@@ -1,7 +1,7 @@
 /* Float-mode (`@rt f32`) control gate and run verdict: pure logic, no RSX,
  * shared by the guest (main.c run_f32) and the host test f32-gate-test.c.
  *
- * Rules (codex review 2026-10-19 17:43): every control row is REQUIRED to
+ * Rules (review 2026-10-19 17:43): every control row is REQUIRED to
  * pass; ANY failed control - load, binding, readback, a negative control
  * that failed to detect its difference - latches the run INVALID for
  * good, and no later passing control can clear it.  A required control that
@@ -18,7 +18,7 @@
 /* Keys 0..5 are the core float controls (by name); 6..10 are the binding
  * controls (by role), required too whenever a corpus row is judged, so a
  * qualification manifest cannot drop a positive or negative binding
- * control and still judge rows (codex 2026-10-19 17:51). */
+ * control and still judge rows (review 2026-10-19 17:51). */
 #define F32_GATE_NREQ 11
 static const char *const f32_gate_required[F32_GATE_NREQ] = {
 	"f32-words", "f32-ulp", "f32-sub8", "f32-nan", "xy", "frames",
@@ -26,7 +26,7 @@ static const char *const f32_gate_required[F32_GATE_NREQ] = {
 };
 
 
-/* ---- matrix binder (design r3, codex-approved 2026-10-19 23:00) ----
+/* ---- matrix binder (design r3, review-approved 2026-10-19 23:00) ----
  * Plain float4x4 and float3x3 automatic matrix uniforms are admitted only after a
  * COMPLETE named set of matrix controls has passed: one direct probe per row of
  * float4x4/3x3/3x4/4x3 (the probe reads u_matrix[r] straight to the output, a
@@ -243,7 +243,7 @@ static void f32_gate_require(f32_gate *g, int n)
 			f32_gate_fail(g, f32_gate_required[q]);
 }
 
-/* Matrix qualification (codex review of 4d7576d4): a manifest that carries ANY matrix
+/* Matrix qualification (review of 4d7576d4): a manifest that carries ANY matrix
  * control requests it (the guest scans the manifest before the first row and calls
  * f32_gate_request_matrix); every named member is then required to have passed
  * before the first corpus row and at the end of a controls-only run, and a missing
@@ -344,7 +344,7 @@ static const char *f32_gate_verdict(int exit_code)
 	return exit_code == 2 ? "SHADER_DIFF_INVALID" : exit_code == 1 ? "SHADER_DIFF_FAIL" : "SHADER_DIFF_OK";
 }
 
-/* ---- row refusal (codex review of f37d5f41) ----
+/* ---- row refusal (review of f37d5f41) ----
  * Float mode judges colour 0 only, through the plain 2D binder and scalar
  * auto uniforms.  Applied to EVERY row - controls included - before any
  * special case: a row is refused (never drawn, never silently narrowed)

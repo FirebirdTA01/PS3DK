@@ -556,7 +556,7 @@ ContainerResult emitFragmentContainerImpl(
                 // stays 0 and each row carries its own columns, zero-padded.
                 // Measured on `uniform float3x3 M = float3x3(1..9)`: rows at
                 // 336/368/400 holding [1,2,3,0] [4,5,6,0] [7,8,9,0]
-                // (uniform-default-records A1; found by codex, who also found that we
+                // (uniform-default-records A1; found in review, which also found that we
                 // accepted this shape and computed with ZERO rows).
                 if (!p.initialValue.empty() &&
                     p.initialValue.size() >=

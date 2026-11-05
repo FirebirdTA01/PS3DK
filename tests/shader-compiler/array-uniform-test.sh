@@ -286,7 +286,7 @@ refuse "index -1"                 fp_array_uniform_negative_refuse_f     "array 
 refuse "index 4 / 0"              fp_array_uniform_invalid_const_refuse_f "divides by zero"
 # (int)(bool)(float)0.5 is element 1 to the established compiler (the fraction is
 # truthy); this evaluator cannot carry the fraction through the casts and
-# refuses by name rather than reading element 0 (review: codex; flips to an
+# refuses by name rather than reading element 0 (review; flips to an
 # accept row when the typed evaluator serves the index path).
 refuse "(int)(bool)(float)0.5 (reference: element 1)" fp_array_uniform_cast_bool_float_f "floating value"
 refuse "(fixed)3 (reference: element 1; clamp is the typed evaluator's)" fp_array_uniform_fixed_cast_refuse_f "floating value"

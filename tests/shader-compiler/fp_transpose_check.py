@@ -45,7 +45,7 @@ appear in operand words this walk already has to read: per-operand NEGATE
 src0, hw[2] bit 18 for src1).  Either one wraps the term, so an abs'd or
 negated operand no longer matches the plain expectation and the row fails
 by name.  The first version of this file claimed abs in its header and
-never read the bit; codex set src0's abs on one DP3, changing that dot to
+never read the bit; a reviewer set src0's abs on one DP3, changing that dot to
 abs(p), and the checker passed.  A header is not an implementation.
 
 Usage:  fp_transpose_check.py <ucode-dump> <row>;<row>;<row>
@@ -103,7 +103,7 @@ def reject_unmodelled(w, index):
 def source(word, lane, block, regs, input_src, index, absolute):
     """The symbolic value this operand reads for destination lane 'lane'.
 
-    TWO FIELDS THAT ARE NOT IN THIS WORD, both found by codex in review of
+    TWO FIELDS THAT ARE NOT IN THIS WORD, both found in review of
     this file - the second of them after the first version shipped:
 
       the INPUT REGISTER's identity is per-INSTRUCTION (hw[0] bits 13..16),
@@ -248,7 +248,7 @@ def check(path, spec):
     expected = parse_expected(spec)
     regs = evaluate(path)
     # ONE INPUT REGISTER ACROSS THE WHOLE OUTPUT, not per lane (review:
-    # codex).  Judging each lane's selector on its own accepts a program
+    # review).  Judging each lane's selector on its own accepts a program
     # whose three dot products read three DIFFERENT varyings - each dot is
     # internally consistent and the picture is wrong.  He broke the first
     # version exactly that way: row 21's selector moved TC0 -> TC1 while

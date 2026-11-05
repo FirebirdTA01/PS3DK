@@ -32,7 +32,7 @@ namespace rsx_cg {
 // A select on a constant condition is its chosen operand.  Measured: an
 // input read only under `if (false)`, `false ? u : k` or a `static const
 // bool` that is false is UNREAD on the established compiler (UNDEFINED, no index), but
-// such a select survives into the backend here (review: codex), keeping
+// such a select survives into the backend here (review), keeping
 // the dead load alive.  Fold it before deciding what is read; returns
 // whether anything changed (the caller re-runs dead-code elimination).
 enum class SelectFold { Unchanged, Changed, Failed };
@@ -43,7 +43,7 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
     // chain and the rounds to a fixed point.  Reaching that bound means a
     // cycle or a bug: report it (the caller refuses by name) rather than
     // return an intermediate value whose dead arm stays live and shifts an
-    // implicit TEXCOORD (review: codex - fixed caps of 64/16 did exactly
+    // implicit TEXCOORD (review - fixed caps of 64/16 did exactly
     // that on a 65-deep chain).
     size_t selects = 0;
     for (const auto& block : entry.blocks)
@@ -99,7 +99,7 @@ inline SelectFold foldConstantSelects(IRFunction& entry)
     };
     // To a fixed point: a condition may itself be a select that an earlier
     // round folded to a constant - `bool b = true ? false : (u.x > 0);
-    // b ? u : k` (review: codex; measured u UNREAD on the established compiler).
+    // b ? u : k` (review; measured u UNREAD on the established compiler).
     bool converged = false;
     for (size_t round = 0; round <= bound && !failed; ++round) {
         bool grew = false;

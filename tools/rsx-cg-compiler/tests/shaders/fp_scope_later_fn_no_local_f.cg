@@ -4,7 +4,7 @@
 // function in it, so a function declared AFTER a call is still "found".  The
 // bookkeeping that records an unresolved callee has to ask whether a binding
 // is VISIBLE AT THE CALL, not whether the name exists anywhere in the unit
-// (review: codex, who found this on two different lookups in a row).
+// (review, which found this on two different lookups in a row).
 //
 // ACCEPT: recorded but never collided - the later f with NO local
 // declaration.  Recording must stay silent on its own.

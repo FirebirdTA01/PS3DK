@@ -20,7 +20,7 @@ liar() {
 }
 
 # run <test> <env...>: the test's exit status.  Its complete raw output is kept in THIS test's log (indented, framed
-# by the case), so the site each adversary was caught at survives the temporary directory (review: codex).
+# by the case), so the site each adversary was caught at survives the temporary directory (review).
 run() {
     local t=$1 rc; shift
     env "$@" bash "$here/$t.sh" > "$work/out" 2>&1; rc=$?
@@ -48,7 +48,7 @@ for t in libgcc-fde-fast-path-test libgcc-heap-ready-link-test; do
     done
     if [ $t = libgcc-heap-ready-link-test ]; then
         # Selective: nm is truthful for the libgcc archive (so the test gets past its archive inspection) and lies
-        # only for the LINKED program, the stage.elf check (review: codex - the generic liar never reached it).
+        # only for the LINKED program, the stage.elf check (review - the generic liar never reached it).
         printf '#!/bin/sh\nfor a; do last=$a; done\n"%s" "$@"; rc=$?\ncase $last in *.elf) exit 1 ;; esac\nexit $rc\n' "$P-nm" \
             > "$work/nm-elf-liar" && chmod +x "$work/nm-elf-liar" || { echo "cannot write nm-elf-liar"; exit 1; }
         rc=$(run $t "NM=$work/nm-elf-liar")

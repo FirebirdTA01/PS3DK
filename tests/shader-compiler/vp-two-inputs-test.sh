@@ -30,7 +30,7 @@
 # selector, so it cannot see a per-slot identity the compiler meant and
 # lost; the per-row source and swizzle assertions (which input each slot
 # reads, with which lanes) and the rig row's lane recipes carry that proof
-# (review: codex).
+# (review).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -116,14 +116,14 @@ expect vp_two_inputs_dot_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.'
 # A dot product must keep BOTH operands' swizzles: the established compiler reads
 # dot(p.xyz, n.zyx) as IN0.xyzx, R0.zyxz and dot(p.xyz, n.www) as R0.wwww.
 # The first draft reset a staged or direct DP3 operand to xyz (review:
-# codex - dot(p.xyz, n.zyx) at p=(1,2,3), n=(4,5,6) read 32 for 28).
+# review - dot(p.xyz, n.zyx) at p=(1,2,3), n=(4,5,6) read 32 for 28).
 accept vp_two_inputs_dot_rhs_swz_v "dot(p.xyz, n.zyx): the staged operand keeps zyx"
 expect vp_two_inputs_dot_rhs_swz_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.xyzx src1=R[0-9]+\.zyxz'
 accept vp_two_inputs_dot_lhs_swz_v "dot(p.zyx, n.xyz): the direct operand keeps zyx"
 expect vp_two_inputs_dot_lhs_swz_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src0=IN0\.zyxz src1=R[0-9]+\.xyzx'
 # (The established compiler stages the w lane INTO LANE X and reads R0.x; we keep the
 # identity copy in lane w and read R0.wwww - same value, a placement byte
-# difference recorded here, not a defect - review: claude.)
+# difference recorded here, not a defect - review.)
 accept vp_two_inputs_dot_www_v "dot(p.xyz, n.www): the staged copy carries w and the DP3 reads it"
 expect vp_two_inputs_dot_www_v '^[0-9]+ MOV dst=R[0-9]+ mask=w src0=IN2\.'
 expect vp_two_inputs_dot_www_v '^[0-9]+ DP3 dst=(o7|R[0-9]+) .* src1=R[0-9]+\.wwww'

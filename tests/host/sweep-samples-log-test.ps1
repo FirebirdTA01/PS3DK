@@ -1,9 +1,9 @@
 # scripts/sweep-samples.ps1 keeps each sweep's logs to that sweep and fails loudly when it cannot write them
-# (codex ac64a1ae: an old log held open could not be cleared, and the sweep appended the new run to it and
+# (review ac64a1ae: an old log held open could not be cleared, and the sweep appended the new run to it and
 # printed DONE).  Drives the sweep against a fake package with two samples and a mock cmake (cmake.cmd):
 #   1. a run: exit 0; sample one's log holds its configure + build stdout AND stderr and exit 0, sample two's
 #      configure exits 3 (logged, CSV "fail,skip"); the CSV log column points into this run's directory
-#   2. a second run with run 1's log held open (FileShare.ReadWrite, as codex's probe): exit 0, a NEW run
+#   2. a second run with run 1's log held open (FileShare.ReadWrite, as the review's probe): exit 0, a NEW run
 #      directory, each log holds exactly one sample header, run 1's log unchanged
 #   3. an existing run directory: exit 1 before any cmake call
 #   4. a log that cannot be written (the mock puts a directory at sample two's log path): exit 1, FAILED

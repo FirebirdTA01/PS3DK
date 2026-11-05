@@ -5,7 +5,7 @@
 // bounded by the rows the matrix actually OWNS: `m3[3]` on a float3x3 is
 // "array index out of bounds" to the established compiler, and reading c[base + 3]
 // would take a register belonging to whatever was allocated next - the
-// silent wrong value this item exists to avoid (review finding, codex;
+// silent wrong value this item exists to avoid (review finding;
 // its refusal is the twin fixture).
 //
 // And a matrix row is a CONST source three lanes wide, so the constructor

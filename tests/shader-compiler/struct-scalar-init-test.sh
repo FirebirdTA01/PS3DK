@@ -29,7 +29,7 @@
 # (FragmentProgramDecompiler AddReg), so a same-boot pixel match cannot tell
 # a hardware guarantee from an emulator convenience - and a physical register
 # reused after another value's live range holds that value either way
-# (codex, 2026-09-07).  So we emit the zeros and the parity gap is recorded.
+# (review, 2026-09-07).  So we emit the zeros and the parity gap is recorded.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -87,7 +87,7 @@ twin fp_struct_nested_zero_init_f fp_struct_nested_zero_init_twin_f "(OUT)0 thro
 
 # A NON-FIRST leaf, read after a non-zero fill.  Every row above reads a
 # single-field struct or the FIRST field of a nested one, so a fill that stops
-# after the first leaf is INVISIBLE to all of them - measured by Fable
+# after the first leaf is INVISIBLE to all of them - measured in review
 # 2026-09-14 with a bindLeaves-breaks-after-first mutant that left all three
 # twins above byte-identical while REFUSING this shape outright.
 twin fp_struct_second_leaf_init_f fp_struct_second_leaf_init_twin_f "(OUT)1 read through the SECOND leaf"
@@ -135,7 +135,7 @@ grep -q "cannot cast" "$work/fp_struct_sampler_init_refuse_f.err" \
 # Writing the scalar through unchanged is a WRONG VALUE, measured against
 # the established compiler: (S)0.5 into a bool leaf is 1 there and was 0.5 here, (S)3.0
 # into a fixed leaf is 1.9990234375 there and was 3, (S)65537 into a short
-# leaf is 1 there and was 65537 (codex, review of this commit).  These rows
+# leaf is 1 there and was 65537 (review of this commit).  These rows
 # exist so the refusal cannot quietly become an acceptance again without
 # someone doing the conversions.
 for stem in fp_struct_init_bool_leaf_refuse_f \

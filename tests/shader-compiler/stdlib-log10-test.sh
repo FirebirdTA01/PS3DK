@@ -83,7 +83,7 @@ rm -f "$shadow_out"
 shadow_rc=0
 compile_ir "shadow_log10" "$work/shadow_log10.fcg" "$shadow_out" "$shadow_log" || shadow_rc=$?
 if [[ "$shadow_rc" -ne 0 ]]; then
-    # the diagnostics are in the OTHER half now (codex, review of the
+    # the diagnostics are in the OTHER half now (review of the
     # capture separation) - the .log holds the IR dump this test greps
     tail -n 20 "${shadow_log%.log}.err" >&2
     fail "user-defined log10 failed to compile"

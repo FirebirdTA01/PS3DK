@@ -667,7 +667,7 @@ if inst_count != 3:
 PY
 
 # -----------------------------------------------------------------------------
-# Row 3i: Local vector constructor boolean truthiness (Codex review witness)
+# Row 3i: Local vector constructor boolean truthiness (review witness)
 # bool2(float2(0.5, 2.0)).x must evaluate to true (0.5 != 0)
 # -----------------------------------------------------------------------------
 cat >"$work/pos_local_bool2.cg" <<'EOF'

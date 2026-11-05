@@ -306,7 +306,7 @@ def patch_uniform(blob, name, values):
 
 def check_relocations(work):
     # STRUCTURAL: every fragment container this guard compiles must have every
-    # uniform relocation pointing at a decoded inline block (codex's finding:
+    # uniform relocation pointing at a decoded inline block (the review's finding:
     # one DIVSQR reading |u.y| and u.y carried TWO blocks, offsets {32, 16},
     # and the second was the next instruction).
     for path in sorted(work.glob('*.fpo')):

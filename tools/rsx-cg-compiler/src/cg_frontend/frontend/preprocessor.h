@@ -16,7 +16,7 @@ struct MacroDefinition
 	// USED.  The established compiler ACCEPTS `#define UNUSED (1.0<FF>)` when nothing
 	// expands it and refuses the same body the moment it does, so the error
 	// belongs to the expansion and not to the definition - we tokenise the
-	// body eagerly, which reported it too soon (codex asked for the cell that
+	// body eagerly, which reported it too soon (a reviewer asked for the cell that
 	// shows the difference).
 	bool bodyFailedToTokenise = false;
 	std::string bodyTokeniseError;
@@ -36,8 +36,8 @@ struct MacroDefinition
 	//                                                    expands the line
 	// So the answer is a property of the BINDING - how it got there - and not
 	// of the spelling.  A list of special names would have got the pristine
-	// rows right and every source-#defined row wrong (codex found it; ruling
-	// by Fable, preprocessor-defined-operator).  Default true, so an ordinary #define needs no
+	// rows right and every source-#defined row wrong (found in review; ruling
+	// in review, preprocessor-defined-operator).  Default true, so an ordinary #define needs no
 	// code; the driver clears it on the four it rebinds per line and file.
 	bool countsAsDefined = true;
 

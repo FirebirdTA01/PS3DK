@@ -8,7 +8,7 @@ review:
   broadcast   the original operand-lane-width defect: force every component of the
               final colour write's source swizzle to x, so y and z read the
               red channel.
-  bypass      codex's review finding against the second version of the
+  bypass      the review finding against the second version of the
               check: point that same operand at the ORIGINAL INPUT instead
               of the computed temp, keeping the xyz selectors.  Lane
               indices still match; the multiply is gone, and the shader
@@ -17,12 +17,12 @@ review:
               scaled by the wrong amount while every register, selector and
               opcode stays exactly as the compiler emitted it.
 
-  hwinput     codex's second round: point the MULTIPLY's per-instruction
+  hwinput     the review's second round: point the MULTIPLY's per-instruction
               input selector (hw[0] bits 13..16 - a fragment instruction has
               ONE) at a different varying, leaving the copy that produces
               lane w on the original.  RGB and w then come from different
               attributes.
-  earlyend    codex's third round: set PROGRAM_END on the FIRST
+  earlyend    the review's third round: set PROGRAM_END on the FIRST
               instruction, so the hardware stops before the multiply and
               before the final colour write.
   saturate    set the multiply's destination saturation bit.

@@ -45,7 +45,7 @@
 // TEXCOORD2.x change sign across the centre lines without hitting 0 at a
 // pixel centre.  Two lanes may coincide on isolated curves (continuous
 // functions of (u, v) do) - at most 65 of 4225 sample points for the
-// closest pair (claude, review of e53d763).  An identity or a coincidence
+// closest pair (review of e53d763).  An identity or a coincidence
 // confined to a line is not blindness: a row judges 4096 pixels and the
 // other 98% still show a dropped or swapped lane.
 

@@ -138,7 +138,7 @@ import sys
 # unparseable row silently - so a stderr line interleaving inside a hex row
 # under a merged capture cost the row, shifted every later one, and made
 # this guard report a dead write at R33 that the compiler never emitted.
-# Two people spent an hour on that in opposite environments before codex
+# Two people spent an hour on that in opposite environments before a reviewer
 # isolated it (2026-09-07).  groups() now refuses a dump it cannot trust,
 # and using it here means this guard inherits that refusal instead of
 # re-implementing the bug.

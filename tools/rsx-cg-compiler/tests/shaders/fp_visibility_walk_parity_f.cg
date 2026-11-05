@@ -1,4 +1,4 @@
-// function-visibility commit 1.  WALK PARITY SELF-CHECK (review: Fable).
+// function-visibility commit 1.  WALK PARITY SELF-CHECK (review).
 //
 // Every top-level declaration KIND in one unit: struct, file-scope uniform,
 // file-scope const, a prototype, a helper definition, and the entry.  Call

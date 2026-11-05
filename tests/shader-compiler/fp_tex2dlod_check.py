@@ -69,7 +69,7 @@ def judge(blob, units, direct):
 
 def judge_controls():
     """Hand-encoded TXL programs: the judge must accept the shape and reject
-    the mutants (review: codex - the earlier controls only perturbed the
+    the mutants (review - the earlier controls only perturbed the
     expected unit and count, not the instruction)."""
     from fp_eval import _container, _ins, _src
     from fp_sources import INPUT, TEMP

@@ -137,13 +137,13 @@ private:
     // IT IS SIZE_MAX OUTSIDE analyzeDeclarations, ON PURPOSE: anything
     // resolving from another pass - shader validation, pass 1 itself - keeps
     // the old whole-unit view.  Nothing resolves a CALL from there today
-    // (review: Fable), so the value is unobservable; if something ever does,
+    // (review), so the value is unobservable; if something ever does,
     // it will see the pre-function-visibility behaviour and this comment is the reason
     // why.
     size_t visibleThrough_ = SIZE_MAX;
     // Pass 1's declaration count, checked against pass 2's at the end.  The
     // two walks must enumerate identically or every index is off and
-    // resolution silently shifts; see analyzeDeclarations (review: Fable).
+    // resolution silently shifts; see analyzeDeclarations (review).
     size_t declCountPass1_ = 0;
     std::vector<SemanticDiagnostic> diagnostics_;
     ShaderInfo shaderInfo_;
@@ -162,7 +162,7 @@ private:
     std::vector<FunctionDecl*> allFunctions_;
     // File-scope variables, in declaration order.  Their INITIALISERS are
     // reachability roots: a call from one reaches its callee's body even
-    // though the entry never mentions it (review: codex).
+    // though the entry never mentions it (review).
     std::vector<VarDecl*> allGlobalVars_;
 
     // WHERE each file-scope name was declared, in the same one-per-top-level

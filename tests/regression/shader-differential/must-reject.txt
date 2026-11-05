@@ -19,7 +19,7 @@
 #                                  frontend-reject here, and so is the
 #                                  established compiler's for the same construct.  Do
 #                                  not "fix" such a prefix to make the label
-#                                  literal (claude, review of c3cfc8c).
+#                                  literal (review of c3cfc8c).
 #                  backend-refuse  refuses without naming the file (a shape
 #                                  the path cannot lower - honest, not a
 #                                  frontend verdict)

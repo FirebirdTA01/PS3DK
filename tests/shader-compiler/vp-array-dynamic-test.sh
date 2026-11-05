@@ -285,7 +285,7 @@ printf '  %-44s two temp indices, two ARLs
 # A CONSTANT-PROPAGATED index (`int i = 1; u[i]`, `float i = 1; u[int(i)]`)
 # is a constant index to the established compiler: per-element layout, no ARL, the
 # same on the fragment side.  Beside a real run-time index the array is a
-# block and the folded read is its element (review: codex's twins, which
+# block and the folded read is its element (review twins, which
 # the first sha read as ONE lane for two literals - u[1] + u[1]).
 accept vp_array_uniform_dyn_local_const_v
 expect_record vp_array_uniform_dyn_local_const_v 'u\[0\] type=1048 paramno=none ref=0 resIndex=none'
@@ -305,7 +305,7 @@ printf '  %-44s per element c467/c466, no ARL; beside a run-time index: block
 ' "int i = 1; u[i]"
 
 # The same on the fragment side: the folded index is a constant element -
-# compiled under the FRAGMENT profile (review: codex - the first version sent
+# compiled under the FRAGMENT profile (review - the first version sent
 # this source through the vertex-profile helper and asserted only rc), the
 # container's profile word checked, u[1] and u[2] referenced with their own
 # inline constants and u[0]/u[3] declared without.
@@ -327,7 +327,7 @@ printf '  %-44s fragment container, u[1]/u[2] referenced
 
 # A temp index REWRITTEN in place between two reads is two index values:
 # the second read must name a different lane from the first (review:
-# codex - the first sha reused the lane because the vreg and component
+# review - the first sha reused the lane because the vreg and component
 # matched, and read u[old v.x] twice).
 accept vp_array_uniform_dyn_rewrite_v
 expect_word vp_array_uniform_dyn_rewrite_v 'C\[A0\.x\+464\]'
@@ -344,7 +344,7 @@ printf '  %-44s rewrite = two lanes; same expression twice = one
 # zero (1.7 -> 1, -0.5 -> 0, 3.9 -> 3; 4.0 refuses C1068), an UNSIGNED cast of
 # 2^32 wraps to element 0 (a signed one is INT_MIN and out of bounds), and a
 # float literal is SINGLE precision before any conversion, so 4294967297.0
-# under an unsigned int or unsigned char cast is element 0 too (review: codex),
+# under an unsigned int or unsigned char cast is element 0 too (review),
 # a local float
 # constant folds the same way, and an expression goes through a temp.
 accept vp_array_uniform_dyn_float_index_v
@@ -390,7 +390,7 @@ refuse "float index out of range (C1068 in the established compiler)" vp_array_u
 # reads 2), u[((float)3 / 2) * 2] is element 3 (leaf truncation reads 2, and
 # there is no float LITERAL in it), u[(int)(bool)(float)0.5] is element 1
 # (the fraction is truthy; leaf truncation reads 0).  The last two were
-# found in review (codex) on a candidate that accepted them WRONG; a
+# found in review on a candidate that accepted them WRONG; a
 # refusal is the honest interim, and these rows flip to accept rows with
 # element assertions when the evaluator lands.
 refuse "u[1.7 * 2.0] (reference: element 3)"        vp_array_uniform_dyn_float_arith_v      "floating value"
@@ -398,13 +398,13 @@ refuse "u[((float)3 / 2) * 2] (reference: 3)"        vp_array_uniform_dyn_float_
 refuse "u[(int)(bool)(float)0.5] (reference: 1)"     vp_array_uniform_dyn_float_cast_bool_v  "floating value"
 # A FIXED cast clamps to [-2, 2 - 2^-10] before it is read - the established compiler
 # reads u[(fixed)3] as element 1 - and that conversion is the typed
-# evaluator's, so the cast refuses by name here (review: codex).  An integral
+# evaluator's, so the cast refuses by name here (review).  An integral
 # cast of an out-of-range float literal folds to INT_MIN (the x86 indefinite
 # value the established compiler uses, measured on static-const-qualifiers) and is out of bounds.
 refuse "u[(fixed)3] (reference: element 1)"           vp_array_uniform_dyn_fixed_cast_refuse_v "floating value"
 refuse "u[(int)4294967296.0] (C1068 in the established compiler)" vp_array_uniform_dyn_int_cast_oob_refuse_v "out of bounds"
 # The float32 rule on bare literals, directly: 0.9999999999 is 1.0f before
-# it is read (element 1), and 3.9999999999 is 4.0f - out of bounds (claude's
+# it is read (element 1), and 3.9999999999 is 4.0f - out of bounds (the review's
 # rows).  The unsigned wrap has a bound: 2^32 + 512 (exactly representable
 # in fp32) narrows to 512 and is out of bounds, which separates "int64, then
 # narrow to 32, then the ordinary bounds check" from "wrap modulo the array".

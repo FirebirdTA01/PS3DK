@@ -3,7 +3,7 @@
 // structName and structFields.  One comparator (CgType::equals) reaches both
 // today, so these rows exist to keep a future struct-specific narrowing from
 // passing while the array rows still do - the same argument that put the array
-// rows in, one type category over.  Probe by Claude_Fable_PS3DK_LE.
+// rows in, one type category over.  Review probe.
 //
 // the UNCALLED struct overload carries the semantic
 // Compile with -e beta.  Reference verdict: ACCEPT

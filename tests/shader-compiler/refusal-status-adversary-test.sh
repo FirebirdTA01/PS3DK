@@ -203,7 +203,7 @@ judge() {   # $1 script, $2 timeout -> verdict (failures without firing are name
     # `rc is not zero` is the very thing this file exists to reject, and it
     # would be wrong HERE for the same reason it is wrong in the guards: a
     # script that HUNG or died under the adversary did not decide anything, and
-    # reading either as "caught it" would be this defect one level up (codex,
+    # reading either as "caught it" would be this defect one level up (review,
     # on the first draft, which did exactly that).  Only the scripts' own
     # fail() - exit 1 - counts as having caught the crash.
     case "$rc" in

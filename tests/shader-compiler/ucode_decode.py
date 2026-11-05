@@ -82,7 +82,7 @@ class CorruptDump(Exception):
 # nothing reads - a "dead write" that the compiler never emitted.  That cost
 # two people an hour of arguing about four accumulation_mad rows where one
 # ran the suite under WSL with merged capture and the other natively with
-# separate capture, on the SAME binary (codex, 2026-09-07).
+# separate capture, on the SAME binary (review, 2026-09-07).
 #
 # The rows are NUMBERED, so the corruption is detectable rather than
 # guessable: indices run 0, 1, 2, ... within one program and restart at 0
@@ -93,7 +93,7 @@ class CorruptDump(Exception):
 # compiler prints "NV40 ucode words: N", so the row count is knowable
 # independently of the row numbers - and a splice that damages the FINAL row
 # without leaving a "<digits>:" line behind is invisible to both rules above.
-# Fable measured that shape: a stderr fragment landing between the index
+# A reviewer measured that shape: a stderr fragment landing between the index
 # digits and the colon ("4 src0 kind=1 ..." then ": 8280...") leaves two
 # lines, neither of which opens like a row, and no successor index to
 # disagree with - four of five rows, silently.  Requiring 4 * rows == N per
@@ -138,7 +138,7 @@ def groups(path):
                 # first word - "173: src0 kind=1 ..." - slip through as
                 # prose; on the FINAL row there is no following index to
                 # expose the gap either, so the decoder silently returned
-                # 173 of 174 rows (codex, review of 1a588e5f).  Measured
+                # 173 of 174 rows (review of 1a588e5f).  Measured
                 # before widening it: in a real dump, with RSX_DUMP_ORDER
                 # both on and off, EVERY line matching "<digits>:" is a hex
                 # row - the log's ordinary prose never opens that way.

@@ -1,7 +1,7 @@
 # multi-process-xmb — Phase 0 Regression Harness
 
 Test scaffolding for the co-resident VSH+game multi-process refactor
-(plan: `~/.claude/plans/multi-process-true-coresident-vsh-and-game.md`).
+(design plan kept outside the repository).
 
 No RPCS3 source changes. All artifacts live in this directory.
 

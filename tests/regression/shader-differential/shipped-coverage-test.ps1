@@ -22,7 +22,7 @@
 # A bare path in that file exempts nothing here and is itself a failure:
 # an exclusion without a reason is the denominator shrinking by silence,
 # which is the exact thing this test exists to refuse (review finding,
-# codex, 2026-09-06: the first version read only field 0 of every list).
+# review, 2026-09-06: the first version read only field 0 of every list).
 $ErrorActionPreference = "Stop"
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -64,7 +64,7 @@ try {
     # Count FIRST: an array on the left of -ne filters rather than compares, so
     # an EMPTY Excluded would pass a membership assertion silently - a guard
     # must be proven able to fail on the empty case, not only the wrong one
-    # (review finding, claude, 2026-09-06).
+    # (review finding, 2026-09-06).
     if (@($r.Excluded).Count -ne 1 -or @($r.Excluded)[0] -ne "samples/x/shaders/good.vcg") { throw "exclusion parser did not accept exactly the one complete record: [$($r.Excluded -join ',')]" }
     if (@($r.Malformed).Count -ne 2) { throw "exclusion parser did not flag the two reasonless records: $($r.Malformed -join ',')" }
 } finally {

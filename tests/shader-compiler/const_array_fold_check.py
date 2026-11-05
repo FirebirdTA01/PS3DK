@@ -2,7 +2,7 @@
 
 `static const float k[3] = {...}; k[1]` was a uniform load of the const
 global, and the lowering - no uniform record behind a const - refused it.
-The established compiler emits the element inline.  Rows (review: codex): scalar,
+The established compiler emits the element inline.  Rows (review): scalar,
 vector, int, half and matrix element types, and shadowing (a local array
 and a helper parameter named like the global), judged by value with fp_eval
 against the established compiler-measured formula.  A NON-static `const` array is a
@@ -45,7 +45,7 @@ NON_STATIC = """const float k[3] = {0.25, 0.5, 0.125};
 float4 main(float4 t : TEXCOORD0) : COLOR { return float4(k[1] * t.x, k[2], 0, 1); }
 """
 
-# The vertex path shares buildIndexExpr (review: codex): an ordinary scalar
+# The vertex path shares buildIndexExpr (review): an ordinary scalar
 # and vector read must compile byte-identically to the same program with the
 # literals written in - the established compiler's two listings are identical.
 VP_FOLD = """static const float  kf[3] = {0.25, 0.5, 0.125};
@@ -55,7 +55,7 @@ void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { 
 VP_TWIN = """void main(float4 p : POSITION, out float4 o : POSITION, out float4 c : COLOR) { o = p * 0.5 + float4(0.5, 0.25, 0.125, 1); c = float4(1, 2, 3, 4) * 0.125; }
 """
 
-# A static const array passed whole to a helper (review: codex): a parameter
+# A static const array passed whole to a helper (review): a parameter
 # named like the global, two calls of a helper that copies the array and
 # writes its copy, and the global read after - each call starts from the
 # initialiser and the global is untouched (measured: (2, 13, 13, 1)).  A

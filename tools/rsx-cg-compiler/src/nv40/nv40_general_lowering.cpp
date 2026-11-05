@@ -642,7 +642,7 @@ static void assignSwizzle(VSrc& src, int encoded, int count)
 //
 // Takes the index rather than assuming 0 so the MRT lane can ask the same
 // question of COLOR1..3, whose half bank the established compiler measures as
-// H0/H4/H6/H8 against the float targets R0/R2/R3/R4 (codex, 2026-09-07).
+// H0/H4/H6/H8 against the float targets R0/R2/R3/R4 (review, 2026-09-07).
 static bool fragmentColourOutputIsHalf(const IRFunction& entry, int outIndex)
 {
     const auto isColour = [outIndex](const std::string& rawSem, int index) {
@@ -788,7 +788,7 @@ private:
     // Rows the matrix at that base actually OWNS.  A row index is
     // bounded against this, not against 4: `m[3]` on a float3x3 would
     // otherwise resolve to c[base + 3], a register belonging to
-    // whatever was allocated next (review finding, codex).  The
+    // whatever was allocated next (review finding).  The
     // established compiler rejects that source - "array index out of bounds".
     std::unordered_map<IRValueID, int> matrixUniformRows_;
     struct MatrixValue
@@ -834,7 +834,7 @@ private:
         // For a TEMP source: how many writes to that lane of the vreg
         // preceded the read.  A lane rewritten in place between two
         // reads (`v.x = v.y`) is a different index value with the same
-        // vreg and component (review: codex's rewrite twin).
+        // vreg and component (review rewrite twin).
         unsigned version = 0;
         int stride = 1;       // the same index into vectors and matrices differs
         size_t   arlAt = 0;     // position in program_.instrs
@@ -999,7 +999,7 @@ private:
     // Each value is decided ONCE (memo, cleared per classification): a shared
     // boolean DAG (b1 = b0 && b0; b2 = b1 && b1; ...) is linear work here.
     // A plain recursion revisited both edges of every shared node, which is
-    // exponential - a 40-deep chain did not finish (review: codex).
+    // exponential - a 40-deep chain did not finish (review).
     // Post-order with an explicit stack, so a deep chain cannot overflow the
     // native stack either.
     bool isComparisonTree(IRValueID root) const
@@ -2768,7 +2768,7 @@ private:
                     // matrix while the reflection table says otherwise - the
                     // established compiler puts [0.25,0.5,0.75,0] and so on into the
                     // ucode (measured, uniform-default-records A3; predicted from this
-                    // site by codex before it was reproduced).
+                    // site in review before it was reproduced).
                     const size_t rowBase =
                         static_cast<size_t>(row) * static_cast<size_t>(cols);
                     if (g.initialValue.size() >= rowBase + static_cast<size_t>(cols)) {
@@ -3051,7 +3051,7 @@ private:
         // so it needs the half stamp explicitly.  Without it a
         // `half4 main(): COLOR` whose two returns merge into a select
         // ACCEPTS with the colour in fp32 R0 and outputFromH0 clear, which
-        // is worse than the refusal it replaced.  Found by codex in review.
+        // is worse than the refusal it replaced.  Found in review.
         markHalfColourDest(out, outIndex);
         out.srcs[0] = tempSrc(selected);
         program_.instrs.push_back(out);
@@ -4293,7 +4293,7 @@ private:
         // Measured prec=0 on every member, INCLUDING unpack_2half, whose IR
         // result is half2: pinned as an explicit override so a pass that
         // stamps half-typed results with FLOAT16 (half-temporary-allocation) leaves the
-        // packed-data instructions alone (review: codex).
+        // packed-data instructions alone (review).
         vi.fpPrecisionOverride = NVFX_FP_PRECISION_FP32;
         program_.instrs.push_back(vi);
     }
@@ -4354,7 +4354,7 @@ private:
     // established compiler's whole rule: on two packs read by one ADD the established compiler
     // emits no fence, and a packed value COPIED by a MOV and then read
     // arithmetically is fenced by the established compiler but not here (review:
-    // codex, build/codex-pack-probes).  What a missing fence on such a
+    // review, build/review-pack-probes).  What a missing fence on such a
     // reader costs is UNMEASURED timing semantics, not a proven no-op: the
     // two-pack measurement defeats a universal rule, it does not make the
     // MOV-propagated case safe.  The exact rule is a follow-up with those
@@ -8620,8 +8620,8 @@ private:
             // TXP divides by source W.  A float3 coordinate in a temp or a
             // constant has no w of its own (the temp's w is unwritten, the
             // literal block pads it with zero), so the established compiler reads it
-            // as .xyzz - the divisor is the logical z (review: codex,
-            // build/codex-txp-probes).  A varying's resolve() already
+            // as .xyzz - the divisor is the logical z (review,
+            // build/review-txp-probes).  A varying's resolve() already
             // arrives with its last lane smeared; this makes every width-3
             // source read the same way.
             vi.srcs[0].swizzle[3] = vi.srcs[0].swizzle[2];
@@ -8660,7 +8660,7 @@ private:
         }
         // A fetch is prec=0 whatever its result type: the established compiler emits
         // `TEXR H0` for a half-typed fetch (fp16 DESTINATION, fp32 fetch) -
-        // measured by claude and codex on h4tex2D under float4 and half4
+        // measured by two reviewers on h4tex2D under float4 and half4
         // outputs.  Pinned as an explicit override so a pass that stamps
         // half-typed results with FLOAT16 (half-temporary-allocation) leaves the fetch
         // alone, exactly as the pack/unpack family does.  The H destination
@@ -9223,7 +9223,7 @@ private:
     // read off the destination bank.  It is the type of the value being
     // computed.  This is why markHalfColourDest above forces FLOAT32 on a
     // non-MOV writer of a half COLOUR - there the values are float and only
-    // the output is half (codex's 15-shape matrix) - and why that rule does
+    // the output is half (the review's 15-shape matrix) - and why that rule does
     // not contradict this one.
     //
     // EXACT SCOPE, applied centrally after each IR instruction lowers.  It
@@ -9236,11 +9236,11 @@ private:
     // matrix - is not reached either.
     //
     // SO THE GATE IS THE IR RESULT'S TYPE, WHICH IS NARROWER THAN "WHAT THE
-    // ESTABLISHED COMPILER COMPUTES IN HALF".  Gemini's dullMetalFp is 213 pixels off
+    // ESTABLISHED COMPILER COMPUTES IN HALF".  The dullMetalFp sample is 213 pixels off
     // because the established compiler keeps a NORMALIZE at prec=1, and normalize's
     // result is Float32-typed in our IR whatever its inputs are - so it
     // fails the Float16 test above and this rule never reaches it.  That
-    // shader is NOT fixed here (codex, review).  A rule that would reach it
+    // shader is NOT fixed here (review).  A rule that would reach it
     // has to key on the OPERAND types rather than the result's, and does
     // not exist yet.
     void markHalfComputation(const IRInstruction& inst, size_t firstNew)
@@ -9272,7 +9272,7 @@ private:
         // fp32 is exactly the defect this commit exists to remove.  The
         // override says what was MEANT; the bank says where it lives.
         //
-        // The cost is measured and it is not correctness: codex's VecInsert
+        // The cost is measured and it is not correctness: the review's VecInsert
         // coalescer refuses to merge a preceding writer that carries an
         // explicit override or an fp16 destination, so a half insert chain
         // does not compact - `half4 a = p; a.xy = p.zw; a.zw = p.xy;` is
@@ -9293,7 +9293,7 @@ private:
         // data through the shared register and only the w MOV is new here;
         // stamping the vreg fp16 on the strength of that one instruction
         // reinterprets the xyz lanes as half - a wrong value, not a
-        // formatting difference (codex, review of this commit, with the
+        // formatting difference (review of this commit, with the
         // normalize twin behaving the same way).  Walking only the new
         // instructions is not enough on its own: vregToFp16 is per-REGISTER
         // metadata, so it has to be left alone whenever an earlier writer
@@ -9315,7 +9315,7 @@ private:
             // dst.fp16=false on a register whose earlier writers used H, so
             // a half insert chain wrote half data through an R view and the
             // conversion at the end read it as float - the inverse of the
-            // defect above, and just as wrong (codex, second round).  The
+            // defect above, and just as wrong (review, second round).  The
             // value's type decided nothing here: the REGISTER decides, and
             // the appended write has to agree with what is already in it.
             for (size_t i = firstNew; i < program_.instrs.size(); ++i) {
@@ -9327,7 +9327,7 @@ private:
                 // bank and precision together.  That is an ALIAS-PRESERVATION
                 // rule for this lowering, not a claim that a register may
                 // only ever hold one arithmetic precision - the two are
-                // independent ISA fields (codex).  Taking the bank while
+                // independent ISA fields (review).  Taking the bank while
                 // still deciding the precision from the value's type put
                 // prec=1 lanes beside prec=0 lanes in the same register and
                 // turned mrt-output's compose-float red, so the pair travels
@@ -9351,7 +9351,7 @@ private:
             // prec=0 into an R register whatever its result feeds -
             // measured on the merged tree, where UP2H came out prec=1
             // against the established compiler's 0 on fp_pack_roundtrip_f and
-            // fp_pack_family_f (codex raised it from the source; pack-unpack-intrinsics
+            // fp_pack_family_f (a reviewer raised it from the source; pack-unpack-intrinsics
             // + this card).  These instructions read and write RAW BITS;
             // their format is the ISA's, not the value's.
             if (vi.fpPrecisionOverride >= 0) continue;
@@ -9382,14 +9382,14 @@ private:
         // into an H register IS a half move.  Forcing FLOAT16 onto every
         // writer computed the value itself in half: `a = p * 1.003` became
         // a half multiply where the established compiler keeps a full one and only
-        // the destination changes (codex's 15-shape precision matrix).
+        // the destination changes (the review's 15-shape precision matrix).
         //
         // The choice has to be EXPLICIT in both directions, not just
         // omitted for the non-MOV case: the emitter defaults
         // insn.precision to FLOAT16 for any fp16 destination and only then
         // applies an override, so leaving the override at -1 on a TEX or a
         // multiply still emits it half.  Setting FLOAT32 here is what
-        // actually keeps the arithmetic full (codex).  An override the
+        // actually keeps the arithmetic full (review).  An override the
         // lowering set for its own reasons is left alone.
         if (vi.fpPrecisionOverride < 0)
             vi.fpPrecisionOverride = vi.op == VOp::Mov ? FLOAT16 : FLOAT32;
@@ -9542,7 +9542,7 @@ private:
         // stamped the composition into H0 and then exported depth from
         // H0.x.  The established compiler keeps the value in fp32 - MOVR R1.xyz;
         // MOVH H0, R1.xyzz; MOVR R1.z, R1.x - converting AT the colour
-        // store and reading depth at full precision.  Found by codex in
+        // store and reading depth at full precision.  Found in
         // review; the guard fixtures all passed, because every one of them
         // had a colour that owned its value.
         //
@@ -9982,10 +9982,10 @@ private:
     // dot(p.xyz, n.zyx) as IN0.xyzx, R0.zyxz and dot(p.xyz, n.www) as
     // R0.wwww).  applyDp3Swizzle assumed an identity operand and reset a
     // swizzled one to xyz - a wrong value on every swizzled dot that went
-    // through the input staging (vp-input-selector-limits review: codex).
+    // through the input staging (vp-input-selector-limits review).
     // Idempotent by construction - it runs in appendPreload and again in
     // the final VP DP3 block, and the cache-reuse path relies on that final
-    // block alone to shape a reused temp's read (review: claude).
+    // block alone to shape a reused temp's read (review).
     static void composeDp3Swizzle(VSrc& src)
     {
         if (src.kind == VSrcKind::None) return;
@@ -11246,7 +11246,7 @@ private:
         // reject its own reservation, which turned two shapes that compile
         // correctly on 6ece362 into named refusals - an output written,
         // read back and re-stored, and the three-store discard shape.
-        // Found by codex in review of the single-owner version, and
+        // Found in review of the single-owner version, and
         // witnessed rather than argued.
         //
         // Exempting every owner is safe because it does not disable the
@@ -11794,7 +11794,7 @@ static struct nvfx_reg regFromSource(const VSrc& src)
 // repeated non-finites un-merged.  It is not: merging them by == packs
 // {inf,1,2,0} read .xyxz, which PAINTS THE SOURCE exactly.  Whatever loses
 // the established compiler's lane is a different effect, so a special case here would
-// have protected nothing and cost a rule (review: codex).  NaN needs no
+// have protected nothing and cost a rule (review).  NaN needs no
 // case either - NaN != NaN, so it never merges with itself.
 static void packLiteralBlock(VSrc& src)
 {
@@ -12266,7 +12266,7 @@ static void seedFpEmbeddedUniforms(const IRFunction& entry,
         // The container declared M[1..3] with no offsets and isReferenced
         // 0, so the runtime - which patches a row by its record's offset -
         // could never write them, and the shader sampled M[0] over three
-        // rows of permanent zero (review: Fable).
+        // rows of permanent zero (review).
         const unsigned count = (p.type.isArray() || p.type.isMatrix())
             ? rsx_cg::fpUniformSlotCount(p.type) : 1u;
         for (unsigned k = 0; k < count; ++k)
@@ -12461,7 +12461,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
             // only EVEN H indices (slot << 1) and owns the whole R slot
             // when it does, so no odd-H value exists to reach this.  If
             // sub-slot packing is ever added, this is one of the places
-            // that has to learn the difference (Fable, review of 3618daf8).
+            // that has to learn the difference (review of 3618daf8).
             const int slot = vi.dst.fp16 ? (vi.dst.phys >> 1) : vi.dst.phys;
             if (slot != 0) continue;
             out.diagnostics.push_back(
@@ -12958,7 +12958,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
         // different modifiers (DIVSQR |u.y|, u.y - sqrt of a uniform, and
         // pow(u, 0.5) after constant-exponent-pow): the hardware decoded that block as
         // the next instruction, and the container's relocation list sent
-        // the runtime's uniform patch into it (found by codex, offsets
+        // the runtime's uniform patch into it (found in review, offsets
         // {32, 16} for one DIVSQR).  Two DIFFERENT constants in one
         // instruction cannot be encoded at all, so that is a named refusal
         // rather than a silently corrupt program.
@@ -13181,7 +13181,7 @@ static UcodeOutput emitVertexVirtual(VirtualProgram& program,
     // nextLiteralReg is the NEXT register to hand out, so the LOWEST one
     // actually allocated is nextLiteralReg + 1 - and the floor register
     // itself is legal.  Comparing the next pointer instead refused a
-    // shader that exactly filled the last legal register (codex, review
+    // shader that exactly filled the last legal register (review
     // of the first version).
     const int lowestLiteralReg = nextLiteralReg + 1;
     if (lowestLiteralReg < program.vpConstFloor) {

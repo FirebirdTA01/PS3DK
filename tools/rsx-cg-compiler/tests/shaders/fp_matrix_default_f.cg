@@ -10,7 +10,7 @@
 // The FP matrix registration pushed slots and row sources but never seeded
 // program_.fpUniformDefaults, so every row's inline block was zero-filled.
 // The reflection can be perfect while the shader renders black; the guard
-// reads both (predicted from the registration site by codex, then measured).
+// reads both (predicted from the registration site in review, then measured).
 //
 //   M  initialised, ASYMMETRIC values so a transposed or row-shifted fold is
 //      visible - 0.25/0.5/0.75 then 1.5/2.5/3.5 then -1/-2/-4, including

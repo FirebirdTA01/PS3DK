@@ -7,5 +7,5 @@
 // literal is the control for every one of them.  The rows are byte-compared
 // against it so they pin the VALUE the macro expands to and not merely that
 // the file was accepted - an accept-only row is what let the pre-revision-4
-// per-parameter rule look right (codex's condition, endorsed by Fable).
+// per-parameter rule look right (the review's condition, endorsed in review).
 float4 main(float4 t : TEXCOORD0) : COLOR { return t * 2.0; }

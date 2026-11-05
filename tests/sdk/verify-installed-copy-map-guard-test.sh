@@ -88,7 +88,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Codex P1 (v6): the shared-SDK collision guard must fire on the RESOLVED
+# Review P1 (v6): the shared-SDK collision guard must fire on the RESOLVED
 # path (a scratch/tc that is a SYMLINK ALIAS that resolves into the shared
 # root).  Two defects to close:
 #   (a) the alias row must exercise a REAL symlink (test -L + a realpath
@@ -99,7 +99,7 @@ fi
 #       copy in $TWORK whose guard_dir body is deleted) must make the same
 #       input stop emitting that diagnostic -- proving the row passes only
 #       because the guard is present.  The mutant is generated in the test,
-#       NOT via a production bypass switch (claude P1: a guard-off switch
+#       NOT via a production bypass switch (review P1: a guard-off switch
 #       must not ship in the helper).  We verify the sed actually changed
 #       the copy (cmp must differ) before trusting the mutant.
 # PS3TC_SHARED_ROOTS aliases a scratch-local stand-in for /c alongside the
@@ -234,7 +234,7 @@ if [[ "$MUT2_OK" -eq 1 ]]; then
 fi
 
 # --- toolchain side: real-scr is a normal dir; ONLY tc is a symlink alias.
-#     (Codex defect 1: do NOT 'mkdir tc' first -- tc must be a symlink, not a
+#     (Review defect 1: do NOT 'mkdir tc' first -- tc must be a symlink, not a
 #      real dir, or the alias is never exercised.) ---
 TC_ALIAS="$TWORK/tc-alias"
 mkdir -p "$TC_ALIAS"                 # the scratch itself is a real dir
@@ -270,7 +270,7 @@ if [[ "$MUT2_OK" -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Codex P1: a failing producer step must fail the verification (exit 1)
+# Review P1: a failing producer step must fail the verification (exit 1)
 # even when all nine REPLACING lines are present.  We use a stub source
 # tree where build-runtime-lv2.sh emits BOTH of the librt lines and then
 # exits non-zero, and a stub make that emits the other seven lines and
@@ -388,11 +388,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Red-path self-check (claude P1 / codex v8/v9): the two real alias rows call
+# Red-path self-check (review P1, v8/v9): the two real alias rows call
 # assert_guard_row(), whose RED branch runs fail().  A v8-style ${grep ...}
 # bad substitution in that branch made fail() never execute and FAIL not rise,
 # so a red row still printed "RESULT ... 0 failed" (a false green).  To close
-# that WITHOUT duplicating the fail expression (codex v9: the self-check must
+# that WITHOUT duplicating the fail expression (review v9: the self-check must
 # exercise the REAL assertion, not a third copy), the self-check calls the
 # SAME assert_guard_row() with a RED input (diagnostic absent, exit 0).
 #

@@ -12,3 +12,8 @@ tools/rsx-cg-compiler/src/cgnv2elf/cgnv2elf.cpp	83fd7c7aeca126d89eb87fef4a15bbe9
 tests/shader-compiler/cgnv2elf-test.sh	a3dd8354992d28d1b3d6dadecf35408b0b1901daf5553eb047f0c9964702516b
 # PSL1GHT's disclaimer, kept verbatim.
 tools/sfo-pkg/sfo.xml	68ea95aecf7a1f252518033a1b2b70430ebaf2aa8e33bd068d1cb25ca7409dcb
+# Local-only per-user tool files the repository must keep ignoring.
+.gitignore	adfc38b7d6d0fd83bc0ac858e9f147df9e84e65e2ab479ea5133a777d02e8309
+.gitignore	fca16cae5b0e32edfa6b55eaa32a98ffbf4a0c7d885fb585785fc83b6ea2d9c3
+.gitignore	619f7dca04ccfb0af0292c080245494bf26e0ed7ee8c41da0e29de711e4b755b
+.gitignore	42719d282417d6cd336337c0c03241a3eae97ed68debe4b83e1ff01c43c142bd

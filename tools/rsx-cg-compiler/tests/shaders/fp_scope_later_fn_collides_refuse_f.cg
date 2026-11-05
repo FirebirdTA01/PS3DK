@@ -4,7 +4,7 @@
 // function in it, so a function declared AFTER a call is still "found".  The
 // bookkeeping that records an unresolved callee has to ask whether a binding
 // is VISIBLE AT THE CALL, not whether the name exists anywhere in the unit
-// (review: codex, who found this on two different lookups in a row).
+// (review, which found this on two different lookups in a row).
 //
 // REFUSE: the callee f has no VISIBLE binding at the call - the only f is
 // declared after this body - so the use is recorded, and the later local

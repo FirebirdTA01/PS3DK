@@ -116,7 +116,7 @@ accept fp_txp_proj3_f "tex2Dproj(float3): divides by the coordinate's last lane"
 expect fp_txp_proj3_f '^[0-9]+ TXP dst=R[0-9]+ mask=xyzw .* s0=TEX0\.'
 # A float3 coordinate that lives in a TEMP or a CONSTANT has no w lane of
 # its own: the hardware divides by source W, so the established compiler reads .xyzz
-# (review: codex - the candidate read .xyzw and divided by an unwritten w,
+# (review - the candidate read .xyzw and divided by an unwritten w,
 # or by the literal block's zero).  The varying spellings already arrive
 # with the last lane smeared; these three do not.
 accept fp_txp_expr3_f "tex2Dproj(p.xyz * 2.0): the divisor is the temp's z"
@@ -144,8 +144,8 @@ expect fp_txp_two_f '^[0-9]+ ADD '
 # DISABLE_PC on the instruction that reads the varying feeding it (the fetch
 # when it reads the input directly, the producing MOV/MUL/ADD when it does
 # not, nothing for a constant), and the general path sets that bit nowhere -
-# plain texCUBE has the same gap on the tip.  Measured by claude and codex
-# (build/codex-cube-disable-pc-review, C:/cgdev/txp-probe/cube); one card
+# plain texCUBE has the same gap on the tip.  Measured by two reviewers
+# (build/review-cube-disable-pc-review, C:/cgdev/txp-probe/cube); one card
 # for the propagation rule rather than a projective accept that ships the
 # wrong bit.
 refuse "texCUBEproj (reference: TXP with DISABLE_PC on the varying read)" fp_txp_cube_f sce_fp_rsx "texCUBEproj"

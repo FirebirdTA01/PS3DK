@@ -135,7 +135,7 @@ control green     0  'findings: 0'                                 "a zero-exten
 # judge <objdump> <object> <name>: the object's listing (objdump -d) and its FUNC symbols (objdump -t), both
 # status-checked, then the scanner with the FUNC list.  Passes only if the scan has no finding AND witnessed at least
 # one CTR-controlled loop (a bd* cycle reachable from a judged mtctr): a listing whose mtctr feed no loop branch
-# tests nothing (codex 15e26177, 67047a74).  Possible counts are still all judged for hazards.  The reason
+# tests nothing (review 15e26177, 67047a74).  Possible counts are still all judged for hazards.  The reason
 # for a failure is left in $work/<name>.why.
 judge() {
     local od=$1 obj=$2 name=$3 rc witnessed

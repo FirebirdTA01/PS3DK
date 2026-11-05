@@ -42,7 +42,7 @@ REFUSE = {
     'scoped_arm_local': """float4 f(float4 c) { float4 k = c * 3.0; if (c.x > 0.0) { float4 k = c * 5.0; if (c.y > 0.0) return k; } return k; }
 float4 main(float4 t : TEXCOORD0) : COLOR { return f(t); }
 """,
-    # The same leak through a CONSTANT branch (review: codex): the taken
+    # The same leak through a CONSTANT branch (review): the taken
     # block declares k, and the nested run-time return would run the
     # outer `return k` inside it.
     'const_block_shadow': """float4 f(float4 c) { float4 k = 1; if (true) { float4 k = 2; if (c.x > 0) return k; } return k; }
@@ -119,7 +119,7 @@ float4 scale(const float4 c)
 }
 float4 main(float4 t : TEXCOORD0) : COLOR { return scale(t); }
 """
-# Conditions fold by TYPED value (review: codex - 1 == 2 once folded true
+# Conditions fold by TYPED value (review - 1 == 2 once folded true
 # as "both truthy").  COND picks the helper's first return (c * 2) when true,
 # else the second (c * 3); every expected arm was measured on the established compiler.
 PICK = """static const int K = 3;
@@ -136,7 +136,7 @@ PICK_ROWS = [('1 == 2', False), ('1 != 2', True), ('2 == 2', True), ('K == L', F
              ('K != L', True), ('!(K != L)', False), ('K < L', True), ('(K < L) == false', False),
              ('F == 0.5', True), ('F > 0.75 || K == 3', True), ('K == 3 && L == 3', False),
              ('K * 2 == 6', True), ('-K == 3', False)]
-# Precision edges (review: codex), measured on the established compiler.  These fold
+# Precision edges (review), measured on the established compiler.  These fold
 # and must pick the established compiler's arm:
 PREC = """static const float F = 0.1;
 static const float G = 16777217.0;
@@ -156,7 +156,7 @@ PREC_ROWS = [('F == 0.1', True), ('F == float(0.1)', True), ('F != 0.1', False),
 # half constant above half precision (H == 0.1 is TRUE there).
 PREC_REFUSED = ['G == 16777217', 'H == 0.1', 'H != 0.25']
 # A static const that ALIASES one of those shapes through its initialiser is
-# refused too (review: codex), as is an int initialiser in a float const,
+# refused too (review), as is an int initialiser in a float const,
 # which the established compiler keeps unrounded (Z == 16777217.0 is FALSE there).
 ALIAS = """static const float G = 16777217.0;
 static const half H = 0.1;

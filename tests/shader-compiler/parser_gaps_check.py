@@ -61,7 +61,7 @@ ROWS = {
     # Commas in for clauses: the static expansion takes the induction from the
     # operand the condition tests and runs j-- after each body (reference 0.75).
     'comma_for_clauses': ('float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; int i, j; for (i = 0, j = 2; i < 2; i++, j--) s += t[i] * j; return float4(s, 0, 0, 1); }' + '\\n', [0.75, 0.0, 0.0, 1.0]),
-    # Review of the typedef/comma port (codex 04:57; measured on the established compiler
+    # Review of the typedef/comma port (review 04:57; measured on the established compiler
     # 2026-10-17, values = fp_eval of the established compiler's own containers):
     # the same tag and name; a tag declared inside a typedef, then shadowed
     # by a local (byte-identical to the plain-struct spelling); several

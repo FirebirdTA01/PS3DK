@@ -17,7 +17,7 @@
 // reads full precision.  That is the property the test asserts, and it is
 // what a shared value falling through to the explicit store produces.
 //
-// Found by codex reviewing 3618daf8; every guard fixture in place at the
+// Found in review of 3618daf8; every guard fixture in place at the
 // time passed, because each of them had a colour that owned its value.
 void main(float4 p : TEXCOORD0, out half4 c : COLOR, out float d : DEPTH)
 {

@@ -31,7 +31,7 @@
 // version of this fixture used only the TEXCOORD spelling, and the fix it
 // guarded matched only that string - so a shader written with TEX had its
 // read mask set and its declared width missed, and the bit stayed set
-// (review finding, codex).
+// (review finding).
 void main(float4 wideRead   : TEXCOORD0,
           float2 narrowRead : TEXCOORD1,
           float4 wideUnread : TEXCOORD2,

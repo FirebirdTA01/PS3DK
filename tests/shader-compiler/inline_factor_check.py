@@ -5,7 +5,7 @@ For the rebound rows of user-function-inline-control-flow-test.sh
 file-scope name.  A row that asserts "a MUL reads the input" plus "the bytes
 of 2.0 are somewhere in the container" is satisfied by a program that reads
 the const block's ZERO lane (swizzle .yyyy over {2,0,0,0}) or that negates
-the factor - codex built both containers and all four earlier assertions
+the factor - a reviewer built both containers and all four earlier assertions
 passed on each.  So this walks the program with the decoded operands and
 computes the value: input lanes (0.25, -0.5, 0.75, 2.0), the const block's
 own floats through each operand's swizzle, negate and abs, MOV and MUL.  The
@@ -21,7 +21,7 @@ read (insert_lane_check.py learned that in three rounds).
 
 The vertex side delegates the arithmetic to vp_special_output_check.inspect()
 but NOT the envelope: inspect() never reads PROGRAM_END, the condition test,
-the scalar slot, abs or saturate (review: codex - clearing LAST on a valid
+the scalar slot, abs or saturate (review - clearing LAST on a valid
 container still passed), so vp_envelope() refuses those first.
 
 usage: inline_factor_check.py <container> fp|vp <factor>
@@ -178,7 +178,7 @@ def vp_envelope(blob):
 
     inspect() evaluates the VECTOR opcode and its three sources and nothing
     else: it does not read NVFX_VP_INST_LAST, the condition test, the scalar
-    slot, abs or saturate (review: codex - clearing LAST on the valid
+    slot, abs or saturate (review - clearing LAST on the valid
     rebound container still passed).  So every instruction's envelope is
     checked HERE, before delegation, and the walk requires LAST on the
     final instruction and on no other.

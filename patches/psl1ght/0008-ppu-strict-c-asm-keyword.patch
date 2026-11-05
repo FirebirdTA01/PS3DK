@@ -1,4 +1,4 @@
-From: PS3 Custom Toolchain <noreply@anthropic.com>
+From: PS3 Custom Toolchain <maintainers@example.invalid>
 Date: 2026-04-24
 Subject: [PATCH] ppu-{asm,lv2}.h: use __asm__ keyword for std-C99/C++17 compat
 

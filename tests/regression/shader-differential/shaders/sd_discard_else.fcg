@@ -8,7 +8,7 @@
 // LAST COMPARISON SEEN instead of the PATH CONDITION emits the same
 // SGTRC but predicates the KIL on NE rather than EQ, and kills exactly
 // the fragments that must survive: every pixel differs.  Measured by
-// claude against the established compiler, 2026-09-02 08:58 (the default path,
+// review against the established compiler, 2026-09-02 08:58 (the default path,
 // shipping; the general path refuses the shape until CF-2 lands).
 //
 // Curated on the default path, RED until discard-guard-completeness is fixed.  Whatever

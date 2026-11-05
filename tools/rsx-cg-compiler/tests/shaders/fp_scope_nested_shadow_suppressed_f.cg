@@ -3,7 +3,7 @@
 // An error-typed argument SUPPRESSES the diagnostics on its call - measured
 // both ways on the established compiler - but it must NOT suppress the record that the
 // callee's NAME was used unresolved, because a later declaration of that name
-// in the same scope is C1002 and the established compiler refuses it (review: codex).
+// in the same scope is C1002 and the established compiler refuses it (review).
 //
 // ACCEPT: a local f shadowing a VISIBLE function, called with an error-typed
 // argument.  C1105 would fire here if the non-function check were moved

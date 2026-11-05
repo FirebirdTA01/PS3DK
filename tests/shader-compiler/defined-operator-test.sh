@@ -42,7 +42,7 @@
 #     #undef then #define                            defined
 # A list of special names would have passed the first two rows and failed
 # every other one.  It is the binding's provenance that decides, so the bit
-# lives on the binding (codex found the hole; ruling by Fable).
+# lives on the binding (found in review; ruling in review).
 #
 # ONE CELL IS DELIBERATELY NOT HERE.  `#if defined(X) ? 1 : 0` is C0105 on the
 # established compiler and accepted by us, because our ExprParser has a ternary and the

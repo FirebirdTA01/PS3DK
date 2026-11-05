@@ -70,9 +70,9 @@ ea_is_const() {
 status=0
 # The checker's own controls: GCC 16's li/oris build and GCC 12's lis/ori/clrldi build are accepted, also after an
 # -O0 stvx spill; a sign-extending lis, a negative li, an access through another register, a register clobbered
-# before the oris or before the access (codex's 7bf0e74f counterexamples), and a clobber after a spill are refused;
+# before the oris or before the access (the review's 7bf0e74f counterexamples), and a clobber after a spill are refused;
 # a value spilled and reloaded is accepted, but not after a narrower store overwrote part of the slot, nor past a
-# branch (codex's 902c3f6a counterexamples); an indexed update form changing the base (stdux, ldux - codex's
+# branch (the review's 902c3f6a counterexamples); an indexed update form changing the base (stdux, ldux - the review's
 # 03acb1eb counterexamples) and any opcode the evaluator does not list are refused too.
 if ea_is_const $'\tli 9,4\n\toris 9,9,0x8000\n\tlvsl 0,0,9' lvsl &&
    ea_is_const $'\tlis 9,0x8000\n\tori 9,9,4\n\tclrldi 9,9,32\n\tlvsl 0,0,9' lvsl &&

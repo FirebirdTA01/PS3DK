@@ -1044,7 +1044,7 @@ jobs:
     shutil.rmtree(grandchild_tmp, ignore_errors=True)
     assert not grandchild_alive, f"Grandchild process {grandchild_pid} survived timeout kill"
 
-    # Idle timeout & wall ceiling row requirements (lead ruling & codex findings):
+    # Idle timeout & wall ceiling row requirements (lead ruling & review findings):
     # Row 1: slow-but-writing process survives past its old budget under idle timeout (byte-based, no newlines)
     # Generous margin: writes every 0.10s for 6 iterations (0.60s total), idle_timeout=0.40s.
     slow_code = (
@@ -1107,7 +1107,7 @@ jobs:
     assert res_temp.outcome == Outcome.PASS, f"Temp-writing process must PASS, got {res_temp.outcome}"
     assert res_temp.duration >= 0.50, f"Temp-writing process finished too fast: {res_temp.duration:.2f}s"
 
-    # Row 4: Positive control for future-dated file beside an active file (codex finding)
+    # Row 4: Positive control for future-dated file beside an active file (review finding)
     # Even if an existing file carries a future timestamp (+3600s), updates to another file must be recognized
     future_code = (
         "import os, pathlib, time\n"

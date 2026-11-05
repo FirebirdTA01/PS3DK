@@ -1,5 +1,5 @@
 // shader-differential - NAMED REGRESSION for file-scope uniforms used out
-// of declaration order (claude, 2026-09-01 21:10; default path, ships).
+// of declaration order (review, 2026-09-01 21:10; default path, ships).
 //
 // THE DEFECT: nv40_fp_emit allocates a file-scope uniform's slot at FIRST
 // USE while the container emit numbers them in DECLARATION order, so when
@@ -17,7 +17,7 @@
 // needs auto, not a fill.
 //
 // THIS IS A COMPOUND ROW carrying TWO default-path defects, and its
-// expected progression is (review finding, codex):
+// expected progression is (review finding):
 //   today:  RED - R carries a's value (the swap), and G reads ZERO: b's
 //           patch does land at a's site, but the scalar const block there
 //           holds its value in the DESTINATION lane (y) while a by-name

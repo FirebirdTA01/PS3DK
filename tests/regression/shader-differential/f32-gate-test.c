@@ -141,7 +141,7 @@ int main(void)
 			{ "f32-ulp exact recipe -> accepted", "f32-ulp", half, ulp_b, 1 },
 			{ "f32-sub8 exact recipe -> accepted", "f32-sub8", half, sub8_b, 1 },
 			{ "f32-nan exact recipe -> accepted", "f32-nan", nan_w, nan_w, 1 },
-			{ "f32-words all-zero words (codex probe) -> rejected", "f32-words", zero, zero, 0 },
+			{ "f32-words all-zero words (review probe) -> rejected", "f32-words", zero, zero, 0 },
 			{ "f32-ulp made an equality test (kb = ka) -> rejected", "f32-ulp", half, half, 0 },
 			{ "f32-ulp all-zero words -> rejected", "f32-ulp", zero, zero, 0 },
 			{ "f32-sub8 made an equality test -> rejected", "f32-sub8", half, half, 0 },
@@ -158,7 +158,7 @@ int main(void)
 			g_fail += !ok;
 		}
 	}
-	/* artifact writes: every stdio failure is reported (codex 20:12) */
+	/* artifact writes: every stdio failure is reported (review 20:12) */
 	{
 		static const char *what[4] = { "write ok -> 1", "open fails -> 0", "short write -> 0", "close fails -> 0" };
 		char buf[64] = { 0 };
@@ -263,7 +263,7 @@ int main(void)
 		}
 	}
 	{
-		/* end to end (codex review of 4d7576d4): a manifest with matrix controls
+		/* end to end (review of 4d7576d4): a manifest with matrix controls
 		 * requires the whole set, before the first corpus row and at the end */
 		enum { QUAL_FULL, QUAL_INCOMPLETE, MISSING_BEFORE_CORPUS, CORPUS_THEN_SET, LATE_COMPLETION,
 		       NO_MATRIX_CONTROLS, NSCEN };

@@ -2,7 +2,7 @@
 // AN ARGUMENT BOUND TO A PARAMETER THE BODY NEVER NAMES IS NEVER EXPANDED.
 // DROP ignores x, so BAD is not expanded and its untokenisable body never
 // reaches the token stream - the established compiler ACCEPTS. We expanded every
-// argument regardless, which refused it (codex's second cell). Skipping the
+// argument regardless, which refused it (the review's second cell). Skipping the
 // unused ones is also what the language specifies.
 #define BAD (1.0)
 #define DROP(x) 2.0

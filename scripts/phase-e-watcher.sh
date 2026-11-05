@@ -1,9 +1,9 @@
 #!/bin/bash
 set -u
-LOG=/home/firebirdta01/source/repos/PS3_Custom_Toolchain/build/phase-e-build.log
-PRJ=PS3_Custom_Toolchain
-FROM=claude_PS3DK
-TO=@claude_PS3DK,@deepseek_PS3DK
+LOG=${PHASE_E_LOG:?set PHASE_E_LOG to the phase-e build log}
+PRJ=${RDAC_PROJECT:-PS3_Custom_Toolchain}
+FROM=${RDAC_FROM:?set RDAC_FROM to the posting identity}
+TO=${RDAC_TO:?set RDAC_TO to the recipients}
 
 # Wait for log file to exist
 while [[ ! -f "$LOG" ]]; do sleep 2; done
@@ -16,7 +16,7 @@ tail -F -n 0 "$LOG" 2>/dev/null | while IFS= read -r line; do
   case "$line" in
     *'Patch '*' failed'*|*'configure: error'*|*'make: ***'*' Error '*|*'unable to recognize insn'*|*'internal compiler error'*|*'fatal error:'*)
       rdac-agent say --project "$PRJ" --from "$FROM" --to "$TO" \
-        "Phase E build FAILURE detected. Failure-marker line: $line. See build/phase-e-build.log."
+        "Phase E build FAILURE detected. Failure-marker line: $line. See $LOG."
       exit 1
       ;;
   esac

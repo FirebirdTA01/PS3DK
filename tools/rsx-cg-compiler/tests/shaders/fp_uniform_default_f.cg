@@ -14,7 +14,7 @@
 //          what the EXPRESSION held - one component - and produced
 //          (0.5,0,0,0): right in x and zero elsewhere, which renders as a
 //          plausible darker colour rather than as anything obviously wrong
-//          (review finding, codex).  The original fixture used only a
+//          (review finding).  The original fixture used only a
 //          four-component constructor and could not see it.
 //   plain  NO initialiser, so its block must stay ZERO.  A fix that wrote
 //          defaults into every uniform's block rather than only into those

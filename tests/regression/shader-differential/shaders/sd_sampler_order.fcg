@@ -1,5 +1,5 @@
 // shader-differential - NAMED REGRESSION for file-scope SAMPLERS used out
-// of declaration order (codex, review of 5d44ba6, 2026-09-01 21:19;
+// of declaration order (review of 5d44ba6, 2026-09-01 21:19;
 // default path, ships).
 //
 // THE DEFECT: the emit side assigns a file-scope sampler's texture unit at

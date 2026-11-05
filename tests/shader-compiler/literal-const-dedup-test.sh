@@ -21,7 +21,7 @@
 # the swizzle and the predication below are all read from the same bytes.
 # This used to read the stdout LISTING - and the listing was NOT missing the
 # condition fields: it dumps all four raw words per row and this file already
-# unswapped them (review: codex).  The gap was that nothing here LOOKED at
+# unswapped them (review).  The gap was that nothing here LOOKED at
 # the condition test (hw[1] bits 18..20) or the condition-code write (hw[0]
 # bit 8), so a container whose colour MOV carried NVFX_COND_FL - a write that
 # never executes - would carry a perfectly packed block that never reached a
@@ -113,7 +113,7 @@ done
 # the merged form PAINTS THE SOURCE: block {inf,1,2,0} read .xyxz gives
 # (inf,1,inf,2) back.  There is no special case for it and there must not
 # be one - an earlier draft had an isfinite() guard and it protected
-# nothing (review: codex).
+# nothing (review).
 #
 # NAMED DIVERGENCE, and the wording is deliberate: The established compiler'S PACKING
 # OF REPEATED NON-FINITE VALUES IS NOT CHARACTERISED.  Four arrangements

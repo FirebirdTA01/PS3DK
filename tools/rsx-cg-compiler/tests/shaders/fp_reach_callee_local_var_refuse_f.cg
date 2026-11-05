@@ -2,6 +2,6 @@
 // return missing(t);` is C1105 "cannot call a non-function" on the
 // established compiler, unconditional - the deferred class is name-NOT-FOUND, and
 // this name is found.  Deferring it let an unreachable body call a float
-// (review: codex).
+// (review).
 float4 unused(float4 t) { float missing = 1; return missing(t); }
 float4 main(float4 t : TEXCOORD0) : COLOR { return t; }

@@ -282,7 +282,7 @@ private:
     // The run-time conditions of the if-arms being built, innermost last,
     // with the arm's polarity (then = true).  A flattened if executes both
     // arms, so a vertex branch loop inside one ANDs these into its exit
-    // test (VP-CF, codex S3-CONTROL): an untaken arm's loop takes zero trips
+    // test (VP-CF, review S3-CONTROL): an untaken arm's loop takes zero trips
     // instead of running - unboundedly - for a result the join discards.
     std::vector<std::pair<IRValueID, bool>> armConditions_;
     void buildWhileStmt(WhileStmt* stmt);

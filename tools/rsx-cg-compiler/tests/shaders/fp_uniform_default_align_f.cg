@@ -4,7 +4,7 @@
 // ALIGNMENT, because the strings that precede its first default block happen
 // to leave the blob already 16-aligned - so a writer padding to 4 instead of
 // 16 produces byte-identical output there and the alignment assertion never
-// fires (found by mutation, review: Fable).
+// fires (found by mutation, review).
 //
 // This fixture forces the padding to matter.  The entry parameter contributes
 // "TEXCOORD0\0" + "t\0" = 12 bytes before the first file-scope uniform's block

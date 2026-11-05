@@ -117,12 +117,12 @@ printf '.LC0:\n\t.quad\t1311768467463790320\n' > "$work/pos-quad.s"
 printf '\tlis 3,0x9abc\n\tlis 9,0x1234\n\tori 3,3,0xdef0\n\tori 9,9,0x5678\n\trldimi 3,9,32,0\n' > "$work/pos-split.s"
 printf '\tlis 3,0x9abc\n\tlis 9,0x1234\n\tori 3,3,0xdef0\n\tori 9,9,0x5678\n\trldimi 3,9,16,0\n' > "$work/neg-split-shift.s"
 printf '\tlis 3,0x1234\n\tlis 9,0x9abc\n\tori 3,3,0x5678\n\tori 9,9,0xdef0\n\trldimi 3,9,32,0\n' > "$work/neg-split-swapped.s"
-# codex's 7bf0e74f counterexamples: a source clobbered before the join, the join before its inputs are defined,
+# the review's 7bf0e74f counterexamples: a source clobbered before the join, the join before its inputs are defined,
 # and one register used for both halves (0x1234567812345678).
 printf 'lis 3,0x9abc\nlis 9,0x1234\nori 3,3,0xdef0\nori 9,9,0x5678\nli 9,0\nrldimi 3,9,32,0\n' > "$work/neg-split-clobber.s"
 printf 'rldimi 3,9,32,0\nlis 3,0x9abc\nlis 9,0x1234\nori 3,3,0xdef0\nori 9,9,0x5678\n' > "$work/neg-split-early.s"
 printf 'lis 3,0x9abc\nori 3,3,0xdef0\nlis 3,0x1234\nori 3,3,0x5678\nrldimi 3,3,32,0\n' > "$work/neg-split-samereg.s"
-# codex's 902c3f6a counterexample: a call clobbers r3 after the value is built.
+# the review's 902c3f6a counterexample: a call clobbers r3 after the value is built.
 printf 'lis 3,0x1234\nori 3,3,0x5678\nsldi 3,3,32\noris 3,3,0x9abc\nori 3,3,0xdef0\nbl unknown_function\nblr\n' > "$work/neg-postcall.s"
 if whole_value "$work/pos-inline.s" && whole_value "$work/pos-quad.s" && ! whole_value "$work/neg-long.s" &&
    ! whole_value "$work/neg-nosldi.s" && ! whole_value "$work/neg-tworegs.s" &&
