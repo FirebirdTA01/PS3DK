@@ -167,6 +167,14 @@ fn the_outcome_line_keeps_cleanup_warnings_for_both_outcomes() {
         cleanup_warning: Some("published, but /c/s.partial was not removed".into()),
     })));
     assert!(t.contains("saved") && t.contains("was not removed"), "{t}");
+    let (tone, t) = live_line(&view(Outcome::PublishedEarly {
+        published: Published { path: PathBuf::from("/c/s.prof"), cleanup_warning: None },
+        cause: "disconnected by the user".into(),
+        cut: 1000,
+        torn_dropped: 7,
+    }));
+    assert_eq!(tone, ps3dk_ui::Tone::Success);
+    assert!(t.contains("ended early (disconnected by the user)") && t.contains("byte 1000") && t.contains("7 bytes"), "{t}");
     let (_, t) = live_line(&view(Outcome::Incomplete {
         saved: None,
         reasons: vec!["nothing was saved".into()],

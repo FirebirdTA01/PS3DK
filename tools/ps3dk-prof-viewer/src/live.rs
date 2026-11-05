@@ -626,6 +626,59 @@ pub struct Published {
     pub cleanup_warning: Option<String>,
 }
 
+/// A step of publishing a session that ended early, in order: the torn tail is cut from the closed local copy
+/// (open, set_len, sync, close), then the copy is published.  Each is a fault-injection point for tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarlyStep {
+    Open,
+    SetLen,
+    Sync,
+    Close,
+    Publish,
+}
+
+/// A test fault: called before each [`EarlyStep`]; an error it returns is that step's failure.  Production configs
+/// carry none.
+#[derive(Clone)]
+pub struct EarlyFault(pub std::sync::Arc<dyn Fn(EarlyStep) -> Option<std::io::Error> + Send + Sync>);
+
+impl fmt::Debug for EarlyFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("EarlyFault")
+    }
+}
+
+impl EarlyFault {
+    pub fn check(f: &Option<EarlyFault>, s: EarlyStep) -> std::io::Result<()> {
+        match f.as_ref().and_then(|h| (h.0)(s)) {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Cuts `path` to `len` bytes with every step checked, the close included (the same checked close as the local
+/// copy).  The handle is released exactly once whatever fails.  `Err` names the failed step.
+pub fn cut_file(path: &std::path::Path, len: u64, fault: &Option<EarlyFault>) -> Result<(), String> {
+    let at = |s: EarlyStep, e: std::io::Error| format!("could not cut the torn tail of {} ({s:?}): {e}", path.display());
+    let file = EarlyFault::check(fault, EarlyStep::Open)
+        .and_then(|_| std::fs::OpenOptions::new().write(true).open(path))
+        .map_err(|e| at(EarlyStep::Open, e))?;
+    let body = EarlyFault::check(fault, EarlyStep::SetLen)
+        .and_then(|_| file.set_len(len))
+        .map_err(|e| at(EarlyStep::SetLen, e))
+        .and_then(|_| {
+            EarlyFault::check(fault, EarlyStep::Sync)
+                .and_then(|_| file.sync_all())
+                .map_err(|e| at(EarlyStep::Sync, e))
+        });
+    let close = checked_close(file);
+    body?;
+    EarlyFault::check(fault, EarlyStep::Close)
+        .and(close)
+        .map_err(|e| at(EarlyStep::Close, e))
+}
+
 /// The suffixes a session may publish under.
 pub const SUFFIX_COMPLETE: &str = ".prof";
 pub const SUFFIX_INCOMPLETE: &str = ".incomplete.prof";

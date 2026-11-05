@@ -6,7 +6,7 @@
 //! number, and sorts after every known value.
 
 use ps3dk_prof::report::verdict_line;
-use ps3dk_prof::{load, Analysis, Metric, Outcome, Verdict, ZoneStats};
+use ps3dk_prof::{load, load_prefix, Analysis, Metric, Outcome, Verdict, ZoneStats};
 use std::cmp::Ordering;
 use std::path::PathBuf;
 
@@ -70,9 +70,34 @@ pub enum DocState {
     Analysed(Box<Analysis>),
 }
 
+/// File names the viewer keeps for a session that failed a check: never analysed as an accepted prefix.
+pub const NO_PREFIX_SUFFIX: &str = ".incomplete.prof";
+
 impl Document {
+    /// Opens `bytes`: a capture that ended early (no TRAILER, otherwise clean up to its last whole chunk) is
+    /// analysed as an accepted prefix, except a file named `*.incomplete.prof` (any case), which keeps the strict
+    /// analysis.
     pub fn from_bytes(path: PathBuf, bytes: &[u8]) -> Document {
-        let (state, ext, frames, hot) = match load(bytes) {
+        // Case-insensitive: Windows file names are, so `a.INCOMPLETE.PROF` is the same kept copy.
+        let prefix_ok = !path.to_string_lossy().to_ascii_lowercase().ends_with(NO_PREFIX_SUFFIX);
+        Document::build(path, bytes, prefix_ok)
+    }
+
+    /// The strict analysis only (a live session whose outcome failed a check).
+    pub fn strict(path: PathBuf, bytes: &[u8]) -> Document {
+        Document::build(path, bytes, false)
+    }
+
+    fn build(path: PathBuf, bytes: &[u8], prefix_ok: bool) -> Document {
+        let strict = load(bytes);
+        let loaded = match strict {
+            Outcome::Analysed(a) if prefix_ok && a.verdict != Verdict::Complete => match load_prefix(bytes) {
+                Ok(p) => Outcome::Analysed(Box::new(p)),
+                Err(_) => Outcome::Analysed(a),
+            },
+            other => other,
+        };
+        let (state, ext, frames, hot) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
@@ -117,12 +142,24 @@ impl Document {
                     text: diagnosis.clone(),
                 }
             }
-            DocState::Analysed(a) => VerdictView {
-                tone: match a.verdict {
-                    Verdict::Complete => VerdictTone::Complete,
-                    Verdict::Incomplete(_) => VerdictTone::Incomplete,
+            DocState::Analysed(a) => match &a.prefix {
+                // Cause-neutral: the bytes cannot say why the capture ended early.
+                Some(p) => VerdictView {
+                    tone: VerdictTone::CompleteEarly,
+                    text: format!(
+                        "COMPLETE (ended early): no TRAILER; analysed up to byte {} ({} whole chunks{}); loss not yet                          reported at the cut cannot be seen",
+                        p.cut,
+                        p.chunks,
+                        if p.torn_dropped > 0 { format!(", {} torn bytes dropped", p.torn_dropped) } else { String::new() }
+                    ),
                 },
-                text: verdict_line(&a.verdict),
+                None => VerdictView {
+                    tone: match a.verdict {
+                        Verdict::Complete => VerdictTone::Complete,
+                        Verdict::Incomplete(_) => VerdictTone::Incomplete,
+                    },
+                    text: verdict_line(&a.verdict),
+                },
             },
         }
     }
@@ -131,6 +168,8 @@ impl Document {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerdictTone {
     Complete,
+    /// An accepted prefix: a capture that ended early, analysed up to its last whole chunk.
+    CompleteEarly,
     Incomplete,
     Malformed,
 }

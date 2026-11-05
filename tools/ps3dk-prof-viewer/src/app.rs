@@ -248,7 +248,7 @@ impl App {
 
 fn tone(t: VerdictTone) -> ui::Tone {
     match t {
-        VerdictTone::Complete => ui::Tone::Success,
+        VerdictTone::Complete | VerdictTone::CompleteEarly => ui::Tone::Success,
         VerdictTone::Incomplete => ui::Tone::Warning,
         VerdictTone::Malformed => ui::Tone::Danger,
     }
@@ -257,6 +257,7 @@ fn tone(t: VerdictTone) -> ui::Tone {
 fn verdict_word(t: VerdictTone) -> &'static str {
     match t {
         VerdictTone::Complete => "COMPLETE",
+        VerdictTone::CompleteEarly => "COMPLETE (ended early)",
         VerdictTone::Incomplete => "INCOMPLETE",
         VerdictTone::Malformed => "MALFORMED",
     }
@@ -521,6 +522,19 @@ pub fn live_line(v: &LiveView) -> (ui::Tone, String) {
             }
             (ui::Tone::Success, t)
         }
+        Some(Outcome::PublishedEarly { published, cause, cut, torn_dropped }) => {
+            let mut t = format!(
+                "Live session ended early ({cause}); saved {} as a complete capture up to byte {cut}",
+                published.path.display()
+            );
+            if *torn_dropped > 0 {
+                t.push_str(&format!(" ({torn_dropped} bytes of a torn last chunk dropped)"));
+            }
+            if let Some(w) = &published.cleanup_warning {
+                t.push_str(&format!(" ({w})"));
+            }
+            (ui::Tone::Success, t)
+        }
         Some(Outcome::Incomplete { saved, reasons }) => {
             let at = saved
                 .as_ref()
@@ -538,7 +552,7 @@ pub fn live_line(v: &LiveView) -> (ui::Tone, String) {
             LinkState::Handshake => (ui::Tone::Neutral, "LIVE: connecting…".into()),
             LinkState::Streaming => (
                 ui::Tone::Neutral,
-                "LIVE, PROVISIONAL: the capture is still arriving; statistics appear when it is COMPLETE".into(),
+                "LIVE, PROVISIONAL: the capture is still arriving; statistics cover what has arrived so far".into(),
             ),
             LinkState::Ended(_) => (ui::Tone::Neutral, "LIVE: END received; checking…".into()),
             LinkState::Failed(e) => (ui::Tone::Danger, format!("LIVE link failed: {e}")),

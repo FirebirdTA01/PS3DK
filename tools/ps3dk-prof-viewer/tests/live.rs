@@ -757,3 +757,30 @@ fn corrupt_prefixes_stay_malformed() {
         }
     }
 }
+
+#[test]
+fn cut_file_checks_every_step_and_releases_the_handle() {
+    use std::sync::Arc;
+    let dir = std::env::temp_dir().join(format!("ps3dk-cut-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("c.partial");
+    std::fs::write(&p, [7u8; 100]).unwrap();
+    assert_eq!(cut_file(&p, 60, &None), Ok(()));
+    assert_eq!(std::fs::metadata(&p).unwrap().len(), 60);
+    for step in [EarlyStep::Open, EarlyStep::SetLen, EarlyStep::Sync, EarlyStep::Close] {
+        std::fs::write(&p, [7u8; 100]).unwrap();
+        let f = Some(EarlyFault(Arc::new(move |s| (s == step).then(|| std::io::Error::other("injected")))));
+        let e = cut_file(&p, 60, &f).unwrap_err();
+        assert!(e.contains(&format!("({step:?})")) && e.contains("injected"), "{e}");
+        let len = std::fs::metadata(&p).unwrap().len();
+        match step {
+            EarlyStep::Open | EarlyStep::SetLen => assert_eq!(len, 100, "{step:?}: nothing cut"),
+            _ => assert_eq!(len, 60, "{step:?}"),
+        }
+        // The handle was released: the file can be removed (Windows refuses an open file).
+        std::fs::remove_file(&p).unwrap();
+    }
+    let missing = cut_file(&dir.join("missing.partial"), 1, &None).unwrap_err();
+    assert!(missing.contains("(Open)"), "{missing}");
+}

@@ -53,12 +53,19 @@ fn incomplete_capture_is_flagged() {
     let mut s = scenario(vec![two_zone_lane(1)]);
     s.trailer = false;
     let bytes = s.bytes();
+    // No TRAILER but clean up to its last whole chunk: the viewer counts it as complete (ended early); the reader's
+    // own verdict stays INCOMPLETE, and a kept `.incomplete.prof` is never promoted.
     let d = doc(&bytes);
     let v = d.verdict();
-    assert_eq!(v.tone, VerdictTone::Incomplete);
-    assert!(v.text.starts_with("INCOMPLETE"), "{}", v.text);
+    assert_eq!(v.tone, VerdictTone::CompleteEarly);
+    assert!(v.text.starts_with("COMPLETE (ended early)"), "{}", v.text);
+    assert!(verdict_line(&d.analysis().unwrap().verdict).starts_with("INCOMPLETE"));
     let o = overview(d.analysis().unwrap());
     assert!(o.trailer.is_empty());
+    let kept = Document::from_bytes(PathBuf::from("t.incomplete.prof"), &bytes);
+    let v = kept.verdict();
+    assert_eq!(v.tone, VerdictTone::Incomplete);
+    assert!(v.text.starts_with("INCOMPLETE"), "{}", v.text);
 }
 
 #[test]
@@ -80,8 +87,11 @@ fn torn_capture_is_incomplete_not_malformed() {
     let mut bytes = scenario(vec![two_zone_lane(1)]).bytes();
     let n = bytes.len();
     bytes.truncate(n - 3);
+    // The torn TRAILER is cut; what remains is a capture that ended early, never MALFORMED.
     let d = doc(&bytes);
-    assert_eq!(d.verdict().tone, VerdictTone::Incomplete);
+    assert_eq!(d.verdict().tone, VerdictTone::CompleteEarly);
+    let kept = Document::from_bytes(PathBuf::from("t.incomplete.prof"), &bytes);
+    assert_eq!(kept.verdict().tone, VerdictTone::Incomplete);
 }
 
 #[test]
@@ -371,4 +381,19 @@ fn build_id_text_and_hex_never_collide() {
     assert_eq!(printable(b"abcd"), "text \"abcd\" (hex 61626364)");
     assert_eq!(printable(&[0xab, 0xcd]), "hex abcd");
     assert_ne!(printable(b"abcd"), printable(&[0xab, 0xcd]));
+}
+
+#[test]
+fn a_kept_incomplete_copy_is_never_promoted_whatever_its_case() {
+    let mut s = scenario(vec![two_zone_lane(1)]);
+    s.trailer = false;
+    let bytes = s.bytes();
+    for name in ["t.incomplete.prof", "t.INCOMPLETE.PROF", "t.Incomplete.Prof", "dir/T.incomplete.PROF"] {
+        let d = Document::from_bytes(PathBuf::from(name), &bytes);
+        assert_eq!(d.verdict().tone, VerdictTone::Incomplete, "{name}");
+    }
+    for name in ["t.prof", "t.PROF", "incomplete.prof.prof"] {
+        let d = Document::from_bytes(PathBuf::from(name), &bytes);
+        assert_eq!(d.verdict().tone, VerdictTone::CompleteEarly, "{name}");
+    }
 }

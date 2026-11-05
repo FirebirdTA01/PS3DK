@@ -221,6 +221,7 @@ fn reasons(o: &Outcome) -> String {
     match o {
         Outcome::Incomplete { reasons, .. } => reasons.join("; "),
         Outcome::Published(p) => panic!("unexpectedly published {:?}", p.path),
+        Outcome::PublishedEarly { published, .. } => panic!("unexpectedly published early {:?}", published.path),
     }
 }
 
@@ -570,4 +571,185 @@ fn configs_outside_the_protocol_are_refused() {
     ))
     .unwrap();
     assert!(h.contains(&format!("#define LIVE_MAX_PINGS_PER_S {MAX_PINGS_PER_S}u")));
+}
+
+// ---- a session that ends early after valid data (director 2026-11-04 19:30) ---------------------------------------
+
+/// `n` lanes, one RECORDS chunk each, so a stream cut mid-capture can end after whole event chunks.
+fn capture_lanes(n: u32) -> (Vec<u8>, Vec<usize>, Vec<usize>) {
+    let lanes = (1..=n)
+        .map(|inc| {
+            let recs = seqd(
+                0,
+                [vec![frame(0, 1000, 0)], zone(0, 0, 0, 1100, 1, 0), vec![end(0, 0, 0, 1150, 1), frame(0, 1200, 1)]]
+                    .concat(),
+            );
+            lane(inc, recs)
+        })
+        .collect();
+    let f = scenario(lanes).file();
+    let ends: Vec<usize> = (1..=f.chunks.len()).map(|k| File::new(f.chunks[..k].to_vec()).bytes().len()).collect();
+    let rec_ends = f.chunks.iter().zip(&ends).filter(|(c, _)| c.ty == T_RECORDS).map(|(_, &e)| e).collect();
+    (f.bytes(), ends, rec_ends)
+}
+
+fn early(o: &Outcome) -> (&Published, &str, u64, u64) {
+    match o {
+        Outcome::PublishedEarly { published, cause, cut, torn_dropped } => (published, cause, *cut, *torn_dropped),
+        o => panic!("{o:?}"),
+    }
+}
+
+#[test]
+fn a_close_before_end_after_whole_event_chunks_is_published_early() {
+    let (cap, _, rec) = capture_lanes(4);
+    let sent = rec[2] - 5; // inside lane 3's RECORDS chunk: lanes 1 and 2 are whole
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+    let (port, _) = mock(script);
+    let dir = out_dir("early-publish");
+    let c = start(cfg(port, &dir));
+    wait(&c);
+    let v = c.view();
+    let (p, cause, cut, torn) = early(v.outcome.as_ref().unwrap());
+    assert!(cause.contains("closed before END"), "{cause}");
+    assert_eq!((cut as usize, torn as usize), (rec[1], sent - rec[1]));
+    assert!(p.path.to_string_lossy().ends_with(".prof") && !p.path.to_string_lossy().ends_with(".incomplete.prof"));
+    assert_eq!(std::fs::read(&p.path).unwrap(), &cap[..rec[1]], "the published bytes are the cut prefix");
+    assert_eq!(complete_files(&dir).len(), 1, "{:?}", files(&dir));
+    let doc = v.doc.unwrap();
+    assert_eq!(doc.verdict().tone, VerdictTone::CompleteEarly);
+    assert_eq!(doc.size, rec[1], "the screen shows the analysis of exactly the published bytes");
+    let a = doc.analysis().unwrap();
+    assert!(a.lane_valid(1) && a.lane_valid(2), "{:?}", a.lanes);
+    // Reopening the published file gives the same acceptance.
+    let re = ps3dk_prof_viewer::model::Document::from_bytes(p.path.clone(), &std::fs::read(&p.path).unwrap());
+    assert_eq!(re.verdict().tone, VerdictTone::CompleteEarly);
+    assert!(!re.verdict().text.contains("closed"), "reopen wording is cause-neutral: {}", re.verdict().text);
+}
+
+#[test]
+fn disconnect_after_valid_data_is_published_early() {
+    let (cap, _, rec) = capture_lanes(4);
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..rec[1]], 256).into_iter().map(Step::Send));
+    script.push(Step::Hold(3000)); // the user leaves while the console is quiet
+    let (port, _) = mock(script);
+    let dir = out_dir("disconnect-early");
+    let c = start(cfg(port, &dir));
+    let t0 = Instant::now();
+    while c.view().received < rec[1] as u64 {
+        assert!(t0.elapsed() < Duration::from_secs(5), "data never arrived");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    c.disconnect();
+    wait(&c);
+    let v = c.view();
+    let (p, cause, cut, torn) = early(v.outcome.as_ref().unwrap());
+    assert_eq!((cause, cut as usize, torn), ("disconnected by the user", rec[1], 0));
+    assert_eq!(std::fs::read(&p.path).unwrap(), &cap[..rec[1]]);
+    assert_eq!(v.doc.unwrap().verdict().tone, VerdictTone::CompleteEarly);
+}
+
+#[test]
+fn a_close_before_any_whole_event_chunk_stays_incomplete_and_strict() {
+    let (cap, _, rec) = capture_lanes(2);
+    let sent = rec[0] - 3;
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+    let (port, _) = mock(script);
+    let dir = out_dir("early-no-events");
+    let c = start(cfg(port, &dir));
+    wait(&c);
+    let v = c.view();
+    let why = reasons(v.outcome.as_ref().unwrap());
+    assert!(why.contains("not a capture that ended early") && why.contains("none with events"), "{why}");
+    assert!(complete_files(&dir).is_empty(), "{:?}", files(&dir));
+    assert_eq!(v.doc.unwrap().verdict().tone, VerdictTone::Incomplete);
+}
+
+#[test]
+fn a_protocol_failure_after_valid_data_is_never_published_early() {
+    let (cap, _, rec) = capture_lanes(4);
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..rec[1]], 256).into_iter().map(Step::Send));
+    // DATA at the wrong offset: a Gap, a protocol failure
+    let mut bad = ((rec[1] + 100) as u64).to_le_bytes().to_vec();
+    bad.extend_from_slice(&cap[rec[1]..rec[1] + 16]);
+    script.push(Step::Send(wire(T_DATA, &bad)));
+    script.push(Step::Hold(500));
+    let (port, _) = mock(script);
+    let dir = out_dir("early-protocol");
+    let c = start(cfg(port, &dir));
+    wait(&c);
+    let v = c.view();
+    let why = reasons(v.outcome.as_ref().unwrap());
+    assert!(why.contains("expected"), "{why}");
+    assert!(complete_files(&dir).is_empty(), "{:?}", files(&dir));
+    let doc = v.doc.unwrap();
+    assert_eq!(doc.verdict().tone, VerdictTone::Incomplete, "a failed session keeps the strict analysis");
+    // Its kept copy is never promoted on reopen.
+    let kept = files(&dir).into_iter().find(|f| f.ends_with(".incomplete.prof")).expect("kept");
+    let path = dir.join(kept);
+    let re = ps3dk_prof_viewer::model::Document::from_bytes(path.clone(), &std::fs::read(&path).unwrap());
+    assert_eq!(re.verdict().tone, VerdictTone::Incomplete);
+}
+
+#[test]
+fn a_disconnect_racing_a_valid_end_keeps_the_end_rules() {
+    let (cap, _, _) = capture_lanes(2);
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap, 256).into_iter().map(Step::Send));
+    script.push(Step::Send(end_frame(cap.len() as u64)));
+    script.push(Step::Hold(2000)); // no close: the user disconnects inside close_wait
+    let (port, _) = mock(script);
+    let dir = out_dir("end-race");
+    let mut k = cfg(port, &dir);
+    k.close_wait = Duration::from_millis(1500);
+    let c = start(k);
+    let t0 = Instant::now();
+    while !matches!(c.view().link, LinkState::Ended(_)) {
+        assert!(t0.elapsed() < Duration::from_secs(5), "END never arrived");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    c.disconnect();
+    wait(&c);
+    let v = c.view();
+    assert!(matches!(v.outcome, Some(Outcome::Incomplete { .. })), "{:?}", v.outcome);
+    assert!(complete_files(&dir).is_empty(), "{:?}", files(&dir));
+}
+
+#[test]
+fn reopen_acceptance_follows_the_file_and_its_name() {
+    let (cap, _, rec) = capture_lanes(2);
+    let doc = |name: &str, b: &[u8]| ps3dk_prof_viewer::model::Document::from_bytes(PathBuf::from(name), b);
+    assert_eq!(doc("a.prof", &cap).verdict().tone, VerdictTone::Complete, "ordinary COMPLETE unchanged");
+    assert_eq!(doc("a.prof", &cap[..rec[1]]).verdict().tone, VerdictTone::CompleteEarly);
+    assert_eq!(doc("a.incomplete.prof", &cap[..rec[1]]).verdict().tone, VerdictTone::Incomplete);
+    assert_eq!(doc("a.prof", &cap[..rec[0] - 3]).verdict().tone, VerdictTone::Incomplete, "no whole event chunk");
+    let early = doc("a.prof", &cap[..rec[1]]);
+    let a = early.analysis().unwrap();
+    assert!(a.prefix.is_some() && a.verdict != ps3dk_prof::Verdict::Complete, "the reader verdict stays strict");
+    assert!(early.frames.is_some() && early.hot.is_some(), "every page is built from the prefix analysis");
+}
+
+#[test]
+fn every_failed_step_of_an_early_publish_keeps_the_session_incomplete_and_strict() {
+    let (cap, _, rec) = capture_lanes(4);
+    let sent = rec[2] - 5; // a torn tail, so every step runs
+    for step in [EarlyStep::Open, EarlyStep::SetLen, EarlyStep::Sync, EarlyStep::Close, EarlyStep::Publish] {
+        let mut script = vec![Step::Send(hello_frame())];
+        script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+        let (port, _) = mock(script);
+        let dir = out_dir(&format!("early-fault-{step:?}"));
+        let mut k = cfg(port, &dir);
+        k.early_fault = Some(EarlyFault(Arc::new(move |s| (s == step).then(|| std::io::Error::other("injected")))));
+        let c = start(k);
+        wait(&c);
+        let v = c.view();
+        let why = reasons(v.outcome.as_ref().unwrap());
+        assert!(why.contains(&format!("({step:?})")) && why.contains("injected"), "{step:?}: {why}");
+        assert!(complete_files(&dir).is_empty(), "{step:?}: {:?}", files(&dir));
+        assert_eq!(v.doc.unwrap().verdict().tone, VerdictTone::Incomplete, "{step:?}: strict document");
+    }
 }

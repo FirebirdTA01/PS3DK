@@ -55,6 +55,8 @@ pub struct ClientConfig {
     pub parse_every: Duration,
     /// Capture bytes accepted at most.
     pub cap: u64,
+    /// Tests only: fault injection for publishing a session that ended early.
+    pub early_fault: Option<EarlyFault>,
 }
 
 impl ClientConfig {
@@ -70,6 +72,7 @@ impl ClientConfig {
             ping_every: Duration::from_secs(1),
             parse_every: Duration::from_millis(250),
             cap: MAX_SESSION_BYTES,
+            early_fault: None,
         }
     }
 
@@ -121,6 +124,14 @@ impl ClientConfig {
 pub enum Outcome {
     /// Every check passed; the capture was published as a `.prof`.
     Published(Published),
+    /// The session ended early (`cause`) after valid data: the accepted prefix, cut at its last whole chunk, was
+    /// published as a `.prof` (see `ps3dk_prof::load_prefix`).
+    PublishedEarly {
+        published: Published,
+        cause: String,
+        cut: u64,
+        torn_dropped: u64,
+    },
     /// Kept as `.incomplete.prof` (or not saved at all), with every reason.
     Incomplete {
         saved: Option<Published>,
@@ -218,7 +229,7 @@ impl LiveClient {
         self.shared.inner.lock().unwrap().view.clone()
     }
 
-    /// Asks the session to end; what arrived is kept as incomplete.
+    /// Asks the session to end; valid data that arrived is published as a capture that ended early.
     pub fn disconnect(&self) {
         self.shared.cancel.store(true, Ordering::SeqCst);
         self.shared.wake.notify_all();
@@ -316,6 +327,9 @@ struct NetResult {
     extra: Vec<String>,
     /// EOF after a valid END: the only clean end.
     clean_eof: bool,
+    /// Set only by an end that may publish an accepted prefix: the user's Disconnect, EOF or a read error before
+    /// END, no response in time, a failed PING.  Never by a protocol failure or a local failure.
+    early: Option<String>,
 }
 
 fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
@@ -323,6 +337,7 @@ fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
         local: Local::NotYet,
         extra: Vec::new(),
         clean_eof: false,
+        early: None,
     };
     let connected = TcpStream::connect_timeout(&addr, cfg.connect_timeout).and_then(|s| {
         s.set_nodelay(true)?;
@@ -353,6 +368,7 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
     loop {
         if sh.cancel.load(Ordering::SeqCst) {
             r.extra.push("disconnected by the user".into());
+            r.early = Some("disconnected by the user".into());
             return;
         }
         let state = sh.inner.lock().unwrap().session.state.clone();
@@ -369,12 +385,14 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
             (LinkState::Streaming, None) => {
                 if last_rx.elapsed() > cfg.liveness_timeout {
                     r.extra.push("the console stopped responding".into());
+                    r.early = Some("the console stopped responding".into());
                     return;
                 }
                 if last_ping.elapsed() >= cfg.ping_every {
                     last_ping = Instant::now();
                     if let Err(e) = stream.write_all(&ping()) {
                         r.extra.push(format!("could not send a PING: {e}"));
+                        r.early = Some(format!("could not send a PING: {e}"));
                         return;
                     }
                 }
@@ -385,6 +403,9 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
             Ok(0) => {
                 let mut g = sh.inner.lock().unwrap();
                 r.clean_eof = matches!(g.session.state, LinkState::Ended(_));
+                if matches!(g.session.state, LinkState::Handshake | LinkState::Streaming) {
+                    r.early = Some("the connection closed before END".into());
+                }
                 g.session.closed(); // a failure before END
                 set_link(sh, &mut g);
                 return;
@@ -428,6 +449,9 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
                 // Any read error refuses publication, after END too.
                 r.extra.push(format!("connection error: {e}"));
                 let mut g = sh.inner.lock().unwrap();
+                if matches!(g.session.state, LinkState::Handshake | LinkState::Streaming) {
+                    r.early = Some(format!("connection error: {e}"));
+                }
                 g.session.closed();
                 set_link(sh, &mut g);
                 return;
@@ -467,6 +491,12 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
             .is_some_and(|d| d.verdict().tone == VerdictTone::Complete);
         (g.session.state.clone(), g.session.received.len(), complete)
     };
+    // An early end may publish an accepted prefix only when the link itself did not fail a check: still
+    // streaming (the user's Disconnect, no response, a failed PING) or closed before END.  END stays authoritative
+    // even when a Disconnect raced it.
+    let early = r.early.take().filter(|_| {
+        matches!(state, LinkState::Handshake | LinkState::Streaming | LinkState::Failed(LinkError::Closed))
+    });
     if matches!(state, LinkState::Ended(_)) && !r.clean_eof && r.extra.is_empty() {
         r.extra
             .push("the link did not end with a clean close".into());
@@ -502,6 +532,7 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
             if let Some(e) = &copy.error {
                 sh.inner.lock().unwrap().view.local_error = Some(e.clone());
             }
+            let whole = local_ok && copy.written == received && copy.error.is_none();
             let decision = match publish_decision(&state, received, reader_complete, local_ok) {
                 Publish::Complete if extra.is_empty() => Publish::Complete,
                 Publish::Complete => Publish::Incomplete(extra),
@@ -509,6 +540,28 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
                     why.extend(extra);
                     Publish::Incomplete(why)
                 }
+            };
+            let early = match (&decision, early) {
+                (Publish::Incomplete(_), Some(cause)) if whole => Some(cause),
+                _ => None,
+            };
+            let decision = match early {
+                None => decision,
+                Some(cause) => match publish_early(sh, cfg, &partial, &stem, cause) {
+                    Ok(o) => {
+                        let mut g = sh.inner.lock().unwrap();
+                        g.view.outcome = Some(o);
+                        sh.wake.notify_all();
+                        return;
+                    }
+                    Err(why) => match decision {
+                        Publish::Incomplete(mut w) => {
+                            w.push(why);
+                            Publish::Incomplete(w)
+                        }
+                        d => d,
+                    },
+                },
             };
             match decision {
                 Publish::Complete => {
@@ -540,7 +593,50 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
             }
         }
     };
+    if matches!(outcome, Outcome::Incomplete { .. }) {
+        strict_doc(sh);
+    }
     let mut g = sh.inner.lock().unwrap();
     g.view.outcome = Some(outcome);
     sh.wake.notify_all();
+}
+
+/// A session that failed a check keeps the STRICT analysis on screen: its bytes are never shown as a capture that
+/// ended early, whatever the reader would accept.
+fn strict_doc(sh: &Shared) {
+    let bytes = sh.inner.lock().unwrap().session.received.snapshot().to_vec();
+    let doc = Arc::new(Document::strict(PathBuf::from("live capture"), &bytes));
+    let mut g = sh.inner.lock().unwrap();
+    g.view.doc = Some(doc);
+    g.view.generation += 1;
+}
+
+/// Publishes the accepted prefix of a session that ended early: the final bytes must be an accepted prefix
+/// (`ps3dk_prof::load_prefix`); a torn final chunk is cut from the closed local copy (checked set_len + sync)
+/// before it is published as a `.prof`.  `Err` names why it stays incomplete.
+fn publish_early(
+    sh: &Shared,
+    cfg: &ClientConfig,
+    partial: &std::path::Path,
+    stem: &str,
+    cause: String,
+) -> Result<Outcome, String> {
+    let bytes = sh.inner.lock().unwrap().session.received.snapshot().to_vec();
+    let a = ps3dk_prof::load_prefix(&bytes).map_err(|e| format!("not a capture that ended early: {e}"))?;
+    let p = a.prefix.as_ref().expect("load_prefix sets it");
+    let (cut, torn) = (p.cut, p.torn_dropped);
+    if torn > 0 {
+        cut_file(partial, cut as u64, &cfg.early_fault)?;
+    }
+    let published = EarlyFault::check(&cfg.early_fault, EarlyStep::Publish)
+        .and_then(|_| publish_file(partial, &cfg.out_dir, stem, SUFFIX_COMPLETE))
+        .map_err(|e| format!("could not publish ({:?}): {e}", EarlyStep::Publish))?;
+    // The document on screen is the analysis of exactly the published bytes.
+    let doc = Arc::new(Document::from_bytes(PathBuf::from("live capture"), &bytes[..cut]));
+    {
+        let mut g = sh.inner.lock().unwrap();
+        g.view.doc = Some(doc);
+        g.view.generation += 1;
+    }
+    Ok(Outcome::PublishedEarly { published, cause, cut: cut as u64, torn_dropped: torn as u64 })
 }
