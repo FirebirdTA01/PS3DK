@@ -160,6 +160,7 @@ ppu_stub  ppu/lib/libpamf_stub.a
 ppu_stub  ppu/lib/libperf.a
 ppu_stub  ppu/lib/libpngdec_stub.a
 ppu_stub  ppu/lib/libpngenc_stub.a
+ppu_stub  ppu/lib/libps3dkprof.a
 ppu_stub  ppu/lib/libresc_stub.a
 ppu_stub  ppu/lib/librsx.a
 ppu_stub  ppu/lib/librt.a

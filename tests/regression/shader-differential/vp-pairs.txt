@@ -50,6 +50,7 @@ samples/toolchain/hello-psgl-shader-interface/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-spudraw-triangle/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-textured-quad/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-triangle/shaders/vpshader.vcg|auto|general
+samples/profiling/heterogeneous-workload/shaders/scene.vcg|auto|general
 sdk/libdbgfont/shaders/vpshader_dbgfont.vcg|auto|general
 
 # Faceforward and composed-lane correctness witnesses, pixel-judged 2026-09-06.
