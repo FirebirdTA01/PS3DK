@@ -133,6 +133,19 @@ jobs:
         working-directory: tools
         run: cargo test --workspace
 
+      # The binary arc writer (sdk/libps3dkprof core) on the host, plain and ASan+UBSan, checked by its oracle
+      # and by the reader built above (check-arcs, arcs-json).
+      - name: ps3dk-prof arcs writer host test
+        env:
+          READER: tools/target/debug/ps3dk-prof
+        run: bash tests/host/ps3dk-prof-runtime/arcs-writer-test.sh "$RUNNER_TEMP/arcs-writer"
+
+      # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
+      # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
+      # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
+      - name: ps3dk-prof clockmap exact cross-check
+        run: python3 -B tools/ps3dk-prof/tests/clockmap_check.py tools/target/debug/examples/clockmap_cases --seed 1 --cases 1000 --timeout 300 --self-test --runner-controls
+
       # The release workflow runs every shipped tool with --version and fails
       # the release on one that rejects it; check the same list here.
       - name: Every shipped Rust tool answers --version
@@ -618,6 +631,8 @@ jobs:
       # files under samples/ and tests/: a package ships them as source.
       - name: Test the release-tree guard against shipped build outputs
         run: bash tests/host/release-tree-build-outputs-test.sh
+      - name: Test profiler release artifact and archive membership gates
+        run: bash tests/host/release-tree-profiler-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
       # libgcc the lock-free FDE registry in both multilibs.

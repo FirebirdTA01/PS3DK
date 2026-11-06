@@ -14,6 +14,21 @@ an intended change in the changelog.  A whole-file sha256 is not enough: two
 archives with identical members used to differ in their headers, and a
 library can change behaviour through a header it did not own.
 
+For each ABI (`ppu/lib` and `ppu/lib/lp64`), `libps3dkprof.a` has exactly
+`prof_core.o`, `prof_drain.o` and `pal_lv2.o`. `libps3prof.a` has those three
+plus `prof_arcs_writer.o` and `startup.o`. The manual archive omits the
+automatic lifecycle and arc serializer deliberately. Include these members
+in the diff and hash record; `scripts/check-release-tree.sh` rejects missing,
+extra or duplicate members. Update these expectations when compiler adapters
+are added, alongside their build and acceptance tests.
+
+The shared required-artifact manifest also requires both archives for both
+ABIs and `ppu/include/ps3dk/prof.h`. Windows packaging copies the installed
+SDK tree, then validates it with that manifest; no separate profiler payload
+list is maintained. Archive membership proves composition, not startup
+retention: retain the installed-library anchor/no-anchor RPCS3 controls in
+`tests/sdk/ps3dk-prof-auto`, with `--gc-sections`, for both ABIs.
+
 ## 2. Reproducibility
 
 - `scripts/leakscan.py` on the extracted candidate, with a `--prefix` for

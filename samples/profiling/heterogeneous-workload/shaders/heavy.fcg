@@ -1,0 +1,7 @@
+void main(float2 uv : TEXCOORD0, out float4 color : COLOR)
+{
+    float3 p=float3(uv,uv.x+uv.y);
+    for(int i=0;i<12;++i)
+        p=frac(p.yzx*1.37+p.zxy*0.61+float3(0.13,0.27,0.41));
+    color=float4(p*0.65,1);
+}

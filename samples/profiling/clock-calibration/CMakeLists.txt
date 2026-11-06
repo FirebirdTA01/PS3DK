@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+project(clock_calibration C ASM)
+include(ps3-self)
+set(CAL_SPU_SAMPLES 1500 CACHE STRING "SPU samples per SPU phase (two phases)")
+set(CAL_RSX_SAMPLES 1500 CACHE STRING "RSX samples")
+set(CAL_PERIOD_US 10000 CACHE STRING "Microseconds between samples")
+add_executable(clock-calibration source/main.c)
+target_compile_features(clock-calibration PRIVATE c_std_11)
+target_compile_options(clock-calibration PRIVATE -O2 -g -Wall -Wextra -Werror)
+target_include_directories(clock-calibration PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../gcm/common" "${PS3DK}/ppu/include")
+target_compile_definitions(clock-calibration PRIVATE CAL_SPU_SAMPLES=${CAL_SPU_SAMPLES}
+  CAL_RSX_SAMPLES=${CAL_RSX_SAMPLES} CAL_PERIOD_US=${CAL_PERIOD_US})
+target_link_libraries(clock-calibration PRIVATE gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
+set(CAL_SPU_SDK "${PS3DK}" CACHE PATH "SPU SDK root")
+ps3_add_spu_image(clock-calibration NAME clockcal_spu SOURCES spu/main.c LIBS sputhread
+  CFLAGS "-I${CAL_SPU_SDK}/spu/include" LDFLAGS "-L${CAL_SPU_SDK}/spu/lib")
+ps3_add_self(clock-calibration)
