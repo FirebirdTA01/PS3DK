@@ -21,7 +21,15 @@ static void le(uint8_t *b, uint64_t v, int n)
 }
 
 /* ---------------------------------------------------------------- the fault policy */
-static void fault(prg_dom *d) { ST_REL(&d->fault, 1u); }
+/* S2 (R81): the first fault's reason is published first-fault-wins, then the fault word; a later fault never
+ * relabels an earlier one */
+static void fault_as(prg_dom *d, uint32_t reason)
+{
+    uint32_t z = PRG_FAULT_NONE;
+    (void)CAS(&d->fault_reason, &z, reason);
+    ST_REL(&d->fault, 1u);
+}
+static void fault(prg_dom *d) { fault_as(d, PRG_FAULT_GENERIC); }
 static int faulted(prg_dom *d) { return LD_ACQ(&d->fault) != 0; }
 
 /* every lock operation: a refusal, or an unlock reporting failure after the real unlock, latches the fault */
@@ -222,16 +230,22 @@ int prg_attach(prg_dom *d, uint32_t domain_id, uint32_t report_first, uint32_t r
  * snapshot like any other admitted call. */
 static int admit(prg_dom *d)
 {
+    PRG_STEP(d, PRG_SP_ADMIT_TRY);
     ST_SC(&d->inflight, 1u);
     if (LD_SC(&d->state) != PRG_ATTACHED || LD_ACQ(&d->anomaly) || LD_ACQ(&d->overflow) || LD_ACQ(&d->exhausted) ||
         faulted(d)) {
-        ST_REL(&d->inflight, 0u);
+        ST_REL(&d->inflight, 0u); /* a rejected admission: no leave() follows */
         return 0;
     }
+    PRG_STEP(d, PRG_SP_ADMITTED);
     return 1;
 }
 
-static void leave(prg_dom *d) { ST_REL(&d->inflight, 0u); }
+static void leave(prg_dom *d)
+{
+    PRG_STEP(d, PRG_SP_LEAVE);
+    ST_REL(&d->inflight, 0u);
+}
 
 /* the producer's exit: a failed publication is terminal (EFAULT), never ignored */
 static int publish_leave(prg_dom *d, int rc)
@@ -249,18 +263,29 @@ static void lose(prg_dom *d, uint64_t s)
     d->p_open_count++; /* contiguous: the open loss always ends at s - 1 */
 }
 
-/* number and submit one event; the caller has admitted; returns the number or UINT64_MAX (overflow) */
-static uint64_t submit(prg_dom *d, uint8_t kind, uint8_t depth, uint32_t desc)
+/* the receipt of one submission (r may be NULL) */
+static void rcpt(prg_receipt *r, uint32_t kind, uint32_t reason, uint64_t seq)
+{
+    if (r)
+        *r = (prg_receipt){kind, reason, seq};
+}
+
+/* number and submit one event; the caller has admitted; returns the number or UINT64_MAX (overflow).  The receipt:
+ * EVENT (the pair was reserved), LOST (numbered, inside the open loss) or REFUSED(seq overflow), never inferred
+ * from a return code. */
+static uint64_t submit(prg_dom *d, uint8_t kind, uint8_t depth, uint32_t desc, prg_receipt *r)
 {
     uint64_t s, t = d->p_ticket;
     uint32_t slot;
     if (d->p_seq == UINT64_MAX || d->p_ticket == UINT64_MAX) {
         d->p_overflow = 1;
         ST_REL(&d->overflow, 1u);
+        rcpt(r, PRG_R_REFUSED, PRG_RR_SEQ_OVERFLOW, 0);
         return UINT64_MAX;
     }
     s = d->p_seq++;
     slot = (uint32_t)(t % d->report_count);
+    rcpt(r, PRG_R_LOST, PRG_RR_NONE, s); /* replaced by EVENT below once the pair is reserved */
     if (t - LD_ACQ(&d->drained_pub) >= d->report_count) { /* the slot's previous ticket is not drained */
         d->st.lost_ring++;
         lose(d, s);
@@ -276,6 +301,7 @@ static uint64_t submit(prg_dom *d, uint8_t kind, uint8_t depth, uint32_t desc)
         lose(d, s);
         return s;
     }
+    rcpt(r, PRG_R_EVENT, PRG_RR_NONE, s);
     if (d->p_open_count) { /* close the open loss into an immutable record before this event becomes visible */
         prg_interval *r = &d->rec[d->p_rec_head % PRG_INTERVALS];
         r->first = d->p_open_first;
@@ -288,17 +314,21 @@ static uint64_t submit(prg_dom *d, uint8_t kind, uint8_t depth, uint32_t desc)
     return s;
 }
 
-int prg_begin(prg_dom *d, uint32_t desc, prg_token *tok)
+int prg_begin_r(prg_dom *d, uint32_t desc, prg_token *tok, prg_receipt *r)
 {
     uint64_t s;
+    rcpt(r, PRG_R_REFUSED, PRG_RR_EINVAL, 0);
     if (!tok)
         return d->st.refused_api++, PRG_EINVAL;
     *tok = (prg_token){0, 0, 0, 0, 0}; /* domain 0 never matches: an unissued token is refused by prg_end */
-    if (!admit(d))
+    if (!admit(d)) {
+        rcpt(r, PRG_R_REFUSED, PRG_RR_NOT_ADMITTED, 0);
         return d->st.refused_api++, PRG_ESTOPPED;
+    }
     if (d->p_depth >= PRG_DEPTH) {
         if (d->p_suppressed >= PRG_SUPPRESS_MAX || d->p_sup_serial == UINT64_MAX) {
             d->st.refused_suppress_overflow++;
+            rcpt(r, PRG_R_REFUSED, PRG_RR_SUPPRESS_OVERFLOW, 0);
             leave(d);
             return PRG_EOVERFLOW;
         }
@@ -306,9 +336,10 @@ int prg_begin(prg_dom *d, uint32_t desc, prg_token *tok)
          * suppressed zone can end, and a stale token of an ended zone never matches a later one at the same level */
         d->p_sup_stack[d->p_suppressed++] = ++d->p_sup_serial;
         *tok = (prg_token){d->domain_id, 0x80000000u | d->p_suppressed, d->p_sup_serial, desc, 0};
+        rcpt(r, PRG_R_SUPPRESSED, PRG_RR_NONE, 0);
         return publish_leave(d, PRG_OK);
     }
-    s = submit(d, PRG_K_BEGIN, (uint8_t)d->p_depth, desc);
+    s = submit(d, PRG_K_BEGIN, (uint8_t)d->p_depth, desc, r);
     if (s != UINT64_MAX) {
         d->p_stack[d->p_depth] = (prg_frame_ent){s, desc, 0};
         *tok = (prg_token){d->domain_id, d->p_depth, s, desc, 0};
@@ -317,14 +348,19 @@ int prg_begin(prg_dom *d, uint32_t desc, prg_token *tok)
     return publish_leave(d, s == UINT64_MAX ? PRG_EOVERFLOW : PRG_OK);
 }
 
-int prg_end(prg_dom *d, const prg_token *tok, uint32_t desc)
+int prg_begin(prg_dom *d, uint32_t desc, prg_token *tok) { return prg_begin_r(d, desc, tok, NULL); }
+
+int prg_end_r(prg_dom *d, const prg_token *tok, uint32_t desc, prg_receipt *r)
 {
     uint64_t s;
     const prg_frame_ent *top;
+    rcpt(r, PRG_R_REFUSED, PRG_RR_EINVAL, 0);
     if (!tok || tok->domain != d->domain_id || tok->desc != desc)
         return d->st.refused_api++, PRG_EINVAL;
-    if (!admit(d))
+    if (!admit(d)) {
+        rcpt(r, PRG_R_REFUSED, PRG_RR_NOT_ADMITTED, 0);
         return d->st.refused_api++, PRG_ESTOPPED;
+    }
     if (tok->depth & 0x80000000u) {
         if (!d->p_suppressed || (tok->depth & 0x7fffffffu) != d->p_suppressed ||
             tok->begin_seq != d->p_sup_stack[d->p_suppressed - 1]) {
@@ -332,6 +368,7 @@ int prg_end(prg_dom *d, const prg_token *tok, uint32_t desc)
             return d->st.refused_api++, PRG_EINVAL; /* not the innermost suppressed zone (or already ended) */
         }
         d->p_suppressed--;
+        rcpt(r, PRG_R_SUPPRESSED, PRG_RR_NONE, 0);
         return publish_leave(d, PRG_OK);
     }
     top = d->p_depth ? &d->p_stack[d->p_depth - 1] : NULL;
@@ -339,28 +376,123 @@ int prg_end(prg_dom *d, const prg_token *tok, uint32_t desc)
         leave(d);
         return d->st.refused_api++, PRG_EINVAL; /* not the top of the stack, or not its descriptor: no number */
     }
-    s = submit(d, PRG_K_END, (uint8_t)tok->depth, desc);
+    s = submit(d, PRG_K_END, (uint8_t)tok->depth, desc, r);
     if (s != UINT64_MAX)
         d->p_depth--;
     return publish_leave(d, s == UINT64_MAX ? PRG_EOVERFLOW : PRG_OK);
 }
 
-int prg_mark(prg_dom *d, uint32_t desc)
+int prg_end(prg_dom *d, const prg_token *tok, uint32_t desc) { return prg_end_r(d, tok, desc, NULL); }
+
+/* a MARK inside an admission the caller holds (it publishes and leaves): 0 submitted (numbered: EVENT or LOST),
+ * 1 refused at depth 64 (no number, nothing to publish), 2 the seq/ticket space is exhausted */
+static int mark_admitted(prg_dom *d, uint32_t desc, prg_receipt *r)
 {
-    uint64_t s;
-    if (!admit(d))
-        return d->st.refused_api++, PRG_ESTOPPED;
     if (d->p_depth >= PRG_DEPTH) { /* inside suppressed nesting: depth 64 has no encoding; refused, no number */
         d->st.refused_mark_depth++;
+        rcpt(r, PRG_R_REFUSED, PRG_RR_MARK_DEPTH, 0);
+        return 1;
+    }
+    return submit(d, PRG_K_MARK, (uint8_t)d->p_depth, desc, r) == UINT64_MAX ? 2 : 0;
+}
+
+int prg_mark_r(prg_dom *d, uint32_t desc, prg_receipt *r)
+{
+    int m;
+    if (!admit(d)) {
+        rcpt(r, PRG_R_REFUSED, PRG_RR_NOT_ADMITTED, 0);
+        return d->st.refused_api++, PRG_ESTOPPED;
+    }
+    m = mark_admitted(d, desc, r);
+    if (m == 1) {
         leave(d);
         return PRG_EOVERFLOW;
     }
-    s = submit(d, PRG_K_MARK, (uint8_t)d->p_depth, desc);
-    return publish_leave(d, s == UINT64_MAX ? PRG_EOVERFLOW : PRG_OK);
+    return publish_leave(d, m == 2 ? PRG_EOVERFLOW : PRG_OK);
 }
+
+int prg_mark(prg_dom *d, uint32_t desc) { return prg_mark_r(d, desc, NULL); }
+
+/* S2: one admission across END, its publication, the commit, BEGIN and its publication (r7 4, r8 1) */
+void prg_frame_capture(prg_dom *d, uint32_t owner, uint64_t frame_id, uint8_t owner_ref, uint32_t end_desc1,
+                       uint32_t begin_desc1, prg_fc_out *out)
+{
+    uint32_t n = d->desc_count ? LD_ACQ(d->desc_count) : 0u;
+    *out = (prg_fc_out){PRG_OK, 0u, {PRG_R_NONE, PRG_RR_NONE, 0}, {PRG_R_NONE, PRG_RR_NONE, 0}};
+    PRG_STEP(d, PRG_SP_FC);
+    /* pre-validation: no admit(), no leave(), inflight untouched (R7a, R84) */
+    if ((owner == 0 && frame_id != 0) || end_desc1 > n || begin_desc1 > n) {
+        out->rc = PRG_EINVAL;
+        return;
+    }
+    PRG_STEP(d, PRG_SP_P1);
+    if (!admit(d)) {
+        out->rc = PRG_ESTOPPED; /* nothing submitted, nothing committed, no leave (R7b) */
+        if (end_desc1)
+            rcpt(&out->end, PRG_R_REFUSED, PRG_RR_NOT_ADMITTED, 0);
+        if (begin_desc1)
+            rcpt(&out->begin, PRG_R_REFUSED, PRG_RR_NOT_ADMITTED, 0);
+        return;
+    }
+    PRG_STEP(d, PRG_SP_P2);
+    if (end_desc1) { /* under the OLD frame fields and owner ref */
+        (void)mark_admitted(d, end_desc1 - 1u, &out->end);
+        PRG_STEP(d, PRG_SP_P3);
+        if (publish(d) != 0) {
+            out->rc = PRG_EFAULT; /* nothing committed; the END receipt stands as recorded */
+            leave(d);
+            return;
+        }
+    }
+    PRG_STEP(d, PRG_SP_P4);
+    d->p_frame_owner = owner; /* the commit */
+    d->p_frame_id = frame_id;
+    d->p_owner_ref = owner_ref;
+    out->committed = 1;
+    PRG_STEP(d, PRG_SP_P5);
+    if (begin_desc1) { /* under the NEW fields */
+        (void)mark_admitted(d, begin_desc1 - 1u, &out->begin);
+        if (publish(d) != 0)
+            out->rc = PRG_EFAULT; /* committed; the BEGIN receipt stands as recorded */
+    }
+    PRG_STEP(d, PRG_SP_P6);
+    leave(d);
+}
+
+/* S2 (r13 2.2, r14 carry 1, OQ-15): admit, validate, pop, leave; nothing submitted or published */
+int prg_zone_abandon(prg_dom *d, const prg_token *tok, uint32_t desc)
+{
+    const prg_frame_ent *top;
+    PRG_STEP(d, PRG_SP_ABANDON);
+    if (!tok || tok->domain != d->domain_id || tok->desc != desc)
+        return PRG_EINVAL;
+    if (!admit(d))
+        return PRG_EINVAL; /* a rejected admission: no leave, the stack unchanged */
+    if (tok->depth & 0x80000000u) { /* the innermost suppressed level, by level and serial (as prg_end) */
+        uint32_t lvl = tok->depth & 0x7fffffffu;
+        int ok = lvl != 0 && lvl == d->p_suppressed && tok->begin_seq == d->p_sup_stack[lvl - 1];
+        if (ok)
+            d->p_suppressed--;
+        leave(d);
+        return ok ? PRG_OK : PRG_EINVAL;
+    }
+    /* the exact top: depth, begin number and descriptor (as prg_end), with no suppressed level above it */
+    top = d->p_depth ? &d->p_stack[d->p_depth - 1] : NULL;
+    if (d->p_suppressed == 0 && top && tok->depth + 1u == d->p_depth && tok->begin_seq == top->seq &&
+        desc == top->desc) {
+        d->p_depth--;
+        leave(d);
+        return PRG_OK;
+    }
+    leave(d);
+    return PRG_EINVAL;
+}
+
+void prg_hook_fault(prg_dom *d) { fault_as(d, PRG_FAULT_HOOK); }
 
 int prg_frame(prg_dom *d, uint32_t owner, uint64_t frame_id, uint8_t owner_ref)
 {
+    PRG_STEP(d, PRG_SP_FRAME);
     if (owner == 0 && frame_id != 0)
         return PRG_EINVAL;
     if (!admit(d))

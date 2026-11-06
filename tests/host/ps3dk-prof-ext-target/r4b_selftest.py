@@ -359,7 +359,7 @@ def front_rows():
 
 
 MK_GOOD = ('# comment\nEXT_MEMBERS := prof_core prof_drain pal_lv2 ext_runtime psp_ppu psp_elf gpu_runtime prg '
-           'gpu_port_gcm\n')
+           'gpu_port_gcm rsxcap\n')
 AR_GOOD = '\n'.join(A.MEMBERS) + '\n'
 HDR = ''.join(f"File: x.a({n})\nELF Header:\n  Magic:   7f 45 4c 46\n  Class:  ELF64\n"
               f"  Data:  2's complement, big endian\n  Machine:  PowerPC64\n  Flags:  0x0\n" for n in A.MEMBERS)

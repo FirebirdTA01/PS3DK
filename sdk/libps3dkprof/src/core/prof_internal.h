@@ -177,6 +177,23 @@ typedef struct drainer {
     int frozen;                 /* the frontier was taken: ordinary processing never runs again */
 } drainer;
 
+#ifdef PS3DK_PROF_WITH_SPU
+/* Capture RSX frame (S2): the capture runtime's entry points, published once by ps3dk_prof__rsxcap_enable (under
+ * spu_mutex, before any GPU attach).  NULL: the process never enabled captures, and every GPU call takes today's
+ * path unchanged.  A table instead of direct calls keeps every build that does not link rsxcap.o unchanged. */
+struct gpu_slot;
+struct prof;
+#define RSXCAP_FRAME_PLAIN 1000 /* rsxcap_ops.frame: not a capture boundary; run today's prg_frame */
+typedef struct rsxcap_ops {
+    void (*stop)(struct prof *p); /* the stopper: shutdown, right after its claim */
+    /* gpu_frame after PREPARE: a PRG_* code with *committed, or RSXCAP_FRAME_PLAIN */
+    int (*frame)(struct prof *p, struct gpu_slot *g, uint32_t owner, uint64_t frame_id, uint8_t ref,
+                 uint32_t *committed);
+    void (*detach_settle)(struct prof *p, struct gpu_slot *g); /* the owner, after its DETACHING CAS */
+    void (*attach)(struct prof *p, struct gpu_slot *g);        /* attach, under spu_mutex, before id publication */
+} rsxcap_ops;
+#endif
+
 typedef struct prof {
     ps3dk_prof_config cfg;
     pal_owner owner;            /* APP mode: the drain thread (checked identity) */
@@ -236,6 +253,7 @@ typedef struct prof {
     uint32_t gpu_lifetime;           /* attaches so far (ids 1026 + n, never reused), under spu_mutex */
     struct gpu_slot *gpu;            /* gpu_max table slots, in the block */
     struct prg_ledger *gpu_ledger;   /* the GPU share of the file-wide aggregates, under spu_mutex */
+    const rsxcap_ops *rsxcap;        /* S2: atomic (release once under spu_mutex, acquire); NULL: not enabled */
 #endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];
@@ -341,7 +359,7 @@ void p_gpu_slot_freed(prof *p, uint32_t slot); /* the drainer, under thread_mute
 int p_gpu_desc(prof *p, ps3dk_prof_desc *d, uint32_t *idx, uint32_t *scope); /* the calling thread's descriptor path */
 /* unlock sites for the site-targeted fault hook */
 enum { U_ANY = 0, U_STEP3B = 1, U_SEAL = 2, U_END_FINAL = 3, U_GPU_ATTACH = 4, U_GPU_DETACH = 5, U_GPU_RELEASE = 6,
-       U_GPU_STATS = 7 };
+       U_GPU_STATS = 7, U_RSXCAP_REQUEST = 8, U_RSXCAP_ENABLE = 9 };
 #endif
 int p_lock(prof *p, pal_mutex *m);
 void p_unlock(prof *p, pal_mutex *m);

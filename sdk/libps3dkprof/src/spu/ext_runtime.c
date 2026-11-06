@@ -286,6 +286,9 @@ static int ext_lock(prof *p)
     if (ps3dk_prof_test_hooks.spu_lock_fail_at &&
         ++ps3dk_prof_test_hooks.spu_ops == ps3dk_prof_test_hooks.spu_lock_fail_at)
         return -1;
+    if (pal_mutex_trylock(&p->spu_mutex) == 0)
+        return 0;
+    __atomic_fetch_add(&ps3dk_prof_test_hooks.ext_lock_contended, 1u, __ATOMIC_SEQ_CST); /* S2: found it held */
 #endif
     return pal_mutex_lock(&p->spu_mutex) == 0 ? 0 : -1;
 }

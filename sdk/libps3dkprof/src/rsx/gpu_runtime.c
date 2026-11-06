@@ -536,6 +536,15 @@ int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32
     if (rc != PS3DK_PROF_OK)
         goto out;
     g->dom.drainer_finalizes = 1; /* the drainer is the sole encoder: a detach is finalized by it, never here */
+    g->dom.desc_count = &p->desc_count; /* S2: prg_frame_capture's descriptor range check */
+    {
+        /* S2 (R56, R82): with captures enabled (read under this mutex), the 5 draw kinds on the owner; a failure
+         * leaves the domain not capable and attach's rc unchanged.  Written before the id is published. */
+        const rsxcap_ops *ro = LD_ACQ(&p->rsxcap);
+        g->rsxcap_capable = 0;
+        if (ro)
+            ro->attach(p, g);
+    }
     p->gpu_lifetime++;
     ST_REL(&g->state, (uint32_t)GPU_S_LIVE);
     ST_SC_(&g->id, id);
@@ -708,6 +717,27 @@ int ps3dk_prof_gpu_frame(uint32_t h, ps3dk_prof_token tok)
             return done(g, PS3DK_PROF_ESTOPPED);
         }
     }
+    /* PREPARE (F1-F7) is complete.  S2: a capture boundary (REQUESTED or ARMED for this domain) runs the capture
+     * entry with its one admission; anything else runs today's prg_frame unchanged (R13). */
+    {
+        const rsxcap_ops *ro = LD_ACQ(&p->rsxcap);
+        if (ro) {
+            uint32_t committed = 0;
+            int crc = ro->frame(p, g, tok.owner, tok.frame, (uint8_t)ref, &committed);
+            if (crc != RSXCAP_FRAME_PLAIN) {
+                note_ticket(g); /* an END ticket extends the OLD entry's lease (R14) */
+                if (committed) {
+                    if (g->cur_ref && g->cur_ref != ref)
+                        g->own[g->cur_ref - 1].cur = 0; /* still leased by its outstanding tickets */
+                    g->cur_ref = ref;
+                    note_ticket(g); /* a BEGIN ticket belongs to the new entry */
+                } else if (installed) {
+                    g->own[ref - 1].cur = 0; /* not current: reclaimable once drained */
+                }
+                return done(g, map(crc));
+            }
+        }
+    }
     rc = map(prg_frame(&g->dom, tok.owner, tok.frame, (uint8_t)ref));
     if (rc == PS3DK_PROF_OK) {
         if (g->cur_ref && g->cur_ref != ref)
@@ -760,6 +790,17 @@ int ps3dk_prof_gpu_detach(uint32_t h, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_
     if (ctx != g->ctx) {
         g->refused_ctx++;
         return done(g, PS3DK_PROF_EINVAL);
+    }
+    {
+        /* S2 (R37, R78): the SC DETACHING CAS first (prg_detach_wait accepts DETACHING), then the capture settle's SC
+         * load of the slot word, then today's detach.  A faulted domain keeps today's EFAULT path. */
+        const rsxcap_ops *ro = LD_ACQ(&p->rsxcap);
+        if (ro) {
+            uint32_t e = PRG_ATTACHED;
+            if (!LD_ACQ(&g->dom.fault))
+                (void)CAS_SC_(&g->dom.state, &e, (uint32_t)PRG_DETACHING);
+            ro->detach_settle(p, g);
+        }
     }
     rc = map(prg_detach_wait(&g->dom, timeout_us, poll_inline, p));
     if (LD_ACQ(&p->ext_fault))
@@ -842,6 +883,7 @@ int ps3dk_prof_gpu_get_stats(uint32_t h, ps3dk_prof_gpu_stats *st)
     o.anomaly = LD_ACQ(&d->anomaly);
     o.loss_exhausted = d->loss_exhausted;
     o.overflow = LD_ACQ(&d->overflow);
+    o.pad = LD_ACQ(&d->fault_reason); /* S2 (OQ-14): the first fault's reason, internal diagnostics only */
     if (p_ext_unlock_site(p, U_GPU_STATS) != 0)
         return done(g, PS3DK_PROF_ESTOPPED);
     *st = o;

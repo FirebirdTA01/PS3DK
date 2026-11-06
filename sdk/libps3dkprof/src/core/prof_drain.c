@@ -889,6 +889,14 @@ int ps3dk_prof_shutdown(void)
     if (!CAS_ACQREL(&p->shutdown_once, &z, 1u))
         return PS3DK_PROF_EALREADY;
     HOOK(after_shutdown_claim);   /* claimed: shutdown has begun, the stop latch is not yet set */
+#ifdef PS3DK_PROF_WITH_SPU
+    {
+        /* Capture RSX frame (S2, R40): the stopper sets STOP right after the claim, before the seal */
+        const rsxcap_ops *ro = __atomic_load_n(&p->rsxcap, __ATOMIC_ACQUIRE);
+        if (ro)
+            ro->stop(p);
+    }
+#endif
 
     /* The latch, under thread_mutex, fixing Ft (5.4).  A lock failure still latches, and fails the capture closed. */
     locked = p_lock(p, &p->thread_mutex) == 0;

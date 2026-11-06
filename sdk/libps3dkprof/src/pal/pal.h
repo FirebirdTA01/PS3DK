@@ -73,6 +73,10 @@ int pal_mutex_init(pal_mutex *m);
 int pal_mutex_destroy(pal_mutex *m);
 int pal_mutex_lock(pal_mutex *m);
 int pal_mutex_unlock(pal_mutex *m);
+#ifdef PS3DK_PROF_TEST_HOOKS
+#define pal_mutex_trylock ps3dk_prof__pal_mutex_trylock
+int pal_mutex_trylock(pal_mutex *m); /* host test builds only: 0 when acquired without waiting */
+#endif
 
 /* Thread identity.  pal_owner_is_self returns 1 only when the current identity is read successfully AND equals o. */
 int pal_owner_get(pal_owner *o);

@@ -42,6 +42,12 @@
 #define prg_drain_held ps3dk_prof__prg_drain_held
 #define prg_seal_held ps3dk_prof__prg_seal_held
 #define prg_detach_wait ps3dk_prof__prg_detach_wait
+#define prg_begin_r ps3dk_prof__prg_begin_r
+#define prg_end_r ps3dk_prof__prg_end_r
+#define prg_mark_r ps3dk_prof__prg_mark_r
+#define prg_frame_capture ps3dk_prof__prg_frame_capture
+#define prg_zone_abandon ps3dk_prof__prg_zone_abandon
+#define prg_hook_fault ps3dk_prof__prg_hook_fault
 
 #define PRG_SLOTS_MAX 1024u
 #define PRG_INTERVALS 16u
@@ -64,6 +70,25 @@ enum { PRG_K_BEGIN = 1, PRG_K_END = 2, PRG_K_MARK = 3 };
  * CONSUMED/BAD/CANCELLED, or the finalization's CANCELLED) -> IDLE when the drainer consumes the slot; BAD latches
  * the anomaly when the drainer reaches it */
 enum { PRG_CAL_IDLE = 0, PRG_CAL_ACTIVE, PRG_CAL_CONSUMED, PRG_CAL_CANCELLED, PRG_CAL_BAD };
+
+/* S2 submission receipts: what became of one zone or marker submission, independent of the return code */
+enum { PRG_R_NONE = 0, PRG_R_EVENT = 1, PRG_R_LOST = 2, PRG_R_SUPPRESSED = 3, PRG_R_REFUSED = 4 };
+enum { PRG_RR_NONE = 0, PRG_RR_NOT_ADMITTED, PRG_RR_EINVAL, PRG_RR_SEQ_OVERFLOW, PRG_RR_SUPPRESS_OVERFLOW,
+       PRG_RR_MARK_DEPTH };
+/* the domain's first fault reason (fault_reason, first writer wins; fault stays 1 for every fault) */
+enum { PRG_FAULT_NONE = 0, PRG_FAULT_GENERIC = 1, PRG_FAULT_HOOK = 2 };
+
+/* The test step seam (S2): compiled to nothing unless PRG_TEST_STEPS is defined (host test builds only; the SDK
+ * archives never carry prg_test_step). */
+enum { PRG_SP_ADMIT_TRY = 1, PRG_SP_ADMITTED = 2, PRG_SP_LEAVE = 3, PRG_SP_P1 = 11, PRG_SP_P2, PRG_SP_P3, PRG_SP_P4,
+       PRG_SP_P5, PRG_SP_P6, PRG_SP_FRAME = 21, PRG_SP_FC = 22, PRG_SP_ABANDON = 23 };
+struct prg_dom;
+#ifdef PRG_TEST_STEPS
+void prg_test_step(struct prg_dom *d, int point);
+#define PRG_STEP(d, n) prg_test_step((d), (n))
+#else
+#define PRG_STEP(d, n) ((void)0)
+#endif
 
 typedef struct prg_meta prg_meta;
 
@@ -145,6 +170,17 @@ typedef struct prg_stats {
     uint64_t brackets, brackets_dropped, cal_bad, loss_exhausted, held;
 } prg_stats;
 
+typedef struct prg_receipt {
+    uint32_t kind, reason; /* PRG_R_*, PRG_RR_* (REFUSED only) */
+    uint64_t seq;          /* valid for EVENT and LOST */
+} prg_receipt;
+
+typedef struct prg_fc_out {
+    int rc;
+    uint32_t committed;    /* the frame fields and owner ref were committed */
+    prg_receipt end, begin; /* kind PRG_R_NONE when that marker was not requested or not reached */
+} prg_fc_out;
+
 typedef struct prg_dom {
     /* configuration (attach) */
     uint32_t domain_id, report_first, report_count, label;
@@ -170,6 +206,9 @@ typedef struct prg_dom {
     uint64_t drained_pub;  /* drainer -> producer (atomic): slots below it are free */
     uint32_t state, inflight, anomaly, overflow, fault, retired; /* atomics */
     uint32_t exhausted; /* atomic: the drainer exhausted the LOSS budget (a sticky admission stop, FINAL OVERFLOWED) */
+    uint32_t fault_reason; /* atomic: PRG_FAULT_*, published first-fault-wins before fault = 1 (S2) */
+    const uint32_t *desc_count; /* S2: the published descriptor count (acquire), for prg_frame_capture's desc1 check;
+                                 * NULL: every nonzero desc1 is refused */
     uint32_t cal_state;                                          /* atomic: the calibration cell */
     uint64_t cal_ticket;                                         /* producer private (diagnostic) */
     /* drainer private (under the ext lock) */
@@ -223,5 +262,27 @@ void prg_seal_held(prg_dom *d);
 int prg_detach_wait(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void *poll_ctx);
 int prg_detach(prg_dom *d, uint64_t timeout_us, void (*poll_hook)(void *), void *poll_ctx);
 int prg_release(prg_dom *d);
+
+/* S2 receipt entries.  Return codes exactly as prg_begin / prg_end / prg_mark (those are thin wrappers); *r (may be
+ * NULL) receives EVENT(seq) or LOST(seq) for a numbered submission, SUPPRESSED (no number, rc OK) for a suppressed
+ * zone level, or REFUSED(reason) with no number.  A publication failure after a submission keeps its receipt and
+ * returns EFAULT (the fault is latched). */
+int prg_begin_r(prg_dom *d, uint32_t desc, prg_token *tok, prg_receipt *r);
+int prg_end_r(prg_dom *d, const prg_token *tok, uint32_t desc, prg_receipt *r);
+int prg_mark_r(prg_dom *d, uint32_t desc, prg_receipt *r);
+/* One admission across an END marker (under the OLD frame fields and owner ref), its publication, the commit of the
+ * new frame fields, a BEGIN marker (under the NEW fields) and its publication.  end_desc1 / begin_desc1: descriptor
+ * index + 1, 0 = none; a nonzero value above *desc_count is EINVAL before admission.  Owner 0 with frame != 0 is
+ * EINVAL before admission.  out->rc: OK, EINVAL, ESTOPPED (not admitted: nothing submitted or committed), EFAULT
+ * (an END publication failure: committed 0; a BEGIN publication failure: committed 1).  The marker receipts say
+ * what was enqueued. */
+void prg_frame_capture(prg_dom *d, uint32_t owner, uint64_t frame_id, uint8_t owner_ref, uint32_t end_desc1,
+                       uint32_t begin_desc1, prg_fc_out *out);
+/* Pops the producer's innermost zone without submitting anything: the token must be the exact top (depth, begin
+ * number, descriptor) or the innermost suppressed level with its serial.  PRG_OK, or PRG_EINVAL with no state
+ * change (also when not admitted).  One admission and one leave; nothing is published. */
+int prg_zone_abandon(prg_dom *d, const prg_token *tok, uint32_t desc);
+/* Latches the domain's fault word with reason PRG_FAULT_HOOK (first fault wins), sticky: no further admission. */
+void prg_hook_fault(prg_dom *d);
 
 #endif

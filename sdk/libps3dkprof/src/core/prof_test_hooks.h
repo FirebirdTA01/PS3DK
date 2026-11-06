@@ -107,6 +107,13 @@ typedef struct ps3dk_prof_test_hooks_t {
     int live_ephemeral_port;           /* ps3dk_prof_live_start binds port 0 (an ephemeral port), for host tests */
     uint16_t live_listen_port;         /* nonzero: ps3dk_prof_live_start binds 127.0.0.1 on this port (wins) */
     unsigned join_calls;               /* host PAL: pal_thread_join calls, counted (controlling thread only) */
+    /* Capture RSX frame S2 (host test builds only) */
+    void (*rsxcap_step)(int point);    /* the runtime's step points (rsxcap.h RT_* / HK_* / AG_* / DT_*) */
+    uint32_t rsxcap_other_cas_fail;    /* the next n other-thread CAS attempts meet a real concurrent increment */
+    int rsxcap_neg_plain_other;        /* TSan NEGATIVE control: the other-thread counter is a plain increment */
+    int rsxcap_neg_late_fields;        /* TSan NEGATIVE control: the agent writes its fields after the publication */
+    uint64_t ext_lock_contended;       /* atomic: the extension lock found its mutex held (then waited) */
+    uint32_t rsxcap_pin_cas_fail;      /* the next n request-scan pin CAS attempts meet a real concurrent pin */
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;

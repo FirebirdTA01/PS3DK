@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 MEMBERS = ('prof_core.o', 'prof_drain.o', 'pal_lv2.o', 'ext_runtime.o', 'psp_ppu.o', 'psp_elf.o', 'gpu_runtime.o',
-           'prg.o', 'gpu_port_gcm.o')
+           'prg.o', 'gpu_port_gcm.o', 'rsxcap.o')
 # measured from the candidate libps3dkprof.a (nm, raw spelling) + the R3 GCM accessors + strcpy (psp_ppu.c lane name)
 IMPORTS_R4B_R2 = ('.TOC.', '__errno', 'clock_gettime', 'close', 'free', 'memalign', 'memcmp', 'memcpy', 'memset',
                   'nanosleep', 'open', 'pthread_attr_destroy', 'pthread_attr_init', 'pthread_attr_setstacksize',

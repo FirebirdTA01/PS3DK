@@ -275,3 +275,42 @@ collision is searched for or claimed.
 - **TSan.** Tests change hook pointers while other threads run, but only on fields those threads do not read. The memory sink's `in_write` is accessed atomically. Any report fails the test, because `halt_on_error=1`.
 - **ASan/LSan.** Each `rt_cap` is a stack object of about 180 KiB, on the main thread only. The event and buffer allocations are reachable from globals.
 - **`build-and-run.sh` needs bash 4** for `declare -A`, and uses `timeout` and `nm` (GNU binutils output format). It is not marked executable in git: run it with `bash`.
+
+## 7. Capture RSX frame, slice S2: rule-to-code map
+
+Host-only runtime core (no librsx hooks, no live protocol, no target build).  Tests: `tests/host/ps3dk-prof-rsxcap/`
+(`s2-test.py` drives `rsxcap_core.c`, `rsxcap_rt.c`, `rsxcap_contract.c` and the round-trip checker `rsxcap_check.rs`).
+
+| Rule | Code |
+|---|---|
+| Receipts EVENT / LOST / SUPPRESSED / REFUSED, never inferred from rc; the public wrappers keep their codes | `prg.c` `submit` (receipt per outcome), `prg_begin_r` / `prg_end_r` / `prg_mark_r`, `prg_begin` / `prg_end` / `prg_mark` |
+| One admission across END, publish, commit, BEGIN, publish; pre-validation refusals touch nothing; desc1 = index + 1 | `prg.c` `prg_frame_capture` (`PRG_STEP` P1-P6) |
+| Zone abandon: exact top or innermost suppressed level, nothing submitted or published | `prg.c` `prg_zone_abandon` |
+| Fault reason first-fault-wins, then `fault = 1`; the hook fault | `prg.c` `fault_as`, `prg_hook_fault`; stats `pad` in `gpu_runtime.c` |
+| The slot word (state, flags, epoch, TERMINAL outcome and reason), whole-word CAS by every actor, bounded retries | `rsxcap.c` `RSXCAP_WORD`, `owner_terminal`, `owner_closing`, `arm`, `close_`, the agent loops |
+| STOP process-sticky, set by shutdown right after its claim in any state | `prof_drain.c` `ps3dk_prof_shutdown` -> `rsxcap_ops.stop` (`rc_stop`) |
+| CANCEL cap-scoped; only the IDLE -> CLAIMING claim drops it | `ps3dk_prof__rsxcap_request` claim CAS (`w & RSXCAP_F_STOP`) |
+| Validation, domain-0 resolution and the claim under the extension mutex; the selected slot pinned to the revalidation | `ps3dk_prof__rsxcap_request` (scan, `pin_slot`, `AG_*` steps) |
+| R78 SC pair: agent publication then SC loads; detach's DETACHING CAS then its SC slot load | `ps3dk_prof__rsxcap_request` revalidation; `gpu_runtime.c` `ps3dk_prof_gpu_detach` -> `rc_detach_settle` |
+| R89 / R91: the agent's withdrawal writes nothing shared; WITHDRAWN lives in agent-private state; unlock fault reports ESTOPPED with cap e | `request`, `ps3dk_prof__rsxcap_query`, `g_ag` |
+| R92: contested REQUESTED transitions carry their result in the CAS; records written only CLAIMING / ARMING / CLOSING | `arm` (STOP settle CAS), `rc_detach_settle`, `freeze`, `rsxcap_rec` |
+| R93: an extension fault at the ARMED publication gives TERMINAL(ABANDONED, fault); ARMED_FAULTED in query | `arm`, `ps3dk_prof__rsxcap_query` |
+| Carry 3: recycle clears outcome and reason, keeps STOP / CANCEL; a stale cap reads only its cached result | `ps3dk_prof__rsxcap_recycle`, `ps3dk_prof__rsxcap_query` |
+| gpu_frame: PREPARE (F1-F7) unchanged, then the capture entry or today's prg_frame; END ticket extends the old entry's lease | `gpu_runtime.c` `ps3dk_prof_gpu_frame` (`RSXCAP_FRAME_PLAIN`) |
+| Counters: other_thread whole-word CAS (4 attempts, SAT, FROZEN snapshot); other_ctx / immediate 16-bit; the five at 262144 with counts_sat; the draw cap; blocks of 4096 | `rsxcap_other_add`, `freeze`, `sat16`, `side_inc`, `ps3dk_prof__rsxcap_draw_begin`, `checkpoint` |
+| A hook fault settles the capture in the faulting call (abandon, latch, CLOSING, TERMINAL); publish faults likewise | `ps3dk_prof__rsxcap_draw_abandon`, `owner_settle`, `fault_reason_of` |
+| Static pool 16 x (BEGIN + END + 64 checkpoints), file `<ps3dk-rsxcap>`, line = 1 + index; tags formatted once | `rsxcap.c` `pool_init`, `rsxcap_tags_*` |
+| Formatter refuses every value the reader refuses; the emitter writes iff payload + NUL fits | `rsxcap_fmt_*`, `rsxcap_emit_*` |
+| Opt-in before any attach; kinds registered on the owner at attach under the mutex | `ps3dk_prof__rsxcap_enable`, `rc_attach`, `gpu_runtime.c` attach |
+
+Hooks submit nothing after a terminal PAL fault (`hook_stopped`: the extension fault or a lock failure); a draw END
+that observes STOP, a fault or an ended capture pops its zone through `prg_zone_abandon` (no command).  A request
+scan that cannot pin a table slot refuses (busy) before any claim.
+
+**Carry to S3 / S5 / sample integration:** the draw kinds are registered at attach only when the attaching (owner)
+thread is already a registered profiler thread (no auto-registration under the extension mutex); an unregistered
+owner's domain is attached but not capable (`rt.attach_unregistered_not_capable`).  The integration must register
+the render thread before `ps3dk_prof_gpu_attach`.
+
+The capture runtime is reached only through `prof->rsxcap` (set by the opt-in), so every build that does not link
+`rsxcap.o` is unchanged.  No timer, sleep or timeout is added to SDK code; every loop states its bound.

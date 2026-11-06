@@ -70,6 +70,10 @@ typedef struct gpu_slot {
     uint32_t label;
     uint32_t report_first, report_count;
     prg_dom dom;
+    /* S2: capture eligibility, written by attach under the extension mutex before the id is published and never
+     * cleared while that id is published; the 5 draw-kind descriptor indices registered on the owner at attach */
+    uint32_t rsxcap_capable;
+    uint32_t rsxcap_kind[5];
     prg_meta *meta;
     prg_stage *stage;
     uint8_t *scratch;

@@ -58,14 +58,18 @@ int ps3dk_prof_gpu_begin(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc 
 int ps3dk_prof_gpu_end(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_gpu_zone *zone);
 int ps3dk_prof_gpu_mark(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc);
 /* NONE ({0, 0, 0}) or a token ps3dk_prof_frame_token() returned on a LIVE thread for a frame that thread began;
- * EBUSY when every owner entry is still leased. */
+ * EBUSY when every owner entry is still leased.  With RSX frame captures enabled (internal, rsxcap.h), a boundary
+ * whose request slot is REQUESTED or ARMED for this domain runs the capture entry after the same validation (one
+ * admission across END, the commit and BEGIN); a capture refusal or fault is reported in the slot's outcome, and the
+ * return code is today's (ESTOPPED when the admission is refused). */
 int ps3dk_prof_gpu_frame(uint32_t gpu, ps3dk_prof_token frame);
 int ps3dk_prof_gpu_calibrate(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us);
 /* Requests the detach and waits; the drain thread (or the designated APP thread's drains) finalizes it.  OK once
  * the finalizing drain turn completed, its closing extension unlock included: the domain is RETIRED (the frozen
  * terminal decision); whether the FINAL chunk was ACCEPTED is final_written in the stats (a failed sink retires
  * output-free).  ETIMEDOUT while pending (call again; a repeated call after OK is OK); ESTOPPED when that turn's
- * closing unlock failed or the seal won. */
+ * closing unlock failed or the seal won.  With captures enabled, detach first settles a capture of this domain
+ * (REQUESTED or ARMED -> TERMINAL(ABANDONED, detach), no END) right after its DETACHING transition. */
 int ps3dk_prof_gpu_detach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us);
 /* APP PRECONDITION before a successful release: the context is idle (cellGcmFinish or an equivalent the app owns)
  * and no CPU call on the domain is in flight.  A successful release returns the report range and label for
