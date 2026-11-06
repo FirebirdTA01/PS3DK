@@ -5,6 +5,9 @@
 #define WORK_ROUNDS 128u
 #define WORK_DIGEST 0xe7b15af8u
 #define WORK_MAX_SPUS 6u
+/* Plan A r2 A-C2: the plain SPU worker's mark in work_slot.reserved[1]: its decrementer was written once before the
+ * job loop (SPU_WrDec has no failure path: the mark records that the write was issued and completed) */
+#define SAMPLE_DEC_WRITTEN 0xDEC00001u
 typedef struct { uint32_t digest, count; } work_result;
 static inline uint32_t work_mix(uint32_t index, uint32_t rounds)
 {

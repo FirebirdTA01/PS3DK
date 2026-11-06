@@ -7,6 +7,8 @@ static work_slot local;
 int main(uint64_t address,uint64_t lane,uint64_t lanes,uint64_t unused)
 {
     (void)unused;
+    spu_writech(SPU_WrDec,0xFFFFFFFFu); /* A-C2: one write before the job loop; per-job deltas follow Plan A r2 2.3 */
+    local.reserved[1]=SAMPLE_DEC_WRITTEN;
     for(;;) {
         uint32_t sequence=spu_read_in_mbox();
         if(!sequence)break;
@@ -40,7 +42,14 @@ static pe_unpacked g_u;
 static uint32_t w_read_mbox(void *c){(void)c;return spu_read_in_mbox();}
 static int w_attach(void *c){(void)c;return ps3dk_prof_spu_attach(&g_w,g_u.ring_ea,g_u.ring_slots,g_u.ctl_ea,WRITER_TAG,g_stage,LS_CAP,PS3DK_PROF_SPU_OWN_DEC);}
 static int w_flush(void *c){(void)c;return ps3dk_prof_spu_flush(&g_w);}
-static int w_dec_write(void *c){(void)c;return ps3dk_prof_spu_dec_write(&g_w,0xFFFFFFFFu);}
+/* Plan A r2 2.3: reserved[1] records that a decrementer write returned success before the following jobs */
+static int w_dec_write(void *c)
+{
+    (void)c;
+    int rc=ps3dk_prof_spu_dec_write(&g_w,0xFFFFFFFFu);
+    if(rc==0)local.reserved[1]=SAMPLE_DEC_WRITTEN;
+    return rc;
+}
 static int w_fini(void *c){(void)c;return ps3dk_prof_spu_fini(&g_w);}
 static uint32_t w_zone_begin(void *c){(void)c;return PS3DK_PROF_SPU_ZONE_BEGIN(&g_w,"spu.work");}
 static void w_zone_end(void *c,uint32_t z){(void)c;PS3DK_PROF_SPU_ZONE_END(&g_w,z);}
