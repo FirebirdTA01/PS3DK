@@ -419,6 +419,36 @@ fn tone(t: VerdictTone) -> ui::Tone {
     }
 }
 
+/// What the app bar badge and the verdict strip say about the open document, given the live link (if any).
+///
+/// While the link has no outcome yet (connecting, streaming, or END received and still being checked), the document
+/// is a SNAPSHOT of a capture that is still arriving.  It has no TRAILER yet, so the reader necessarily reads it as an
+/// accepted prefix ("COMPLETE (ended early)") or as INCOMPLETE: that is a statement about the prefix, not an end state,
+/// and it is never shown as one.  The strip then says PROVISIONAL with the bytes received and what the snapshot covers,
+/// and there is no verdict badge (the bar already shows LIVE / PROVISIONAL).  A MALFORMED snapshot is shown as it is:
+/// bytes that break a rule stay broken whatever arrives later.  Once the outcome is known, the reader's verdict is shown
+/// unchanged.  Returns (tone, badge, strip text).
+pub fn shown_verdict(d: &Document, live: Option<&LiveView>) -> (ui::Tone, Option<&'static str>, String) {
+    let v = d.verdict();
+    let pending = live.filter(|l| l.outcome.is_none());
+    match (pending, v.tone) {
+        (Some(l), VerdictTone::Complete | VerdictTone::CompleteEarly | VerdictTone::Incomplete) => {
+            let covered = match d.analysis().and_then(|a| a.prefix.as_ref()) {
+                Some(p) => format!("this snapshot is analysed up to byte {} ({} whole chunks)", p.cut, p.chunks),
+                None if v.tone == VerdictTone::Incomplete => "this snapshot has no analysable prefix yet".to_string(),
+                None => "this snapshot is analysed in full".to_string(),
+            };
+            let text = format!(
+                "PROVISIONAL: still receiving ({} bytes so far); {covered}. {}",
+                l.received,
+                "The capture's end state is decided only when the link has ended."
+            );
+            (ui::Tone::Neutral, None, text)
+        }
+        _ => (tone(v.tone), Some(verdict_word(v.tone)), v.text),
+    }
+}
+
 fn verdict_word(t: VerdictTone) -> &'static str {
     match t {
         VerdictTone::Complete => "COMPLETE",
@@ -462,10 +492,9 @@ impl eframe::App for App {
                     bar.add_space(ui::SPACE_LG);
                     ui::badge(bar, "LIVE · PROVISIONAL", ui::Tone::Neutral);
                 }
-                if let Some(d) = &self.doc {
-                    let v = d.verdict();
+                if let Some((t, Some(word), _)) = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref())) {
                     bar.add_space(ui::SPACE_LG);
-                    ui::badge(bar, verdict_word(v.tone), tone(v.tone));
+                    ui::badge(bar, word, t);
                 }
             },
             |bar| {
@@ -509,15 +538,15 @@ impl eframe::App for App {
         let link_line = live_view.as_ref().map(live_line);
         let snap_msg = self.captures.message.clone();
         if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() {
-            let verdict = self.doc.as_ref().map(|d| d.verdict());
+            let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
             egui::TopBottomPanel::top("verdict").show(ctx, |strip| {
                 strip.add_space(ui::SPACE_XS);
                 // The link and the reader's verdict are separate statements.
                 if let Some((t, text)) = &link_line {
                     ui::field_message(strip, *t, text);
                 }
-                if let Some(v) = &verdict {
-                    ui::field_message(strip, tone(v.tone), &v.text);
+                if let Some((t, _, text)) = &verdict {
+                    ui::field_message(strip, *t, text);
                 }
                 if let Some((bad, m)) = &snap_msg {
                     ui::field_message(strip, if *bad { ui::Tone::Warning } else { ui::Tone::Neutral }, m);

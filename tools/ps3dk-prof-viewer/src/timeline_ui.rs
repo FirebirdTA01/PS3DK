@@ -607,6 +607,9 @@ fn draw_foreign_track(
     let t = &fv.tracks[index];
     let mut text = vec![t.header.clone()];
     text.extend(t.coverage.iter().cloned());
+    if let Some(line) = tf::gaps_line(t, tb) {
+        text.push(line);
+    }
     if let Some(r) = &t.refusal {
         text.push(r.clone());
     }
@@ -626,6 +629,20 @@ fn draw_foreign_track(
     let painter = p.painter_at(area);
     painter.rect_filled(area, 2.0, pal.surface_alt);
     let w = width as f64;
+    // Stretches with no placed pair: marked and labelled, never left blank (an unmapped epoch is a coverage line).
+    for &(g0, g1) in &t.gaps {
+        let x0 = area.left() + ((g0 - st.view.t0) / st.view.dt * w) as f32;
+        let x1 = area.left() + ((g1 - st.view.t0) / st.view.dt * w) as f32;
+        if x1 < area.left() || x0 > area.right() {
+            continue;
+        }
+        let r = Rect::from_min_max(Pos2::new(x0.max(area.left()), area.top() + 1.0), Pos2::new(x1.min(area.right()), area.bottom() - 1.0));
+        p.painter_at(r).rect_filled(r, 0.0, pal.text_faint.gamma_multiply(0.12));
+        if r.width() > 90.0 {
+            let at = Pos2::new(r.center().x, area.top() + TRACK_PAD + ROW_H / 2.0);
+            p.painter_at(r).text(at, Align2::CENTER_CENTER, tf::GAP_LABEL, FontId::proportional(12.0), pal.text_muted);
+        }
+    }
     let l = tf::layout(t, &st.view, w, QueryCaps::default(), st.show_extrapolated);
     for d in &l.draws {
         let top = area.top() + TRACK_PAD + d.depth as f32 * ROW_H;

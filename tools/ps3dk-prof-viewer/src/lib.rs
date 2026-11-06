@@ -14,6 +14,7 @@ pub mod foreign;
 pub mod foreign_hot;
 pub mod frames;
 pub mod frames_ui;
+pub mod graphs;
 pub mod hotpaths;
 pub mod hotpaths_ui;
 pub mod live;

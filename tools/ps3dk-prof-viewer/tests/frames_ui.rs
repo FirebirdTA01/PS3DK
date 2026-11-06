@@ -195,3 +195,90 @@ fn chunked_frames(n: u64) -> Vec<u8> {
     }
     f.bytes()
 }
+
+// ---- graph display modes -------------------------------------------------------------------------------------
+
+use ps3dk_prof_viewer::graphs::{GraphMode, Smoothing};
+
+#[test]
+fn the_default_mode_is_bars() {
+    let h = Harness::new(capture());
+    assert_eq!((h.st.mode, h.drawn.mode, h.drawn.work), (GraphMode::Bars, GraphMode::Bars, 0));
+}
+
+#[test]
+fn a_click_in_the_lines_and_map_modes_selects_by_the_same_columns() {
+    for mode in [GraphMode::Lines, GraphMode::VerdictMap] {
+        let mut h = Harness::new(capture());
+        h.st.mode = mode;
+        h.frame(vec![]);
+        assert_eq!(h.drawn.mode, mode);
+        let before = h.tl.view;
+        h.click_slot(1, 3);
+        assert_eq!(h.st.sel, Selection { owner: Some(1), frame: Some(1) }, "{mode:?}");
+        assert_ne!(h.tl.view, before, "a measured slot frames the Timeline in {mode:?} too");
+        h.click_slot(2, 3);
+        assert_eq!(h.st.sel.frame, Some(2), "the UNKNOWN slot selects in {mode:?}");
+    }
+}
+
+#[test]
+fn switching_modes_keeps_the_selection_the_tables_and_the_scroll() {
+    let n = 100_001usize;
+    let mut h = Harness::new(big(100_000));
+    let r = h.graph.unwrap();
+    let over = Pos2::new(600.0, r.center().y);
+    h.frame(vec![Event::PointerMoved(over)]);
+    for _ in 0..10 {
+        h.frame(vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(-4.0e5, 0.0), modifiers: Modifiers::NONE }]);
+    }
+    for _ in 0..30 {
+        h.frame(vec![]);
+    }
+    let painted = h.st.painted.clone();
+    assert!(painted.start > 0 && painted.end <= n, "scrolled: {painted:?}");
+    let k = painted.start as u64 + 3;
+    let (a, ix) = (&h.a, &h.ix);
+    h.st.select(a, ix, 1, Some(k));
+    let sel = h.st.sel;
+    let tables = h.st.tables.clone();
+    for mode in [GraphMode::Lines, GraphMode::VerdictMap, GraphMode::Distribution, GraphMode::Bars, GraphMode::Lines] {
+        h.st.mode = mode;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.st.sel, sel, "{mode:?}");
+        assert_eq!(h.st.tables, tables, "{mode:?}");
+        assert_eq!(h.st.painted, painted, "the horizontal scroll survives {mode:?}");
+    }
+}
+
+#[test]
+fn the_per_repaint_work_of_every_mode_is_bounded_on_a_large_capture() {
+    let mut h = Harness::new(big(100_000));
+    let visible = h.st.painted.len();
+    assert!(visible > 0 && visible < 1_000, "{visible}");
+    h.st.mode = GraphMode::Lines;
+    h.frame(vec![]);
+    assert!(h.drawn.work <= visible + 2, "raw: {} for {visible} visible", h.drawn.work);
+    h.st.smoothing = Smoothing::W30;
+    h.frame(vec![]);
+    assert!(h.drawn.work <= 2 * (visible + 2) + 29, "smoothed: {}", h.drawn.work);
+    assert!(h.drawn.work > visible, "the smoothed pass ran");
+    h.st.mode = GraphMode::VerdictMap;
+    h.frame(vec![]);
+    assert!(h.drawn.work <= visible + 2, "map: {}", h.drawn.work);
+    h.st.mode = GraphMode::Distribution;
+    h.frame(vec![]);
+    assert!(h.drawn.work > 0 && h.drawn.work <= 96, "distribution bins: {}", h.drawn.work);
+    assert!(h.drawn.budget_line);
+}
+
+#[test]
+fn the_mode_survives_a_new_capture_like_the_budget() {
+    let mut h = Harness::new(capture());
+    h.st.mode = GraphMode::Distribution;
+    h.st.smoothing = Smoothing::W5;
+    let ix = FramesIndex::build(&h.a);
+    h.st.reset(Some(&ix));
+    assert_eq!((h.st.mode, h.st.smoothing), (GraphMode::Distribution, Smoothing::W5));
+}

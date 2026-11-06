@@ -1019,14 +1019,16 @@ mod tl_rows_r2 {
         let bars: Vec<FtBar> = (0..5).map(|i| b(i * 100, i * 100 + 50, false)).collect();
         let s = src(bars);
         let full = build_track(&s, 0);
-        // independent count: 6 per bar, the tile table, one entry per covered tile (no wide bars here)
+        // independent count: 6 per bar, the gap pass (1 per bar + GAP_MAX), the tile table, one entry per covered
+        // tile (no wide bars here)
         let lo = 0.0;
         let hi = 450.0;
         let tile = |v: f64| (((v - lo) / (hi - lo) * TILES as f64).floor() as usize).min(TILES - 1);
         let entries: u64 = (0..5).map(|i| (tile((i * 100 + 50) as f64) - tile((i * 100) as f64) + 1).min(WIDE_TILES + 1) as u64).map(|e| if e > WIDE_TILES as u64 { 1 } else { e }).sum();
-        let need = 6 * 5 + TILES as u64 + entries;
+        let need = 6 * 5 + (5 + ps3dk_prof_viewer::timeline_foreign::GAP_MAX as u64) + TILES as u64 + entries;
         let exact = build_track_with(&s, 0, ViewBudgets { build_ops: need });
         assert!(exact.refusal.is_none() && exact.bars.len() == 5, "{:?}", exact.refusal);
+        assert_eq!(exact.gaps, vec![(50.0, 100.0), (150.0, 200.0), (250.0, 300.0), (350.0, 400.0)]);
         assert_eq!(exact, full);
         let short = build_track_with(&s, 0, ViewBudgets { build_ops: need - 1 });
         assert!(short.refusal.as_deref().unwrap_or("").contains("view build budget") && short.bars.is_empty());
@@ -1145,5 +1147,533 @@ mod tl_rows_r2 {
         st.sync_foreign(&doc.foreign_tl, a);
         assert_eq!(st.view, View::fit(&st.tl));
         assert!(st.tl.extra.is_none());
+    }
+}
+
+// ---- Frames page graph modes: the SPU/RSX lane side (crate::graphs) ---------------------------------------------
+
+mod graph_modes {
+    use super::*;
+    use ps3dk_prof_viewer::foreign::{build_dist, dist_cost, DistWork, DIST_OPS};
+    use ps3dk_prof_viewer::graphs::{lane_cell, lane_point, ppu_point, runs, smooth, Cell, LinePoint};
+
+    /// Owner 1 with `n` measured frames of 150 ticks (ids 0..n) and the final UNKNOWN frame n.
+    fn owner_n(n: u64) -> (Analysis, FramesIndex) {
+        let tbs: Vec<u64> = (0..=n).map(|k| 150 * k).collect();
+        let a = analysed(&owner_bytes(&tbs, false, cm_ext()));
+        let ix = FramesIndex::build(&a);
+        (a, ix)
+    }
+
+    #[test]
+    fn lane_points_use_the_upper_bound_keep_open_and_infinite_ends_and_break_elsewhere() {
+        let (a, ix) = owner_n(4);
+        let o = ix.owner(1).unwrap();
+        let r = Ok(handcrafted(vec![
+            cell(0, Some(bnd(rat(10, 1), false, Some(rat(30, 1))))),
+            cell(1, Some(bnd(rat(0, 1), true, Some(rat(5, 1))))),
+            cell(2, Some(bnd(rat(40, 1), false, None))),
+            // frame 3: nothing included (an excluded-only cell)
+            cell(3, None),
+        ]));
+        let v = build(&a, &ix, 1, &r, &Labels::build(&a), Budget::Fps30);
+        let l = &v.lanes[0];
+        assert_eq!(lane_point(o, l, 0), LinePoint::At { y: 30.0, band: Some((10.0, false)) }, "hi, with lo..hi");
+        assert_eq!(lane_point(o, l, 1), LinePoint::At { y: 5.0, band: Some((0.0, true)) }, "the open lo is kept");
+        assert_eq!(lane_point(o, l, 2), LinePoint::Unbounded { lo: 40.0, lo_open: false }, "+inf: no line point");
+        assert_eq!(lane_point(o, l, 3), LinePoint::NonePlaced, "nothing included is never 0");
+        assert_eq!(lane_point(o, l, 4), LinePoint::NoInterval, "the final frame");
+        // The line runs over frames 0..1 and breaks at the infinite bound and after it.
+        let rr = runs((0..5).map(|i| (i, lane_point(o, l, i).y())));
+        assert_eq!(rr, vec![vec![(0, 30.0), (1, 5.0)]]);
+        // Smoothing never bridges the break either.
+        let s = smooth(0..5, 4, |i| lane_point(o, l, i).y());
+        assert_eq!(s, vec![Some((30.0, 1)), Some((17.5, 2)), None, None, None]);
+    }
+
+    #[test]
+    fn frame_k_is_the_same_slot_on_the_ppu_and_every_lane() {
+        let (a, ix) = owner_n(3);
+        let o = ix.owner(1).unwrap();
+        // Two lanes, each with one bar on a different frame; neither is summed with the other or the PPU.
+        let mut ff = handcrafted(vec![cell(1, Some(bnd(rat(7, 1), false, Some(rat(9, 1)))))]);
+        let mut second = ff.lanes[0].clone();
+        second.source = SourceKey::Lane(LANE);
+        second.frames = vec![cell(2, Some(bnd(rat(3, 1), false, Some(rat(4, 1)))))];
+        ff.lanes.push(second);
+        let v = build(&a, &ix, 1, &Ok(ff), &Labels::build(&a), Budget::Fps30);
+        let (rsx, spu) = (&v.lanes[0], &v.lanes[1]);
+        for k in 0..3usize {
+            assert_eq!(o.slots[k].frame, k as u64);
+            assert_eq!(ppu_point(o, k), LinePoint::At { y: 150.0, band: None }, "the PPU's own value");
+        }
+        assert_eq!(lane_point(o, rsx, 1).y(), Some(9.0), "frame 1's RSX bar is at slot 1");
+        assert_eq!(lane_point(o, spu, 2).y(), Some(4.0), "frame 2's SPU bar is at slot 2");
+        assert_eq!(lane_point(o, rsx, 2), LinePoint::NonePlaced);
+        assert_eq!(lane_point(o, spu, 1), LinePoint::NonePlaced);
+        assert_eq!(lane_cell(o, rsx, 1), Cell::Within);
+        assert_eq!(lane_cell(o, rsx, 0), Cell::NonePlaced);
+        assert_eq!(lane_cell(o, rsx, 3), Cell::NoInterval);
+    }
+
+    #[test]
+    fn lane_cells_carry_the_exact_verdicts() {
+        let (a, ix) = owner_n(4);
+        let o = ix.owner(1).unwrap();
+        let b = (FREQ / 30) as i64; // the 30 FPS budget in ticks, exact
+        let r = Ok(handcrafted(vec![
+            cell(0, Some(bnd(rat(b + 1, 1), false, Some(rat(b + 2, 1))))),
+            cell(1, Some(bnd(rat(1, 1), false, Some(rat(b, 1))))),
+            cell(2, Some(bnd(rat(1, 1), false, Some(rat(b + 1, 1))))),
+            cell(3, Some(bnd(rat(1, 1), false, Some(Rat { num: BigInt::from(1) << 600u32, den: BigInt::from(1) })))),
+        ]));
+        let v = build(&a, &ix, 1, &r, &Labels::build(&a), Budget::Fps30);
+        let l = &v.lanes[0];
+        let cells: Vec<Cell> = (0..5).map(|i| lane_cell(o, l, i)).collect();
+        assert_eq!(cells, vec![Cell::Over, Cell::Within, Cell::Undetermined, Cell::Unavailable, Cell::NoInterval]);
+        let v = build(&a, &ix, 1, &r, &Labels::build(&a), Budget::None);
+        assert_eq!(lane_cell(o, &v.lanes[0], 0), Cell::NoVerdict, "no budget: no verdict");
+    }
+
+    #[test]
+    fn lane_distribution_is_an_order_statistic_interval_with_exclusions_counted() {
+        // 25 measured frames; bars on 24 of them (frame 3 has nothing included), the final frame has no interval.
+        let (_a, ix) = owner_n(25);
+        let mut cells = Vec::new();
+        for k in 0..25i64 {
+            if k == 3 {
+                continue;
+            }
+            // lo = k, hi = 100 - k (so the hi order is the reverse of the frame order); frame 24's hi is +inf
+            let hi = if k == 24 { None } else { Some(rat(100 - k, 1)) };
+            cells.push(cell(k as u64, Some(bnd(rat(k, 1), k == 0, hi))));
+        }
+        let v = build_dist(&ix, 1, &Ok(handcrafted(cells)), DIST_OPS);
+        let d = v.lanes[0].as_ref().unwrap();
+        assert_eq!((d.bars, d.none_placed, d.no_interval), (24, 1, 1));
+        let row = |label: &str| d.rows.iter().find(|r| r.label == label).unwrap().value.clone().unwrap();
+        // los ascending: 0,1,2,4,..,24; his ascending: 77..97 except 97 (k=3), then 98, 99, 100, +inf
+        let lo_at = |rank: usize| [0, 1, 2].iter().copied().chain(4..25).nth(rank - 1).unwrap() as f64;
+        let his: Vec<i64> = (0..24i64).filter(|&k| k != 3).map(|k| 100 - k).rev().collect();
+        let hi_at = |rank: usize| his.get(rank - 1).map(|&h| h as f64);
+        assert_eq!((row("min").lo, row("min").hi), (0.0, Some(77.0)));
+        assert_eq!(his.len(), 23);
+        // p50: rank ceil(50 * 24 / 100) = 12; p90: rank ceil(21.6) = 22; p99: rank ceil(23.76) = 24 = max
+        assert_eq!((row("p50").lo, row("p50").hi), (lo_at(12), hi_at(12)));
+        assert_eq!((row("p90").lo, row("p90").hi), (lo_at(22), hi_at(22)));
+        assert_eq!((row("p99").lo, row("p99").hi), (24.0, None), "the infinite hi sorts last");
+        assert_eq!(row("max"), row("p99"));
+        assert!(row("max").text.contains("+inf) ms"), "{}", row("max").text);
+        // The p50 interval contains the p50 of any per-frame values inside the bars (here the midpoints).
+        let mut mids: Vec<f64> = (0..24i64).filter(|&k| k != 3).map(|k| (k + 100 - k) as f64 / 2.0).collect();
+        mids.push(1e9);
+        mids.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let p50 = mids[11];
+        assert!(row("p50").lo <= p50 && p50 <= row("p50").hi.unwrap());
+        // Below 20 bars the percentiles are refused; min and max stay.
+        let few = build_dist(&ix, 1, &Ok(handcrafted(vec![cell(0, Some(bnd(rat(1, 1), false, Some(rat(2, 1)))))])), DIST_OPS);
+        let d = few.lanes[0].as_ref().unwrap();
+        assert_eq!((d.bars, d.none_placed, d.no_interval), (1, 24, 1));
+        let labels: Vec<&str> = d.rows.iter().map(|r| r.label).collect();
+        assert_eq!(labels, ["min", "p50", "p90", "p99", "max"]);
+        assert_eq!(d.rows[1].value, Err("1 frames with a bar, percentiles need 20".to_string()));
+        assert!(d.rows[0].value.is_ok() && d.rows[4].value.is_ok());
+        // No bar at all: no rows, every measured frame counted as excluded, nothing drawn as 0.
+        let none = build_dist(&ix, 1, &Ok(handcrafted(vec![])), DIST_OPS);
+        let d = none.lanes[0].as_ref().unwrap();
+        assert_eq!((d.bars, d.none_placed, d.no_interval, d.rows.len()), (0, 25, 1, 0));
+    }
+
+    /// `n` lanes, lane i holding `cells_of(i)` (the reader's lane shape, all on one owner).
+    fn lanes_of(n: usize, cells_of: impl Fn(usize) -> Vec<FrameCell>) -> ForeignFrames {
+        let mut ff = handcrafted(vec![]);
+        let proto = ff.lanes[0].clone();
+        ff.lanes = (0..n)
+            .map(|i| {
+                let mut l = proto.clone();
+                l.source = SourceKey::Lane(i as u32 + 100);
+                l.frames = cells_of(i);
+                l
+            })
+            .collect();
+        ff
+    }
+
+    #[test]
+    fn many_empty_and_sparse_lanes_over_a_large_owner_cost_their_cells_not_the_frames() {
+        // 5000 measured frames + the final one; 300 lanes, every 10th with one bar, the rest empty.
+        let (_a, ix) = owner_n(5000);
+        let o = ix.owner(1).unwrap();
+        assert_eq!((o.slots.len(), o.placeable()), (5001, 5000), "eligibility counted once with the slots");
+        let ff = lanes_of(300, |i| if i % 10 == 0 { vec![cell((i % 5000) as u64, Some(bnd(rat(1, 1), false, Some(rat(2, 1)))))] } else { vec![] });
+        let d = build_dist(&ix, 1, &Ok(ff), DIST_OPS);
+        // Independent charge: an empty lane 4; a one-cell lane 4 + 1 * (1 + clog2(5002) = 13 + 2) + 3 + 0 + 40 = 63.
+        assert_eq!(dist_cost(0, 5001), 4);
+        assert_eq!(dist_cost(1, 5001), 63);
+        assert_eq!(d.used, 270 * 4 + 30 * 63, "bounded by the cells, never lanes x frames");
+        assert_eq!(d.work.visits, 30, "only the 30 cells exist to visit");
+        for (i, l) in d.lanes.iter().enumerate() {
+            let l = l.as_ref().unwrap();
+            let bars = u64::from(i % 10 == 0);
+            assert_eq!((l.bars, l.none_placed, l.no_interval), (bars, 5000 - bars, 1), "lane {i}");
+        }
+    }
+
+    #[test]
+    fn the_distribution_budget_is_exact_and_one_short_refuses_visibly() {
+        let (_a, ix) = owner_n(25);
+        let cells: Vec<FrameCell> = (0..25).map(|k| cell(k, Some(bnd(rat(k as i64, 1), false, Some(rat(k as i64 + 5, 1)))))).collect();
+        // 4 + 25 * (1 + clog2(27) = 5 + 2) + 3 * 25 + 2 * clog2(25) (= 5) * (3 * 25 + 25) + 40 = 1319
+        assert_eq!(dist_cost(25, 26), 1319);
+        let two = || Ok(lanes_of(2, |_| cells.clone()));
+        let exact = build_dist(&ix, 1, &two(), 2 * 1319);
+        assert!(exact.lanes.iter().all(|l| l.is_ok()) && exact.used == 2 * 1319, "{exact:?}");
+        let short = build_dist(&ix, 1, &two(), 2 * 1319 - 1);
+        assert!(short.lanes[0].is_ok());
+        let why = short.lanes[1].as_ref().unwrap_err();
+        assert_eq!(why, "distribution refused: budget (2637 operations; this lane needs 1319)");
+        let first = build_dist(&ix, 1, &two(), 1318);
+        assert!(first.lanes.iter().all(|l| l.as_ref().is_err_and(|w| w.starts_with("distribution refused: budget"))),
+            "a refused lane refuses every later one: {first:?}");
+        assert_eq!(first.used, 0);
+    }
+
+    #[test]
+    fn a_bound_over_the_bit_ceiling_refuses_only_its_lane() {
+        let (_a, ix) = owner_n(4);
+        let huge = Rat { num: BigInt::from(1) << 600u32, den: BigInt::from(1) };
+        let ff = lanes_of(2, |i| {
+            if i == 0 {
+                vec![cell(0, Some(bnd(rat(1, 1), false, Some(huge.clone()))))]
+            } else {
+                vec![cell(1, Some(bnd(rat(1, 1), false, Some(rat(3, 1)))))]
+            }
+        });
+        let d = build_dist(&ix, 1, &Ok(ff), DIST_OPS);
+        assert_eq!(d.lanes[0], Err("distribution refused: a bound over the bit ceiling".to_string()));
+        assert_eq!(d.lanes[1].as_ref().unwrap().bars, 1);
+        // a reader refusal: no lanes at all (the page shows the refusal itself)
+        assert!(build_dist(&ix, 1, &Err(Refusal::NoExtension), DIST_OPS).lanes.is_empty());
+    }
+
+    #[test]
+    fn only_the_modes_that_show_it_build_the_distribution() {
+        use eframe::egui;
+        use ps3dk_prof_viewer::frames_ui::{draw, FramesState};
+        use ps3dk_prof_viewer::graphs::GraphMode;
+        let a = analysed(&owner_bytes(&[0, 150, 300], false, cm_ext()));
+        let ix = FramesIndex::build(&a);
+        let ctx = egui::Context::default();
+        ps3dk_ui::install(&ctx);
+        let run = |slot: &ForeignSlot, st: &mut FramesState| {
+            for _ in 0..3 {
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |p| {
+                        draw(p, &a, &ix, st, None, Some(slot));
+                    });
+                });
+            }
+        };
+        let dist = |s: &ForeignSlot| s.counters.dist.load(std::sync::atomic::Ordering::Relaxed);
+        let slot = ForeignSlot::default();
+        let mut st = FramesState::default();
+        st.reset(Some(&ix));
+        run(&slot, &mut st);
+        assert_eq!((st.mode, dist(&slot)), (GraphMode::Bars, 0), "Bars never builds it");
+        st.mode = GraphMode::VerdictMap;
+        run(&slot, &mut st);
+        assert_eq!(dist(&slot), 0, "nor the verdict map");
+        st.mode = GraphMode::Lines;
+        st.full_scale = true;
+        run(&slot, &mut st);
+        assert_eq!(dist(&slot), 0, "nor Lines at the Max scale");
+        st.full_scale = false;
+        run(&slot, &mut st);
+        assert_eq!(dist(&slot), 1, "the Lines p99 fit builds it once");
+        st.mode = GraphMode::Distribution;
+        run(&slot, &mut st);
+        assert_eq!(dist(&slot), 1, "cached per reader entry");
+    }
+
+    #[test]
+    fn the_distribution_wording_names_its_population_and_omissions() {
+        use ps3dk_prof_viewer::foreign::LaneDist;
+        use ps3dk_prof_viewer::frames_ui::{dist_population, DIST_CAPTION};
+        use ps3dk_prof_viewer::graphs::scale_caption;
+        for w in ["INCLUDED start-attributed", "AMBIGUOUS", "EXTRAPOLATED", "exclusive-unavailable", "frames with nothing included", "not of all"] {
+            assert!(DIST_CAPTION.contains(w), "{w:?} missing from {DIST_CAPTION}");
+        }
+        assert!(!DIST_CAPTION.contains("true per-frame work lies"), "no claim about all work");
+        let line = dist_population(&LaneDist { bars: 3, none_placed: 5, no_interval: 1, rows: vec![] });
+        assert_eq!(
+            line,
+            "population: included start-attributed top-level work on 3 frames with a bar. Omitted: 5 measured frames \
+             with nothing included, 1 frames without an interval, and every AMBIGUOUS, EXTRAPOLATED or \
+             exclusive-unavailable pair (in no bar; counted in the lane footer)"
+        );
+        let max = scale_caption(true, "9 ms", 0);
+        assert!(max.contains("every finite value fits") && max.contains("+inf") && max.contains("arrow"), "{max}");
+        assert!(!max.contains("every value fits"), "{max}");
+        let fit = scale_caption(false, "9 ms", 0);
+        assert!(fit.contains("Fit p99") && fit.contains("+inf") && fit.contains("arrow"), "{fit}");
+        for c in [DIST_CAPTION.to_string(), line, max, fit] {
+            assert!(!c.contains("  "), "{c}");
+        }
+    }
+
+    #[test]
+    fn zero_budget_and_lanes_after_exhaustion_visit_and_allocate_nothing() {
+        let (_a, ix) = owner_n(25);
+        let cells: Vec<FrameCell> = (0..25).map(|k| cell(k, Some(bnd(rat(k as i64, 1), false, Some(rat(k as i64 + 5, 1)))))).collect();
+        let three = || Ok(lanes_of(3, |_| cells.clone()));
+        let none = build_dist(&ix, 1, &three(), 0);
+        assert!(none.lanes.iter().all(|l| l.is_err()));
+        assert_eq!((none.used, none.work), (0, DistWork::default()), "a zero budget touches no cell and allocates nothing");
+        // One lane fits: the later two are refused with no visit and no allocation of their own.
+        let one = build_dist(&ix, 1, &three(), dist_cost(25, 26));
+        assert!(one.lanes[0].is_ok() && one.lanes[1].is_err() && one.lanes[2].is_err());
+        let alone = build_dist(&ix, 1, &Ok(lanes_of(1, |_| cells.clone())), DIST_OPS);
+        assert_eq!(one.work, alone.work, "the refused lanes added nothing");
+        assert_eq!(one.work.visits, 25);
+    }
+
+    #[test]
+    fn an_admitted_sort_stays_within_its_charge_exactly_and_one_short_does_no_work() {
+        let (_a, ix) = owner_n(25);
+        // 25 bars in a scrambled order (7 is coprime with 25), so both sorts really merge.
+        let cells: Vec<FrameCell> = (0..25u64)
+            .map(|k| {
+                let v = ((k * 7) % 25) as i64;
+                cell(k, Some(bnd(rat(v, 1), false, Some(rat(100 - v, 1)))))
+            })
+            .collect();
+        let need = dist_cost(25, 26);
+        let ok = build_dist(&ix, 1, &Ok(lanes_of(1, |_| cells.clone())), need);
+        let d = ok.lanes[0].as_ref().unwrap();
+        let row = |label: &str| d.rows.iter().find(|r| r.label == label).unwrap().value.clone().unwrap();
+        assert_eq!((row("min").lo, row("min").hi), (0.0, Some(76.0)), "sorted: smallest lo 0, smallest hi 100 - 24");
+        assert_eq!((row("max").lo, row("max").hi), (24.0, Some(100.0)));
+        let w = ok.work;
+        assert!(w.compares > 0 && w.visits == 25, "{w:?}");
+        assert!(w.visits + w.allocs + 3 * w.compares <= ok.used, "counted work {w:?} within the charge {}", ok.used);
+        let short = build_dist(&ix, 1, &Ok(lanes_of(1, |_| cells.clone())), need - 1);
+        assert!(short.lanes[0].is_err());
+        assert_eq!(short.work, DistWork::default(), "one short: refused before any cell");
+    }
+
+    /// Draws the Frames page three times in `mode` (Fit p99) and returns the last Drawn.
+    fn draw_mode(a: &Analysis, ix: &FramesIndex, slot: &ForeignSlot, mode: ps3dk_prof_viewer::graphs::GraphMode) -> ps3dk_prof_viewer::frames_ui::Drawn {
+        use eframe::egui;
+        use ps3dk_prof_viewer::frames_ui::{draw, Drawn, FramesState};
+        let ctx = egui::Context::default();
+        ps3dk_ui::install(&ctx);
+        let mut st = FramesState::default();
+        st.reset(Some(ix));
+        st.mode = mode;
+        let mut last = Drawn::default();
+        for _ in 0..3 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |p| {
+                    last = draw(p, a, ix, &mut st, None, Some(slot));
+                });
+            });
+        }
+        last
+    }
+
+    #[test]
+    fn a_budget_refusal_is_shown_as_the_fit_fallback_in_lines_and_distribution() {
+        use ps3dk_prof_viewer::graphs::{fit_fallback_notes, GraphMode};
+        let a = analysed(&owner_bytes(&[0, 150, 300], false, cm_ext()));
+        let ix = FramesIndex::build(&a);
+        for mode in [GraphMode::Lines, GraphMode::Distribution] {
+            // A zero distribution budget: both lanes (the SPU lane and the RSX domain) are refused.
+            let d = draw_mode(&a, &ix, &ForeignSlot::with_dist_ops(0), mode);
+            assert_eq!(d.fit_fallback, 2, "{mode:?}");
+            // The default budget: nothing refused, no fallback.
+            assert_eq!(draw_mode(&a, &ix, &ForeignSlot::default(), mode).fit_fallback, 0, "{mode:?}");
+        }
+        // Bars never builds the distribution, so it never shows the note.
+        assert_eq!(draw_mode(&a, &ix, &ForeignSlot::with_dist_ops(0), GraphMode::Bars).fit_fallback, 0);
+        let v = build_dist(&ix, 1, &Ok(lanes_of(1, |_| vec![cell(0, Some(bnd(rat(1, 1), false, Some(rat(2, 1)))))])), 0);
+        let notes = fit_fallback_notes(&["RSX domain 3"], &v.lanes, false);
+        assert_eq!(
+            notes,
+            vec!["RSX domain 3: distribution refused: budget (0 operations; this lane needs 52); the Fit p99 scale uses \
+                  this lane's finite maximum (conservative fallback)"
+                .to_string()]
+        );
+        assert!(fit_fallback_notes(&["RSX domain 3"], &v.lanes, true).is_empty(), "Max needs no fallback");
+        let cap = ps3dk_prof_viewer::graphs::scale_caption(false, "9 ms", 2);
+        assert!(cap.contains("except 2 lane(s) whose distribution was refused") && cap.contains("finite maximum"), "{cap}");
+        assert!(!cap.contains("  "), "{cap}");
+    }
+
+    #[test]
+    fn a_bit_ceiling_refusal_is_shown_as_the_fit_fallback_on_the_draw_path() {
+        use ps3dk_prof_viewer::graphs::GraphMode;
+        let a = analysed(&owner_bytes(&[0, 150, 300], false, cm_ext()));
+        let ix = FramesIndex::build(&a);
+        let huge = Rat { num: BigInt::from(1) << 600u32, den: BigInt::from(1) };
+        let result = || Ok(handcrafted(vec![cell(1, Some(bnd(rat(1, 1), false, Some(huge.clone()))))]));
+        for mode in [GraphMode::Lines, GraphMode::Distribution] {
+            let slot = ForeignSlot::seeded(&a, 1, false, result(), None);
+            let d = draw_mode(&a, &ix, &slot, mode);
+            assert_eq!(d.fit_fallback, 1, "{mode:?}");
+            assert_eq!(slot.counters.reader.load(std::sync::atomic::Ordering::Relaxed), 0, "the seeded result was used");
+            let dv = slot.dist(&ix, 1, false).unwrap();
+            assert_eq!(dv.lanes, vec![Err("distribution refused: a bound over the bit ceiling".to_string())]);
+        }
+    }
+}
+
+// ---- Timeline SPU/RSX rows: stretches no placed pair's outer extent meets are marked, not blank ----------------
+
+mod tl_gaps {
+    use super::*;
+    use ps3dk_prof::clockmap::{End, Projection};
+    use ps3dk_prof::foreign_timeline::{FtBar, FtCounts, FtSource, FtSourceState};
+    use ps3dk_prof_viewer::model::TimeBase;
+    use ps3dk_prof_viewer::timeline_foreign::{
+        build_track, build_track_axis, build_track_with, gaps_line, track_gaps, FTrack, ViewBudgets, GAP_FRACTION,
+        GAP_MAX, Rel, TILES,
+    };
+
+    fn e(v: Option<i64>, neg: bool) -> End {
+        match v {
+            Some(v) => End::At { value: rat(v, 1), open: false },
+            None if neg => End::NegInf,
+            None => End::PosInf,
+        }
+    }
+
+    /// A bar whose outer extent is [lo, hi] (None: unbounded on that side).
+    fn bar(lo: Option<i64>, hi: Option<i64>) -> FtBar {
+        FtBar {
+            epoch: 1,
+            image: Some(0),
+            desc: 0,
+            depth: 0,
+            begin: Projection { lo: e(lo, true), hi: e(lo.map(|v| v + 1), false), interpolated: true },
+            end: Projection { lo: e(hi.map(|v| v - 1), true), hi: e(hi, false), interpolated: true },
+            inclusive: 1,
+            exclusive: Some(1),
+            extrapolated: false,
+        }
+    }
+
+    fn src(bars: Vec<FtBar>, counts: FtCounts) -> FtSource {
+        FtSource { source: SourceKey::Lane(LANE), epochs: vec![], counts, state: FtSourceState::Bars(bars) }
+    }
+
+    fn on_axis(bars: Vec<FtBar>, end: f64) -> FTrack {
+        build_track_axis(&src(bars, FtCounts::default()), 0, Some(end), ViewBudgets::default())
+    }
+
+    /// No shaded gap meets any bar's outer extent, and every gap lies inside the axis.
+    fn assert_disjoint(t: &FTrack, axis: (f64, f64)) {
+        for &(g0, g1) in &t.gaps {
+            assert!(axis.0 <= g0 && g0 < g1 && g1 <= axis.1, "gap {g0}..{g1} outside the axis {axis:?}");
+            for b in &t.bars {
+                let lo = match b.b_lo { Rel::At(v) => v, _ => f64::NEG_INFINITY };
+                let hi = match b.e_hi { Rel::At(v) => v, _ => f64::INFINITY };
+                assert!(!(lo < g1 && g0 < hi), "gap {g0}..{g1} meets the outer extent {lo}..{hi}");
+            }
+        }
+    }
+
+    #[test]
+    fn internal_gaps_respect_the_threshold_and_nesting() {
+        // Extent 0..1000 (no axis): threshold 1000 / 50 = 20; a 15-tick gap is not listed, nesting opens none.
+        let t = build_track(&src(vec![bar(Some(0), Some(100)), bar(Some(10), Some(40)), bar(Some(115), Some(130)), bar(Some(600), Some(1000))], FtCounts::default()), 0);
+        assert_eq!(t.gaps, vec![(130.0, 600.0)]);
+        assert_eq!(GAP_FRACTION, 50.0);
+        assert_disjoint(&t, (0.0, 1000.0));
+    }
+
+    #[test]
+    fn a_half_unbounded_bar_covers_the_edge_on_its_open_side_only() {
+        // Review repro 1: [300, +inf] and [600, 700] on [0, 1000]: the only gap is [0, 300], never [0, 600].
+        let t = on_axis(vec![bar(Some(300), None), bar(Some(600), Some(700))], 1000.0);
+        assert_eq!(t.gaps, vec![(0.0, 300.0)]);
+        assert_disjoint(&t, (0.0, 1000.0));
+        // Review repro 2: [-inf, 700] and [300, 400]: the only gap is [700, 1000], never [400, 1000].
+        let t = on_axis(vec![bar(None, Some(700)), bar(Some(300), Some(400))], 1000.0);
+        assert_eq!(t.gaps, vec![(700.0, 1000.0)]);
+        assert_disjoint(&t, (0.0, 1000.0));
+    }
+
+    #[test]
+    fn all_half_unbounded_and_outside_axis_bars() {
+        // Every bar half-unbounded: [-inf, 100] and [400, +inf] leave exactly [100, 400].
+        let t = on_axis(vec![bar(None, Some(100)), bar(Some(400), None)], 1000.0);
+        assert_eq!(t.gaps, vec![(100.0, 400.0)]);
+        assert_disjoint(&t, (0.0, 1000.0));
+        // Both unbounded ends overlapping: no gap.
+        let t = on_axis(vec![bar(None, Some(500)), bar(Some(400), None)], 1000.0);
+        assert!(t.gaps.is_empty(), "{:?}", t.gaps);
+        // ... and without an axis the same bars list only the internal stretch.
+        let t = build_track(&src(vec![bar(None, Some(100)), bar(Some(400), None)], FtCounts::default()), 0);
+        assert_eq!(t.gaps, vec![(100.0, 400.0)]);
+        // Bars wholly before and after the axis: the whole axis is one gap, clipped.
+        let t = on_axis(vec![bar(Some(-500), Some(-400)), bar(Some(1200), Some(1300))], 1000.0);
+        assert_eq!(t.gaps, vec![(0.0, 1000.0)]);
+        assert_disjoint(&t, (0.0, 1000.0));
+        // Bars straddling both axis ends with a hole between.
+        let t = on_axis(vec![bar(Some(-100), Some(200)), bar(Some(900), Some(1500))], 1000.0);
+        assert_eq!(t.gaps, vec![(200.0, 900.0)]);
+        assert_disjoint(&t, (0.0, 1000.0));
+        // Late start and early stop: both edges.
+        let t = on_axis(vec![bar(Some(300), Some(400)), bar(Some(600), Some(700))], 1000.0);
+        assert_eq!(t.gaps, vec![(0.0, 300.0), (400.0, 600.0), (700.0, 1000.0)]);
+        // Out of the reader's order: no gaps rather than a gap that could cross a bar.
+        assert!(on_axis(vec![bar(Some(600), Some(700)), bar(Some(0), Some(100))], 1000.0).gaps.is_empty());
+        assert!(on_axis(vec![], 1000.0).gaps.is_empty());
+    }
+
+    #[test]
+    fn gaps_are_capped_and_charged_in_the_view_build_budget() {
+        // Bars every 3000 ticks over [0, 100000] (threshold 2000): 33 stretches of 2999 (the trailing 999 is below
+        // the threshold), never more than GAP_MAX.
+        let bars: Vec<FtBar> = (0..34).map(|i| bar(Some(i * 3000), Some(i * 3000 + 1))).collect();
+        let t = on_axis(bars, 100_000.0);
+        assert_eq!(t.gaps.len(), 33);
+        assert!(t.gaps.len() <= GAP_MAX);
+        assert_eq!(track_gaps(&t.bars, Some((0.0, 100_000.0))), t.gaps);
+        // The charge: 6 per bar, then bars + GAP_MAX for the gap pass, before the tiles (one bar, one tile).
+        let s = src(vec![bar(Some(0), Some(10))], FtCounts::default());
+        let need = 6 + (1 + GAP_MAX as u64) + TILES as u64 + 1;
+        let exact = build_track_with(&s, 0, ViewBudgets { build_ops: need });
+        assert!(exact.refusal.is_none(), "{:?}", exact.refusal);
+        let short = build_track_with(&s, 0, ViewBudgets { build_ops: 6 + GAP_MAX as u64 });
+        assert!(short.refusal.as_deref().unwrap_or("").contains("view build budget"));
+        assert!(short.gaps.is_empty() && short.bars.is_empty(), "a refused gap pass leaves nothing drawn");
+    }
+
+    #[test]
+    fn the_gap_line_names_its_scope_and_the_unplaced_coverage_separately() {
+        let counts = FtCounts {
+            placed: 4,
+            not_placed: 7,
+            censored: 2,
+            unpaired: 1,
+            open: None,
+            loss_records: Some(3),
+            no_inventory_epochs: 1,
+            ..FtCounts::default()
+        };
+        let t = build_track_axis(&src(vec![bar(Some(300), Some(400)), bar(Some(600), Some(700))], counts), 0, Some(1000.0), ViewBudgets::default());
+        let line = gaps_line(&t, TimeBase { freq_hz: None }).unwrap();
+        assert!(line.starts_with("3 shaded stretch(es) (longest 300.0 ticks): no placed completed pair's outer extent"), "{line}");
+        assert!(line.contains("work that was not placed may still fall there"), "{line}");
+        assert!(
+            line.contains("there. Not shown on this row at all: 7 pairs not placed, 2 censored, 1 unpaired, unknown open, loss records 3, 1 epoch(s) without an inventory"),
+            "{line}"
+        );
+        for banned in ["idle", "not an unmapped", "unmapped epoch"] {
+            assert!(!line.contains(banned), "{banned:?} in {line}");
+        }
+        assert!(!line.contains("  "), "{line}");
+        assert!(gaps_line(&on_axis(vec![bar(Some(0), Some(1000))], 1000.0), TimeBase { freq_hz: None }).is_none());
     }
 }

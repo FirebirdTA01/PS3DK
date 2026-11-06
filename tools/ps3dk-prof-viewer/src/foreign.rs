@@ -351,6 +351,42 @@ pub struct LaneView {
     pub errors: Vec<String>,
 }
 
+/// One percentile of a lane's bars: the closed interval [p-th smallest lo, p-th smallest hi] (an infinite hi sorts
+/// last).  Order statistics are monotone in every argument, so the same percentile of the true per-frame values
+/// lies in this interval; an open lo only makes that inclusion stricter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PctBound {
+    /// Pixels only.
+    pub lo: f64,
+    /// None: +inf (or not representable).
+    pub hi: Option<f64>,
+    /// Outward-rounded text of the exact interval.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PctRow {
+    /// "min", "p50", "p90", "p99" or "max".
+    pub label: &'static str,
+    /// Refused (with the reason) below 20 bars for p50/p90/p99, the ZoneStats rule.
+    pub value: Result<PctBound, String>,
+}
+
+/// A lane's bars over the owner's frames, measured frames with a bar only.  The population is the reader's retained
+/// INCLUDED start-attributed top-level work (DEFINITE, not extrapolated, exclusive available) on the frames that have
+/// a bar; AMBIGUOUS, EXTRAPOLATED and exclusive-unavailable pairs are in no bar and so in no row.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LaneDist {
+    /// Frames with a bar (the population of every row).
+    pub bars: u64,
+    /// Measured frames with nothing included on this lane: excluded, never counted as 0.
+    pub none_placed: u64,
+    /// UNKNOWN, REFUSED, final or zero-length frames: no interval, excluded.
+    pub no_interval: u64,
+    pub rows: Vec<PctRow>,
+}
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForeignView {
     pub refusal: Option<String>,
@@ -488,6 +524,178 @@ pub fn build(
     ForeignView { refusal: None, state, lanes, top }
 }
 
+// ---- the distribution (built only for the modes that show it) -------------------------------------------------
+
+/// The distribution meter's default limit (operations, see [`dist_cost`]).
+pub const DIST_OPS: u64 = 1 << 24;
+/// Formatting the five rows of one lane (charged once per lane with a bar).
+pub const DIST_ROW_OPS: u64 = 40;
+
+/// The charge for one lane with `cells` sparse cells over an owner of `slots` slots, paid BEFORE any cell of the
+/// lane is touched.  It is a conservative bound from the cell count alone (every cell is assumed to hold a bar):
+/// - 4 fixed;
+/// - the inventory scan, per cell: the visit, the slot lookup (clog2(slots + 1)) and 2 bit-ceiling checks;
+/// - the three reference buffers (bars, lo refs, hi refs): 3 per cell;
+/// - the two merge sorts, per pass (clog2(cells) passes each): at most `cells` comparisons at 3 (two products and
+///   the compare) and `cells` element copies into the pass buffer;
+/// - publication: DIST_ROW_OPS for the five rows.
+pub fn dist_cost(cells: u64, slots: u64) -> u64 {
+    let lookup = ps3dk_prof::clockmap::clog2(slots.saturating_add(1));
+    let passes = ps3dk_prof::clockmap::clog2(cells);
+    let sorts = 2 * passes * (3 * cells + cells);
+    let rows = if cells > 0 { DIST_ROW_OPS } else { 0 };
+    4 + cells * (1 + lookup + 2) + 3 * cells + sorts + rows
+}
+
+/// The work a distribution build actually did, counted where it happens (independent of [`dist_cost`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DistWork {
+    /// Cells visited.
+    pub visits: u64,
+    /// Elements written into any buffer (reference buffers, merge-pass buffers, rows).
+    pub allocs: u64,
+    /// Rational comparisons.
+    pub compares: u64,
+}
+
+/// The distribution of every lane (aligned with [`ForeignView::lanes`]), or one refusal for the whole result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistView {
+    /// Per lane: its distribution, or why it was refused (visible text).
+    pub lanes: Vec<Result<LaneDist, String>>,
+    /// The operations charged (never above the limit).
+    pub used: u64,
+    /// The work actually done (tests compare it with `used`).
+    pub work: DistWork,
+}
+
+fn cmp_rat(a: &Rat, b: &Rat) -> std::cmp::Ordering {
+    // den > 0 for every reader Rat; both operands are under BIT_CEILING (checked before the sort)
+    (&a.num * &b.den).cmp(&(&b.num * &a.den))
+}
+
+/// A bottom-up merge sort: clog2(n) passes, each at most n comparisons and exactly n element copies (the charge in
+/// [`dist_cost`]); both are counted in `w`.
+fn merge_sort<T: Clone>(v: Vec<T>, cmp: &dyn Fn(&T, &T) -> std::cmp::Ordering, w: &mut DistWork) -> Vec<T> {
+    let n = v.len();
+    let mut a = v;
+    let mut width = 1;
+    while width < n {
+        let mut out = Vec::with_capacity(n);
+        w.allocs += n as u64;
+        let mut i = 0;
+        while i < n {
+            let (mid, hi) = ((i + width).min(n), (i + 2 * width).min(n));
+            let (mut l, mut r) = (i, mid);
+            while l < mid && r < hi {
+                w.compares += 1;
+                if cmp(&a[r], &a[l]) == std::cmp::Ordering::Less {
+                    out.push(a[r].clone());
+                    r += 1;
+                } else {
+                    out.push(a[l].clone());
+                    l += 1;
+                }
+            }
+            out.extend_from_slice(&a[l..mid]);
+            out.extend_from_slice(&a[r..hi]);
+            i = hi;
+        }
+        a = out;
+        width *= 2;
+    }
+    a
+}
+
+/// One lane's distribution from its sparse cells; `placeable` is the owner's count of measured, nonempty, closed
+/// frames (computed once in the FramesIndex), so the exclusions come from the cells alone.
+fn lane_dist(o: &Owner, l: &LaneF2, freq: Option<u64>, w: &mut DistWork) -> Result<LaneDist, String> {
+    let bound_ok = |r: &Rat| r.num.bits() <= ps3dk_prof::clockmap::BIT_CEILING && r.den.bits() <= ps3dk_prof::clockmap::BIT_CEILING;
+    let mut bars: Vec<&TickBound> = Vec::new();
+    let mut on_placeable = 0u64;
+    for c in &l.frames {
+        w.visits += 1;
+        let Some(b) = &c.bar else { continue };
+        if let Some((_, s)) = o.slot_of(c.frame) {
+            if matches!(s.kind, SlotKind::Measured(d) if d > 0) && s.next_tb.is_some() {
+                on_placeable += 1;
+            }
+        }
+        if !bound_ok(&b.lo) || !b.hi.as_ref().is_none_or(bound_ok) {
+            return Err("distribution refused: a bound over the bit ceiling".to_string());
+        }
+        bars.push(b);
+        w.allocs += 1;
+    }
+    w.allocs += 2 * bars.len() as u64; // the lo and hi reference buffers
+    let los = merge_sort(bars.iter().map(|b| &b.lo).collect(), &|x: &&Rat, y: &&Rat| cmp_rat(x, y), w);
+    let his = merge_sort(
+        bars.iter().map(|b| b.hi.as_ref()).collect(),
+        &|x: &Option<&Rat>, y: &Option<&Rat>| match (x, y) {
+            (Some(x), Some(y)) => cmp_rat(x, y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        },
+        w,
+    );
+    let k = bars.len() as u64;
+    let at = |rank: u64| -> PctBound {
+        let i = (rank - 1) as usize;
+        let b = TickBound { lo: los[i].clone(), lo_open: false, hi: his[i].cloned() };
+        PctBound {
+            lo: to_px_f64(&b.lo).unwrap_or(f64::MAX).max(0.0),
+            hi: b.hi.as_ref().and_then(to_px_f64),
+            text: bound_rounded(&b, freq),
+        }
+    };
+    let mut rows = Vec::new();
+    if k > 0 {
+        rows.push(PctRow { label: "min", value: Ok(at(1)) });
+        for (p, label) in [(50u64, "p50"), (90, "p90"), (99, "p99")] {
+            let value = if k < 20 {
+                Err(format!("{k} frames with a bar, percentiles need 20"))
+            } else {
+                Ok(at((p * k).div_ceil(100).max(1)))
+            };
+            rows.push(PctRow { label, value });
+        }
+        rows.push(PctRow { label: "max", value: Ok(at(k)) });
+    }
+    w.allocs += rows.len() as u64;
+    let placeable = o.placeable();
+    Ok(LaneDist {
+        bars: k,
+        none_placed: placeable.saturating_sub(on_placeable),
+        no_interval: o.slots.len() as u64 - placeable,
+        rows,
+    })
+}
+
+/// Every lane's distribution, metered by `ops`.  Each lane is charged [`dist_cost`] from its cell COUNT before any of
+/// its cells is visited: a lane whose charge does not fit is refused, and so is every later lane, without visiting
+/// their cells (deterministic, visible).  A reader refusal gives no lanes (the page already shows the refusal).
+pub fn build_dist(ix: &FramesIndex, owner: u32, result: &Result<ForeignFrames, Refusal>, ops: u64) -> DistView {
+    let freq = ix.freq_hz.filter(|&f| f > 0);
+    let mut work = DistWork::default();
+    let (Ok(r), Some(o)) = (result, ix.owner(owner)) else { return DistView { lanes: Vec::new(), used: 0, work } };
+    let slots = o.slots.len() as u64;
+    let mut used = 0u64;
+    let mut exhausted = false;
+    let mut lanes = Vec::with_capacity(r.lanes.len());
+    for l in &r.lanes {
+        let cost = dist_cost(l.frames.len() as u64, slots);
+        if exhausted || used.saturating_add(cost) > ops {
+            exhausted = true;
+            lanes.push(Err(format!("distribution refused: budget ({ops} operations; this lane needs {cost})")));
+            continue;
+        }
+        used += cost;
+        lanes.push(lane_dist(o, l, freq, &mut work));
+    }
+    DistView { lanes, used, work }
+}
+
 // ---- the cache ---------------------------------------------------------------------------------------------------
 
 struct Entry {
@@ -496,6 +704,7 @@ struct Entry {
     result: Result<ForeignFrames, Refusal>,
     labels: Labels,
     view: Option<(Budget, Arc<ForeignView>)>,
+    dist: Option<Arc<DistView>>,
 }
 
 /// Build counters (tests read them): the reader pass and the view build.
@@ -503,6 +712,8 @@ struct Entry {
 pub struct Counters {
     pub reader: AtomicU64,
     pub view: AtomicU64,
+    /// Distribution builds (only the Lines-fit and Distribution modes ask for one).
+    pub dist: AtomicU64,
 }
 
 impl Counters {
@@ -516,6 +727,8 @@ impl Counters {
 pub struct ForeignSlot {
     entry: Mutex<Option<Entry>>,
     pub counters: Counters,
+    /// The distribution limit (None: DIST_OPS).
+    dist_ops: Option<u64>,
 }
 
 impl std::fmt::Debug for ForeignSlot {
@@ -525,6 +738,21 @@ impl std::fmt::Debug for ForeignSlot {
 }
 
 impl ForeignSlot {
+    /// A slot whose distributions are metered by `ops` instead of DIST_OPS.
+    pub fn with_dist_ops(ops: u64) -> ForeignSlot {
+        ForeignSlot { dist_ops: Some(ops), ..ForeignSlot::default() }
+    }
+
+    /// A slot already holding `result` for (owner, w32), as if the reader had produced it (tests drive the page with
+    /// reader results a capture cannot reach, such as a bound over the bit ceiling).
+    pub fn seeded(a: &Analysis, owner: u32, w32: bool, result: Result<ForeignFrames, Refusal>, dist_ops: Option<u64>) -> ForeignSlot {
+        let s = ForeignSlot { dist_ops, ..ForeignSlot::default() };
+        if let Ok(mut e) = s.entry.lock() {
+            *e = Some(Entry { owner, w32, result, labels: Labels::build(a), view: None, dist: None });
+        }
+        s
+    }
+
     /// The view for (owner, w32, budget): the reader runs only when (owner, w32) changes, the view only when that or
     /// the budget selector changes.
     pub fn view(&self, a: &Analysis, ix: &FramesIndex, owner: u32, w32: bool, budget: Budget) -> Arc<ForeignView> {
@@ -546,7 +774,7 @@ impl ForeignSlot {
                     &FrameBudgets::default(),
                     &Retention::default(),
                 );
-                *e = Some(Entry { owner, w32, result, labels: Labels::build(a), view: None });
+                *e = Some(Entry { owner, w32, result, labels: Labels::build(a), view: None, dist: None });
             }
             let x = e.as_mut().expect("set above");
             if !matches!(&x.view, Some((b, _)) if *b == budget) {
@@ -555,5 +783,17 @@ impl ForeignSlot {
             }
         }
         Arc::clone(&e.as_ref().expect("set").view.as_ref().expect("set").1)
+    }
+
+    /// The distribution for the entry the last [`ForeignSlot::view`] call built (same owner and W32), built once per
+    /// entry with the default [`DIST_OPS`]; None when there is no such entry.  Never called by the Bars mode.
+    pub fn dist(&self, ix: &FramesIndex, owner: u32, w32: bool) -> Option<Arc<DistView>> {
+        let mut e = self.entry.lock().ok()?;
+        let x = e.as_mut().filter(|x| x.owner == owner && x.w32 == w32)?;
+        if x.dist.is_none() {
+            self.counters.dist.fetch_add(1, Ordering::Relaxed);
+            x.dist = Some(Arc::new(build_dist(ix, owner, &x.result, self.dist_ops.unwrap_or(DIST_OPS))));
+        }
+        x.dist.clone()
     }
 }

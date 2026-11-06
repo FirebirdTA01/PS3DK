@@ -78,6 +78,8 @@ pub struct Owner {
     /// Built once with the slots: the counts, exact sum and percentiles a repaint must not recompute.
     unknown: u64,
     refused: u64,
+    /// MEASURED, nonzero and closed (FRAME k+1 is the next record): the slots an SPU/RSX lane can place into.
+    placeable: u64,
     sum: u128,
     p50: Metric<u64>,
     p90: Metric<u64>,
@@ -87,6 +89,22 @@ impl Owner {
     /// The slot of frame id `k` (binary search: the slots are in ascending frame order).
     pub fn slot_of(&self, k: u64) -> Option<(usize, &Slot)> {
         self.slots.binary_search_by_key(&k, |s| s.frame).ok().map(|i| (i, &self.slots[i]))
+    }
+
+    /// The slots an SPU/RSX lane can place into (measured, nonzero, closed), counted once with the slots.
+    pub fn placeable(&self) -> u64 {
+        self.placeable
+    }
+
+    /// The MEASURED elapsed values, ascending (built once with the slots).
+    pub fn measured_sorted(&self) -> &[u64] {
+        &self.sorted
+    }
+
+    /// The p-th percentile of the MEASURED values by the ZoneStats rank rule (refused below 20 measured frames):
+    /// O(1) from the cached order.
+    pub fn percentile_of(&self, p: u64) -> Metric<u64> {
+        percentile(&self.sorted, p)
     }
 }
 
@@ -159,6 +177,8 @@ impl FramesIndex {
             sorted.sort_unstable();
             let unknown = slots.iter().filter(|s| matches!(s.kind, SlotKind::Unknown(_))).count() as u64;
             let refused = slots.iter().filter(|s| matches!(s.kind, SlotKind::Refused(_))).count() as u64;
+            let placeable =
+                slots.iter().filter(|s| matches!(s.kind, SlotKind::Measured(d) if d > 0) && s.next_tb.is_some()).count() as u64;
             owners.push(Owner {
                 incarnation: inc,
                 name: lane.info.as_ref().map_or(String::new(), |i| i.name.clone()),
@@ -166,6 +186,7 @@ impl FramesIndex {
                 reasons: view.map_or(String::new(), |v| v.reasons.join(", ")),
                 unknown,
                 refused,
+                placeable,
                 sum: sorted.iter().map(|&d| u128::from(d)).sum(),
                 p50: percentile(&sorted, 50),
                 p90: percentile(&sorted, 90),

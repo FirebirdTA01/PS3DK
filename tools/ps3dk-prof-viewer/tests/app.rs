@@ -204,3 +204,52 @@ fn an_empty_userprofile_does_not_hide_home() {
     assert_eq!(home_from(h(""), h("")), None);
     assert_eq!(home_from(None, None), None);
 }
+
+/// While the link has no outcome, a snapshot's structural verdict (an accepted prefix reads "COMPLETE (ended early)",
+/// a snapshot with no whole chunk reads INCOMPLETE) is never shown as an end state: the strip says PROVISIONAL with
+/// the bytes received and there is no verdict badge.  Once the outcome is known the reader's verdict is unchanged.
+#[test]
+fn a_streaming_snapshot_is_provisional_never_an_end_state() {
+    use ps3dk_prof_viewer::model::{Document, VerdictTone};
+    let mut s = scenario(vec![lane(1, seqd(0, vec![frame(0, 1000, 0), frame(0, 2000, 1)]))]);
+    s.trailer = false;
+    let bytes = s.bytes();
+    let snap = Document::from_bytes(PathBuf::from("live.prof"), &bytes);
+    assert_eq!(snap.verdict().tone, VerdictTone::CompleteEarly, "the snapshot reads as an accepted prefix");
+    let streaming = |link: LinkState| {
+        let mut v = view(Outcome::Incomplete { saved: None, reasons: vec![] });
+        v.outcome = None;
+        v.link = link;
+        v.received = 4321;
+        v
+    };
+    for link in [LinkState::Handshake, LinkState::Streaming] {
+        let lv = streaming(link);
+        let (tone, badge, text) = shown_verdict(&snap, Some(&lv));
+        assert_eq!((tone, badge), (ps3dk_ui::Tone::Neutral, None), "no end-state badge while streaming");
+        assert!(text.starts_with("PROVISIONAL: still receiving (4321 bytes so far)"), "{text}");
+        assert!(text.contains("analysed up to byte"), "{text}");
+        assert!(!text.contains("ended early") && !text.starts_with("COMPLETE"), "{text}");
+    }
+    // A snapshot with no whole chunk: still PROVISIONAL, never INCOMPLETE while the link runs.
+    let torn = Document::from_bytes(PathBuf::from("live.prof"), &bytes[..10]);
+    let (_, badge, text) = shown_verdict(&torn, Some(&streaming(LinkState::Streaming)));
+    if torn.verdict().tone != VerdictTone::Malformed {
+        assert_eq!(badge, None);
+        assert!(text.starts_with("PROVISIONAL") && !text.contains("INCOMPLETE"), "{text}");
+    }
+    // The outcome is known: the reader's verdict, badge and text, unchanged.
+    let done = view(Outcome::PublishedEarly {
+        published: Published { path: PathBuf::from("/c/s.prof"), cleanup_warning: None },
+        cause: "disconnected by the user".into(),
+        cut: 1000,
+        torn_dropped: 0,
+    });
+    let (tone, badge, text) = shown_verdict(&snap, Some(&done));
+    assert_eq!((tone, badge), (ps3dk_ui::Tone::Success, Some("COMPLETE (ended early)")));
+    assert_eq!(text, snap.verdict().text);
+    // No live session (a file): unchanged too.
+    let (_, badge, text) = shown_verdict(&snap, None);
+    assert_eq!((badge, text), (Some("COMPLETE (ended early)"), snap.verdict().text));
+    assert!(!snap.verdict().text.contains("  "), "no run of spaces in the verdict text: {}", snap.verdict().text);
+}

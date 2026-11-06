@@ -10,7 +10,8 @@
 //! says it surely ran.
 //!
 //! **Building** a track is metered ([`ViewBudgets::build_ops`], charged before the work): per bar 6 (the copy and
-//! its four endpoint conversions and the core test), the tile table, and one unit per tile entry (at most
+//! its four endpoint conversions and the core test), the gap pass ([`track_gaps`]: per bar 1 plus [`GAP_MAX`] for
+//! its output, charged before it runs), the tile table, and one unit per tile entry (at most
 //! `WIDE_TILES` per bar; a wider or unbounded bar is one wide-list entry).  A refusal refuses that track's drawing.
 //!
 //! **Queries** are bounded per frame: every tile entry and wide-list entry inspected counts against `inspect_cap`
@@ -28,7 +29,7 @@ use ps3dk_prof::clockmap::{Budgets, End, Premises, Rat};
 use ps3dk_prof::durations::DurationBudgets;
 use ps3dk_prof::ext::SourceKey;
 use ps3dk_prof::foreign_timeline::{
-    foreign_timeline_of, has_core, FtBar, FtEpoch, FtSource, FtSourceState, ForeignTimeline, TimelineBudgets,
+    foreign_timeline_of, has_core, FtBar, FtCounts, FtEpoch, FtSource, FtSourceState, ForeignTimeline, TimelineBudgets,
 };
 use ps3dk_prof::frames_foreign::Retention;
 use ps3dk_prof::Analysis;
@@ -127,6 +128,14 @@ pub struct FTrack {
     /// Sorted as the reader sorted them (by begin.lo, begin.hi, epoch): an index is a stable identity.
     pub bars: Vec<FBar>,
     pub max_depth: u8,
+    /// Stretches (relative, ascending, disjoint) of the gap axis that NO placed completed pair's outer extent
+    /// [begin.lo, end.hi] meets, each longer than 1/GAP_FRACTION of that axis ([`track_gaps`]).  The gap axis is the
+    /// PPU axis in [`build`], else the union of the bars' finite endpoints.  It says nothing about work that was not
+    /// placed: [`FTrack::unplaced`] lists that coverage.
+    pub gaps: Vec<(f64, f64)>,
+    /// The coverage the gaps cannot speak for: pairs not placed, censored, unpaired, open, loss records and epochs
+    /// without an inventory (from the reader's counts; "unknown" where the reader does not know).
+    pub unplaced: String,
     tiles: Vec<Vec<u32>>,
     wide: Vec<u32>,
     /// The finite extent the tiles cover (relative), or None when no bar has a finite outer extent.
@@ -218,14 +227,22 @@ fn new_track(s: &FtSource) -> FTrack {
         refusal: None,
         bars: Vec::new(),
         max_depth: 0,
+        gaps: Vec::new(),
+        unplaced: unplaced_text(&s.counts),
         tiles: Vec::new(),
         wide: Vec::new(),
         span: None,
     }
 }
 
-/// One source's row, metered by `vb` (exposed for tests: a synthetic source exercises the geometry directly).
+/// One source's row, metered by `vb` (exposed for tests: a synthetic source exercises the geometry directly).  The
+/// gaps are taken over the bars' own finite extent (no PPU axis).
 pub fn build_track_with(s: &FtSource, origin: u64, vb: ViewBudgets) -> FTrack {
+    build_track_axis(s, origin, None, vb)
+}
+
+/// As [`build_track_with`], with the gaps taken over the PPU axis [0, axis_end] when it is given.
+pub fn build_track_axis(s: &FtSource, origin: u64, axis_end: Option<f64>, vb: ViewBudgets) -> FTrack {
     let mut t = new_track(s);
     let bars = match &s.state {
         FtSourceState::Refused(l) => {
@@ -244,6 +261,7 @@ pub fn build_track_with(s: &FtSource, origin: u64, vb: ViewBudgets) -> FTrack {
         t.bars = Vec::new();
         t.tiles = Vec::new();
         t.wide = Vec::new();
+        t.gaps = Vec::new();
         t.span = None;
         t
     };
@@ -262,6 +280,10 @@ pub fn build_track_with(s: &FtSource, origin: u64, vb: ViewBudgets) -> FTrack {
         })
         .collect();
     t.max_depth = t.bars.iter().map(|b| b.bar.depth).max().unwrap_or(0);
+    if !charge(t.bars.len() as u64 + GAP_MAX as u64) {
+        return refuse(t);
+    }
+    t.gaps = track_gaps(&t.bars, axis_end.map(|e| (0.0, e)));
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for b in &t.bars {
         if let Some((a, z)) = outer(b) {
@@ -310,6 +332,91 @@ pub fn build_track_with(s: &FtSource, origin: u64, vb: ViewBudgets) -> FTrack {
     t
 }
 
+/// A gap must be longer than (axis / GAP_FRACTION) to be listed.
+pub const GAP_FRACTION: f64 = 50.0;
+/// The most gaps one track can list: disjoint stretches each longer than axis / GAP_FRACTION (the allocation the
+/// view budget charges up front).
+pub const GAP_MAX: usize = GAP_FRACTION as usize;
+
+/// The stretches of the axis [a, b] that no bar's outer extent [begin.lo, end.hi] meets, each longer than
+/// (b - a) / GAP_FRACTION, clipped to [a, b].  Every bar counts, including the finite endpoint of a half-unbounded
+/// bar: an unbounded begin covers everything before its end, an unbounded end everything after its begin.
+///
+/// One sweep over `bars` in the reader's order (ascending begin.lo, unbounded first).  Bars out of that order give no
+/// gaps at all (never a gap that could cross a bar).  Without an axis, [a, b] is the union of the bars' finite
+/// endpoints and no edge stretch is listed.  At most GAP_MAX gaps.
+pub fn track_gaps(bars: &[FBar], axis: Option<(f64, f64)>) -> Vec<(f64, f64)> {
+    let start = |x: &FBar| x.b_lo.f().unwrap_or(f64::NEG_INFINITY);
+    let finish = |x: &FBar| x.e_hi.f().unwrap_or(f64::INFINITY);
+    let (a, b, edges) = match axis {
+        Some((a, b)) => (a, b, true),
+        None => {
+            let fin = bars.iter().flat_map(|x| [x.b_lo.f(), x.e_hi.f()]).flatten();
+            let (lo, hi) = fin.fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| (l.min(v), h.max(v)));
+            (lo, hi, false)
+        }
+    };
+    if !(a.is_finite() && b.is_finite() && b > a) || bars.is_empty() {
+        return Vec::new();
+    }
+    let min = (b - a) / GAP_FRACTION;
+    let mut out = Vec::new();
+    // `cursor`: everything before it is covered by a bar seen so far (or is before the axis).
+    let mut cursor = if edges { a } else { f64::NEG_INFINITY };
+    let mut last_start = f64::NEG_INFINITY;
+    for x in bars {
+        let (s0, e0) = (start(x), finish(x));
+        if s0 < last_start || s0.is_nan() || e0.is_nan() {
+            return Vec::new();
+        }
+        last_start = s0;
+        if cursor >= b {
+            continue; // the rest of the axis is covered; keep checking the order
+        }
+        let gap_end = s0.min(b);
+        if cursor.is_finite() && cursor >= a && gap_end - cursor > min && out.len() < GAP_MAX {
+            out.push((cursor, gap_end));
+        }
+        cursor = cursor.max(e0);
+    }
+    if edges && cursor.is_finite() && b - cursor.max(a) > min && out.len() < GAP_MAX {
+        out.push((cursor.max(a), b));
+    }
+    out
+}
+
+/// The label drawn inside a gap.
+pub const GAP_LABEL: &str = "no placed pairs";
+
+fn unplaced_text(c: &FtCounts) -> String {
+    let unknown = |v: Option<u64>| v.map_or("unknown".to_string(), |n| n.to_string());
+    format!(
+        "Not shown on this row at all: {} pairs not placed, {} censored, {} unpaired, {} open, loss records {}, {} \
+         epoch(s) without an inventory (their events unknown)",
+        c.not_placed,
+        c.censored,
+        c.unpaired,
+        unknown(c.open),
+        unknown(c.loss_records),
+        c.no_inventory_epochs
+    )
+}
+
+/// The track's gap lines: the stretches no placed completed-pair outer extent meets, and, separately, the coverage
+/// that was not placed (which those stretches cannot speak for).  None without gaps.
+pub fn gaps_line(t: &FTrack, tb: crate::model::TimeBase) -> Option<String> {
+    let longest = t.gaps.iter().map(|&(a, b)| b - a).fold(0.0_f64, f64::max);
+    (!t.gaps.is_empty()).then(|| {
+        format!(
+            "{} shaded stretch(es) (longest {}): no placed completed pair's outer extent (earliest begin to latest \
+             end) meets them; work that was not placed may still fall there. {}",
+            t.gaps.len(),
+            tb.ticks_f(longest),
+            t.unplaced
+        )
+    })
+}
+
 pub fn build_track(s: &FtSource, origin: u64) -> FTrack {
     build_track_with(s, origin, ViewBudgets::default())
 }
@@ -317,7 +424,9 @@ pub fn build_track(s: &FtSource, origin: u64) -> FTrack {
 /// Builds the rows.  The shared PPU-axis rule: `origin` is the timeline origin and `axis_len` the PPU data extent;
 /// bars outside it are counted in their track header ("Fit all" widens the axis to the interpolated bounds).
 pub fn build(_a: &Analysis, ft: &ForeignTimeline, origin: u64, axis_len: u64, w32: bool) -> FTimeline {
-    let mut tracks: Vec<FTrack> = ft.sources.iter().map(|s| build_track(s, origin)).collect();
+    let axis = Some(axis_len as f64);
+    let mut tracks: Vec<FTrack> =
+        ft.sources.iter().map(|s| build_track_axis(s, origin, axis, ViewBudgets::default())).collect();
     // SPU lanes first, then RSX domains (stable within each kind).
     tracks.sort_by_key(|t| matches!(t.source, SourceKey::Gpu(_)));
     // Bars wholly outside the shown axis are never drawn there: say how many, so an empty row is explained.

@@ -11,7 +11,8 @@ fn main() -> eframe::Result<()> {
         println!("ps3dk-prof-viewer {}", ps3dk_version::VERSION);
         return Ok(());
     }
-    // ps3dk-prof-viewer [--page=overview|timeline|zones] [--view=START:LEN]
+    // ps3dk-prof-viewer [--page=overview|timeline|zones|frames|paths] [--view=START:LEN]
+    //                   [--graph=bars|lines|distribution|map]
     //                   [--connect=IP:PORT] [--capture-dir=DIR] [--min-size]
     //                   [capture.prof]
     // --view sets the timeline window in ticks from the capture start (for
@@ -39,6 +40,14 @@ fn main() -> eframe::Result<()> {
     } else {
         Page::Overview
     };
+    // The Frames page graph mode (for screenshots and bug reports).
+    let graph = args.iter().find_map(|a| match a.strip_prefix("--graph=")? {
+        "bars" => Some(ps3dk_prof_viewer::graphs::GraphMode::Bars),
+        "lines" => Some(ps3dk_prof_viewer::graphs::GraphMode::Lines),
+        "distribution" => Some(ps3dk_prof_viewer::graphs::GraphMode::Distribution),
+        "map" => Some(ps3dk_prof_viewer::graphs::GraphMode::VerdictMap),
+        _ => None,
+    });
     let size = if args.iter().any(|a| a == "--min-size") {
         [860.0, 540.0]
     } else {
@@ -63,6 +72,9 @@ fn main() -> eframe::Result<()> {
             ui::install(&cc.egui_ctx);
             let mut app = App::new(open);
             app.page = page;
+            if let Some(g) = graph {
+                app.frames.mode = g;
+            }
             if let Some((host, port)) = connect {
                 let form = ConnectForm {
                     host,

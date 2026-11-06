@@ -159,7 +159,7 @@ impl Document {
                 Some(p) => VerdictView {
                     tone: VerdictTone::CompleteEarly,
                     text: format!(
-                        "COMPLETE (ended early): no TRAILER; analysed up to byte {} ({} whole chunks{}); loss not yet                          reported at the cut cannot be seen",
+                        "COMPLETE (ended early): no TRAILER; analysed up to byte {} ({} whole chunks{}); loss not yet reported at the cut cannot be seen",
                         p.cut,
                         p.chunks,
                         if p.torn_dropped > 0 { format!(", {} torn bytes dropped", p.torn_dropped) } else { String::new() }
