@@ -7,7 +7,7 @@
 // but are beyond the export bound (the model's own full C stream check covers them); B+C and above were never
 // assigned.  A missing file, a lane without a header, a duplicate or out-of-range row, an unknown expectation
 // directive or an expectation without a verdict is an error.  Exit 1 on any error.
-use ps3dk_prof::ext::{SourceKey, SourceReport, Structure};
+use ps3dk_prof::ext::{OpenBegins, SourceKey, SourceReport, Structure};
 use ps3dk_prof::{load, Outcome, Verdict};
 use std::collections::HashMap;
 
@@ -141,6 +141,20 @@ fn check(stem: &std::path::Path) -> Result<(), String> {
                     return Err(format!("lane {id}: got {got}, want {want}"));
                 }
                 check_truth(s, id, &truth, &meta)?;
+            }
+            Some("open") => {
+                // "open ID verified N" | "open ID unverifiable N" | "open ID nofinal": the reader's open_begins state
+                let a = analysed(&outcome)?;
+                let id: u32 = f.get(1).and_then(|x| x.parse().ok()).ok_or("open: lane id".to_string())?;
+                let got = match source(a, id)?.open_begins {
+                    OpenBegins::Verified(n) => format!("verified {n}"),
+                    OpenBegins::Unverifiable(n) => format!("unverifiable {n}"),
+                    OpenBegins::NoFinal => "nofinal".to_string(),
+                };
+                let want = f[2..].join(" ");
+                if got != want {
+                    return Err(format!("lane {id} open_begins: got {got}, want {want}"));
+                }
             }
             Some("truth") => {
                 let a = analysed(&outcome)?;

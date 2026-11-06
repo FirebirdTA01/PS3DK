@@ -403,8 +403,14 @@ int psp_spu_fini_close(psp_spu *s)
     return PSP_OK;
 }
 
+/* the depth refusal: a pure read of the writer, checked before anything else so that the refused call issues no
+ * channel command, no DMA and no decrementer write, and changes no writer state */
+static int dec_depth_refused(const psp_spu *s) { return s->depth != 0 || s->suppressed != 0; }
+
 int psp_spu_dec_preflight(psp_spu *s)
 {
+    if (dec_depth_refused(s))
+        return PSP_EDEPTH;
     if (!(s->flags & PSP_F_OWN_DEC))
         return PSP_ENOTSUP;
     if (s->flags & PSP_F_FAULT)
@@ -435,6 +441,8 @@ void psp_spu_dec_commit(psp_spu *s, uint32_t v)
 int psp_spu_dec_write(psp_spu *s, uint32_t v)
 {
     int rc;
+    if (dec_depth_refused(s))
+        return PSP_EDEPTH; /* FIRST, before the initial flush: nothing flushed, written or published */
     if (!(s->flags & PSP_F_OWN_DEC))
         return PSP_ENOTSUP;
     rc = psp_spu_flush(s);

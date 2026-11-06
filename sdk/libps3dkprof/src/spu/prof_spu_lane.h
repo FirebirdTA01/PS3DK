@@ -26,6 +26,8 @@
 #define PS3DK_PROF_SPU_EAGAIN (-20)  /* dec_write: earlier events are not all published yet; flush and retry */
 #define PS3DK_PROF_SPU_EFAULT (-21)  /* terminal: an MFC status was wrong, or an invalid descriptor index was used */
 #define PS3DK_PROF_SPU_EEXHAUSTED (-22) /* flush: the generation/write counters are spent; only fini's CLOSED remains */
+#define PS3DK_PROF_SPU_EDEPTH (-23) /* dec_write inside a zone (or with suppressed BEGINs): refused before any flush,
+                                    * write or publication; NOT retryable by flushing (end the zones first) */
 
 #define PS3DK_PROF_SPU_OWN_DEC 1u
 #define PS3DK_PROF_SPU_STAGING_BYTES(ls_cap) (((uint32_t)(ls_cap) + 8u) * 8u)
@@ -66,6 +68,8 @@ void ps3dk_prof_spu_end(ps3dk_prof_spu_writer *w, uint32_t desc_index);
 void ps3dk_prof_spu_mark(ps3dk_prof_spu_writer *w, uint32_t desc_index);
 int ps3dk_prof_spu_flush(ps3dk_prof_spu_writer *w);
 int ps3dk_prof_spu_fini(ps3dk_prof_spu_writer *w);
+/* EDEPTH first (a zone is open or a BEGIN was suppressed: nothing happens), then ENOTSUP without OWN_DEC; then a
+ * flush, the preflight (EAGAIN: earlier events not all published, retry after a flush), the write and its EPOCH. */
 int ps3dk_prof_spu_dec_write(ps3dk_prof_spu_writer *w, uint32_t v);
 
 extern const char __start_ps3dkprof_spudesc[] __attribute__((weak));

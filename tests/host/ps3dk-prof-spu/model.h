@@ -64,7 +64,7 @@ typedef struct lane_h {
     port_ctx pc;
     psp_port port;
     uint8_t *buf;
-    uint32_t idx, lane_id;
+    uint32_t idx, lane_id, domain_id;
     tev *truth;
     uint64_t ntruth, cap;
     uint64_t tbase; /* seqs below it were assigned and lost before the trace started (an injected state) */
@@ -107,9 +107,13 @@ void zm(lane_h *h, uint16_t d);
 /* checks after each library call: no reservation of ours outlives it, the app tag mask is restored */
 void call_ok(lane_h *h, const char *what);
 
+/* the open_begins field of the lane's accepted FINAL: 1 and *open set when one was accepted, else 0 */
+int final_open(run *r, uint32_t lane_id, uint32_t *open);
+
 /* write <dir>/<name>.prof (+ .truth); with_trailer = the run finished without sink failure */
 void write_capture(run *r, const char *dir, const char *name);
-/* the independent stream check: tiling, event identities vs truth, FINAL = emitted; returns 0 when consistent */
+/* the independent stream check: tiling, event identities vs truth, FINAL = emitted, and the FINAL's open_begins
+ * against a replay of the accepted chunks under the depth-zero epoch rule; returns 0 when consistent */
 int check_streams(run *r, const char *name);
 
 /* what the sink ACCEPTED for a lane (the collector stores only accepted chunks), and the stats check against it:
