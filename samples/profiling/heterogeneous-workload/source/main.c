@@ -11,6 +11,18 @@
 #if SAMPLE_LIVE
 #include "live.h"
 #endif
+/* The ABI the build selected (SAMPLE_ABI_LP64, from CMake's SAMPLE_ABI) must be the compiled data model, and the
+ * printed ABI is derived from the compiled model, never from the cache string. */
+#ifndef SAMPLE_ABI_LP64
+#error "SAMPLE_ABI_LP64 must be defined by the build"
+#endif
+#ifdef __LP64__
+#define SAMPLE_ABI_NAME "lp64"
+_Static_assert(SAMPLE_ABI_LP64 == 1 && sizeof(void *) == 8, "SAMPLE_ABI is not the compiled data model (LP64)");
+#else
+#define SAMPLE_ABI_NAME "ilp32"
+_Static_assert(SAMPLE_ABI_LP64 == 0 && sizeof(void *) == 4, "SAMPLE_ABI is not the compiled data model (ILP32)");
+#endif
 #if SAMPLE_PROF_EXT
 #include "prof_ext_rt.h"
 #if !PS3DK_PROF
@@ -64,7 +76,7 @@ int main(void)
     if(!log){close(fd);return 1;}
     fprintf(log,"kind,frame,phase,sequence,lane,items,digest,compute_us,frame_us,spu_dec_begin,spu_dec_end,gpu_begin,gpu_end,gpu_valid\n");
     printf("WORKLOAD_BEGIN abi=%s profiling=%d live=%d csv=%s phase_seconds=%u session_seconds=%u\n",
-           SAMPLE_ABI,PS3DK_PROF,SAMPLE_LIVE,path,(unsigned)SAMPLE_PHASE_SECONDS,(unsigned)SAMPLE_SESSION_SECONDS);
+           SAMPLE_ABI_NAME,PS3DK_PROF,SAMPLE_LIVE,path,(unsigned)SAMPLE_PHASE_SECONDS,(unsigned)SAMPLE_SESSION_SECONDS);
     scene_owned=1;
     if(scene_init()){puts("WORKLOAD_FAIL scene-init");goto done;}
     uint64_t idle=sample_now_us();

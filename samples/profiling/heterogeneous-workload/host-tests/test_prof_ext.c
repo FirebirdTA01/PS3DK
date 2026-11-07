@@ -141,6 +141,14 @@ static void args(void)
     check(pe_pack_ext(0, 0, 1, 0x40, 1024, 0x80, &x) != 0, "an unaligned ring EA is refused");
     check(pe_pack_ext(0, 0, 1, 0x80, 0, 0x80, &x) != 0, "zero ring slots are refused");
     check(pe_pack_ext(0, 0, 1, 0, 1, 0, &x) == 0 && pe_unpack_ext(x).ring_ea == 0, "no lane: ring EA 0 (unprofiled)");
+    /* P-EA32: the slot EA is a full 64-bit parameter, checked like the others (it was a uint32_t: narrowed) */
+    check(pe_pack_ext(0x100000000ull, 0, 1, 0x80, 1024, 0x80, &x) != 0, "a slot EA of 4 GiB is refused (no narrowing)");
+    check(pe_pack_ext(0x100002000ull, 0, 1, 0, 1, 0, &x) != 0, "a 64-bit slot EA is refused for the unprofiled words too");
+    check(pe_pack_ext(0x10002040u, 0, 1, 0x80, 1024, 0x80, &x) != 0, "a misaligned slot EA is refused");
+    check(pe_pack_ext(0xffffff80u, 0, 1, 0xffffff80u, 1024, 0xffffff80u, &x) == 0 && pe_unpack_ext(x).slot_ea == 0xffffff80u &&
+              pe_unpack_ext(x).ctl_ea == 0xffffff80u && pe_unpack_ext(x).ring_ea == 0xffffff80u,
+          "the highest aligned 32-bit EAs pack and round-trip exactly");
+    check(pe_pack_ext(0, 0, 1, 0x80, 1024, 0x100000000ull, &x) != 0, "a 64-bit control-block EA is refused");
     check(6u * PE_LANE_BYTES == 50688u, "six lanes' rings and control blocks = 50688 B");
     check(PE_RING_SLOTS >= 64 && (PE_RING_SLOTS & (PE_RING_SLOTS - 1)) == 0, "ring slots: a power of two >= 64");
     check(PE_IMAGE_BYTES >= 4096u && PE_IMAGE_BYTES <= 16777216u, "image bytes inside 4 KiB..16 MiB");
@@ -849,6 +857,68 @@ static const char *run(mock *m, const char *fail, int nth, unsigned workers, int
 }
 static int has(const char *log, const char *seq) { return strstr(log, seq) != NULL; }
 
+static void worker_args(void)
+{
+    pmock m;
+    pe_epochs e;
+    pe_args a[3];
+    pool_io io = pio(&m);
+    pe_lane good0 = {1, 1024, 0x30000080u, 0x30010000u}, good1 = {2, 1024, 0x30020000u, 0x30030000u};
+    pe_lane high = {2, 1024, 0x30020000u, 0x100000000ull}, odd = {2, 1024, 0x30020040u, 0x30030000u};
+    uint64_t slot[3] = {0x10002000u, 0x10002100u, 0x10002200u};
+
+    memset(&m, 0, sizeof m);
+    pe_epochs_init(&e, 2, 0);
+    const pe_lane *both[3] = {&good0, &good1, NULL};
+    check(pp_worker_args(&e, &io, slot, both, 2, a) == 0 && e.w32_eligible && !m.log[0], "args: two lanes pack");
+    check(pe_unpack_ext(a[1]).ring_ea == 0x30020000u && pe_unpack_ext(a[1]).ctl_ea == 0x30030000u &&
+              pe_unpack_ext(a[1]).slot_ea == 0x10002100u && pe_unpack_ext(a[1]).lane == 1 && pe_unpack_ext(a[1]).lanes == 2,
+          "args: worker 1's words are its lane's");
+
+    /* a control-block EA above 4 GiB: refused loudly, the worker unprofiled, eligibility cleared, SPU reported off */
+    memset(&m, 0, sizeof m);
+    pe_epochs_init(&e, 2, 0);
+    const pe_lane *hi[3] = {&good0, &high, NULL};
+    check(pp_worker_args(&e, &io, slot, hi, 2, a) == 1, "args: a 64-bit control-block EA returns 1 (SPU off)");
+    check(strstr(m.log, "!pack-refused") != NULL, "args: the refusal is logged (no silent fallback)");
+    check(!e.w32_eligible && e.why && strstr(e.why, "argument packing refused"), "args: a refusal clears W32 eligibility");
+    check(pe_unpack_ext(a[1]).ring_ea == 0 && pe_unpack_ext(a[1]).slot_ea == 0x10002100u,
+          "args: the refused worker gets the unprofiled words");
+    check(pe_unpack_ext(a[0]).ring_ea == 0x30000080u, "args: the other worker keeps its lane");
+    memset(&m, 0, sizeof m);
+    pe_epochs_init(&e, 2, 0);
+    const pe_lane *mis[3] = {&good0, &odd, NULL};
+    check(pp_worker_args(&e, &io, slot, mis, 2, a) == 1 && !e.w32_eligible && strstr(m.log, "!pack-refused"),
+          "args: a misaligned ring EA is refused the same way");
+
+    /* no lane at all: unprofiled words, nothing refused (the caller reports "SPU lanes are off") */
+    memset(&m, 0, sizeof m);
+    pe_epochs_init(&e, 2, 0);
+    const pe_lane *none[3] = {NULL, NULL, NULL};
+    check(pp_worker_args(&e, &io, slot, none, 2, a) == 0 && e.w32_eligible && !m.log[0] &&
+              pe_unpack_ext(a[0]).ring_ea == 0 && pe_unpack_ext(a[1]).ring_ea == 0,
+          "args: without lanes the workers run unprofiled, nothing refused");
+
+    /* a work slot above 4 GiB: nothing the SPU program can use; the pool must not start */
+    memset(&m, 0, sizeof m);
+    pe_epochs_init(&e, 2, 0);
+    uint64_t slot_hi[3] = {0x10002000u, 0x100002100ull, 0};
+    check(pp_worker_args(&e, &io, slot_hi, both, 2, a) == -1 && strstr(m.log, "!slot-pack-refused") && !e.w32_eligible,
+          "args: a 64-bit work slot EA refuses the start");
+
+    /* pe_spu_off: reported off and logged; the lanes stay live and are still ended after the join */
+    mock lm;
+    memset(&lm, 0, sizeof lm);
+    pe_port lp = {&lm, m_init, m_tb, m_reg, m_lc, m_le, m_ga, m_gc, m_dr, m_fe, m_gd, m_gr, m_te, m_sd, m_log};
+    pe_state s;
+    check(pe_start(&s, &lp, 2) == 0 && s.spu == 1, "spu-off: lanes up");
+    pe_spu_off(&s, &lp, "spu-off-pack-refused");
+    check(s.spu == 0 && strstr(lm.log, "!spu-off-pack-refused"), "spu-off: SPU reported off, logged");
+    pe_spu_off(&s, &lp, "again");
+    check(!strstr(lm.log, "!again"), "spu-off: logged once");
+    check(pe_stop(&s, &lp, 1) == 0 && lm.counts[4] == 2, "spu-off: both lanes still ended after the join");
+}
+
 static void lifecycle(void)
 {
     mock m;
@@ -894,6 +964,7 @@ int main(void)
     fence();
     worker();
     pool();
+    worker_args();
     end_to_end();
     receipt();
     lifecycle();

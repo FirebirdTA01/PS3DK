@@ -7,11 +7,14 @@ included).  Any difference is a FAIL naming it and stops the checkpoint for revi
 Rules: every nm / readelf record is classified or the check fails; an undefined symbol is discharged only by an
 externally visible (GLOBAL or WEAK) definition in some member, never by a local one; weak undefined references are
 judged explicitly (the expected weak set is empty); each member has exactly one ELF header with each field once, and
-exactly one Tag_GNU_Power_CellOS_Data_Model attribute, which must be ILP32 (the e_flags are the same for ILP32 and
-LP64, so they cannot tell the ABIs apart); the reference archive's headers must themselves be complete and uniform.
+exactly one Tag_GNU_Power_CellOS_Data_Model attribute, which must be the selected data model (the e_flags are the same
+for ILP32 and LP64, so they cannot tell the ABIs apart); the reference archive's headers must themselves be complete
+and uniform.  Both data models' expectations are fixed HERE (CONTRACTS); --data-model only selects one, so a command
+line cannot widen what an archive may contain.
 
-usage: r4b_archive.py --ar AR --nm NM --readelf READELF --archive LIB.a --members-mk ext-members.mk
-                      --ref-archive SHIPPED_ILP32.a          (exit 0 iff every check passes)
+usage: r4b_archive.py --data-model ILP32|LP64 --ar AR --nm NM --readelf READELF --archive LIB.a
+                      --members-mk ext-members.mk --ref-archive SHIPPED.a   (the shipped libps3dkprof.a of the same data
+                      model: ppu/lib for ILP32, ppu/lib/lp64 for LP64; exit 0 iff every check passes)
 The judging functions take tool output text, so r4b_selftest.py drives them with synthetic inputs."""
 import argparse
 import re
@@ -30,6 +33,11 @@ IMPORTS_R4B_R2 = ('.TOC.', '__errno', 'clock_gettime', 'close', 'free', 'memalig
 # (read), pal_rewind (lseek) and pal_sync (fsync), so the r2 baseline above was stale; target attempt 2 (r4b-t3)
 # failed on exactly them.  Any further unexpected import still stops the checkpoint.
 IMPORTS = IMPORTS_R4B_R2 + ('fsync', 'lseek', 'read')
+# LP64 (the -mlp64 build of the same ten members): MEASURED on the ext-lp64 archive and frozen for review, each name
+# traced to its call site in a member (lp64-ext port, design section 3: never "whatever nm printed").  The set equals
+# the ILP32 one: the same sources call the same libc, pthread, LV2 and GCM entry points in both data models.
+IMPORTS_LP64 = IMPORTS
+CONTRACTS = {'ILP32': IMPORTS, 'LP64': IMPORTS_LP64}
 WEAK_IMPORTS = ()
 HEADER = {'Class': 'ELF64', 'Data': "2's complement, big endian", 'Machine': 'PowerPC64'}
 REF_FLAGS = '0x0'  # measured on the shipped ILP32 (and LP64) objects
@@ -109,8 +117,10 @@ def judge_headers(hdr, ref_hdr):
     return errs
 
 
-def judge_attributes(text):
-    """readelf -A of the archive: each member exactly one data-model tag, ILP32"""
+def judge_attributes(text, model='ILP32'):
+    """readelf -A of the archive: each member exactly one data-model tag, the selected one"""
+    if model not in CONTRACTS:
+        raise Bad(f'unknown data model {model!r}')
     tags, cur = {}, None
     for l in text.splitlines():
         s = l.strip()
@@ -126,14 +136,17 @@ def judge_attributes(text):
             raise Bad(f'unrecognised readelf -A record {s!r}')
     errs = []
     for n in MEMBERS:
-        if tags.get(n) != ['ILP32']:
-            errs.append(f'{n}: data model {tags.get(n)} (want exactly [ILP32])')
+        if tags.get(n) != [model]:
+            errs.append(f'{n}: data model {tags.get(n)} (want exactly [{model}])')
     errs += [f'attributes for a non-member {n}' for n in tags if n not in MEMBERS]
     return errs
 
 
-def judge_imports(nm_text):
+def judge_imports(nm_text, model='ILP32'):
     """nm (default format) of the archive.  Returns (errors, external undefined, weak undefined)."""
+    if model not in CONTRACTS:
+        raise Bad(f'unknown data model {model!r}')
+    imports = set(CONTRACTS[model])
     und, weak, gdef = set(), set(), set()
     errs = []
     blocks = []
@@ -162,8 +175,8 @@ def judge_imports(nm_text):
         errs.append(f'nm member blocks {blocks} (want exactly one block for each of the {len(MEMBERS)} members)')
     ext = und - gdef
     wext = weak - gdef
-    errs += [f'unexpected import {n}' for n in sorted(ext - set(IMPORTS))]
-    errs += [f'expected import absent {n}' for n in sorted(set(IMPORTS) - ext)]
+    errs += [f'unexpected import {n}' for n in sorted(ext - imports)]
+    errs += [f'expected import absent {n}' for n in sorted(imports - ext)]
     errs += [f'unexpected weak import {n}' for n in sorted(wext - set(WEAK_IMPORTS))]
     return errs, sorted(ext), sorted(wext)
 
@@ -177,6 +190,7 @@ def run(cmd):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument('--data-model', required=True, choices=sorted(CONTRACTS))
     for a in ('--ar', '--nm', '--readelf', '--archive', '--members-mk', '--ref-archive'):
         ap.add_argument(a, required=True)
     a = ap.parse_args()
@@ -186,8 +200,8 @@ def main():
         errs += judge_members(run([a.ar, 't', a.archive]))
         errs += judge_headers(parse_readelf_h(run([a.readelf, '-h', a.archive])),
                               parse_readelf_h(run([a.readelf, '-h', a.ref_archive])))
-        errs += judge_attributes(run([a.readelf, '-A', a.archive]))
-        e, ext, wext = judge_imports(run([a.nm, a.archive]))
+        errs += judge_attributes(run([a.readelf, '-A', a.archive]), a.data_model)
+        e, ext, wext = judge_imports(run([a.nm, a.archive]), a.data_model)
         errs += e
         print('external undefined (verbatim): ' + ' '.join(ext))
         print('weak undefined: ' + (' '.join(wext) or '(none)'))
@@ -195,7 +209,7 @@ def main():
         errs.append(str(b))
     for x in errs:
         print('FAIL ' + x)
-    print('R4B ARCHIVE ' + ('PASS' if not errs else 'FAIL'))
+    print(f'R4B ARCHIVE ({a.data_model}) ' + ('PASS' if not errs else 'FAIL'))
     return 0 if not errs else 1
 
 

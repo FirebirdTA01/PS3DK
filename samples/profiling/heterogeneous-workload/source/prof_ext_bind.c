@@ -1,5 +1,5 @@
 /* SAMPLE_PROF_EXT target binding: prof_ext.c's port bound to the profiler API and GCM.  Compiled only with
- * SAMPLE_PROF_EXT (ILP32, the uninstalled ext archive). */
+ * SAMPLE_PROF_EXT (either PPU data model, with the uninstalled ext archive of the same data model). */
 #include "prof_ext_rt.h"
 #include "workload.h"
 #include <cell/gcm.h>
@@ -186,6 +186,7 @@ static const pe_port g_port = {NULL,        b_init,       b_thread_begin, b_regi
 int pe_rt_start(unsigned workers) { return pe_start(&g_pe, &g_port, workers); }
 const pe_lane *pe_rt_lane(unsigned i) { return g_pe.spu && i < g_pe.lanes ? &g_pe.lane[i] : NULL; }
 int pe_rt_spu_on(void) { return g_pe.spu; }
+void pe_rt_spu_off(const char *why) { pe_spu_off(&g_pe, &g_port, why); }
 void pe_rt_gpu_start(void) { pe_gpu_start(&g_pe, &g_port); }
 void pe_rt_gpu_frame(void)
 {

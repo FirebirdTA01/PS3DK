@@ -74,21 +74,36 @@ static void e1_lines_zero(void)
     memset(&e1_commit_line, 0, sizeof e1_commit_line);
     E1_SYNC();
 }
-static uint64_t e1_report_eas(void)
+/* the report lines' EAs, checked (P-EA32, e1_report.h): -1 when either is above 4 GiB (never narrowed) */
+static int e1_report_eas(uint64_t *out)
 {
-    return ((uint64_t)(uint32_t)(uintptr_t)&e1_payload_line << 32) | (uint32_t)(uintptr_t)&e1_commit_line;
+    return e1_pack_report_eas((uint64_t)(uintptr_t)&e1_payload_line, (uint64_t)(uintptr_t)&e1_commit_line, out);
 }
-/* the PPU's own read of line A's read_idx (the drainer's store): one aligned 64-bit load after a sync */
+/* the PPU's own read of line A's read_idx (the drainer's store): one aligned 64-bit load after a sync, at the full
+ * process address the lane reported (no 32-bit round trip) */
 static uint64_t e1_line_a_read_idx(uint64_t ea_ctl)
 {
     E1_SYNC();
-    return *(volatile const uint64_t *)(uintptr_t)(uint32_t)(ea_ctl + PSP_A_READ_IDX);
+    return *(volatile const uint64_t *)(uintptr_t)(ea_ctl + PSP_A_READ_IDX);
 }
 #else
 #include "e1_host.h" /* host tests: fakes for every LV2/GCM call, the host SPU producer, the file seams */
 #endif
 
 #include "e1_marker.h"
+
+/* The data model, printed in the start marker, is the compiled one; a build that declares it (E1_ABI_LP64, from
+ * CMake's E1_ABI) must declare the compiled one. */
+#ifdef __LP64__
+#define E1_ABI_NAME "lp64"
+#else
+#define E1_ABI_NAME "ilp32"
+#endif
+#if defined(E1_ABI_LP64)
+_Static_assert(E1_ABI_LP64 == (sizeof(void *) == 8), "E1_ABI is not the compiled data model");
+#elif !defined(E1_HOST_TEST)
+#error "E1_ABI_LP64 must be defined by the build"
+#endif
 
 #ifndef E1_WAIT_US
 #define E1_WAIT_US 2000000u /* each polling deadline */
@@ -300,8 +315,10 @@ static void e1_spu_phase(e1_spu *sp)
                 args.arg0 = sp->lane.ea_ring;
                 args.arg1 = (uint64_t)sp->lane.ring_slots << 32;
                 args.arg2 = sp->lane.ea_ctl;
-                args.arg3 = e1_report_eas();
-                if ((rc = sysSpuThreadInitialize(&sp->thread, sp->group, 0, &sp->image, &tattr, &args)) != 0)
+                if (e1_report_eas(&args.arg3) != 0) {
+                    rc = -1;
+                    call = "ea32"; /* a report line above 4 GiB: P-EA32 failed, the thread is not created */
+                } else if ((rc = sysSpuThreadInitialize(&sp->thread, sp->group, 0, &sp->image, &tattr, &args)) != 0)
                     call = "thread-init";
             }
         }
@@ -654,7 +671,7 @@ int main(void)
     rc = snprintf(e1_dir, sizeof e1_dir, "%s/%016llx", E1_BASE, (unsigned long long)e1_run);
     if (rc < 0 || (size_t)rc >= sizeof e1_dir || E1_MKDIR(e1_dir) != 0)
         return 2;
-    e1_mark(1, "main-entered", "ok", "");
+    e1_mark(1, "main-entered", "ok", "abi=" E1_ABI_NAME);
 
     /* 02: init (APP drain mode: this thread drains) */
     {

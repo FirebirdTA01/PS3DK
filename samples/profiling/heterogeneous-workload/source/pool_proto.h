@@ -20,6 +20,14 @@ typedef struct pool_io {
     void (*log)(void *ctx, const char *what, int value);
 } pool_io;
 
+/* The EXT thread arguments of every worker, into out[0..workers): slot_ea[i] is worker i's work slot, lane[i] its
+ * lane (NULL: none, the worker runs unprofiled).  A lane whose words do not pack (P-EA32 failed: an EA above 4 GiB,
+ * or a misaligned one) is NEVER silent: it is logged ("pack-refused", worker), that worker gets the unprofiled words
+ * (ring EA 0), eligibility is cleared, and the return is 1: the caller must report SPU profiling off for the run.
+ * -1: a work slot EA itself does not pack (nothing the SPU program could use; the pool must not start).  0: every
+ * worker got its lane's words or, without a lane, the unprofiled ones. */
+int pp_worker_args(pe_epochs *e, const pool_io *io, const uint64_t *slot_ea, const pe_lane *const *lane,
+                   unsigned workers, pe_args *out);
 /* One job (work) word per worker.  A failed mailbox write (partial send) invalidates eligibility. */
 int pp_submit(pe_epochs *e, const pool_io *io, unsigned workers, uint32_t sequence);
 /* After the caller saw every worker complete `sequence`: barrier, then each status into the epoch rule. */

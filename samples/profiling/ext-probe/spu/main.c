@@ -1,6 +1,6 @@
 /* E1 SPU program, target binding (TARGET ONLY; the host tests bind e1_spu_core.c to a model instead).
  * Arguments: arg0 = the lane ring EA, arg1 = (ring_slots << 32) | 0, arg2 = the lane control-block EA, arg3 =
- * (payload EA << 32) | commit EA (both 32-bit ILP32 PPU addresses, 128-aligned).  Reports follow the W probe's
+ * (payload EA << 32) | commit EA (LV2 process addresses below 4 GiB, checked by the PPU; 128-aligned).  Reports follow the W probe's
  * sequence exactly (clock-calibration/spu/main.c): PAYLOAD put, wait-all, COMMIT put, wait-all, on E1_REPORT_TAG,
  * with the caller's tag mask saved and restored.  No other decrementer user.  The program ends with an explicit
  * sys_spu_thread_exit(0) (libsputhread): after an MFC tag-status sequence it writes the exit code to the outbound

@@ -25,6 +25,20 @@
 #define GPP_ST32(pc, a, v) ((void)(pc), *(a) = (v))
 #endif
 
+/* A context field as an integer address.  On the target the four fields are 32-bit (mode(SI)) pointers in BOTH data
+ * models (gcm_sys.h): the field converts to uint32_t exactly, then widens (identity in ILP32, zero-extension in LP64;
+ * a direct cast of a 32-bit pointer to the 64-bit uintptr_t is the conversion -Wpointer-to-int-cast refuses).  The
+ * assertion stops the build if a header ever widens a field, instead of this conversion losing bits.  The host
+ * stand-in's fields are native pointers. */
+#ifdef PS3DK_PROF_PAL_LV2
+_Static_assert(sizeof(((gpp_ctx *)0)->begin) == 4 && sizeof(((gpp_ctx *)0)->end) == 4 &&
+                   sizeof(((gpp_ctx *)0)->current) == 4 && sizeof(((gpp_ctx *)0)->callback) == 4,
+               "the GCM context fields are 32-bit in both data models");
+#define GPP_FIELD_ADDR(p) ((uintptr_t)(uint32_t)(p))
+#else
+#define GPP_FIELD_ADDR(p) ((uintptr_t)(p))
+#endif
+
 static int gpp_label_reserved(uint32_t l)
 {
     return l == 255u || (l >= 65u && l <= 68u); /* our libPSGL's idle token and prepared-buffer/status labels */
@@ -34,7 +48,7 @@ static int gpp_label_reserved(uint32_t l)
  * addresses only: nothing is subtracted or formed before validation. */
 static int gpp_room(const gpp_ctx *c, uintptr_t *cur)
 {
-    uintptr_t b = (uintptr_t)c->begin, u = (uintptr_t)c->current, e = (uintptr_t)c->end;
+    uintptr_t b = GPP_FIELD_ADDR(c->begin), u = GPP_FIELD_ADDR(c->current), e = GPP_FIELD_ADDR(c->end);
 
     if (b == 0 || u == 0 || e == 0)
         return 0;
@@ -50,7 +64,7 @@ static int gpp_room(const gpp_ctx *c, uintptr_t *cur)
 
 static int gpp_ctx_valid(const gpp_ctx *c)
 {
-    uintptr_t b = (uintptr_t)c->begin, u = (uintptr_t)c->current, e = (uintptr_t)c->end;
+    uintptr_t b = GPP_FIELD_ADDR(c->begin), u = GPP_FIELD_ADDR(c->current), e = GPP_FIELD_ADDR(c->end);
 
     return b != 0 && u != 0 && e != 0 && ((b | u | e) & (uintptr_t)(sizeof(uint32_t) - 1)) == 0 && b <= u && u <= e;
 }

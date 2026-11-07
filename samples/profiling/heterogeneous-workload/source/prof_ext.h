@@ -64,12 +64,15 @@ void pe_final(pe_epochs *e, unsigned i, uint64_t now_us, uint32_t spu_status);
 void pe_clear(pe_epochs *e, const char *why);
 
 /* SPU thread arguments.  OFF: arg0 slot EA, arg1 lane, arg2 lanes, arg3 0 (today's ABI exactly).  EXT: arg0 slot
- * EA, arg1 (lane << 32) | lanes, arg2 ring EA, arg3 (ring_slots << 32) | control-block EA (32-bit EAs). */
+ * EA, arg1 (lane << 32) | lanes, arg2 ring EA, arg3 (ring_slots << 32) | control-block EA.  The SPU program reads the
+ * slot and control-block EAs as 32-bit values in both PPU data models (its image is the same for both), which rests
+ * on P-EA32: every LV2 process address is below 4 GiB.  The PPU CHECKS it: pe_pack_ext takes full 64-bit EAs and
+ * refuses a slot, ring or control-block EA above 4 GiB (or a misaligned one), so nothing is narrowed silently. */
 typedef struct {
     uint64_t arg0, arg1, arg2, arg3;
 } pe_args;
 pe_args pe_pack_off(uint32_t slot_ea, uint32_t lane, uint32_t lanes);
-int pe_pack_ext(uint32_t slot_ea, uint32_t lane, uint32_t lanes, uint64_t ring_ea, uint32_t ring_slots,
+int pe_pack_ext(uint64_t slot_ea, uint32_t lane, uint32_t lanes, uint64_t ring_ea, uint32_t ring_slots,
                 uint64_t ctl_ea, pe_args *out);
 typedef struct {
     uint32_t slot_ea, lane, lanes, ring_slots;
@@ -164,6 +167,9 @@ typedef struct {
     int retained_lanes, retained_gpu; /* kept because they may still be referenced */
 } pe_state;
 
+/* SPU profiling reported off for the rest of the run (logged with `why`): pe_rt_spu_on() is 0 from here on.  The
+ * lanes already created stay live and are still ended by pe_stop after the join. */
+void pe_spu_off(pe_state *s, const pe_port *p, const char *why);
 /* init_ex -> thread_begin -> register -> one lane per worker.  Returns 0 when the profiler is up (SPU lanes may
  * be off after a registration/lane failure, logged); nonzero when init itself failed (nothing to undo). */
 int pe_start(pe_state *s, const pe_port *p, unsigned workers);

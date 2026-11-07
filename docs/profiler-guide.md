@@ -2,7 +2,7 @@
 
 The PS3DK profiler (`libps3dkprof`) records a PPU zone capture into a `.prof` file, and can optionally add SPU-lane and RSX-domain zones. On the PC side, `ps3dk-prof check` and `ps3dk-prof report` read a capture from the command line, and the `ps3dk-prof-viewer` GUI displays one.
 
-The `PS3DK_PROF` interface in `<ps3dk/prof.h>` is PPU-only: an SPU translation unit that has `PS3DK_PROF` set fails to build.  SPU-lane and RSX-domain zones come from a separate, EXPERIMENTAL, ILP32-only extension (section 2.8).
+The `PS3DK_PROF` interface in `<ps3dk/prof.h>` is PPU-only: an SPU translation unit that has `PS3DK_PROF` set fails to build.  SPU-lane and RSX-domain zones come from a separate, EXPERIMENTAL extension (section 2.8).
 
 ---
 
@@ -153,7 +153,7 @@ if (netInitialize() == 0) {
 
 Only captures on the internal HDD (`/dev_hdd0/`) are served. The live view has been run on a HEN console with the heterogeneous-workload sample, and the viewer's saved copy matched the console's file byte for byte; its overhead has not been measured, and the agent still uses CPU, memory and I/O while it serves.
 
-### 2.8 SPU lanes and RSX domains (EXPERIMENTAL, ILP32 only)
+### 2.8 SPU lanes and RSX domains (EXPERIMENTAL)
 
 This records:
 
@@ -165,21 +165,22 @@ so the viewer's Timeline shows PPU, SPU and RSX rows.
 **Build it from the extension archive.** The SPU-lane / RSX-domain extension is not part of the installed SDK; it is the **uninstalled extension archive**, built from the SDK's `sdk/libps3dkprof` tree:
 
 ```
-make -C sdk/libps3dkprof ext-ilp32       # libps3dkprof_ext.a (ILP32 only)
+make -C sdk/libps3dkprof ext-ilp32 ext-live-ilp32   # ILP32: libps3dkprof_ext.a and libps3dkprof_ext_live.a
+make -C sdk/libps3dkprof ext-lp64 ext-live-lp64     # LP64 (-mlp64): the same members, in their own directories
 ```
 
 In the sample's `CMakeLists.txt`, turn it on with `-DSAMPLE_PROF_EXT=ON`, pointing:
 
 - `SAMPLE_EXT_ARCHIVE` at the uninstalled `libps3dkprof_ext.a`, and
-- `SAMPLE_EXT_LIVE_ARCHIVE` (only with `SAMPLE_LIVE`) at the live members compiled with the same extension flags.
+- `SAMPLE_EXT_LIVE_ARCHIVE` (only with `SAMPLE_LIVE`) at the uninstalled `libps3dkprof_ext_live.a`.
 
-`SAMPLE_PROF_EXT` requires `SAMPLE_PROFILING` and ILP32; it links the extension archive (and the live archive, if live) instead of the SDK's `libps3dkprof.a`. An app that does not opt in is unchanged.  The extension has no installed public header yet; its use is documented by the sample: `samples/profiling/heterogeneous-workload/README.md`, its `CMakeLists.txt` and `source/prof_ext.h`, and the extension sources under `sdk/libps3dkprof/src`.
+Both archives must be the data model the sample is built for (`SAMPLE_ABI`, with the matching toolchain file); the sample checks every member's data-model tag at configure time.  The SPU program takes some PPU addresses as 32-bit values in both data models, which relies on every LV2 process address being below 4 GiB; the PPU side checks each one and refuses to pack a larger address (the worker then runs unprofiled, SPU profiling is reported off and `w32_eligible` is cleared).  `SAMPLE_PROF_EXT` requires `SAMPLE_PROFILING`; it links the extension archive (and the live archive, if live) instead of the SDK's `libps3dkprof.a`. An app that does not opt in is unchanged.  The extension has no installed public header yet; its use is documented by the sample: `samples/profiling/heterogeneous-workload/README.md`, its `CMakeLists.txt` and `source/prof_ext.h`, and the extension sources under `sdk/libps3dkprof/src`.
 
 **The W32 premise.** SPU times come from each SPU's 32-bit decrementer.  W32 ("assume no decrementer wrap") is the premise that no worker's decrementer wrapped within an epoch.  It is not something the profiler guarantees: the app has to make it true and show it.  The sample does so with its own protocol: it resets a worker's decrementer on the first job word, when a reset is due (its dispatch threshold is 20 s, with acknowledgements, deadlines and a service bound under 22 s) or on a reset-only word, and any failed step permanently clears eligibility.  W32 is justified for a capture only when the sample's completed `.ext-end.txt` receipt for that run reports `w32_eligible=1` and its lifecycle checks passed.  Even then, W32 does not guarantee that every SPU zone can be placed: an epoch with too few clock observations, or a reader budget refusal, still leaves part of a lane unplaced.  Without W32 (the R64 premise), SPU lane rows show as UNMAPPABLE.
 
 GPU-side, the sample uses reports 32..63 and label 241 for the domain, and label 242 for the application fence. These values are part of the sample's build, not a public contract; they may change before release.
 
-**Status:** EXPERIMENTAL.  One run of the heterogeneous-workload sample on a HEN console placed all six SPU lanes and the RSX domain on the timeline; broader validation is pending.
+**Status:** EXPERIMENTAL.  One ILP32 run of the heterogeneous-workload sample on a HEN console placed all six SPU lanes and the RSX domain on the timeline; LP64 builds, and its archives and linked test images pass the same target data-model, import, link and code-shape checks as ILP32; the sample's configure-time checks are still open, and no LP64 sample image has been built or run on a console yet; broader validation is pending.
 
 ---
 

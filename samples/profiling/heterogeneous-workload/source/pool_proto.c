@@ -1,5 +1,28 @@
 #include "pool_proto.h"
 
+int pp_worker_args(pe_epochs *e, const pool_io *io, const uint64_t *slot_ea, const pe_lane *const *lane,
+                   unsigned workers, pe_args *out)
+{
+    int refused = 0;
+    for (unsigned i = 0; i < workers; ++i) {
+        const pe_lane *l = lane[i];
+        if (l && pe_pack_ext(slot_ea[i], i, workers, l->ea_ring, l->ring_slots, l->ea_ctl, &out[i]) == 0)
+            continue;
+        if (l) {
+            io->log(io->ctx, "pack-refused", (int)i);
+            refused = 1;
+        }
+        if (pe_pack_ext(slot_ea[i], i, workers, 0, 1, 0, &out[i])) {
+            io->log(io->ctx, "slot-pack-refused", (int)i);
+            pe_clear(e, "work slot argument packing refused");
+            return -1;
+        }
+    }
+    if (refused)
+        pe_clear(e, "lane argument packing refused");
+    return refused;
+}
+
 int pp_submit(pe_epochs *e, const pool_io *io, unsigned workers, uint32_t sequence)
 {
     if (!sequence || sequence >= PE_SEQ_MASK)

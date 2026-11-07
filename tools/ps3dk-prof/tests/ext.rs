@@ -2,6 +2,11 @@
 //! Every case pins the exact verdict: MALFORMED with its detail, or the per-source STRUCTURE / RAW VALIDITY /
 //! COVERAGE. MAPPING is always UNMEASURED. Set EXT_FIXTURE_DIR to also write each fixture there (for the
 //! baseline-reader comparison script).
+//!
+//! Both PPU data models: every file this suite decodes is decoded a second time as its LP64 twin (the same bytes
+//! with the HEADER's abi byte 1 -> 2, the chunk CRC recomputed; see `load` below), and the twin must give the same
+//! outcome: the same analysis apart from the header's abi, the same report apart from the printed ABI, or the same
+//! MALFORMED rule and detail.  The extension format has no pointer-width field, so nothing else may change.
 
 mod common;
 
@@ -24,6 +29,119 @@ const LANE: u32 = 10;
 const SPU_D: u32 = 2;
 const RSX_D: u32 = 3;
 const GPU_DESC: u32 = 3;
+
+// ---- both data models: every decode also runs on the file's LP64 twin ---------------------------------------------
+
+/// The same bytes with the HEADER chunk's abi byte 1 replaced by 2 (LP64) and that chunk's CRC recomputed; `None`
+/// when the file has no intact HEADER chunk (complete, CRC correct) carrying abi 1: a truncated or header-damaged
+/// fixture has no twin (it is counted, never silently treated as checked).
+fn lp64_twin(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut at = 16usize; // magic 8, major 2, minor 2, flags 4
+    while at.checked_add(16)? <= bytes.len() {
+        let ty = u32::from_le_bytes(bytes[at..at + 4].try_into().ok()?);
+        let len = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().ok()?) as usize;
+        let end = at.checked_add(16)?.checked_add(len)?; // type 4, len 4, seq 8, payload
+        if end.checked_add(4)? > bytes.len() {
+            return None;
+        }
+        if ty == T_HEADER {
+            if crc32(&bytes[at..end]) != u32::from_le_bytes(bytes[end..end + 4].try_into().ok()?) {
+                return None;
+            }
+            let p = &bytes[at + 16..end];
+            let mut o = 0usize;
+            for _ in 0..6 {
+                // app, build id, sdk, compiler, flags, workload: u16 length-prefixed
+                let n = u16::from_le_bytes([*p.get(o)?, *p.get(o + 1)?]) as usize;
+                o = o.checked_add(2 + n)?;
+            }
+            if p.get(o) != Some(&1) {
+                return None;
+            }
+            let mut out = bytes.to_vec();
+            out[at + 16 + o] = 2;
+            let crc = crc32(&out[at..end]);
+            out[end..end + 4].copy_from_slice(&crc.to_le_bytes());
+            return Some(out);
+        }
+        at = end + 4;
+    }
+    None
+}
+
+/// `common::load` (this item shadows the glob import, so every decode in this file goes through it), plus the LP64
+/// twin's decode, which must be the same outcome apart from the ABI (module doc).
+fn load(bytes: &[u8]) -> Outcome {
+    let one = common::load(bytes);
+    match lp64_twin(bytes) {
+        Some(t) => {
+            let two = common::load(&t);
+            match (&one, &two) {
+                (Outcome::Analysed(a), Outcome::Analysed(b)) => {
+                    assert_eq!(a.capture.header.as_ref().map(|h| h.abi), Some(1), "the original is ILP32");
+                    assert_eq!(b.capture.header.as_ref().map(|h| h.abi), Some(2), "the twin is LP64");
+                    let mut back = (**b).clone();
+                    if let Some(h) = back.capture.header.as_mut() {
+                        h.abi = 1;
+                    }
+                    assert_eq!(format!("{a:?}"), format!("{back:?}"), "the LP64 twin's analysis differs beyond the abi");
+                    let (ra, rb) = (ps3dk_prof::report::render(a), ps3dk_prof::report::render(b));
+                    assert_eq!(ra.matches("| abi ILP32 |").count(), 1, "the ILP32 report prints its ABI once");
+                    assert_eq!(rb.matches("| abi LP64 |").count(), 1, "the LP64 report prints its ABI once");
+                    assert_eq!(ra.replace("| abi ILP32 |", "| abi LP64 |"), rb, "the reports differ beyond the ABI");
+                }
+                (Outcome::Malformed(x), Outcome::Malformed(y)) => assert_eq!(x, y, "the twin's MALFORMED differs"),
+                _ => panic!("the LP64 twin changed the outcome kind"),
+            }
+            println!("H3-TWIN checked");
+        }
+        None => {
+            println!("H3-TWIN none");
+        }
+    }
+    one
+}
+
+#[test]
+fn lp64_twin_patches_exactly_the_header_abi_byte() {
+    let f = ext_file(std_ext()).bytes();
+    let t = lp64_twin(&f).expect("a valid file has a twin");
+    let diff: Vec<usize> = (0..f.len()).filter(|&i| f[i] != t[i]).collect();
+    // the abi byte and at most the four CRC bytes of the HEADER chunk
+    assert!(!diff.is_empty() && diff.len() <= 5, "{diff:?}");
+    let header_end = 16 + 16 + u32::from_le_bytes(f[20..24].try_into().unwrap()) as usize + 4;
+    assert!(diff.iter().all(|&i| i >= 32 && i < header_end), "{diff:?} outside the HEADER chunk ..{header_end}");
+    assert!(lp64_twin(&t).is_none(), "an LP64 file has no twin");
+    assert!(lp64_twin(&f[..20]).is_none(), "a cut header has no twin");
+    let mut bad = f.clone();
+    bad[16 + 16] ^= 1; // a HEADER payload byte: its CRC no longer matches
+    assert!(lp64_twin(&bad).is_none(), "a CRC-damaged header has no twin");
+    match common::load(&t) {
+        Outcome::Analysed(a) => assert_eq!(a.capture.header.as_ref().map(|h| h.abi), Some(2)),
+        Outcome::Malformed(m) => panic!("{m}"),
+    }
+}
+
+#[test]
+fn lp64_extension_capture_reads_like_ilp32_and_cross_abi_ab_is_refused() {
+    let f = ext_file(std_ext()).bytes();
+    let t = lp64_twin(&f).unwrap();
+    let (a, b) = match (common::load(&f), common::load(&t)) {
+        (Outcome::Analysed(a), Outcome::Analysed(b)) => (a, b),
+        _ => panic!("both data models must read"),
+    };
+    assert_eq!(a.verdict, ps3dk_prof::Verdict::Complete);
+    assert_eq!(b.verdict, ps3dk_prof::Verdict::Complete);
+    let lanes = |x: &ps3dk_prof::Analysis| x.capture.ext.as_ref().map(|e| e.sources.len());
+    assert_eq!(lanes(&a), Some(2));
+    assert_eq!(lanes(&b), Some(2));
+    let c = ps3dk_prof::analysis::compare(&a, &b);
+    assert_eq!(c.refused.as_deref(), Some("ABI differs"), "{c:?}");
+    assert_eq!(ps3dk_prof::analysis::compare(&b, &a).refused.as_deref(), Some("ABI differs"));
+    for (x, y) in [(&a, &a), (&b, &b)] {
+        assert_ne!(ps3dk_prof::analysis::compare(x, y).refused.as_deref(), Some("ABI differs"), "same-ABI pair");
+    }
+}
 
 // ---- a test-only extension writer ---------------------------------------------------------------------------------
 

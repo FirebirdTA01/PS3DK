@@ -87,7 +87,11 @@ static void e1_lines_zero(void) /* before the producer thread exists: its creati
         __atomic_store_n(&e1_commit_line.w[i], 0u, __ATOMIC_RELAXED);
     }
 }
-static uint64_t e1_report_eas(void) { return 0; } /* the host producer uses the lines directly */
+static int e1_report_eas(uint64_t *out) /* the host producer uses the lines directly */
+{
+    *out = 0;
+    return 0;
+}
 /* the torn-commit step (e1_host.c): the PPU announces its copy, the producer changes the commit, the PPU rechecks */
 #define E1_AFTER_COPY(s) e1h_after_copy(s)
 

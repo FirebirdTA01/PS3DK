@@ -113,10 +113,12 @@ pe_args pe_pack_off(uint32_t slot_ea, uint32_t lane, uint32_t lanes)
     return a;
 }
 
-int pe_pack_ext(uint32_t slot_ea, uint32_t lane, uint32_t lanes, uint64_t ring_ea, uint32_t ring_slots,
+int pe_pack_ext(uint64_t slot_ea, uint32_t lane, uint32_t lanes, uint64_t ring_ea, uint32_t ring_slots,
                 uint64_t ctl_ea, pe_args *out)
 {
-    if (ring_ea > 0xffffffffull || ctl_ea > 0xffffffffull || (ring_ea & 127u) || (ctl_ea & 127u) || !ring_slots)
+    /* P-EA32 (prof_ext.h): the SPU reads the slot and control-block EAs as 32 bits; the work slot is 128-aligned */
+    if (slot_ea > 0xffffffffull || ring_ea > 0xffffffffull || ctl_ea > 0xffffffffull || (slot_ea & 127u) ||
+        (ring_ea & 127u) || (ctl_ea & 127u) || !ring_slots)
         return -1;
     out->arg0 = slot_ea;
     out->arg1 = ((uint64_t)lane << 32) | lanes;
@@ -260,6 +262,13 @@ int pe_start(pe_state *s, const pe_port *p, unsigned workers)
     }
     s->spu = 1;
     return 0;
+}
+
+void pe_spu_off(pe_state *s, const pe_port *p, const char *why)
+{
+    if (s->spu)
+        p->log(p->ctx, why, -1);
+    s->spu = 0;
 }
 
 void pe_gpu_start(pe_state *s, const pe_port *p)

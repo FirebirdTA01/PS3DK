@@ -6,10 +6,13 @@ C++ gnu++17 and c++20 in both include orders.  NEGATIVE (each must FAIL, and its
 diagnostic of the call, not an include or setup failure): an int * into each of the six context-taking
 declarations, in C and in C++.  OLD-DEFECT control: the sealed pre-fix header (ctxtype/old, blob 13b41649) compiled in
 C with gCellGcmCurrentContext must still give -Wincompatible-pointer-types.  --archive/--libs: the C++ caller
-(R4B_MAIN) also LINKS against the C runtime archive (the extern "C" boundary; never run).
+(R4B_MAIN) also LINKS against the C runtime archive (the extern "C" boundary; never run).  --abi lp64 runs every
+--target row with -mlp64 (compiles and the link; --archive/--libs must then name the LP64 ext archive and
+ppu/lib/lp64); --abi ilp32 (the default) is the PPU compiler's default data model.
 --host: prof_gpu.h compiles in host C and C++ with no cell headers (-Werror).
 
-usage: ctx-test.py --target CC CXX SRC_DIR INCLUDE_DIR SYSTEM_INCLUDE_DIR CONFIG_H OUTDIR [--archive A --libs "..."]
+usage: ctx-test.py --target CC CXX SRC_DIR INCLUDE_DIR SYSTEM_INCLUDE_DIR CONFIG_H OUTDIR [--abi ilp32|lp64]
+                   [--archive A --libs "..."]
        ctx-test.py --host CC CXX SRC_DIR INCLUDE_DIR OUTDIR          (exit 0 iff every row holds)"""
 import os
 import shlex
@@ -39,6 +42,15 @@ def first_error(stderr):
 def main():
     a = sys.argv[1:]
     archive = libs = None
+    abi = 'ilp32'
+    if '--abi' in a:
+        i = a.index('--abi')
+        abi = a[i + 1] if i + 1 < len(a) else ''
+        a = a[:i] + a[i + 2:]
+        if abi not in ('ilp32', 'lp64'):
+            print(f'unknown --abi {abi!r} (ilp32 or lp64)')
+            return 2
+    mlp64 = ['-mlp64'] if abi == 'lp64' else []
     if '--archive' in a:
         i = a.index('--archive')
         archive, libs = a[i + 1], a[a.index('--libs') + 1]
@@ -50,7 +62,7 @@ def main():
         out = Path(out)
         out.mkdir()
         incs = [f'-I{inc}', f'-I{sysinc}', f'-I{src}/rsx', f'-I{src}/core', f'-I{src}/spu', f'-I{src}/pal']
-        pre = ['-mcpu=cell', '-include', config]
+        pre = ['-mcpu=cell', *mlp64, '-include', config]
 
         def pos(name, comp, std, srcf, extra):
             r = run([comp, *COMMON, *pre, std, *extra, *incs, '-c', str(HERE / srcf), '-o', str(out / f'{name}.o')],
@@ -83,7 +95,7 @@ def main():
                      str(HERE / 'ctx_api.cc'), '-o', str(o)], out / 'cxx-main-cc.log')
             ok = r.returncode == 0 and not r.stderr.strip()
             if ok:
-                r = run([cxx, '-mcpu=cell', '-Wl,--gc-sections', str(o), archive, *shlex.split(libs), '-o',
+                r = run([cxx, '-mcpu=cell', *mlp64, '-Wl,--gc-sections', str(o), archive, *shlex.split(libs), '-o',
                          str(out / 'cxx-main.elf')], out / 'cxx-main-link.log')
                 ok = r.returncode == 0 and (out / 'cxx-main.elf').stat().st_size > 0
             rows.append(('C++ caller links against the C runtime archive (extern "C")', ok,
@@ -105,7 +117,8 @@ def main():
     for name, ok, why in rows:
         print(f'{"PASS" if ok else "FAIL"} {name}: {why}')
         bad += not ok
-    print(f'CTX-TYPE {mode[2:].upper()} ' + ('PASS' if not bad else f'FAIL ({bad})') + f' ({len(rows)} rows)')
+    tag = f' {abi.upper()}' if mode == '--target' else ''
+    print(f'CTX-TYPE {mode[2:].upper()}{tag} ' + ('PASS' if not bad else f'FAIL ({bad})') + f' ({len(rows)} rows)')
     return 0 if not bad else 1
 
 

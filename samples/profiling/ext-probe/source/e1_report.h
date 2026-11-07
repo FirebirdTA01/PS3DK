@@ -33,6 +33,17 @@ typedef struct e1_line {
 } __attribute__((aligned(128))) e1_line;
 _Static_assert(sizeof(e1_line) == 128, "one cache line");
 
+/* P-EA32: the SPU program takes the two report-line EAs as 32-bit halves of one argument (arg3 = payload << 32 |
+ * commit), in both PPU data models.  The PPU packs them through this check, which refuses an EA above 4 GiB instead
+ * of narrowing it (0: packed; -1: refused, *out untouched). */
+static inline int e1_pack_report_eas(uint64_t payload_ea, uint64_t commit_ea, uint64_t *out)
+{
+    if (payload_ea > 0xffffffffull || commit_ea > 0xffffffffull)
+        return -1;
+    *out = (payload_ea << 32) | commit_ea;
+    return 0;
+}
+
 /* The descriptor records the SPU image holds: the target image has exactly 3 (16-byte records: probe-e1, probe-e2,
  * probe-mark).  The HOST build overrides it (its 32-byte record shim gives 6 16-byte slots, 3 of them fillers). */
 #ifndef E1_DESC_COUNT

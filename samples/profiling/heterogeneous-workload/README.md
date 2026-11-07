@@ -133,15 +133,20 @@ SDK's.
 
 ## SPU lanes and RSX domains (SAMPLE_PROF_EXT)
 
-`-DSAMPLE_PROF_EXT=ON` (ILP32 only, needs `SAMPLE_PROFILING`) records each SPU worker's jobs as `spu.work` zones
+`-DSAMPLE_PROF_EXT=ON` (ILP32 or LP64, needs `SAMPLE_PROFILING`) records each SPU worker's jobs as `spu.work` zones
 on its own SPU lane and the scene's command blocks as `rsx.setup` / `rsx.draw` zones on an RSX domain, so the
 viewer's Timeline shows PPU, SPU and RSX rows.  It links the uninstalled extension archive
-(`make -C sdk/libps3dkprof ext-ilp32`, `SAMPLE_EXT_ARCHIVE`); with `SAMPLE_LIVE` it also needs the live members
-compiled with the same flags (`SAMPLE_EXT_LIVE_ARCHIVE`).  The SPU decrementer is reset at least every 20 s per
+of the selected data model (`make -C sdk/libps3dkprof ext-ilp32` or `ext-lp64`, `SAMPLE_EXT_ARCHIVE`); with
+`SAMPLE_LIVE` it also needs the live members compiled with the same flags (`ext-live-ilp32` or `ext-live-lp64`,
+`SAMPLE_EXT_LIVE_ARCHIVE`).  Configure refuses a `SAMPLE_ABI` that is not the compiler's data model and an archive
+member whose data-model tag is not `SAMPLE_ABI`'s.  The SPU worker takes its work-slot and control-block addresses as
+32-bit values in both data models: the PPU side refuses (logged as `POOL pack-refused`) any address above 4 GiB
+instead of narrowing it, and a refusal turns SPU profiling off and clears `w32_eligible`.  The SPU decrementer is reset at least every 20 s per
 worker (idle workers get reset-only commands), so every SPU epoch spans under 22 s, well inside the 32-bit wrap
 (53.8 s): the run prints `w32_eligible=1` when every check held, and only then is the viewer's W32 premise
 justified for that capture.  The GPU domain uses reports 32..63 and label 241; the application fence uses label
-242.  Status: host-tested only; target build and hardware validation are pending.
+242.  Status: ILP32 has run on a HEN console; LP64 is host-tested and target-compiled, and its console run is
+pending.
 
 ## Tests
 
@@ -155,7 +160,7 @@ python3 samples/profiling/heterogeneous-workload/host-tests/verify.py capture.cs
 The SPU-lane/RSX-domain lifecycle (`SAMPLE_PROF_EXT`) has its own host test against a mocked profiler:
 
 ```sh
-cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined   samples/profiling/heterogeneous-workload/host-tests/test_prof_ext.c   samples/profiling/heterogeneous-workload/source/prof_ext.c -o prof-ext-test
+cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined   samples/profiling/heterogeneous-workload/host-tests/test_prof_ext.c   samples/profiling/heterogeneous-workload/source/prof_ext.c   samples/profiling/heterogeneous-workload/source/pool_proto.c   samples/profiling/heterogeneous-workload/source/worker_proto.c -pthread -o prof-ext-test
 ./prof-ext-test
 ```
 

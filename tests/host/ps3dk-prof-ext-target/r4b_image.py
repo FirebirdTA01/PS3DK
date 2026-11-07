@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """P3.3 R4b linked-image checker (design p3.3-r4b r2 delta section 2; review 21:23 carries; review 22:15 CHANGES).
 
-Fail-closed code-shape checks of the LV2 psp_mem adapter and the GPU attach in a LINKED ILP32 ELFv1 image.  Verdicts:
+Fail-closed code-shape checks of the LV2 psp_mem adapter and the GPU attach in a LINKED ELFv1 image (ILP32 or LP64:
+the LP64 shapes add no zero-extension of the EA and use the load-with-update forms below).  Verdicts:
   PASS   machine-proved for the stated (narrow) property over every path of the function as disassembled;
   FAIL   a violation, with its named reason;
   UNMET  the checker could not resolve the listing, the control flow or the data flow (never a pass).
@@ -39,7 +40,10 @@ HEX = re.compile(r'^[0-9a-f]+$')
 
 STORES = {'stb': 1, 'sth': 2, 'stw': 4, 'std': 8, 'stbx': 1, 'sthx': 2, 'stwx': 4, 'stdx': 8, 'stbu': 1, 'sthu': 2,
           'stwu': 4, 'stdu': 8}
-LOADS = {'lbz': 1, 'lhz': 2, 'lha': 2, 'lwz': 4, 'lwa': 4, 'ld': 8, 'lbzx': 1, 'lhzx': 2, 'lhax': 2, 'lwzx': 4,
+# D-form loads with update (lbzu ...: rd = the load, then the base register = the effective address), first met in the
+# LP64 m_alloc; an invalid form (rd = base, or base r0) is UNMET
+LOAD_UPDATE = {'lbzu': 1, 'lhzu': 2, 'lhau': 2, 'lwzu': 4, 'ldu': 8}
+LOADS = {**LOAD_UPDATE, 'lbz': 1, 'lhz': 2, 'lha': 2, 'lwz': 4, 'lwa': 4, 'ld': 8, 'lbzx': 1, 'lhzx': 2, 'lhax': 2, 'lwzx': 4,
          'lwax': 4, 'ldx': 8}
 REVERSED = {'sthbrx', 'stwbrx', 'stdbrx', 'lhbrx', 'lwbrx', 'ldbrx'}
 BARRIERS = {'sync', 'hwsync', 'lwsync', 'isync'}
@@ -116,13 +120,43 @@ def imm(s):
 # ---- values ----
 # None unknown (no identity); ('C', c); ('ARG', name, off); ('ARGX', name) arg-derived, unknown offset;
 # ('V', shift) the stored value; ('L', k, shift) source doubleword k; ('SP', off) entry-SP relative;
-# ('TOC', off); ('TOCWORD', off, width); ('S', site, zext) an unknown value with identity; 'POISON'.
+# ('TOC', off); ('TOCWORD', off, width); ('S', site, zext) an unknown value with identity; 'POISON';
+# ('E', op, x, y) an EXACT expression over identities and constants (op add, mul64, mul32, shl64, shl32; x and y are
+# each S, C or E, never an unknown or a tracked pointer; add and the multiplies are stored in a canonical operand order).
+# An E names one value as precisely as its leaves do: two E are the same value only when structurally equal.  It is
+# how the LP64 m_alloc slot address (a loaded base + index * slot size, then copied to r3 for memset) keeps an identity
+# that the ILP32 code gets from its final clrldi.  Anything else (an unknown operand) still loses the identity.
 
 RELEVANT = ('ARG', 'ARGX', 'V', 'L', 'SP', 'TOC', 'TOCWORD')
 
 
 def relevant(v):
     return v == 'POISON' or (isinstance(v, tuple) and v[0] in RELEVANT)
+
+
+def exact(v):
+    """a value an E may be built from: an identity, a constant or an E"""
+    return isinstance(v, tuple) and v[0] in ('S', 'C', 'E')
+
+
+def expr(op, x, y):
+    """('E', op, x, y), operands canonically ordered for the commutative ops; None unless both are exact"""
+    if not (exact(x) and exact(y)):
+        return None
+    if op in ('add', 'mul64', 'mul32') and repr(y) < repr(x):
+        x, y = y, x
+    return ('E', op, x, y)
+
+
+def mentions(v, site):
+    """v is, or is built from, the identity of definition site `site`"""
+    if not isinstance(v, tuple):
+        return False
+    if v[0] == 'S':
+        return v[1] == site
+    if v[0] == 'E':
+        return mentions(v[2], site) or mentions(v[3], site)
+    return False
 
 
 def add(a, b):
@@ -139,7 +173,11 @@ def add(a, b):
     for x, y in ((a, b), (b, a)):
         if isinstance(x, tuple) and x[0] in ('ARG', 'ARGX') and not relevant(y):
             return ('ARGX', x[1])  # an argument pointer plus an unknown index
-    return 'POISON' if (relevant(a) or relevant(b)) else None
+    if relevant(a) or relevant(b):
+        return 'POISON'
+    if exact(a) and exact(b) and not (a[0] == 'C' and b[0] == 'C'):
+        return expr('add', a, b)
+    return None
 
 
 def same_value(a, b):
@@ -192,10 +230,10 @@ def define(st, rd, v, fresh=False):
     previous instance of that site; a copy does not"""
     if fresh and isinstance(v, tuple) and v[0] == 'S':
         for r, x in list(st.regs.items()):
-            if isinstance(x, tuple) and x[0] == 'S' and x[1] == v[1]:
+            if mentions(x, v[1]):  # the previous instance, and every expression built from it
                 st.regs[r] = None
         for k, x in list(st.slots.items()):
-            if isinstance(x, tuple) and x[0] == 'S' and x[1] == v[1]:
+            if mentions(x, v[1]):
                 st.slots[k] = None
     st.regs[rd] = v
 
@@ -243,6 +281,10 @@ def step(st, ins, ev):
         a = mem_addr(st, ins)
         ev.append(('load', ins, a, LOADS[m]))
         rd = o[0]
+        if m in LOAD_UPDATE:
+            base = MEM.match(o[1]).group(2)
+            if base == 'r0' or base == rd:
+                raise Unmet(f'invalid load-with-update form {ins}')
         if isinstance(a, tuple) and a[0] == 'SP':
             v = st.slots.get((a[1], LOADS[m]))
             sp = reg(st, 'r1')
@@ -257,6 +299,8 @@ def step(st, ins, ev):
             define(st, rd, 'POISON')
         else:
             define(st, rd, ('S', ins.addr, 0), fresh=True)
+        if m in LOAD_UPDATE:
+            st.regs[base] = a
         return
     if m in BARRIERS:
         kind = m
@@ -320,6 +364,12 @@ def step(st, ins, ev):
             define(st, rd, ('C', v[1] & 0xffffffff))
         else:
             define(st, rd, 'POISON' if relevant(v) else ('S', ins.addr, 0), fresh=True)
+    elif m in ('mulld', 'mullw') and len(o) == 3 and exact(reg(st, o[1])) and exact(reg(st, o[2])):
+        define(st, rd, expr('mul64' if m == 'mulld' else 'mul32', reg(st, o[1]), reg(st, o[2])))
+    elif m == 'mulli' and len(o) == 3 and exact(reg(st, o[1])):
+        define(st, rd, expr('mul64', reg(st, o[1]), ('C', imm(o[2]))))
+    elif m in ('sldi', 'slwi') and len(o) == 3 and exact(reg(st, o[1])):
+        define(st, rd, expr('shl64' if m == 'sldi' else 'shl32', reg(st, o[1]), ('C', imm(o[2]))))
     elif m == 'srdi' or (m == 'rldicl' and len(o) == 4 and imm(o[2]) + imm(o[3]) == 64 and imm(o[3]) > 0):
         n = imm(o[2]) if m == 'srdi' else imm(o[3])
         v = reg(st, o[1])
@@ -579,7 +629,7 @@ def check_alloc(ins):
             if reg(st, 'r4') != ('C', 0):
                 raise Fail(f'memset fill is not zero (r4 = {reg(st, "r4")}) at {x}')
             zd = reg(st, 'r3')
-            if not (isinstance(zd, tuple) and zd[0] == 'S'):
+            if not (isinstance(zd, tuple) and zd[0] in ('S', 'E')):
                 raise Unmet(f'the zeroed region address is not tracked at {x}: {zd}')
         step(st, x, ev)
         for e in ev:
