@@ -1478,6 +1478,7 @@ fn clockmap_line_only_with_order_records() {
     let mut c = f_base();
     c.ext.retain(|ch| ch.ty != T_ORDER);
     c.flags = 3;
+    dump("no-order", &c.bytes());
     let a = analysed(&c.bytes());
     let x = a.capture.ext.as_ref().unwrap();
     let out = cm_lines(x, &map_capture(x, Premises::default(), &Budgets::default()));
@@ -1487,4 +1488,148 @@ fn clockmap_line_only_with_order_records() {
     let t = text(&a, &r);
     assert!(r.lanes.iter().all(|l| l.state == LaneState::NoOrder), "{t}");
     assert!(!t.contains("TICKS[profile") && t.contains("SPU ticks coverage: not applicable"), "{t}");
+}
+
+// ---- RMAX1: the decrementer never advances faster than the tb ----------------------------------------------------
+
+/// The refined bounds (rl, ru) of every observation of lane index `lane`, in program order.
+fn refined(r: &SpuResult, lane: usize) -> Vec<(Option<u64>, Option<u64>)> {
+    r.lanes[lane].obs.iter().map(|o| (o.rl, o.ru)).collect()
+}
+
+/// One lane created at tb 1000, one drain at tb 2000 loading `raws` as alternating BEGIN/END events.
+fn chain_cap(raws: &[u32]) -> Cap {
+    let mut c = Cap::new(1, 1000);
+    c.epoch(1, 0, 1500);
+    let items: Vec<Item> =
+        raws.iter().enumerate().map(|(i, &r)| Item::Ev(r, D_WORK, if i % 2 == 0 { BEGIN } else { END }, 0)).collect();
+    c.walk(1, 2000, &items);
+    c.finish(1);
+    c
+}
+
+#[test]
+fn rmax1_three_zone_chain_exact_bounds() {
+    // Every event has the causal interval [1000, 2000] (LANE_CREATED, the one drain).  Raw reads 1000, 900, 850, 800,
+    // 700, 600 give steps of 100, 50, 50, 100, 100 ticks; at 1 tb per tick:
+    //   lower: 1000, 1100, 1150, 1200, 1300, 1400   (forward, from the lower bound 1000)
+    //   upper: 1600, 1700, 1750, 1800, 1900, 2000   (backward, from the upper bound 2000)
+    let b = chain_cap(&[1000, 900, 850, 800, 700, 600]).bytes();
+    dump("rmax1-chain", &b);
+    let (a, r) = run_with(&b, &opts());
+    let t = text(&a, &r);
+    let lo = [1000u64, 1100, 1150, 1200, 1300, 1400];
+    let hi = [1600u64, 1700, 1750, 1800, 1900, 2000];
+    let want: Vec<_> = lo.iter().zip(&hi).map(|(&l, &h)| (Some(l), Some(h))).collect();
+    assert_eq!(refined(&r, 0), want, "{t}");
+    assert_eq!(r.lanes[0].rmax1_contradicted, 0, "{t}");
+    // the causal bounds are untouched, and the old width is the whole drain interval
+    assert!(r.lanes[0].obs.iter().all(|o| o.l == Some(1000) && o.u == Some(2000)), "{t}");
+    let sg = &r.lanes[0].segments[0];
+    assert_eq!(sg.width, Some((600, 600)), "{t}");
+    assert_eq!(sg.width_causal, Some((1000, 1000)), "{t}");
+    // END >= BEGIN + zone ticks follows: zone 1 is 100 ticks, zone 2 is 50, zone 3 is 100
+    let p = &r.lanes[0].pairs_out;
+    assert_eq!(p.iter().map(|p| p.ticks).collect::<Vec<_>>(), vec![Some(100), Some(50), Some(100)], "{t}");
+    assert_eq!(p[0].place_b, Place::Placed(1000, 1600), "{t}");
+    assert_eq!(p[0].place_e, Place::Placed(1100, 1700), "{t}");
+    assert_eq!(p[2].place_e, Place::Placed(1400, 2000), "{t}");
+    // the labels
+    assert!(t.contains("D(RMAX 2) RMAX1 E)"), "{t}");
+    assert!(t.contains("width p50/max 600/600 tb") && t.contains("(causal bounds alone: p50/max 1000/1000 tb"), "{t}");
+    assert!(t.contains("RMAX1 contradicted 0"), "{t}");
+    // a half-rate premise (1 tb per 2 ticks, like D) halves every step: 50, 25, 25, 50, 50
+    let slow = Options { rmax1: (2, 1), ..opts() };
+    let (_, rs) = run_with(&b, &slow);
+    assert_eq!(rs.lanes[0].obs[1].rl, Some(1050));
+    assert_eq!(rs.lanes[0].obs[4].ru, Some(1950));
+    // steps round up: 1 tb per 3 ticks gives ceil(100 / 3) = 34 for the first step
+    let third = Options { rmax1: (3, 1), ..opts() };
+    let (_, r3) = run_with(&b, &third);
+    assert_eq!(r3.lanes[0].obs[1].rl, Some(1034));
+}
+
+#[test]
+fn rmax1_planted_contradiction_is_counted_and_marked() {
+    // 600 ticks per step is within D (<= 2 x 1000) but not within RMAX1: 1000 + 600 + 600 = 2200 > 2000
+    let b = chain_cap(&[3000, 2400, 1800]).bytes();
+    dump("rmax1-contradiction", &b);
+    let (a, r) = run_with(&b, &opts());
+    let t = text(&a, &r);
+    let u = &r.lanes[0];
+    assert_eq!(u.d_contradicted, 0, "{t}");
+    assert_eq!(u.rmax1_contradicted, 1, "{t}");
+    assert_eq!(r.rmax1_contradicted, 1, "{t}");
+    assert!(u.segments[0].rmax1_bad, "{t}");
+    // never clamped: no refined bound is kept, and every endpoint is UNPLACED
+    assert!(u.obs.iter().all(|o| o.rl.is_none() && o.ru.is_none()), "{t}");
+    for p in &u.pairs_out {
+        assert_eq!(p.place_b, Place::Unplaced("RMAX1 contradiction".into()), "{t}");
+        assert_eq!(p.place_e, Place::Unplaced("RMAX1 contradiction".into()), "{t}");
+    }
+    assert!(t.contains("RMAX1 CONTRADICTION") && t.contains("RMAX1 contradicted 1"), "{t}");
+    assert!(t.contains("RMAX1 CONTRADICTED"), "{t}");
+    // the tick count is still reported (RMAX1 does not touch it)
+    assert_eq!(u.pairs_out[0].ticks, Some(600), "{t}");
+    // at the D-equivalent rate (1 tb per 2 ticks) the same capture is consistent: 1000, 1300, 1600
+    let (_, rs) = run_with(&b, &Options { rmax1: (2, 1), ..opts() });
+    assert_eq!(rs.lanes[0].rmax1_contradicted, 0);
+    assert_eq!(rs.lanes[0].obs[2].rl, Some(1600));
+}
+
+#[test]
+fn rmax1_chain_never_crosses_a_segment() {
+    // epoch 1: raw 1000, 900 (drain at tb 2000); epoch 2: raw 500, 400 (drain at tb 3000).  A chain across the
+    // boundary would lift epoch 2's first lower bound to 1100 + 400 = 1500 and lower epoch 1's last upper bound.
+    let mut c = Cap::new(1, 1000);
+    c.epoch(1, 0, 1500);
+    c.walk(1, 2000, &[Item::Ev(1000, D_WORK, BEGIN, 0), Item::Ev(900, D_WORK, END, 0), Item::Epoch(0xFFFF_FFFF)]);
+    c.walk(1, 3000, &[Item::Ev(500, D_WORK, BEGIN, 0), Item::Ev(400, D_WORK, END, 0)]);
+    c.finish(1);
+    let b = c.bytes();
+    dump("rmax1-segments", &b);
+    let (a, r) = run_with(&b, &opts());
+    let t = text(&a, &r);
+    let u = &r.lanes[0];
+    assert_eq!(u.segments.len(), 2, "{t}");
+    assert_eq!(u.segments[0].end, ps3dk_prof::spu_ticks::Boundary::Epoch, "{t}");
+    assert_eq!(
+        refined(&r, 0),
+        vec![(Some(1000), Some(1900)), (Some(1100), Some(2000)), (Some(1000), Some(2900)), (Some(1100), Some(3000))],
+        "{t}"
+    );
+    assert_eq!(u.rmax1_contradicted, 0, "{t}");
+}
+
+#[test]
+fn rmax1_passes_are_charged_before_any_work() {
+    let b = chain_cap(&[1000, 900, 850, 800, 700, 600]).bytes();
+    let a = analysed(&b);
+    let o = opts();
+    let full = analyze(&a, &o).unwrap();
+    assert!(full.exhausted_at.is_none());
+    // the budgets that run out in the RMAX1 phase are exactly its charge: two passes over 6 observations, 1 segment
+    // and 2 fixed = 15; the next budget passes the phase, every budget below the first of them refuses earlier
+    let mut at_phase: Vec<u64> = Vec::new();
+    for budget in 0..full.used {
+        let r = analyze(&a, &at(&o, budget)).unwrap();
+        work_ok(&r, budget);
+        if r.exhausted_at.as_ref().is_some_and(|e| e.phase == "rmax1") {
+            at_phase.push(budget);
+            // atomic: the lane is the inventory only, nothing of the chain is published
+            let l = &r.lanes[0];
+            assert_eq!(l.state, LaneState::Unsupported("capture budget in rmax1".into()), "budget {budget}");
+            assert!(l.obs.is_empty() && l.segments.is_empty() && l.pairs_out.is_empty() && l.rmax1_contradicted == 0);
+        }
+    }
+    assert_eq!(at_phase.len(), 15, "{at_phase:?}");
+    assert_eq!(*at_phase.last().unwrap() - at_phase[0], 14, "contiguous: {at_phase:?}");
+    let enough = *at_phase.last().unwrap() + 1;
+    let r = analyze(&a, &at(&o, enough)).unwrap();
+    assert!(r.exhausted_at.as_ref().map_or(true, |e| e.phase != "rmax1"));
+    // exactly enough for the whole capture, and one short refuses
+    let e = analyze(&a, &at(&o, full.used)).unwrap();
+    assert!(e.exhausted_at.is_none());
+    assert_eq!(e.lanes, full.lanes);
+    assert!(analyze(&a, &at(&o, full.used - 1)).unwrap().exhausted_at.is_some());
 }

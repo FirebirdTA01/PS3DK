@@ -122,6 +122,10 @@ pub struct Options {
     pub h1: Option<H1Input>,
     /// The segment accumulator's limit (production: the type maximum; the controls lower it).
     pub seg_acc_max: u128,
+    /// RMAX1 as (num, den): the SPU decrementer never advances more than num ticks per den tb, so the tb elapsed
+    /// between two reads on one lane is at least ceil(ticks * den / num).  Production: 1/1 (the decrementer never
+    /// advances faster than the tb).
+    pub rmax1: (u128, u128),
     /// The H-TICK sum's limit (production: 2^64 - 1; the controls lower it).
     pub htick_acc_max: u128,
 }
@@ -136,6 +140,7 @@ impl Default for Options {
             isolation_scale: false,
             h1: None,
             seg_acc_max: u128::MAX,
+            rmax1: (1, 1),
             htick_acc_max: u128::from(u64::MAX),
         }
     }
@@ -164,6 +169,10 @@ pub struct ObsOut {
     pub u1: Option<u64>,
     pub u2: Option<u64>,
     pub u: Option<u64>,
+    /// The bounds tightened by RMAX1 along the segment's chain (equal to l and u when nothing tightens); None for
+    /// both in a segment that contradicts RMAX1.
+    pub rl: Option<u64>,
+    pub ru: Option<u64>,
     /// Index into the lane's segments.
     pub seg: usize,
     /// The lifted coordinate within the segment; None when the segment's accumulator was refused (range).
@@ -256,6 +265,11 @@ pub struct SegOut {
     pub placed: u64,
     /// p50 (lower median) and max of U - L over the placed endpoints of those pairs.
     pub width: Option<(u64, u64)>,
+    /// The same width from the causal bounds alone (before RMAX1), over the endpoints that were causally placed.
+    pub width_causal: Option<(u64, u64)>,
+    /// The segment's RMAX1 chain contradicted the causal bounds (a lower bound above its upper bound): its endpoints
+    /// are UNPLACED (RMAX1 contradiction).
+    pub rmax1_bad: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -392,6 +406,8 @@ pub struct LaneOut {
     pub rows: Vec<EpochRow>,
     pub d_contradicted: u64,
     pub order_contradicted: u64,
+    /// Segments whose RMAX1 chain has a lower bound above its upper bound.
+    pub rmax1_contradicted: u64,
     pub findings: Vec<String>,
     pub w32: Vec<W32Epoch>,
     pub h1: Option<H1Lane>,
@@ -419,6 +435,7 @@ impl LaneOut {
             rows: Vec::new(),
             d_contradicted: 0,
             order_contradicted: 0,
+            rmax1_contradicted: 0,
             findings: Vec::new(),
             w32: Vec::new(),
             h1: None,
@@ -491,6 +508,7 @@ pub struct SpuResult {
     pub not_listed: Option<u64>,
     pub d_contradicted: u64,
     pub order_contradicted: u64,
+    pub rmax1_contradicted: u64,
     pub work: Work,
     pub used: u64,
     pub freq_hz: u64,
@@ -559,6 +577,7 @@ pub fn analyze(a: &Analysis, opts: &Options) -> Option<SpuResult> {
         not_listed: None,
         d_contradicted: 0,
         order_contradicted: 0,
+        rmax1_contradicted: 0,
         work: Work::default(),
         used: 0,
         freq_hz: a.capture.clock.as_ref().map_or(0, |c| c.freq_hz),
@@ -881,6 +900,7 @@ fn publish(ops: &mut Ops, res: &mut SpuResult, u: LaneOut) -> Result<(), Limit> 
     c.overflow |= !ok;
     res.d_contradicted = res.d_contradicted.saturating_add(u.d_contradicted);
     res.order_contradicted = res.order_contradicted.saturating_add(u.order_contradicted);
+    res.rmax1_contradicted = res.rmax1_contradicted.saturating_add(u.rmax1_contradicted);
     ops.step(1);
     res.lanes.push(u);
     Ok(())
@@ -1004,6 +1024,8 @@ fn evaluate(
         u1: None,
         u2: None,
         u: None,
+        rl: None,
+        ru: None,
         seg: 0,
         f: None,
     };
@@ -1024,6 +1046,8 @@ fn evaluate(
             u1: None,
             u2: None,
             u: None,
+            rl: None,
+            ru: None,
             seg: 0,
             f: None,
         });
@@ -1132,6 +1156,8 @@ fn evaluate(
             ticks: None,
             placed: 0,
             width: None,
+            width_causal: None,
+            rmax1_bad: false,
         });
         range_bad.push(false);
     };
@@ -1252,28 +1278,109 @@ fn evaluate(
     }
     ops.charge(n as u64).map_err(&p)?;
     ops.step(n as u64);
+    // ---- RMAX1 (the decrementer never advances faster than the tb): within one segment the tb elapsed between two
+    // reads is at least their decrementer ticks times opts.rmax1.  Forward pass: lower(e_k) = max(L_k, lower(e_k-1) +
+    // step); backward pass: upper(e_k) = min(U_k, upper(e_k+1) - step).  Steps are rounded up (a lower bound on an
+    // integer elapsed), so no bound is ever loosened the unsafe way.  A chain never crosses a segment; a lower bound
+    // above its upper bound contradicts RMAX1 (or the causal bounds): counted, the segment marked, nothing clamped.
+    let p = ph("rmax1");
+    ops.charge(2 * n as u64 + segs.len() as u64 + 2).map_err(&p)?;
+    let (rn, rd) = opts.rmax1;
+    let step_of = |a: &ObsOut, b: &ObsOut| -> u128 {
+        let m = u128::from(a.raw.wrapping_sub(b.raw));
+        if rn == 0 {
+            0
+        } else {
+            m.checked_mul(rd).map_or(0, |v| v.div_ceil(rn))
+        }
+    };
+    let mut lo: Vec<Option<u128>> = obs.iter().map(|o| o.l.map(u128::from)).collect();
+    let mut up: Vec<Option<i128>> = obs.iter().map(|o| o.u.map(i128::from)).collect();
+    for sg in 0..segs.len() {
+        if matches!(segs[sg].state, TickState::Unavailable(_)) {
+            continue;
+        }
+        let (f, l) = (segs[sg].first, segs[sg].last);
+        for i in f + 1..=l {
+            ops.step(1);
+            let st = step_of(&obs[i - 1], &obs[i]);
+            if let Some(prev) = lo[i - 1] {
+                let cand = prev.saturating_add(st);
+                lo[i] = Some(lo[i].map_or(cand, |v| v.max(cand)));
+            }
+        }
+        for i in (f..l).rev() {
+            ops.step(1);
+            let st = i128::try_from(step_of(&obs[i], &obs[i + 1])).unwrap_or(i128::MAX);
+            if let Some(next) = up[i + 1] {
+                let cand = next.saturating_sub(st);
+                up[i] = Some(up[i].map_or(cand, |v| v.min(cand)));
+            }
+        }
+        let mut bad = false;
+        for i in f..=l {
+            ops.step(1);
+            let l_ok = lo[i].map_or(true, |v| u64::try_from(v).is_ok());
+            let u_ok = up[i].map_or(true, |v| u64::try_from(v).is_ok());
+            let ordered = match (lo[i], up[i]) {
+                (Some(a), Some(b)) => i128::try_from(a).map_or(false, |a| a <= b),
+                _ => true,
+            };
+            bad |= !(l_ok && u_ok && ordered);
+        }
+        if bad {
+            segs[sg].rmax1_bad = true;
+            u.rmax1_contradicted += 1;
+            if u.findings.len() < MAX_LISTED_FINDINGS {
+                ops.charge(1).map_err(&p)?;
+                ops.step(1);
+                u.findings.push(format!(
+                    "lane {} epoch {} segment {}: RMAX1 CONTRADICTION (a lower bound exceeds its upper bound along the chain; \n                     the segment's endpoints are UNPLACED)",
+                    u.lane_id, segs[sg].epoch, segs[sg].index
+                ));
+            }
+        } else {
+            for i in f..=l {
+                obs[i].rl = lo[i].and_then(|v| u64::try_from(v).ok());
+                obs[i].ru = up[i].and_then(|v| u64::try_from(v).ok());
+            }
+        }
+    }
     // ---- pairs
     let p = ph("pairs");
     let np = pairs.iter().filter(|q| !q.cross).count() as u64; // counted at index time
     let conv_on = opts.pairs && opts.isolation_scale && res.iso.is_some();
-    ops.charge(np.saturating_mul(RET_PAIR_OPS + 6) + 2 * segs.len() as u64).map_err(&p)?;
-    let unplaced = |o: &ObsOut| -> Place {
+    ops.charge(np.saturating_mul(RET_PAIR_OPS + 8) + 2 * segs.len() as u64).map_err(&p)?;
+    let gate = |o: &ObsOut| -> Option<Place> {
         if !t2_short.is_empty() {
-            Place::Unplaced(t2_short.clone())
+            Some(Place::Unplaced(t2_short.clone()))
         } else if contra[o.epoch as usize] {
-            Place::Unplaced("order contradiction".to_string())
+            Some(Place::Unplaced("order contradiction".to_string()))
         } else {
-            Place::of(o.l, o.u)
+            None
         }
+    };
+    let causal = |o: &ObsOut| -> Place { gate(o).unwrap_or_else(|| Place::of(o.l, o.u)) };
+    let unplaced = |o: &ObsOut, bad: bool| -> Place {
+        gate(o).unwrap_or_else(|| {
+            if bad {
+                Place::Unplaced("RMAX1 contradiction".to_string())
+            } else {
+                Place::of(o.rl.or(o.l), o.ru.or(o.u))
+            }
+        })
     };
     let mut seg_ticks: Vec<Vec<u128>> = vec![Vec::new(); segs.len()];
     let mut seg_width: Vec<Vec<u64>> = vec![Vec::new(); segs.len()];
+    let mut seg_width_c: Vec<Vec<u64>> = vec![Vec::new(); segs.len()];
     let mut out: Vec<PairOut> = Vec::with_capacity(np as usize);
     for pr in pairs.iter().filter(|q| !q.cross) {
         ops.step(4);
         let (ob, oe) = (ev_obs[pr.b], ev_obs[pr.e]);
         let (sb, se) = (obs[ob].seg, obs[oe].seg);
-        let (pb, pe) = (unplaced(&obs[ob]), unplaced(&obs[oe]));
+        let bad = segs[sb].rmax1_bad || segs[se].rmax1_bad;
+        let (pb, pe) = (unplaced(&obs[ob], bad), unplaced(&obs[oe], bad));
+        let (cb, ce) = (causal(&obs[ob]), causal(&obs[oe]));
         let mut ticks = None;
         let mut reviewed = false;
         let st = &segs[sb].state;
@@ -1309,6 +1416,11 @@ fn evaluate(
                     seg_width[sb].push(h - l);
                 }
             }
+            for pl in [&cb, &ce] {
+                if let Place::Placed(l, h) = pl {
+                    seg_width_c[sb].push(h - l);
+                }
+            }
         }
         let mut conv = None;
         if conv_on && reviewed {
@@ -1336,6 +1448,7 @@ fn evaluate(
     for (sg, seg) in segs.iter_mut().enumerate() {
         msort(ops, &mut seg_ticks[sg], |a, b| a < b).map_err(&p)?;
         msort(ops, &mut seg_width[sg], |a, b| a < b).map_err(&p)?;
+        msort(ops, &mut seg_width_c[sg], |a, b| a < b).map_err(&p)?;
         let t = &seg_ticks[sg];
         if !t.is_empty() {
             seg.ticks = Some((t[0], t[(t.len() - 1) / 2], t[t.len() - 1]));
@@ -1343,6 +1456,10 @@ fn evaluate(
         let w = &seg_width[sg];
         if !w.is_empty() {
             seg.width = Some((w[(w.len() - 1) / 2], w[w.len() - 1]));
+        }
+        let w = &seg_width_c[sg];
+        if !w.is_empty() {
+            seg.width_causal = Some((w[(w.len() - 1) / 2], w[w.len() - 1]));
         }
     }
     // ---- rows (EMPTY / EMPTY-UNPROVEN per epoch)
@@ -1645,7 +1762,9 @@ pub fn d_ping_check(pings: &[(Option<u128>, Option<u64>, Option<u64>)]) -> (u64,
 pub const HEADER: &str = "spu ticks: SPU zones are counted in SPU decrementer ticks (the counter's advance between the \
 two raw reads of a zone pair; a count, not a quantity of seconds) and placed on the PPU tb only by causal, \
 identity-bound bounds; no rate, slope or fit is used for SPU";
-pub const PREMISES_TEXT: &str = "(premises C-PPU C-SPU C-ORD S D(RMAX 2) E)";
+pub const PREMISES_TEXT: &str = "(premises C-PPU C-SPU C-ORD S D(RMAX 2) RMAX1 E)";
+/// The header of a capture with order records: placement adds the RMAX1 rate bound to the causal bounds.
+pub const HEADER_RMAX1: &str = "spu ticks: SPU zones are counted in SPU decrementer ticks (the counter's advance between the two raw reads of a zone pair; a count, not a quantity of seconds) and placed on the PPU tb only by causal, identity-bound bounds tightened by RMAX1 (the SPU decrementer never advances faster than the tb); no slope or fit is used for SPU";
 
 fn lane_state_text(u: &LaneOut) -> String {
     match &u.state {
@@ -1680,7 +1799,7 @@ fn class_list(m: &BTreeMap<String, u64>) -> String {
 /// The report lines (design 9.1, delta D1.2, D1.7).  `r` comes from [`analyze`]; formatting only.
 pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
     let x = a.capture.ext.as_ref().expect("extension");
-    let mut out = vec![HEADER.to_string()];
+    let mut out = vec![(if r.order_present { HEADER_RMAX1 } else { HEADER }).to_string()];
     match &a.capture.profile {
         Some(p) => out.push(record_line(p)),
         None => out.push("profile: none".to_string()),
@@ -1714,7 +1833,7 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
         };
         out.push(format!(
             "  SPU lane {} (domain {}): {} | epochs {} events {} brackets {} (positioned {}, unpositioned brackets {}) \
-             order records {}{cov} | pairs {} (cross-epoch {}) | findings: D contradicted {}, order contradicted {}",
+             order records {}{cov} | pairs {} (cross-epoch {}) | findings: D contradicted {}, order contradicted {}{}",
             u.lane_id,
             u.domain_id,
             lane_state_text(u),
@@ -1727,14 +1846,16 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
             u.pairs,
             u.cross_epoch.map_or("unknown".to_string(), |v| v.to_string()),
             u.d_contradicted,
-            u.order_contradicted
+            u.order_contradicted,
+            if u.state == LaneState::NoOrder { String::new() } else { format!(", RMAX1 contradicted {}", u.rmax1_contradicted) }
         ));
         for f in &u.findings {
             out.push(format!("    FINDING: {f}"));
         }
         let listed = u.findings.len() as u64;
-        if u.d_contradicted + u.order_contradicted > listed {
-            out.push(format!("    FINDING: {} more not listed", u.d_contradicted + u.order_contradicted - listed));
+        let found = u.d_contradicted + u.order_contradicted + u.rmax1_contradicted;
+        if found > listed {
+            out.push(format!("    FINDING: {} more not listed", found - listed));
         }
         for w in &u.w32 {
             let t = w.ticks.map_or("none".to_string(), |(a, b, c)| format!("{a}/{b}/{c}"));
@@ -1796,9 +1917,17 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
                 ),
                 (_, None) => format!("pairs {}", sg.pairs),
             };
-            let width = sg.width.map_or("none".to_string(), |(p50, mx)| {
-                format!("p50/max {p50}/{mx} tb ({}/{})", us(p50, r.freq_hz), us(mx, r.freq_hz))
-            });
+            let wtxt = |w: Option<(u64, u64)>| {
+                w.map_or("none".to_string(), |(p50, mx)| {
+                    format!("p50/max {p50}/{mx} tb ({}/{})", us(p50, r.freq_hz), us(mx, r.freq_hz))
+                })
+            };
+            let width = format!(
+                "{}{} (causal bounds alone: {})",
+                wtxt(sg.width),
+                if sg.rmax1_bad { " RMAX1 CONTRADICTED" } else { "" },
+                wtxt(sg.width_causal)
+            );
             out.push(format!(
                 "    {head} lane {} epoch {} segment {}: observations {} steps proven {} | {ticks} | placement PLACED \
                  {} of {} endpoints, width {width} | D contradicted {}, order contradicted {} | ends: {}",
@@ -1828,7 +1957,7 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
                     _ => String::new(),
                 };
                 out.push(format!(
-                    "      {} seq {}/{} ticks {t} | BEGIN {} END {} (causal bounds){conv}",
+                    "      {} seq {}/{} ticks {t} | BEGIN {} END {} (causal bounds plus RMAX1){conv}",
                     names.get(p.desc as usize).map_or("?", |s| s.as_str()),
                     p.begin,
                     p.end,
@@ -1926,7 +2055,7 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
         out.push(format!(
             "SPU ticks coverage {}/{} (policy 95 %: {}); placement {}/{} (policy 95 %: {}); omitted from ticks: {}; \
              omitted from placement: {}{states}; unknown inventory: {} (total {}){unk_nd}; findings: D contradicted \
-             {}, order contradicted {}{}",
+             {}, order contradicted {}, RMAX1 contradicted {}{}",
             c.q_t,
             c.total,
             pol(c.ticks_met()),
@@ -1939,15 +2068,16 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
             c.unknown_total(),
             r.d_contradicted,
             r.order_contradicted,
+            r.rmax1_contradicted,
             if nd.is_empty() { String::new() } else { format!("; NOT DETERMINED: {}", nd.join(", ")) }
         ));
     }
-    out.push(
+    let basis = if r.order_present { "causal bounds plus RMAX1" } else { "causal bounds" };
+    out.push(format!(
         "spu ticks wording: an SPU tick count is the decrementer's advance in SPU decrementer ticks, not a quantity of \
-         seconds; a placement bounds when a raw read happened (causal bounds), never how long a zone ran; coverage is \
-         a policy, not an accuracy figure"
-            .to_string(),
-    );
+         seconds; a placement bounds when a raw read happened ({basis}), never how long a zone ran; coverage is a \
+         policy, not an accuracy figure"
+    ));
     out
 }
 
