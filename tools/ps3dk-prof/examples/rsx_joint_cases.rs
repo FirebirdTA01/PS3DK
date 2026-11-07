@@ -83,7 +83,7 @@ fn case(c: &Value) -> Option<Value> {
         }
         _ => Value::Null,
     };
-    let split = match split_holdout(m, &obs).ok()? {
+    let split = match split_holdout(m, &obs, false).ok()? {
         SplitOutcome::NotAvailable(why) => json!({ "na": why }),
         SplitOutcome::Checked { kept, held } => {
             let v: Vec<Value> = held

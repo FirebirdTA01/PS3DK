@@ -149,19 +149,46 @@ pub struct Hold {
     pub not_evaluated: Option<String>,
 }
 
-/// H-SPLIT counts of one unit (held-out brackets).
+/// The result of one H-SPLIT pass (one held-out parity): the kept/checked counts and the reasons a unit is
+/// not measured in that pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Held {
+    /// Brackets kept (fitted) in this pass; 0 when not evaluated or not available.
+    pub kept: u64,
+    /// Brackets held out and checked in this pass; 0 when not evaluated or not available.
+    pub held: u64,
+    /// Held-out brackets whose DECISIVE test passes (a feasible observation could have missed the prediction).
+    pub decisive: u64,
+    /// Held-out brackets whose observation misses the kept brackets' prediction.
+    pub contradicted: u64,
+    /// Why no held-out bracket could be checked in this pass; None when checked.
+    pub not_available: Option<String>,
+    /// Margin distribution of this pass's held-out brackets, smallest to largest (ticks).
+    pub margins: Vec<u64>,
+    /// Contradiction findings (bracket identity, kept brackets' prediction, window).
+    pub findings: Vec<String>,
+}
+
+/// H-SPLIT of a unit, across both parity passes (odd and even interior brackets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Split {
-    /// Brackets kept (fitted) and held out (predicted and checked) by the selection rule; 0 and 0 when not evaluated
-    /// or not available.
-    pub kept: u64,
-    pub held: u64,
-    pub decisive: u64,
-    pub contradicted: u64,
-    /// Why no held-out bracket could be checked (the unit-level NOT AVAILABLE class); None when checked or not
-    /// evaluated.
-    pub not_available: Option<String>,
-    pub findings: Vec<String>,
+    pub odd: Option<Held>,
+    pub even: Option<Held>,
+}
+
+impl Split {
+    /// Contradicted held-out brackets across every pass that was checked (a unit is not measured when any is non-zero).
+    pub fn total_contradicted(&self) -> u64 {
+        self.odd.as_ref().map_or(0, |h| h.contradicted) + self.even.as_ref().map_or(0, |h| h.contradicted)
+    }
+    /// Decisive held-out brackets across every pass (M-HOLD needs one of either kind).
+    pub fn total_decisive(&self) -> u64 {
+        self.odd.as_ref().map_or(0, |h| h.decisive) + self.even.as_ref().map_or(0, |h| h.decisive)
+    }
+    /// At least one pass was checked (held out brackets); a pass present means it is not NOT AVAILABLE.
+    pub fn any_checked(&self) -> bool {
+        self.odd.is_some() || self.even.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,16 +349,27 @@ pub fn classify_constraint(lo: &End, hi: &End, t: i128, lower: bool) -> (bool, b
     }
 }
 
-/// The H-SPLIT selection rule, fixed before any data is seen: bracket ordinal `j` (bracket seq order within the
-/// unit) of `n` brackets is held out iff j is odd and 1 <= j <= n - 2; every other bracket is kept.  Both neighbours
-/// of a held-out bracket are kept, and the first and last brackets are always kept, so every prediction is made
-/// between two kept brackets.
+/// The H-SPLIT selection rule of a pass, fixed before any data is seen: bracket ordinal `j` (bracket seq order within
+/// the unit) of `n` brackets is held out iff it has the pass's parity and is interior; every other bracket is kept.
+/// Both neighbours of a held-out bracket are kept, and the first and last brackets are always kept, so every
+/// prediction is made between two kept brackets.  Odd pass: j odd and 1 <= j <= n - 2.  Even pass: j even and
+/// 2 <= j <= n - 2.
 pub fn held_out(j: usize, n: usize) -> bool {
-    j % 2 == 1 && j + 2 <= n
+    held_out_parity(j, n, false)
+}
+
+pub fn held_out_parity(j: usize, n: usize, even: bool) -> bool {
+    if even {
+        j % 2 == 0 && j >= 2 && j + 2 <= n
+    } else {
+        j % 2 == 1 && j + 2 <= n
+    }
 }
 
 /// One held-out bracket of H-SPLIT: its ordinal, observation, a-priori window, the kept brackets' prediction at its
-/// coordinate (lowest terms), and its classification.
+/// coordinate (lowest terms), its classification and its margin.  The margin is the distance in ticks from the
+/// observed interval to the nearest edge of the prediction (how far the observation is inside it); it is exact in tick
+/// units (a whole number of ticks) and is 0 exactly when the observation is out of or touches the prediction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldOut {
     pub ordinal: usize,
@@ -344,44 +382,51 @@ pub struct HeldOut {
     pub hi: End,
     pub contradicted: bool,
     pub decisive: bool,
+    pub margin: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SplitOutcome {
-    /// No held-out bracket can be checked: the class.
+    /// No held-out bracket can be checked in this pass: the class.
     NotAvailable(String),
-    /// Every held-out bracket, in ordinal order.
+    /// Every held-out bracket of this pass, in ordinal order.
     Checked { kept: u64, held: Vec<HeldOut> },
 }
 
 /// Charge per held-out classification (four exact rational comparisons of bounded size and the record).
 const HELD_OPS: u64 = 6;
+/// Charge per held-out margin (the distance of each of the two observation endpoints to the nearer finite
+/// prediction edge, bounded-size big integers: a multiply, a subtract and a divide per finite edge).
+const MARGIN_OPS: u64 = 16;
 
 /// The H-SPLIT budget of a unit with n brackets: the partition, the kept coordinates' sort, the kept solve, the
-/// held-out projections, their two reductions and their classifications:
-/// solve_budget(n) + project_budget(n, n) + n (2 ceil(log2(n + 1)) + 16) + 64.
+/// held-out projections, their two reductions, their classifications and their margins:
+/// solve_budget(n) + project_budget(n, n) + n (2 ceil(log2(n + 1)) + 10 + HELD_OPS + MARGIN_OPS) + 64.
 pub fn split_budget(n: u64) -> u64 {
-    let per = 2u64.saturating_mul(clog2(n.saturating_add(1))).saturating_add(10 + HELD_OPS);
+    let per = 2u64.saturating_mul(clog2(n.saturating_add(1))).saturating_add(10 + HELD_OPS + MARGIN_OPS);
     solve_budget(n).saturating_add(project_budget(n, n)).saturating_add(n.saturating_mul(per)).saturating_add(64)
 }
 
-/// H-SPLIT on one unit's brackets `obs` (bracket seq order; lo = tb0, hi = tb1), every step charged to `m` first.
-/// The prediction for a held-out bracket uses the kept brackets only; its window uses its two kept neighbours only;
-/// its own observation is used only by the CONTRADICTED test.
-pub fn split_holdout(m: &mut Meter, obs: &[Obs]) -> Result<SplitOutcome, Limit> {
+/// H-SPLIT of one pass (`even`) on one unit's brackets `obs` (bracket seq order; lo = tb0, hi = tb1), every step
+/// charged to `m` first.  The prediction for a held-out bracket uses the kept brackets only; its window uses its two
+/// kept neighbours only; its own observation is used only by the CONTRADICTED test and the margin.
+pub fn split_holdout(m: &mut Meter, obs: &[Obs], even: bool) -> Result<SplitOutcome, Limit> {
     let n = obs.len();
     m.charge(2 * n as u64 + 1)?;
     let mut kept: Vec<Obs> = Vec::with_capacity(n);
     let mut held: Vec<usize> = Vec::new();
     for (j, o) in obs.iter().enumerate() {
-        if held_out(j, n) {
+        if held_out_parity(j, n, even) {
             held.push(j);
         } else {
             kept.push(*o);
         }
     }
     if held.is_empty() {
-        return Ok(SplitOutcome::NotAvailable(format!("fewer than 3 brackets ({n})")));
+        // no interior bracket of this parity: for n < 3 neither pass has one; the even pass needs n >= 4 (the
+        // third bracket at j = 2 is the first even interior)
+        let label = if even { "no held-out even bracket" } else { "no held-out odd bracket" };
+        return Ok(SplitOutcome::NotAvailable(format!("{label} (n {n})")));
     }
     // the kept coordinates first (one sort, one dedup): the bound needs 2 of them
     let nk = kept.len() as u64;
@@ -409,7 +454,9 @@ pub fn split_holdout(m: &mut Meter, obs: &[Obs]) -> Result<SplitOutcome, Limit> 
         m.charge(HELD_OPS)?;
         let (w_lo, w_hi) = (obs[j - 1].hi, obs[j + 1].lo);
         let (contradicted, decisive) = classify_held_out(&lo, &hi, o.lo, o.hi, w_lo, w_hi);
-        out.push(HeldOut { ordinal: j, f: o.f, tb0: o.lo, tb1: o.hi, w_lo, w_hi, lo, hi, contradicted, decisive });
+        m.charge(MARGIN_OPS)?;
+        let margin = margin_ticks(&lo, &hi, o.lo, o.hi);
+        out.push(HeldOut { ordinal: j, f: o.f, tb0: o.lo, tb1: o.hi, w_lo, w_hi, lo, hi, contradicted, decisive, margin });
     }
     Ok(SplitOutcome::Checked { kept: nk, held: out })
 }
@@ -419,6 +466,45 @@ fn reduce_end(m: &mut Meter, e: End) -> Result<End, Limit> {
         End::At { value, open } => End::At { value: reduce(m, &value)?, open },
         e => e,
     })
+}
+
+/// The margin in tick units of a held-out bracket: the distance, in whole ticks, from the observed interval
+/// [tb0, tb1] to the nearest edge (lo or hi) of the kept brackets' prediction.  For a finite prediction edge
+/// at value `v` and observed interval [tb0, tb1], the distance is 0 if v is in [tb0, tb1], otherwise the
+/// (floored) distance to the closer end of the interval (tb0 - v if v < tb0, value.tb1 to v if v > tb1).  The
+/// margin is the minimum over the two prediction edges; an edge with an infinite prediction contributes no
+/// finite distance and is skipped.  Whole ticks are the floor of the exact rational distance.
+fn margin_ticks(lo: &End, hi: &End, tb0: i128, tb1: i128) -> u64 {
+    let dist = |e: &End| -> Option<u64> {
+        match e {
+            End::NegInf | End::PosInf => None,
+            End::At { value, .. } => {
+                // value = value.num / value.den with value.den > 0 (Rat is normalized).
+                let v = &value.num;
+                let d = &value.den;
+                // v < tb0*den iff value is to the left of the observed interval (v < tb0).
+                let v_lt = v < &(BigInt::from(tb0) * d);
+                let v_gt = v > &(BigInt::from(tb1) * d);
+                if v_lt {
+                    let num = BigInt::from(tb0) * d - v;
+                    Some((num / d).try_into().unwrap_or(u64::MAX))
+                } else if v_gt {
+                    let num = v.clone() - (BigInt::from(tb1) * d);
+                    Some((num / d).try_into().unwrap_or(u64::MAX))
+                } else {
+                    Some(0)
+                }
+            }
+        }
+    };
+    let dl = dist(lo);
+    let dh = dist(hi);
+    match (dl, dh) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => u64::MAX,
+    }
 }
 
 /// H-SPLIT of one held-out bracket: the prediction [lo, hi] (closed except at an open end), the observation
@@ -1236,47 +1322,63 @@ fn unit(
             un.push("INSUFFICIENT (fewer than 2 distinct bracket coordinates)".to_string());
         }
     }
-    // H-SPLIT: held-out brackets (from the brackets alone, whatever F_0's state)
+    // H-SPLIT: held-out brackets, one pass per parity (odd and even interior), from the brackets alone whatever F_0's
+    // state.  Both passes run (when the unit's brackets allow any held-out bracket in that parity) and each publishes
+    // its own result; M-HOLD needs at least one DECISIVE in either and zero CONTRADICTED in any.
     let p = ph("H-SPLIT");
-    let mut sm = ops.phase(split_budget(nb), Limit::EpochSolve).map_err(&p)?;
-    let r = split_holdout(&mut sm, &obs);
-    match ops.settle(&sm, r).map_err(&p)? {
-        SplitOutcome::NotAvailable(why) => {
-            ops.step(1);
-            u.split.not_available = Some(why);
-        }
-        SplitOutcome::Checked { kept, held } => {
-            ops.charge(1 + held.len() as u64).map_err(&p)?;
-            ops.step(1);
-            u.split.kept = kept;
-            u.split.held = held.len() as u64;
-            for h in &held {
+    for even in [false, true] {
+        let mut sm = ops.phase(split_budget(nb), Limit::EpochSolve).map_err(&p)?;
+        let r = split_holdout(&mut sm, &obs, even);
+        match ops.settle(&sm, r).map_err(&p)? {
+            SplitOutcome::NotAvailable(why) => {
                 ops.step(1);
-                u.split.decisive += u64::from(h.decisive);
-                if h.contradicted {
-                    u.split.contradicted += 1;
-                    if u.split.findings.len() < MAX_LISTED_FINDINGS {
-                        ops.charge(1).map_err(&p)?;
-                        ops.step(1);
-                        u.split.findings.push(format!(
-                            "H-SPLIT bracket seq {} at f {}: observed [{}, {}] misses the kept brackets' prediction {} \
-                             (window [{}, {}])",
-                            x.brackets[br[h.ordinal]].seq,
-                            h.f,
-                            h.tb0,
-                            h.tb1,
-                            interval_text(&h.lo, &h.hi),
-                            h.w_lo,
-                            h.w_hi
-                        ));
+                let slot = if even { &mut u.split.even } else { &mut u.split.odd };
+                *slot = Some(Held { not_available: Some(why), ..Held::default() });
+            }
+            SplitOutcome::Checked { kept, held } => {
+                ops.charge(1 + held.len() as u64).map_err(&p)?;
+                ops.step(1);
+                let mut h = Held {
+                    kept,
+                    held: held.len() as u64,
+                    decisive: 0,
+                    contradicted: 0,
+                    not_available: None,
+                    margins: Vec::new(),
+                    findings: Vec::new(),
+                };
+                for w in &held {
+                    ops.step(1);
+                    h.decisive += u64::from(w.decisive);
+                    h.margins.push(w.margin);
+                    if w.contradicted {
+                        h.contradicted += 1;
+                        if h.findings.len() < MAX_LISTED_FINDINGS {
+                            ops.charge(1).map_err(&p)?;
+                            ops.step(1);
+                            h.findings.push(format!(
+                                "H-SPLIT bracket seq {} at f {}: observed [{}, {}] misses the kept brackets' prediction {} \
+                                 (window [{}, {}])",
+                                x.brackets[br[w.ordinal]].seq,
+                                w.f,
+                                w.tb0,
+                                w.tb1,
+                                interval_text(&w.lo, &w.hi),
+                                w.w_lo,
+                                w.w_hi
+                            ));
+                        }
                     }
                 }
+                h.margins.sort_unstable();
+                let slot = if even { &mut u.split.even } else { &mut u.split.odd };
+                *slot = Some(h);
             }
         }
     }
-    if u.split.contradicted > 0 {
+    if u.split.total_contradicted() > 0 {
         ops.step(1);
-        un.push(format!("H-SPLIT contradicted {} (FINDING)", u.split.contradicted));
+        un.push(format!("H-SPLIT contradicted {} (FINDING)", u.split.total_contradicted()));
     }
     // X-RSX constraints: (half-plane, token)
     let p = ph("X-RSX");
@@ -1478,25 +1580,39 @@ fn unit(
             }
         }
     }
-    // M-HOLD (lead decision on R-17, with H-SPLIT: rsx-measured-holdout-delta.md): one decisive hold-out of either
-    // kind, and no contradiction of either kind
+    // M-HOLD (lead decision on R-17, with H-SPLIT: rsx-measured-holdout-delta.md): one DECISIVE hold-out of either a
+    // H-SPLIT pass (odd or even) or the H-CAUSAL constraints, and no CONTRADICTED held-out in any of them
     let p = ph("publication");
     ops.charge(2 + un.len() as u64 + cond.len() as u64).map_err(&p)?;
     ops.step(1 + un.len() as u64 + cond.len() as u64);
-    let decisive = u.split.decisive.checked_add(u.hold.decisive).ok_or((Limit::Range, "publication"))?;
-    if u.split.contradicted > 0 || u.hold.contradicted > 0 {
+    let decisive = u.split.total_decisive().checked_add(u.hold.decisive).ok_or((Limit::Range, "publication"))?;
+    if u.split.total_contradicted() > 0 || u.hold.contradicted > 0 {
         ops.step(1);
+        let sc = u.split.total_contradicted();
+        let (so, se) = (
+            u.split.odd.as_ref().map_or(0, |h| h.contradicted),
+            u.split.even.as_ref().map_or(0, |h| h.contradicted),
+        );
         cond.push(format!(
-            "hold-out contradicted: H-SPLIT {}, H-CAUSAL {}",
-            u.split.contradicted, u.hold.contradicted
+            "hold-out contradicted: H-SPLIT {} (odd {}, even {}), H-CAUSAL {}",
+            sc, so, se, u.hold.contradicted
         ));
     } else if decisive == 0 {
-        ops.step(1);
-        let split = match &u.split.not_available {
-            Some(w) => format!("H-SPLIT not available ({w})"),
-            None => format!("H-SPLIT checked {} decisive 0", u.split.held),
+        // the no-decisive reason: the state of every H-SPLIT pass and H-CAUSAL
+        let pass = |h: &Option<Held>| -> String {
+            match h {
+                None => "not run".to_string(),
+                Some(h) => match &h.not_available {
+                    Some(w) => format!("not available ({w})"),
+                    None => format!("checked {} decisive 0", h.held),
+                },
+            }
         };
-        cond.push(format!("no decisive hold-out: {split}, H-CAUSAL available {} decisive 0", u.hold.available));
+        ops.step(1);
+        cond.push(format!(
+            "no decisive hold-out: H-SPLIT odd {}, H-SPLIT even {}, H-CAUSAL available {} decisive 0",
+            pass(&u.split.odd), pass(&u.split.even), u.hold.available
+        ));
     }
     u.state = if !un.is_empty() {
         un.extend(cond);
@@ -1514,6 +1630,50 @@ fn width_text(r: &Rat) -> String {
         r.num.to_string()
     } else {
         format!("{r} (ceil {})", r.ceil())
+    }
+}
+
+/// The median of a non-empty tick list (smallest to largest: whole ticks, no rounding): the central element, or
+/// the average of the two central elements when the count is even (a whole tick by construction).
+fn med_of(v: &[u64]) -> u64 {
+    let n = v.len();
+    if n == 0 {
+        0
+    } else {
+        (v[(n - 1) / 2] + v[n / 2]) / 2
+    }
+}
+
+/// One pass of H-SPLIT as printed: the counts and the margin distribution (min and median, ticks).
+fn held_text(name: &str, h: &Held) -> String {
+    match &h.not_available {
+        Some(w) => format!("H-SPLIT {name} not available ({w})"),
+        None => format!(
+            "H-SPLIT {} kept {} held {} decisive {} contradicted {} margin min {} median {}",
+            name,
+            h.kept,
+            h.held,
+            h.decisive,
+            h.contradicted,
+            h.margins.first().copied().unwrap_or(0),
+            med_of(&h.margins)
+        ),
+    }
+}
+
+/// The H-SPLIT report field of a unit: both parity passes; "not evaluated" when neither pass was run.
+fn split_text(u: &Unit) -> String {
+    let passes = [
+        u.split.odd.as_ref().map(|h| held_text("odd", h)),
+        u.split.even.as_ref().map(|h| held_text("even", h)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if passes.is_empty() {
+        "H-SPLIT not evaluated".to_string()
+    } else {
+        passes.join(" ; ")
     }
 }
 
@@ -1561,14 +1721,7 @@ pub fn lines(a: &Analysis, r: &RsxResult) -> Vec<String> {
         let na: Vec<String> = u.hold.not_available.iter().map(|(k, v)| format!("{k} {v}")).collect();
         let na = if na.is_empty() { "none".to_string() } else { na.join(", ") };
         let slope_label = if matches!(u.state, State::Measured) { "(F_J)" } else { "(F_J, conditional)" };
-        let split = match &u.split.not_available {
-            Some(w) => format!("H-SPLIT not available: {w}"),
-            None if u.split.held == 0 => "H-SPLIT not evaluated".to_string(),
-            None => format!(
-                "H-SPLIT (odd seq 1..n-2 held out) kept {} held {} decisive {} contradicted {}",
-                u.split.kept, u.split.held, u.split.decisive, u.split.contradicted
-            ),
-        };
+        let split = split_text(u);
         out.push(format!(
             "  MAPPING {state} [profile {id}{nc}] (premises {prem}; order: premise E) domain {} epoch {} brackets {} \
              distinct_f {} events {} pairs {} interpolated {} extrapolated {} | slope {fj} tb/tick {slope_label}, F_0 \
@@ -1594,14 +1747,16 @@ pub fn lines(a: &Analysis, r: &RsxResult) -> Vec<String> {
         if u.hold.contradicted as usize > u.hold.findings.len() {
             out.push(format!("    FINDING: {} more contradictions not listed", u.hold.contradicted as usize - u.hold.findings.len()));
         }
-        for f in &u.split.findings {
-            out.push(format!("    FINDING: {f}"));
-        }
-        if u.split.contradicted as usize > u.split.findings.len() {
-            out.push(format!(
-                "    FINDING: {} more H-SPLIT contradictions not listed",
-                u.split.contradicted as usize - u.split.findings.len()
-            ));
+        for h in [u.split.odd.as_ref(), u.split.even.as_ref()].into_iter().flatten() {
+            for f in &h.findings {
+                out.push(format!("    FINDING: {f}"));
+            }
+            if h.contradicted as usize > h.findings.len() {
+                out.push(format!(
+                    "    FINDING: {} more H-SPLIT contradictions not listed",
+                    h.contradicted as usize - h.findings.len()
+                ));
+            }
         }
     }
     for (d, why) in &r.refused {
