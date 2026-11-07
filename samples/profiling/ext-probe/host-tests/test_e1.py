@@ -461,7 +461,7 @@ def main():
                                       'events=0 lost=0 losses=0 epochs=1 paired=0 marks=0 unpaired=0 censored=0 '
                                       'frames_resolved=0 frames_unresolved=0 frames_none=0\nend\n'), 'source rows'),
         'lane-263-events': (good.replace('events=264', 'events=263', 1), 'events=263'),
-        'lane-no-final': (good.replace('raw_valid=0 final=1', 'raw_valid=0 final=none', 1), 'final=none'),
+        'lane-no-final': (good.replace('raw_valid=1 final=1', 'raw_valid=1 final=none', 1), 'final=none'),
         'gpu-89-events': (good.replace('raw_valid=1 final=1 events=90', 'raw_valid=1 final=1 events=89'), 'events=89'),
         'epoch1-only': (good.replace('events kind=lane id=1 epoch=2 ev=begin desc=probe-e2 count=64\n', ''), 'events rows'),
         'wrong-descriptor': (good.replace('epoch=1 ev=mark desc=probe-mark count=4', 'epoch=1 ev=mark desc=probe-e1 count=4'),
