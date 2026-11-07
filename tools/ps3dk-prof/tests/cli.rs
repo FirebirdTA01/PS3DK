@@ -46,6 +46,70 @@ fn check_exit_status_for_complete_and_incomplete() {
     let one = seqd(0, [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)]].concat());
     let (code, out) = run(&["check"], &scenario(vec![lane(1, one.clone())]).bytes(), "complete");
     assert_eq!(code, Some(0), "{out}");
-    let (code, out) = run(&["check"], &scenario(vec![lane(1, one)]).file().without_trailer().bytes(), "incomplete");
+    // A file with valid chunks that ends without a trailer holds captured data: COMPLETE (exit 0) with the note and
+    // the machine-readable `ending:` line; a file with a trailer has no such line.
+    let (code, out) = run(&["check"], &scenario(vec![lane(1, one.clone())]).bytes(), "complete-ending");
+    assert_eq!((code, out.contains("ending:")), (Some(0), false), "{out}");
+    let (code, out) = run(&["check"], &scenario(vec![lane(1, one)]).file().without_trailer().bytes(), "no-trailer");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.starts_with("COMPLETE (ended without a trailer (app quit or the link ended)"), "{out}");
+    assert!(out.lines().any(|l| l == "ending: NO-TRAILER"), "{out}");
+}
+
+fn one_lane() -> Vec<Rec> {
+    seqd(0, [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)]].concat())
+}
+
+#[test]
+fn a_trailerless_file_is_complete_in_every_command_and_the_report_carries_the_note() {
+    let bytes = scenario(vec![lane(1, one_lane())]).file().without_trailer().bytes();
+    for cmd in ["check", "report", "paths", "clockmap", "measured", "spu-ticks"] {
+        let (code, out) = run(&[cmd], &bytes, &format!("nt-{cmd}"));
+        assert_eq!(code, Some(0), "{cmd}: {out}");
+        assert!(out.contains("COMPLETE (ended without a trailer"), "{cmd}: {out}");
+        assert!(out.lines().any(|l| l == "ending: NO-TRAILER"), "{cmd}: {out}");
+        assert!(!out.contains("INCOMPLETE"), "{cmd}: {out}");
+    }
+    let (_, out) = run(&["report"], &bytes, "nt-report-verdict");
+    assert!(out.starts_with("verdict: COMPLETE (ended without a trailer"), "{out}");
+}
+
+#[test]
+fn a_torn_last_chunk_is_dropped_and_named_never_fatal() {
+    let whole = scenario(vec![lane(1, one_lane()), lane(2, one_lane())]).file().without_trailer().bytes();
+    for cut in [1usize, 5, 11] {
+        let torn = &whole[..whole.len() - cut];
+        let (code, out) = run(&["check"], torn, &format!("torn-{cut}"));
+        assert_eq!(code, Some(0), "{cut}: {out}");
+        assert!(out.contains("COMPLETE (ended without a trailer"), "{cut}: {out}");
+        assert!(out.contains("bytes of a torn last chunk dropped"), "{cut}: {out}");
+    }
+    // The same file cut inside its TRAILER (a torn trailer): everything before it counts.
+    let full = scenario(vec![lane(1, one_lane())]).bytes();
+    let (code, out) = run(&["check"], &full[..full.len() - 3], "torn-trailer");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("torn last chunk dropped"), "{out}");
+}
+
+#[test]
+fn corruption_inside_the_prefix_is_still_malformed() {
+    let mut bytes = scenario(vec![lane(1, one_lane())]).file().without_trailer().bytes();
+    bytes[16 + 12] ^= 0xff; // inside the first chunk: its checksum no longer matches
+    let (code, out) = run(&["check"], &bytes, "corrupt-prefix");
+    assert_eq!(code, Some(2), "{out}");
+    assert!(out.starts_with("MALFORMED"), "{out}");
+    // A bad structure after valid chunks is MALFORMED too, not forgiven as a missing ending.
+    let mut f = scenario(vec![lane(1, one_lane())]).file().without_trailer().bytes();
+    f.extend_from_slice(&[0xee; 40]); // a whole garbage chunk header: an impossible length
+    let (code, out) = run(&["check"], &f, "garbage-after");
+    assert_eq!(code, Some(2), "{out}");
+}
+
+#[test]
+fn a_file_with_no_event_chunk_and_no_trailer_stays_incomplete() {
+    let bytes = scenario(vec![]).file().without_trailer().bytes();
+    let (code, out) = run(&["check"], &bytes, "no-events");
     assert_eq!(code, Some(1), "{out}");
+    assert!(out.starts_with("INCOMPLETE"), "{out}");
+    assert!(!out.contains("ending:"), "{out}");
 }

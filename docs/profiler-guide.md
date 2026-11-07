@@ -236,6 +236,8 @@ ps3dk-prof report capture.prof    # print a human-readable report
 
 Run these before interpreting a capture.
 
+Exit status: `0` COMPLETE, `1` INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean.  A capture that ends without a trailer (the app quit from the XMB, the link ended, a copy cut short) is COMPLETE and exits `0`; its output has the extra line `ending: NO-TRAILER` (a file with a trailer has no `ending:` line), so a script that must tell the two apart greps for that line.
+
 ### 3.2 The viewer
 
 The GUI viewer is started with an optional capture and flags (from the viewer's `main.rs`):
@@ -275,7 +277,7 @@ While data is streaming, the app bar shows a `LIVE · PROVISIONAL` badge and the
 When the link ends (the app's profiler shuts down, the link disconnects, or you press **Disconnect**), the outcome is classified as follows:
 
 - if the console sent `END` and every check passed, the capture is saved as a normal `.prof` with the verdict `COMPLETE`;
-- if the session ended early (for example **Disconnect** or dropped link) and what arrived is an eligible valid prefix, the viewer saves that accepted prefix as a normal `.prof` and shows `COMPLETE (ended early)`. This is the viewer's acceptance of a prefix: the strict reader (`ps3dk-prof check`) still reports such a file as `INCOMPLETE`, because it has no trailer;
+- if the session ended without a trailer (for example **Disconnect**, a dropped link, or the app quit from the XMB so the console's `END` says no trailer was written) and what arrived is a valid prefix with at least one event chunk, the viewer saves that prefix as a normal `.prof` (a torn last chunk is cut) and shows `COMPLETE` with the note `ended without a trailer (app quit or the link ended)`. `ps3dk-prof check` reads the same file the same way;
 - otherwise, including a protocol, integrity or local-publication failure even after some valid data arrived, the session is a failure: the viewer keeps what it could as `<name>.incomplete.prof` with the reasons, or reports that nothing could be saved. A `.incomplete.prof` file is never promoted to a complete capture when it is reopened.
 
 ---
@@ -314,9 +316,13 @@ A **Capture RSX frame** button next to **Capture full frame** is planned: it wil
 | Verdict | Meaning |
 |---|---|
 | `COMPLETE` | The reader found the file structurally complete (header to trailer, every chunk valid).  Whether the run itself finalized cleanly, including the file's close, is not in the bytes: it is the result of `ps3dk_prof_shutdown` on the console (and, for a live session, the agent's END status). |
-| `COMPLETE (ended early)` | Viewer only: the accepted valid prefix of a live session that ended early, saved as a normal `.prof`.  The strict reader (`ps3dk-prof check`) reports the same file as `INCOMPLETE` (no trailer). |
-| `INCOMPLETE` | The reader found the capture incomplete (for example no trailer).  A live session's kept copy in that state is named `<name>.incomplete.prof`. |
-| `MALFORMED` | The capture could not be parsed (truncated, bad checksum, out-of-range length, or a structural error). |
+| `COMPLETE (ended without a trailer ...)` | Valid chunks, no trailer, at least one event chunk: the app quit, the link ended or the copy was cut short.  Reported by `ps3dk-prof` and the viewer alike (exit `0`, extra line `ending: NO-TRAILER`).  Every analysis runs on it as on a trailered file, up to the last whole chunk; a torn last chunk is dropped and its bytes are named in the note, and loss that was not yet reported at the cut cannot be seen.  SPU zones are placed PROVISIONALLY (causal bounds alone, no tick counts, counted apart from the final coverage) and the coverage says the lane final record was not received, because there is no `ORDER_FINAL`. |
+| `INCOMPLETE` | The trailer says the run did not finish cleanly (`NOT_QUIESCED`, `SEQ_LIMIT`, a sink error), or the file has no event chunk at all (a header with nothing captured).  A live session that failed a check (a protocol, integrity or local-copy failure) keeps its copy as `<name>.incomplete.prof`; a missing trailer alone never does. |
+| `MALFORMED` | The capture broke a rule: a bad checksum, an out-of-range length, bad structure or inconsistent counts inside the bytes that are there.  Only the missing ending is forgiven; corruption in the prefix is not. |
+
+### A capture that quit from the XMB
+
+The file has no trailer, and that is expected: the app did not reach `ps3dk_prof_shutdown`.  `ps3dk-prof check` prints `COMPLETE (ended without a trailer ...)` and exits `0`; the viewer shows the `COMPLETE` badge with the same note and saves a normal `.prof`.  Per-source lines of a domain-extension file still say `STRUCTURE INCOMPLETE (no DOMAIN_FINAL; the file has no valid TRAILER)`, which is the source's own fact and does not change the file's verdict.
 
 ### A live view that never connects
 

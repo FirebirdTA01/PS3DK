@@ -1760,3 +1760,33 @@ fn provisional_placement_keeps_a_lost_event_gate() {
     let t = lines(&a, &r, false).join("\n");
     assert!(t.contains("placement PROVISIONAL over the received prefix (coverage over the received prefix is provisional, not final)"), "{t}");
 }
+
+/// A capture without its TRAILER (and so without ORDER_FINAL) is COMPLETE as a file; its SPU placement is the
+/// PROVISIONAL machinery (causal bounds alone, no tick counts, counted apart) and the coverage says the lane final
+/// record was not received.
+#[test]
+fn a_file_without_a_trailer_is_complete_and_its_spu_coverage_says_the_final_record_was_not_received() {
+    let c = gen(2, 2, 8, 2);
+    let po = Options { provisional: true, ..opts() };
+    let mut seen = 0;
+    for keep in 1..c.ext.len() {
+        let b = c.torn_after(keep);
+        let a = match ps3dk_prof::load_file(&b) {
+            Outcome::Analysed(a) => *a,
+            Outcome::Malformed(m) => panic!("keep {keep}: {m}"),
+        };
+        if a.prefix.is_none() {
+            continue; // no whole event chunk: stays INCOMPLETE
+        }
+        assert_eq!(a.verdict, ps3dk_prof::Verdict::Complete, "keep {keep}");
+        let Some(r) = analyze(&a, &po) else { continue };
+        assert_eq!(r.coverage.q_p, 0, "keep {keep}");
+        if r.coverage.lanes_without_final > 0 {
+            let text = ps3dk_prof::spu_ticks::lines(&a, &r, false).join(" ");
+            assert!(text.contains("lanes without ORDER_FINAL (the lane final record was not received)"), "keep {keep}: {text}");
+            assert!(!r.coverage.placement_met());
+            seen += 1;
+        }
+    }
+    assert!(seen > 0);
+}

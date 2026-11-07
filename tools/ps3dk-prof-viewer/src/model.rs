@@ -6,7 +6,7 @@
 //! number, and sorts after every known value.
 
 use ps3dk_prof::report::verdict_line;
-use ps3dk_prof::{load, load_prefix, Analysis, Metric, Outcome, Verdict, ZoneStats};
+use ps3dk_prof::{load, load_file, Analysis, Metric, Outcome, Verdict, ZoneStats};
 use std::cmp::Ordering;
 use std::path::PathBuf;
 
@@ -97,14 +97,7 @@ impl Document {
     }
 
     fn build(path: PathBuf, bytes: &[u8], prefix_ok: bool) -> Document {
-        let strict = load(bytes);
-        let loaded = match strict {
-            Outcome::Analysed(a) if prefix_ok && a.verdict != Verdict::Complete => match load_prefix(bytes) {
-                Ok(p) => Outcome::Analysed(Box::new(p)),
-                Err(_) => Outcome::Analysed(a),
-            },
-            other => other,
-        };
+        let loaded = if prefix_ok { load_file(bytes) } else { load(bytes) };
         let (state, ext, frames, hot) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
@@ -156,14 +149,9 @@ impl Document {
             }
             DocState::Analysed(a) => match &a.prefix {
                 // Cause-neutral: the bytes cannot say why the capture ended early.
-                Some(p) => VerdictView {
+                Some(_) => VerdictView {
                     tone: VerdictTone::CompleteEarly,
-                    text: format!(
-                        "COMPLETE (ended early): no TRAILER; analysed up to byte {} ({} whole chunks{}); loss not yet reported at the cut cannot be seen",
-                        p.cut,
-                        p.chunks,
-                        if p.torn_dropped > 0 { format!(", {} torn bytes dropped", p.torn_dropped) } else { String::new() }
-                    ),
+                    text: ps3dk_prof::report::verdict_text(a),
                 },
                 None => VerdictView {
                     tone: match a.verdict {

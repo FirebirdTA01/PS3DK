@@ -6,12 +6,13 @@
 //!   ps3dk-prof paths <file>    print the verdict and the PPU hot paths
 //!   ps3dk-prof spu-ticks [options] <file>   print the verdict and the SPU ticks with their causal placement
 //!
-//! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
+//! Exit status: 0 COMPLETE (a file that ends without a TRAILER is COMPLETE too: the output then has an `ending:
+//! NO-TRAILER` line), 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
 
 use std::process::ExitCode;
 
-use ps3dk_prof::{load, report, Outcome, Verdict};
+use ps3dk_prof::{load_file, report, Outcome, Verdict};
 
 const USAGE: &str = "usage:
   ps3dk-prof check <file>    print the verdict
@@ -31,8 +32,9 @@ const USAGE: &str = "usage:
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
   ps3dk-prof -h | --help | -v | --version
 
-exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error,
-4 TRANSPORT COMPLETE but a domain-extension source is not COMPLETE and RAW VALID
+exit status: 0 COMPLETE (also a file that ends without a trailer; its output then has the line
+'ending: NO-TRAILER', absent for a file with a trailer), 1 INCOMPLETE, 2 MALFORMED, 3 usage or
+I/O error, 4 TRANSPORT COMPLETE but a domain-extension source is not COMPLETE and RAW VALID
 (only files with file_flags bit 0; every v1 file keeps codes 0-3)
 check-pair: 0 verified FINAL pair; 1 refused or PROVISIONAL; 2 malformed arcs;
 3 usage or I/O error. Timing problems inside the pair, including malformed bound timing
@@ -90,7 +92,7 @@ fn check_pair(arcs_path: &str, timing_path: &str) -> ExitCode {
 /// The exit status of `check` for an analysed capture.
 fn verdict_code(a: &ps3dk_prof::Analysis) -> ExitCode {
     match a.verdict {
-        Verdict::Complete if report::extensions_clean(&a.capture) => ExitCode::SUCCESS,
+        Verdict::Complete if report::analysis_extensions_clean(a) => ExitCode::SUCCESS,
         Verdict::Complete => ExitCode::from(4),
         Verdict::Incomplete(_) => ExitCode::from(1),
     }
@@ -146,13 +148,13 @@ fn clockmap(rest: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     };
-    match load(&bytes) {
+    match load_file(&bytes) {
         Outcome::Malformed(m) => {
             println!("{m}");
             ExitCode::from(2)
         }
         Outcome::Analysed(a) => {
-            println!("{}", report::verdict_line(&a.verdict));
+            println!("{}", report::verdict_block(&a));
             match &a.capture.ext {
                 None => println!("clockmap: no domain extensions (nothing to map)"),
                 Some(x) => {
@@ -210,13 +212,13 @@ fn measured(rest: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     };
-    match load(&bytes) {
+    match load_file(&bytes) {
         Outcome::Malformed(m) => {
             println!("{m}");
             ExitCode::from(2)
         }
         Outcome::Analysed(a) => {
-            println!("{}", report::verdict_line(&a.verdict));
+            println!("{}", report::verdict_block(&a));
             let convention = submit.zip(wait).map(|(s, w)| Convention { submit: s.to_string(), wait: w.to_string() });
             let opts = Options { convention, ..Options::default() };
             match analyze(&a, &opts) {
@@ -302,13 +304,16 @@ fn spu_ticks(rest: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     };
-    match load(&bytes) {
+    match load_file(&bytes) {
         Outcome::Malformed(m) => {
             println!("{m}");
             ExitCode::from(2)
         }
         Outcome::Analysed(a) => {
-            println!("{}", report::verdict_line(&a.verdict));
+            println!("{}", report::verdict_block(&a));
+            // A capture without a TRAILER has no ORDER_FINAL: place from the received order records (PROVISIONAL
+            // machinery: causal bounds alone, no tick counts, counted apart from the final coverage).
+            opts.provisional = a.prefix.is_some();
             match analyze(&a, &opts) {
                 None => println!("spu ticks: no domain extensions (no SPU lane)"),
                 Some(r) => {
@@ -389,14 +394,14 @@ fn main() -> ExitCode {
             }
         };
     }
-    match load(&bytes) {
+    match load_file(&bytes) {
         Outcome::Malformed(m) => {
             println!("{m}");
             ExitCode::from(2)
         }
         Outcome::Analysed(a) if args[0] == "paths" => {
             use ps3dk_prof::paths::{lines, paths, PathBudgets};
-            println!("{}", report::verdict_line(&a.verdict));
+            println!("{}", report::verdict_block(&a));
             for line in lines(&a, &paths(&a, &PathBudgets::default())) {
                 println!("{line}");
             }
@@ -406,7 +411,7 @@ fn main() -> ExitCode {
             if full {
                 print!("{}", report::render(&a));
             } else {
-                println!("{}", report::verdict_line(&a.verdict));
+                println!("{}", report::verdict_block(&a));
                 for line in report::extension_lines(&a.capture) {
                     println!("{line}");
                 }

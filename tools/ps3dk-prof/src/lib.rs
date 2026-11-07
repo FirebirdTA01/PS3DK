@@ -27,7 +27,7 @@ pub mod rsx_capture;
 pub mod spu_ticks;
 
 pub use analysis::{
-    compare, compare_with, load, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,
+    compare, compare_with, load, load_file, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,
     Comparison, ComparisonKind, FrameElapsed, LaneView, Outcome, SpanView, SpansN, TokenOutcome,
     TokenRef, PrefixAcceptance, Work, ZoneStats,
 };

@@ -265,6 +265,47 @@ pub fn extensions_clean(cap: &Capture) -> bool {
         .is_none_or(|x| x.sources.iter().all(|s| s.structure == crate::ext::Structure::Complete && s.raw_valid))
 }
 
+/// Like [`extensions_clean`], for an analysed file.  A capture that ended without a TRAILER cannot have DOMAIN_FINAL
+/// records or a valid TRAILER, so its sources are clean when they pass the prefix-only raw validity rule (see
+/// [`crate::spu_ticks::provisional_raw_ok`]): the missing ending is forgiven, a lost event, a protocol error or an
+/// abandoned, overflowed or unbound source is not.
+pub fn analysis_extensions_clean(a: &Analysis) -> bool {
+    if a.prefix.is_none() {
+        return extensions_clean(&a.capture);
+    }
+    a.capture.ext.as_ref().is_none_or(|x| x.sources.iter().all(crate::spu_ticks::provisional_raw_ok))
+}
+
+/// The note on a capture that ended without a TRAILER (None for any file that has one).
+pub fn ending_note(a: &Analysis) -> Option<String> {
+    let p = a.prefix.as_ref()?;
+    let torn = if p.torn_dropped > 0 { format!(", {} bytes of a torn last chunk dropped", p.torn_dropped) } else { String::new() };
+    Some(format!(
+        "ended without a trailer (app quit or the link ended); analysed up to byte {} ({} whole chunks{torn}); loss not yet reported at the cut cannot be seen",
+        p.cut, p.chunks
+    ))
+}
+
+/// The verdict line of an analysed file: `verdict_line`, or COMPLETE with the ending note.
+pub fn verdict_text(a: &Analysis) -> String {
+    match ending_note(a) {
+        Some(n) => format!("COMPLETE ({n})"),
+        None => verdict_line(&a.verdict),
+    }
+}
+
+/// The machine-readable ending, printed only for a file without a TRAILER (the verdict word stays COMPLETE).
+pub const ENDING_NO_TRAILER: &str = "ending: NO-TRAILER";
+
+/// The verdict line, plus the `ending:` line for a file without a TRAILER.
+pub fn verdict_block(a: &Analysis) -> String {
+    match a.prefix {
+        Some(_) => format!("{}
+{ENDING_NO_TRAILER}", verdict_text(a)),
+        None => verdict_text(a),
+    }
+}
+
 pub fn verdict_line(v: &Verdict) -> String {
     match v {
         Verdict::Complete => "COMPLETE (TRANSPORT COMPLETE)".to_string(),
@@ -278,7 +319,10 @@ pub fn verdict_line(v: &Verdict) -> String {
 pub fn render(a: &Analysis) -> String {
     let mut o = String::new();
     let cap = &a.capture;
-    let _ = writeln!(o, "verdict: {}", verdict_line(&a.verdict));
+    let _ = writeln!(o, "verdict: {}", verdict_text(a));
+    if a.prefix.is_some() {
+        let _ = writeln!(o, "{ENDING_NO_TRAILER}");
+    }
     if cap.minor_warning {
         let _ = writeln!(o, "warning: minor version > 0; read as v1");
     }

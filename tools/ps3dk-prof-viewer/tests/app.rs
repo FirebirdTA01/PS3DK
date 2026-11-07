@@ -174,7 +174,7 @@ fn the_outcome_line_keeps_cleanup_warnings_for_both_outcomes() {
         torn_dropped: 7,
     }));
     assert_eq!(tone, ps3dk_ui::Tone::Success);
-    assert!(t.contains("ended early (disconnected by the user)") && t.contains("byte 1000") && t.contains("7 bytes"), "{t}");
+    assert!(t.contains("ended without a trailer (disconnected by the user)") && t.contains("byte 1000") && t.contains("7 bytes"), "{t}");
     let (_, t) = live_line(&view(Outcome::Incomplete {
         saved: None,
         reasons: vec!["nothing was saved".into()],
@@ -205,7 +205,7 @@ fn an_empty_userprofile_does_not_hide_home() {
     assert_eq!(home_from(None, None), None);
 }
 
-/// While the link has no outcome, a snapshot's structural verdict (an accepted prefix reads "COMPLETE (ended early)",
+/// While the link has no outcome, a snapshot's structural verdict (an accepted prefix reads "COMPLETE" with the no-trailer note,
 /// a snapshot with no whole chunk reads INCOMPLETE) is never shown as an end state: the strip says PROVISIONAL with
 /// the bytes received and there is no verdict badge.  Once the outcome is known the reader's verdict is unchanged.
 #[test]
@@ -229,7 +229,7 @@ fn a_streaming_snapshot_is_provisional_never_an_end_state() {
         assert_eq!((tone, badge), (ps3dk_ui::Tone::Neutral, None), "no end-state badge while streaming");
         assert!(text.starts_with("PROVISIONAL: still receiving (4321 bytes so far)"), "{text}");
         assert!(text.contains("analysed up to byte"), "{text}");
-        assert!(!text.contains("ended early") && !text.starts_with("COMPLETE"), "{text}");
+        assert!(!text.contains("ended without a trailer") && !text.starts_with("COMPLETE"), "{text}");
     }
     // A snapshot with no whole chunk: still PROVISIONAL, never INCOMPLETE while the link runs.
     let torn = Document::from_bytes(PathBuf::from("live.prof"), &bytes[..10]);
@@ -246,10 +246,10 @@ fn a_streaming_snapshot_is_provisional_never_an_end_state() {
         torn_dropped: 0,
     });
     let (tone, badge, text) = shown_verdict(&snap, Some(&done));
-    assert_eq!((tone, badge), (ps3dk_ui::Tone::Success, Some("COMPLETE (ended early)")));
+    assert_eq!((tone, badge), (ps3dk_ui::Tone::Success, Some("COMPLETE")));
     assert_eq!(text, snap.verdict().text);
     // No live session (a file): unchanged too.
     let (_, badge, text) = shown_verdict(&snap, None);
-    assert_eq!((badge, text), (Some("COMPLETE (ended early)"), snap.verdict().text));
+    assert_eq!((badge, text), (Some("COMPLETE"), snap.verdict().text));
     assert!(!snap.verdict().text.contains("  "), "no run of spaces in the verdict text: {}", snap.verdict().text);
 }

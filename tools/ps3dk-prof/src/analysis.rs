@@ -214,6 +214,26 @@ pub fn load(bytes: &[u8]) -> Outcome {
     }
 }
 
+/// The verdict of a capture FILE (what `ps3dk-prof` and the viewer report).  Only a missing ending is forgiven:
+/// a file whose chunks are valid but which ends without a TRAILER (the app quit from the XMB, the link ended, a copy
+/// cut short) holds captured data, and is COMPLETE; the ending is named by [`Analysis::prefix`] (the cut, the chunks
+/// kept, a torn final chunk dropped), never a verdict.  Genuine incompleteness stays INCOMPLETE (a TRAILER that
+/// reports NOT_QUIESCED, SEQ_LIMIT or SINK_ERROR, or a file with no event chunk at all) and anything that breaks a
+/// rule inside the kept prefix stays MALFORMED.  [`load`] is unchanged: it is the strict transport verdict, which a
+/// FINAL companion pair still needs.
+pub fn load_file(bytes: &[u8]) -> Outcome {
+    match load(bytes) {
+        Outcome::Analysed(a) if a.verdict != Verdict::Complete => match load_prefix(bytes) {
+            Ok(mut p) => {
+                p.verdict = Verdict::Complete;
+                Outcome::Analysed(Box::new(p))
+            }
+            Err(_) => Outcome::Analysed(a),
+        },
+        other => other,
+    }
+}
+
 /// The end of the last whole chunk of `bytes` and what lies after it, by a checked linear walk of the chunk
 /// lengths only (contents are judged by the reader on the cut bytes).  `Err` when what follows the last whole
 /// chunk is not a genuinely torn final chunk.

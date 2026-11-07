@@ -628,6 +628,56 @@ fn a_close_before_end_after_whole_event_chunks_is_published_early() {
     assert!(!re.verdict().text.contains("closed"), "reopen wording is cause-neutral: {}", re.verdict().text);
 }
 
+/// The app quit from the XMB: the agent sends END with `trailer_written` 0 (and a failed shutdown).  The bytes that
+/// arrived are a valid prefix, so the session is published as a normal `.prof`, never `.incomplete.prof`.
+#[test]
+fn an_end_without_a_trailer_after_valid_data_is_published_as_a_normal_prof() {
+    let (cap, _, rec) = capture_lanes(4);
+    let sent = rec[2] - 5; // a torn last chunk as well
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+    let mut p = vec![1, 0, 0, 0]; // io_finalized, no trailer, no join failure
+    p.extend_from_slice(&(-1i32).to_le_bytes());
+    p.extend_from_slice(&(sent as u64).to_le_bytes());
+    p.extend_from_slice(&(sent as u64).to_le_bytes());
+    script.push(Step::Send(wire(T_END, &p)));
+    let (port, _) = mock(script);
+    let dir = out_dir("end-no-trailer");
+    let c = start(cfg(port, &dir));
+    wait(&c);
+    let v = c.view();
+    let (p, cause, cut, torn) = early(v.outcome.as_ref().unwrap());
+    assert!(cause.contains("without a trailer"), "{cause}");
+    assert_eq!((cut as usize, torn as usize), (rec[1], sent - rec[1]));
+    let name = p.path.to_string_lossy().into_owned();
+    assert!(name.ends_with(".prof") && !name.ends_with(".incomplete.prof"), "{name}");
+    assert_eq!(std::fs::read(&p.path).unwrap(), &cap[..rec[1]]);
+    assert!(!files(&dir).iter().any(|f| f.ends_with(".incomplete.prof")), "{:?}", files(&dir));
+    let doc = v.doc.unwrap();
+    assert_eq!(doc.verdict().tone, VerdictTone::CompleteEarly);
+    assert!(doc.verdict().text.starts_with("COMPLETE (ended without a trailer"), "{}", doc.verdict().text);
+}
+
+#[test]
+fn an_end_without_a_trailer_before_any_event_chunk_stays_incomplete() {
+    let (cap, _, rec) = capture_lanes(2);
+    let sent = rec[0] - 3;
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+    let mut p = vec![1, 0, 0, 0];
+    p.extend_from_slice(&0i32.to_le_bytes());
+    p.extend_from_slice(&(sent as u64).to_le_bytes());
+    p.extend_from_slice(&(sent as u64).to_le_bytes());
+    script.push(Step::Send(wire(T_END, &p)));
+    let (port, _) = mock(script);
+    let dir = out_dir("end-no-trailer-no-events");
+    let c = start(cfg(port, &dir));
+    wait(&c);
+    let why = reasons(c.view().outcome.as_ref().unwrap());
+    assert!(why.contains("none with events"), "{why}");
+    assert!(complete_files(&dir).is_empty(), "{:?}", files(&dir));
+}
+
 #[test]
 fn disconnect_after_valid_data_is_published_early() {
     let (cap, _, rec) = capture_lanes(4);
@@ -729,7 +779,8 @@ fn reopen_acceptance_follows_the_file_and_its_name() {
     assert_eq!(doc("a.prof", &cap[..rec[0] - 3]).verdict().tone, VerdictTone::Incomplete, "no whole event chunk");
     let early = doc("a.prof", &cap[..rec[1]]);
     let a = early.analysis().unwrap();
-    assert!(a.prefix.is_some() && a.verdict != ps3dk_prof::Verdict::Complete, "the reader verdict stays strict");
+    assert!(a.prefix.is_some() && a.verdict == ps3dk_prof::Verdict::Complete, "a file without a trailer is COMPLETE");
+    assert!(matches!(ps3dk_prof::load(&cap[..rec[1]]), ps3dk_prof::Outcome::Analysed(s) if s.verdict != ps3dk_prof::Verdict::Complete), "the strict transport verdict is unchanged");
     assert!(early.frames.is_some() && early.hot.is_some(), "every page is built from the prefix analysis");
 }
 

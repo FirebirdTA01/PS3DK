@@ -452,7 +452,7 @@ pub fn shown_verdict(d: &Document, live: Option<&LiveView>) -> (ui::Tone, Option
 fn verdict_word(t: VerdictTone) -> &'static str {
     match t {
         VerdictTone::Complete => "COMPLETE",
-        VerdictTone::CompleteEarly => "COMPLETE (ended early)",
+        VerdictTone::CompleteEarly => "COMPLETE",
         VerdictTone::Incomplete => "INCOMPLETE",
         VerdictTone::Malformed => "MALFORMED",
     }
@@ -774,7 +774,7 @@ pub fn live_line(v: &LiveView) -> (ui::Tone, String) {
         }
         Some(Outcome::PublishedEarly { published, cause, cut, torn_dropped }) => {
             let mut t = format!(
-                "Live session ended early ({cause}); saved {} as a complete capture up to byte {cut}",
+                "Live session ended without a trailer ({cause}); saved {} as a complete capture up to byte {cut}",
                 published.path.display()
             );
             if *torn_dropped > 0 {

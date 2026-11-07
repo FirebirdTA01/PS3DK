@@ -1077,8 +1077,10 @@ fn cli_exit_status_by_extension_layer() {
     let (code, out) = cli(&ext_file(ext).bytes(), "loss");
     assert_eq!(code, Some(4), "{out}");
     assert!(out.contains("RAW VALIDITY NOT VALID"), "{out}");
+    // No trailer: the ending is forgiven (COMPLETE, exit 0, `ending: NO-TRAILER`); a lost event still fails the source.
     let (code, out) = cli(&ext_file(std_ext()).without_trailer().bytes(), "torn");
-    assert_eq!(code, Some(1), "{out}");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.lines().any(|l| l == "ending: NO-TRAILER"), "{out}");
     let (code, _) = cli(&v1_scenario().bytes(), "v1");
     assert_eq!(code, Some(0));
 }

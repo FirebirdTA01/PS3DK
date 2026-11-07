@@ -508,6 +508,14 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
     let early = r.early.take().filter(|_| {
         matches!(state, LinkState::Handshake | LinkState::Streaming | LinkState::Failed(LinkError::Closed))
     });
+    // An END that says no trailer was written (the app quit from the XMB, the console's shutdown failed) is an
+    // ending without a trailer too: the file is judged by its bytes, not by the missing trailer.
+    let early = early.or_else(|| match &state {
+        LinkState::Ended(e) if !e.trailer_written => {
+            Some("the console ended the capture without a trailer (app quit or the link ended)".to_string())
+        }
+        _ => None,
+    });
     if matches!(state, LinkState::Ended(_)) && !r.clean_eof && r.extra.is_empty() {
         r.extra
             .push("the link did not end with a clean close".into());

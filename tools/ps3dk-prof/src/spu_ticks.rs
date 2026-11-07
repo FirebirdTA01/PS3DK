@@ -2108,7 +2108,7 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
             nd.push(format!("{} refused lanes", c.refused_lanes));
         }
         if c.lanes_without_final > 0 {
-            nd.push(format!("{} lanes without ORDER_FINAL", c.lanes_without_final));
+            nd.push(format!("{} lanes without ORDER_FINAL (the lane final record was not received)", c.lanes_without_final));
         }
         let pol = |met: bool| {
             if met {

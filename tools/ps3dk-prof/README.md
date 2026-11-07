@@ -9,7 +9,7 @@ ps3dk-prof report <file>   print the verdict and the full report
 ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
 ```
 
-Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
+Exit status: 0 COMPLETE (a file that ends without a trailer too; its output has the line `ending: NO-TRAILER`), 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error.
 
 `check-pair` returns 0 only for a verified FINAL pair. Refused pairs and matching
 progress snapshots return 1; progress output is labelled `PROVISIONAL`.

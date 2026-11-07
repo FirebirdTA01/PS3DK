@@ -53,19 +53,31 @@ fn incomplete_capture_is_flagged() {
     let mut s = scenario(vec![two_zone_lane(1)]);
     s.trailer = false;
     let bytes = s.bytes();
-    // No TRAILER but clean up to its last whole chunk: the viewer counts it as complete (ended early); the reader's
-    // own verdict stays INCOMPLETE, and a kept `.incomplete.prof` is never promoted.
+    // No TRAILER but clean up to its last whole chunk: COMPLETE with the no-trailer note (the strict transport
+    // verdict, `load`, stays INCOMPLETE), and a kept `.incomplete.prof` is never promoted.
     let d = doc(&bytes);
     let v = d.verdict();
     assert_eq!(v.tone, VerdictTone::CompleteEarly);
-    assert!(v.text.starts_with("COMPLETE (ended early)"), "{}", v.text);
-    assert!(verdict_line(&d.analysis().unwrap().verdict).starts_with("INCOMPLETE"));
+    assert!(v.text.starts_with("COMPLETE (ended without a trailer (app quit or the link ended)"), "{}", v.text);
+    assert!(verdict_line(&d.analysis().unwrap().verdict).starts_with("COMPLETE"));
+    assert!(matches!(load(&bytes), Outcome::Analysed(s) if verdict_line(&s.verdict).starts_with("INCOMPLETE")));
     let o = overview(d.analysis().unwrap());
     assert!(o.trailer.is_empty());
     let kept = Document::from_bytes(PathBuf::from("t.incomplete.prof"), &bytes);
     let v = kept.verdict();
     assert_eq!(v.tone, VerdictTone::Incomplete);
     assert!(v.text.starts_with("INCOMPLETE"), "{}", v.text);
+}
+
+#[test]
+fn a_corrupt_prefix_without_a_trailer_stays_malformed() {
+    let mut s = scenario(vec![two_zone_lane(1)]);
+    s.trailer = false;
+    let mut bytes = s.bytes();
+    // Flip a byte inside the first chunk after the file header: its CRC no longer matches.
+    bytes[16 + 12] ^= 0xff;
+    let d = doc(&bytes);
+    assert_eq!(d.verdict().tone, VerdictTone::Malformed);
 }
 
 #[test]
