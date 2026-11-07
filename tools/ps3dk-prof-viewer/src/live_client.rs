@@ -284,7 +284,11 @@ fn run_worker(sh: &Shared, every: Duration) {
         // Copy and parse outside the lock.
         let tail = snap.len() % BLOCK_BYTES as u64;
         let bytes = snap.to_vec();
-        let doc = Arc::new(Document::from_bytes(PathBuf::from("live capture"), &bytes));
+        let mut doc = Document::from_bytes(PathBuf::from("live capture"), &bytes);
+        // A snapshot that is still arriving places its SPU zones PROVISIONALLY from the order records received so
+        // far; the final snapshot (no byte can follow) keeps the final placement rules.
+        doc.foreign_tl.spu.options.provisional = !is_final;
+        let doc = Arc::new(doc);
         let working = snap.len() + tail + bytes.len() as u64;
         drop(bytes);
         {

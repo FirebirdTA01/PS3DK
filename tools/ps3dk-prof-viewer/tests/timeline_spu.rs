@@ -25,6 +25,11 @@ use spu_support::*;
 
 /// 2 lanes x 2 epochs, 8 work pairs per epoch, 2 brackets per epoch (as the reader's F-BASE).
 fn f_base() -> Cap {
+    f_base_with(true)
+}
+
+/// F-BASE; `finish` false leaves out every ORDER_FINAL and DOMAIN_FINAL (a capture that is still arriving).
+fn f_base_with(finish: bool) -> Cap {
     let mut c = Cap::new(2, 1000);
     for l in 1..=2 {
         let mut tb = 2000u64;
@@ -58,7 +63,9 @@ fn f_base() -> Cap {
                 }
             }
         }
-        c.finish(l);
+        if finish {
+            c.finish(l);
+        }
     }
     c
 }
@@ -102,7 +109,7 @@ fn c1_10_analysis_builds_once_per_document() {
     for t in &spu {
         assert_eq!(t.bars.len(), 16, "{}", t.header);
         assert!(t.refusal.is_none());
-        assert!(t.header.starts_with("SPU decrementer ticks, placed by causal bounds | zones drawn 16, UNPLACED 0"), "{}", t.header);
+        assert!(t.header.contains("| placed 16/16 pairs | UNPLACED 0 | median width "), "{}", t.header);
         assert!(t.bars.iter().all(|b| !b.bar.extrapolated));
     }
     assert!(fv.caption.contains(CAPTION));
@@ -206,7 +213,7 @@ fn c1_10_full_view_of_a_million_bars_stops_at_the_inspection_cap() {
 }
 
 #[test]
-fn c1_10_lane_table_paints_at_most_256_rows() {
+fn unplaced_zones_are_counted_in_the_status_line_never_listed() {
     let v = synthetic(300, &|i, p| {
         p.place_b = Place::Unplaced("order coverage unknown".into());
         p.ticks = Some(i as u128);
@@ -217,13 +224,11 @@ fn c1_10_lane_table_paints_at_most_256_rows() {
         _ => panic!(),
     }
     let info = &infos[&1];
-    let names = |_d: u32| "spu.work".to_string();
-    let (rows, rest) = table_rows(info, &names, 0);
-    assert_eq!(rows.len(), 256);
-    assert_eq!(not_shown_line(rest).as_deref(), Some("44 not shown"));
-    // sorted by ticks, largest first
-    assert!(rows[0].contains(": 299 ticks"), "{}", rows[0]);
-    assert!(rows[0].contains("BEGIN UNPLACED (order coverage unknown)"), "{}", rows[0]);
+    assert_eq!((info.unplaced, info.placed, info.total), (300, 0, 300));
+    assert!(info.header.contains("| placed 0/300 pairs | UNPLACED 300 | median width "), "{}", info.header);
+    assert!(!info.header.contains('\n'), "one line");
+    assert_eq!(status_line("TICKS[profile]", 3, 4, 1, Some(20)), "TICKS[profile] | placed 3/4 pairs | UNPLACED 1 | median width 20 tb");
+    assert_eq!(status_line("EMPTY", 0, 0, 0, None), "EMPTY | placed 0/0 pairs | UNPLACED 0 | median width none");
 }
 
 #[test]
@@ -340,4 +345,186 @@ fn old_files_keep_the_clock_mapping_rows() {
     let lane = v.tracks.iter().find(|t| t.label == "SPU lane 1").unwrap();
     assert!(lane.bars.is_empty() && lane.coverage.iter().any(|x| x.contains("ambiguous")));
     let _ = LaneState::Empty;
+}
+
+// ---- the drawn Timeline (a headless egui context): bars on the lane rows, no per-pair text in the paint list -------
+
+/// Every text the frame painted (the paint list's text shapes), in paint order.
+fn painted_texts(out: &eframe::egui::FullOutput) -> Vec<(eframe::egui::Pos2, eframe::egui::Vec2, String)> {
+    use eframe::egui::Shape;
+    fn walk(s: &Shape, v: &mut Vec<(eframe::egui::Pos2, eframe::egui::Vec2, String)>) {
+        match s {
+            Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, v)),
+            Shape::Text(t) => v.push((t.pos, t.galley.size(), t.galley.job.text.clone())),
+            _ => {}
+        }
+    }
+    let mut v = Vec::new();
+    for c in &out.shapes {
+        walk(&c.shape, &mut v);
+    }
+    v
+}
+
+struct Page {
+    ctx: eframe::egui::Context,
+    time: f64,
+}
+
+impl Page {
+    fn new() -> Page {
+        let ctx = eframe::egui::Context::default();
+        ps3dk_ui::install(&ctx);
+        ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+        Page { ctx, time: 0.0 }
+    }
+    fn frame(&mut self, d: &Document, st: &mut TimelineState, events: Vec<eframe::egui::Event>) -> eframe::egui::FullOutput {
+        use eframe::egui::{Pos2, RawInput, Rect, Vec2};
+        self.time += 1.0 / 60.0;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 3000.0))),
+            time: Some(self.time),
+            events,
+            ..Default::default()
+        };
+        let a = d.analysis().unwrap();
+        let mut sel = None;
+        self.ctx.run(input, |ctx| ps3dk_prof_viewer::timeline_ui::draw(ctx, &d.foreign_tl, a, st, &mut sel))
+    }
+}
+
+/// Every horizontal line segment the frame painted (left end first).
+fn horizontal_segments(out: &eframe::egui::FullOutput) -> Vec<(eframe::egui::Pos2, eframe::egui::Pos2)> {
+    use eframe::egui::Shape;
+    fn walk(s: &Shape, v: &mut Vec<(eframe::egui::Pos2, eframe::egui::Pos2)>) {
+        match s {
+            Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, v)),
+            Shape::LineSegment { points: [a, b], .. } if a.y == b.y && a.x != b.x => {
+                v.push(if a.x < b.x { (*a, *b) } else { (*b, *a) })
+            }
+            _ => {}
+        }
+    }
+    let mut v = Vec::new();
+    for c in &out.shapes {
+        walk(&c.shape, &mut v);
+    }
+    v
+}
+
+/// Per-pair text of the old lane table (any of these in the paint list is a per-pair row).
+fn per_pair(t: &str) -> bool {
+    t.contains(" seq ") || t.contains("BEGIN UNPLACED") || t.contains("END UNPLACED") || t.contains("BEGIN placed")
+}
+
+fn spu_status_texts(texts: &[(eframe::egui::Pos2, eframe::egui::Vec2, String)]) -> Vec<String> {
+    texts.iter().filter(|t| t.2.contains("| placed ") && t.2.contains("pairs | UNPLACED")).map(|t| t.2.clone()).collect()
+}
+
+#[test]
+fn drawn_timeline_without_order_final_paints_one_status_line_per_lane_and_no_pair_text() {
+    // a capture that is still arriving, analysed with the final rules: every zone UNPLACED (order coverage unknown)
+    let b = f_base_with(false).torn_after(usize::MAX);
+    dump("viewer-no-order-final", &b);
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let mut st = TimelineState::new(a);
+    st.axis_all = true;
+    let mut pg = Page::new();
+    pg.frame(&d, &mut st, vec![]);
+    let out = pg.frame(&d, &mut st, vec![]);
+    let texts = painted_texts(&out);
+    assert!(texts.len() > 10, "the page painted its texts");
+    for t in &texts {
+        assert!(!per_pair(&t.2), "per-pair text in the paint list: {}", t.2);
+    }
+    let status = spu_status_texts(&texts);
+    assert_eq!(status.len(), 2, "one status line per SPU lane: {status:?}");
+    for s in &status {
+        assert!(s.starts_with("TICKS-UNAVAILABLE (order coverage unknown (no ORDER_FINAL)) | placed 0/16 pairs | UNPLACED 16"), "{s}");
+        assert!(!s.contains('\n'), "{s}");
+    }
+    let fv = st.foreign.clone().unwrap();
+    assert!(fv.tracks.iter().filter(|t| t.spu.is_some()).all(|t| t.bars.is_empty()));
+    assert_eq!(d.foreign_tl.spu.builds.load(Ordering::Relaxed), 1, "built once for both frames");
+}
+
+#[test]
+fn drawn_timeline_of_a_provisional_snapshot_draws_bars_and_says_provisional() {
+    let b = f_base_with(false).torn_after(usize::MAX);
+    let mut d = doc(&b);
+    d.foreign_tl.spu.options.provisional = true; // what the live client sets on a snapshot that is still arriving
+    let a = d.analysis().unwrap();
+    let mut st = TimelineState::new(a);
+    st.axis_all = true;
+    let mut pg = Page::new();
+    pg.frame(&d, &mut st, vec![]);
+    let out = pg.frame(&d, &mut st, vec![]);
+    let texts = painted_texts(&out);
+    for t in &texts {
+        assert!(!per_pair(&t.2), "per-pair text in the paint list: {}", t.2);
+    }
+    let status = spu_status_texts(&texts);
+    assert_eq!(status.len(), 2, "{status:?}");
+    for s in &status {
+        assert!(s.starts_with("PROVISIONAL (no ORDER_FINAL yet) | placed 16/16 pairs | UNPLACED 0 | median width "), "{s}");
+    }
+    let fv = st.foreign.clone().unwrap();
+    for t in fv.tracks.iter().filter(|t| t.spu.is_some()) {
+        assert_eq!(t.bars.len(), 16, "{}", t.header);
+        let info = t.spu.as_ref().unwrap();
+        assert!(info.provisional);
+        let lines = details(info, "spu.work", 0, Some(FREQ));
+        assert!(lines.iter().any(|l| l == PROVISIONAL_NOTE), "{lines:?}");
+        // no tick count in a provisional lane: the tooltip says so in SPU decrementer ticks wording
+        assert!(lines[2].starts_with("no tick count (") && lines[2].ends_with("(SPU decrementer ticks)"), "{}", lines[2]);
+    }
+}
+
+#[test]
+fn drawn_bars_carry_ticks_in_the_tooltip_and_a_click_opens_the_details_panel() {
+    use eframe::egui::{Event, Modifiers, PointerButton, Pos2};
+    use ps3dk_prof_viewer::timeline_ui::ROW_H;
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let mut st = TimelineState::new(a);
+    st.axis_all = true;
+    let mut pg = Page::new();
+    pg.frame(&d, &mut st, vec![]);
+    let out = pg.frame(&d, &mut st, vec![]);
+    let texts = painted_texts(&out);
+    for t in &texts {
+        assert!(!per_pair(&t.2), "per-pair text in the paint list: {}", t.2);
+    }
+    // a drawn bar of SPU lane 1: a horizontal whisker segment in the lane's bar area (right of its label column)
+    let lane = texts.iter().find(|t| t.2 == "SPU lane 1").expect("lane label").0;
+    let whisker = horizontal_segments(&out)
+        .into_iter()
+        .find(|(a, b)| a.x > lane.x + 180.0 && a.y > lane.y && a.y < lane.y + ROW_H + 8.0 && b.x - a.x > 6.0)
+        .expect("a drawn SPU bar on the lane row");
+    let at = Pos2::new((whisker.0.x + whisker.1.x) / 2.0, whisker.0.y);
+    // hover: the tooltip carries the tick count in SPU decrementer ticks, and the pair text
+    pg.frame(&d, &mut st, vec![Event::PointerMoved(at)]);
+    let out = pg.frame(&d, &mut st, vec![Event::PointerMoved(at)]);
+    let tip = painted_texts(&out);
+    let is_ticks = |t: &str| {
+        t.strip_suffix(" ticks (TICKS-CONDITIONAL) (SPU decrementer ticks)").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    };
+    let want = tip.iter().find(|t| is_ticks(&t.2)).map(|t| t.2.clone()).expect("a tooltip line with the tick count");
+    assert!(tip.iter().any(|t| t.2.starts_with("BEGIN placed between ")), "the tooltip carries the pair's placement");
+    assert!(tip.iter().any(|t| t.2.starts_with("SPU lane 1, epoch ")), "the tooltip names the pair");
+    // click: the details panel opens under the lane with the same pair text
+    let press = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    pg.frame(&d, &mut st, vec![press(true)]);
+    pg.frame(&d, &mut st, vec![press(false)]);
+    let pick = st.spu_pick.clone().expect("a click on a bar picks it");
+    assert!(pick.lines.iter().any(|l| *l == want), "{:?}", pick.lines);
+    let out = pg.frame(&d, &mut st, vec![Event::PointerMoved(Pos2::new(1.0, 1.0))]);
+    let shown = painted_texts(&out);
+    assert!(shown.iter().any(|t| t.2.ends_with(": zone details")), "the details panel is drawn");
+    assert!(shown.iter().any(|t| t.2 == want), "the panel shows the tick count");
+    // a newer snapshot drops the pick (its pair belongs to the old rows)
+    st.refresh(a);
+    assert!(st.spu_pick.is_none());
 }

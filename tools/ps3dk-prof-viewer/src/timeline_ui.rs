@@ -61,6 +61,25 @@ pub struct TimelineState {
     pub spu_iso: bool,
     /// The last tooltip conversion (the hovered pair only).
     pub spu_conv: crate::timeline_spu::ConvCache,
+    /// The SPU zone a click picked: its details panel is drawn under its lane while the rows it came from are shown.
+    pub spu_pick: Option<SpuPick>,
+}
+
+/// A clicked SPU bar: the rows it belongs to (by identity), its track and bar, and its details lines (built once,
+/// at the click).
+#[derive(Debug, Clone)]
+pub struct SpuPick {
+    pub view: Arc<FTimeline>,
+    pub track: usize,
+    pub bar: usize,
+    pub lines: Vec<String>,
+}
+
+impl SpuPick {
+    /// The pick belongs to `fv` (the rows drawn this frame) and to `track`.
+    pub fn is_for(&self, fv: &FTimeline, track: usize) -> bool {
+        self.track == track && std::ptr::eq(Arc::as_ptr(&self.view), fv)
+    }
 }
 
 impl TimelineState {
@@ -82,6 +101,7 @@ impl TimelineState {
             axis_all: false,
             spu_iso: false,
             spu_conv: crate::timeline_spu::ConvCache::default(),
+            spu_pick: None,
         }
     }
 
@@ -109,6 +129,9 @@ impl TimelineState {
             self.fit_all = true;
             self.box_from = None;
         }
+        if self.spu_pick.as_ref().is_some_and(|k| !Arc::ptr_eq(&k.view, &v)) {
+            self.spu_pick = None;
+        }
         self.foreign = Some(v);
     }
 
@@ -120,6 +143,7 @@ impl TimelineState {
     pub fn refresh(&mut self, a: &Analysis) {
         self.tl = crate::timeline::timeline(a);
         self.foreign = None; // the next frame takes the new snapshot's rows
+        self.spu_pick = None; // its pair belongs to the old snapshot
         let before = self.view;
         if self.follow {
             self.view.t0 = self.tl.length() - self.view.dt;
@@ -612,14 +636,7 @@ fn draw_foreign_track(
     pal: &ui::Palette,
 ) {
     let t = &fv.tracks[index];
-    let mut text = vec![t.header.clone()];
-    text.extend(t.coverage.iter().cloned());
-    if let Some(line) = tf::gaps_line(t, tb) {
-        text.push(line);
-    }
-    if let Some(r) = &t.refusal {
-        text.push(r.clone());
-    }
+    let text = track_text(t, tb);
     let galley = p.fonts(|f| f.layout(text.join("\n"), FontId::proportional(11.0), pal.text_muted, LABEL_W - ui::SPACE_SM));
     let label_h = 20.0 + galley.size().y + 4.0;
     let rows = if t.bars.is_empty() { 0.0 } else { t.max_depth as f32 + 1.0 };
@@ -699,6 +716,10 @@ fn draw_foreign_track(
                     let pts = vec![Pos2::new(w1 - 6.0, mid - 4.0), Pos2::new(w1, mid), Pos2::new(w1 - 6.0, mid + 4.0)];
                     painter.add(Shape::line(pts, Stroke::new(1.5_f32, color)));
                 }
+                if st.spu_pick.as_ref().is_some_and(|k| k.is_for(fv, index) && k.bar == i) {
+                    let r = Rect::from_min_max(Pos2::new(w0 - 2.0, top), Pos2::new(w1 + 2.0, top + ROW_H));
+                    painter.rect_stroke(r, 2.0, Stroke::new(1.5_f32, pal.text));
+                }
                 // Core: where it surely ran.
                 if let Some((c0, c1)) = d.core {
                     let r = Rect::from_min_max(
@@ -755,6 +776,17 @@ fn draw_foreign_track(
             let x = f64::from(pos.x - area.left());
             // One reverse paint-order test for bars and dense runs alike: the topmost primitive answers.
             let topmost = tf::hit_any(&l, depth, x);
+            // A click on an SPU bar opens its details panel; a click elsewhere on the lane closes it.
+            if resp.clicked() && t.spu.is_some() {
+                st.spu_pick = match (topmost, &t.spu, &st.foreign) {
+                    (Some(tf::FHit::Bar(i)), Some(info), Some(view)) => {
+                        let b = &t.bars[i];
+                        let lines = crate::timeline_spu::details(info, &labels.zone(a, b.bar.image, b.bar.desc), i, tb.freq_hz);
+                        Some(SpuPick { view: Arc::clone(view), track: index, bar: i, lines })
+                    }
+                    _ => None,
+                };
+            }
             if let Some(tf::FHit::Bar(i)) = topmost {
                 let lines = match &t.spu {
                     Some(info) => {
@@ -787,21 +819,46 @@ fn draw_foreign_track(
     if resp.dragged() {
         st.view.pan(&st.tl, -f64::from(resp.drag_delta().x) / wf);
     }
-    // The lane's UNPLACED zones: never drawn, listed (at most PAINT_ROWS rows per repaint, the rest counted).
-    if let Some(info) = &t.spu {
-        if !info.table.is_empty() {
-            let image = a.capture.ext.as_ref().and_then(|x| x.lanes.get(&info.lane_out().lane_id)).map(|l| l.image_index);
-            let names = |d: u32| labels.zone(a, image, d);
-            let (rows, rest) = crate::timeline_spu::table_rows(info, &names, 0);
-            p.label(egui::RichText::new(format!("{}: zones with an UNPLACED endpoint (not drawn), by ticks", t.label)).small().color(pal.text_muted));
-            for r in rows {
-                p.label(egui::RichText::new(r).small().monospace());
+    // The picked SPU zone's details panel, under its lane (UNPLACED zones are counted in the status line only).
+    if let Some(k) = st.spu_pick.as_ref().filter(|k| k.is_for(fv, index)) {
+        let lines = k.lines.clone();
+        let mut close = false;
+        egui::Frame::group(p.style()).fill(pal.surface).show(p, |p| {
+            p.set_max_width(LABEL_W + width - 2.0 * ui::SPACE_SM);
+            p.horizontal(|p| {
+                p.label(egui::RichText::new(format!("{}: zone details", t.label)).strong());
+                if ui::quiet_button(p, "Close").clicked() {
+                    close = true;
+                }
+            });
+            for line in &lines {
+                p.label(egui::RichText::new(line).small());
             }
-            if let Some(l) = crate::timeline_spu::not_shown_line(rest) {
-                p.label(egui::RichText::new(l).small().color(pal.warning));
-            }
+        });
+        if close {
+            st.spu_pick = None;
         }
     }
+}
+
+/// The label column text of a foreign track.  An SPU lane with order records shows its one status line (and a
+/// refusal when it says something else); every other track its header, coverage, gaps and refusal lines.
+pub fn track_text(t: &tf::FTrack, tb: TimeBase) -> Vec<String> {
+    let mut text = vec![t.header.clone()];
+    if t.spu.is_some() {
+        if let Some(r) = t.refusal.as_ref().filter(|r| **r != t.header) {
+            text.push(r.clone());
+        }
+        return text;
+    }
+    text.extend(t.coverage.iter().cloned());
+    if let Some(line) = tf::gaps_line(t, tb) {
+        text.push(line);
+    }
+    if let Some(r) = &t.refusal {
+        text.push(r.clone());
+    }
+    text
 }
 
 /// Diagonal hatching inside `r` (clipped by the painter).

@@ -799,9 +799,8 @@ pub fn attach_spu(v: &mut FTimeline, infos: &mut std::collections::BTreeMap<u32,
             t.refusal = Some(info.header.clone());
         }
         t.unplaced = format!(
-            "Not shown on this row: {} zone(s) with an UNPLACED endpoint (listed under the lane), {} zone(s) not              retained",
-            info.table.len(),
-            info.not_retained
+            "Not shown on this row: {} zone(s) with an UNPLACED endpoint (counted, never listed), {} zone(s) not retained",
+            info.unplaced, info.not_retained
         );
         t.spu = Some(info);
     }

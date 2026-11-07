@@ -1633,3 +1633,130 @@ fn rmax1_passes_are_charged_before_any_work() {
     assert_eq!(e.lanes, full.lanes);
     assert!(analyze(&a, &at(&o, full.used - 1)).unwrap().exhausted_at.is_some());
 }
+
+// ---- PROVISIONAL placement over a received prefix ---------------------------------------------------------------
+
+fn prefix_analysed(bytes: &[u8]) -> Analysis {
+    ps3dk_prof::load_prefix(bytes).expect("an accepted prefix")
+}
+
+/// (L, U) of a placement; None for UNPLACED.
+fn lu(p: &Place) -> Option<(Option<u64>, Option<u64>)> {
+    match p {
+        Place::Placed(l, u) => Some((Some(*l), Some(*u))),
+        Place::LowerOnly(l) => Some((Some(*l), None)),
+        Place::UpperOnly(u) => Some((None, Some(*u))),
+        Place::Unplaced(_) => None,
+    }
+}
+
+/// `fin` lies inside `prov`: every bound the provisional placement states, the final one states at least as tight.
+fn place_contains(prov: &Place, fin: &Place) -> bool {
+    let (Some((pl, pu)), Some((fl, fu))) = (lu(prov), lu(fin)) else { return lu(prov).is_none() };
+    let lo_ok = match (pl, fl) {
+        (Some(p), Some(f)) => f >= p,
+        (Some(_), None) => false,
+        (None, _) => true,
+    };
+    let hi_ok = match (pu, fu) {
+        (Some(p), Some(f)) => f <= p,
+        (Some(_), None) => false,
+        (None, _) => true,
+    };
+    lo_ok && hi_ok
+}
+
+#[test]
+fn provisional_placement_on_every_truncation_is_a_subset_of_the_final_one_with_wider_bounds() {
+    let c = gen(2, 2, 8, 2);
+    let o = opts();
+    let po = Options { provisional: true, ..opts() };
+    let (_, fin) = run_with(&c.bytes(), &o);
+    // the option changes nothing on the whole capture (every lane has its ORDER_FINAL and the file its TRAILER)
+    let (_, fin_p) = run_with(&c.bytes(), &po);
+    assert_eq!(fin.lanes, fin_p.lanes);
+    assert_eq!(fin.coverage, fin_p.coverage);
+    assert!(fin.lanes.iter().all(|u| !u.provisional));
+    let final_place = |lane: u32, begin: u64| {
+        let u = fin.lanes.iter().find(|u| u.lane_id == lane).unwrap();
+        u.pairs_out.iter().find(|p| p.begin == begin).cloned()
+    };
+    let (mut cuts, mut placed_total, mut placed_cuts) = (0, 0u64, 0);
+    for keep in 1..c.ext.len() {
+        let b = c.torn_after(keep);
+        let a = prefix_analysed(&b);
+        let strict = analyze(&a, &o).unwrap();
+        let r = analyze(&a, &po).unwrap();
+        cuts += 1;
+        // without the option the prefix places nothing (the final verdict needs ORDER_FINAL and the TRAILER)
+        for u in &strict.lanes {
+            assert!(!u.provisional);
+            for p in &u.pairs_out {
+                assert!(matches!(p.place_b, Place::Unplaced(_)) && matches!(p.place_e, Place::Unplaced(_)), "keep {keep}");
+            }
+        }
+        assert_eq!(strict.coverage.q_p_provisional, 0);
+        // with it: placed zones are a subset of the final placement, and their bounds contain the final bounds
+        let mut placed_here = 0u64;
+        for u in &r.lanes {
+            for p in &u.pairs_out {
+                // tick counts stay unavailable in a provisional lane
+                if u.provisional {
+                    assert_eq!(p.ticks, None, "keep {keep}");
+                }
+                if lu(&p.place_b).is_none() && lu(&p.place_e).is_none() {
+                    continue;
+                }
+                assert!(u.provisional, "keep {keep}: a placement in a prefix is PROVISIONAL");
+                let f = final_place(u.lane_id, p.begin).unwrap_or_else(|| panic!("keep {keep}: pair {} not final", p.begin));
+                assert_eq!((f.end, f.epoch), (p.end, p.epoch));
+                assert!(place_contains(&p.place_b, &f.place_b), "keep {keep} lane {} seq {}: BEGIN {:?} vs final {:?}", u.lane_id, p.begin, p.place_b, f.place_b);
+                assert!(place_contains(&p.place_e, &f.place_e), "keep {keep} lane {} seq {}: END {:?} vs final {:?}", u.lane_id, p.begin, p.place_e, f.place_e);
+                if matches!((&p.place_b, &p.place_e), (Place::Placed(..), Place::Placed(..))) {
+                    assert!(matches!((&f.place_b, &f.place_e), (Place::Placed(..), Place::Placed(..))));
+                    placed_here += 1;
+                }
+            }
+        }
+        // never final coverage: counted apart, and q_p holds no provisional pair
+        assert_eq!(r.coverage.q_p_provisional, placed_here, "keep {keep}");
+        assert_eq!(r.coverage.q_p, 0, "keep {keep}");
+        assert!(!r.coverage.placement_met());
+        assert_eq!(r.coverage.omitted_p.get(ps3dk_prof::spu_ticks::PROVISIONAL_OMISSION).copied().unwrap_or(0), placed_here);
+        placed_total += placed_here;
+        if placed_here > 0 {
+            placed_cuts += 1;
+        }
+    }
+    assert!(cuts > 10);
+    assert!(placed_cuts > cuts / 3, "most truncations place something ({placed_cuts} of {cuts})");
+    assert!(placed_total > 0);
+}
+
+#[test]
+fn provisional_placement_keeps_a_lost_event_gate() {
+    // a lane with a LOSS: raw validity fails for a reason a later byte cannot clear, so nothing is placed
+    let mut c = Cap::new(1, 1000);
+    c.epoch(1, 0, 2000);
+    c.walk(1, 3000, &[Item::Ev(0xF000_0000, D_WORK, BEGIN, 0), Item::Ev(0xEFFF_FF00, D_WORK, END, 0)]);
+    c.walk(1, 4000, &[Item::Loss(3)]);
+    c.walk(1, 5000, &[Item::Ev(0xEFFF_0000, D_WORK, BEGIN, 0), Item::Ev(0xEFFE_FF00, D_WORK, END, 0)]);
+    let b = c.torn_after(c.ext.len());
+    let a = prefix_analysed(&b);
+    let r = analyze(&a, &Options { provisional: true, ..opts() }).unwrap();
+    let u = &r.lanes[0];
+    assert!(!u.provisional);
+    assert!(!u.pairs_out.is_empty());
+    for p in &u.pairs_out {
+        assert_eq!(p.place_b, Place::Unplaced("raw validity".into()));
+    }
+    // and the CLI text states a provisional lane as provisional, never as final
+    let mut g = gen(1, 1, 8, 2);
+    g.ext.truncate(g.ext.len() - 2); // drop ORDER_FINAL and DOMAIN_FINAL
+    let b = g.torn_after(g.ext.len());
+    let a = prefix_analysed(&b);
+    let r = analyze(&a, &Options { provisional: true, ..opts() }).unwrap();
+    assert!(r.lanes[0].provisional);
+    let t = lines(&a, &r, false).join("\n");
+    assert!(t.contains("placement PROVISIONAL over the received prefix (coverage over the received prefix is provisional, not final)"), "{t}");
+}

@@ -5,9 +5,14 @@
 //! refusal or an exhausted budget is cached as that result and never rebuilt by the viewer).  Each zone pair becomes
 //! a bar from its endpoints' causal placements: begin in [L(BEGIN), U(BEGIN)], end in [L(END), U(END)]; the solid
 //! core is drawn only where U(BEGIN) < L(END), the whiskers reach L(BEGIN) and U(END), and a side without a bound
-//! runs to the chart edge as an open arrow.  A zone with an UNPLACED endpoint is never drawn: it is listed in the
-//! lane's table, at most [`PAINT_ROWS`] rows per repaint.  The label is the zone's tick count in SPU decrementer
-//! ticks; the bar's length is a placement envelope, never labelled as anything else.  Sorting uses ticks.
+//! runs to the chart edge as an open arrow.  A zone with an UNPLACED endpoint is never drawn and never listed: the
+//! lane's one status line counts it ([`SpuTrackInfo::header`]).  The per-pair text lives in the bar's tooltip and
+//! in the details panel a click opens ([`details`]).  The label is the zone's tick count in SPU decrementer ticks;
+//! the bar's length is a placement envelope, never labelled as anything else.
+//!
+//! A snapshot of a capture that is still arriving is analysed with `Options::provisional` (set by the live
+//! client): its lanes without ORDER_FINAL are placed from the order records received so far, and the status line
+//! and tooltips say PROVISIONAL.
 //!
 //! Files without order records keep the clock-mapping rows of [`crate::timeline_foreign`] unchanged.
 
@@ -23,14 +28,12 @@ use ps3dk_prof::spu_ticks::{
 };
 use ps3dk_prof::Analysis;
 
-/// Lane-table rows built and painted per repaint (the RSX page's bound); the rest are counted.
-pub const PAINT_ROWS: usize = crate::rsx::PAINT_ROWS;
-
 /// The analysis options a cached result was built with (delta D1.6): the capture budget, the table identity and
 /// the premise selection.  The isolation-scale option is formatting only and is not part of the key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpuKey {
     pub capture_ops: u64,
+    pub provisional: bool,
     /// The reviewed SPU ticks entries, by (profile id, accepted digests), in table order.
     pub table: Vec<(String, Vec<[u8; 32]>)>,
     pub spu_nowrap: bool,
@@ -40,6 +43,7 @@ impl SpuKey {
     pub fn of(o: &Options) -> SpuKey {
         SpuKey {
             capture_ops: o.capture_ops,
+            provisional: o.provisional,
             table: o.table.iter().map(|e| (e.entry.profile_id.clone(), e.entry.digests.clone())).collect(),
             spu_nowrap: o.spu_nowrap,
         }
@@ -70,7 +74,8 @@ pub struct SpuSlot {
     entry: Mutex<Option<(SpuKey, Arc<SpuView>)>>,
     /// How many analyses were built (tests: once per Document and key).
     pub builds: AtomicU64,
-    /// The options [`SpuSlot::get`] uses (the reader's defaults; tests may set a table or a budget).
+    /// The options [`SpuSlot::get`] uses (the reader's defaults; tests may set a table or a budget; the live client
+    /// sets `provisional` on a snapshot that is still arriving).
     pub options: Options,
 }
 
@@ -135,11 +140,19 @@ pub struct SpuTrackInfo {
     pub lane: usize,
     /// Bar index (in the track's bars) -> pair index (in the lane's `pairs_out`).
     pub pair_of_bar: Vec<usize>,
-    /// The zones with an UNPLACED endpoint, by pair index, sorted by ticks (largest first; no tick count last).
-    pub table: Vec<usize>,
+    /// Zones with an UNPLACED endpoint (not drawn, not listed: counted in the status line).
+    pub unplaced: u64,
+    /// Zones with both endpoints PLACED.
+    pub placed: u64,
+    /// Every retained eligible zone of the lane.
+    pub total: u64,
+    /// Lower median of U - L over the PLACED endpoints of the lane (tb ticks), None when there is none.
+    pub median_width: Option<u64>,
     /// Drawable zones beyond the retained-bar cap (not drawn, counted).
     pub not_retained: u64,
-    /// The header line (tick wording, counts, segment states).
+    /// The placements are PROVISIONAL (a snapshot that is still arriving, no ORDER_FINAL yet).
+    pub provisional: bool,
+    /// The lane's one compact status line: state, placed/total pairs, median width (or the refusal).
     pub header: String,
 }
 
@@ -189,8 +202,31 @@ pub fn tick_label(p: &PairOut) -> String {
     }
 }
 
-fn sort_ticks(p: &PairOut) -> (bool, std::cmp::Reverse<u128>) {
-    (p.ticks.is_none(), std::cmp::Reverse(p.ticks.unwrap_or(0)))
+/// The lane state word of the status line: PROVISIONAL, or the ticks state of its segments.
+fn state_word(u: &LaneOut) -> String {
+    if u.provisional {
+        return "PROVISIONAL (no ORDER_FINAL yet)".to_string();
+    }
+    match &u.state {
+        LaneState::Empty => return "EMPTY".to_string(),
+        LaneState::EmptyUnproven(_) => return "EMPTY-UNPROVEN".to_string(),
+        _ => {}
+    }
+    let mut unav: Option<&str> = None;
+    let mut cond = false;
+    for s in &u.segments {
+        match &s.state {
+            TickState::Unavailable(w) => unav = unav.or(w.first().map(String::as_str)),
+            TickState::Conditional(_) => cond = true,
+            TickState::Ticks => {}
+        }
+    }
+    match (unav, cond) {
+        (Some(w), _) => format!("TICKS-UNAVAILABLE ({w})"),
+        (None, true) => "TICKS-CONDITIONAL".to_string(),
+        (None, false) if u.segments.is_empty() => "no segments".to_string(),
+        (None, false) => "TICKS[profile]".to_string(),
+    }
 }
 
 /// A drawable zone: pair index, L(BEGIN), U(BEGIN), L(END), U(END).
@@ -202,13 +238,24 @@ pub fn lane_source(view: &Arc<SpuView>, lane: usize, retain: u64) -> (FtSource, 
     let r = view.result.as_ref().expect("a result");
     let u = &r.lanes[lane];
     let mut drawable: Vec<Drawable> = Vec::new();
-    let mut table: Vec<usize> = Vec::new();
+    let (mut unplaced, mut placed) = (0u64, 0u64);
+    let mut widths: Vec<u64> = Vec::new();
     for (i, p) in u.pairs_out.iter().enumerate() {
+        for pl in [&p.place_b, &p.place_e] {
+            if let Place::Placed(l, h) = pl {
+                widths.push(h - l);
+            }
+        }
+        if matches!((&p.place_b, &p.place_e), (Place::Placed(..), Place::Placed(..))) {
+            placed += 1;
+        }
         match (lu(&p.place_b), lu(&p.place_e)) {
             (Some((bl, bu)), Some((el, eu))) => drawable.push((i, bl, bu, el, eu)),
-            _ => table.push(i),
+            _ => unplaced += 1,
         }
     }
+    widths.sort_unstable();
+    let median_width = (!widths.is_empty()).then(|| widths[(widths.len() - 1) / 2]);
     drawable.sort_by(|x, y| {
         let kx = (x.1.is_some(), x.1.unwrap_or(0), x.2.is_none(), x.2.unwrap_or(0), u.pairs_out[x.0].epoch, x.0);
         let ky = (y.1.is_some(), y.1.unwrap_or(0), y.2.is_none(), y.2.unwrap_or(0), u.pairs_out[y.0].epoch, y.0);
@@ -217,7 +264,6 @@ pub fn lane_source(view: &Arc<SpuView>, lane: usize, retain: u64) -> (FtSource, 
     let keep = (drawable.len() as u64).min(retain) as usize;
     let not_retained = (drawable.len() - keep) as u64;
     drawable.truncate(keep);
-    table.sort_by_key(|&i| (sort_ticks(&u.pairs_out[i]), i));
     let image = view.image.get(&u.lane_id).copied();
     let bars: Vec<FtBar> = drawable
         .iter()
@@ -237,26 +283,8 @@ pub fn lane_source(view: &Arc<SpuView>, lane: usize, retain: u64) -> (FtSource, 
         })
         .collect();
     let pair_of_bar: Vec<usize> = drawable.iter().map(|d| d.0).collect();
-    let (mut tk, mut cond, mut unav) = (0, 0, 0);
-    for s in &u.segments {
-        match s.state {
-            TickState::Ticks => tk += 1,
-            TickState::Conditional(_) => cond += 1,
-            TickState::Unavailable(_) => unav += 1,
-        }
-    }
-    let mut ticks: Vec<u128> = u.pairs_out.iter().filter_map(|p| p.ticks).collect();
-    ticks.sort_unstable();
-    let agg = match (ticks.first(), ticks.last()) {
-        (Some(a), Some(z)) => format!("; ticks min/median/max {a}/{}/{z} over {} zones", ticks[(ticks.len() - 1) / 2], ticks.len()),
-        _ => String::new(),
-    };
-    let mut header = format!(
-        "SPU decrementer ticks, placed by causal bounds | zones drawn {}, UNPLACED {} (listed below){agg} | segments \
-         TICKS[profile] {tk}, TICKS-CONDITIONAL {cond}, TICKS-UNAVAILABLE {unav}",
-        bars.len(),
-        table.len()
-    );
+    let total = u.pairs_out.len() as u64;
+    let mut header = status_line(&state_word(u), placed, total, unplaced, median_width);
     if not_retained > 0 {
         header.push_str(&format!(
             "; {not_retained} zone{} not retained",
@@ -294,8 +322,12 @@ pub fn lane_source(view: &Arc<SpuView>, lane: usize, retain: u64) -> (FtSource, 
         view: Arc::new(SpuViewRef(Arc::clone(view))),
         lane,
         pair_of_bar: if refusal.is_some() { Vec::new() } else { pair_of_bar },
-        table: if refusal.is_some() { Vec::new() } else { table },
+        unplaced,
+        placed,
+        total,
+        median_width,
         not_retained,
+        provisional: u.provisional,
         header,
     };
     (src, info)
@@ -319,33 +351,10 @@ pub fn sources(view: &Arc<SpuView>, budgets: &TimelineBudgets) -> (Vec<FtSource>
     (out, infos)
 }
 
-/// One lane-table row (an UNPLACED zone), built for the shown rows only.
-pub fn table_row(info: &SpuTrackInfo, names: &dyn Fn(u32) -> String, k: usize) -> Option<String> {
-    let p = &info.lane_out().pairs_out[*info.table.get(k)?];
-    Some(format!(
-        "{} seq {}/{} epoch {}: {} | BEGIN {} END {}",
-        names(p.desc),
-        p.begin,
-        p.end,
-        p.epoch,
-        tick_label(p),
-        place_text(&p.place_b),
-        place_text(&p.place_e)
-    ))
-}
-
-/// The table rows of one repaint: at most [`PAINT_ROWS`] from row `first`, and the exact count not shown.
-pub fn table_rows(info: &SpuTrackInfo, names: &dyn Fn(u32) -> String, first: usize) -> (Vec<String>, usize) {
-    let n = info.table.len();
-    let first = first.min(n);
-    let last = (first + PAINT_ROWS).min(n);
-    let rows = (first..last).filter_map(|k| table_row(info, names, k)).collect();
-    (rows, n - (last - first))
-}
-
-/// The "<n> not shown" line of the lane table, or None.
-pub fn not_shown_line(n: usize) -> Option<String> {
-    (n > 0).then(|| format!("{n} not shown"))
+/// The lane's status line: "<state> | placed P/T pairs | UNPLACED U | median width W tb".
+pub fn status_line(state: &str, placed: u64, total: u64, unplaced: u64, median_width: Option<u64>) -> String {
+    let w = median_width.map_or("none".to_string(), |w| format!("{w} tb"));
+    format!("{state} | placed {placed}/{total} pairs | UNPLACED {unplaced} | median width {w}")
 }
 
 /// Placement text (design 9.3): "placed between L and U (causal bounds)".
@@ -399,7 +408,7 @@ pub fn details(info: &SpuTrackInfo, zone: &str, bar: usize, freq: Option<u64>) -
         },
         _ => "unbounded".to_string(),
     };
-    vec![
+    let mut v = vec![
         zone.to_string(),
         format!("SPU lane {}, epoch {}, seq {}/{}", info.lane_out().lane_id, p.epoch, p.begin, p.end),
         format!("{} (SPU decrementer ticks)", tick_label(p)),
@@ -410,11 +419,22 @@ pub fn details(info: &SpuTrackInfo, zone: &str, bar: usize, freq: Option<u64>) -
             width(&p.place_b),
             width(&p.place_e)
         ),
-    ]
+    ];
+    if info.provisional {
+        v.push(PROVISIONAL_NOTE.to_string());
+    }
+    v
 }
+
+/// The tooltip and details line of a PROVISIONAL placement.
+pub const PROVISIONAL_NOTE: &str = concat!(
+    "PROVISIONAL: placed from the order records received so far (no ORDER_FINAL yet); the final placement is ",
+    "decided when the capture ends and lies inside these bounds unless a later record contradicts them"
+);
 
 /// The caption added under the SPU group for a file with order records.
 pub const CAPTION: &str = "SPU lanes with order records: each zone is placed by causal bounds only (no clock \
 mapping, no rate); solid where its BEGIN surely precedes its END's lower bound, whiskers out to the outer bounds, \
 open arrows where a side has no bound; the label is the zone's count in SPU decrementer ticks; zones with an \
-UNPLACED endpoint are listed under their lane.";
+UNPLACED endpoint are counted in the lane's status line, never listed; hover a bar for its pair, \
+click it for the details panel.";

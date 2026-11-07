@@ -23,7 +23,9 @@ use num_bigint::BigUint;
 
 use crate::analysis::Analysis;
 use crate::clockmap::Limit;
-use crate::ext::{Bracket, BracketAt, Drain, ExtCapture, LaneOrder, RawEvent, SourceKey, SourceReport, Structure};
+use crate::ext::{
+    Bracket, BracketAt, Drain, ExtCapture, LaneOrder, OpenBegins, RawEvent, SourceKey, SourceReport, Structure,
+};
 use crate::profile::{classify, record_line, Classification, TableEntry, KIND_SPU};
 use crate::rsx_measured::{bump, bump_free, lower, map_cost, msort, Ops, Work};
 
@@ -128,6 +130,13 @@ pub struct Options {
     pub rmax1: (u128, u128),
     /// The H-TICK sum's limit (production: 2^64 - 1; the controls lower it).
     pub htick_acc_max: u128,
+    /// PROVISIONAL placement (a snapshot of a capture that is still arriving): a lane whose placement gate is only
+    /// the missing end of the capture (no ORDER_FINAL, DOMAIN_FINAL or TRAILER yet) places its endpoints from the
+    /// order records received so far, by the causal bounds alone (no RMAX1 chain), instead of UNPLACED (order
+    /// coverage unknown).  Its tick counts stay unavailable and its placements are counted apart from the final
+    /// coverage ([`Coverage::q_p_provisional`]).  A lane the final gate already passes is unaffected.  Every bound
+    /// so placed is at least as wide as the one the whole capture gives (see [`provisional_raw_ok`]).
+    pub provisional: bool,
 }
 
 impl Default for Options {
@@ -142,6 +151,7 @@ impl Default for Options {
             seg_acc_max: u128::MAX,
             rmax1: (1, 1),
             htick_acc_max: u128::from(u64::MAX),
+            provisional: false,
         }
     }
 }
@@ -411,6 +421,8 @@ pub struct LaneOut {
     pub findings: Vec<String>,
     pub w32: Vec<W32Epoch>,
     pub h1: Option<H1Lane>,
+    /// The placements are PROVISIONAL: [`Options::provisional`] on a lane without ORDER_FINAL.
+    pub provisional: bool,
 }
 
 impl LaneOut {
@@ -439,6 +451,7 @@ impl LaneOut {
             findings: Vec::new(),
             w32: Vec::new(),
             h1: None,
+            provisional: false,
         }
     }
     /// Eligible pairs (Q's part of this lane): every pair less the cross-epoch ones when known.
@@ -462,6 +475,10 @@ pub struct Coverage {
     pub exhausted: bool,
     pub refused_lanes: u64,
     pub lanes_without_final: u64,
+    /// Pairs with both endpoints PLACED provisionally (over a received prefix); never part of q_p.
+    pub q_p_provisional: u64,
+    /// Lanes whose placements are PROVISIONAL.
+    pub provisional_lanes: u64,
 }
 
 impl Coverage {
@@ -863,6 +880,9 @@ fn publish(ops: &mut Ops, res: &mut SpuResult, u: LaneOut) -> Result<(), Limit> 
     ops.charge(PUB_FIXED_OPS + np.saturating_mul(3 * (map_cost(n) + 1) + 2))?;
     ops.step(2);
     let mut ok = bump_free(&mut c.unknown, "cross-epoch", u.cross_epoch.unwrap_or(0));
+    if u.provisional {
+        c.provisional_lanes = c.provisional_lanes.saturating_add(1);
+    }
     if u.state != LaneState::NoOrder {
         match c.total.checked_add(u.eligible()) {
             Some(v) => c.total = v,
@@ -878,6 +898,14 @@ fn publish(ops: &mut Ops, res: &mut SpuResult, u: LaneOut) -> Result<(), Limit> 
                 Some(k) => ok &= bump_free(&mut c.omitted_t, k.clone(), 1),
             }
             match (&p.place_b, &p.place_e) {
+                // a provisional placement is never final coverage: counted apart, and omitted from q_p
+                (Place::Placed(..), Place::Placed(..)) if u.provisional => {
+                    ok &= bump_free(&mut c.omitted_p, PROVISIONAL_OMISSION, 1);
+                    match c.q_p_provisional.checked_add(1) {
+                        Some(v) => c.q_p_provisional = v,
+                        None => ok = false,
+                    }
+                }
                 (Place::Placed(..), Place::Placed(..)) => match c.q_p.checked_add(1) {
                     Some(v) => c.q_p = v,
                     None => ok = false,
@@ -1247,6 +1275,18 @@ fn evaluate(
             t2_short = "raw validity".to_string();
         }
     }
+    // The placement gate: the ticks gate, except under Options::provisional, where a lane whose gate is only the
+    // missing end of the capture (no ORDER_FINAL yet, no DOMAIN_FINAL or TRAILER yet) is placed PROVISIONALLY; the
+    // raw validity reasons a later byte cannot clear still gate it.
+    let p2_short = if !opts.provisional || t2_short.is_empty() {
+        t2_short.clone()
+    } else if provisional_raw_ok(s) {
+        String::new()
+    } else {
+        "raw validity".to_string()
+    };
+    let prov = opts.provisional && !t2_short.is_empty() && p2_short.is_empty();
+    u.provisional = prov;
     let dropped = ord.final_.map_or(0, |f| f.1);
     for (sg, seg) in segs.iter_mut().enumerate() {
         ops.step(1);
@@ -1352,8 +1392,8 @@ fn evaluate(
     let conv_on = opts.pairs && opts.isolation_scale && res.iso.is_some();
     ops.charge(np.saturating_mul(RET_PAIR_OPS + 8) + 2 * segs.len() as u64).map_err(&p)?;
     let gate = |o: &ObsOut| -> Option<Place> {
-        if !t2_short.is_empty() {
-            Some(Place::Unplaced(t2_short.clone()))
+        if !p2_short.is_empty() {
+            Some(Place::Unplaced(p2_short.clone()))
         } else if contra[o.epoch as usize] {
             Some(Place::Unplaced("order contradiction".to_string()))
         } else {
@@ -1493,6 +1533,34 @@ fn evaluate(
     u.segments = segs;
     u.pairs_out = out;
     Ok(Ok(u))
+}
+
+/// The omission class of a pair placed PROVISIONALLY (both endpoints PLACED over a received prefix).
+pub const PROVISIONAL_OMISSION: &str = "PROVISIONAL placement (no ORDER_FINAL yet)";
+
+/// The raw validity of a lane in a snapshot that is still arriving: every reason RAW VALIDITY fails is one that
+/// the rest of the capture can clear (no DOMAIN_FINAL yet, no TRAILER yet, open_begins with no DOMAIN_FINAL yet).
+/// A lost event, a PROTOCOL ERROR, an ABANDONED, OVERFLOWED or unbound lane, or an unverifiable open count fails
+/// it, exactly as in the final analysis.
+///
+/// Why a PROVISIONAL placement is never tighter than the final one: every order record is immutable once received
+/// and the received records are a prefix, in file order, of the lane's records.  L(o) is the maximum of
+/// LANE_CREATED and the tb0 of each positioned bracket before o: the prefix positions a subset of the brackets, so
+/// its L is a maximum over a subset of the final terms (never above the final L).  Upper-1 is the tb_copy of the
+/// first DRAIN_TB with events_through > seq: DRAIN_TB records arrive in events_through order, so the prefix finds
+/// the same record or none (no bound, never a smaller one).  Upper-2 is a minimum over a subset of the final
+/// brackets (never below the final one).  The RMAX1 chain is not applied (its segments need the final order
+/// coverage), and the final bound is the causal bound tightened by it, so it lies inside the provisional one.  An
+/// ORDER CONTRADICTION found in the prefix (some L above a later U) persists, because L only grows and U only
+/// shrinks as records arrive.  What a later record can still do is contradict, or the capture can end with a raw
+/// validity failure; then the final analysis refuses a placement the snapshot showed, which is why it is labelled
+/// PROVISIONAL and never counted as coverage.
+pub fn provisional_raw_ok(s: &SourceReport) -> bool {
+    let prefix_only = s.incomplete.iter().all(|r| r == "no DOMAIN_FINAL" || r == "the file has no valid TRAILER");
+    s.invalid.iter().all(|r| {
+        (r == "STRUCTURE is not COMPLETE" && prefix_only)
+            || (r == "open_begins not verified" && s.open_begins == OpenBegins::NoFinal)
+    })
 }
 
 /// x = ticks * s / freq_hz in us, rounded outward to 0.001 us (exact big integers): (x_lo, x_hi) as text.
@@ -1828,6 +1896,12 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
             String::new()
         } else if u.final_present {
             format!(" (dropped {})", opt(u.dropped))
+        } else if u.provisional {
+            concat!(
+                " (dropped unknown) ORDER COVERAGE UNKNOWN (no ORDER_FINAL); placement PROVISIONAL over the received ",
+                "prefix (coverage over the received prefix is provisional, not final)"
+            )
+            .to_string()
         } else {
             " (dropped unknown) ORDER COVERAGE UNKNOWN (no ORDER_FINAL)".to_string()
         };
@@ -1957,12 +2031,13 @@ pub fn lines(a: &Analysis, r: &SpuResult, observations: bool) -> Vec<String> {
                     _ => String::new(),
                 };
                 out.push(format!(
-                    "      {} seq {}/{} ticks {t} | BEGIN {} END {} (causal bounds plus RMAX1){conv}",
+                    "      {} seq {}/{} ticks {t} | BEGIN {} END {} ({}){conv}",
                     names.get(p.desc as usize).map_or("?", |s| s.as_str()),
                     p.begin,
                     p.end,
                     p.place_b.text(),
-                    p.place_e.text()
+                    p.place_e.text(),
+                    if u.provisional { "causal bounds alone, PROVISIONAL" } else { "causal bounds plus RMAX1" }
                 ));
             }
         }
