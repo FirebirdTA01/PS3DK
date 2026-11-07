@@ -51,6 +51,9 @@ _Static_assert(offsetof(ps3dk_prof_ext_config, reserved) == 32, "ext config offs
  * ownership information, NOT permission to start a producer (it will never be drained).
  * Callbacks must not wait for another thread that is inside one of these calls. */
 #include "psp_desc.h" /* struct ps3dk_prof_spu_desc: the one type the runtime's descriptors use too */
+/* Capacity: an image's descriptors take n * sizeof(ps3dk_prof_spu_desc) bytes of the spu_image_bytes_max arena (16
+ * bytes each in ILP32, 24 in LP64: two pointers) plus their strings, so one arena holds fewer descriptors in LP64.
+ * The SPU-side records the ELF path decodes are 16 bytes in both data models. */
 typedef struct ps3dk_prof_spu_desc ps3dk_prof_spu_desc;
 
 typedef struct ps3dk_prof_spu_lane {

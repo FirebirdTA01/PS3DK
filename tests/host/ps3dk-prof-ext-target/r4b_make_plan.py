@@ -2,7 +2,10 @@
 """P3.3 R4b shipped-build invariance (review 21:23 carry 2): for the default goal, `all` and `install`, the REACHABLE
 dependency graph (each reachable target's prerequisites and recipe lines, from `make -p -n GOAL`) and the dry-run
 recipe output (`make -n GOAL`) are identical between two sdk/libps3dkprof trees, and neither mentions the extension
-(ext-ilp32 / ilp32-ext / libps3dkprof_ext / EXT_).  Nothing is built or installed (-n).
+(ext-ilp32 / ext-lp64 / ext-live / ilp32-ext / lp64-ext / libps3dkprof_ext / EXT_ / EXT64 / EXTL).  And for each
+existing extension goal of the base tree (ext-ilp32, ext-ilp32-profile), the dry-run recipe output is identical too
+(the LP64 twin and the live targets must not change a single ILP32 extension command).  Nothing is built or installed
+(-n).
 
 Normalization, and nothing else: each tree's absolute root is replaced by the token <ROOT>.  The same scratch
 PS3_BUILD_ROOT / PS3DK / PS3DEV values and SDK_VERSION=r4b-plan (a command-line override, so version.sh is not run)
@@ -14,7 +17,8 @@ import subprocess
 import sys
 
 GOALS = ['', 'all', 'install']
-EXT = re.compile(r'ext-ilp32|ilp32-ext|libps3dkprof_ext|EXT_')
+EXT = re.compile(r'ext-ilp32|ext-lp64|ext-live|ilp32-ext|lp64-ext|libps3dkprof_ext|EXT_|EXT64|EXTL')
+EXT_GOALS = ['ext-ilp32', 'ext-ilp32-profile']  # dry-run identical between the trees
 
 
 def make(libdir, scratch, args):
@@ -98,6 +102,29 @@ def main():
             print(f'PASS {name}: dry-run identical ({len(cd.splitlines())} lines), reachable graph identical '
                   f'({len(cg)} targets), extension-free')
         fail |= gfail
+    for g in EXT_GOALS:
+        out = {}
+        for tag, d in (('base', base), ('cand', cand)):
+            rc, dry, err = make(d, scratch, ['-n', g])
+            if rc != 0:
+                print(f'FAIL {g} {tag}: make rc {rc}: {err[:400]}')
+                fail = 1
+            elif not dry.strip():
+                print(f'FAIL {g} {tag}: empty dry run')
+                fail = 1
+            else:
+                out[tag] = dry
+        if len(out) != 2:
+            continue
+        if out['base'] != out['cand']:
+            print(f'FAIL {g}: dry-run output differs')
+            print('--- base')
+            print(out['base'])
+            print('--- cand')
+            print(out['cand'])
+            fail = 1
+        else:
+            print(f'PASS {g}: dry-run identical ({len(out["cand"].splitlines())} lines)')
     print('R4B MAKE PLAN ' + ('PASS' if not fail else 'FAIL'))
     return fail
 

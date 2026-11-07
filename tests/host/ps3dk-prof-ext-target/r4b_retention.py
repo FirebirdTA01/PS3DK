@@ -3,7 +3,8 @@
 externally visible definitions (from nm of the archive, strict records, exactly one block per contract member) is a
 symbol of the image (readelf -sW, strict inventory).  --expect all: every contract member linked (the positive
 fixture); --expect none: no member linked (the negative fixture).  Retention is object-granular (R3: --gc-sections
-keeps every function of a pulled-in ILP32 ELFv1 object), so a member's presence is what this proves, nothing finer.
+keeps every function of a pulled-in ELFv1 object; observed in ILP32, and the LP64 run checks the same rule), so a
+member's presence is what this proves, nothing finer.
 
 usage: r4b_retention.py --archive-nm NM.txt --image-syms READELF_S.txt --expect all|none
 A witness is an image symbol that is GLOBAL or WEAK and DEFINED in a numeric nonzero section (never UND, LOCAL, ABS

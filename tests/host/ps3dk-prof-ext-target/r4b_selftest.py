@@ -12,6 +12,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import r4b_archive as A  # noqa: E402
 import r4b_image as I  # noqa: E402
+import r4b_live as LV  # noqa: E402
 
 CALLEES = {'memset': 0x9000, 'memcpy': 0x9100, 'helper': 0x9200}
 
@@ -41,6 +42,28 @@ ST64_BYTES = ['clrldi r9,r4,32', 'srdi r10,r5,56', 'stb r10,0(r9)', 'srdi r10,r5
               'srdi r10,r5,40', 'stb r10,2(r9)', 'srdi r10,r5,32', 'stb r10,3(r9)', 'srdi r10,r5,24', 'stb r10,4(r9)',
               'srdi r10,r5,16', 'stb r10,5(r9)', 'srdi r10,r5,8', 'stb r10,6(r9)', 'stb r5,7(r9)', 'blr']
 ST64_TWO = ['std r5,0(r4)', 'std r5,0(r4)', 'blr']
+# load-with-update forms (the LP64 m_alloc uses lbzu): understood, never a way around a rule
+ST64_LDU_COPY = ['mr r9,r4', 'lbzu r10,8(r9)', 'std r5,0(r4)', 'blr']  # an update load through a copy of the EA
+ST64_LDU_EA = ['lbzu r10,8(r4)', 'std r5,0(r4)', 'blr']  # the update moves the EA register itself
+ST64_LDU_BAD = ['lbzu r4,8(r4)', 'std r5,0(r4)', 'blr']  # rd = base: an invalid form
+
+
+def alloc64(store=('std r3,0(r31)',), dest_extra=()):
+    """the LP64 m_alloc shape: slot = base (ld) + index * slot_bytes (lwz, addi 32, sldi 3, mulld), add, copied to r3,
+    memset, sync, then `store` (the EA store through ea-out); r27 keeps ctx, r28 the scale, r29 the base, r30 the
+    index across the call"""
+    l = ['mflr r0', 'std r0,16(r1)', 'stdu r1,-144(r1)', 'std r31,136(r1)', 'std r30,128(r1)', 'std r29,120(r1)',
+         'std r28,112(r1)', 'std r27,104(r1)', 'mr r31,r5', 'mr r27,r3',
+         'ld r29,696(r3)', 'lwz r30,12(r3)', 'lwz r9,808(r3)', 'addi r9,r9,32', 'sldi r28,r9,3', 'mulld r8,r30,r28',
+         'add r10,r29,r8', *dest_extra, 'mr r3,r10', 'li r4,0', 'bl memset', 'sync', *store,
+         'li r3,0', 'ld r27,104(r1)', 'ld r28,112(r1)', 'ld r29,120(r1)', 'ld r30,128(r1)', 'ld r31,136(r1)',
+         'addi r1,r1,144', 'ld r0,16(r1)', 'mtlr r0', 'blr']
+    return l
+
+
+def ldu_scan(a):
+    """the LP64 slot scan shape: a pointer copy advanced by lbzu instead of an indexed lbz"""
+    return [{'li r9,0': 'addi r8,r3,-1', 'lbz r10,0(r3)': 'lbzu r10,1(r8)'}.get(x, x) for x in a]
 ST64_SPILL = ['stdu r1,-64(r1)', 'std r5,48(r1)', 'std r5,0(r4)', 'addi r1,r1,64', 'blr']
 ST64_UNKNOWN = ['std r5,0(r4)', 'unknown_side_effect', 'blr']
 ST64_SC = ['std r5,0(r4)', 'sc', 'blr']
@@ -147,6 +170,12 @@ ROWS = [
     ('st64 one std', lambda: I.check_store(listing(ST64_GOOD), 8, S8), 'PASS', 'one std'),
     ('c1 st64 byte-wise', lambda: I.check_store(listing(ST64_BYTES), 8, S8), 'FAIL', '8 stores to the EA'),
     ('st64 two stores', lambda: I.check_store(listing(ST64_TWO), 8, S8), 'FAIL', '2 stores to the EA'),
+    ('lbzu through a copy of the EA is a load from the EA', lambda: I.check_store(listing(ST64_LDU_COPY), 8, S8),
+     'FAIL', 'a load from the EA in a store hook'),
+    ('lbzu of the EA register is a load from the EA', lambda: I.check_store(listing(ST64_LDU_EA), 8, S8), 'FAIL',
+     'a load from the EA in a store hook'),
+    ('lbzu with rd = base is an invalid form', lambda: v(I.check_store, listing(ST64_LDU_BAD), 8, S8), 'UNMET',
+     'invalid load-with-update form'),
     ('st64 v spilled', lambda: I.check_store(listing(ST64_SPILL), 8, S8), 'FAIL', 'stack store of v'),
     ('review repro: unknown side-effect opcode', lambda: v(I.check_store, listing(ST64_UNKNOWN), 8, S8), 'UNMET',
      'unmodelled instruction'),
@@ -196,6 +225,40 @@ ROWS = [
     ('lwsync is not a full sync', lambda: I.check_barrier(listing(['lwsync', 'blr']), 'sync'), 'FAIL', 'no sync'),
     ('isync hook', lambda: I.check_barrier(listing(['isync', 'blr']), 'isync'), 'PASS', 'isync'),
     ('alloc good', lambda: v(I.check_alloc, listing(alloc())), 'PASS', 'ORDERING ONLY'),
+    ('alloc good, LP64 lbzu scan', lambda: v(I.check_alloc, listing(ldu_scan(alloc()))), 'PASS', 'ORDERING ONLY'),
+    ('c3 with the lbzu scan: sync before memset', lambda: v(I.check_alloc, listing(ldu_scan(alloc(sync_at='before')))),
+     'FAIL', 'no sync after the zeroing memset'),
+    ('an lbzu that moves the slot register before the memset: that address is zeroed and stored',
+     lambda: v(I.check_alloc, listing([{'lwz r29,12(r3)': 'lbzu r29,12(r30)'}.get(x, x) for x in alloc()])), 'PASS',
+     'ORDERING ONLY'),
+    ('an lbzu that moves the slot register after the memset', lambda: v(I.check_alloc, listing(alloc(
+        post=('lbzu r29,12(r30)',)))), 'FAIL', 'the stored EA is not the zeroed region address'),
+    ('LP64 shape: base + index * slot size, via r3, memset return stored',
+     lambda: v(I.check_alloc, listing(alloc64())), 'PASS', 'ORDERING ONLY'),
+    ('LP64 shape: the same sum recomputed after the call (operands commuted) is the same address',
+     lambda: v(I.check_alloc, listing(alloc64(store=('mulld r8,r28,r30', 'add r3,r8,r29', 'std r3,0(r31)')))),
+     'PASS', 'ORDERING ONLY'),
+    ('LP64 mutant: wrong scale (index * slot size * 2)',
+     lambda: v(I.check_alloc, listing(alloc64(store=('sldi r9,r28,1', 'mulld r8,r30,r9', 'add r3,r29,r8',
+                                                      'std r3,0(r31)')))), 'FAIL',
+     'the stored EA is not the zeroed region address'),
+    ('LP64 mutant: wrong base (another ctx field)',
+     lambda: v(I.check_alloc, listing(alloc64(store=('ld r9,704(r27)', 'mulld r8,r30,r28', 'add r3,r9,r8',
+                                                      'std r3,0(r31)')))), 'FAIL',
+     'the stored EA is not the zeroed region address'),
+    ('LP64 mutant: missing add (index * slot size alone)',
+     lambda: v(I.check_alloc, listing(alloc64(store=('mulld r3,r30,r28', 'std r3,0(r31)')))), 'FAIL',
+     'the stored EA is not the zeroed region address'),
+    ('LP64 mutant: r3 clobbered after the memset',
+     lambda: v(I.check_alloc, listing(alloc64(store=('mr r3,r30', 'std r3,0(r31)')))), 'FAIL',
+     'the stored EA is not the zeroed region address'),
+    ('LP64 mutant: wrong scale on the memset side (32-bit multiply)',
+     lambda: v(I.check_alloc, listing([{'mulld r8,r30,r28': 'mullw r8,r30,r28'}.get(x, x) for x in alloc64(
+         store=('mulld r8,r28,r30', 'add r3,r29,r8', 'std r3,0(r31)'))])), 'FAIL',
+     'the stored EA is not the zeroed region address'),
+    ('LP64 fail closed: an unknown operand in the memset address',
+     lambda: v(I.check_alloc, listing(alloc64(dest_extra=('add r10,r10,r12',)))), 'UNMET',
+     'the zeroed region address is not tracked'),
     ('alloc claim names its source obligations', lambda: v(I.check_alloc, listing(alloc())), 'PASS',
      'SOURCE OBLIGATIONS'),
     ('c3 sync before memset', lambda: v(I.check_alloc, listing(alloc(sync_at='before'))), 'FAIL',
@@ -380,11 +443,20 @@ def arch_rows():
         except A.Bad as b:
             return [str(b)]
 
-    def attr_errs(t):
+    def attr_errs(t, model='ILP32'):
         try:
-            return A.judge_attributes(t)
+            return A.judge_attributes(t, model)
         except A.Bad as b:
             return [str(b)]
+
+    def imp_errs(t, model):
+        try:
+            return A.judge_imports(t, model)[0]
+        except A.Bad as b:
+            return [str(b)]
+    ATTR64 = ATTR.replace('ILP32', 'LP64')
+    NM64 = NM_GOOD.replace(''.join(f'                 U {n}\n' for n in A.IMPORTS),
+                           ''.join(f'                 U {n}\n' for n in A.IMPORTS_LP64))
     return [
         ('mk good', not A.judge_members_mk(MK_GOOD)),
         ('e mk member removed', has(A.judge_members_mk(MK_GOOD.replace(' prg', '')), 'member list differs')),
@@ -409,6 +481,22 @@ def arch_rows():
         ('attributes LP64 member', has(attr_errs(ATTR.replace('ILP32', 'LP64', 1)), 'data model')),
         ('attributes missing tag', has(attr_errs(ATTR.replace('  Tag_GNU_Power_CellOS_Data_Model: ILP32\n', '', 1)),
                                        'data model')),
+        ('attributes LP64 contract good', not attr_errs(ATTR64, 'LP64')),
+        ('attributes LP64 contract fed one ILP32 member', has(attr_errs(ATTR64.replace('LP64', 'ILP32', 1), 'LP64'),
+                                                             'want exactly [LP64]')),
+        ('attributes LP64 contract with a missing tag',
+         has(attr_errs(ATTR64.replace('  Tag_GNU_Power_CellOS_Data_Model: LP64\n', '', 1), 'LP64'), 'data model []')),
+        ('attributes ILP32 contract fed the LP64 archive', has(attr_errs(ATTR64, 'ILP32'), 'want exactly [ILP32]')),
+        ('attributes unknown data model refused', has(attr_errs(ATTR, 'ILP16'), 'unknown data model')),
+        ('attributes two tags on one member',
+         has(attr_errs(ATTR64.replace('Model: LP64\n', 'Model: LP64\n  Tag_GNU_Power_CellOS_Data_Model: LP64\n', 1),
+                       'LP64'), "['LP64', 'LP64']")),
+        ('imports LP64 contract good', not imp_errs(NM64, 'LP64')),
+        ('imports LP64 contract plus one extra import', has(imp_errs(NM64 + '                 U puts\n', 'LP64'),
+                                                           'unexpected import puts')),
+        ('imports LP64 contract with one import absent', has(imp_errs(NM64.replace('U strcpy\n', ''), 'LP64'),
+                                                            'expected import absent strcpy')),
+        ('imports unknown data model refused', has(imp_errs(NM_GOOD, 'ILP16'), 'unknown data model')),
         ('imports good', not A.judge_imports(NM_GOOD)[0]),
         ('d unexpected import puts', has(A.judge_imports(NM_GOOD + '                 U puts\n')[0],
                                          'unexpected import puts')),
@@ -430,6 +518,47 @@ def arch_rows():
                                           'unexpected import TOC.')),
         ('expected import absent', has(A.judge_imports(NM_GOOD.replace('U strcpy\n', ''))[0],
                                        'expected import absent strcpy')),
+    ]
+
+
+LV_AR = 'live_agent.o\nlive_os_lv2.o\nlive_api.o\n'
+LV_ATTR = ''.join(f'\nFile: y.a({n})\nAttribute Section: gnu\nFile Attributes\n  Tag_GNU_Power_CellOS_Data_Model: LP64\n'
+                  for n in LV.LIVE_MEMBERS)
+LV_NM = ''.join(f'\n{n}:\n                 U ps3dk_prof__lock\n0000000000000000 T live_{n[:-2]}\n'
+                '0000000000000040 t helper\n' for n in LV.LIVE_MEMBERS)
+
+
+def live_rows():
+    def has(errs, s):
+        return any(s in e for e in errs)
+
+    def attr(t, model='LP64'):
+        try:
+            return LV.judge_attributes(t, model)
+        except A.Bad as b:
+            return [str(b)]
+    return [
+        ('live members good', not LV.judge_members(LV_AR)),
+        ('live member missing', has(LV.judge_members(LV_AR.replace('live_api.o\n', '')), 'missing member live_api.o')),
+        ('live extra member', has(LV.judge_members(LV_AR + 'prof_core.o\n'), 'extra member prof_core.o')),
+        ('live duplicate member', has(LV.judge_members(LV_AR + 'live_api.o\n'), 'duplicate member live_api.o')),
+        ('live attributes LP64 good', not attr(LV_ATTR)),
+        ('live attributes one ILP32 member', has(attr(LV_ATTR.replace('LP64', 'ILP32', 1)), 'want exactly [LP64]')),
+        ('live attributes ILP32 contract on LP64 members', has(attr(LV_ATTR, 'ILP32'), 'want exactly [ILP32]')),
+        ('live attributes missing tag',
+         has(attr(LV_ATTR.replace('  Tag_GNU_Power_CellOS_Data_Model: LP64\n', '', 1)), 'data model []')),
+        ('live disjoint good', not LV.judge_disjoint(LV_NM, NM_GOOD)[0]),
+        ('live symbol defined in both archives',
+         has(LV.judge_disjoint(LV_NM + '0000000000000080 T ps3dk_prof_init\n', NM_GOOD)[0],
+             'defined in both archives: ps3dk_prof_init')),
+        ('live weak definition in both archives counts',
+         has(LV.judge_disjoint(LV_NM + '0000000000000080 W ps3dk_prof__lock\n', NM_GOOD)[0],
+             'defined in both archives: ps3dk_prof__lock')),
+        ('live local twin of an ext symbol is fine',
+         not LV.judge_disjoint(LV_NM + '0000000000000080 t ps3dk_prof_init\n', NM_GOOD)[0]),
+        ('live unclassified nm record', has(LV.judge_disjoint(LV_NM + '??? odd\n', NM_GOOD)[0], 'unclassified')),
+        ('live nm block missing', has(LV.judge_disjoint(LV_NM.split('\nlive_api.o:')[0], NM_GOOD)[0],
+                                      'nm member blocks')),
     ]
 
 
@@ -477,7 +606,7 @@ def main():
         ok = got == want and why in reason
         print(f'{"PASS" if ok else "FAIL"} image {name}: {got} ({reason})')
         fails += not ok
-    for name, ok in front_rows() + [(f'archive {n}', o) for n, o in arch_rows()] + retention_rows():
+    for name, ok in front_rows() + [(f'archive {n}', o) for n, o in arch_rows()] + retention_rows() + live_rows():
         print(f'{"PASS" if ok else "FAIL"} {name}')
         fails += not ok
     print('R4B SELFTEST ' + ('PASS' if not fails else f'FAIL ({fails})'))

@@ -128,19 +128,23 @@ int pool_create(void)
 int pool_start_ext(void)
 {
     int rc;
+    uint64_t slot_ea[WORK_MAX_SPUS];const pe_lane *lane[WORK_MAX_SPUS];pe_args a[WORK_MAX_SPUS];
+    _Static_assert(WORK_MAX_SPUS<=PE_MAX_WORKERS,"one lane per worker");
+    pe_epochs_init(&epochs,workers,io_now(0)); /* before the start: an early bound for the attach-time reset */
+    for(unsigned i=0;i<workers;++i){slot_ea[i]=(uint64_t)(uintptr_t)&slots[i];lane[i]=pe_rt_lane(i);}
+    /* full 64-bit EAs, checked (P-EA32, prof_ext.h); a refused lane is logged, turns SPU profiling off and clears
+     * eligibility: never a silent unprofiled worker */
+    rc=pp_worker_args(&epochs,&io,slot_ea,lane,workers,a);
+    if(rc<0){pool_close();return -1;}
+    if(rc>0)pe_rt_spu_off("spu-off-pack-refused");
     for(unsigned i=0;i<workers;++i) {
         sysSpuThreadAttribute attr={0};attr.name="prof-worker";attr.nsize=12;
         sysSpuThreadArgument args={0};
-        const pe_lane *l=pe_rt_lane(i);
-        pe_args a;
-        if(!l || pe_pack_ext((uint32_t)(uintptr_t)&slots[i],i,workers,l->ea_ring,l->ring_slots,l->ea_ctl,&a))
-            pe_pack_ext((uint32_t)(uintptr_t)&slots[i],i,workers,0,1,0,&a); /* no lane: the worker runs unprofiled */
-        args.arg0=a.arg0;args.arg1=a.arg1;args.arg2=a.arg2;args.arg3=a.arg3;
+        args.arg0=a[i].arg0;args.arg1=a[i].arg1;args.arg2=a[i].arg2;args.arg3=a[i].arg3;
         rc=sysSpuThreadInitialize(&threads[i],group,i,&image,&attr,&args);
         if(rc){printf("POOL thread-init=%08x\n",(unsigned)rc);pool_close();return -1;}
     }
     __asm__ volatile("sync" ::: "memory");
-    pe_epochs_init(&epochs,workers,io_now(0)); /* before the start: an early bound for the attach-time reset */
     if(!pe_rt_spu_on())pe_clear(&epochs,"SPU lanes are off");
     rc=sysSpuThreadGroupStart(group);
     if(rc){printf("POOL start=%08x\n",(unsigned)rc);pool_close();return -1;}

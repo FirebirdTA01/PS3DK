@@ -7,7 +7,7 @@
  * then block forever; no recovery or shutdown bound is promised for that case.
  *
  * Two memory adapters: the host one emulates the line premises (psp_host_emul.h; not target evidence); the LV2 one
- * (R4b, ILP32 only) uses plain aligned accesses and real barriers.  Its correctness rests on the OPEN target
+ * (R4b, both PPU data models) uses plain aligned accesses and real barriers.  Its correctness rests on the OPEN target
  * assumptions T1-T6 of p3.3-r4b r2 (line-B putlluc indivisible and coherent as seen by PPU loads, ordered loads, ring
  * data visible before its publication, single-copy aligned line-A stores whose stores cancel an SPU reservation,
  * MFC coherence); the build gates check only the code shapes they require. */
@@ -19,9 +19,6 @@
 #error "the SPU lane extension: no PAL selected"
 #endif
 #ifdef PS3DK_PROF_PAL_LV2
-#ifdef __LP64__
-#error "the SPU lane extension target is ILP32 only"
-#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
 #error "the SPU lane extension target never carries test hooks"
 #endif
@@ -41,7 +38,16 @@
 #include "psp_host_emul.h"
 #endif
 #ifdef PS3DK_PROF_PAL_LV2
-_Static_assert(sizeof(uintptr_t) == 4, "LV2 extension: ILP32 effective addresses");
+/* both PPU data models: the pointer, uintptr_t and size_t widths are the ones __LP64__ selects (an EA is the
+ * process address as an unsigned 64-bit value either way; the size checks rely on the size_t width) */
+#ifdef __LP64__
+#define PS3DK_PROF__PTR_BYTES 8
+#else
+#define PS3DK_PROF__PTR_BYTES 4
+#endif
+_Static_assert(sizeof(void *) == PS3DK_PROF__PTR_BYTES && sizeof(uintptr_t) == sizeof(void *) &&
+                   sizeof(size_t) == sizeof(void *),
+               "LV2 extension: the data model matches __LP64__");
 #endif
 #include "psp_elf.h"
 #include "psp_ppu.h"
@@ -116,8 +122,9 @@ static uint64_t m_mftb(void *c)
 
 #else /* PS3DK_PROF_PAL_LV2 */
 
-/* ILP32: the EA is the 32-bit effective address zero-extended (at() above).  Every line-A store is ONE naturally
- * aligned store (assumption T5); native big-endian order equals the psp_be64 / psp_rd64 byte order. */
+/* The EA is the process address as an unsigned 64-bit value (zero-extended in ILP32; at() above).  Every line-A
+ * store is ONE naturally aligned store (assumption T5); native big-endian order equals the psp_be64 / psp_rd64 byte
+ * order. */
 static uint64_t m_ld64(void *c, uint64_t ea)
 {
     (void)c;
@@ -180,6 +187,15 @@ static uint64_t m_mftb(void *c)
 /* the slot allocator over the init block: psp_lane_create asks for the ring, then the control block, of one lane */
 static size_t slot_bytes(const prof *p) { return (size_t)p->spu->cfg.ring_slots * PSP_SLOT + PSP_CTL_BYTES; }
 
+/* Lane slot i's address, computed out of line ONCE per allocation (after the free-slot scan, from its final index):
+ * the call's result is the one value m_alloc zeroes and returns, so the linked code shows the zeroed region and the
+ * returned EA as the same value in both data models (the image checker's G4a binding; in LP64 an inline sum would
+ * be rebuilt from the scan's index on each path).  Behaviour is unchanged. */
+static __attribute__((noinline)) uint8_t *slot_at(prof *p, uint32_t i)
+{
+    return p->spu_slots + (size_t)i * slot_bytes(p);
+}
+
 static int m_alloc(void *c, size_t size, uint64_t *ea)
 {
     prof *p = c;
@@ -195,7 +211,7 @@ static int m_alloc(void *c, size_t size, uint64_t *ea)
             return -1;
         p->ext_slot_used[i] = 1;
         p->ext_pending_slot = i;
-        slot = p->spu_slots + (size_t)i * slot_bytes(p); /* once: the zeroed slot IS the EA returned below */
+        slot = slot_at(p, i); /* once: the zeroed slot IS the EA returned below */
         memset(slot, 0, slot_bytes(p));
 #ifdef PS3DK_PROF_PAL_LV2
         __asm__ volatile("sync" ::: "memory"); /* the zeroed ring + control block are performed before the lane's EA

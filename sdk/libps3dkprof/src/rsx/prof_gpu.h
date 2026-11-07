@@ -1,6 +1,6 @@
 /* GPU (RSX) timestamp domains in the runtime (P3.3 R2; R4b target wiring): INTERNAL.  It is not installed under
- * sdk/include; the only target archive containing the GPU runtime is the UNINSTALLED ILP32 ext archive (make
- * ext-ilp32), where the device is GCM; host builds use a test-hook device.  Enabled by
+ * sdk/include; the only target archives containing the GPU runtime are the UNINSTALLED ext archives (make ext-ilp32,
+ * make ext-lp64), where the device is GCM; host builds use a test-hook device.  Enabled by
  * ps3dk_prof_ext_config.gpu_domains_max (prof_spu.h).
  *
  * Every call: EBUSY inside a drain, a sink callback or another GPU call (port callbacks included), checked before any

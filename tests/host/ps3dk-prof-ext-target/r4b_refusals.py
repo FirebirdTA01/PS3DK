@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """P3.3 R4b configuration refusals (host preprocessor).  Each refused configuration of ext_runtime.c / gpu_runtime.c
 must fail, and its FIRST diagnostic must be its own #error text (a refusal for the named reason, not an unrelated
-failure); each host configuration the suites use must preprocess cleanly.  The refusals sit before any include, so the
-host compiler reaches them; --target re-checks them with the PPU compiler.
+failure); each host configuration the suites use, and the LV2 configuration in both PPU data models, must preprocess
+cleanly.  The refusals sit before any include, so the host compiler reaches them; --target re-checks them with the PPU
+compiler (default ILP32 and -mlp64).  A source that still refuses LP64 fails the clean LP64 rows.
 
 usage: r4b_refusals.py [--target] CC SRC_DIR INCLUDE_DIR [SYSTEM_INCLUDE_DIR]      (exit 0 iff every row holds)
---target uses the PPU compiler rows (LV2 clean; LV2 + -mlp64 / hooks / devmem, HOST+LV2 and no PAL refused)."""
+--target uses the PPU compiler rows (LV2 and LV2 + -mlp64 clean; hooks / devmem in both data models, HOST+LV2 and no
+PAL refused)."""
 import os
 import subprocess
 import sys
@@ -18,16 +20,19 @@ ROWS = [  # (file stem, extra flags, None = must preprocess cleanly, or the exac
     ('host+hooks+devmem', ['-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS', '-DGPP_HOST_DEVMEM'], None),
     ('host+lv2', ['-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_PAL_LV2'], '{x}: PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2 together'),
     ('no-pal', [], '{x}: no PAL selected'),
-    ('lv2+lp64', ['-DPS3DK_PROF_PAL_LV2'], '{x} target is ILP32 only'),
+    ('lv2', LV2, None),
+    ('lv2+lp64', ['-DPS3DK_PROF_PAL_LV2'], None),
     ('lv2+hooks', LV2 + ['-DPS3DK_PROF_TEST_HOOKS'], '{x} target never carries test hooks'),
     ('lv2+devmem', LV2 + ['-DGPP_HOST_DEVMEM'], 'GPP_HOST_DEVMEM is a host-only test seam'),
 ]
 # --target: the PPU compiler (ILP32 by default, -mlp64 for LP64); the LV2 configuration must preprocess cleanly
 TARGET_ROWS = [
     ('lv2', ['-DPS3DK_PROF_PAL_LV2'], None),
-    ('lv2+mlp64', ['-DPS3DK_PROF_PAL_LV2', '-mlp64'], '{x} target is ILP32 only'),
+    ('lv2+mlp64', ['-DPS3DK_PROF_PAL_LV2', '-mlp64'], None),
     ('lv2+hooks', ['-DPS3DK_PROF_PAL_LV2', '-DPS3DK_PROF_TEST_HOOKS'], '{x} target never carries test hooks'),
+    ('lv2+mlp64+hooks', ['-DPS3DK_PROF_PAL_LV2', '-mlp64', '-DPS3DK_PROF_TEST_HOOKS'], '{x} target never carries test hooks'),
     ('lv2+devmem', ['-DPS3DK_PROF_PAL_LV2', '-DGPP_HOST_DEVMEM'], 'GPP_HOST_DEVMEM is a host-only test seam'),
+    ('lv2+mlp64+devmem', ['-DPS3DK_PROF_PAL_LV2', '-mlp64', '-DGPP_HOST_DEVMEM'], 'GPP_HOST_DEVMEM is a host-only test seam'),
     ('host+lv2', ['-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_PAL_LV2'], '{x}: PS3DK_PROF_PAL_HOST and PS3DK_PROF_PAL_LV2 together'),
     ('no-pal', [], '{x}: no PAL selected'),
 ]

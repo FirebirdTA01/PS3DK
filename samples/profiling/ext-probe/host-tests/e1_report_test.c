@@ -159,6 +159,36 @@ int main(void)
     make(w, 2, k2_clean); w[E1_W_DEC_STATE] = 0; expect("clean dec not attempted", w, 2, 14);
     make(w, 2, k2_fini); w[E1_W_RIDX_STATE] = 0; w[E1_W_RIDX_LO] = 0; expect("fini without ridx", w, 2, 14);
 
+    /* ---- P-EA32: the report-line EAs pack exactly, or are refused (never narrowed) ---- */
+    {
+        uint64_t v = 7;
+        ++g_n;
+        if (e1_pack_report_eas(0x10000080u, 0x10000100u, &v) != 0 || v != 0x1000008010000100ull) {
+            ++g_bad;
+            printf("FAIL ea32: 32-bit EAs pack\n");
+        } else
+            printf("PASS ea32: 32-bit EAs pack\n");
+        ++g_n;
+        if (e1_pack_report_eas(0xffffff80u, 0xffffff00u, &v) != 0 || v != 0xffffff80ffffff00ull) {
+            ++g_bad;
+            printf("FAIL ea32: the highest 32-bit EAs pack\n");
+        } else
+            printf("PASS ea32: the highest 32-bit EAs pack\n");
+        v = 7;
+        ++g_n;
+        if (e1_pack_report_eas(0x100000080ull, 0x10000100u, &v) != -1 || v != 7) {
+            ++g_bad;
+            printf("FAIL ea32: a 64-bit payload EA is refused, output untouched\n");
+        } else
+            printf("PASS ea32: a 64-bit payload EA is refused, output untouched\n");
+        ++g_n;
+        if (e1_pack_report_eas(0x10000080u, 0x100000000ull, &v) != -1 || v != 7) {
+            ++g_bad;
+            printf("FAIL ea32: a 64-bit commit EA is refused, output untouched\n");
+        } else
+            printf("PASS ea32: a 64-bit commit EA is refused, output untouched\n");
+    }
+
     if (g_bad)
         printf("E1-REPORT FAIL %d of %d\n", g_bad, g_n);
     else

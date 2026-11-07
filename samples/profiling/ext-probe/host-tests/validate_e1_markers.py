@@ -45,10 +45,11 @@ REPORT = rf'ok|timeout|identity|spu-status:{CALLS}:{SDEC}'
 FAIL = rf'fail=(?:none|{CALLS}:{SDEC})'
 # seq: (results, fields).  Fields are checked again against the result in check_record.
 MATRIX = {
-    1: (r'ok', r''),
+    1: (r'ok', r'abi=(?:ilp32|lp64)'),
     2: (rf'ok|error:(?:sink-path|init-ex):{H8}', r''),
     3: (rf'ok|error:thread-begin:{H8}', r''),
-    4: (rf'ok|error:(?:register-elf|lane-create|spu-init|import|group-create|thread-init):{H8}', rf'(?:lane={DEC})?'),
+    4: (rf'ok|error:(?:register-elf|lane-create|spu-init|import|group-create|ea32|thread-init):{H8}',
+        rf'(?:lane={DEC})?'),
     5: (r'ok', r''),
     6: (rf'ok|error:group-start:{H8}', r''),
     7: (REPORT, rf'(?:spu_ev1={DEC} {FAIL})?'),

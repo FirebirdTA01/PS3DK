@@ -1,6 +1,6 @@
-/* GPU (RSX) timestamp domains inside the runtime (P3.3 R2; R4b: LV2 ILP32): the port adapters over the R1 core
- * (prg.c), the table-slot pin protocol, owner entries and their declaration evidence, the drain/seal steps, and the
- * API of prof_gpu.h.  Design: p3.3-r2 935936fb + deltas 2400e50a, 0e23d13e and the review 12:53 rulings.
+/* GPU (RSX) timestamp domains inside the runtime (P3.3 R2; R4b: LV2, both PPU data models): the port adapters over
+ * the R1 core (prg.c), the table-slot pin protocol, owner entries and their declaration evidence, the drain/seal
+ * steps, and the API of prof_gpu.h.  Design: p3.3-r2 935936fb + deltas 2400e50a, 0e23d13e and the review 12:53 rulings.
  *
  * Locks: the EXTENSION mutex (spu_mutex) serializes every drain/finalization, attach, release, the stats copy and the
  * GPU ledger; it is held across sink callbacks (the drainer emits under it).  Each table slot's snap mutex is taken
@@ -18,10 +18,7 @@
 #elif !defined(PS3DK_PROF_PAL_HOST) && !defined(PS3DK_PROF_PAL_LV2)
 #error "the GPU domain extension: no PAL selected"
 #endif
-#ifdef PS3DK_PROF_PAL_LV2 /* R4b: the GCM device; ILP32 only, never with a host seam */
-#ifdef __LP64__
-#error "the GPU domain extension target is ILP32 only"
-#endif
+#ifdef PS3DK_PROF_PAL_LV2 /* R4b: the GCM device, both PPU data models; never with a host seam */
 #ifdef PS3DK_PROF_TEST_HOOKS
 #error "the GPU domain extension target never carries test hooks"
 #endif
@@ -38,6 +35,17 @@
 
 #include "gpu_internal.h"
 #include "prof_gpu.h"
+#ifdef PS3DK_PROF_PAL_LV2
+/* both PPU data models, checked here too (this file must not rely on being linked with ext_runtime.c) */
+#ifdef __LP64__
+#define PS3DK_PROF__PTR_BYTES 8
+#else
+#define PS3DK_PROF__PTR_BYTES 4
+#endif
+_Static_assert(sizeof(void *) == PS3DK_PROF__PTR_BYTES && sizeof(uintptr_t) == sizeof(void *) &&
+                   sizeof(size_t) == sizeof(void *),
+               "LV2 extension: the data model matches __LP64__");
+#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
 #include "prof_test_hooks.h"
 #include "psp_ppu.h" /* the limits accessor */

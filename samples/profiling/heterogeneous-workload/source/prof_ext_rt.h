@@ -10,8 +10,11 @@
 int pe_rt_start(unsigned workers);
 /* The lane for worker i (NULL when SPU profiling is off). */
 const pe_lane *pe_rt_lane(unsigned i);
-/* SPU lanes are on (every worker has a lane).  The epoch rule lives with the pool (spu_pool.c, pool_proto.c). */
+/* SPU lanes are on (every worker has a lane and its words packed).  The epoch rule lives with the pool (spu_pool.c,
+ * pool_proto.c). */
 int pe_rt_spu_on(void);
+/* A lane's thread arguments were refused (pp_worker_args): SPU profiling is reported off for the run (logged). */
+void pe_rt_spu_off(const char *why);
 /* GPU: after scene_init; per frame; calibration points; the domain id (0: off). */
 void pe_rt_gpu_start(void);
 void pe_rt_gpu_frame(void);

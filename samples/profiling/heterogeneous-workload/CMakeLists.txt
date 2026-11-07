@@ -1,17 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 project(heterogeneous_workload C ASM)
 include(ps3-self)
+include("${CMAKE_CURRENT_LIST_DIR}/../prof-ext-abi.cmake")
 option(SAMPLE_PROFILING "Capture named PPU zones using the candidate SDK profiler" ON)
 option(SAMPLE_LIVE "Serve the capture to the PC viewer while it runs (the live link; needs SAMPLE_PROFILING)" OFF)
 if(SAMPLE_LIVE AND NOT SAMPLE_PROFILING)
   message(FATAL_ERROR "SAMPLE_LIVE needs SAMPLE_PROFILING: the live link serves the profiler's capture")
 endif()
-# SPU-lane and RSX-domain zones (design docs r1-r3): ILP32 only; links the UNINSTALLED ext archive
-# (`make -C sdk/libps3dkprof ext-ilp32`) instead of ps3dkprof, and with SAMPLE_LIVE a sample-local archive of the live
-# members compiled with the ext flags (SAMPLE_EXT_LIVE_ARCHIVE; gate 2 builds it).  OFF: today's build.
-option(SAMPLE_PROF_EXT "Record SPU-lane and RSX-domain zones (needs SAMPLE_PROFILING; ILP32; uninstalled ext archive)" OFF)
-set(SAMPLE_EXT_ARCHIVE "" CACHE FILEPATH "the uninstalled libps3dkprof_ext.a (make ext-ilp32); SAMPLE_PROF_EXT only")
-set(SAMPLE_EXT_LIVE_ARCHIVE "" CACHE FILEPATH "live members built with the ext flags; SAMPLE_PROF_EXT + SAMPLE_LIVE only")
+# SPU-lane and RSX-domain zones (design docs r1-r3): ILP32 or LP64; links the UNINSTALLED ext archive of the same data
+# model (`make -C sdk/libps3dkprof ext-ilp32` or `ext-lp64`) instead of ps3dkprof, and with SAMPLE_LIVE the live
+# members compiled with the ext flags (`make ... ext-live-ilp32` or `ext-live-lp64`, SAMPLE_EXT_LIVE_ARCHIVE).  Every
+# member of each archive must carry SAMPLE_ABI's data-model tag (checked at configure time).  OFF: today's build.
+option(SAMPLE_PROF_EXT "Record SPU-lane and RSX-domain zones (needs SAMPLE_PROFILING; ILP32 or LP64; the uninstalled ext archive of the same data model)" OFF)
+set(SAMPLE_EXT_ARCHIVE "" CACHE FILEPATH "the uninstalled libps3dkprof_ext.a (make ext-ilp32 / ext-lp64); SAMPLE_PROF_EXT only")
+set(SAMPLE_EXT_LIVE_ARCHIVE "" CACHE FILEPATH "libps3dkprof_ext_live.a (make ext-live-ilp32 / ext-live-lp64); SAMPLE_PROF_EXT + SAMPLE_LIVE only")
 set(SAMPLE_PROF_SRC "${CMAKE_CURRENT_LIST_DIR}/../../../sdk/libps3dkprof/src" CACHE PATH "libps3dkprof sources (internal headers)")
 set(SAMPLE_PHASE_SECONDS 8 CACHE STRING "Seconds per workload phase")
 set(SAMPLE_SESSION_SECONDS 120 CACHE STRING "Session seconds; 0 explicitly loops until exit")
@@ -28,19 +30,31 @@ set(SAMPLE_ABI ilp32 CACHE STRING "ilp32 or lp64, matching the selected toolchai
 if(NOT SAMPLE_ABI MATCHES "^(ilp32|lp64)$")
   message(FATAL_ERROR "SAMPLE_ABI must be ilp32 or lp64")
 endif()
+# SAMPLE_ABI must be the compiler's data model (the toolchain file selects it); main.c asserts it again at compile time
+prof_ext_compiled_abi(sample_compiled_abi)
+if(NOT SAMPLE_ABI STREQUAL sample_compiled_abi)
+  message(FATAL_ERROR "SAMPLE_ABI is ${SAMPLE_ABI} but the compiler's data model is ${sample_compiled_abi} "
+    "(select ps3-ppu-toolchain-lp64.cmake and SAMPLE_ABI=lp64 together)")
+endif()
+if(SAMPLE_ABI STREQUAL "lp64")
+  set(sample_abi_lp64 1)
+else()
+  set(sample_abi_lp64 0)
+endif()
 set(SAMPLE_BUILD_ID candidate CACHE STRING "Exact build/source identity for captures")
 if(SAMPLE_PROF_EXT)
   if(NOT SAMPLE_PROFILING)
     message(FATAL_ERROR "SAMPLE_PROF_EXT needs SAMPLE_PROFILING")
-  endif()
-  if(NOT SAMPLE_ABI STREQUAL "ilp32")
-    message(FATAL_ERROR "SAMPLE_PROF_EXT is ILP32 only (the ext archive is ILP32)")
   endif()
   if(NOT EXISTS "${SAMPLE_EXT_ARCHIVE}")
     message(FATAL_ERROR "SAMPLE_PROF_EXT needs SAMPLE_EXT_ARCHIVE (got '${SAMPLE_EXT_ARCHIVE}')")
   endif()
   if(SAMPLE_LIVE AND NOT EXISTS "${SAMPLE_EXT_LIVE_ARCHIVE}")
     message(FATAL_ERROR "SAMPLE_PROF_EXT with SAMPLE_LIVE needs SAMPLE_EXT_LIVE_ARCHIVE (got '${SAMPLE_EXT_LIVE_ARCHIVE}')")
+  endif()
+  prof_ext_require_abi(${SAMPLE_ABI} "SAMPLE_EXT_ARCHIVE" "${SAMPLE_EXT_ARCHIVE}")
+  if(SAMPLE_LIVE)
+    prof_ext_require_abi(${SAMPLE_ABI} "SAMPLE_EXT_LIVE_ARCHIVE" "${SAMPLE_EXT_LIVE_ARCHIVE}")
   endif()
 endif()
 add_executable(heterogeneous-workload source/main.c source/spu_pool.c source/scene.c)
@@ -63,7 +77,7 @@ target_include_directories(heterogeneous-workload PRIVATE "${CMAKE_CURRENT_LIST_
 target_compile_definitions(heterogeneous-workload PRIVATE PS3DK_PROF=$<BOOL:${SAMPLE_PROFILING}>
   SAMPLE_LIVE=$<BOOL:${SAMPLE_LIVE}>
   SAMPLE_PHASE_SECONDS=${SAMPLE_PHASE_SECONDS} SAMPLE_SESSION_SECONDS=${SAMPLE_SESSION_SECONDS}
-  SAMPLE_IDLE_SECONDS=${SAMPLE_IDLE_SECONDS} SAMPLE_ABI="${SAMPLE_ABI}" SAMPLE_BUILD_ID="${SAMPLE_BUILD_ID}")
+  SAMPLE_IDLE_SECONDS=${SAMPLE_IDLE_SECONDS} SAMPLE_ABI_LP64=${sample_abi_lp64} SAMPLE_BUILD_ID="${SAMPLE_BUILD_ID}")
 if(SAMPLE_ABI STREQUAL "lp64")
   set(sample_lib "${PS3DK}/ppu/lib/lp64")
 else()

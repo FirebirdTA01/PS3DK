@@ -78,32 +78,82 @@ clean:
 
 -include $(ILP32_AUTO:.o=.d) $(LP64_AUTO:.o=.d) $(ILP32_LIVE:.o=.d) $(LP64_LIVE:.o=.d)
 
-# The SPU-lane + GPU-domain extension (P3.3 R4b): ILP32 only, NOT part of all or install.  Its own build directory and
-# rules; the shipped archives above are untouched.  Compile/link gating only: no target behaviour follows from it.
+# The SPU-lane + GPU-domain extension (P3.3 R4b): one archive per PPU data model, NOT part of all or install.  Its own
+# build directories and rules; the shipped archives above are untouched.  The data-model flag lives in one per-ABI
+# variable (EXT_FLAGS_<abi>) that every extension recipe derives from; the ILP32 rules expand exactly as before the
+# LP64 twin existed (EXT_FLAGS_ilp32 is EXT_FLAGS), and the LP64 ones add -mlp64.  Compile/link gating only: no target
+# behaviour follows from it.
 include ext-members.mk
 EXT_DIR := $(BUILD)/ilp32-ext
 EXT_OBJS := $(addprefix $(EXT_DIR)/,$(addsuffix .o,$(EXT_MEMBERS)))
 EXT_FLAGS := $(PPU_FLAGS) -DPS3DK_PROF_WITH_SPU -Isrc/core -Isrc/pal -Isrc/spu -Isrc/rsx
+EXT_FLAGS_ilp32 := $(EXT_FLAGS)
+EXT_FLAGS_lp64 := $(EXT_FLAGS) -mlp64
+EXT64_DIR := $(BUILD)/lp64-ext
+EXT64_OBJS := $(addprefix $(EXT64_DIR)/,$(addsuffix .o,$(EXT_MEMBERS)))
 
-.PHONY: ext-ilp32 ext-clean
+.PHONY: ext-ilp32 ext-lp64 ext-clean
 ext-ilp32: $(EXT_DIR)/libps3dkprof_ext.a
 $(EXT_DIR)/%.o: src/core/%.c $(CONFIG) Makefile ext-members.mk
 	@mkdir -p "$(@D)"
-	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+	$(PPU_CC) $(EXT_FLAGS_ilp32) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
 $(EXT_DIR)/%.o: src/pal/%.c $(CONFIG) Makefile ext-members.mk
 	@mkdir -p "$(@D)"
-	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+	$(PPU_CC) $(EXT_FLAGS_ilp32) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
 $(EXT_DIR)/%.o: src/spu/%.c $(CONFIG) Makefile ext-members.mk
 	@mkdir -p "$(@D)"
-	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+	$(PPU_CC) $(EXT_FLAGS_ilp32) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
 $(EXT_DIR)/%.o: src/rsx/%.c $(CONFIG) Makefile ext-members.mk
 	@mkdir -p "$(@D)"
-	$(PPU_CC) $(EXT_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+	$(PPU_CC) $(EXT_FLAGS_ilp32) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
 $(EXT_DIR)/libps3dkprof_ext.a: $(EXT_OBJS)
 	@rm -f "$@"
 	$(PPU_AR) rcs "$@" $^
+ext-lp64: $(EXT64_DIR)/libps3dkprof_ext.a
+$(EXT64_DIR)/%.o: src/core/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_lp64) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT64_DIR)/%.o: src/pal/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_lp64) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT64_DIR)/%.o: src/spu/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_lp64) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT64_DIR)/%.o: src/rsx/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_lp64) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXT64_DIR)/libps3dkprof_ext.a: $(EXT64_OBJS)
+	@rm -f "$@"
+	$(PPU_AR) rcs "$@" $^
+
+# The live link members (live_agent live_os_lv2 live_api) for an extension app: compiled with the extension recipe
+# of the same data model plus -Isrc/live (a recipe-consistency contract: the live members do not include
+# prof_internal.h), archived separately as libps3dkprof_ext_live.a beside that ABI's ext archive.  An app links both
+# (the live archive first); no global symbol may be defined in both (tests/host/ps3dk-prof-ext-target/r4b_live.py).
+EXTL_DIR := $(BUILD)/ilp32-ext-live
+EXTL_OBJS := $(addprefix $(EXTL_DIR)/,$(addsuffix .o,$(LIVE)))
+EXTL64_DIR := $(BUILD)/lp64-ext-live
+EXTL64_OBJS := $(addprefix $(EXTL64_DIR)/,$(addsuffix .o,$(LIVE)))
+.PHONY: ext-live-ilp32 ext-live-lp64
+ext-live-ilp32: $(EXTL_DIR)/libps3dkprof_ext_live.a
+ext-live-lp64: $(EXTL64_DIR)/libps3dkprof_ext_live.a
+$(EXTL_DIR)/%.o: src/live/%.c $(CONFIG) Makefile
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_ilp32) -Isrc/live -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTL_DIR)/libps3dkprof_ext_live.a: $(EXTL_OBJS)
+	@rm -f "$@"
+	$(PPU_AR) rcs "$@" $^
+$(EXTL64_DIR)/%.o: src/live/%.c $(CONFIG) Makefile
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXT_FLAGS_lp64) -Isrc/live -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTL64_DIR)/libps3dkprof_ext_live.a: $(EXTL64_OBJS)
+	@rm -f "$@"
+	$(PPU_AR) rcs "$@" $^
+
 ext-clean:
-	rm -f $(EXT_OBJS) $(EXT_OBJS:.o=.d) "$(EXT_DIR)/libps3dkprof_ext.a"
+	rm -f $(EXT_OBJS) $(EXT_OBJS:.o=.d) "$(EXT_DIR)/libps3dkprof_ext.a" $(EXT64_OBJS) $(EXT64_OBJS:.o=.d) \
+	      "$(EXT64_DIR)/libps3dkprof_ext.a" $(EXTL_OBJS) $(EXTL_OBJS:.o=.d) "$(EXTL_DIR)/libps3dkprof_ext_live.a" \
+	      $(EXTL64_OBJS) $(EXTL64_OBJS:.o=.d) "$(EXTL64_DIR)/libps3dkprof_ext_live.a"
 
 # The PROFILE variant of the extension archive (profile-format-spec.md, gate B2p draft): OPT-IN and separate, so the
 # reviewed ext archive above and its member contract (tests/host/ps3dk-prof-ext-target) are unchanged.  The same
@@ -118,7 +168,7 @@ PROF_PREMISES ?= 463
 PROF_KINDS ?= 1
 EXTP_DIR := $(BUILD)/ilp32-ext-profile
 EXTP_OBJS := $(addprefix $(EXTP_DIR)/,$(addsuffix .o,$(EXT_MEMBERS)))
-EXTP_FLAGS := $(EXT_FLAGS) -DPS3DK_PROF_WITH_PROFILE
+EXTP_FLAGS := $(EXT_FLAGS_ilp32) -DPS3DK_PROF_WITH_PROFILE
 EXTP_ID_CONFIG := $(EXTP_DIR)/profile-identity.cfg
 .PHONY: ext-ilp32-profile
 ext-ilp32-profile: $(EXTP_DIR)/libps3dkprof_ext_profile.a
@@ -151,4 +201,4 @@ $(EXTP_DIR)/libps3dkprof_ext_profile.a: $(EXTP_OBJS) $(EXTP_ID_CONFIG) tools/arc
 	mv -f "$@.tmp" "$@"
 -include $(EXTP_OBJS:.o=.d)
 
--include $(EXT_OBJS:.o=.d)
+-include $(EXT_OBJS:.o=.d) $(EXT64_OBJS:.o=.d) $(EXTL_OBJS:.o=.d) $(EXTL64_OBJS:.o=.d)
