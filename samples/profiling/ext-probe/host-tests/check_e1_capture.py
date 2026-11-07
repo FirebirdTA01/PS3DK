@@ -27,8 +27,9 @@ ACCEPT requires all of:
       written 0x00000000ffffffff; gpu domain epoch 1 reason 1 written 0;
     variation rows EXACTLY one per lane epoch (1 and 2) - their STATE is an OBSERVATION, never a criterion, but a
       missing row is a REJECT (the classification must have been made).
-NOT criteria (printed as OBSERVATIONS only): the lane's RAW VALIDITY (NOT VALID by the epoch-transition rule is
-expected) and each epoch's counter state.  Exit 0 ACCEPT, 1 REJECT, 2 usage/unreadable."""
+NOT criteria (printed as OBSERVATIONS only): the lane's RAW VALIDITY (a depth-zero epoch change keeps the lane
+known; its history is unverifiable only after a loss or at non-zero depth) and each epoch's counter state.
+Exit 0 ACCEPT, 1 REJECT, 2 usage/unreadable."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -112,7 +113,53 @@ def exact(bad, what, got, want):
         bad.append(f'facts: {what} rows {sorted(got)} != exactly {sorted(want)}' + (f' (duplicates {dup})' if dup else ''))
 
 
+# The two branches of the epoch rule.
+#  case 1: an epoch change at depth zero keeps the lane known -> NOT a loss.
+#  case 2: a loss, or a non-zero depth, leaves the history unverifiable.
+# These are the two wording obligations the observation line must state.
+LANE_DEPTH_ZERO_KNOWN = 'depth-zero epoch change keeps the lane known'
+LANE_LOSS_OR_DEPTH = 'history is unverifiable only after a loss or at non-zero depth'
+LANE_VALID_NOTE = LANE_DEPTH_ZERO_KNOWN + '; ' + LANE_LOSS_OR_DEPTH
+
+STALE_LANE_WORDING = 'NOT VALID expected by the epoch rule'  # the wording before the depth-zero rule
+
+
+def lane_raw_valid_observation(lane_id, raw_valid):
+    """OBSERVATION wording for a lane's RAW VALIDITY:
+    an epoch change at depth zero keeps the lane known; the history is
+    unverifiable only after a loss or at non-zero depth.  The observation
+    prints the value plus both rule branches.  The old claim that NOT VALID is
+    expected by the epoch rule (the older rule) is gone."""
+    return f'OBSERVATION lane {lane_id}: raw_valid={raw_valid} ({LANE_VALID_NOTE})'
+
+
+def selftest_observation():
+    """Host check for the lane OBSERVATION wording.  Both rule branches must be
+    present, the value stated, and the stale older-rule claim absent.  A copy
+    of this module that reverts either branch must fail here alone."""
+    failures = []
+    for rv in ('0', '1'):
+        line = lane_raw_valid_observation('7', rv)
+        if not line.startswith(f'OBSERVATION lane 7: raw_valid={rv} '):
+            failures.append(f'raw_valid={rv}: does not state its value: {line!r}')
+        if STALE_LANE_WORDING in line:
+            failures.append(f'raw_valid={rv}: keeps the stale {STALE_LANE_WORDING!r} wording: {line!r}')
+        if LANE_DEPTH_ZERO_KNOWN not in line:
+            failures.append(f'raw_valid={rv}: missing the depth-zero/known branch: {line!r}')
+        if LANE_LOSS_OR_DEPTH not in line:
+            failures.append(f'raw_valid={rv}: missing the loss/non-zero-depth branch: {line!r}')
+    return failures
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == '--selftest-observation':
+        fails = selftest_observation()
+        if fails:
+            for f in fails:
+                print(f'REJECT: {f}')
+            return 1
+        print('E1-OBSERVATION-WORDING PASS 2/2')
+        return 0
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rundir', type=Path)
     ap.add_argument('--build', required=True)
@@ -205,7 +252,7 @@ def main():
                 if s[k] != w:
                     bad.append(f'facts: {name} {k}={s[k]} (want {w})')
         if lane is not None:
-            obs.append(f'OBSERVATION lane {lane_id}: raw_valid={lane["raw_valid"]} (NOT VALID expected by the epoch rule)')
+            obs.append(lane_raw_valid_observation(lane_id, lane['raw_valid']))
         ev_want = [('lane', lane_id, '1', 'begin', 'probe-e1', '64'), ('lane', lane_id, '1', 'end', 'probe-e1', '64'),
                    ('lane', lane_id, '1', 'mark', 'probe-mark', '4'), ('lane', lane_id, '2', 'begin', 'probe-e2', '64'),
                    ('lane', lane_id, '2', 'end', 'probe-e2', '64'), ('lane', lane_id, '2', 'mark', 'probe-mark', '4'),

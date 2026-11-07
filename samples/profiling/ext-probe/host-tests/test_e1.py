@@ -370,6 +370,31 @@ def main():
     verdict('tsan judge selftest (controls built from this run\'s real report)',
             j.returncode == 0 and re.search(r'^E1-TSAN-JUDGE PASS \d+/\d+$', j.stdout, re.M) is not None, j.stdout[-300:])
 
+    # ---- the lane OBSERVATION wording must state the current epoch rule ----
+    # both cases (raw_valid 0 and 1): a depth-zero epoch change keeps the lane known;
+    # the history is unverifiable only after a loss or at non-zero depth.  The
+    # self-test is a single-sourced assertion inside check_e1_capture.py.
+    ow = run(py(CHECK, '--selftest-observation'), out / 'obs-wording.log')
+    verdict('observation wording: both cases state the depth-zero rule',
+            ow.returncode == 0 and re.search(r'^E1-OBSERVATION-WORDING PASS 2/2$', ow.stdout, re.M) is not None,
+            ow.stdout[-300:])
+    # mutation control: revert the stale "NOT VALID expected" claim and the
+    # self-test must reject it (not vacuous)
+    src = CHECK.read_text()
+    reverted = src.replace(
+        "return f'OBSERVATION lane {lane_id}: raw_valid={raw_valid} ({LANE_VALID_NOTE})'",
+        "return f'OBSERVATION lane {lane_id}: raw_valid={raw_valid} (NOT VALID expected by the epoch rule)'")
+    if reverted != src:
+        p = out / 'check_stale.py'
+        p.write_text(reverted)
+        mut = run(py(p, '--selftest-observation'), out / 'obs-wording-mut.log')
+        verdict('wording self-test rejects the stale-wording revert (not vacuous)',
+                mut.returncode == 1 and 'NOT VALID expected' in mut.stdout,
+                mut.stdout[-200:])
+    else:
+        verdict('wording self-test rejects the stale-wording revert (not vacuous)',
+                False, 'mutation did not apply')
+
     # ---- acceptance: the clean run, then its damage controls (the checker runs the reader itself) ----
     acc = out / 'accept'
     acc.mkdir()
