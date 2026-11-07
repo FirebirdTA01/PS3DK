@@ -988,3 +988,40 @@ fn split_exactly_on_the_boundary_is_compatible_and_one_tick_off_is_contradicted(
             "{:?}", u.state);
     }
 }
+
+fn hex32(s: &str) -> [u8; 32] {
+    let mut d = [0u8; 32];
+    for (i, b) in d.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
+    }
+    d
+}
+
+/// The compiled-in RSX-R1 entry: accepts both measured runtime digests at the measured timebase, and refuses an
+/// unknown digest; its timebase rule is the measured 79.8 MHz only.
+#[test]
+fn the_builtin_rsx_r1_entry_binds_digests_and_timebase() {
+    let table = ps3dk_prof::profile::builtin_table();
+    let run = |digest: [u8; 32], freq: u64| {
+        let mut r = baseline();
+        let p = r.profile.as_mut().unwrap();
+        p.id = b"RSX-R1".to_vec();
+        p.digest = digest;
+        p.fields[2].value = freq.to_le_bytes().to_vec();
+        let a = analysed(&r.bytes());
+        analyze(&a, &Options { table: table.clone(), convention: conv(), ..Options::default() }).unwrap()
+    };
+    for h in [
+        "39dcb52ae3a1dc034b3974490c886f9935f049dcf854aed254ebae5e4e9e1fca",
+        "5b53c967cadf272c4b19746668a7b2deab3418eb06ff93e2bca55183fc9b480d",
+    ] {
+        let res = run(hex32(h), 79_800_000);
+        assert!(res.classification.failures.is_empty(), "{:?}", res.classification.failures);
+    }
+    let res = run([7; 32], 79_800_000);
+    assert!(res.classification.failures.iter().any(|f| f.starts_with("runtime not reviewed for RSX-R1")), "{:?}", res.classification.failures);
+    // A different timebase is refused even earlier (the PROFILE field must equal the CLOCKS frequency); the entry
+    // itself accepts only the measured 79.8 MHz.
+    let tb = table[0].fields.iter().find(|(id, _)| *id == ps3dk_prof::profile::F_TB_FREQ_HZ).unwrap();
+    assert_eq!(tb.1, FieldRule::RequiredMatch(vec![79_800_000u64.to_le_bytes().to_vec()]));
+}
