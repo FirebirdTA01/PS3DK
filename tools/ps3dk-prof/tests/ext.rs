@@ -242,7 +242,9 @@ fn t0_flags_one_torn_before_any_domain_is_incomplete() {
 
 #[test]
 fn t0_unknown_flag_bits_are_malformed_in_every_byte() {
-    for flags in [2u32, 3, 0x100, 0x10000, 0x8000_0000] {
+    // Bit 1 (PROFILE_RECORD, profile-format-spec.md 2) is now defined: alone (2) it is FileFlagsNonzero (it requires
+    // bit 0); with bit 0 (3) the file must carry a PROFILE at chunk 2, which this file does not (ProfileMissing).
+    for flags in [2u32, 4, 7, 0x100, 0x10000, 0x8000_0000] {
         let mut f = ext_file(std_ext());
         f.flags = flags;
         dump(&format!("t0-flags-{flags:x}"), &f.bytes());
@@ -250,6 +252,12 @@ fn t0_unknown_flag_bits_are_malformed_in_every_byte() {
             Outcome::Malformed(m) => assert_eq!(m.rule, Rule::FileFlagsNonzero, "flags {flags:#x}"),
             o => panic!("flags {flags:#x}: {o:?}"),
         }
+    }
+    let mut f = ext_file(std_ext());
+    f.flags = 3;
+    match load(&f.bytes()) {
+        Outcome::Malformed(m) => assert_eq!(m.rule, Rule::ProfileMissing, "flags 3 without a PROFILE"),
+        o => panic!("flags 3: {o:?}"),
     }
 }
 

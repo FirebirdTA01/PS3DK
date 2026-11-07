@@ -19,7 +19,9 @@ pub mod frames_foreign;
 pub mod hash;
 pub mod model;
 pub mod paths;
+pub mod profile;
 pub mod reader;
+pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;
 

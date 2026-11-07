@@ -68,7 +68,7 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | Producer effects a file can show | ACKED with SEQ_LIMIT and an unadmitted STOP batch: refused >= k, open_spans = k, k spans OPEN, no TRUNCATED_AT_STOP END; accepted | `acked_entry_with_seq_limit_and_an_unadmitted_stop_batch_is_consistent` |
 | Producer effects a file can show | RETIRED with open_spans = 2 and 2 spans OPEN in the records; accepted, reported OPEN (censored) | `retired_entry_with_open_spans_2_and_two_open_spans_in_the_records` |
 
-## Rule variants (87) -> tests (103 in malformed.rs, 86 in stage2.rs, 3 in cli.rs)
+## Rule variants (90) -> tests (111 in malformed.rs, 86 in stage2.rs, 3 in cli.rs)
 
 | rule | tests |
 |---|---|
@@ -77,17 +77,17 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | `StringContainsNul` | `string_contains_nul` |
 | `MagicMismatch` | `magic_mismatch`, `short_header_bad_byte_at_every_cut_point` |
 | `MajorVersion` | `major_version`, `short_header_bad_byte_at_every_cut_point` |
-| `FileFlagsNonzero` | `file_flags_nonzero`, `short_header_bad_byte_at_every_cut_point`, `fifteen_byte_header_with_nonzero_flags_byte_is_not_torn` |
+| `FileFlagsNonzero` | `file_flags_nonzero`, `short_header_bad_byte_at_every_cut_point`, `fifteen_byte_header_with_nonzero_flags_byte_is_not_torn`, `profile_flag_bit_1_without_bit_0` |
 | `ChunkLenOverCap` | `chunk_len_over_cap` |
 | `ChunkSeqOrder` | `chunk_seq_out_of_order` |
 | `ChunkCrc` | `chunk_crc_mismatch` |
-| `UnknownChunkType` | `unknown_chunk_type` |
+| `UnknownChunkType` | `unknown_chunk_type`, `profile_chunk_without_bit_1_is_an_unknown_chunk` |
 | `HeaderNotChunk0` | `header_not_chunk_0` |
 | `ClocksNotChunk1` | `clocks_not_chunk_1` |
 | `DuplicateHeaderOrClocks` | `duplicate_header_or_clocks` |
 | `TrailingBytesAfterTrailer` | `trailing_bytes_after_trailer` |
 | `SecondTrailer` | `second_trailer` |
-| `PayloadLength` | `payload_length` |
+| `PayloadLength` | `payload_length`, `profile_payload_length_one_short_and_one_long` |
 | `HeaderAbi` | `header_abi` |
 | `HeaderConsumerMode` | `header_consumer_mode` |
 | `HeaderReserved` | `header_reserved` |
@@ -159,3 +159,6 @@ and a mapped test name that does not exist.  Stage 3 and later bullets are not p
 | `EndFlagSinkErrorMismatch` | `end_flag_sink_error_mismatch` |
 | `TokenImpossible` | `token_impossible`, `nonexistent_frame_complete_lossless_quiesced_owner_is_malformed`, `rule4_missing_incomplete_only_through_seq_limit_on_another_lane`, `rule4_missing_incomplete_only_through_seq_limit_on_owner`, `rule4_missing_incomplete_only_through_recovered_sink_error`, `rule4_missing_incomplete_only_through_other_lane_not_quiesced`, `rule4_missing_complete_lossless_capture`, `read_alone_accepts_a_rule_4_case_that_load_refuses` |
 | `Extension` | `file_flags_extensions_unbound_domain` |
+| `Profile` | `profile_header_rules`, `profile_field_rules` |
+| `ProfileMissing` | `profile_missing_at_chunk_2` |
+| `ProfilePlacement` | `profile_second_record_or_other_index` |

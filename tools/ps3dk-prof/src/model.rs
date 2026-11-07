@@ -157,6 +157,12 @@ pub enum Rule {
     TokenImpossible,
     /// A rule of the domain extensions (chunk types 8..16, file_flags bit 0); the detail names it.
     Extension,
+    /// PROFILE record (file_flags bit 1, chunk type 17; profile-format-spec.md 3): a payload rule, the detail names it.
+    Profile,
+    /// file_flags bit 1 is set and chunk 2 is not a PROFILE chunk.
+    ProfileMissing,
+    /// A PROFILE chunk at an index other than 2 (including a second one).
+    ProfilePlacement,
 }
 
 /// A MALFORMED verdict: the rule broken and where.
@@ -437,6 +443,10 @@ pub struct Capture {
     pub incomplete: Vec<Incomplete>,
     /// file_flags bit 0 (DOMAIN_EXTENSIONS): the extension sources; None for a v1 file (flags 0).
     pub ext: Option<crate::ext::ExtCapture>,
+    /// file_flags bit 1 (PROFILE_RECORD) is set.
+    pub profile_flag: bool,
+    /// The decoded PROFILE (chunk 2); None when bit 1 is clear or the file is torn before chunk 2 is complete.
+    pub profile: Option<crate::profile::ProfileRecord>,
 }
 
 impl Capture {

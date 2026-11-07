@@ -18,6 +18,9 @@ const USAGE: &str = "usage:
   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
                                                       affine bounds (exit status as check)
   ps3dk-prof paths <file>    print the verdict and the PPU hot paths (exit status as check)
+  ps3dk-prof measured [--xrsx-submit NAME --xrsx-wait NAME] <file>
+                             print the verdict and the profile-bound RSX mapping states of a file
+                             with a PROFILE record (exit status as check)
   ps3dk-prof check-arcs <file>   validate a binary arc companion
   ps3dk-prof arcs-json <file>    export exact arc observations as JSON
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
@@ -161,10 +164,79 @@ fn clockmap(rest: &[String]) -> ExitCode {
     }
 }
 
+/// `measured [--xrsx-submit NAME --xrsx-wait NAME] <file>`: both names or neither, each at most once; the reader's
+/// compiled-in table of reviewed profiles is used (it is empty: no profile has been reviewed).  The verdict and the
+/// exit status are exactly those of `check`; nothing else changes.
+fn measured(rest: &[String]) -> ExitCode {
+    use ps3dk_prof::rsx_measured::{analyze, lines, Convention, Options};
+    let (mut submit, mut wait, mut path): (Option<&str>, Option<&str>, Option<&str>) = (None, None, None);
+    let mut i = 0;
+    while i < rest.len() {
+        let slot = match rest[i].as_str() {
+            "--xrsx-submit" => &mut submit,
+            "--xrsx-wait" => &mut wait,
+            a if a.starts_with('-') || path.is_some() => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+            a => {
+                path = Some(a);
+                i += 1;
+                continue;
+            }
+        };
+        match rest.get(i + 1) {
+            Some(v) if slot.is_none() && !v.is_empty() => *slot = Some(v.as_str()),
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+        }
+        i += 2;
+    }
+    let (Some(path), true) = (path, submit.is_some() == wait.is_some()) else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            println!("{}", report::verdict_line(&a.verdict));
+            let convention = submit.zip(wait).map(|(s, w)| Convention { submit: s.to_string(), wait: w.to_string() });
+            let opts = Options { convention, ..Options::default() };
+            match analyze(&a, &opts) {
+                None => println!(
+                    "rsx mapping: no PROFILE record (file_flags bit 1 clear): no unit is profile-bound; every unit \
+                     keeps the MAPPING the other commands print"
+                ),
+                Some(r) => {
+                    for line in lines(&a, &r) {
+                        println!("{line}");
+                    }
+                }
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|c| c == "clockmap") {
         return clockmap(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "measured") {
+        return measured(&args[1..]);
     }
     if let [cmd, arcs, timing] = args.as_slice() {
         if cmd == "check-pair" {

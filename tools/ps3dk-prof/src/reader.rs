@@ -153,9 +153,13 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
                 return malformed(Rule::MajorVersion, format!("{n}-byte file: major version bytes are not 1"));
             }
         }
-        // file_flags: byte 12 may be 0 or FLAG_DOMAIN_EXTENSIONS; bytes 13..15 must be 0, as far as they are present.
-        if n > 12 && (bytes[12] & !(FLAG_DOMAIN_EXTENSIONS as u8) != 0 || bytes[13..n].iter().any(|&b| b != 0)) {
-            return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not 0 or 1"));
+        // file_flags: byte 12 may be 0, FLAG_DOMAIN_EXTENSIONS or that plus FLAG_PROFILE_RECORD (bit 1 requires
+        // bit 0); bytes 13..15 must be 0, as far as they are present.
+        if n > 12 && (!matches!(bytes[12], 0 | 1 | 3) || bytes[13..n].iter().any(|&b| b != 0)) {
+            // A file without bit 1 keeps the baseline's exact message (its output is byte-identical to the baseline
+            // reader's); only a byte with bit 1 set names the new allowed value.
+            let allowed = if bytes[12] & 2 == 0 { "0 or 1" } else { "0, 1 or 3" };
+            return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not {allowed}"));
         }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
@@ -170,9 +174,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
     if major != 1 {
         return malformed(Rule::MajorVersion, format!("major version {major}"));
     }
-    if file_flags & !FLAG_DOMAIN_EXTENSIONS != 0 {
+    let profile_flag = crate::profile::FLAG_PROFILE_RECORD;
+    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag) != 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
     }
+    if file_flags & profile_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 1 without bit 0"));
+    }
+    r.cap.profile_flag = file_flags & profile_flag != 0;
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(crate::ext::ExtReader::new());
     }
@@ -213,8 +222,18 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         if chunk_seq != index {
             return malformed(Rule::ChunkSeqOrder, format!("chunk {index} carries chunk_seq {chunk_seq}"));
         }
+        // PROFILE (file_flags bit 1): exactly chunk 2, once.  Without bit 1 type 17 stays an unknown chunk.
+        if r.cap.profile_flag {
+            if index == 2 && ty != crate::profile::CHUNK_PROFILE {
+                return malformed(Rule::ProfileMissing, format!("file_flags bit 1 and chunk 2 has type {ty}"));
+            }
+            if index != 2 && ty == crate::profile::CHUNK_PROFILE {
+                return malformed(Rule::ProfilePlacement, format!("a PROFILE chunk at index {index}"));
+            }
+        }
+        let profile_ty = r.cap.profile_flag && ty == crate::profile::CHUNK_PROFILE;
         let ext_ty = r.ext.is_some() && (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&ty);
-        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty {
+        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
         if index == 0 && ty != CHUNK_HEADER {
@@ -235,6 +254,10 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
             CHUNK_RECORDS => r.records(payload)?,
             CHUNK_RETIRED => r.retired(payload)?,
             CHUNK_TRAILER => r.trailer(payload)?,
+            crate::profile::CHUNK_PROFILE if profile_ty => {
+                let freq = r.cap.clock.as_ref().expect("CLOCKS is chunk 1").freq_hz;
+                r.cap.profile = Some(crate::profile::parse(payload, freq)?);
+            }
             _ => {
                 let refs = crate::ext::V1Refs { descriptors: &r.cap.descriptors, declared_incarnations: &r.declared };
                 r.ext.as_mut().expect("extension chunk only with the flag").chunk(ty, payload, &refs)?

@@ -414,6 +414,16 @@ pub struct Model {
     down: Side,
 }
 
+/// One extra half-plane of a joint set (rsx_measured: an X-RSX causal constraint): `lo <= a + b*f` when `lo` is set,
+/// `a + b*f <= hi` when `hi` is set (exactly one of them is set).  It never counts as a bracket: the model's
+/// `brackets`, `distinct_f`, `fmin` and `fmax` (the interpolation range) come from the brackets alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Half {
+    pub f: i128,
+    pub lo: Option<i128>,
+    pub hi: Option<i128>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Solved {
     NoObservations,
@@ -467,6 +477,73 @@ pub fn solve(m: &mut Meter, obs: &[Obs]) -> Result<Solved, Limit> {
         distinct_f: pts.len() as u64,
         fmin: pts[0].0,
         fmax: pts[pts.len() - 1].0,
+        slope_lo: r1,
+        slope_hi: r2,
+        up: Side { hull: q, at_lo: up_lo, at_hi: up_hi },
+        down: Side { hull: down, at_lo: down_lo, at_hi: down_hi },
+    })))
+}
+
+/// The feasible set of the brackets `obs` intersected with the half-planes `halves` (a joint set F_J, used by
+/// rsx_measured).  A separate function so that [`solve`] keeps its exact operation charges and results.  At least
+/// one bracket is needed (none: NoObservations, whatever the half-planes say), so neither hull is ever empty.
+pub fn solve_with(m: &mut Meter, obs: &[Obs], halves: &[Half]) -> Result<Solved, Limit> {
+    if obs.is_empty() {
+        return Ok(Solved::NoObservations);
+    }
+    m.charge(obs.len() as u64 + halves.len() as u64)?;
+    if !obs.iter().all(|o| in_range(o.f) && in_range(o.lo) && in_range(o.hi)) {
+        return Err(Limit::Range);
+    }
+    if !halves.iter().all(|h| {
+        in_range(h.f) && h.lo.is_some() != h.hi.is_some() && h.lo.is_none_or(in_range) && h.hi.is_none_or(in_range)
+    }) {
+        return Err(Limit::Range);
+    }
+    let mut v: Vec<(i128, Option<i128>, Option<i128>)> =
+        obs.iter().map(|o| (o.f, Some(o.lo), Some(o.hi))).chain(halves.iter().map(|h| (h.f, h.lo, h.hi))).collect();
+    m.charge(sort_cost(v.len() as u64))?;
+    v.sort_by_key(|o| o.0);
+    // The interpolation range and the distinct coordinates are the brackets' only.
+    let mut bf: Vec<i128> = obs.iter().map(|o| o.f).collect();
+    m.charge(sort_cost(bf.len() as u64))?;
+    bf.sort_unstable();
+    bf.dedup();
+    // Equal f: one point per hull (max lo, min hi); a contradiction among them empties F in the walk.
+    let mut pts: Vec<(i128, Option<i128>, Option<i128>)> = Vec::with_capacity(v.len());
+    for o in &v {
+        m.charge(1)?;
+        match pts.last_mut() {
+            Some(last) if last.0 == o.0 => {
+                last.1 = match (last.1, o.1) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                };
+                last.2 = match (last.2, o.2) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+            }
+            _ => pts.push(*o),
+        }
+    }
+    let ups: Vec<(i128, i128)> = pts.iter().filter_map(|&(f, _, hi)| hi.map(|h| (f, h))).collect();
+    let downs: Vec<(i128, i128)> = pts.iter().rev().filter_map(|&(f, lo, _)| lo.map(|l| (-f, -l))).collect();
+    let q = lower_hull(m, &ups)?;
+    let down = lower_hull(m, &downs)?;
+    let p = Hull { x: down.x.iter().rev().map(|x| -x).collect(), y: down.y.iter().rev().map(|y| -y).collect() };
+    let Some((r1, r2)) = slope_interval(m, &q, &p)? else { return Ok(Solved::Inconsistent) };
+    let up_lo = support(m, &q, &r1)?;
+    let down_lo = support(m, &down, &r1)?;
+    let (up_hi, down_hi) = match &r2 {
+        Some(z) => (Some(support(m, &q, z)?), Some(support(m, &down, z)?)),
+        None => (None, None),
+    };
+    Ok(Solved::Compatible(Box::new(Model {
+        brackets: obs.len() as u64,
+        distinct_f: bf.len() as u64,
+        fmin: bf[0],
+        fmax: bf[bf.len() - 1],
         slope_lo: r1,
         slope_hi: r2,
         up: Side { hull: q, at_lo: up_lo, at_hi: up_hi },

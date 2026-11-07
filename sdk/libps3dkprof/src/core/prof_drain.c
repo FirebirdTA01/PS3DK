@@ -230,6 +230,58 @@ static size_t clen(const char *s)
     return n;
 }
 
+#ifdef PS3DK_PROF_WITH_PROFILE
+#include "prof_identity.h"
+/* Link-time declarations (status DECLARED_BUILD): an undefined weak symbol resolves to 0.
+ * ps3dk_sample_main exists exactly when the run-hook injection renamed the sample's main
+ * (tests/hardware/psgl-sample-boot/run-hook-inject.cmake); ps3dk_prof_live_start when the live members are linked. */
+extern int ps3dk_sample_main(int, char **) __attribute__((weak));
+extern int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg) __attribute__((weak));
+
+static void enc_field(prof *p, uint16_t id, uint8_t status, uint8_t width, const uint8_t *value)
+{
+    uint8_t k;
+    enc_u16(p, id);
+    enc_u8(p, status);
+    enc_u8(p, width);
+    for (k = 0; k < width; k++)
+        enc_u8(p, value ? value[k] : 0u);
+}
+
+/* PROFILE (chunk 2, profile-format-spec.md 3): version 1, the generated identity, the 7 version-1 fields.  Fields
+ * this runtime has no source for are NOT_READABLE with zero values (never a guess): SYS_SW_VERSION (no query in the
+ * SDK headers), HW_MODEL_CLASS, SPU_USABLE. */
+static void enc_profile(prof *p)
+{
+    const ps3dk_prof__identity_t *id = &ps3dk_prof__identity;
+    uint8_t tb[8], hook, live;
+    uint8_t n = id->id_len, k;
+    p_le64(tb, p->tb_freq);
+    hook = ps3dk_sample_main ? 1u : 0u;
+    live = ps3dk_prof_live_start ? 1u : 0u;
+    enc_begin(p, 17);
+    enc_u16(p, 1);
+    enc_u16(p, 0);
+    enc_u8(p, n); /* written as generated: an invalid length makes the reader refuse the record (fail closed) */
+    for (k = 0; k < n && k < 32; k++)
+        enc_u8(p, (uint8_t)id->id[k]);
+    enc_u32(p, 1); /* ARCHIVE-DIGEST-V1 */
+    for (k = 0; k < 32; k++)
+        enc_u8(p, id->digest[k]);
+    enc_u32(p, id->premise_bits);
+    enc_u32(p, id->kinds);
+    enc_u16(p, 7);
+    enc_field(p, 1, 3, 4, NULL);
+    enc_field(p, 2, 3, 4, NULL);
+    enc_field(p, 3, 1, 8, tb);
+    enc_field(p, 4, 3, 4, NULL);
+    enc_field(p, 5, 2, 1, &hook);
+    enc_field(p, 6, 2, 1, &live);
+    enc_field(p, 7, 1, 40, p->prof_ext_cfg);
+    enc_end(p);
+}
+#endif
+
 /* The file header, HEADER (chunk 0) and CLOCKS (chunk 1), written by the first drain. */
 static void dr_start(prof *p)
 {
@@ -270,6 +322,10 @@ static void dr_start(prof *p)
     enc_u64(p, p->tb_freq);
     enc_u64(p, p->tb_at_init);
     enc_end(p);
+#ifdef PS3DK_PROF_WITH_PROFILE
+    if (p->ext_flags & 2)
+        enc_profile(p); /* chunk 2, in the same start step as HEADER and CLOCKS */
+#endif
 }
 
 static void enc_threads(prof *p, const tdecl *t, uint32_t n)

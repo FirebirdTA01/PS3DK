@@ -105,4 +105,50 @@ $(EXT_DIR)/libps3dkprof_ext.a: $(EXT_OBJS)
 ext-clean:
 	rm -f $(EXT_OBJS) $(EXT_OBJS:.o=.d) "$(EXT_DIR)/libps3dkprof_ext.a"
 
+# The PROFILE variant of the extension archive (profile-format-spec.md, gate B2p draft): OPT-IN and separate, so the
+# reviewed ext archive above and its member contract (tests/host/ps3dk-prof-ext-target) are unchanged.  The same
+# members compiled with PS3DK_PROF_WITH_PROFILE, plus the generated identity member prof_identity.o, which holds the
+# ARCHIVE-DIGEST-V1 of every other member (tools/archive_digest.py) and is excluded from its own digest; the build
+# re-verifies the finished archive, digest AND declared identity, before it replaces the archive.  The declared
+# identity (PROF_PROFILE_ID, PROF_PREMISES, PROF_KINDS) is a build input through a config file rewritten only when a
+# value changes, as $(CONFIG) is for the version: a changed value rebuilds the identity member and the archive (the
+# other members stay), an unchanged one leaves the archive up to date.
+PROF_PROFILE_ID ?= RSX-R1
+PROF_PREMISES ?= 463
+PROF_KINDS ?= 1
+EXTP_DIR := $(BUILD)/ilp32-ext-profile
+EXTP_OBJS := $(addprefix $(EXTP_DIR)/,$(addsuffix .o,$(EXT_MEMBERS)))
+EXTP_FLAGS := $(EXT_FLAGS) -DPS3DK_PROF_WITH_PROFILE
+EXTP_ID_CONFIG := $(EXTP_DIR)/profile-identity.cfg
+.PHONY: ext-ilp32-profile
+ext-ilp32-profile: $(EXTP_DIR)/libps3dkprof_ext_profile.a
+$(EXTP_ID_CONFIG): FORCE
+	@mkdir -p "$(@D)"
+	@printf 'id=%s\npremises=%s\nkinds=%s\n' '$(PROF_PROFILE_ID)' '$(PROF_PREMISES)' '$(PROF_KINDS)' > "$@.tmp"
+	@cmp -s "$@.tmp" "$@" || cp "$@.tmp" "$@"
+	@rm -f "$@.tmp"
+$(EXTP_DIR)/%.o: src/core/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXTP_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTP_DIR)/%.o: src/pal/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXTP_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTP_DIR)/%.o: src/spu/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXTP_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTP_DIR)/%.o: src/rsx/%.c $(CONFIG) Makefile ext-members.mk
+	@mkdir -p "$(@D)"
+	$(PPU_CC) $(EXTP_FLAGS) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"
+$(EXTP_DIR)/libps3dkprof_ext_profile.a: $(EXTP_OBJS) $(EXTP_ID_CONFIG) tools/archive_digest.py src/core/prof_identity.h
+	@rm -f "$@" "$@.tmp" "$(EXTP_DIR)/members.a" "$(EXTP_DIR)/prof_identity.c" "$(EXTP_DIR)/prof_identity.o"
+	$(PPU_AR) rcsD "$(EXTP_DIR)/members.a" $(EXTP_OBJS)
+	python3 tools/archive_digest.py emit "$(EXTP_DIR)/members.a" --id "$(PROF_PROFILE_ID)" \
+	    --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)" > "$(EXTP_DIR)/prof_identity.c"
+	$(PPU_CC) $(EXTP_FLAGS) -c "$(EXTP_DIR)/prof_identity.c" -o "$(EXTP_DIR)/prof_identity.o"
+	$(PPU_AR) rcsD "$@.tmp" $(EXTP_OBJS) "$(EXTP_DIR)/prof_identity.o"
+	python3 tools/archive_digest.py verify "$@.tmp" --id "$(PROF_PROFILE_ID)" --premises "$(PROF_PREMISES)" \
+	    --kinds "$(PROF_KINDS)"
+	mv -f "$@.tmp" "$@"
+-include $(EXTP_OBJS:.o=.d)
+
 -include $(EXT_OBJS:.o=.d)

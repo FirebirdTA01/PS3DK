@@ -3,6 +3,7 @@
 //! test to its rule.
 
 mod common;
+mod rsxm_support;
 
 use common::*;
 use ps3dk_prof::{Incomplete, Rule};
@@ -795,4 +796,142 @@ fn token_impossible() {
     let owner = lane(1, vec![frame(0, 10, 0)]);
     let worker = lane(2, seqd(0, [zone_tok(0, 0, 0, 100, 1, 0, 1, 5), vec![end(0, 0, 0, 200, 1)]].concat()));
     assert_rule(&scenario(vec![owner, worker]).bytes(), Rule::TokenImpossible);
+}
+
+// ---- PROFILE (file_flags bit 1, chunk 17; profile-format-spec.md 3 and 5.1) ---------------------------------------
+
+fn prof_file(p: rsxm_support::Prof) -> Vec<u8> {
+    let mut r = rsxm_support::baseline();
+    r.profile = Some(p);
+    r.bytes()
+}
+
+fn prof_rule(rule: Rule, p: rsxm_support::Prof, detail: &str) {
+    let m = malformed(&prof_file(p));
+    assert_eq!(m.rule, rule, "{m}");
+    assert!(m.detail.contains(detail), "detail {:?} lacks {detail:?}", m.detail);
+}
+
+#[test]
+fn profile_valid_record_is_decoded() {
+    let a = complete(&prof_file(rsxm_support::Prof::default()));
+    let p = a.capture.profile.expect("decoded");
+    assert!(a.capture.profile_flag);
+    assert_eq!(p.profile_id, "RSX-TEST");
+    assert_eq!(p.fields.len(), 7);
+}
+
+#[test]
+fn profile_flag_bit_1_without_bit_0() {
+    let mut r = rsxm_support::baseline();
+    r.flags = 2;
+    assert_rule(&r.bytes(), Rule::FileFlagsNonzero);
+    // the same in a file cut inside its 16-byte header
+    let b = r.bytes();
+    assert_rule(&b[..13], Rule::FileFlagsNonzero);
+    let mut r3 = rsxm_support::baseline();
+    r3.flags = 3;
+    let (_, why) = incomplete(&r3.bytes()[..13]);
+    assert!(why.contains(&Incomplete::TornTail), "byte 12 = 3 is a valid flags prefix");
+}
+
+#[test]
+fn profile_missing_at_chunk_2() {
+    let mut r = rsxm_support::baseline();
+    r.profile = None;
+    r.flags = 3;
+    assert_rule(&r.bytes(), Rule::ProfileMissing);
+}
+
+#[test]
+fn profile_second_record_or_other_index() {
+    let mut r = rsxm_support::baseline();
+    r.extra_chunks_after_profile = vec![chunk(rsxm_support::T_PROFILE, rsxm_support::Prof::default().payload())];
+    assert_rule(&r.bytes(), Rule::ProfilePlacement);
+}
+
+#[test]
+fn profile_chunk_without_bit_1_is_an_unknown_chunk() {
+    let mut r = rsxm_support::baseline();
+    r.flags = 1;
+    assert_rule(&r.bytes(), Rule::UnknownChunkType);
+}
+
+#[test]
+fn profile_header_rules() {
+    use rsxm_support::Prof;
+    prof_rule(Rule::Profile, Prof { version: 2, ..Prof::default() }, "version 2");
+    prof_rule(Rule::Profile, Prof { reserved0: 1, ..Prof::default() }, "reserved0 1");
+    prof_rule(Rule::Profile, Prof { id: Vec::new(), ..Prof::default() }, "id_len 0");
+    prof_rule(Rule::Profile, Prof { id: vec![b'A'; 33], ..Prof::default() }, "id_len 33");
+    complete(&prof_file(Prof { id: b"A".to_vec(), ..Prof::default() }));
+    complete(&prof_file(Prof { id: vec![b'A'; 32], ..Prof::default() }));
+    prof_rule(Rule::Profile, Prof { id: b"1RSX".to_vec(), ..Prof::default() }, "does not start with a letter");
+    prof_rule(Rule::Profile, Prof { id: b"_RSX".to_vec(), ..Prof::default() }, "does not start with a letter");
+    prof_rule(Rule::Profile, Prof { id: b"RSX_".to_vec(), ..Prof::default() }, "profile_id byte 3");
+    prof_rule(Rule::Profile, Prof { id: b"RSx".to_vec(), ..Prof::default() }, "profile_id byte 2");
+    prof_rule(Rule::Profile, Prof { alg: 2, ..Prof::default() }, "digest_alg 2");
+    prof_rule(Rule::Profile, Prof { premises: 1 << 9, ..Prof::default() }, "undefined bit");
+    prof_rule(Rule::Profile, Prof { kinds: 0, ..Prof::default() }, "kinds 0x0");
+    prof_rule(Rule::Profile, Prof { kinds: 4, ..Prof::default() }, "kinds 0x4");
+}
+
+#[test]
+fn profile_field_rules() {
+    use rsxm_support::{PField, Prof};
+    let mut p = Prof::default();
+    p.fields.pop();
+    prof_rule(Rule::Profile, p, "field_count 6");
+    let mut p = Prof::default();
+    p.fields.push(PField { id: 8, status: 1, width: 1, value: vec![0] });
+    prof_rule(Rule::Profile, p, "field_count 8");
+    let mut p = Prof::default();
+    p.fields.swap(0, 1);
+    prof_rule(Rule::Profile, p, "field 0: id 2, want 1");
+    for k in 0..7 {
+        let mut p = Prof::default();
+        let f = &mut p.fields[k];
+        f.width -= 1;
+        f.value.pop();
+        prof_rule(Rule::Profile, p, "width");
+        let mut p = Prof::default();
+        let f = &mut p.fields[k];
+        f.width += 1;
+        f.value.push(0);
+        prof_rule(Rule::Profile, p, "width");
+    }
+    for st in [0u8, 5] {
+        let mut p = Prof::default();
+        p.fields[0].status = st;
+        prof_rule(Rule::Profile, p, &format!("status {st}"));
+    }
+    // statuses a field does not permit
+    for (k, st) in [(2usize, 3u8), (2, 2), (4, 1), (5, 3), (6, 4), (1, 4)] {
+        let mut p = Prof::default();
+        p.fields[k].status = st;
+        if st == 1 || st == 2 {
+            // keep the value valid for the field
+        } else {
+            p.fields[k].value = vec![0; p.fields[k].value.len()];
+        }
+        prof_rule(Rule::Profile, p, "not permitted");
+    }
+    let mut p = Prof::default();
+    p.fields[0].value = vec![1, 0, 0, 0];
+    prof_rule(Rule::Profile, p, "a nonzero value with status 3");
+    for freq in [rsxm_support::FREQ - 1, rsxm_support::FREQ + 1] {
+        let mut p = Prof::default();
+        p.fields[2].value = freq.to_le_bytes().to_vec();
+        prof_rule(Rule::Profile, p, "differs from CLOCKS freq_hz");
+    }
+}
+
+#[test]
+fn profile_payload_length_one_short_and_one_long() {
+    let mut p = rsxm_support::Prof::default();
+    p.fields[6].value.pop(); // the payload ends one byte early
+    let m = malformed(&prof_file(p));
+    assert_eq!(m.rule, Rule::PayloadLength, "{m}");
+    let p = rsxm_support::Prof { tail: vec![0], ..rsxm_support::Prof::default() };
+    assert_rule(&prof_file(p), Rule::PayloadLength);
 }

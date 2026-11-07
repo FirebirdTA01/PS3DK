@@ -282,6 +282,10 @@ pub fn render(a: &Analysis) -> String {
     if cap.minor_warning {
         let _ = writeln!(o, "warning: minor version > 0; read as v1");
     }
+    // Only files with file_flags bit 1 carry a PROFILE; every other file's report is unchanged.
+    if let Some(p) = &cap.profile {
+        let _ = writeln!(o, "{}", crate::profile::record_line(p));
+    }
     if let Some(h) = &cap.header {
         let _ = writeln!(
             o,

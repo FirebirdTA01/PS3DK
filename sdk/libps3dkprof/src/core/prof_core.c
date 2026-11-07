@@ -1149,6 +1149,23 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     if (x.enabled) {
         p->spu_bytes = off - ext_start;
         p->ext_flags = 1;
+#ifdef PS3DK_PROF_WITH_PROFILE
+        {
+            /* PROFILE (profile-format-spec.md 3.4 field 7): the accepted configuration after defaults, LE fields in
+             * declaration order; the record itself is encoded by the first drain (dr_start) */
+            uint8_t *c = p->prof_ext_cfg;
+            uint32_t w[4] = {PS3DK_PROF_EXT_CONFIG_SIZE, x.spu ? x.lanes_max : 0u, x.spu ? x.ring_slots : 0u,
+                             x.spu ? x.image_bytes : 0u};
+            uint32_t g[4] = {x.gpu_max, x.gpu_max ? x.gpu_slots : 0u, 0u, 0u};
+            unsigned k;
+            for (k = 0; k < 4; k++)
+                p_le32(c + 4 * k, w[k]);
+            p_le64(c + 16, x.mem_max);
+            for (k = 0; k < 4; k++)
+                p_le32(c + 24 + 4 * k, g[k]);
+            p->ext_flags |= 2; /* file_flags bit 1 (PROFILE_RECORD), only with bit 0 */
+        }
+#endif
         p->decl_acc = (ext_acc *)(void *)(p->block + o_acc);
         memset(p->decl_acc, 0, sizeof(ext_acc) * c.max_threads);
     }
