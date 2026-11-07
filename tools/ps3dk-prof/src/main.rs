@@ -170,7 +170,7 @@ fn clockmap(rest: &[String]) -> ExitCode {
 }
 
 /// `measured [--xrsx-submit NAME --xrsx-wait NAME] <file>`: both names or neither, each at most once; the reader's
-/// compiled-in table of reviewed profiles is used (it is empty: no profile has been reviewed).  The verdict and the
+/// compiled-in table of reviewed profiles is used (RSX-R1 only).  The verdict and the
 /// exit status are exactly those of `check`; nothing else changes.
 fn measured(rest: &[String]) -> ExitCode {
     use ps3dk_prof::rsx_measured::{analyze, lines, Convention, Options};

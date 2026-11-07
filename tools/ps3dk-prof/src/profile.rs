@@ -7,8 +7,8 @@
 //!
 //! [`parse`] applies the structural rules (3.1-3.4; any violation is MALFORMED, rule [`Rule::Profile`]).
 //! [`classify`] applies the classification of 5.3 against a table of reviewed profiles.  The table compiled into
-//! the reader ([`builtin_table`]) is EMPTY: no profile has been reviewed, so no capture classifies as reviewed
-//! through the command line.  Tests pass their own tables through the library API.
+//! the reader ([`builtin_table`]) holds one entry, RSX-R1 (RSX units only); every other profile id classifies as not
+//! reviewed.  Tests pass their own tables through the library API.
 
 use std::fmt::Write as _;
 
@@ -235,10 +235,47 @@ pub struct TableEntry {
     pub evidence: Vec<String>,
 }
 
-/// The table compiled into the reader: empty, because no profile has been reviewed yet.  Adding an entry is a
-/// reviewed change carrying the evidence references (Plan B r2 4.3).
+/// The runtime digests of the two RSX-R1 archives measured on the console (ILP32 and LP64 builds of the same
+/// sources), as printed by the archive's verify step.
+const RSX_R1_DIGESTS: [&str; 2] = [
+    "39dcb52ae3a1dc034b3974490c886f9935f049dcf854aed254ebae5e4e9e1fca",
+    "5b53c967cadf272c4b19746668a7b2deab3418eb06ff93e2bca55183fc9b480d",
+];
+
+fn digest_from_hex(s: &str) -> [u8; 32] {
+    let mut d = [0u8; 32];
+    for (i, b) in d.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).expect("table digest is hex");
+    }
+    d
+}
+
+/// The table compiled into the reader.  Adding or changing an entry is a reviewed change carrying the evidence
+/// references (Plan B r2 4.3).
+///
+/// RSX-R1 covers RSX units only.  Evidence: two console captures of the heterogeneous-workload sample, one per data
+/// model, each with 17 brackets, every GPU pair interpolated, the held-out bracket test 8 of 8 decisive and none
+/// contradicted, and the same slope within the fitted bounds in both data models.
 pub fn builtin_table() -> Vec<TableEntry> {
-    Vec::new()
+    vec![TableEntry {
+        profile_id: "RSX-R1".into(),
+        kinds: KIND_RSX,
+        premise_bits: 0b1_1100_1111,
+        digests: RSX_R1_DIGESTS.iter().map(|h| digest_from_hex(h)).collect(),
+        fields: vec![
+            (F_SYS_SW_VERSION, FieldRule::Any("not readable by the runtime on the measured console".into())),
+            (F_HW_MODEL_CLASS, FieldRule::Any("not readable by the runtime on the measured console".into())),
+            (F_TB_FREQ_HZ, FieldRule::RequiredMatch(vec![79_800_000u64.to_le_bytes().to_vec()])),
+            (F_SPU_USABLE, FieldRule::Any("RSX placement does not use SPUs".into())),
+            (F_LOADER_HOOK, FieldRule::RequiredMatch(vec![vec![0], vec![1]])),
+            (F_LIVE_LINKED, FieldRule::RequiredMatch(vec![vec![0], vec![1]])),
+            (F_EXT_CONFIG, FieldRule::Any("each capture's held-out bracket test checks its own map".into())),
+        ],
+        evidence: vec![
+            "console capture, ILP32, heterogeneous-workload, 4777 frames, 9554 GPU pairs".into(),
+            "console capture, LP64, heterogeneous-workload, 4774 frames, 9548 GPU pairs".into(),
+        ],
+    }]
 }
 
 /// The classification of one capture for one unit kind.
