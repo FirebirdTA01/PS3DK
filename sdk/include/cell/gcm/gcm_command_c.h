@@ -744,29 +744,14 @@ static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGc
 	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);
 }
 
-/* ==========================================================
- * Fragment-program control (NV40TCL_FP_CONTROL word).
- *
- * Thin forwarder to rsxSetFragmentProgramControl, which assembles the
- * control word from the rsxFragmentProgram's num_regs + fp_control bits
- * and the allowTex/reserved fields.  No command-word math here - the rsx
- * emitter is the single source of truth for the NV40 bits, matching how
- * every other cellGcmSet* wrapper in this header forwards to rsx* without
- * re-deriving the encoding. */
-
-static inline void cellGcmSetFragmentProgramControl(CellGcmContextData *thisContext,
-                                                    const rsxFragmentProgram *program,
-                                                    uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
-{
-	rsxSetFragmentProgramControl(thisContext, program, allowTex, reserved0, reserved1);
-}
-
-static inline void cellGcmSetFragmentProgramControlUnsafe(CellGcmContextData *thisContext,
-                                                          const rsxFragmentProgram *program,
-                                                          uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
-{
-	rsxSetFragmentProgramControlUnsafe(thisContext, program, allowTex, reserved0, reserved1);
-}
+/* cellGcmSetFragmentProgramControl (Safe + Unsafe) + the no-context
+ * C++ overload now live in <cell/gcm/gcm_cg_bridge.h>, which is the
+ * canonical home for the Cg-program-handle fragment-program surface
+ * (cellGcmSetFragmentProgram / Load / Parameter all live there).
+ * See gcm_cg_bridge.h for the parameter list and derivation.  This
+ * header (gcm_command_c.h) keeps the command-emitters that forward
+ * 1:1 to rsx* low-level writers; the FP_CONTROL word from a CGprogram
+ * is a different layer. */
 
 /* ==========================================================
  * Z-cull / S-cull surface controls + invalidate.

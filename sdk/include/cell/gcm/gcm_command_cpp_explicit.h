@@ -99,10 +99,10 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetFogParams(this, p0, p1); }
     void SetFragmentProgram(CGprogram prog, uint32_t offset)
     { ::cellGcmSetFragmentProgram(this, prog, offset); }
-    void SetFragmentProgramControl(const rsxFragmentProgram *program, uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
-    { ::cellGcmSetFragmentProgramControl(this, program, allowTex, reserved0, reserved1); }
-    void SetFragmentProgramControlUnsafe(const rsxFragmentProgram *program, uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
-    { ::cellGcmSetFragmentProgramControlUnsafe(this, program, allowTex, reserved0, reserved1); }
+    void SetFragmentProgramControl(CGprogram prog, uint8_t controlTxp, uint8_t reserved0, uint8_t reserved1)
+    { ::cellGcmSetFragmentProgramControl(this, prog, controlTxp, reserved0, reserved1); }
+    void SetFragmentProgramControlUnsafe(CGprogram prog, uint8_t controlTxp, uint8_t reserved0, uint8_t reserved1)
+    { ::cellGcmSetFragmentProgramControlUnsafe(this, prog, controlTxp, reserved0, reserved1); }
     void SetFragmentProgramGammaEnable(uint32_t enable)
     { ::cellGcmSetFragmentProgramGammaEnable(this, enable); }
     void SetFragmentProgramParameter(CGprogram prog, CGparameter param, const float *values, uint32_t addrOffset)

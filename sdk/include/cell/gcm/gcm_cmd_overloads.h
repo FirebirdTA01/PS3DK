@@ -327,9 +327,9 @@ static inline void cellGcmSetUpdateFragmentProgramParameter(uint32_t offset)
 static inline void cellGcmSetUpdateFragmentProgramParameterLocation(uint32_t offset, uint32_t location)
 { cellGcmSetUpdateFragmentProgramParameterLocation(gCellGcmCurrentContext, offset, location); }
 
-static inline void cellGcmSetFragmentProgramControl(const rsxFragmentProgram *program,
-                                                    uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
-{ cellGcmSetFragmentProgramControl(gCellGcmCurrentContext, program, allowTex, reserved0, reserved1); }
+/* The no-context cellGcmSetFragmentProgramControl(prog, controlTxp,
+ * reserved0, reserved1) overload lives in <cell/gcm/gcm_cg_bridge.h>
+ * with the rest of the Cg-program-handle fragment-program surface. */
 
 static inline void cellGcmSetInvalidateZcull(void)
 { cellGcmSetInvalidateZcull(gCellGcmCurrentContext); }
