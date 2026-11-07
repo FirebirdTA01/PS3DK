@@ -10,7 +10,8 @@ use common::*;
 use ps3dk_prof::clockmap::{reduce, solve, solve_with, End, Half, Meter, Obs, Rat, Solved};
 use ps3dk_prof::profile::{classify, FieldRule, KIND_RSX};
 use ps3dk_prof::rsx_measured::{
-    analyze, classify_constraint, lines, Convention, Coverage, Exhaustion, Options, RsxResult, State, Unit, CAPTURE_OPS,
+    analyze, classify_constraint, classify_held_out, held_out, lines, split_holdout, Convention, Coverage, Exhaustion,
+    Options, RsxResult, SplitOutcome, State, Unit, CAPTURE_OPS,
 };
 use rsxm_support::*;
 
@@ -53,6 +54,7 @@ fn baseline_is_measured_with_decisive_hold_out_and_full_coverage() {
     assert_eq!(u.hold.available, 64);
     assert_eq!(u.hold.pairs_available, 16);
     assert!(u.hold.decisive > 0 && u.hold.contradicted == 0, "{:?}", u.hold);
+    assert_eq!((u.split.kept, u.split.held, u.split.decisive, u.split.contradicted), (3, 1, 1, 0), "{:?}", u.split);
     let fj = u.fj.as_ref().unwrap();
     assert!(fj.hi.is_some() && !fj.lo_open);
     assert_eq!((res.coverage.q, res.coverage.total), (16, 16));
@@ -64,6 +66,7 @@ fn baseline_is_measured_with_decisive_hold_out_and_full_coverage() {
          interpolated 16 extrapolated 0"
     ), "{text}");
     assert!(text.contains("RSX coverage 16/16 pairs interpolated in MEASURED units (policy 99 %: met)"), "{text}");
+    assert!(text.contains("| H-SPLIT (odd seq 1..n-2 held out) kept 3 held 1 decisive 1 contradicted 0 | X-RSX"), "{text}");
     assert!(text.contains("never verified"), "{text}");
 }
 
@@ -165,47 +168,99 @@ fn not_readable_never_matches_and_any_fields_are_printed() {
     assert_eq!(c.failures, vec!["applicability unchecked: HW_MODEL_CLASS"]);
 }
 
-// ---- M-HOLD (lead decision on R-17) ---------------------------------------------------------------------------------
+// ---- M-HOLD (lead decision on R-17, with H-SPLIT: rsx-measured-holdout-delta.md) -----------------------------------
+
+/// The M-HOLD reason of a unit whose one held-out bracket is not decisive and whose X-RSX constraints are all NOT
+/// AVAILABLE.
+const NO_HOLD_SPLIT_1: &str = "no decisive hold-out: H-SPLIT checked 1 decisive 0, H-CAUSAL available 0 decisive 0";
+
+/// The baseline with abutting colinear brackets (each starts where the previous ends, the true map through every
+/// midpoint): the held-out bracket's prediction is exactly its window, so H-SPLIT cannot fail (not decisive).
+fn abutting() -> Rsx {
+    let mut r = baseline();
+    r.brackets = [100_000u64, 125_000, 150_000, 175_000].iter().map(|&tt| (2 * tt, tt - 12_500, tt + 12_500)).collect();
+    r
+}
+
+/// Four abutting unit-slope brackets at f = 0, 100, 200, 300 (the first one ends at `first_tb1`, at most 1100), one
+/// GPU pair at f = 0 and f = 50 under frame 0's token, and one frame [1000, wait_end + 1) whose submit zone begins at
+/// `submit_begin` and whose wait zone ends at `wait_end`.  F_0's projections: [1000, first_tb1] at f = 0 and
+/// [1050, 1150] at f = 50 (first_tb1 = 1100); the held-out bracket 1's prediction [1100, 1200] equals its window when
+/// first_tb1 = 1100.
+fn small_abut(submit_begin: u64, wait_end: u64, first_tb1: u64) -> Rsx {
+    let mut r = baseline();
+    r.brackets = vec![(0, 1000, first_tb1), (100, 1100, 1200), (200, 1200, 1300), (300, 1300, 1400)];
+    r.frames = vec![PpuFrame {
+        tb: 1000,
+        submit: vec![(submit_begin, submit_begin)],
+        wait: vec![(submit_begin + 1, wait_end)],
+        nested: false,
+    }];
+    r.last_frame_tb = wait_end + 1;
+    r.events = vec![(0, D_DRAW, 1, 0, OWNER, 0), (50, D_DRAW, 2, 0, OWNER, 0)];
+    r
+}
 
 #[test]
-fn m_hold_no_convention_is_conditional_even_when_every_other_clause_holds() {
-    let (_, res) = run_with(&baseline(), &opts(None));
+fn m_hold_no_convention_is_measured_by_a_decisive_held_out_bracket() {
+    let (a, res) = run_with(&baseline(), &opts(None));
     let u = unit1(&res);
-    assert_eq!(u.state, State::Conditional(vec!["no decisive hold-out: available 0, decisive 0".into()]));
     assert_eq!(u.hold.not_available.get("no convention"), Some(&16));
+    assert_eq!(u.hold.available, 0);
+    assert_eq!((u.split.kept, u.split.held, u.split.decisive, u.split.contradicted), (3, 1, 1, 0), "{:?}", u.split);
+    assert_eq!(u.state, State::Measured, "{:?}", u.state);
+    let text = lines(&a, &res).join("\n");
+    assert!(text.contains("H-SPLIT (odd seq 1..n-2 held out) kept 3 held 1 decisive 1 contradicted 0"), "{text}");
+}
+
+#[test]
+fn m_hold_no_convention_and_no_decisive_held_out_bracket_is_conditional() {
+    let (a, res) = run_with(&abutting(), &opts(None));
+    let u = unit1(&res);
+    assert_eq!((u.split.kept, u.split.held, u.split.decisive, u.split.contradicted), (3, 1, 0, 0), "{:?}", u.split);
+    assert_eq!(u.state, State::Conditional(vec![NO_HOLD_SPLIT_1.into()]));
+    assert_eq!(u.hold.not_available.get("no convention"), Some(&16));
+    let text = lines(&a, &res).join("\n");
+    assert!(text.contains(&format!("MAPPING CONDITIONAL({NO_HOLD_SPLIT_1})")), "{text}");
 }
 
 #[test]
 fn m_hold_every_frame_unavailable_is_conditional() {
-    let mut r = baseline();
+    let mut r = abutting();
     for (k, f) in r.frames.iter_mut().enumerate() {
         f.submit.push((t(k as u64) + 450, t(k as u64) + 480));
     }
     let (_, res) = run_with(&r, &opts(conv()));
     let u = unit1(&res);
-    assert_eq!(u.state, State::Conditional(vec!["no decisive hold-out: available 0, decisive 0".into()]));
+    assert_eq!(u.state, State::Conditional(vec![NO_HOLD_SPLIT_1.into()]));
     assert_eq!(u.hold.not_available.get("submit count 2 wait count 1"), Some(&16));
 }
 
-fn tight() -> Rsx {
-    let mut r = baseline();
-    r.brackets = r.brackets.iter().map(|&(f, t0, t1)| (f, t0 + 2999, t1 - 2999)).collect();
-    r
-}
-
 #[test]
-fn m_hold_available_but_none_decisive_is_conditional_and_one_decisive_is_measured() {
-    let (_, res) = run_with(&tight(), &opts(conv()));
+fn m_hold_available_but_none_decisive_is_conditional_and_one_decisive_of_either_kind_is_measured() {
+    // every X-RSX bound at its F_0 projection edge, the held-out bracket's prediction equal to its window
+    let (_, res) = run_with(&small_abut(1000, 1150, 1100), &opts(conv()));
     let u = unit1(&res);
-    assert_eq!(u.hold.available, 64);
-    assert_eq!(u.state, State::Conditional(vec!["no decisive hold-out: available 64, decisive 0".into()]));
-    // one frame's submit begins exactly at its first GPU endpoint: that lower bound cuts into F_0's projection
-    let mut r = tight();
-    r.frames[3].submit = vec![(t(3) + 1000, t(3) + 1050)];
-    r.frames[3].wait = vec![(t(3) + 1100, t(3) + 9000)];
-    let (_, res) = run_with(&r, &opts(conv()));
+    assert_eq!((u.hold.available, u.hold.decisive, u.hold.contradicted), (4, 0, 0), "{:?}", u.hold);
+    assert_eq!((u.split.held, u.split.decisive), (1, 0), "{:?}", u.split);
+    assert_eq!(
+        u.state,
+        State::Conditional(vec!["no decisive hold-out: H-SPLIT checked 1 decisive 0, H-CAUSAL available 4 decisive 0".into()])
+    );
+    // one tick: the submit zone begins at 1001, one above F_0's lower edge at f = 0: H-CAUSAL decisive
+    let (_, res) = run_with(&small_abut(1001, 1150, 1100), &opts(conv()));
     let u = unit1(&res);
-    assert!(u.hold.decisive >= 1 && u.hold.contradicted == 0, "{:?}", u.hold);
+    assert_eq!((u.hold.decisive, u.hold.contradicted, u.split.decisive), (1, 0, 0), "{:?} {:?}", u.hold, u.split);
+    assert_eq!(u.state, State::Measured, "{:?}", u.state);
+    // one tick on the bracket side: bracket 0 ends at 1099, so the window starts at 1099 and [1099, 1100] would
+    // still meet the prediction [1100, ..]: not decisive; at 1098, [1098, 1099] would miss it: decisive
+    let (_, res) = run_with(&small_abut(1000, 1150, 1099), &opts(conv()));
+    let u = unit1(&res);
+    assert_eq!((u.hold.decisive, u.split.decisive), (0, 0), "{:?} {:?}", u.hold, u.split);
+    assert!(matches!(u.state, State::Conditional(_)), "{:?}", u.state);
+    let (_, res) = run_with(&small_abut(1000, 1150, 1098), &opts(conv()));
+    let u = unit1(&res);
+    assert_eq!((u.hold.decisive, u.split.decisive, u.split.contradicted), (0, 1, 0), "{:?} {:?}", u.hold, u.split);
     assert_eq!(u.state, State::Measured, "{:?}", u.state);
 }
 
@@ -416,10 +471,10 @@ fn identity_gap_two_submits_no_wait_order_split_and_swap() {
 
 #[test]
 fn identity_wrong_names() {
-    let (_, res) = run_with(&baseline(), &opts(Some(Convention { submit: "x".into(), wait: "y".into() })));
+    let (_, res) = run_with(&abutting(), &opts(Some(Convention { submit: "x".into(), wait: "y".into() })));
     let u = unit1(&res);
     assert_eq!(u.hold.not_available.get("submit count 0 wait count 0"), Some(&16));
-    assert_eq!(u.state, State::Conditional(vec!["no decisive hold-out: available 0, decisive 0".into()]));
+    assert_eq!(u.state, State::Conditional(vec![NO_HOLD_SPLIT_1.into()]));
 }
 
 // ---- raw validity, empty units, range (design 4, 8.6) ---------------------------------------------------------------
@@ -459,7 +514,10 @@ fn full_u64_range_is_exact() {
     let u = unit1(&res);
     assert!(u.f0.is_some() && u.fj.is_some(), "solved exactly at the u64 limits");
     assert_eq!((u.pairs, u.interpolated), (1, 1));
-    assert_eq!(u.state, State::Conditional(vec!["no decisive hold-out: available 0, decisive 0".into()]));
+    assert_eq!(u.hold.available, 0);
+    // the held-out bracket at f = 2^62 - 1 is predicted from the three kept ones exactly, far inside its window
+    assert_eq!((u.split.held, u.split.decisive, u.split.contradicted), (1, 1, 0), "{:?}", u.split);
+    assert_eq!(u.state, State::Measured);
 }
 
 // ---- the command line ---------------------------------------------------------------------------------------------
@@ -610,6 +668,7 @@ fn exact_budget_reproduces_the_unlimited_result_and_one_short_refuses() {
     assert_eq!(s.state, State::Unmeasured(vec!["UNSUPPORTED-RESOURCE (capture budget) in publication".into()]));
     assert_eq!((s.brackets, s.events, s.pairs, s.distinct_f, s.interpolated), (4, 32, 16, 0, 0), "inventory only");
     assert!(s.f0.is_none() && s.fj.is_none() && s.width.is_none() && s.hold == Default::default());
+    assert_eq!(s.split, Default::default(), "atomic: no H-SPLIT result published");
     assert_eq!((short.coverage.q, short.coverage.total), (0, 16), "no coverage credit");
     assert!(!short.coverage.met());
     let text = lines(&a, &short).join("\n");
@@ -640,7 +699,7 @@ fn every_budget_below_the_total_refuses_with_no_work_after_exhaustion() {
         assert!(!res.coverage.met());
     }
     println!("WORK baseline phases reached by exhaustion: {phases:?}");
-    for p in ["classification", "index", "brackets", "F_0", "X-RSX", "H-CAUSAL", "F_J", "F_J summary", "publication"] {
+    for p in ["classification", "index", "brackets", "F_0", "H-SPLIT", "X-RSX", "H-CAUSAL", "F_J", "F_J summary", "publication"] {
         assert!(phases.contains(p), "no budget exhausted in {p}: {phases:?}");
     }
 }
@@ -659,6 +718,7 @@ fn exhaustion_inside_the_f_j_summary_is_atomic_unsupported_resource() {
     let x = unit1(&res);
     assert_eq!(x.state, State::Unmeasured(vec!["UNSUPPORTED-RESOURCE (capture budget) in F_J summary".into()]));
     assert!(x.width.is_none() && x.fj.is_none() && x.f0.is_none(), "atomic: no partial result published");
+    assert_eq!(x.split, Default::default(), "atomic: no H-SPLIT result published");
     assert_eq!((res.coverage.q, res.coverage.total), (0, 16));
     assert_eq!(
         res.coverage.omitted.get("unit not MEASURED (UNMEASURED: UNSUPPORTED-RESOURCE (capture budget) in F_J summary)"),
@@ -780,5 +840,151 @@ fn disagreeing_decoded_inputs_are_refused_by_source_never_skipped() {
         let text = lines(&a, &res).join("\n");
         assert!(text.contains(&format!("MAPPING REFUSED domain 3: the decoded inputs disagree ({why})")), "{text}");
         assert!(text.contains("NOT DETERMINED: 1 refused sources"), "{text}");
+    }
+}
+
+// ---- H-SPLIT: held-out brackets (rsx-measured-holdout-delta.md) ----------------------------------------------------
+
+#[test]
+fn split_selection_rule_is_fixed_by_position() {
+    let held = |n: usize| (0..n).filter(|&j| held_out(j, n)).collect::<Vec<_>>();
+    assert_eq!(held(0), Vec::<usize>::new());
+    assert_eq!(held(2), Vec::<usize>::new());
+    assert_eq!(held(3), vec![1]);
+    assert_eq!(held(4), vec![1], "the last bracket is always kept");
+    assert_eq!(held(5), vec![1, 3]);
+    assert_eq!(held(6), vec![1, 3]);
+    assert_eq!(held(17), vec![1, 3, 5, 7, 9, 11, 13, 15], "the H1 unit: 8 held out, 9 kept");
+}
+
+#[test]
+fn split_classification_edges() {
+    let at = |v: i128, open: bool| End::At { value: Rat::int(v), open };
+    let (lo, hi) = (at(100, false), at(200, false));
+    let c = |t0, t1, w0, w1| classify_held_out(&lo, &hi, t0, t1, w0, w1);
+    // contradiction: the observation touching the prediction is compatible, one tick off is contradicted
+    assert_eq!(c(90, 100, 0, 300), (false, true));
+    assert_eq!(c(89, 99, 0, 300), (true, true));
+    assert_eq!(c(200, 210, 0, 300), (false, true));
+    assert_eq!(c(201, 211, 0, 300), (true, true));
+    // decisive: [w_lo, w_lo + 1] must miss the prediction on the left, or [w_hi - 1, w_hi] on the right
+    assert_eq!(c(100, 200, 99, 201), (false, false), "window [99, 201]: every observation meets [100, 200]");
+    assert_eq!(c(100, 200, 98, 201), (false, true), "[98, 99] would miss it");
+    assert_eq!(c(100, 200, 99, 202), (false, true), "[201, 202] would miss it");
+    assert_eq!(c(150, 151, 150, 150), (false, false), "an empty window decides nothing");
+    // an open end is not attained
+    assert_eq!(classify_held_out(&at(100, true), &hi, 90, 100, 99, 201), (true, true));
+    assert_eq!(classify_held_out(&lo, &at(200, true), 200, 210, 99, 201), (true, true));
+    // an unbounded prediction can neither fail nor decide
+    assert_eq!(classify_held_out(&End::NegInf, &End::PosInf, 0, 1, 0, 1000), (false, false));
+}
+
+fn obs_of(v: &[(i128, i128, i128)]) -> Vec<Obs> {
+    v.iter().map(|&(f, lo, hi)| Obs { f, lo, hi }).collect()
+}
+
+/// Kept brackets 0, 2 and 3 predict [1100, 1110] at f = 100; the held-out bracket 1 is [t0, t1].
+fn edge(t0: i128, t1: i128) -> Vec<Obs> {
+    obs_of(&[(0, 1000, 1010), (100, t0, t1), (200, 1200, 1210), (300, 1300, 1310)])
+}
+
+#[track_caller]
+fn checked(o: &[Obs]) -> (u64, Vec<ps3dk_prof::rsx_measured::HeldOut>) {
+    match split_holdout(&mut Meter::unlimited(), o).unwrap() {
+        SplitOutcome::Checked { kept, held } => (kept, held),
+        s => panic!("{s:?}"),
+    }
+}
+
+#[test]
+fn split_prediction_uses_the_kept_brackets_only() {
+    let (kept, a) = checked(&edge(1090, 1100));
+    let (_, b) = checked(&edge(1150, 1160));
+    assert_eq!(kept, 3);
+    assert_eq!((&a[0].lo, &a[0].hi), (&End::At { value: Rat::int(1100), open: false }, &End::At { value: Rat::int(1110), open: false }));
+    assert_eq!((&a[0].lo, &a[0].hi, a[0].w_lo, a[0].w_hi, a[0].decisive), (&b[0].lo, &b[0].hi, b[0].w_lo, b[0].w_hi, b[0].decisive),
+        "moving the held-out observation changes neither its prediction, its window nor its decisive flag");
+    assert_eq!((a[0].w_lo, a[0].w_hi), (1010, 1200));
+    assert_eq!((a[0].contradicted, b[0].contradicted), (false, true));
+}
+
+#[test]
+fn split_not_available_classes_and_never_decisive() {
+    let na = |o: Vec<Obs>| match split_holdout(&mut Meter::unlimited(), &o).unwrap() {
+        SplitOutcome::NotAvailable(w) => w,
+        s => panic!("{s:?}"),
+    };
+    assert_eq!(na(obs_of(&[])), "fewer than 3 brackets (0)");
+    assert_eq!(na(obs_of(&[(0, 0, 10)])), "fewer than 3 brackets (1)");
+    assert_eq!(na(obs_of(&[(0, 0, 10), (100, 100, 110)])), "fewer than 3 brackets (2)");
+    assert_eq!(na(obs_of(&[(5, 0, 10), (5, 20, 30), (5, 40, 50)])), "kept brackets have 1 distinct coordinate (fewer than 2)");
+    assert_eq!(na(obs_of(&[(200, 0, 10), (150, 20, 30), (100, 40, 50)])), "kept brackets inconsistent");
+}
+
+#[test]
+fn split_too_few_brackets_is_not_available_never_decisive() {
+    let mut r = baseline();
+    r.brackets.truncate(2);
+    let (a, res) = run_with(&r, &opts(None));
+    let u = unit1(&res);
+    assert_eq!(u.split.not_available.as_deref(), Some("fewer than 3 brackets (2)"));
+    assert_eq!((u.split.kept, u.split.held, u.split.decisive, u.split.contradicted), (0, 0, 0, 0));
+    assert_eq!(
+        u.state,
+        State::Conditional(vec![
+            "fewer than 4 distinct brackets (2)".into(),
+            "no decisive hold-out: H-SPLIT not available (fewer than 3 brackets (2)), H-CAUSAL available 0 decisive 0".into(),
+        ])
+    );
+    let text = lines(&a, &res).join("\n");
+    assert!(text.contains("| H-SPLIT not available: fewer than 3 brackets (2) |"), "{text}");
+}
+
+#[test]
+fn split_planted_violation_is_contradicted() {
+    // bracket 1 displaced by +10 000 ticks inside its window [103000, 150000]: the kept brackets predict
+    // [123000, 129000] at its coordinate
+    for c in [None, conv()] {
+        let mut r = baseline();
+        r.brackets[1] = (252_000, 133_000, 139_000);
+        let (a, res) = run_with(&r, &opts(c.clone()));
+        let u = unit1(&res);
+        assert_eq!((u.split.held, u.split.decisive, u.split.contradicted), (1, 1, 1), "{:?}", u.split);
+        assert!(matches!(&u.state, State::Unmeasured(v)
+            if v.contains(&"H-SPLIT contradicted 1 (FINDING)".to_string())
+                && v.contains(&"INCONSISTENT (F_0 empty)".to_string())
+                && v.contains(&"hold-out contradicted: H-SPLIT 1, H-CAUSAL 0".to_string())), "{:?}", u.state);
+        let text = lines(&a, &res).join("\n");
+        assert!(text.contains(
+            "    FINDING: H-SPLIT bracket seq 1 at f 252000: observed [133000, 139000] misses the kept brackets' \
+             prediction [123000, 129000] (window [103000, 150000])"
+        ), "{text}");
+        assert!(!text.contains("MAPPING MEASURED"), "{text}");
+        assert_eq!(res.coverage.q, 0);
+    }
+}
+
+#[test]
+fn split_exactly_on_the_boundary_is_compatible_and_one_tick_off_is_contradicted() {
+    let at = |t0: u64, t1: u64| {
+        let mut r = baseline();
+        r.brackets = vec![(0, 1000, 1010), (100, t0, t1), (200, 1200, 1210), (300, 1300, 1310)];
+        r.events = vec![(0, D_DRAW, 1, 0, 0, 0), (50, D_DRAW, 2, 0, 0, 0)];
+        let (_, res) = run_with(&r, &opts(None));
+        unit1(&res).clone()
+    };
+    for (t0, t1) in [(1090, 1100), (1110, 1120)] {
+        let u = at(t0, t1);
+        assert_eq!((u.split.decisive, u.split.contradicted), (1, 0), "[{t0}, {t1}] touches [1100, 1110]: {:?}", u.split);
+        assert_eq!(u.state, State::Measured, "[{t0}, {t1}]: {:?}", u.state);
+        let s = u.f0.as_ref().unwrap();
+        let r = |x: &Rat| reduce(&mut Meter::unlimited(), x).unwrap();
+        assert_eq!((r(&s.lo), s.hi.as_ref().map(r)), (Rat::int(1), Some(Rat::int(1))), "F_0: the single slope b = 1");
+    }
+    for (t0, t1) in [(1089, 1099), (1111, 1121)] {
+        let u = at(t0, t1);
+        assert_eq!((u.split.decisive, u.split.contradicted), (1, 1), "[{t0}, {t1}]: {:?}", u.split);
+        assert!(matches!(&u.state, State::Unmeasured(v) if v.contains(&"H-SPLIT contradicted 1 (FINDING)".to_string())),
+            "{:?}", u.state);
     }
 }

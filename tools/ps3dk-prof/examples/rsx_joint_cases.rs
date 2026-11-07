@@ -4,12 +4,16 @@
 //! usage: rsx_joint_cases < cases.json > results.json   (exit 0; 2 unreadable or malformed input)
 //! Input:  {"cases": [{"obs": [["f", "lo", "hi"], ...], "halves": [["f", "lo"|"hi", "T"], ...]}, ...]}
 //! Output: {"results": [{"f0": state, "fj": state, "fj_slope": [lo, lo_open, hi|null] | null,
-//!   "hold": [[contradicted, decisive], ...] | null}]}: the hold-out is evaluated only when F_0 is COMPATIBLE with at
-//!   least 2 distinct bracket coordinates (rsx_measured's rule).  Rationals in lowest terms, "n" or "n/d".
+//!   "hold": [[contradicted, decisive], ...] | null, "split": {"na": class} | {"kept": k, "held": [[ordinal,
+//!   contradicted, decisive, lo, lo_open, hi, hi_open], ...]}}]}: the hold-out is evaluated only when F_0 is
+//!   COMPATIBLE with at least 2 distinct bracket coordinates (rsx_measured's rule); H-SPLIT ([`split_holdout`], the
+//!   reader's own function) on the brackets in the order given.  Rationals in lowest terms, "n" or "n/d"; an infinite
+//!   end is "-inf" / "+inf".
 use std::io::Read;
 
 use ps3dk_prof::clockmap::{reduce, solve, solve_with, Half, Meter, Obs, Rat, Solved};
-use ps3dk_prof::rsx_measured::classify_constraint;
+use ps3dk_prof::clockmap::End;
+use ps3dk_prof::rsx_measured::{classify_constraint, split_holdout, SplitOutcome};
 use serde_json::{json, Value};
 
 fn num(v: &Value) -> Option<i128> {
@@ -25,6 +29,14 @@ fn state(s: &Solved) -> &'static str {
         Solved::NoObservations => "NO-OBSERVATIONS",
         Solved::Inconsistent => "INCONSISTENT",
         Solved::Compatible(_) => "COMPATIBLE",
+    }
+}
+
+fn end(e: &End) -> (String, bool) {
+    match e {
+        End::NegInf => ("-inf".into(), false),
+        End::PosInf => ("+inf".into(), false),
+        End::At { value, open } => (rat(value), *open),
     }
 }
 
@@ -71,7 +83,21 @@ fn case(c: &Value) -> Option<Value> {
         }
         _ => Value::Null,
     };
-    Some(json!({"f0": state(&f0), "fj": state(&fj), "fj_slope": fj_slope, "hold": hold}))
+    let split = match split_holdout(m, &obs).ok()? {
+        SplitOutcome::NotAvailable(why) => json!({ "na": why }),
+        SplitOutcome::Checked { kept, held } => {
+            let v: Vec<Value> = held
+                .iter()
+                .map(|h| {
+                    let (lo, lo_open) = end(&h.lo);
+                    let (hi, hi_open) = end(&h.hi);
+                    json!([h.ordinal, h.contradicted, h.decisive, lo, lo_open, hi, hi_open])
+                })
+                .collect();
+            json!({ "kept": kept, "held": v })
+        }
+    };
+    Some(json!({"f0": state(&f0), "fj": state(&fj), "fj_slope": fj_slope, "hold": hold, "split": split}))
 }
 
 fn main() {

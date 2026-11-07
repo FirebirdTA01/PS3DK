@@ -5,8 +5,19 @@
 //! Unit: one RSX (domain, epoch).  Clauses (design 4): M1 M-PROF (profile classification, [`crate::profile`]), M2
 //! M-RAW (the source is STRUCTURE COMPLETE and RAW VALID), M5 M-JOINT (F_J non-empty with 0 < b_lo <= b_hi < inf), M6
 //! M-CHRON (event raw values and bracket foreign values non-decreasing in seq order), M-COV (at least N_MIN = 4
-//! distinct bracket coordinates), M-HOLD (at least one AVAILABLE causal constraint DECISIVE against F_0 and none
-//! contradicted).  M3 (order records) and M4 (lift) do not apply to RSX: premises E and R64 are printed instead.
+//! distinct bracket coordinates), M-HOLD (at least one DECISIVE hold-out, H-SPLIT bracket or H-CAUSAL constraint, and
+//! none contradicted in either; rsx-measured-holdout-delta.md).  M3 (order records) and M4 (lift) do not apply to RSX:
+//! premises E and R64 are printed instead.
+//!
+//! H-SPLIT (held-out brackets, [`split_holdout`]): the selection rule is fixed and uses only bracket positions: the
+//! brackets of the unit in bracket seq order (ordinal j = 0..n-1) with odd j and 1 <= j <= n - 2 are held out, every
+//! other bracket is kept.  F_K = the bracket set of the kept brackets alone; its projection at a held-out bracket's
+//! coordinate is the prediction P_j = [lo_j, hi_j].  The a-priori window W_j = [tb1 of bracket j - 1, tb0 of bracket
+//! j + 1] (both kept) holds every observation the decoder could accept for bracket j given its neighbours, with no
+//! affine premise.  CONTRADICTED iff the observed [tb0_j, tb1_j] misses P_j; DECISIVE iff some integer observation
+//! [t0, t1], t0 < t1, inside W_j misses P_j (the test could have failed).  Not available: no held-out bracket (n < 3),
+//! the kept brackets have fewer than 2 distinct coordinates, or F_K is empty.  It is computed whether or not F_0 is
+//! empty, so a held-out failure is reported as one; F_0 itself still uses every bracket.
 //!
 //! F_0 = the bracket-only set (C, A, S, R64), retained and printed; F_J = F_0 with the X-RSX half-planes.  Displayed
 //! bounds of a MEASURED unit come from F_J.  The hold-out H-CAUSAL checks each X-RSX constraint against F_0 only:
@@ -38,7 +49,8 @@ use num_bigint::BigInt;
 
 use crate::analysis::Analysis;
 use crate::clockmap::{
-    clog2, project_budget, solve, solve_budget, solve_with, summarize, End, Half, Limit, Meter, Model, Obs, Rat, Solved,
+    clog2, project_budget, reduce, solve, solve_budget, solve_with, summarize, End, Half, Limit, Meter, Model, Obs, Rat,
+    Solved,
 };
 use crate::ext::{RawEvent, SourceKey, SourceReport, Structure};
 use crate::frames_foreign::{owner_frames, FrameSet, Refusal};
@@ -137,6 +149,21 @@ pub struct Hold {
     pub not_evaluated: Option<String>,
 }
 
+/// H-SPLIT counts of one unit (held-out brackets).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Split {
+    /// Brackets kept (fitted) and held out (predicted and checked) by the selection rule; 0 and 0 when not evaluated
+    /// or not available.
+    pub kept: u64,
+    pub held: u64,
+    pub decisive: u64,
+    pub contradicted: u64,
+    /// Why no held-out bracket could be checked (the unit-level NOT AVAILABLE class); None when checked or not
+    /// evaluated.
+    pub not_available: Option<String>,
+    pub findings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unit {
     pub domain: u32,
@@ -156,6 +183,7 @@ pub struct Unit {
     /// Over the unit's event coordinates projected on F_J (interpolated, bounded): median and max width.
     pub width: Option<(Rat, Rat)>,
     pub hold: Hold,
+    pub split: Split,
     /// Cross-epoch pairs (BEGIN and END in different epochs): unknown inventory.
     pub cross_epoch: u64,
 }
@@ -179,6 +207,7 @@ impl Unit {
             fj: None,
             width: None,
             hold: Hold::default(),
+            split: Split::default(),
             cross_epoch,
         }
     }
@@ -293,16 +322,162 @@ pub fn classify_constraint(lo: &End, hi: &End, t: i128, lower: bool) -> (bool, b
     }
 }
 
+/// The H-SPLIT selection rule, fixed before any data is seen: bracket ordinal `j` (bracket seq order within the
+/// unit) of `n` brackets is held out iff j is odd and 1 <= j <= n - 2; every other bracket is kept.  Both neighbours
+/// of a held-out bracket are kept, and the first and last brackets are always kept, so every prediction is made
+/// between two kept brackets.
+pub fn held_out(j: usize, n: usize) -> bool {
+    j % 2 == 1 && j + 2 <= n
+}
+
+/// One held-out bracket of H-SPLIT: its ordinal, observation, a-priori window, the kept brackets' prediction at its
+/// coordinate (lowest terms), and its classification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldOut {
+    pub ordinal: usize,
+    pub f: i128,
+    pub tb0: i128,
+    pub tb1: i128,
+    pub w_lo: i128,
+    pub w_hi: i128,
+    pub lo: End,
+    pub hi: End,
+    pub contradicted: bool,
+    pub decisive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SplitOutcome {
+    /// No held-out bracket can be checked: the class.
+    NotAvailable(String),
+    /// Every held-out bracket, in ordinal order.
+    Checked { kept: u64, held: Vec<HeldOut> },
+}
+
+/// Charge per held-out classification (four exact rational comparisons of bounded size and the record).
+const HELD_OPS: u64 = 6;
+
+/// The H-SPLIT budget of a unit with n brackets: the partition, the kept coordinates' sort, the kept solve, the
+/// held-out projections, their two reductions and their classifications:
+/// solve_budget(n) + project_budget(n, n) + n (2 ceil(log2(n + 1)) + 16) + 64.
+pub fn split_budget(n: u64) -> u64 {
+    let per = 2u64.saturating_mul(clog2(n.saturating_add(1))).saturating_add(10 + HELD_OPS);
+    solve_budget(n).saturating_add(project_budget(n, n)).saturating_add(n.saturating_mul(per)).saturating_add(64)
+}
+
+/// H-SPLIT on one unit's brackets `obs` (bracket seq order; lo = tb0, hi = tb1), every step charged to `m` first.
+/// The prediction for a held-out bracket uses the kept brackets only; its window uses its two kept neighbours only;
+/// its own observation is used only by the CONTRADICTED test.
+pub fn split_holdout(m: &mut Meter, obs: &[Obs]) -> Result<SplitOutcome, Limit> {
+    let n = obs.len();
+    m.charge(2 * n as u64 + 1)?;
+    let mut kept: Vec<Obs> = Vec::with_capacity(n);
+    let mut held: Vec<usize> = Vec::new();
+    for (j, o) in obs.iter().enumerate() {
+        if held_out(j, n) {
+            held.push(j);
+        } else {
+            kept.push(*o);
+        }
+    }
+    if held.is_empty() {
+        return Ok(SplitOutcome::NotAvailable(format!("fewer than 3 brackets ({n})")));
+    }
+    // the kept coordinates first (one sort, one dedup): the bound needs 2 of them
+    let nk = kept.len() as u64;
+    m.charge(nk.saturating_mul(clog2(nk + 1)).saturating_add(2 * nk))?;
+    let mut kf: Vec<i128> = kept.iter().map(|o| o.f).collect();
+    kf.sort_unstable();
+    kf.dedup();
+    if kf.len() < 2 {
+        return Ok(SplitOutcome::NotAvailable(format!(
+            "kept brackets have {} distinct coordinate (fewer than 2)",
+            kf.len()
+        )));
+    }
+    let mk = match solve(m, &kept)? {
+        Solved::Compatible(mk) => mk,
+        Solved::Inconsistent => return Ok(SplitOutcome::NotAvailable("kept brackets inconsistent".to_string())),
+        Solved::NoObservations => return Ok(SplitOutcome::NotAvailable("no kept bracket".to_string())),
+    };
+    let mut out = Vec::with_capacity(held.len());
+    for &j in &held {
+        let o = obs[j];
+        let p = mk.project(m, o.f)?;
+        let lo = reduce_end(m, p.lo)?;
+        let hi = reduce_end(m, p.hi)?;
+        m.charge(HELD_OPS)?;
+        let (w_lo, w_hi) = (obs[j - 1].hi, obs[j + 1].lo);
+        let (contradicted, decisive) = classify_held_out(&lo, &hi, o.lo, o.hi, w_lo, w_hi);
+        out.push(HeldOut { ordinal: j, f: o.f, tb0: o.lo, tb1: o.hi, w_lo, w_hi, lo, hi, contradicted, decisive });
+    }
+    Ok(SplitOutcome::Checked { kept: nk, held: out })
+}
+
+fn reduce_end(m: &mut Meter, e: End) -> Result<End, Limit> {
+    Ok(match e {
+        End::At { value, open } => End::At { value: reduce(m, &value)?, open },
+        e => e,
+    })
+}
+
+/// H-SPLIT of one held-out bracket: the prediction [lo, hi] (closed except at an open end), the observation
+/// [tb0, tb1] and the a-priori window [w_lo, w_hi]: (contradicted, decisive).
+/// - CONTRADICTED iff [tb0, tb1] and the prediction are disjoint: tb1 < lo or tb0 > hi (<= / >= at an open end).
+/// - DECISIVE iff an integer observation [t0, t1] with w_lo <= t0 < t1 <= w_hi is disjoint from the prediction: on
+///   the left t1 = w_lo + 1 < lo (<= at an open end), on the right t0 = w_hi - 1 > hi (>= at an open end).
+pub fn classify_held_out(lo: &End, hi: &End, tb0: i128, tb1: i128, w_lo: i128, w_hi: i128) -> (bool, bool) {
+    use std::cmp::Ordering::*;
+    // x lies strictly left of the prediction: x < lo, or x = lo at an open end
+    let left_of = |x: i128| match lo {
+        End::NegInf => false,
+        End::PosInf => true,
+        End::At { value, open } => match cmp_int(value, x) {
+            Greater => true,
+            Equal => *open,
+            Less => false,
+        },
+    };
+    let right_of = |x: i128| match hi {
+        End::PosInf => false,
+        End::NegInf => true,
+        End::At { value, open } => match cmp_int(value, x) {
+            Less => true,
+            Equal => *open,
+            Greater => false,
+        },
+    };
+    let contradicted = left_of(tb1) || right_of(tb0);
+    let decisive = w_lo < w_hi && (left_of(w_lo + 1) || right_of(w_hi - 1));
+    (contradicted, decisive)
+}
+
+/// An interval [lo, hi] as printed ("(" or ")" at an open end).
+fn interval_text(lo: &End, hi: &End) -> String {
+    let l = match lo {
+        End::NegInf => "(-inf".to_string(),
+        End::PosInf => "(+inf".to_string(),
+        End::At { value, open } => format!("{}{value}", if *open { "(" } else { "[" }),
+    };
+    let h = match hi {
+        End::NegInf => "-inf)".to_string(),
+        End::PosInf => "+inf)".to_string(),
+        End::At { value, open } => format!("{value}{}", if *open { ")" } else { "]" }),
+    };
+    format!("{l}, {h}")
+}
+
 // ---- the capture meter and the counted primitives ------------------------------------------------------------------
 
 /// Charge per H-CAUSAL classification (two exact rational comparisons of bounded size).
 const CLASSIFY_OPS: u64 = 4;
 /// Charge per unit for its index lookup visit, its inventory record and the copy kept for an atomic refusal.
 const UNIT_RECORD_OPS: u64 = 3;
-/// Charge per evaluated unit, before any of it, for its fixed-size records: at most 9 reason strings outside the
+/// Charge per evaluated unit, before any of it, for its fixed-size records: at most 10 reason strings outside the
 /// source's raw reasons and the profile failures (two ORDER CONTRADICTIONs, N_MIN, the F_0 state, INSUFFICIENT,
-/// H-CAUSAL contradicted, the F_J slope, the F_J state, M-HOLD), two slopes, one width, one H-CAUSAL note.
-const UNIT_FIXED_OPS: u64 = 13;
+/// H-SPLIT contradicted, H-CAUSAL contradicted, the F_J slope, the F_J state, M-HOLD), two slopes, one width, one
+/// H-CAUSAL note, one H-SPLIT note.
+const UNIT_FIXED_OPS: u64 = 15;
 
 /// The capture meter with the independent work counter.
 struct Ops {
@@ -1061,6 +1236,48 @@ fn unit(
             un.push("INSUFFICIENT (fewer than 2 distinct bracket coordinates)".to_string());
         }
     }
+    // H-SPLIT: held-out brackets (from the brackets alone, whatever F_0's state)
+    let p = ph("H-SPLIT");
+    let mut sm = ops.phase(split_budget(nb), Limit::EpochSolve).map_err(&p)?;
+    let r = split_holdout(&mut sm, &obs);
+    match ops.settle(&sm, r).map_err(&p)? {
+        SplitOutcome::NotAvailable(why) => {
+            ops.step(1);
+            u.split.not_available = Some(why);
+        }
+        SplitOutcome::Checked { kept, held } => {
+            ops.charge(1 + held.len() as u64).map_err(&p)?;
+            ops.step(1);
+            u.split.kept = kept;
+            u.split.held = held.len() as u64;
+            for h in &held {
+                ops.step(1);
+                u.split.decisive += u64::from(h.decisive);
+                if h.contradicted {
+                    u.split.contradicted += 1;
+                    if u.split.findings.len() < MAX_LISTED_FINDINGS {
+                        ops.charge(1).map_err(&p)?;
+                        ops.step(1);
+                        u.split.findings.push(format!(
+                            "H-SPLIT bracket seq {} at f {}: observed [{}, {}] misses the kept brackets' prediction {} \
+                             (window [{}, {}])",
+                            x.brackets[br[h.ordinal]].seq,
+                            h.f,
+                            h.tb0,
+                            h.tb1,
+                            interval_text(&h.lo, &h.hi),
+                            h.w_lo,
+                            h.w_hi
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if u.split.contradicted > 0 {
+        ops.step(1);
+        un.push(format!("H-SPLIT contradicted {} (FINDING)", u.split.contradicted));
+    }
     // X-RSX constraints: (half-plane, token)
     let p = ph("X-RSX");
     let mut halves: Vec<(Half, (u32, u64))> = Vec::new();
@@ -1261,18 +1478,25 @@ fn unit(
             }
         }
     }
-    // M-HOLD (lead decision on R-17)
+    // M-HOLD (lead decision on R-17, with H-SPLIT: rsx-measured-holdout-delta.md): one decisive hold-out of either
+    // kind, and no contradiction of either kind
     let p = ph("publication");
     ops.charge(2 + un.len() as u64 + cond.len() as u64).map_err(&p)?;
     ops.step(1 + un.len() as u64 + cond.len() as u64);
-    if u.hold.available == 0 || u.hold.decisive == 0 || u.hold.contradicted > 0 {
+    let decisive = u.split.decisive.checked_add(u.hold.decisive).ok_or((Limit::Range, "publication"))?;
+    if u.split.contradicted > 0 || u.hold.contradicted > 0 {
         ops.step(1);
         cond.push(format!(
-            "no decisive hold-out: available {}, decisive {}{}",
-            u.hold.available,
-            u.hold.decisive,
-            if u.hold.contradicted > 0 { format!(", contradicted {}", u.hold.contradicted) } else { String::new() }
+            "hold-out contradicted: H-SPLIT {}, H-CAUSAL {}",
+            u.split.contradicted, u.hold.contradicted
         ));
+    } else if decisive == 0 {
+        ops.step(1);
+        let split = match &u.split.not_available {
+            Some(w) => format!("H-SPLIT not available ({w})"),
+            None => format!("H-SPLIT checked {} decisive 0", u.split.held),
+        };
+        cond.push(format!("no decisive hold-out: {split}, H-CAUSAL available {} decisive 0", u.hold.available));
     }
     u.state = if !un.is_empty() {
         un.extend(cond);
@@ -1337,10 +1561,18 @@ pub fn lines(a: &Analysis, r: &RsxResult) -> Vec<String> {
         let na: Vec<String> = u.hold.not_available.iter().map(|(k, v)| format!("{k} {v}")).collect();
         let na = if na.is_empty() { "none".to_string() } else { na.join(", ") };
         let slope_label = if matches!(u.state, State::Measured) { "(F_J)" } else { "(F_J, conditional)" };
+        let split = match &u.split.not_available {
+            Some(w) => format!("H-SPLIT not available: {w}"),
+            None if u.split.held == 0 => "H-SPLIT not evaluated".to_string(),
+            None => format!(
+                "H-SPLIT (odd seq 1..n-2 held out) kept {} held {} decisive {} contradicted {}",
+                u.split.kept, u.split.held, u.split.decisive, u.split.contradicted
+            ),
+        };
         out.push(format!(
             "  MAPPING {state} [profile {id}{nc}] (premises {prem}; order: premise E) domain {} epoch {} brackets {} \
              distinct_f {} events {} pairs {} interpolated {} extrapolated {} | slope {fj} tb/tick {slope_label}, F_0 \
-             {f0} | placement width {width} (model-conditional) | X-RSX available {} decisive {} contradicted {}, \
+             {f0} | placement width {width} (model-conditional) | {split} | X-RSX available {} decisive {} contradicted {}, \
              pairs with constraints {}, not available: {na}{}",
             u.domain,
             u.epoch,
@@ -1361,6 +1593,15 @@ pub fn lines(a: &Analysis, r: &RsxResult) -> Vec<String> {
         }
         if u.hold.contradicted as usize > u.hold.findings.len() {
             out.push(format!("    FINDING: {} more contradictions not listed", u.hold.contradicted as usize - u.hold.findings.len()));
+        }
+        for f in &u.split.findings {
+            out.push(format!("    FINDING: {f}"));
+        }
+        if u.split.contradicted as usize > u.split.findings.len() {
+            out.push(format!(
+                "    FINDING: {} more H-SPLIT contradictions not listed",
+                u.split.contradicted as usize - u.split.findings.len()
+            ));
         }
     }
     for (d, why) in &r.refused {
