@@ -24,6 +24,7 @@ pub mod reader;
 pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;
+pub mod spu_ticks;
 
 pub use analysis::{
     compare, compare_with, load, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,

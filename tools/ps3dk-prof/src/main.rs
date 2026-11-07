@@ -4,6 +4,7 @@
 //!   ps3dk-prof report <file>   print the verdict and the full report
 //!   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional affine bounds
 //!   ps3dk-prof paths <file>    print the verdict and the PPU hot paths
+//!   ps3dk-prof spu-ticks [options] <file>   print the verdict and the SPU ticks with their causal placement
 //!
 //! Exit status: 0 COMPLETE, 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
@@ -21,6 +22,10 @@ const USAGE: &str = "usage:
   ps3dk-prof measured [--xrsx-submit NAME --xrsx-wait NAME] <file>
                              print the verdict and the profile-bound RSX mapping states of a file
                              with a PROFILE record (exit status as check)
+  ps3dk-prof spu-ticks [--pairs] [--observations] [--spu-isolation-scale] [--premise spu-nowrap]
+                       [--capture-ops N] <file>
+                             print the verdict and the SPU zones in SPU decrementer ticks with their
+                             causal placement bounds (exit status as check)
   ps3dk-prof check-arcs <file>   validate a binary arc companion
   ps3dk-prof arcs-json <file>    export exact arc observations as JSON
   ps3dk-prof check-pair <file.arcs> <file.prof>   verify a final companion pair
@@ -230,8 +235,98 @@ fn measured(rest: &[String]) -> ExitCode {
     }
 }
 
+/// `spu-ticks [options] <file>`: each option at most once; the reader's compiled-in table of reviewed SPU ticks
+/// profiles is used (it is empty).  The verdict and the exit status are exactly those of `check`.
+fn spu_ticks(rest: &[String]) -> ExitCode {
+    use ps3dk_prof::spu_ticks::{analyze, lines, Options};
+    let mut opts = Options::default();
+    let (mut observations, mut path, mut ops_given) = (false, None::<&str>, false);
+    let mut seen: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        let a = rest[i].as_str();
+        if a.starts_with('-') {
+            if seen.contains(&a) {
+                eprintln!("ps3dk-prof: {a} given twice");
+                return ExitCode::from(3);
+            }
+            seen.push(a);
+        }
+        match a {
+            "--pairs" => opts.pairs = true,
+            "--observations" => observations = true,
+            "--spu-isolation-scale" => opts.isolation_scale = true,
+            "--premise" => {
+                match rest.get(i + 1).map(String::as_str) {
+                    Some("spu-nowrap") => opts.spu_nowrap = true,
+                    Some(other) => {
+                        eprintln!("ps3dk-prof: unknown premise {other:?} (known: spu-nowrap)");
+                        return ExitCode::from(3);
+                    }
+                    None => {
+                        eprintln!("{USAGE}");
+                        return ExitCode::from(3);
+                    }
+                }
+                i += 1;
+            }
+            "--capture-ops" => {
+                match rest.get(i + 1).and_then(|v| v.parse::<u64>().ok()) {
+                    Some(v) if !ops_given => {
+                        opts.capture_ops = v;
+                        ops_given = true;
+                    }
+                    _ => {
+                        eprintln!("{USAGE}");
+                        return ExitCode::from(3);
+                    }
+                }
+                i += 1;
+            }
+            a if a.starts_with('-') || path.is_some() => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+            a => path = Some(a),
+        }
+        i += 1;
+    }
+    let Some(path) = path else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            println!("{}", report::verdict_line(&a.verdict));
+            match analyze(&a, &opts) {
+                None => println!("spu ticks: no domain extensions (no SPU lane)"),
+                Some(r) => {
+                    for line in lines(&a, &r, observations) {
+                        println!("{line}");
+                    }
+                }
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|c| c == "spu-ticks") {
+        return spu_ticks(&args[1..]);
+    }
     if args.first().is_some_and(|c| c == "clockmap") {
         return clockmap(&args[1..]);
     }

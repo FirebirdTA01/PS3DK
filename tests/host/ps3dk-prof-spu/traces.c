@@ -9,6 +9,7 @@
 #include "model.h"
 
 int sched_main(const char *dir);
+void order_traces(const char *dir, int *ntraces);
 
 static const char *g_dir;
 static int g_traces;
@@ -1658,6 +1659,7 @@ int main(int argc, char **argv)
     t_b1_loss_then_depth0();
     t_b1_edepth();
     t_b1_edepth_suppressed();
+    order_traces(g_dir, &g_traces); /* SPU_ORDER records (spu-ticks delta D3.7, r1 10.1) */
     if (g_order_faults)
         FAIL("%d ring loads without the post-acceptance barrier", g_order_faults);
     printf("spu-model traces=%d failures=%d\n", g_traces, g_failures);

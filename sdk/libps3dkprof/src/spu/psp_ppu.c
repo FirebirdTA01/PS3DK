@@ -6,7 +6,10 @@
  *  - Every aggregate is charged to the ledger (emitted + reserved) before the work that needs it.
  *  - Published corruption fails the sink (v1 rule, code -2).
  *  - All drainer work on a lane happens inside the abstract lane-table lock (p->cs); a lane is freed only outside
- *    it, after the drainer's release, which is its last access to the lane's memory (r3 C, E). */
+ *    it, after the drainer's release, which is its last access to the lane's memory (r3 C, E).
+ *  - After psp_ppu_order, SPU_ORDER records (spu-ticks slice design 3, delta D3): LANE_CREATED, BRACKET_AT,
+ *    DRAINED + DRAIN_TB per (walk, epoch run) and ORDER_FINAL, on their own ledger (order_emitted + order_reserved);
+ *    LANE_CREATED and ORDER_FINAL are reserved by psp_ppu_order for every lane the capture may create. */
 #include "psp_ppu.h"
 
 #include <stdio.h>
@@ -20,13 +23,19 @@
 #define C_SPU_EVENTS 13u
 #define C_LOSS 15u
 #define C_DOMAIN_FINAL 16u
+#define C_SPU_ORDER 18u
+#define O_BRACKET_AT 1u
+#define O_DRAINED 2u
+#define O_DRAIN_TB 3u
+#define O_LANE_CREATED 4u
+#define O_FINAL 5u
 #define MAX_CHUNK 1048576u
 #define MAX_SPU_EVENTS 131069u
 #define SNAP_TRIES 8u
 
 psp_limits psp_reader_limits(void)
 {
-    psp_limits l = {1024, 64, 32, 4096, 65536, 65536, 262144};
+    psp_limits l = {1024, 64, 32, 4096, 65536, 65536, 262144, 1u << 20};
     return l;
 }
 
@@ -62,6 +71,107 @@ static int emit(psp_ppu *p, uint32_t type)
     }
     p->spos = 0;
     return ok;
+}
+
+/* ---- SPU_ORDER records (delta D3): one chunk per decision; counted only when the sink accepted it ---- */
+
+static int ord_room(const psp_ppu *p, uint64_t k)
+{
+    return p->order_emitted + p->order_reserved + k <= p->lim.order_records;
+}
+
+static void ord_put(psp_ppu *p, uint32_t kind, uint32_t lane, uint64_t a, uint64_t b)
+{
+    le32(p, kind);
+    le32(p, lane);
+    le64(p, a);
+    le64(p, b);
+}
+
+/* one record alone (n = 1); 1 when accepted */
+static int ord_emit1(psp_ppu *p, uint32_t kind, uint32_t lane, uint64_t a, uint64_t b)
+{
+    le32(p, 1);
+    le32(p, 0);
+    ord_put(p, kind, lane, a, b);
+    return emit(p, C_SPU_ORDER);
+}
+
+/* The DRAINED + DRAIN_TB decision at an emission point (D3.2): when the cursor `cur` is past order_through, one pair
+ * for `epoch` (the run that just ended) with the walk's tb, decided once against the ledger with k = 2 (D3.3).  The
+ * decision moves order_through whether it is admitted or refused. */
+static void ord_drained_at(psp_ppu *p, psp_lane *l, uint32_t epoch, uint64_t cur, uint64_t tb)
+{
+    if (!p->order || cur <= l->order_through || epoch == 0 || p->sink_failed)
+        return;
+    l->order_through = cur;
+    if (p->test_order_mutant == PSP_OM_TB_BEFORE_LOADS)
+        tb = l->tb_pre;
+    if (p->test_order_mutant == PSP_OM_ONE_AT_A_TIME) { /* MUTANT: each record admitted alone */
+        if (!ord_room(p, 1)) {
+            l->ord_dropped += 2;
+            return;
+        }
+        if (ord_emit1(p, O_DRAINED, l->lane_id, epoch, cur)) {
+            p->order_emitted++;
+            l->ord_emitted++;
+        }
+        if (!ord_room(p, 1)) {
+            l->ord_dropped++;
+            return;
+        }
+        if (ord_emit1(p, O_DRAIN_TB, l->lane_id, tb, cur)) {
+            p->order_emitted++;
+            l->ord_emitted++;
+        }
+        return;
+    }
+    if (!ord_room(p, 2)) {
+        l->ord_dropped += 2; /* neither record is built: no partial admission, even with exactly 1 left */
+        return;
+    }
+    le32(p, 2);
+    le32(p, 0);
+    ord_put(p, O_DRAINED, l->lane_id, epoch, cur);
+    ord_put(p, O_DRAIN_TB, l->lane_id, tb, cur);
+    if (emit(p, C_SPU_ORDER)) { /* one chunk: the sink accepts both records or neither */
+        p->order_emitted += 2;
+        l->ord_emitted += 2;
+    }
+}
+
+static void ord_drained(psp_ppu *p, psp_lane *l, uint32_t epoch, uint64_t tb)
+{
+    ord_drained_at(p, l, epoch, l->emitted_next, tb);
+}
+
+/* BRACKET_AT after its CALIBRATION was accepted (D3.3): emitted only when its position does not exceed the accepted
+ * cursor (an overflow can drop a pending LOSS that precedes the CAL), and only within the ledger */
+static void ord_bracket(psp_ppu *p, psp_lane *l, uint64_t bseq, uint64_t before)
+{
+    if (!p->order)
+        return;
+    if (before > l->emitted_next || !ord_room(p, 1)) {
+        l->ord_dropped++;
+        return;
+    }
+    if (ord_emit1(p, O_BRACKET_AT, l->lane_id, (uint64_t)l->epoch | bseq << 32, before)) {
+        p->order_emitted++;
+        l->ord_emitted++;
+    }
+}
+
+/* release the lane's reserved order records that were never accepted (retirement, or never declared) */
+static void ord_release(psp_ppu *p, psp_lane *l)
+{
+    if (l->res_created) {
+        l->res_created = 0;
+        p->order_reserved--;
+    }
+    if (l->res_ofinal) {
+        l->res_ofinal = 0;
+        p->order_reserved--;
+    }
 }
 
 static void corrupt(psp_ppu *p)
@@ -105,6 +215,15 @@ int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const ps
     p->copy_len = st->copy_len;
     p->arena = st->arena;
     p->arena_len = st->arena_len;
+    return PSP_P_OK;
+}
+
+int psp_ppu_order(psp_ppu *p)
+{
+    if (p->order || p->lanes_created || p->sealed || (uint64_t)2 * p->lim.lanes_life > p->lim.order_records)
+        return PSP_P_EINVAL; /* a LANE_CREATED and an ORDER_FINAL are reserved for every lane the capture may create */
+    p->order = 1;
+    p->order_reserved = (uint64_t)2 * p->lim.lanes_life; /* walk records can never take a final's capacity */
     return PSP_P_OK;
 }
 
@@ -256,6 +375,13 @@ int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner
     }
     l->next_req = 1;
     l->state = PSP_L_CREATED;
+    if (p->order) {
+        /* B-5: after the lane slot, ring and control block are reserved and initialised, before the caller sees the
+         * EAs; its two order records were reserved by psp_ppu_order */
+        l->res_created = 1;
+        l->res_ofinal = 1;
+        l->tb_created = p->mem->mftb(p->mem->ctx);
+    }
     *lane = i;
     return PSP_P_OK;
 }
@@ -264,6 +390,7 @@ int psp_lane_create(psp_ppu *p, const char *name, uint32_t image, uint32_t owner
 
 static void declare(psp_ppu *p)
 {
+    uint64_t now = 0; /* the lanes this call declares */
     uint32_t i, cnt = 0;
     size_t at = 0, b;
     for (i = 0; i < p->nimages; i++) {
@@ -351,6 +478,19 @@ static void declare(psp_ppu *p)
             !(l->owner && p->covered && !p->covered(p->covered_ctx, l->owner, l->owner_slot, l->owner_gen))) {
             l->state = PSP_L_DECLARED;
             l->bound = !p->sink_failed;
+            now |= (uint64_t)1 << i;
+        }
+    }
+    /* LANE_CREATED right after the SPU_LANES chunk that bound the lane, from its reservation (D3.4) */
+    for (i = 0; p->order && i < p->cfg.lanes_max; i++) {
+        psp_lane *l = &p->lanes[i];
+        if (!(now >> i & 1) || !l->bound || !l->res_created)
+            continue;
+        if (ord_emit1(p, O_LANE_CREATED, l->lane_id, l->tb_created, 0)) {
+            l->res_created = 0;
+            p->order_reserved--;
+            p->order_emitted++;
+            l->ord_emitted++;
         }
     }
 }
@@ -417,6 +557,13 @@ static void refund_bracket(psp_ppu *p, psp_lane *l, int tell_spu)
 /* retire the lane from encoding; final_written only when the sink accepted the FINAL */
 static void write_final(psp_ppu *p, psp_lane *l, uint32_t state)
 {
+    /* ORDER_FINAL immediately before the DOMAIN_FINAL (D3.4): the lane's accepted kind 1-4 records, never itself;
+     * if the sink refuses it, no DOMAIN_FINAL follows (a sink failure is sticky) */
+    if (p->order && l->res_ofinal && ord_emit1(p, O_FINAL, l->lane_id, l->ord_emitted, l->ord_dropped)) {
+        l->res_ofinal = 0;
+        p->order_reserved--;
+        p->order_emitted++;
+    }
     le32(p, 1);
     le32(p, l->lane_id);
     le8(p, 1);
@@ -437,6 +584,7 @@ static void write_final(psp_ppu *p, psp_lane *l, uint32_t state)
         p->loss_reserved--;
     }
     refund_bracket(p, l, 0);
+    ord_release(p, l);
     p->lanes_live--;
     l->fin_state = state;
     l->state = PSP_L_FINAL;
@@ -449,6 +597,8 @@ typedef struct walk {
     uint64_t pl_first, pl_count;
     int have_br;
     uint64_t br_dec, br_tb0, br_tb1;
+    uint64_t br_before; /* the cursor at the CAL slot: BRACKET_AT.events_before (D3.3) */
+    uint32_t start_epoch;
     int stop;
 } walk;
 
@@ -508,8 +658,10 @@ static void flush_bracket(psp_ppu *p, psp_lane *l, walk *w)
     le64(p, w->br_tb0);
     le64(p, w->br_tb1);
     if (emit(p, C_CALIBRATION)) {
+        uint64_t bseq = l->brackets_epoch;
         l->brackets_epoch++;
         l->res_bracket = 0; /* the reservation became an accepted bracket; brackets_file keeps counting it */
+        ord_bracket(p, l, bseq, w->br_before);
     }
 }
 
@@ -519,6 +671,7 @@ static void overflow_finish(psp_ppu *p, psp_lane *l, walk *w)
     close_events(p, l, w);
     flush_bracket(p, l, w);
     w->pl_count = 0; /* not emitted: the FINAL describes only accepted data */
+    ord_drained(p, l, l->epoch, l->tb1); /* emission point 3, before ORDER_FINAL */
     if (l->res_bracket)
         refund_bracket(p, l, 1);
     write_final(p, l, PSP_FIN_OVERFLOWED);
@@ -532,6 +685,7 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
     uint64_t i;
     const psp_image *im = &p->images[l->image];
     memset(&w, 0, sizeof w);
+    w.start_epoch = l->epoch;
     for (i = 0; i < n && !w.stop && !p->sink_failed; i++, s += PSP_SLOT) {
         uint8_t kind = s[6];
         if (kind >= PSP_K_BEGIN && kind <= PSP_K_MARK) {
@@ -590,6 +744,9 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 overflow_finish(p, l, &w);
                 return;
             }
+            /* emission point 1: the old epoch's run, after its events, loss and bracket, before its EPOCH */
+            if (p->test_order_mutant != PSP_OM_END_START_EPOCH && p->test_order_mutant != PSP_OM_END_CUR_EPOCH)
+                ord_drained(p, l, l->epoch, l->tb1);
             le32(p, 1);
             le32(p, l->domain_id);
             le32(p, l->epoch + 1);
@@ -621,6 +778,11 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 w.br_dec = psp_rd32(s);
                 w.br_tb0 = l->out_tb0;
                 w.br_tb1 = l->tb1;
+                /* the CAL follows every slot of its publication: open events or a pending LOSS(tail), at most one of
+                 * the two nonzero (an event slot flushes the loss first, a LOSS slot closes the events first) */
+                w.br_before = p->test_order_mutant == PSP_OM_EVENTS_BEFORE_CURSOR
+                                  ? l->emitted_next /* MUTANT: the open events and the pending loss ignored */
+                                  : l->emitted_next + w.ev_n + w.pl_count;
                 l->out_id = 0;
             } else {
                 l->stale++;
@@ -639,12 +801,20 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
         p->spos = 0; /* a partly built chunk is dropped, not counted */
         return;
     }
-    close_events(p, l, &w);
-    if (flush_loss(p, l, &w) != 0) {
-        overflow_finish(p, l, &w);
-        return;
+    {
+        uint64_t stale = l->emitted_next; /* read only by the PSP_OM_STALE_CURSOR mutant */
+        close_events(p, l, &w);
+        if (flush_loss(p, l, &w) != 0) {
+            overflow_finish(p, l, &w);
+            return;
+        }
+        flush_bracket(p, l, &w);
+        /* emission point 2: the walk's last run */
+        if (p->test_order_mutant == PSP_OM_STALE_CURSOR)
+            ord_drained_at(p, l, l->epoch, stale, l->tb1); /* MUTANT: decided before close_events */
+        else
+            ord_drained(p, l, p->test_order_mutant == PSP_OM_END_START_EPOCH ? w.start_epoch : l->epoch, l->tb1);
     }
-    flush_bracket(p, l, &w);
 }
 
 /* ---- the snapshot (r3 F) and the per-lane coroutine ---- */
@@ -764,6 +934,8 @@ static int step(psp_ppu *p, uint32_t i)
             }
             if (a > n)
                 a = n;
+            if (p->test_order_mutant == PSP_OM_TB_BEFORE_LOADS)
+                l->tb_pre = m->mftb(m->ctx); /* MUTANT: a walk tb read before the ring loads */
             m->ld_slots(m->ctx, l->ea_ring + first * PSP_SLOT, buf, (size_t)a * PSP_SLOT);
             if (n > a)
                 m->ld_slots(m->ctx, l->ea_ring, buf + a * PSP_SLOT, (size_t)(n - a) * PSP_SLOT);
@@ -849,6 +1021,7 @@ static void finish_lane(psp_ppu *p, uint32_t i)
             l->res_terminal = 0;
             p->loss_reserved--;
         }
+        ord_release(p, l); /* neither order record was emitted: both reservations become available to walks */
         p->lanes_live--;
         l->fin_state = PSP_FIN_ABANDONED;
         l->final_written = 0;

@@ -29,7 +29,8 @@ san = ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined', '-fno-
 env = dict(os.environ, UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1', ASAN_OPTIONS='detect_leaks=1')
 REPORTS = ['runtime error:', 'ERROR: AddressSanitizer', 'ERROR: LeakSanitizer', 'SUMMARY: UndefinedBehaviorSanitizer',
            'SUMMARY: AddressSanitizer']
-sources = [spu / 'psp_spu.c', spu / 'psp_ppu.c', here / 'model.c', here / 'traces.c', here / 'sched.c']
+sources = [spu / 'psp_spu.c', spu / 'psp_ppu.c', here / 'model.c', here / 'order_model.c', here / 'traces.c',
+           here / 'order_traces.c', here / 'sched.c']
 failed = []
 
 
@@ -87,6 +88,35 @@ for d in sorted(x for x in out.glob('plain-*') if x.is_dir()):
             failed.append(f'reader {prof.name}: rc {r.returncode}, want {want}')
             print(f'reader FAIL {prof.name}: rc {r.returncode} want {want}\n{r.stdout[:600]}', flush=True)
 print(f'reader check: {exact} exact-exit captures, {smoke} smoke-exit samples', flush=True)
+
+# reader-side state expectations of the order-record controls: `spu-ticks --observations` over each capture that has
+# a <name>.ticks-expect ("has TEXT" / "lacks TEXT" lines, each a substring of the whole output)
+tpass = tfail = 0
+for d in sorted(x for x in out.glob('plain-*') if x.is_dir()):
+    for tx in sorted(d.glob('*.ticks-expect')):
+        prof = tx.with_suffix('.prof')
+        r = subprocess.run([str(a.reader), 'spu-ticks', '--observations', str(prof)], capture_output=True, text=True)
+        (out / f'ticks-{tx.stem}.stdout').write_text(r.stdout)
+        bad = []
+        if r.returncode not in (0, 1, 4):
+            bad.append(f'rc {r.returncode}')
+        for line in tx.read_text().splitlines():
+            if not line:
+                continue
+            verb, _, text = line.partition(' ')
+            if verb not in ('has', 'lacks'):
+                bad.append(f'unknown directive {verb!r}')
+            elif (text in r.stdout) != (verb == 'has'):
+                bad.append(f'{verb} {text!r}')
+        if bad:
+            tfail += 1
+            failed.append(f'spu-ticks {prof.name}: {"; ".join(bad[:4])}')
+            print(f'spu-ticks FAIL {prof.name}: {bad[:4]}', flush=True)
+        else:
+            tpass += 1
+print(f'spu-ticks expectations: {tpass} PASS, {tfail} FAIL', flush=True)
+if tpass + tfail == 0:
+    failed.append('spu-ticks: no capture with an expectation')
 
 # the checker against the reader crate
 checker = out / 'spu-model-oracle'

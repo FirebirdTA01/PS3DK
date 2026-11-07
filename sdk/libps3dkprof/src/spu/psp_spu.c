@@ -264,6 +264,10 @@ int psp_spu_flush_plan(psp_spu *s)
             for (i = 0; i < t; i++)
                 pub_lost += marker_count(s->tail_lost, i);
             used += t;
+            /* the CAL slot only when every staged event and every tail marker is in this publication, so it
+             * follows all of them in ring order; its raw value (below) is read here, after every staged event's own
+             * read and after the request was observed in line A (premise C-SPU of the spu-ticks slice; the drain's
+             * BRACKET_AT.events_before relies on this position) */
             if (t == mt && answer && used < space)
                 c = 1;
             used += c;

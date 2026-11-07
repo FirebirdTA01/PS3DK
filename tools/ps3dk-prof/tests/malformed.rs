@@ -871,7 +871,7 @@ fn profile_header_rules() {
     prof_rule(Rule::Profile, Prof { id: b"RSX_".to_vec(), ..Prof::default() }, "profile_id byte 3");
     prof_rule(Rule::Profile, Prof { id: b"RSx".to_vec(), ..Prof::default() }, "profile_id byte 2");
     prof_rule(Rule::Profile, Prof { alg: 2, ..Prof::default() }, "digest_alg 2");
-    prof_rule(Rule::Profile, Prof { premises: 1 << 9, ..Prof::default() }, "undefined bit");
+    prof_rule(Rule::Profile, Prof { premises: 1 << 11, ..Prof::default() }, "undefined bit");
     prof_rule(Rule::Profile, Prof { kinds: 0, ..Prof::default() }, "kinds 0x0");
     prof_rule(Rule::Profile, Prof { kinds: 4, ..Prof::default() }, "kinds 0x4");
 }

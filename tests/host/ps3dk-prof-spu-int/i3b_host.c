@@ -93,7 +93,7 @@ static void print_image(const char *name, const uint8_t *bid, uint32_t blen, con
 /* ---- a bare psp_ppu for the register/table modes ---- */
 static psp_limits limits(void)
 {
-    psp_limits l = {64, 64, 32, 256, 65536, 65536, 262144};
+    psp_limits l = {64, 64, 32, 256, 65536, 65536, 262144, 1u << 20};
     return l;
 }
 static int bare_init(psp_ppu *p, uint8_t *arena, size_t arena_len)

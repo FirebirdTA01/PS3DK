@@ -10,6 +10,17 @@ uint8_t *g_mem;
 uint64_t g_tb;
 int g_weak;
 int g_failures;
+int g_order_next;
+
+/* every mftb value with whether the access before it was a ring load (and where): the DRAIN_TB ordering check */
+typedef struct tbrec {
+    uint64_t v, ea, n;
+    int after_load;
+} tbrec;
+static tbrec *g_tblog;
+static size_t g_ntb, g_captb;
+static int g_last_load;
+static uint64_t g_last_ea, g_last_n;
 
 /* ---- allocator over the simulated memory: first fit among freed blocks of the same size, else bump ---- */
 typedef struct blk {
@@ -69,6 +80,8 @@ void mem_reset(void)
     g_top = 4096; /* EA 0 is never handed out */
     g_nwq = 0;
     g_tb = 1000;
+    g_ntb = 0;
+    g_last_load = 0;
 }
 
 static int m_alloc(void *ctx, size_t size, uint64_t *ea)
@@ -157,6 +170,7 @@ static int is_gen_word(uint64_t ea)
 static uint64_t m_ld64(void *c, uint64_t ea)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 8, "load");
     if (is_gen_word(ea))
         g_need_bar = 1;
@@ -165,6 +179,7 @@ static uint64_t m_ld64(void *c, uint64_t ea)
 static void m_ld_line(void *c, uint64_t ea, uint8_t out[128])
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 128, "line load");
     memcpy(out, g_mem + ea, 128);
 }
@@ -177,16 +192,21 @@ static void m_ld_slots(void *c, uint64_t ea, uint8_t *out, size_t n)
         g_order_faults++;
     }
     memcpy(out, g_mem + ea, n);
+    g_last_load = 1;
+    g_last_ea = ea;
+    g_last_n = n;
 }
 static void m_st64(void *c, uint64_t ea, uint64_t v)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 8, "store");
     psp_be64(g_mem + ea, v);
 }
 static void m_st16(void *c, uint64_t ea, uint16_t v)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 2, "store");
     psp_be16(g_mem + ea, v);
 }
@@ -196,7 +216,26 @@ static void m_bar(void *c)
     g_need_bar = 0; /* lwsync / sync */
 }
 static void m_isync(void *c) { (void)c; }
-static uint64_t m_mftb(void *c) { (void)c; return g_tb += 7; }
+static uint64_t m_mftb(void *c)
+{
+    (void)c;
+    g_tb += 7;
+    if (g_ntb == g_captb) {
+        g_captb = g_captb ? g_captb * 2 : 256;
+        g_tblog = realloc(g_tblog, sizeof *g_tblog * g_captb);
+    }
+    g_tblog[g_ntb++] = (tbrec){g_tb, g_last_ea, g_last_n, g_last_load};
+    g_last_load = 0; /* barriers between the loads and this read do not reset it; any other access does */
+    return g_tb;
+}
+
+int tb_after_ring_load(uint64_t tb, uint64_t lo, uint64_t n)
+{
+    for (size_t i = 0; i < g_ntb; i++)
+        if (g_tblog[i].v == tb)
+            return g_tblog[i].after_load && g_tblog[i].ea >= lo && g_tblog[i].ea + g_tblog[i].n <= lo + n;
+    return 0;
+}
 
 /* ---- SPU port shim ---- */
 static int injected(port_ctx *pc)
@@ -327,6 +366,8 @@ void run_init_cap(run *r, uint32_t ring_slots, uint32_t lanes_max, uint64_t mem_
     psp_cfg cfg = {ring_slots, lanes_max, mem_max, 1024};
     psp_limits rl = psp_reader_limits();
     memset(r, 0, sizeof *r);
+    r->order = g_order_next;
+    g_order_next = 0;
     mem_reset();
     r->fail_sink_at = -1;
     r->m = (psp_mem){NULL, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_bar, m_bar, m_isync, m_mftb, m_alloc, m_free};
@@ -340,6 +381,8 @@ void run_init_cap(run *r, uint32_t ring_slots, uint32_t lanes_max, uint64_t mem_
                           1u << 20};
         if (psp_ppu_init(&r->p, &cfg, lim ? lim : &rl, &r->m, &r->o, &st) != 0)
             FAIL("ppu init");
+        if (r->order && psp_ppu_order(&r->p) != PSP_P_OK)
+            FAIL("ppu order");
     }
     if (psp_image_add(&r->p, (const uint8_t *)"\x02model-image", 12, g_descs, 3, &r->image) != 0)
         FAIL("image add");
@@ -355,6 +398,7 @@ void run_free(run *r)
     for (j = 0; j < r->nl; j++) {
         free(r->lanes[j]->buf);
         free(r->lanes[j]->truth);
+        free(r->lanes[j]->cal);
         free(r->lanes[j]);
     }
     psp_ppu_fini(&r->p);
@@ -375,6 +419,8 @@ lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
     pl = &r->p.lanes[h->idx];
     h->lane_id = pl->lane_id;
     h->domain_id = pl->domain_id;
+    h->ea_ring = pl->ea_ring;
+    h->ring_bytes = (uint64_t)r->p.cfg.ring_slots * PSP_SLOT;
     h->pc.dec = 0xFFFFFF00u;
     h->pc.tag_mask = 0xA5u; /* the app's mask: every library wait must restore it */
     h->pc.s = &h->s;
@@ -516,7 +562,7 @@ void write_capture(run *r, const char *dir, const char *name)
     wb(&f, "PS3DKPRF", 8);
     wle(&f, 1, 2);
     wle(&f, 0, 2);
-    wle(&f, 1, 4); /* file_flags: DOMAIN_EXTENSIONS */
+    wle(&f, r->order ? 7 : 1, 4); /* file_flags: DOMAIN_EXTENSIONS (+ PROFILE_RECORD + SPU_ORDER) */
     wstr(&p, "app");
     wstr(&p, "test-build-0001");
     wstr(&p, "0.26.0");
@@ -538,6 +584,37 @@ void write_capture(run *r, const char *dir, const char *name)
     wle(&p, 79800000, 8);
     wle(&p, 1000, 8);
     frame(&f, &seq, 2, p.b, p.n);
+    if (r->order) { /* the PROFILE record (profile-format-spec 3): an SPU ticks premise set, kind SPU */
+        static const uint8_t st[7] = {3, 3, 1, 3, 2, 2, 1}, wd[7] = {4, 4, 8, 4, 1, 1, 40};
+        p.n = 0;
+        wle(&p, 1, 2);
+        wle(&p, 0, 2);
+        wle(&p, 9, 1);
+        wb(&p, "SPU-MODEL", 9);
+        wle(&p, 1, 4);
+        for (int k = 0; k < 32; k++)
+            wle(&p, 0x5A, 1);
+        wle(&p, 1689, 4); /* C-PPU S D E C-SPU C-ORD */
+        wle(&p, 2, 4);
+        wle(&p, 7, 2);
+        for (int k = 0; k < 7; k++) {
+            wle(&p, (uint64_t)k + 1, 2);
+            wle(&p, st[k], 1);
+            wle(&p, wd[k], 1);
+            if (k == 2)
+                wle(&p, 79800000, 8);
+            else if (k == 4)
+                wle(&p, 0, 1);
+            else if (k == 5)
+                wle(&p, 0, 1);
+            else if (k == 6)
+                for (int b = 0; b < 40; b++)
+                    wle(&p, (uint64_t)b, 1);
+            else
+                wle(&p, 0, 4);
+        }
+        frame(&f, &seq, 17, p.b, p.n);
+    }
     for (i = 0; i < r->nch; i++)
         frame(&f, &seq, r->ch[i].type, r->ch[i].data, r->ch[i].len);
     if (!r->p.sink_failed) {

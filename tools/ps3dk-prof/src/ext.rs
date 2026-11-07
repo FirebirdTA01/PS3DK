@@ -19,6 +19,17 @@ pub const CHUNK_SPU_EVENTS: u32 = 13;
 pub const CHUNK_GPU_EVENTS: u32 = 14;
 pub const CHUNK_LOSS: u32 = 15;
 pub const CHUNK_DOMAIN_FINAL: u32 = 16;
+/// SPU_ORDER (spu-ticks slice design 3, delta D3.1): present only with file_flags bit 2.
+pub const CHUNK_SPU_ORDER: u32 = 18;
+/// file_flags bit 2 (SPU_ORDER records); it requires bits 0 and 1.
+pub const FLAG_SPU_ORDER: u32 = 4;
+pub const ORD_BRACKET_AT: u32 = 1;
+pub const ORD_DRAINED: u32 = 2;
+pub const ORD_DRAIN_TB: u32 = 3;
+pub const ORD_LANE_CREATED: u32 = 4;
+pub const ORD_FINAL: u32 = 5;
+/// At most this many order records per file, every kind counted (ORDER_FINAL included).
+pub const MAX_ORDER_RECORDS: u64 = 1 << 20;
 
 pub const KIND_SPU_DEC: u8 = 1;
 pub const KIND_RSX_TIMESTAMP: u8 = 2;
@@ -363,6 +374,63 @@ pub struct ExtCapture {
     pub epochs: Vec<EpochRecord>,
     pub brackets: Vec<Bracket>,
     pub sources: Vec<SourceReport>,
+    /// The SPU_ORDER records (file_flags bit 2), by lane; None when bit 2 is clear.
+    pub order: Option<OrderRecords>,
+}
+
+/// One BRACKET_AT: the bracket (lane's domain, `epoch`, `bracket_seq`) and its position `events_before`, the lane's
+/// next event seq at the CAL slot (lost seqs included).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BracketAt {
+    pub epoch: u32,
+    pub bracket_seq: u64,
+    pub events_before: u64,
+}
+
+/// One DRAINED + DRAIN_TB pair: the epoch whose run ended, the lane's next event seq after the walk, and the walk's
+/// tb read after its ring loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Drain {
+    pub epoch: u32,
+    pub events_through: u64,
+    pub tb_copy: u64,
+}
+
+/// The order records of one lane, in file order, as validated by the structural rules (delta D3.6).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LaneOrder {
+    /// LANE_CREATED.tb_created.
+    pub created: Option<u64>,
+    pub brackets_at: Vec<BracketAt>,
+    /// events_through strictly increasing.
+    pub drains: Vec<Drain>,
+    /// ORDER_FINAL: (records_emitted, records_dropped); None: no ORDER_FINAL in the file (torn, D3.5).
+    pub final_: Option<(u64, u64)>,
+    /// Decoded records of kinds 1-4.
+    pub decoded: u64,
+    /// The first decrease of tb_copy over the lane's DRAIN_TB records (previous, next, events_through of the next):
+    /// an ORDER CONTRADICTION finding for the lane, not MALFORMED (D3.6).
+    pub tb_decrease: Option<(u64, u64, u64)>,
+}
+
+/// Every lane's order records (file_flags bit 2).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrderRecords {
+    pub lanes: BTreeMap<u32, LaneOrder>,
+    /// Order records in the file, every kind.
+    pub records: u64,
+}
+
+/// Reader-side check state of one lane's order records.
+#[derive(Debug, Default)]
+struct OrderState {
+    rec: LaneOrder,
+    /// The previous DRAINED events_through (0 if none).
+    drained_through: u64,
+    last_events_before: u64,
+    /// The last BRACKET_AT's (epoch, bracket_seq).
+    last_bracket: Option<(u32, u64)>,
+    any: bool,
 }
 
 #[derive(Debug, Default)]
@@ -476,6 +544,9 @@ pub struct ExtReader {
     loss_chunks: usize,
     spu_domains: usize,
     rsx_domains: usize,
+    /// file_flags bit 2: the order-record state per lane (None: bit 2 clear, chunk 18 is unknown).
+    order: Option<BTreeMap<u32, OrderState>>,
+    order_records: u64,
 }
 
 fn source_key_of(kind: u8, id: u32) -> Result<SourceKey, Malformed> {
@@ -489,6 +560,15 @@ fn source_key_of(kind: u8, id: u32) -> Result<SourceKey, Malformed> {
 impl ExtReader {
     pub fn new() -> ExtReader {
         ExtReader::default()
+    }
+
+    /// The reader of a file with file_flags bit 2: SPU_ORDER chunks are decoded and checked (delta D3.6).
+    pub fn with_order() -> ExtReader {
+        ExtReader { order: Some(BTreeMap::new()), ..ExtReader::default() }
+    }
+
+    pub fn order_enabled(&self) -> bool {
+        self.order.is_some()
     }
 
     pub fn any_domain(&self) -> bool {
@@ -544,6 +624,7 @@ impl ExtReader {
             CHUNK_GPU_EVENTS => self.gpu_events(payload, v1),
             CHUNK_LOSS => self.loss(payload),
             CHUNK_DOMAIN_FINAL => self.final_(payload),
+            CHUNK_SPU_ORDER if self.order.is_some() => self.spu_order(payload),
             _ => unreachable!("extension chunk type {ty}"),
         }
     }
@@ -962,6 +1043,159 @@ impl ExtReader {
         Ok(())
     }
 
+    /// SPU_ORDER (delta D3.1, D3.6): `u32 n, u32 reserved 0`, then n records of 24 bytes.  n = 2 only for a DRAINED
+    /// immediately followed by its DRAIN_TB (same lane and events_through); every other record is alone.  Each record
+    /// is checked against the file position it occupies: cursor(lane) = the lane's next seq after every preceding
+    /// SPU_EVENTS and LOSS chunk, epoch(lane) = the lane domain's EPOCH count so far.
+    fn spu_order(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+        let mut c = Cursor::new(payload, "SPU_ORDER");
+        let n = c.u32()?;
+        let r0 = c.u32()?;
+        if r0 != 0 {
+            return ext(format!("SPU_ORDER reserved {r0}"));
+        }
+        if !(1..=2).contains(&n) || payload.len() != 8 + 24 * n as usize {
+            return ext(format!("SPU_ORDER n {n} with payload length {}", payload.len()));
+        }
+        let mut recs: Vec<(u32, u32, [u8; 16])> = Vec::with_capacity(2);
+        for _ in 0..n {
+            let kind = c.u32()?;
+            let lane = c.u32()?;
+            let mut rest = [0u8; 16];
+            rest[..8].copy_from_slice(&c.u64()?.to_le_bytes());
+            rest[8..].copy_from_slice(&c.u64()?.to_le_bytes());
+            recs.push((kind, lane, rest));
+        }
+        c.done()?;
+        let lo = |r: &[u8; 16]| u64::from_le_bytes(r[..8].try_into().unwrap());
+        let hi = |r: &[u8; 16]| u64::from_le_bytes(r[8..].try_into().unwrap());
+        match recs.as_slice() {
+            [(ORD_DRAINED, l0, a), (ORD_DRAIN_TB, l1, b)] => {
+                if l0 != l1 || hi(a) != hi(b) {
+                    return ext(format!(
+                        "SPU_ORDER DRAINED (lane {l0}, events_through {}) paired with DRAIN_TB (lane {l1}, events_through {})",
+                        hi(a),
+                        hi(b)
+                    ));
+                }
+            }
+            [(k0, _, _), (k1, _, _)] => {
+                return ext(format!("SPU_ORDER n 2 holds kinds {k0}, {k1}: only DRAINED then DRAIN_TB may share a chunk"))
+            }
+            [(ORD_DRAINED | ORD_DRAIN_TB, lane, _)] => {
+                return ext(format!("SPU_ORDER lane {lane}: a DRAINED or DRAIN_TB without its partner"))
+            }
+            [(ORD_BRACKET_AT | ORD_LANE_CREATED | ORD_FINAL, _, _)] => {}
+            [(k, lane, _)] => return ext(format!("SPU_ORDER lane {lane}: kind {k}")),
+            _ => unreachable!("n is 1 or 2"),
+        }
+        self.order_records += u64::from(n);
+        if self.order_records > MAX_ORDER_RECORDS {
+            return ext(format!("more than {MAX_ORDER_RECORDS} order records"));
+        }
+        let lane_id = recs[0].1;
+        let Some(info) = self.cap.lanes.get(&lane_id) else {
+            return ext(format!("SPU_ORDER names undeclared lane {lane_id}"));
+        };
+        let domain_id = info.domain_id;
+        let key = SourceKey::Lane(lane_id);
+        let cursor = self.live_source(key)?.next_seq; // a record after the lane's DOMAIN_FINAL is refused here
+        let epoch = self.cap.domains[&domain_id].epochs;
+        let st = self.order.as_mut().expect("bit 2").entry(lane_id).or_default();
+        if st.rec.final_.is_some() {
+            return ext(format!("SPU_ORDER lane {lane_id}: an order record after its ORDER_FINAL"));
+        }
+        let (kind, _, r) = recs[0];
+        match kind {
+            ORD_LANE_CREATED => {
+                if hi(&r) != 0 {
+                    return ext(format!("LANE_CREATED lane {lane_id}: reserved {}", hi(&r)));
+                }
+                if st.any {
+                    return ext(format!("LANE_CREATED lane {lane_id}: not before every other order record of the lane"));
+                }
+                st.rec.created = Some(lo(&r));
+                st.rec.decoded += 1;
+            }
+            ORD_DRAINED => {
+                let (e, r1) = (lo(&r) as u32, (lo(&r) >> 32) as u32);
+                let (through, tb) = (hi(&r), lo(&recs[1].2));
+                if r1 != 0 {
+                    return ext(format!("DRAINED lane {lane_id}: reserved {r1}"));
+                }
+                if e == 0 || e != epoch {
+                    return ext(format!("DRAINED lane {lane_id}: epoch {e}, the current epoch is {epoch}"));
+                }
+                if through != cursor {
+                    return ext(format!("DRAINED lane {lane_id}: events_through {through}, the cursor is {cursor}"));
+                }
+                if through <= st.drained_through {
+                    return ext(format!(
+                        "DRAINED lane {lane_id}: events_through {through} not above the previous {}",
+                        st.drained_through
+                    ));
+                }
+                if let Some(prev) = st.rec.drains.last() {
+                    if tb < prev.tb_copy && st.rec.tb_decrease.is_none() {
+                        st.rec.tb_decrease = Some((prev.tb_copy, tb, through));
+                    }
+                }
+                st.drained_through = through;
+                st.rec.drains.push(Drain { epoch: e, events_through: through, tb_copy: tb });
+                st.rec.decoded += 2;
+            }
+            ORD_BRACKET_AT => {
+                let (e, bseq, before) = (lo(&r) as u32, (lo(&r) >> 32) as u32, hi(&r));
+                let bseq = u64::from(bseq);
+                if e == 0 || e != epoch {
+                    return ext(format!("BRACKET_AT lane {lane_id}: epoch {e}, the current epoch is {epoch}"));
+                }
+                let next = self.calibration.get(&(domain_id, e)).map_or(0, |v| v.0);
+                if bseq >= next {
+                    return ext(format!(
+                        "BRACKET_AT lane {lane_id} epoch {e}: bracket {bseq} is not a decoded bracket (decoded {next})"
+                    ));
+                }
+                if let Some((le, ls)) = st.last_bracket {
+                    if le == e && bseq <= ls {
+                        return ext(format!(
+                            "BRACKET_AT lane {lane_id} epoch {e}: bracket {bseq} after bracket {ls} (named twice or out of order)"
+                        ));
+                    }
+                }
+                if before < st.drained_through || before > cursor {
+                    return ext(format!(
+                        "BRACKET_AT lane {lane_id}: events_before {before} outside [{}, {cursor}]",
+                        st.drained_through
+                    ));
+                }
+                if before < st.last_events_before {
+                    return ext(format!(
+                        "BRACKET_AT lane {lane_id}: events_before {before} below the previous {}",
+                        st.last_events_before
+                    ));
+                }
+                st.last_events_before = before;
+                st.last_bracket = Some((e, bseq));
+                st.rec.brackets_at.push(BracketAt { epoch: e, bracket_seq: bseq, events_before: before });
+                st.rec.decoded += 1;
+            }
+            ORD_FINAL => {
+                let (emitted, dropped) = (lo(&r), hi(&r));
+                if emitted != st.rec.decoded {
+                    return ext(format!(
+                        "ORDER_FINAL lane {lane_id}: records_emitted {emitted}, the file holds {} order records of kinds 1-4",
+                        st.rec.decoded
+                    ));
+                }
+                st.rec.final_ = Some((emitted, dropped));
+            }
+            _ => unreachable!("kinds checked above"),
+        }
+        st.any = true;
+        Ok(())
+    }
+
     fn final_(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "DOMAIN_FINAL");
         let count = c.u32()?;
@@ -981,6 +1215,12 @@ impl ExtReader {
                 return ext(format!("DOMAIN_FINAL {source}: reserved {r} state {state}"));
             }
             let key = source_key_of(kind, source)?;
+            if let (SourceKey::Lane(lane), Some(order)) = (key, &self.order) {
+                // bit 2: the runtime writes ORDER_FINAL immediately before every lane DOMAIN_FINAL (delta D3.4)
+                if self.sources.contains_key(&key) && order.get(&lane).is_none_or(|o| o.rec.final_.is_none()) {
+                    return ext(format!("{key}: DOMAIN_FINAL without its ORDER_FINAL"));
+                }
+            }
             let Some(s) = self.sources.get_mut(&key) else {
                 return ext(format!("DOMAIN_FINAL for undeclared {key}"));
             };
@@ -1123,6 +1363,10 @@ impl ExtReader {
             });
         }
         self.cap.sources = out;
+        self.cap.order = self.order.take().map(|m| OrderRecords {
+            lanes: m.into_iter().map(|(k, v)| (k, v.rec)).collect(),
+            records: self.order_records,
+        });
         Ok(self.cap)
     }
 }

@@ -91,8 +91,8 @@ def emit(ms, pid, premises, kinds):
         raise Refused(f'the input archive already holds {IDENT}')
     if not re.fullmatch(r'[A-Z][A-Z0-9-]{0,31}', pid):
         raise Refused(f'profile id {pid!r}: 1..32 bytes of A-Z 0-9 -, first a letter')
-    if premises >> 9 or kinds == 0 or kinds & ~3:
-        raise Refused('premise bits beyond 8, or kinds not in 1..3')
+    if premises >> 11 or kinds == 0 or kinds & ~3:
+        raise Refused('premise bits beyond 10, or kinds not in 1..3')
     d = digest_of(ms)
     digest = ', '.join(f'0x{x:02x}' for x in d)
     idc = ', '.join(f"'{c}'" for c in pid)
