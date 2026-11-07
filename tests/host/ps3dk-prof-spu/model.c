@@ -374,6 +374,7 @@ lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
     }
     pl = &r->p.lanes[h->idx];
     h->lane_id = pl->lane_id;
+    h->domain_id = pl->domain_id;
     h->pc.dec = 0xFFFFFF00u;
     h->pc.tag_mask = 0xA5u; /* the app's mask: every library wait must restore it */
     h->pc.s = &h->s;
@@ -595,6 +596,21 @@ void accepted_counts(run *r, uint32_t lane_id, uint64_t *next, uint64_t *events,
     *next = *events + *lost;
 }
 
+int final_open(run *r, uint32_t lane_id, uint32_t *open)
+{
+    for (size_t i = 0; i < r->nch; i++) {
+        const uint8_t *d = r->ch[i].data;
+        if (r->ch[i].type != 16)
+            continue;
+        for (uint32_t e = 0; e < rle32x(d); e++)
+            if (rle32x(d + 4 + 36 * e) == lane_id && d[4 + 36 * e + 4] == 1) {
+                *open = rle32x(d + 4 + 36 * e + 32);
+                return 1;
+            }
+    }
+    return 0;
+}
+
 void check_stats(run *r, lane_h *h, const char *name)
 {
     psp_lane_stats st;
@@ -622,6 +638,53 @@ FILE *expect_open(const char *dir, const char *name)
 static uint32_t rle32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint64_t rle64(const uint8_t *p) { return rle32(p) | (uint64_t)rle32(p + 4) << 32; }
 
+/* the open-begins history, rebuilt here from the accepted chunk bytes only (not from the drain's state): known from
+ * the start; a LOSS makes it unknown for good; a reason-2 EPOCH > 1 keeps it only when it was always known, with no
+ * protocol error and an empty stack (the depth-zero rule); while unknown, a depth-0 BEGIN resynchronises */
+typedef struct ob_hist {
+    int known, ever, protocol;
+    uint32_t sp;
+    uint16_t desc[64];
+    uint8_t depth[64];
+} ob_hist;
+
+static void ob_unknown(ob_hist *o)
+{
+    o->sp = 0;
+    o->known = 0;
+    o->ever = 1;
+}
+
+static void ob_event(ob_hist *o, uint8_t kind, uint16_t desc, uint8_t depth)
+{
+    if (o->protocol)
+        return;
+    if (!o->known) {
+        if (kind == PSP_K_BEGIN && depth == 0) {
+            o->known = 1;
+            o->desc[0] = desc;
+            o->depth[0] = 0;
+            o->sp = 1;
+        }
+        return;
+    }
+    if (kind == PSP_K_BEGIN) {
+        if (depth != o->sp || o->sp == 64) {
+            o->protocol = 1;
+        } else {
+            o->desc[o->sp] = desc;
+            o->depth[o->sp++] = depth;
+        }
+    } else if (kind == PSP_K_MARK) {
+        if (depth != o->sp)
+            o->protocol = 1;
+    } else if (o->sp && o->desc[o->sp - 1] == desc && o->depth[o->sp - 1] == depth) {
+        o->sp--;
+    } else {
+        o->protocol = 1;
+    }
+}
+
 int check_streams(run *r, const char *name)
 {
     uint32_t j;
@@ -631,15 +694,27 @@ int check_streams(run *r, const char *name)
         uint64_t next = 0, events = 0, lost = 0;
         int fin = 0;
         size_t i;
+        ob_hist ob = {1, 0, 0, 0, {0}, {0}};
         for (i = 0; i < r->nch; i++) {
             const uint8_t *d = r->ch[i].data;
-            if (r->ch[i].type == 13 && rle32(d) == h->lane_id) {
+            if (r->ch[i].type == 9) {
+                for (uint32_t e = 0; e < rle32(d); e++) {
+                    const uint8_t *x = d + 4 + 32 * e;
+                    if (rle32(x) != h->domain_id || rle32(x + 4) <= 1)
+                        continue;
+                    if (x[8] != 2 || !ob.known || ob.ever || ob.protocol || ob.sp)
+                        ob_unknown(&ob);
+                }
+            } else if (r->ch[i].type == 13 && rle32(d) == h->lane_id) {
                 uint64_t first = rle64(d + 8), n = rle32(d + 16), k;
                 if (fin || first != next) {
                     FAIL("%s lane %u: SPU_EVENTS first %llu, want %llu", name, h->lane_id, (unsigned long long)first,
                          (unsigned long long)next);
                     bad = 1;
                 }
+                for (k = 0; k < n; k++)
+                    ob_event(&ob, d[20 + 8 * k + 6], (uint16_t)(d[20 + 8 * k + 4] | d[20 + 8 * k + 5] << 8),
+                             d[20 + 8 * k + 7]);
                 for (k = 0; k < n; k++) {
                     const uint8_t *e = d + 20 + 8 * k;
                     uint64_t q = first + k, t = q - h->tbase;
@@ -664,6 +739,7 @@ int check_streams(run *r, const char *name)
                 }
                 next += n;
                 lost += n;
+                ob_unknown(&ob);
             } else if (r->ch[i].type == 16) {
                 uint32_t cnt = rle32(d), e;
                 for (e = 0; e < cnt; e++) {
@@ -671,6 +747,14 @@ int check_streams(run *r, const char *name)
                     if (rle32(f) != h->lane_id || f[4] != 1)
                         continue;
                     fin++;
+                    {
+                        uint32_t want = (ob.ever || ob.protocol) ? UINT32_MAX : ob.sp;
+                        if (rle32(f + 32) != want) {
+                            FAIL("%s lane %u: FINAL open_begins %u, the accepted chunks give %u", name, h->lane_id,
+                                 rle32(f + 32), want);
+                            bad = 1;
+                        }
+                    }
                     if (rle64(f + 8) != next || rle64(f + 16) != events || rle64(f + 24) != lost) {
                         FAIL("%s lane %u: FINAL %llu/%llu/%llu, emitted %llu/%llu/%llu", name, h->lane_id,
                              (unsigned long long)rle64(f + 8), (unsigned long long)rle64(f + 16),

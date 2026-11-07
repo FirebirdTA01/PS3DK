@@ -374,6 +374,11 @@ struct Source {
     final_entry: Option<(u8, u32)>,
     known: bool,
     ever_unknown: bool,
+    /// A reason-2 SPU EPOCH > 1 kept the history known (the depth-zero rule).
+    kept_epoch: bool,
+    /// The FINAL's open_begins was the writer's UINT32_MAX "unknown" placeholder on a source whose history this reader
+    /// kept known across an epoch: a capture from a runtime that predates the depth-zero rule.  Unverifiable, never 0.
+    final_placeholder: bool,
     protocol_error: Option<String>,
     /// Open BEGINs: (desc, depth, seq).
     stack: Vec<(u32, u8, u64)>,
@@ -392,7 +397,8 @@ impl Source {
         Source { domain_id, known: true, ..Default::default() }
     }
 
-    /// LOSS or an epoch transition: every open BEGIN is CENSORED and the stack becomes UNKNOWN.
+    /// LOSS or an epoch transition (other than one the depth-zero rule keeps): every open BEGIN is CENSORED and the
+    /// stack becomes UNKNOWN.
     fn go_unknown(&mut self) {
         if self.protocol_error.is_none() {
             self.raw.censored.extend(self.stack.iter().map(|e| e.2));
@@ -623,6 +629,7 @@ impl ExtReader {
             let key = self.source_of_domain(domain_id)?;
             self.live_source(key)?;
             let d = &self.cap.domains[&domain_id];
+            let spu = d.kind == KIND_SPU_DEC;
             if epoch != d.epochs + 1 {
                 return ext(format!("domain {domain_id}: epoch {epoch} after {}", d.epochs));
             }
@@ -645,8 +652,16 @@ impl ExtReader {
             self.cap.epochs.push(EpochRecord { domain_id, epoch, reason, written_value: written, tb });
             let s = self.sources.get_mut(&key).unwrap();
             s.named_epoch = epoch;
+            // The depth-zero rule, matched by the SPU drain: a reason-2 transition of an SPU lane whose history is
+            // known from the start (no LOSS, no earlier UNKNOWN state, no protocol error) with an empty stack censors
+            // nothing and keeps the history known.  Every other transition makes it UNKNOWN as before.
             if epoch > 1 {
-                s.go_unknown();
+                let known_empty = s.known && !s.ever_unknown && s.protocol_error.is_none() && s.stack.is_empty();
+                if spu && reason == 2 && known_empty {
+                    s.kept_epoch = true;
+                } else {
+                    s.go_unknown();
+                }
             }
         }
         c.done()
@@ -982,10 +997,14 @@ impl ExtReader {
                 ));
             }
             let history_known = !s.ever_unknown && s.protocol_error.is_none();
-            if history_known && open_begins as usize != s.stack.len() {
+            // A runtime that predates the depth-zero rule wrote UINT32_MAX (unknown) after every transition; such a
+            // FINAL stays UNVERIFIABLE with its value kept, never read as a count and never MALFORMED.
+            let placeholder = history_known && s.kept_epoch && open_begins == u32::MAX;
+            if history_known && !placeholder && open_begins as usize != s.stack.len() {
                 return ext(format!("{key}: open_begins {open_begins} but {} BEGINs are open", s.stack.len()));
             }
             s.final_entry = Some((state, open_begins));
+            s.final_placeholder = placeholder;
         }
         c.done()
     }
@@ -1027,7 +1046,7 @@ impl ExtReader {
             let history_known = !s.ever_unknown && s.protocol_error.is_none();
             let open_begins = match s.final_entry {
                 None => OpenBegins::NoFinal,
-                Some((_, ob)) if history_known => OpenBegins::Verified(ob),
+                Some((_, ob)) if history_known && !s.final_placeholder => OpenBegins::Verified(ob),
                 Some((_, ob)) => OpenBegins::Unverifiable(ob),
             };
             let mut invalid = Vec::new();

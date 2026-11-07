@@ -22,6 +22,7 @@ static int map_rc(int rc)
     case PSP_ECLOSED: return PS3DK_PROF_SPU_ECLOSED;
     case PSP_ENOTSUP: return PS3DK_PROF_SPU_ENOTSUP;
     case PSP_EINVAL: return PS3DK_PROF_SPU_EINVAL;
+    case PSP_EDEPTH: return PS3DK_PROF_SPU_EDEPTH;
     default: return PS3DK_PROF_SPU_EFAULT; /* PSP_EFAULT and anything unexpected */
     }
 }

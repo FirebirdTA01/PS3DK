@@ -425,7 +425,8 @@ static void write_final(psp_ppu *p, psp_lane *l, uint32_t state)
     le64(p, l->emitted_next);
     le64(p, l->emitted_events);
     le64(p, l->emitted_lost);
-    le32(p, (l->ever_unknown || l->protocol) ? UINT32_MAX : l->sp); /* writer placeholder when UNVERIFIABLE */
+    /* the true open count while the history is known (also across depth-zero epochs); UINT32_MAX = unknown */
+    le32(p, (l->ever_unknown || l->protocol) ? UINT32_MAX : l->sp);
     l->final_written = emit(p, C_DOMAIN_FINAL);
     if (l->res_epoch1) {
         l->res_epoch1 = 0;
@@ -602,7 +603,12 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 p->epochs_emitted++;
                 l->epoch++;
                 l->brackets_epoch = 0;
-                go_unknown(l);
+                /* the depth-zero rule (clock-mapping plan B r2 5.4; the reader applies the same rule): the history
+                 * stays known across this reason-2 EPOCH only if it was known from the start (no LOSS, no earlier
+                 * unknown state, no protocol error) and the tracked stack is empty here.  Every event before the
+                 * EPOCH slot was replayed above (close_events), so the stack is the one at the boundary. */
+                if (!l->known || l->ever_unknown || l->protocol || l->sp != 0)
+                    go_unknown(l);
             }
         } else if (kind == PSP_K_CAL) {
             uint16_t id = psp_rd16(s + 4);

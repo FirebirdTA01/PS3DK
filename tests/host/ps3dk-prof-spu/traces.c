@@ -303,8 +303,10 @@ static void t_epoch_race(void) /* r2 trace 8, as amended */
     psp_lane_end(&r.p, h->idx);
     want("race", "decrementer writes", h->pc.nwr, 1);
     e = done(&r, "t-epoch-race");
-    fprintf(e, "exit 4\nverdict complete\nepochs 2\nbrackets 4\n"); /* ids 1, 2, 4, and 5 (answered by fini) */
-    lane_line(e, h, "COMPLETE 0 1 4 0"); /* an epoch transition leaves open_begins unverifiable */
+    fprintf(e, "exit 0\nverdict complete\nepochs 2\nbrackets 4\n"); /* ids 1, 2, 4, and 5 (answered by fini) */
+    /* the write happened at depth 0 with a known history: the depth-zero rule keeps it known across EPOCH 2 */
+    lane_line(e, h, "COMPLETE 1 1 4 0");
+    fprintf(e, "open %u verified 0\n", h->lane_id);
     fprintf(e, "losses %u\n", h->lane_id);
     fclose(e);
     run_free(&r);
@@ -742,7 +744,8 @@ static void t_c4_model_epoch(void)
     fini(h);
     psp_lane_end(&r.p, h->idx);
     e = done(&r, "t-c4b-model-limit-brackets-epoch");
-    fprintf(e, "exit 4\nverdict complete\nbrackets 6\nepochs 2\n");
+    /* no events and a depth-0 write: the depth-zero rule keeps the history known, the source is RAW VALID */
+    fprintf(e, "exit 0\nverdict complete\nbrackets 6\nepochs 2\nopen %u verified 0\n", h->lane_id);
     fclose(e);
     run_free(&r);
 }
@@ -1344,6 +1347,257 @@ static void t_k3_seq(void)
     run_free(&r);
 }
 
+/* ---- the depth-zero epoch rule and the dec_write depth refusal (clock-mapping plan B r2 5.4, 5.5) ----
+ * Runtime side only: each trace asserts the FINAL's open_begins field read from the accepted chunk bytes and the
+ * drain's lane history; check_streams also rebuilds the expected field from the accepted chunks on every trace.  The
+ * reader's verdict on the same files is the driver's separate check (exit code and the "open" directive). */
+
+static void want_open(const char *trace, run *r, lane_h *h, long long exp)
+{
+    uint32_t open = 0;
+    want(trace, "FINAL accepted", final_open(r, h->lane_id, &open), 1);
+    want(trace, "FINAL open_begins", open, exp);
+}
+
+/* a decrementer write between balanced zones: the history stays known, the FINAL states the true count 0 */
+static void t_b1_depth0(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    psp_lane *pl;
+    run_init(&r, 16, 4, NULL);
+    h = lane_new(&r, 8, 1, 1);
+    pl = &r.p.lanes[h->idx];
+    zones(h, 2);
+    want("b1-depth0", "flush", flush(h), PSP_OK);
+    psp_drain(&r.p); /* EPOCH 1 and the four events */
+    want("b1-depth0", "dec_write", decw(h, 0x40000000u), PSP_OK);
+    psp_drain(&r.p); /* EPOCH 2 */
+    want("b1-depth0", "epochs", pl->epoch, 2);
+    want("b1-depth0", "history known after EPOCH 2", pl->known && !pl->ever_unknown && !pl->protocol, 1);
+    zones(h, 1);
+    want("b1-depth0", "fini", fini(h), PSP_OK);
+    want("b1-depth0", "end", psp_lane_end(&r.p, h->idx), PSP_P_OK);
+    want_open("b1-depth0", &r, h, 0);
+    want("b1-depth0", "decrementer writes", h->pc.nwr, 1);
+    e = done(&r, "t-b1-depth0");
+    fprintf(e, "exit 0\nverdict complete\nepochs 2\n");
+    lane_line(e, h, "COMPLETE 1 1 6 0");
+    fprintf(e, "open %u verified 0\nlosses %u\n", h->lane_id, h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
+/* the same, with a zone begun after the write and still open at fini: the FINAL states 1, not unknown */
+static void t_b1_depth0_open(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    run_init(&r, 16, 4, NULL);
+    h = lane_new(&r, 8, 1, 1);
+    zones(h, 1);
+    flush(h);
+    psp_drain(&r.p);
+    want("b1-depth0-open", "dec_write", decw(h, 0x40000000u), PSP_OK);
+    psp_drain(&r.p);
+    zb(h, 1); /* never ended */
+    want("b1-depth0-open", "fini", fini(h), PSP_OK);
+    psp_lane_end(&r.p, h->idx);
+    want_open("b1-depth0-open", &r, h, 1);
+    e = done(&r, "t-b1-depth0-open");
+    fprintf(e, "exit 0\nverdict complete\nepochs 2\n");
+    lane_line(e, h, "COMPLETE 1 1 3 0");
+    fprintf(e, "open %u verified 1\nlosses %u\n", h->lane_id, h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
+/* the pending-event replay at the boundary: the END that empties the stack is published by dec_write's own flush and
+ * reaches the drain in the SAME walk as the EPOCH; it is replayed before the EPOCH is judged, so the depth is 0 */
+static void t_b1_pending_end(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    psp_lane *pl;
+    run_init(&r, 16, 4, NULL);
+    h = lane_new(&r, 8, 1, 1);
+    pl = &r.p.lanes[h->idx];
+    zb(h, 0);
+    flush(h);
+    psp_drain(&r.p); /* EPOCH 1, the BEGIN: the drain's stack holds one zone */
+    want("b1-pending-end", "drain depth before", pl->sp, 1);
+    ze(h, 0);        /* staged, not published */
+    want("b1-pending-end", "dec_write", decw(h, 0x40000000u), PSP_OK); /* flush [END], then the EPOCH publication */
+    psp_drain(&r.p); /* one walk: END, EPOCH, PAD */
+    want("b1-pending-end", "epochs", pl->epoch, 2);
+    want("b1-pending-end", "history known after EPOCH 2", pl->known && !pl->ever_unknown && !pl->protocol, 1);
+    want("b1-pending-end", "drain depth after", pl->sp, 0);
+    zones(h, 1);
+    fini(h);
+    psp_lane_end(&r.p, h->idx);
+    want_open("b1-pending-end", &r, h, 0);
+    e = done(&r, "t-b1-pending-end");
+    fprintf(e, "exit 0\nverdict complete\nepochs 2\n");
+    lane_line(e, h, "COMPLETE 1 1 4 0");
+    fprintf(e, "open %u verified 0\nlosses %u\n", h->lane_id, h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
+/* a LOSS, then a depth-0 resynchronisation, then a depth-0 write: the history was unknown once, so it stays
+ * unknown and the FINAL keeps the UINT32_MAX placeholder (the rule never rewrites an unknown history) */
+static void t_b1_loss_then_depth0(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    psp_lane *pl;
+    run_init(&r, 16, 4, NULL);
+    h = lane_new(&r, 4, 1, 1);
+    pl = &r.p.lanes[h->idx];
+    zones(h, 3); /* staging 4: B E B E staged, the third zone's B E are tail losses */
+    flush(h);
+    psp_drain(&r.p); /* the events and LOSS 4+2 */
+    want("b1-loss", "ever unknown after the LOSS", pl->ever_unknown, 1);
+    zones(h, 1); /* a depth-0 BEGIN resynchronises: known again, stack empty, history not known from the start */
+    flush(h);
+    psp_drain(&r.p);
+    want("b1-loss", "resynchronised", pl->known && pl->sp == 0, 1);
+    want("b1-loss", "dec_write", decw(h, 0x40000000u), PSP_OK);
+    psp_drain(&r.p);
+    want("b1-loss", "epochs", pl->epoch, 2);
+    want("b1-loss", "unknown after EPOCH 2", pl->known, 0);
+    zones(h, 1);
+    fini(h);
+    psp_lane_end(&r.p, h->idx);
+    want_open("b1-loss", &r, h, UINT32_MAX);
+    e = done(&r, "t-b1-loss-then-depth0");
+    fprintf(e, "exit 4\nverdict complete\nepochs 2\n");
+    lane_line(e, h, "COMPLETE 0 1 8 2");
+    fprintf(e, "open %u unverifiable 4294967295\nlosses %u 4:2\n", h->lane_id, h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
+/* everything a refused dec_write could touch, captured before the call and compared after it */
+typedef struct side {
+    psp_spu s;
+    port_ctx pc;
+    uint8_t *mem;
+    size_t ring_bytes;
+    uint8_t ctl[256];
+    uint8_t *stage;
+    size_t stage_bytes;
+} side;
+
+static void side_take(side *x, run *r, lane_h *h)
+{
+    psp_lane *pl = &r->p.lanes[h->idx];
+    memcpy(&x->s, &h->s, sizeof x->s);
+    memcpy(&x->pc, &h->pc, sizeof x->pc);
+    x->ring_bytes = (size_t)r->p.cfg.ring_slots * PSP_SLOT;
+    x->mem = malloc(x->ring_bytes);
+    memcpy(x->mem, g_mem + pl->ea_ring, x->ring_bytes);
+    memcpy(x->ctl, g_mem + pl->ea_ctl, sizeof x->ctl);
+    x->stage_bytes = ((size_t)h->s.ls_cap + 2 * PSP_HEAD) * PSP_SLOT;
+    x->stage = malloc(x->stage_bytes);
+    memcpy(x->stage, h->buf, x->stage_bytes);
+}
+
+static void side_same(const char *trace, side *x, run *r, lane_h *h)
+{
+    psp_lane *pl = &r->p.lanes[h->idx];
+    want(trace, "writer state unchanged", memcmp(&x->s, &h->s, sizeof x->s), 0);
+    want(trace, "port: no channel command, DMA, decrementer read or write", memcmp(&x->pc, &h->pc, sizeof x->pc), 0);
+    want(trace, "ring unchanged", memcmp(x->mem, g_mem + pl->ea_ring, x->ring_bytes), 0);
+    want(trace, "control lines unchanged", memcmp(x->ctl, g_mem + pl->ea_ctl, sizeof x->ctl), 0);
+    want(trace, "staging unchanged", memcmp(x->stage, h->buf, x->stage_bytes), 0);
+    free(x->mem);
+    free(x->stage);
+}
+
+/* dec_write and its preflight inside a zone: EDEPTH before the initial flush, nothing flushed, written or published;
+ * flushing does not clear it; after the zone ends the same call behaves as before (and the history stays known) */
+static void t_b1_edepth(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    side x;
+    run_init(&r, 16, 4, NULL);
+    h = lane_new(&r, 8, 1, 1);
+    zones(h, 1);
+    flush(h);
+    psp_drain(&r.p);
+    zb(h, 1); /* depth 1, staged: a flush would publish it */
+    side_take(&x, &r, h);
+    want("b1-edepth", "dec_write at depth 1", decw(h, 0x40000000u), PSP_EDEPTH);
+    side_same("b1-edepth", &x, &r, h);
+    want("b1-edepth", "staged event not flushed", h->s.n, 1);
+    side_take(&x, &r, h);
+    want("b1-edepth", "preflight at depth 1", psp_spu_dec_preflight(&h->s), PSP_EDEPTH);
+    side_same("b1-edepth preflight", &x, &r, h);
+    want("b1-edepth", "flush", flush(h), PSP_OK);
+    psp_drain(&r.p);
+    want("b1-edepth", "dec_write after a flush, still at depth 1", decw(h, 0x40000000u), PSP_EDEPTH);
+    want("b1-edepth", "no decrementer write", h->pc.nwr, 0);
+    ze(h, 1);
+    want("b1-edepth", "dec_write at depth 0", decw(h, 0x40000000u), PSP_OK);
+    want("b1-edepth", "one decrementer write", h->pc.nwr, 1);
+    psp_drain(&r.p);
+    fini(h);
+    psp_lane_end(&r.p, h->idx);
+    want_open("b1-edepth", &r, h, 0);
+    e = done(&r, "t-b1-edepth");
+    fprintf(e, "exit 0\nverdict complete\nepochs 2\n");
+    lane_line(e, h, "COMPLETE 1 1 4 0");
+    fprintf(e, "open %u verified 0\nlosses %u\n", h->lane_id, h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
+/* suppressed depth: 64 open zones and one refused BEGIN (EDEPTH, no side effects); then the suppressed term alone,
+ * injected at depth 0 (not reachable through the zone calls, which suppress only at depth 64) */
+static void t_b1_edepth_suppressed(void)
+{
+    run r;
+    lane_h *h;
+    FILE *e;
+    side x;
+    run_init(&r, 256, 4, NULL);
+    h = lane_new(&r, 160, 1, 1);
+    for (int i = 0; i < 64; i++)
+        zb(h, 0);
+    zb(h, 1); /* suppressed */
+    want("b1-suppressed", "suppressed", h->s.suppressed, 1);
+    side_take(&x, &r, h);
+    want("b1-suppressed", "dec_write at depth 64 + 1 suppressed", decw(h, 7), PSP_EDEPTH);
+    side_same("b1-suppressed", &x, &r, h);
+    ze(h, 1); /* pops the suppressed BEGIN only */
+    want("b1-suppressed", "dec_write at depth 64", decw(h, 7), PSP_EDEPTH);
+    for (int i = 0; i < 64; i++)
+        ze(h, 0);
+    h->s.suppressed = 1; /* injected: the suppressed term alone */
+    side_take(&x, &r, h);
+    want("b1-suppressed", "dec_write at depth 0 with suppressed 1", decw(h, 7), PSP_EDEPTH);
+    side_same("b1-suppressed injected", &x, &r, h);
+    h->s.suppressed = 0;
+    want("b1-suppressed", "no decrementer write", h->pc.nwr, 0);
+    flush(h);
+    psp_drain(&r.p);
+    fini(h);
+    psp_lane_end(&r.p, h->idx);
+    e = done(&r, "t-b1-edepth-suppressed");
+    fprintf(e, "exit 4\nverdict complete\nepochs 1\n");
+    lane_line(e, h, "INCOMPLETE 0 3 128 0"); /* the refused BEGIN latched OVERFLOWED, as in t-depth */
+    fprintf(e, "losses %u\n", h->lane_id);
+    fclose(e);
+    run_free(&r);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3 || (strcmp(argv[2], "traces") && strcmp(argv[2], "sched"))) {
@@ -1398,6 +1652,12 @@ int main(int argc, char **argv)
     t_sink_failures();
     t_image_owned_strings();
     t_published_state();
+    t_b1_depth0();
+    t_b1_depth0_open();
+    t_b1_pending_end();
+    t_b1_loss_then_depth0();
+    t_b1_edepth();
+    t_b1_edepth_suppressed();
     if (g_order_faults)
         FAIL("%d ring loads without the post-acceptance barrier", g_order_faults);
     printf("spu-model traces=%d failures=%d\n", g_traces, g_failures);
