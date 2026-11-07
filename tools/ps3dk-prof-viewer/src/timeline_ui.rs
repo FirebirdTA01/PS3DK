@@ -57,6 +57,10 @@ pub struct TimelineState {
     pub foreign: Option<Arc<FTimeline>>,
     /// The axis also covers the finite interpolated SPU/RSX bounds ("Fit all"), not only the PPU data.
     pub axis_all: bool,
+    /// SPU ticks tooltips: append the conditional isolation-slope figure (formatting only; no rebuild).
+    pub spu_iso: bool,
+    /// The last tooltip conversion (the hovered pair only).
+    pub spu_conv: crate::timeline_spu::ConvCache,
 }
 
 impl TimelineState {
@@ -76,6 +80,8 @@ impl TimelineState {
             collapsed: [false; 3],
             foreign: None,
             axis_all: false,
+            spu_iso: false,
+            spu_conv: crate::timeline_spu::ConvCache::default(),
         }
     }
 
@@ -236,6 +242,7 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
         p.checkbox(&mut st.w32, "SPU: assume no decrementer wrap (W32)");
         p.checkbox(&mut st.show_extrapolated, "Show extrapolated SPU/RSX bars");
         p.checkbox(&mut st.axis_all, "Fit all: axis includes SPU/RSX bounds");
+        p.checkbox(&mut st.spu_iso, "SPU ticks: show the conditional isolation-slope figure in tooltips");
         if st.live {
             p.add_space(ui::SPACE_SM);
             let mut follow = st.follow;
@@ -706,10 +713,15 @@ fn draw_foreign_track(
                         painter.rect_filled(r, 2.0, color);
                         if r.width() > 40.0 {
                             let clip = r.shrink2(Vec2::new(4.0, 0.0)).intersect(area);
+                            // an SPU ticks bar is labelled with its tick count, never with a length
+                            let text = match &t.spu {
+                                Some(info) => format!("{} {}", key.0, crate::timeline_spu::tick_label(info.pair(i))),
+                                None => key.0.clone(),
+                            };
                             p.painter_at(clip).text(
                                 Pos2::new(clip.left(), r.center().y),
                                 Align2::LEFT_CENTER,
-                                &key.0,
+                                &text,
                                 FontId::proportional(11.0),
                                 Color32::WHITE,
                             );
@@ -720,10 +732,7 @@ fn draw_foreign_track(
         }
     }
     if let Some(o) = l.omitted {
-        let msg = match o {
-            Some(n) => format!("{n} bars not drawn at this zoom; zoom in"),
-            None => "additional bars omitted at this zoom (count unknown); zoom in".to_string(),
-        };
+        let msg = tf::omission_text(o);
         painter.text(area.right_bottom() - Vec2::new(4.0, 2.0), Align2::RIGHT_BOTTOM, msg, FontId::proportional(11.0), pal.warning);
     }
     // Wheel and drag act on the shared window, as on a PPU track.
@@ -747,7 +756,17 @@ fn draw_foreign_track(
             // One reverse paint-order test for bars and dense runs alike: the topmost primitive answers.
             let topmost = tf::hit_any(&l, depth, x);
             if let Some(tf::FHit::Bar(i)) = topmost {
-                let lines = tf::details(a, labels, t, i, tb.freq_hz);
+                let lines = match &t.spu {
+                    Some(info) => {
+                        let b = &t.bars[i];
+                        let mut v = crate::timeline_spu::details(info, &labels.zone(a, b.bar.image, b.bar.desc), i, tb.freq_hz);
+                        if let Some(c) = crate::timeline_spu::conversion_for(&mut st.spu_conv, index, info, i, st.spu_iso) {
+                            v.push(c);
+                        }
+                        v
+                    }
+                    None => tf::details(a, labels, t, i, tb.freq_hz),
+                };
                 resp.clone().on_hover_ui_at_pointer(|tt| {
                     for (n, line) in lines.iter().enumerate() {
                         if n == 0 {
@@ -767,6 +786,21 @@ fn draw_foreign_track(
     }
     if resp.dragged() {
         st.view.pan(&st.tl, -f64::from(resp.drag_delta().x) / wf);
+    }
+    // The lane's UNPLACED zones: never drawn, listed (at most PAINT_ROWS rows per repaint, the rest counted).
+    if let Some(info) = &t.spu {
+        if !info.table.is_empty() {
+            let image = a.capture.ext.as_ref().and_then(|x| x.lanes.get(&info.lane_out().lane_id)).map(|l| l.image_index);
+            let names = |d: u32| labels.zone(a, image, d);
+            let (rows, rest) = crate::timeline_spu::table_rows(info, &names, 0);
+            p.label(egui::RichText::new(format!("{}: zones with an UNPLACED endpoint (not drawn), by ticks", t.label)).small().color(pal.text_muted));
+            for r in rows {
+                p.label(egui::RichText::new(r).small().monospace());
+            }
+            if let Some(l) = crate::timeline_spu::not_shown_line(rest) {
+                p.label(egui::RichText::new(l).small().color(pal.warning));
+            }
+        }
     }
 }
 

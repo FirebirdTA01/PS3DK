@@ -25,4 +25,5 @@ pub mod rsx_ui;
 pub mod sha256;
 pub mod timeline;
 pub mod timeline_foreign;
+pub mod timeline_spu;
 pub mod timeline_ui;

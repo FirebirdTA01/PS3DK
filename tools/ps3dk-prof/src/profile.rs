@@ -22,8 +22,9 @@ pub const PROFILE_VERSION: u16 = 1;
 pub const DIGEST_ALG_ARCHIVE_V1: u32 = 1;
 pub const FIELD_COUNT_V1: u16 = 7;
 
-/// Premise bit names (spec 3.2), bit i = PREMISES[i].
-pub const PREMISES: [&str; 9] = ["C-PPU", "C-RSX", "A", "S", "D", "P", "R64", "E", "C-PPU-Z"];
+/// Premise bit names (spec 3.2), bit i = PREMISES[i].  Bits 9 (C-SPU) and 10 (C-ORD) are the SPU ticks slice's
+/// delta (spu-ticks slice design 4.3).
+pub const PREMISES: [&str; 11] = ["C-PPU", "C-RSX", "A", "S", "D", "P", "R64", "E", "C-PPU-Z", "C-SPU", "C-ORD"];
 pub const PREMISE_MASK: u32 = (1 << PREMISES.len()) - 1;
 pub const KIND_RSX: u32 = 1;
 pub const KIND_SPU: u32 = 2;

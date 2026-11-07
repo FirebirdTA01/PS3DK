@@ -155,10 +155,10 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         }
         // file_flags: byte 12 may be 0, FLAG_DOMAIN_EXTENSIONS or that plus FLAG_PROFILE_RECORD (bit 1 requires
         // bit 0); bytes 13..15 must be 0, as far as they are present.
-        if n > 12 && (!matches!(bytes[12], 0 | 1 | 3) || bytes[13..n].iter().any(|&b| b != 0)) {
+        if n > 12 && (!matches!(bytes[12], 0 | 1 | 3 | 7) || bytes[13..n].iter().any(|&b| b != 0)) {
             // A file without bit 1 keeps the baseline's exact message (its output is byte-identical to the baseline
-            // reader's); only a byte with bit 1 set names the new allowed value.
-            let allowed = if bytes[12] & 2 == 0 { "0 or 1" } else { "0, 1 or 3" };
+            // reader's); only a byte with bit 1 set names the new allowed values (bit 2 requires bits 0 and 1).
+            let allowed = if bytes[12] & 2 == 0 { "0 or 1" } else { "0, 1, 3 or 7" };
             return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not {allowed}"));
         }
         r.cap.incomplete.push(Incomplete::TornTail);
@@ -175,7 +175,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         return malformed(Rule::MajorVersion, format!("major version {major}"));
     }
     let profile_flag = crate::profile::FLAG_PROFILE_RECORD;
-    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag) != 0 {
+    let order_flag = crate::ext::FLAG_SPU_ORDER;
+    // bit 2 (SPU_ORDER) requires bits 0 and 1; without bit 1 every refusal keeps the baseline's exact message
+    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag) != 0
+        || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
+    {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
     }
     if file_flags & profile_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
@@ -183,7 +187,11 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
     }
     r.cap.profile_flag = file_flags & profile_flag != 0;
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
-        r.ext = Some(crate::ext::ExtReader::new());
+        r.ext = Some(if file_flags & order_flag != 0 {
+            crate::ext::ExtReader::with_order()
+        } else {
+            crate::ext::ExtReader::new()
+        });
     }
     r.cap.minor_warning = minor > 0;
 
@@ -232,7 +240,10 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
             }
         }
         let profile_ty = r.cap.profile_flag && ty == crate::profile::CHUNK_PROFILE;
-        let ext_ty = r.ext.is_some() && (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&ty);
+        let ext_ty = r.ext.as_ref().is_some_and(|x| {
+            (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&ty)
+                || (ty == crate::ext::CHUNK_SPU_ORDER && x.order_enabled())
+        });
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }

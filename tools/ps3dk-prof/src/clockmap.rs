@@ -1024,6 +1024,9 @@ or W32 (SPU, only when selected: f = 4294967295 - dec, no decrementer wrap withi
 and no rate is claimed; EXTRAPOLATED bounds are model predictions, not containment; each source's own STRUCTURE / \
 RAW VALIDITY / COVERAGE facts precede its epochs and are unchanged by this analysis";
 
+/// Printed under each SPU source of a file with order records (spu-ticks slice design 9.3).
+pub const SPU_ORDER_LINE: &str = "  SPU: premise A is not supported for SPU (probe-results-r1); these conditional bounds are not used for ticks or placement";
+
 fn tb_rat(r: &Rat) -> String {
     if r.den.is_one() {
         r.to_string()
@@ -1094,6 +1097,10 @@ pub fn lines_with(x: &ExtCapture, c: &CaptureMap, extra: &dyn Fn(&EpochMap) -> V
     let mut out = vec![HEADER.to_string()];
     for s in &x.sources {
         out.extend(crate::report::source_fact_lines(s));
+        if x.order.is_some() && matches!(s.key, SourceKey::Lane(_)) {
+            // only files with SPU order records (file_flags bit 2); every other file's output is unchanged
+            out.push(SPU_ORDER_LINE.to_string());
+        }
         if c.not_mapped.contains(&s.key) {
             out.push(format!("  {}: not mapped (decoded epochs inconsistent)", s.key));
         }

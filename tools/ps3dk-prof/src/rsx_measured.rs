@@ -480,19 +480,19 @@ const UNIT_RECORD_OPS: u64 = 3;
 const UNIT_FIXED_OPS: u64 = 15;
 
 /// The capture meter with the independent work counter.
-struct Ops {
-    meter: Meter,
+pub(crate) struct Ops {
+    pub(crate) meter: Meter,
     limit: u64,
-    work: Work,
-    exhausted: bool,
+    pub(crate) work: Work,
+    pub(crate) exhausted: bool,
 }
 
 impl Ops {
-    fn new(limit: u64) -> Ops {
+    pub(crate) fn new(limit: u64) -> Ops {
         Ops { meter: Meter::new(limit, Limit::Capture), limit, work: Work::default(), exhausted: false }
     }
     /// Charge `n` operations before the work they pay for; refused once the capture budget is exhausted.
-    fn charge(&mut self, n: u64) -> Result<(), Limit> {
+    pub(crate) fn charge(&mut self, n: u64) -> Result<(), Limit> {
         if self.exhausted {
             return Err(Limit::Capture);
         }
@@ -508,7 +508,7 @@ impl Ops {
         }
     }
     /// Count `n` steps actually done (independent of the charges).
-    fn step(&mut self, n: u64) {
+    pub(crate) fn step(&mut self, n: u64) {
         self.work.steps = self.work.steps.saturating_add(n);
         if self.exhausted {
             self.work.after_exhaustion = self.work.after_exhaustion.saturating_add(n);
@@ -538,12 +538,12 @@ impl Ops {
 }
 
 /// A map operation on a BTreeMap of n entries: at most 11 key comparisons per node over at most log6(n) + 1 levels.
-fn map_cost(n: usize) -> u64 {
+pub(crate) fn map_cost(n: usize) -> u64 {
     6 * (clog2(n as u64 + 1) + 1)
 }
 
 /// The first index of `v` whose element is not `before` (`v` partitioned by `before`).  Charges the probes first.
-fn lower<T>(ops: &mut Ops, v: &[T], before: impl Fn(&T) -> bool) -> Result<usize, Limit> {
+pub(crate) fn lower<T>(ops: &mut Ops, v: &[T], before: impl Fn(&T) -> bool) -> Result<usize, Limit> {
     ops.charge(clog2(v.len() as u64 + 1) + 1)?;
     let (mut lo, mut hi) = (0, v.len());
     while lo < hi {
@@ -560,7 +560,7 @@ fn lower<T>(ops: &mut Ops, v: &[T], before: impl Fn(&T) -> bool) -> Result<usize
 
 /// A stable bottom-up merge sort.  Charges first: at most n - 1 comparisons and n copies per level over
 /// ceil(log2 n) levels, plus the two buffers.
-fn msort<T: Copy>(ops: &mut Ops, v: &mut Vec<T>, less: impl Fn(&T, &T) -> bool) -> Result<(), Limit> {
+pub(crate) fn msort<T: Copy>(ops: &mut Ops, v: &mut Vec<T>, less: impl Fn(&T, &T) -> bool) -> Result<(), Limit> {
     let n = v.len();
     let n64 = n as u64;
     ops.charge(n64.saturating_mul(2).saturating_mul(clog2(n64)).saturating_add(n64.saturating_mul(2)))?;
@@ -632,14 +632,14 @@ fn na(ops: &mut Ops, m: &mut BTreeMap<String, u64>, k: impl Into<String>, n: u64
 }
 
 /// A checked count addition, charged: Ok(false) on overflow (the entry is left unchanged).
-fn bump(ops: &mut Ops, m: &mut BTreeMap<String, u64>, k: impl Into<String>, n: u64) -> Result<bool, Limit> {
+pub(crate) fn bump(ops: &mut Ops, m: &mut BTreeMap<String, u64>, k: impl Into<String>, n: u64) -> Result<bool, Limit> {
     ops.charge(map_cost(m.len()) + 1)?;
     ops.step(1);
     Ok(bump_free(m, k, n))
 }
 
 /// The same, uncharged: for the refusal record and for [`publish`], which charges for all of its updates first.
-fn bump_free(m: &mut BTreeMap<String, u64>, k: impl Into<String>, n: u64) -> bool {
+pub(crate) fn bump_free(m: &mut BTreeMap<String, u64>, k: impl Into<String>, n: u64) -> bool {
     let e = m.entry(k.into()).or_default();
     match e.checked_add(n) {
         Some(v) => {

@@ -1187,6 +1187,17 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
             rc = PS3DK_PROF_EINVAL;
             goto fail_block;
         }
+#ifdef PS3DK_PROF_WITH_PROFILE
+        /* SPU_ORDER records (spu-ticks slice design 3, delta D3): with a PROFILE record (file_flags bit 1) every
+         * SPU lane this extension creates carries LANE_CREATED, the per-walk DRAINED + DRAIN_TB pairs, BRACKET_AT and
+         * ORDER_FINAL, and the file declares them with file_flags bit 2 (which requires bits 0 and 1).  Enabled
+         * once, before any lane exists; the reservation is 2 records per lane the capture may create. */
+        if (psp_ppu_order(p->spu) != PSP_P_OK) {
+            rc = PS3DK_PROF_EINVAL;
+            goto fail_block;
+        }
+        p->ext_flags |= 4;
+#endif
     }
     if (x.gpu_max) {
         p->gpu_max = x.gpu_max;

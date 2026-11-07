@@ -362,7 +362,9 @@ fn t0_flags_one_torn_before_any_domain_is_incomplete() {
 fn t0_unknown_flag_bits_are_malformed_in_every_byte() {
     // Bit 1 (PROFILE_RECORD, profile-format-spec.md 2) is now defined: alone (2) it is FileFlagsNonzero (it requires
     // bit 0); with bit 0 (3) the file must carry a PROFILE at chunk 2, which this file does not (ProfileMissing).
-    for flags in [2u32, 4, 7, 0x100, 0x10000, 0x8000_0000] {
+    // Bit 2 (SPU_ORDER, spu-ticks slice design 3) requires bits 0 and 1: 4, 5 and 6 are FileFlagsNonzero; 7 is
+    // defined and also needs the PROFILE.
+    for flags in [2u32, 4, 5, 6, 0x100, 0x10000, 0x8000_0000] {
         let mut f = ext_file(std_ext());
         f.flags = flags;
         dump(&format!("t0-flags-{flags:x}"), &f.bytes());
@@ -371,11 +373,13 @@ fn t0_unknown_flag_bits_are_malformed_in_every_byte() {
             o => panic!("flags {flags:#x}: {o:?}"),
         }
     }
-    let mut f = ext_file(std_ext());
-    f.flags = 3;
-    match load(&f.bytes()) {
-        Outcome::Malformed(m) => assert_eq!(m.rule, Rule::ProfileMissing, "flags 3 without a PROFILE"),
-        o => panic!("flags 3: {o:?}"),
+    for flags in [3u32, 7] {
+        let mut f = ext_file(std_ext());
+        f.flags = flags;
+        match load(&f.bytes()) {
+            Outcome::Malformed(m) => assert_eq!(m.rule, Rule::ProfileMissing, "flags {flags} without a PROFILE"),
+            o => panic!("flags {flags}: {o:?}"),
+        }
     }
 }
 
@@ -679,6 +683,186 @@ fn t4_open_begins_mismatch_with_known_history_is_malformed() {
     let l = source(&v, SourceKey::Lane(LANE));
     assert_eq!((l.open_begins, l.open_at_end(), l.raw_valid), (OpenBegins::Verified(1), Some(1), true));
     assert!(l.coverage_unknown.iter().any(|c| c.contains("OPEN at FINAL")));
+}
+
+// ---- T4b: the depth-zero epoch rule (clock-mapping plan B r2 5.4) --------------------------------------------------
+// Reader side only: these fixtures are written here, not by the runtime; the runtime is tested separately in the SPU
+// host model (tests/host/ps3dk-prof-spu).
+
+const B: u8 = 1;
+const E: u8 = 2;
+const UNKNOWN_OPEN: u32 = u32::MAX;
+
+/// One SPU lane: epoch 1 (start), `body`, and a FINAL (FINALIZED) with `next`, `events`, `lost` and `open`.
+fn lane_final(body: Vec<Chunk>, next: u64, events: u64, lost: u64, open: u32) -> Vec<Chunk> {
+    let mut v = vec![
+        domains(&[(SPU_D, 1, LANE)]),
+        images(0, b"spu-build", 2),
+        lanes(&[(LANE, SPU_D, 0, 1)]),
+        epochs(&[(SPU_D, 1, 1, 0)]),
+    ];
+    v.extend(body);
+    v.push(finals(&[(LANE, 1, 1, next, events, lost, open)]));
+    v
+}
+
+fn lane_source(name: &str, ext: Vec<Chunk>) -> SourceReport {
+    source(&sources(name, &ext_file(ext).bytes()), SourceKey::Lane(LANE)).clone()
+}
+
+/// A zone in epoch 1, a reason-2 transition at depth 0, a zone in epoch 2.
+fn depth0_body() -> Vec<Chunk> {
+    vec![
+        spu_events(LANE, 1, 0, &[(990, 0, B, 0), (980, 0, E, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 2, &[(0xFFFF_0000, 1, B, 0), (0xFFFE_0000, 1, E, 0)]),
+    ]
+}
+
+#[test]
+fn b1_depth0_transition_keeps_the_history_known_and_verified() {
+    let l = lane_source("b1-depth0", lane_final(depth0_body(), 4, 4, 0, 0));
+    assert_eq!((l.censored(), l.unpaired(), l.paired()), (0, 0, 2));
+    assert_eq!((l.open_begins, l.open_at_end(), l.raw_valid), (OpenBegins::Verified(0), Some(0), true));
+    assert!(l.invalid.is_empty(), "{:?}", l.invalid);
+    let (code, out) = cli(&ext_file(lane_final(depth0_body(), 4, 4, 0, 0)).bytes(), "b1-depth0");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("RAW VALIDITY VALID"), "{out}");
+}
+
+#[test]
+fn b1_depth0_transition_with_a_zone_open_at_the_final_is_verified_with_its_count() {
+    let mut body = depth0_body();
+    body.push(spu_events(LANE, 2, 4, &[(0xFFFD_0000, 0, B, 0)]));
+    let l = lane_source("b1-depth0-open", lane_final(body, 5, 5, 0, 1));
+    assert_eq!((l.open_begins, l.open_at_end(), l.raw_valid), (OpenBegins::Verified(1), Some(1), true));
+}
+
+#[test]
+fn b1_pending_end_in_the_chunk_before_the_epoch_closes_the_stack_first() {
+    // the END that empties the stack is in its own chunk immediately before the EPOCH (the drain closes the walk's
+    // events before it emits the EPOCH); the transition is then at depth 0
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, B, 0)]),
+        spu_events(LANE, 1, 1, &[(980, 0, E, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 2, &[(0xFFFF_0000, 1, B, 0), (0xFFFE_0000, 1, E, 0)]),
+    ];
+    let l = lane_source("b1-pending-end", lane_final(body, 4, 4, 0, 0));
+    assert_eq!((l.censored(), l.paired(), l.open_begins, l.raw_valid), (0, 2, OpenBegins::Verified(0), true));
+}
+
+#[test]
+fn b1_depth1_transition_censors_and_stays_unverifiable() {
+    // today's rule, unchanged: a BEGIN open at the transition is CENSORED and the history becomes UNKNOWN
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, B, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 1, &[(0xFFFF_0000, 0, E, 0)]),
+    ];
+    let l = lane_source("b1-depth1", lane_final(body, 2, 2, 0, 0));
+    assert_eq!((l.censored(), l.unpaired(), l.paired()), (1, 1, 0));
+    assert_eq!((l.open_begins, l.raw_valid), (OpenBegins::Unverifiable(0), false));
+}
+
+#[test]
+fn b1_loss_then_a_depth0_transition_stays_unknown() {
+    // LOSS, then a depth-0 resynchronisation (stack known and empty again), then a depth-0 transition: the history
+    // was unknown once, so the transition does not keep it; the FINAL's value is reported, never verified
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, B, 0), (980, 0, E, 0)]),
+        loss(LANE, 1, 2, 2),
+        spu_events(LANE, 1, 4, &[(960, 0, B, 0), (950, 0, E, 0)]),
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 6, &[(0xFFFF_0000, 1, B, 0), (0xFFFE_0000, 1, E, 0)]),
+    ];
+    for (tag, open) in [("zero", 0u32), ("placeholder", UNKNOWN_OPEN), ("other", 3)] {
+        let l = lane_source(&format!("b1-loss-depth0-{tag}"), lane_final(body.clone(), 8, 6, 2, open));
+        assert_eq!((l.open_begins, l.raw_valid), (OpenBegins::Unverifiable(open), false), "{tag}");
+        assert_eq!((l.censored(), l.paired()), (0, 3), "{tag}");
+    }
+}
+
+#[test]
+fn b1_an_already_unknown_history_after_a_protocol_error_stays_unknown() {
+    let body = vec![
+        spu_events(LANE, 1, 0, &[(990, 0, E, 0)]), // END on an empty stack: PROTOCOL ERROR
+        epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
+        spu_events(LANE, 2, 1, &[(0xFFFF_0000, 1, B, 0), (0xFFFE_0000, 1, E, 0)]),
+    ];
+    let l = lane_source("b1-protocol-depth0", lane_final(body, 3, 3, 0, 0));
+    assert!(l.protocol_error.is_some());
+    assert_eq!((l.open_begins, l.raw_valid, l.open_at_end()), (OpenBegins::Unverifiable(0), false, None));
+}
+
+#[test]
+fn b1_a_second_transition_at_depth1_ends_the_known_history() {
+    let mut body = depth0_body();
+    body.push(spu_events(LANE, 2, 4, &[(0xFFFD_0000, 0, B, 0)]));
+    body.push(epochs(&[(SPU_D, 3, 2, 0xFFFF_FFFF)]));
+    body.push(spu_events(LANE, 3, 5, &[(0xFFFF_0000, 0, E, 0)]));
+    let l = lane_source("b1-depth0-then-depth1", lane_final(body, 6, 6, 0, 0));
+    assert_eq!((l.censored(), l.unpaired(), l.paired()), (1, 1, 2));
+    assert_eq!((l.open_begins, l.raw_valid), (OpenBegins::Unverifiable(0), false));
+}
+
+#[test]
+fn b1_final_mismatch_after_a_depth0_transition_is_malformed() {
+    expect_malformed(
+        "b1-final-mismatch-high",
+        &ext_file(lane_final(depth0_body(), 4, 4, 0, 1)).bytes(),
+        "open_begins 1 but 0 BEGINs are open",
+    );
+    let mut body = depth0_body();
+    body.push(spu_events(LANE, 2, 4, &[(0xFFFD_0000, 0, B, 0)]));
+    expect_malformed(
+        "b1-final-mismatch-low",
+        &ext_file(lane_final(body, 5, 5, 0, 0)).bytes(),
+        "open_begins 0 but 1 BEGINs are open",
+    );
+}
+
+#[test]
+fn b1_historical_unknown_final_after_a_depth0_transition_stays_unverifiable() {
+    // a runtime that predates the rule wrote UINT32_MAX after every transition: kept as written, never read as 0,
+    // never MALFORMED, never verified
+    let ext = lane_final(depth0_body(), 4, 4, 0, UNKNOWN_OPEN);
+    let l = lane_source("b1-historical-placeholder", ext.clone());
+    assert_eq!(l.open_begins, OpenBegins::Unverifiable(UNKNOWN_OPEN));
+    assert!(!l.raw_valid && l.invalid.iter().any(|r| r == "open_begins not verified"), "{:?}", l.invalid);
+    assert_eq!((l.censored(), l.paired(), l.open_at_end()), (0, 2, Some(0)));
+    let (code, out) = cli(&ext_file(ext).bytes(), "b1-historical");
+    assert_eq!(code, Some(4), "{out}");
+    // with a zone still open at the FINAL, the placeholder is still not a count
+    let mut body = depth0_body();
+    body.push(spu_events(LANE, 2, 4, &[(0xFFFD_0000, 0, B, 0)]));
+    let l = lane_source("b1-historical-placeholder-open", lane_final(body, 5, 5, 0, UNKNOWN_OPEN));
+    assert_eq!((l.open_begins, l.raw_valid, l.open_at_end()), (OpenBegins::Unverifiable(UNKNOWN_OPEN), false, Some(1)));
+}
+
+#[test]
+fn b1_the_placeholder_without_a_kept_transition_is_still_malformed() {
+    // one epoch, history known: UINT32_MAX is no count and the rule does not apply (unchanged)
+    let body = vec![spu_events(LANE, 1, 0, &[(990, 0, B, 0), (980, 0, E, 0)])];
+    expect_malformed(
+        "b1-placeholder-single-epoch",
+        &ext_file(lane_final(body, 2, 2, 0, UNKNOWN_OPEN)).bytes(),
+        "open_begins 4294967295 but 0 BEGINs are open",
+    );
+}
+
+#[test]
+fn b1_other_transition_reasons_still_go_unknown() {
+    // the rule is the drain's: only a reason-2 (decrementer write) transition keeps the history; 5 and 6 do not
+    for reason in [5u8, 6] {
+        let body = vec![
+            spu_events(LANE, 1, 0, &[(990, 0, B, 0), (980, 0, E, 0)]),
+            epochs(&[(SPU_D, 2, reason, 0)]),
+            spu_events(LANE, 2, 2, &[(0xFFFF_0000, 1, B, 0), (0xFFFE_0000, 1, E, 0)]),
+        ];
+        let l = lane_source(&format!("b1-reason-{reason}"), lane_final(body, 4, 4, 0, 0));
+        assert_eq!((l.open_begins, l.raw_valid), (OpenBegins::Unverifiable(0), false), "reason {reason}");
+    }
 }
 
 // ---- T5: raw verdicts and frames ------------------------------------------------------------------------------------
@@ -1464,13 +1648,18 @@ fn cv_two_epochs_independent_with_an_epoch_boundary_loss() {
 }
 
 #[test]
-fn cv_epoch_2_transition_without_loss_is_classified_with_its_invalidity_kept() {
+fn cv_epoch_2_transition_without_loss_is_classified_with_its_validity_from_the_final() {
     let body = vec![
         spu_events(LANE, 1, 0, &[(990, 0, M, 0), (990, 0, M, 0)]),
         epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
         spu_events(LANE, 2, 2, &[(0xFFFF_FFFE, 0, M, 0), (0xFFFF_E930, 0, M, 0)]),
     ];
-    let (v, s) = variation("cv-epoch2", lane_only(body, (1, 4, 4, 0)));
+    // a depth-0 transition with the true count in the FINAL: valid under the depth-zero rule
+    let (v, s) = variation("cv-epoch2", lane_only(body.clone(), (1, 4, 4, 0)));
+    assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0)), epv(2, 2, 0, Moving, Some(0))]);
+    assert_eq!((s.structure, s.raw_valid), (Structure::Complete, true));
+    // the same with the older runtime's UINT32_MAX placeholder: classified the same, its invalidity kept
+    let (v, s) = variation("cv-epoch2-placeholder", lane_final(body, 4, 4, 0, u32::MAX));
     assert_eq!(v, vec![epv(1, 2, 0, Static, Some(0)), epv(2, 2, 0, Moving, Some(0))]);
     assert_eq!((s.structure, s.raw_valid), (Structure::Complete, false));
 }
@@ -1566,7 +1755,8 @@ fn cv_report_lines() {
         spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
         epochs(&[(SPU_D, 3, 2, 0xFFFF_FFFF)]),
     ];
-    let r = rendered(&ext_file(lane_only(body, (1, 4, 4, 0))).bytes());
+    // the older runtime's UINT32_MAX FINAL keeps open_begins unverifiable across the depth-0 transitions
+    let r = rendered(&ext_file(lane_final(body, 4, 4, 0, u32::MAX)).bytes());
     let q = " | source RAW VALIDITY is NOT VALID: open_begins not verified";
     let tail = "| order and raw endpoints only (no durations)";
     for line in [
@@ -1791,7 +1981,8 @@ fn cm_cli_exit_status_is_the_check_status() {
             epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
             spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
         ];
-        ext_file(lane_only(body, (1, 4, 4, 0))).bytes()
+        // invalid: the older runtime's UINT32_MAX FINAL after a depth-0 transition stays unverifiable
+        ext_file(lane_final(body, 4, 4, 0, u32::MAX)).bytes()
     };
     let mut bad = std_ext();
     bad[4] = calibration(SPU_D, 1, 0, &[(1000, 20, 20)]);
@@ -1819,14 +2010,18 @@ fn cm_cli_prints_the_source_facts_beside_the_results() {
     let cases = [
         (
             "transition",
-            lane_only(
+            // the older runtime's UINT32_MAX FINAL after a depth-0 transition: open_begins stays unverifiable
+            lane_final(
                 vec![
                     cal(),
                     spu_events(LANE, 1, 0, &[(950, 0, M, 0), (950, 0, M, 0)]),
                     epochs(&[(SPU_D, 2, 2, 0xFFFF_FFFF)]),
                     spu_events(LANE, 2, 2, &[(5, 0, M, 0), (4, 0, M, 0)]),
                 ],
-                (1, 4, 4, 0),
+                4,
+                4,
+                0,
+                u32::MAX,
             ),
             "open_begins not verified",
         ),

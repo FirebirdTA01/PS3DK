@@ -50,7 +50,10 @@ typedef struct psp_port {
 
 #define PSP_HEAD 4u /* headroom slots before and after the staged events */
 
-enum { PSP_OK = 0, PSP_EBUSY = 1, PSP_EAGAIN = 2, PSP_ECLOSED = 3, PSP_EFAULT = 4, PSP_ENOTSUP = 5, PSP_EINVAL = 6 };
+/* 7 is the core-internal ENOSPC (psp_spu.c).  EDEPTH: dec_write refused at a nonzero zone depth or with suppressed
+ * BEGINs outstanding, before any flush, write or publication; flushing never clears it (not retryable). */
+enum { PSP_OK = 0, PSP_EBUSY = 1, PSP_EAGAIN = 2, PSP_ECLOSED = 3, PSP_EFAULT = 4, PSP_ENOTSUP = 5, PSP_EINVAL = 6,
+       PSP_EDEPTH = 8 };
 
 /* flush phases, exposed so the host scheduler can interleave them */
 enum { PSP_FL_IDLE = 0, PSP_FL_PLANNED, PSP_FL_PUT, PSP_FL_WAITED };
@@ -94,7 +97,9 @@ int psp_spu_flush_publish(psp_spu *s);
 int psp_spu_fini(psp_spu *s);
 int psp_spu_fini_close(psp_spu *s); /* the CLOSED publication after fini's flush (the scheduler's step) */
 int psp_spu_dec_write(psp_spu *s, uint32_t v);
-/* dec_write in phases: preflight (after a completed flush), then the write, then the publication */
+/* dec_write in phases: preflight (after a completed flush), then the write, then the publication.  Both dec_write and
+ * preflight return EDEPTH first when a zone is open (depth != 0) or a BEGIN is suppressed: an epoch never starts
+ * inside a zone, so the drain can keep the lane history known across it (clock-mapping plan B r2 5.4, 5.5). */
 int psp_spu_dec_preflight(psp_spu *s);
 void psp_spu_dec_commit(psp_spu *s, uint32_t v);
 

@@ -55,6 +55,8 @@ typedef struct ps3dk_prof_spu_desc psp_desc;
  * is a MODEL limit, never the reader's */
 typedef struct psp_limits {
     uint32_t lanes_life, lanes_live, images, epochs, loss_chunks, brackets_epoch, brackets_file;
+    uint32_t order_records; /* SPU_ORDER records per file, every kind (spu-ticks delta D3.1, D3.3); used only after
+                             * psp_ppu_order */
 } psp_limits;
 
 typedef struct psp_cfg {
@@ -62,6 +64,10 @@ typedef struct psp_cfg {
     uint64_t mem_max;
     uint32_t cancel_after; /* drain opportunities without an answer (private: 1024) */
 } psp_cfg;
+
+/* the host-model order-record mutants (psp_ppu.test_order_mutant) */
+enum { PSP_OM_NONE = 0, PSP_OM_ONE_AT_A_TIME, PSP_OM_END_START_EPOCH, PSP_OM_END_CUR_EPOCH, PSP_OM_STALE_CURSOR,
+       PSP_OM_EVENTS_BEFORE_CURSOR, PSP_OM_TB_BEFORE_LOADS };
 
 enum { PSP_P_OK = 0, PSP_P_EINVAL, PSP_P_ENOSPC, PSP_P_ENOMEM, PSP_P_ESTOPPED, PSP_P_ETIMEDOUT, PSP_P_EBUSY };
 
@@ -101,6 +107,12 @@ typedef struct psp_lane {
     uint64_t out_tb0;
     uint32_t out_epoch, out_waits;
     uint64_t stale, cancelled, unstable;
+    /* order records (psp_ppu_order): LANE_CREATED's tb, the cursor at the last DRAINED decision (admitted or not),
+     * the lane's accepted records of kinds 1-4 and its refused ones, and which of its two reserved records (LANE_CREATED,
+     * ORDER_FINAL) are still held in the ledger */
+    uint64_t tb_created, order_through, ord_emitted, ord_dropped;
+    uint64_t tb_pre; /* TEST ONLY: the PSP_OM_TB_BEFORE_LOADS mutant's early tb */
+    int res_created, res_ofinal;
     /* replay of the emitted prefix with the reader's pairing rules (spec 3) */
     int known, ever_unknown, protocol;
     uint32_t sp;
@@ -151,12 +163,16 @@ typedef struct psp_ppu {
     uint32_t nimages, lanes_created, lanes_live;
     uint64_t epochs_emitted, epochs_reserved, loss_emitted, loss_reserved, brackets_file;
     uint64_t mem_used;
+    int order;                              /* psp_ppu_order was called: SPU_ORDER records are emitted */
+    uint64_t order_emitted, order_reserved; /* the order ledger: emitted + reserved <= lim.order_records */
     int sealed, sink_failed, corrupt;
     /* the abstract lane-table lock: every drainer access to lane metadata or memory (a step, an end, the seal, the
      * declarations) happens inside it; a lane is freed or its entry reused only outside it (psp_lane_end_poll).  The
      * real mutex/atomics are deferred; this host model is single-threaded, so the boundary is the API call. */
     int cs;
     int test_no_terminal;   /* TEST ONLY: the no-reservation control of trace C2 (never set by a library caller) */
+    int test_order_mutant;  /* TEST ONLY: PSP_OM_* order-record mutants of the host-model controls (never set by a
+                             * library caller; 0 = the contract) */
     /* owner coverage: a lane with an owner is declared only once covered() says the owner's THREADS identity was
      * accepted; NULL = always covered (the host model) */
     int (*covered)(void *ctx, uint32_t incarnation, uint32_t slot, uint32_t generation);
@@ -173,6 +189,11 @@ psp_limits psp_reader_limits(void);
 int psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem, const psp_out *out,
                  const psp_storage *st);
 void psp_ppu_fini(psp_ppu *p);
+/* SPU_ORDER records (chunk 18; spu-ticks delta D3), switched on right after psp_ppu_init and before any lane is
+ * created: reserves a LANE_CREATED and an ORDER_FINAL for each of lim.lanes_life lanes; EINVAL when 2 lanes_life >
+ * lim.order_records or a lane exists.  The caller then writes file_flags bit 2 and a PROFILE chunk.  Without it the
+ * drain emits no order record and every chunk is as before. */
+int psp_ppu_order(psp_ppu *p);
 int psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d, uint32_t n,
                   uint32_t *index);
 /* a descriptor source: get(ctx, i, out) yields record i with BOUNDED lengths (name 1..512, file 0..512, no NUL

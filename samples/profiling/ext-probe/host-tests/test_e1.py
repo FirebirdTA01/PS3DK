@@ -370,6 +370,31 @@ def main():
     verdict('tsan judge selftest (controls built from this run\'s real report)',
             j.returncode == 0 and re.search(r'^E1-TSAN-JUDGE PASS \d+/\d+$', j.stdout, re.M) is not None, j.stdout[-300:])
 
+    # ---- the lane OBSERVATION wording must state the current epoch rule ----
+    # both cases (raw_valid 0 and 1): a depth-zero epoch change keeps the lane known;
+    # the history is unverifiable only after a loss or at non-zero depth.  The
+    # self-test is a single-sourced assertion inside check_e1_capture.py.
+    ow = run(py(CHECK, '--selftest-observation'), out / 'obs-wording.log')
+    verdict('observation wording: both cases state the depth-zero rule',
+            ow.returncode == 0 and re.search(r'^E1-OBSERVATION-WORDING PASS 2/2$', ow.stdout, re.M) is not None,
+            ow.stdout[-300:])
+    # mutation control: revert the stale "NOT VALID expected" claim and the
+    # self-test must reject it (not vacuous)
+    src = CHECK.read_text()
+    reverted = src.replace(
+        "return f'OBSERVATION lane {lane_id}: raw_valid={raw_valid} ({LANE_VALID_NOTE})'",
+        "return f'OBSERVATION lane {lane_id}: raw_valid={raw_valid} (NOT VALID expected by the epoch rule)'")
+    if reverted != src:
+        p = out / 'check_stale.py'
+        p.write_text(reverted)
+        mut = run(py(p, '--selftest-observation'), out / 'obs-wording-mut.log')
+        verdict('wording self-test rejects the stale-wording revert (not vacuous)',
+                mut.returncode == 1 and 'NOT VALID expected' in mut.stdout,
+                mut.stdout[-200:])
+    else:
+        verdict('wording self-test rejects the stale-wording revert (not vacuous)',
+                False, 'mutation did not apply')
+
     # ---- acceptance: the clean run, then its damage controls (the checker runs the reader itself) ----
     acc = out / 'accept'
     acc.mkdir()
@@ -436,7 +461,7 @@ def main():
                                       'events=0 lost=0 losses=0 epochs=1 paired=0 marks=0 unpaired=0 censored=0 '
                                       'frames_resolved=0 frames_unresolved=0 frames_none=0\nend\n'), 'source rows'),
         'lane-263-events': (good.replace('events=264', 'events=263', 1), 'events=263'),
-        'lane-no-final': (good.replace('raw_valid=0 final=1', 'raw_valid=0 final=none', 1), 'final=none'),
+        'lane-no-final': (good.replace('raw_valid=1 final=1', 'raw_valid=1 final=none', 1), 'final=none'),
         'gpu-89-events': (good.replace('raw_valid=1 final=1 events=90', 'raw_valid=1 final=1 events=89'), 'events=89'),
         'epoch1-only': (good.replace('events kind=lane id=1 epoch=2 ev=begin desc=probe-e2 count=64\n', ''), 'events rows'),
         'wrong-descriptor': (good.replace('epoch=1 ev=mark desc=probe-mark count=4', 'epoch=1 ev=mark desc=probe-e1 count=4'),

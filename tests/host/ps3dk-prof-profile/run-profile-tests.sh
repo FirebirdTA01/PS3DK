@@ -76,6 +76,30 @@ step report-profile-line 0 expect reader-report "SYS_SW_VERSION=NOT_READABLE HW_
 CAPD=$(ls "$O"/cap-d/*.prof 2>/dev/null | head -1)
 step reader-plain-measured 0 "$READER" measured "$CAPD"
 step plain-no-profile 0 expect reader-plain-measured "rsx mapping: no PROFILE record (file_flags bit 1 clear)"
+# SPU order records on the REAL EXT capture path (spu-ticks slice delta D3): the runtime built with SPU lanes, PROFILE
+# and the test hooks, the I2 host producers (real psp_spu core over the host line emulation), case basic-thread;
+# the file must carry file_flags 7 and, per lane, LANE_CREATED first, at least one DRAINED+DRAIN_TB pair and
+# ORDER_FINAL immediately before the lane's DOMAIN_FINAL (order_check.py), and the reader must accept it.
+I2=$R/tests/host/ps3dk-prof-spu-int
+WRAP=-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=posix_memalign,--wrap=aligned_alloc
+order_build() {
+    local D=$O/obj-order
+    build_members "$D" "-DPS3DK_PROF_WITH_PROFILE -DPS3DK_PROF_TEST_HOOKS" || return 1
+    ar rcsD "$D/members.a" "$D"/*.o || return 1
+    python3 -I -B "$R/sdk/libps3dkprof/tools/archive_digest.py" emit "$D/members.a" --id SPU-HOST --premises 1689         --kinds 2 > "$D/prof_identity.c" || return 1
+    $CC $FL -DPS3DK_PROF_WITH_PROFILE -c "$D/prof_identity.c" -o "$D/prof_identity.o" || return 1
+    $CC $FL -DPS3DK_PROF_WITH_PROFILE -DPS3DK_PROF_TEST_HOOKS -c "$I2/i2_test.c" -o "$D/i2_test.o" || return 1
+    $CC -pthread "$D"/*.o -o "$O/i2-order" $WRAP
+}
+step build-order 0 order_build
+mkdir "$O/cap-order"
+step write-order 0 "$O/i2-order" basic-thread "$O/cap-order"
+CAPO=$(ls "$O"/cap-order/*.prof 2>/dev/null | head -1)
+step order-records 0 python3 -I -B "$H/order_check.py" "$CAPO"
+step reader-order-check 0 "$READER" check "$CAPO"
+step reader-order-ticks 0 "$READER" spu-ticks "$CAPO"
+step order-ticks-records 0 expect reader-order-ticks "(file_flags bit 2)"
+step order-ticks-final 1 expect reader-order-ticks "ORDER COVERAGE UNKNOWN"
 echo "overall=$([ $bad -eq 0 ] && echo PASS || echo FAIL)" >> "$O/SUMMARY.txt"
 cat "$O/SUMMARY.txt"
 exit $bad

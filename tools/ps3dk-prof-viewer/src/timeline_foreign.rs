@@ -136,6 +136,9 @@ pub struct FTrack {
     /// The coverage the gaps cannot speak for: pairs not placed, censored, unpaired, open, loss records and epochs
     /// without an inventory (from the reader's counts; "unknown" where the reader does not know).
     pub unplaced: String,
+    /// An SPU lane of a file with order records: its ticks rows (the bars come from causal placement, not from
+    /// the clock mapping).  None for every other track.
+    pub spu: Option<crate::timeline_spu::SpuTrackInfo>,
     tiles: Vec<Vec<u32>>,
     wide: Vec<u32>,
     /// The finite extent the tiles cover (relative), or None when no bar has a finite outer extent.
@@ -229,6 +232,7 @@ fn new_track(s: &FtSource) -> FTrack {
         max_depth: 0,
         gaps: Vec::new(),
         unplaced: unplaced_text(&s.counts),
+        spu: None,
         tiles: Vec::new(),
         wide: Vec::new(),
         span: None,
@@ -681,6 +685,14 @@ pub fn layout(t: &FTrack, view: &View, width: f64, caps: QueryCaps, show_extrapo
     FLayout { draws: em.draws, inspected, omitted }
 }
 
+/// The stated omission of a layout: an exact count when every candidate was inspected, else "count unknown".
+pub fn omission_text(o: Option<usize>) -> String {
+    match o {
+        Some(n) => format!("{n} bars not drawn at this zoom; zoom in"),
+        None => "additional bars omitted at this zoom (count unknown); zoom in".to_string(),
+    }
+}
+
 /// What is under the pointer: a bar or tick (its index), or a dense run (count, extrapolated).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FHit {
@@ -772,6 +784,30 @@ pub fn dense_text(count: usize, extrapolated: bool) -> String {
     )
 }
 
+/// Gives every SPU lane track of an order-record file its ticks info: the header, the refusal and the text of what
+/// the row does not draw.  A drawing refusal of the view build budget (already set) is kept.
+pub fn attach_spu(v: &mut FTimeline, infos: &mut std::collections::BTreeMap<u32, crate::timeline_spu::SpuTrackInfo>) {
+    for t in &mut v.tracks {
+        let SourceKey::Lane(id) = t.source else { continue };
+        let Some(info) = infos.remove(&id) else { continue };
+        let outside = t.header.find("; outside the PPU data range").map(|i| t.header[i..].to_string());
+        t.header = info.header.clone();
+        if let Some(o) = outside {
+            t.header.push_str(&o);
+        }
+        if t.refusal.is_none() && info.pair_of_bar.is_empty() && info.header.contains("nothing drawn") {
+            t.refusal = Some(info.header.clone());
+        }
+        t.unplaced = format!(
+            "Not shown on this row: {} zone(s) with an UNPLACED endpoint (listed under the lane), {} zone(s) not              retained",
+            info.table.len(),
+            info.not_retained
+        );
+        t.spu = Some(info);
+    }
+    v.caption = format!("{} {}", v.caption, crate::timeline_spu::CAPTION);
+}
+
 // ---- cache ---------------------------------------------------------------------------------------------------------
 
 /// The Document's one-entry cache, keyed by W32 (a success and a refusal alike).
@@ -779,6 +815,8 @@ pub fn dense_text(count: usize, extrapolated: bool) -> String {
 pub struct ForeignTimelineSlot {
     entry: Mutex<Option<(bool, Arc<FTimeline>)>>,
     pub builds: AtomicU64,
+    /// The SPU ticks analysis (files with order records), built once per Document whatever the W32 choice.
+    pub spu: crate::timeline_spu::SpuSlot,
 }
 
 impl std::fmt::Debug for ForeignTimelineSlot {
@@ -807,7 +845,7 @@ impl ForeignTimelineSlot {
         let v = Arc::new(match &a.capture.ext {
             None => FTimeline { w32, origin: tl.start, ..FTimeline::default() },
             Some(x) => {
-                let ft = foreign_timeline_of(
+                let mut ft = foreign_timeline_of(
                     x,
                     Premises { spu_nowrap: w32 },
                     &Budgets::default(),
@@ -815,7 +853,32 @@ impl ForeignTimelineSlot {
                     &Retention::default(),
                     &TimelineBudgets::default(),
                 );
-                if tl.has_data {
+                // With SPU order records the SPU rows come from the ticks analysis (no W32 needed); every other
+                // file keeps the clock-mapping rows unchanged.
+                let mut spu_notice = None;
+                let infos = if x.order.is_some() {
+                    let sv = self.spu.get(a);
+                    spu_notice = sv.result.as_ref().and_then(|r| r.exhausted_at.as_ref().map(|e| {
+                        let at = e.lane.map_or("the capture".to_string(), |l| format!("lane {l}"));
+                        let later = match r.not_listed {
+                            Some(n) => format!("{n} later lanes not listed"),
+                            None => "later lanes not listed (count unknown)".to_string(),
+                        };
+                        format!(
+                            "SPU ticks analysis: capture budget exhausted at {at} in {}: it and every later SPU lane                              is UNSUPPORTED-RESOURCE; {later}",
+                            e.phase
+                        )
+                    }));
+                    let (srcs, infos) = crate::timeline_spu::sources(&sv, &TimelineBudgets::default());
+                    ft.sources.retain(|s| !matches!(s.source, SourceKey::Lane(_)));
+                    let mut all = srcs;
+                    all.append(&mut ft.sources);
+                    ft.sources = all;
+                    Some(infos)
+                } else {
+                    None
+                };
+                let mut v = if tl.has_data {
                     build(a, &ft, tl.start, tl.end - tl.start, w32)
                 } else {
                     let extent = foreign_extent(&ft);
@@ -823,7 +886,17 @@ impl ForeignTimelineSlot {
                     let mut v = build(a, &ft, lo, hi - lo, w32);
                     v.extent = extent;
                     v
+                };
+                if let Some(mut infos) = infos {
+                    attach_spu(&mut v, &mut infos);
                 }
+                if let Some(n) = spu_notice {
+                    v.notice = Some(match v.notice.take() {
+                        Some(o) => format!("{o}; {n}"),
+                        None => n,
+                    });
+                }
+                v
             }
         });
         *e = Some((w32, Arc::clone(&v)));

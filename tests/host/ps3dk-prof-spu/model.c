@@ -10,6 +10,17 @@ uint8_t *g_mem;
 uint64_t g_tb;
 int g_weak;
 int g_failures;
+int g_order_next;
+
+/* every mftb value with whether the access before it was a ring load (and where): the DRAIN_TB ordering check */
+typedef struct tbrec {
+    uint64_t v, ea, n;
+    int after_load;
+} tbrec;
+static tbrec *g_tblog;
+static size_t g_ntb, g_captb;
+static int g_last_load;
+static uint64_t g_last_ea, g_last_n;
 
 /* ---- allocator over the simulated memory: first fit among freed blocks of the same size, else bump ---- */
 typedef struct blk {
@@ -69,6 +80,8 @@ void mem_reset(void)
     g_top = 4096; /* EA 0 is never handed out */
     g_nwq = 0;
     g_tb = 1000;
+    g_ntb = 0;
+    g_last_load = 0;
 }
 
 static int m_alloc(void *ctx, size_t size, uint64_t *ea)
@@ -157,6 +170,7 @@ static int is_gen_word(uint64_t ea)
 static uint64_t m_ld64(void *c, uint64_t ea)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 8, "load");
     if (is_gen_word(ea))
         g_need_bar = 1;
@@ -165,6 +179,7 @@ static uint64_t m_ld64(void *c, uint64_t ea)
 static void m_ld_line(void *c, uint64_t ea, uint8_t out[128])
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 128, "line load");
     memcpy(out, g_mem + ea, 128);
 }
@@ -177,16 +192,21 @@ static void m_ld_slots(void *c, uint64_t ea, uint8_t *out, size_t n)
         g_order_faults++;
     }
     memcpy(out, g_mem + ea, n);
+    g_last_load = 1;
+    g_last_ea = ea;
+    g_last_n = n;
 }
 static void m_st64(void *c, uint64_t ea, uint64_t v)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 8, "store");
     psp_be64(g_mem + ea, v);
 }
 static void m_st16(void *c, uint64_t ea, uint16_t v)
 {
     (void)c;
+    g_last_load = 0;
     access_check(ea, 2, "store");
     psp_be16(g_mem + ea, v);
 }
@@ -196,7 +216,26 @@ static void m_bar(void *c)
     g_need_bar = 0; /* lwsync / sync */
 }
 static void m_isync(void *c) { (void)c; }
-static uint64_t m_mftb(void *c) { (void)c; return g_tb += 7; }
+static uint64_t m_mftb(void *c)
+{
+    (void)c;
+    g_tb += 7;
+    if (g_ntb == g_captb) {
+        g_captb = g_captb ? g_captb * 2 : 256;
+        g_tblog = realloc(g_tblog, sizeof *g_tblog * g_captb);
+    }
+    g_tblog[g_ntb++] = (tbrec){g_tb, g_last_ea, g_last_n, g_last_load};
+    g_last_load = 0; /* barriers between the loads and this read do not reset it; any other access does */
+    return g_tb;
+}
+
+int tb_after_ring_load(uint64_t tb, uint64_t lo, uint64_t n)
+{
+    for (size_t i = 0; i < g_ntb; i++)
+        if (g_tblog[i].v == tb)
+            return g_tblog[i].after_load && g_tblog[i].ea >= lo && g_tblog[i].ea + g_tblog[i].n <= lo + n;
+    return 0;
+}
 
 /* ---- SPU port shim ---- */
 static int injected(port_ctx *pc)
@@ -327,6 +366,8 @@ void run_init_cap(run *r, uint32_t ring_slots, uint32_t lanes_max, uint64_t mem_
     psp_cfg cfg = {ring_slots, lanes_max, mem_max, 1024};
     psp_limits rl = psp_reader_limits();
     memset(r, 0, sizeof *r);
+    r->order = g_order_next;
+    g_order_next = 0;
     mem_reset();
     r->fail_sink_at = -1;
     r->m = (psp_mem){NULL, m_ld64, m_ld_line, m_ld_slots, m_st64, m_st16, m_bar, m_bar, m_isync, m_mftb, m_alloc, m_free};
@@ -340,6 +381,8 @@ void run_init_cap(run *r, uint32_t ring_slots, uint32_t lanes_max, uint64_t mem_
                           1u << 20};
         if (psp_ppu_init(&r->p, &cfg, lim ? lim : &rl, &r->m, &r->o, &st) != 0)
             FAIL("ppu init");
+        if (r->order && psp_ppu_order(&r->p) != PSP_P_OK)
+            FAIL("ppu order");
     }
     if (psp_image_add(&r->p, (const uint8_t *)"\x02model-image", 12, g_descs, 3, &r->image) != 0)
         FAIL("image add");
@@ -355,6 +398,7 @@ void run_free(run *r)
     for (j = 0; j < r->nl; j++) {
         free(r->lanes[j]->buf);
         free(r->lanes[j]->truth);
+        free(r->lanes[j]->cal);
         free(r->lanes[j]);
     }
     psp_ppu_fini(&r->p);
@@ -374,6 +418,9 @@ lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
     }
     pl = &r->p.lanes[h->idx];
     h->lane_id = pl->lane_id;
+    h->domain_id = pl->domain_id;
+    h->ea_ring = pl->ea_ring;
+    h->ring_bytes = (uint64_t)r->p.cfg.ring_slots * PSP_SLOT;
     h->pc.dec = 0xFFFFFF00u;
     h->pc.tag_mask = 0xA5u; /* the app's mask: every library wait must restore it */
     h->pc.s = &h->s;
@@ -515,7 +562,7 @@ void write_capture(run *r, const char *dir, const char *name)
     wb(&f, "PS3DKPRF", 8);
     wle(&f, 1, 2);
     wle(&f, 0, 2);
-    wle(&f, 1, 4); /* file_flags: DOMAIN_EXTENSIONS */
+    wle(&f, r->order ? 7 : 1, 4); /* file_flags: DOMAIN_EXTENSIONS (+ PROFILE_RECORD + SPU_ORDER) */
     wstr(&p, "app");
     wstr(&p, "test-build-0001");
     wstr(&p, "0.26.0");
@@ -537,6 +584,37 @@ void write_capture(run *r, const char *dir, const char *name)
     wle(&p, 79800000, 8);
     wle(&p, 1000, 8);
     frame(&f, &seq, 2, p.b, p.n);
+    if (r->order) { /* the PROFILE record (profile-format-spec 3): an SPU ticks premise set, kind SPU */
+        static const uint8_t st[7] = {3, 3, 1, 3, 2, 2, 1}, wd[7] = {4, 4, 8, 4, 1, 1, 40};
+        p.n = 0;
+        wle(&p, 1, 2);
+        wle(&p, 0, 2);
+        wle(&p, 9, 1);
+        wb(&p, "SPU-MODEL", 9);
+        wle(&p, 1, 4);
+        for (int k = 0; k < 32; k++)
+            wle(&p, 0x5A, 1);
+        wle(&p, 1689, 4); /* C-PPU S D E C-SPU C-ORD */
+        wle(&p, 2, 4);
+        wle(&p, 7, 2);
+        for (int k = 0; k < 7; k++) {
+            wle(&p, (uint64_t)k + 1, 2);
+            wle(&p, st[k], 1);
+            wle(&p, wd[k], 1);
+            if (k == 2)
+                wle(&p, 79800000, 8);
+            else if (k == 4)
+                wle(&p, 0, 1);
+            else if (k == 5)
+                wle(&p, 0, 1);
+            else if (k == 6)
+                for (int b = 0; b < 40; b++)
+                    wle(&p, (uint64_t)b, 1);
+            else
+                wle(&p, 0, 4);
+        }
+        frame(&f, &seq, 17, p.b, p.n);
+    }
     for (i = 0; i < r->nch; i++)
         frame(&f, &seq, r->ch[i].type, r->ch[i].data, r->ch[i].len);
     if (!r->p.sink_failed) {
@@ -595,6 +673,21 @@ void accepted_counts(run *r, uint32_t lane_id, uint64_t *next, uint64_t *events,
     *next = *events + *lost;
 }
 
+int final_open(run *r, uint32_t lane_id, uint32_t *open)
+{
+    for (size_t i = 0; i < r->nch; i++) {
+        const uint8_t *d = r->ch[i].data;
+        if (r->ch[i].type != 16)
+            continue;
+        for (uint32_t e = 0; e < rle32x(d); e++)
+            if (rle32x(d + 4 + 36 * e) == lane_id && d[4 + 36 * e + 4] == 1) {
+                *open = rle32x(d + 4 + 36 * e + 32);
+                return 1;
+            }
+    }
+    return 0;
+}
+
 void check_stats(run *r, lane_h *h, const char *name)
 {
     psp_lane_stats st;
@@ -622,6 +715,53 @@ FILE *expect_open(const char *dir, const char *name)
 static uint32_t rle32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint64_t rle64(const uint8_t *p) { return rle32(p) | (uint64_t)rle32(p + 4) << 32; }
 
+/* the open-begins history, rebuilt here from the accepted chunk bytes only (not from the drain's state): known from
+ * the start; a LOSS makes it unknown for good; a reason-2 EPOCH > 1 keeps it only when it was always known, with no
+ * protocol error and an empty stack (the depth-zero rule); while unknown, a depth-0 BEGIN resynchronises */
+typedef struct ob_hist {
+    int known, ever, protocol;
+    uint32_t sp;
+    uint16_t desc[64];
+    uint8_t depth[64];
+} ob_hist;
+
+static void ob_unknown(ob_hist *o)
+{
+    o->sp = 0;
+    o->known = 0;
+    o->ever = 1;
+}
+
+static void ob_event(ob_hist *o, uint8_t kind, uint16_t desc, uint8_t depth)
+{
+    if (o->protocol)
+        return;
+    if (!o->known) {
+        if (kind == PSP_K_BEGIN && depth == 0) {
+            o->known = 1;
+            o->desc[0] = desc;
+            o->depth[0] = 0;
+            o->sp = 1;
+        }
+        return;
+    }
+    if (kind == PSP_K_BEGIN) {
+        if (depth != o->sp || o->sp == 64) {
+            o->protocol = 1;
+        } else {
+            o->desc[o->sp] = desc;
+            o->depth[o->sp++] = depth;
+        }
+    } else if (kind == PSP_K_MARK) {
+        if (depth != o->sp)
+            o->protocol = 1;
+    } else if (o->sp && o->desc[o->sp - 1] == desc && o->depth[o->sp - 1] == depth) {
+        o->sp--;
+    } else {
+        o->protocol = 1;
+    }
+}
+
 int check_streams(run *r, const char *name)
 {
     uint32_t j;
@@ -631,15 +771,27 @@ int check_streams(run *r, const char *name)
         uint64_t next = 0, events = 0, lost = 0;
         int fin = 0;
         size_t i;
+        ob_hist ob = {1, 0, 0, 0, {0}, {0}};
         for (i = 0; i < r->nch; i++) {
             const uint8_t *d = r->ch[i].data;
-            if (r->ch[i].type == 13 && rle32(d) == h->lane_id) {
+            if (r->ch[i].type == 9) {
+                for (uint32_t e = 0; e < rle32(d); e++) {
+                    const uint8_t *x = d + 4 + 32 * e;
+                    if (rle32(x) != h->domain_id || rle32(x + 4) <= 1)
+                        continue;
+                    if (x[8] != 2 || !ob.known || ob.ever || ob.protocol || ob.sp)
+                        ob_unknown(&ob);
+                }
+            } else if (r->ch[i].type == 13 && rle32(d) == h->lane_id) {
                 uint64_t first = rle64(d + 8), n = rle32(d + 16), k;
                 if (fin || first != next) {
                     FAIL("%s lane %u: SPU_EVENTS first %llu, want %llu", name, h->lane_id, (unsigned long long)first,
                          (unsigned long long)next);
                     bad = 1;
                 }
+                for (k = 0; k < n; k++)
+                    ob_event(&ob, d[20 + 8 * k + 6], (uint16_t)(d[20 + 8 * k + 4] | d[20 + 8 * k + 5] << 8),
+                             d[20 + 8 * k + 7]);
                 for (k = 0; k < n; k++) {
                     const uint8_t *e = d + 20 + 8 * k;
                     uint64_t q = first + k, t = q - h->tbase;
@@ -664,6 +816,7 @@ int check_streams(run *r, const char *name)
                 }
                 next += n;
                 lost += n;
+                ob_unknown(&ob);
             } else if (r->ch[i].type == 16) {
                 uint32_t cnt = rle32(d), e;
                 for (e = 0; e < cnt; e++) {
@@ -671,6 +824,14 @@ int check_streams(run *r, const char *name)
                     if (rle32(f) != h->lane_id || f[4] != 1)
                         continue;
                     fin++;
+                    {
+                        uint32_t want = (ob.ever || ob.protocol) ? UINT32_MAX : ob.sp;
+                        if (rle32(f + 32) != want) {
+                            FAIL("%s lane %u: FINAL open_begins %u, the accepted chunks give %u", name, h->lane_id,
+                                 rle32(f + 32), want);
+                            bad = 1;
+                        }
+                    }
                     if (rle64(f + 8) != next || rle64(f + 16) != events || rle64(f + 24) != lost) {
                         FAIL("%s lane %u: FINAL %llu/%llu/%llu, emitted %llu/%llu/%llu", name, h->lane_id,
                              (unsigned long long)rle64(f + 8), (unsigned long long)rle64(f + 16),
