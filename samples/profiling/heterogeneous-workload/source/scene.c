@@ -16,6 +16,8 @@
 #include "light_fpo.h"
 #include "heavy_fpo.h"
 #include <ps3dk/prof.h>
+#include "../../overhead-bench/common/ob_timer.h"
+scene_tb g_scene_tb;
 #if SAMPLE_PROF_EXT
 #include "prof_ext_rt.h"
 #include "prof_gpu.h"
@@ -113,6 +115,7 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
     sf.antiAlias=GCM_SURFACE_CENTER_1;sf.width=width;sf.height=height;
     float scale[4]={width/2.0f,-(float)height/2.0f,0.5f,0};
     float offset[4]={width/2.0f,height/2.0f,0.5f,0};
+    g_scene_tb.submit_begin=ob_tb();
     {
         PS3DK_PROF_ZONE("render.submit");
 #if SAMPLE_PROF_EXT
@@ -159,6 +162,8 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
     cellGcmResetFlipStatus();
     if(cellGcmSetFlip(ctx,current)){failed=1;return -1;}
     cellGcmFlush(ctx);++submitted;
+    g_scene_tb.submit_end=ob_tb();
+    g_scene_tb.flipwait_begin=ob_tb();
     {
         PS3DK_PROF_ZONE("render.flip_wait");
         uint64_t start=sample_now_us();
@@ -170,6 +175,7 @@ int scene_render(int heavy,const char *phase,unsigned workers,uint64_t compute_u
             usleep(200);
         }
     }
+    g_scene_tb.flipwait_end=ob_tb();
     __asm__ volatile("sync" ::: "memory");
     *gpu_begin=cellGcmGetTimeStamp(0);*gpu_end=cellGcmGetTimeStamp(1);
     *gpu_valid=*gpu_begin!=0 && *gpu_end>=*gpu_begin;

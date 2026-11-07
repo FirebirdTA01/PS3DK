@@ -8,6 +8,32 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/memory.h>
+#include <sys/sys_time.h>
+#include "../../overhead-bench/common/ob_timer.h"
+/* Plan A r2 A-C4: the LV2 user-memory query at the same program points in every arm (a CSV MEM row each).
+ * items = 1 when the query returned 0, digest = its rc; a failed query writes UNAVAILABLE in both memory fields,
+ * never a number (the verifier refuses a zero or a number from a failed query). */
+static void sample_mem(FILE *log,unsigned point)
+{
+    sys_memory_info_t m={0,0};
+    int rc=sys_memory_get_user_memory_size(&m);
+    if(rc==0)
+        fprintf(log,"MEM,0,%u,0,0,1,%d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,%u,%u,0,0\n",point,rc,(unsigned)m.total_user_memory,
+                (unsigned)m.available_user_memory);
+    else
+        fprintf(log,"MEM,0,%u,0,0,0,%d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,UNAVAILABLE,UNAVAILABLE,0,0\n",point,rc);
+    printf("WORKLOAD_MEM point=%s rc=%d total=%u available=%u\n",point==0?"before_init":point==1?"after_init":"after_shutdown",
+           rc,(unsigned)m.total_user_memory,(unsigned)m.available_user_memory);
+}
+/* an elapsed-time field: end - begin, or NA when end < begin (a regressed reading is never exported as a huge
+ * unsigned duration) */
+static const char *el(char *b,unsigned long n,uint64_t begin,uint64_t end)
+{
+    if(end<begin)return "NA";
+    snprintf(b,n,"%llu",(unsigned long long)(end-begin));
+    return b;
+}
 #if SAMPLE_LIVE
 #include "live.h"
 #endif
@@ -74,7 +100,10 @@ int main(void)
     if(fd<0){printf("WORKLOAD_FAIL log-open errno=%d\n",errno);return 1;}
     FILE *log=fdopen(fd,"w");
     if(!log){close(fd);return 1;}
-    fprintf(log,"kind,frame,phase,sequence,lane,items,digest,compute_us,frame_us,spu_dec_begin,spu_dec_end,gpu_begin,gpu_end,gpu_valid\n");
+    fprintf(log,"kind,frame,phase,sequence,lane,items,digest,compute_us,frame_us,spu_dec_begin,spu_dec_end,gpu_begin,gpu_end,gpu_valid"
+                ",compute_elapsed_tb,frame_elapsed_tb,submit_elapsed_tb,flipwait_elapsed_tb,nonflip_elapsed_tb,drain_elapsed_tb"
+                ",profcall_elapsed_tb,tb_freq,spu_dec_written,mem_total,mem_available,spe_dispatch_tb,spe_complete_tb\n");
+    uint64_t tb_freq=sys_time_get_timebase_frequency(),drain_t0=0,drain_t1=0;
     printf("WORKLOAD_BEGIN abi=%s profiling=%d live=%d csv=%s phase_seconds=%u session_seconds=%u\n",
            SAMPLE_ABI_NAME,PS3DK_PROF,SAMPLE_LIVE,path,(unsigned)SAMPLE_PHASE_SECONDS,(unsigned)SAMPLE_SESSION_SECONDS);
     scene_owned=1;
@@ -84,6 +113,7 @@ int main(void)
         int poll=scene_poll();if(poll<0)goto done;if(poll>0){rc=0;goto done;}
         if(scene_render(0,"No-input idle baseline",0,0,0,&gpu_begin,&gpu_end,&gpu_valid))goto done;
     }
+    sample_mem(log,0);
 #if SAMPLE_PROF_EXT
     /* EXT order (design r2): the group first (its worker count sizes the lanes), then init_ex, the owner thread,
      * the image and one lane per worker, then the workers start with the lane EAs; the GPU domain attaches on a
@@ -113,6 +143,7 @@ int main(void)
     prof_owned=1;
     if(PS3DK_PROF_THREAD_BEGIN("main")){puts("WORKLOAD_FAIL profiler-thread");goto done;}
 #endif
+    sample_mem(log,1);
 #if SAMPLE_LIVE
     {
         /* The live link serves this run's capture file; it never changes what is captured. */
@@ -127,7 +158,7 @@ int main(void)
 #endif
     uint64_t start=sample_now_us();int previous=-1;
     for(;;){
-        uint64_t begin=sample_now_us(),elapsed=begin-start;
+        uint64_t begin=sample_now_us(),elapsed=begin-start,frame_tb0=ob_tb();
         int poll=scene_poll();if(poll<0)goto done;if(poll>0)break;
         if(SAMPLE_SESSION_SECONDS && elapsed>=(uint64_t)SAMPLE_SESSION_SECONDS*1000000)break;
         int phase=work_phase(elapsed,(uint64_t)SAMPLE_PHASE_SECONDS*1000000);
@@ -146,7 +177,7 @@ int main(void)
 #endif
         if(sequence==UINT32_MAX){puts("WORKLOAD_FAIL sequence-limit");goto done;}
         ++sequence;
-        work_result result={0,0};uint64_t compute_begin=sample_now_us();
+        work_result result={0,0};uint64_t compute_begin=sample_now_us(),compute_tb0=ob_tb(),spe_t0=0,spe_t1=0;
         if(phase==0 || phase==3){
             PS3DK_PROF_ZONE("compute.ppu_serial");
 #if SAMPLE_PROF_EXT
@@ -155,6 +186,7 @@ int main(void)
 #endif
             result=work_partition(0,1,WORK_ITEMS);
         }else{
+            spe_t0=ob_tb(); /* Plan A r2 2.3: the enclosing PPU interval of this sequence's jobs begins */
             {
                 PS3DK_PROF_ZONE("compute.spe_dispatch");
 #if SAMPLE_PROF_EXT
@@ -175,6 +207,7 @@ int main(void)
                     usleep(100);
                 }
             }
+            spe_t1=ob_tb(); /* every worker's slot for this sequence observed: the interval ends */
 #if SAMPLE_PROF_EXT
             pool_done_ext();
 #endif
@@ -183,23 +216,47 @@ int main(void)
                 result.digest^=s->digest;result.count+=s->count;
             }
         }
-        uint64_t compute_us=sample_now_us()-compute_begin;
+        uint64_t compute_tb1=ob_tb(),compute_us=sample_now_us()-compute_begin;
         if(result.count!=WORK_ITEMS || result.digest!=WORK_DIGEST){puts("WORKLOAD_FAIL compute-result");goto done;}
         ++checked;
         if(scene_render(phase>=2,names[phase],pool_count(),compute_us,frame_us,&gpu_begin,&gpu_end,&gpu_valid)){
             puts("WORKLOAD_FAIL render/present");goto done;
         }
+        uint64_t frame_tb1=ob_tb();
         frame_us=sample_now_us()-begin;
+        /* the timer baseline of one profiler call pair (an empty zone; in the plain arm the macros are empty) */
+        uint64_t pc0=ob_tb();
+        {
+            PS3DK_PROF_ZONE("timing.profcall");
+        }
+        uint64_t pc1=ob_tb();
         /* Export after timing; these buffered writes are not SPE compute cost.
          * The next dispatch cannot reuse worker slots until this loop ends. */
         if(phase==1 || phase==2)for(unsigned i=0;i<pool_count();++i){
             const volatile work_slot *s=pool_slot(i);
-            fprintf(log,"SPE,%u,%d,%u,%u,%u,%08x,0,0,%u,%u,0,0,0\n",frames,phase,sequence,i,s->count,s->digest,s->begin_dec,s->end_dec);
+            fprintf(log,"SPE,%u,%d,%u,%u,%u,%08x,0,0,%u,%u,0,0,0,0,0,0,0,0,0,0,0,%u,0,0,%llu,%llu\n",frames,phase,sequence,i,
+                    s->count,s->digest,s->begin_dec,s->end_dec,s->reserved[1]==SAMPLE_DEC_WRITTEN,
+                    (unsigned long long)spe_t0,(unsigned long long)spe_t1);
         }
-        fprintf(log,"FRAME,%u,%d,%u,0,%u,%08x,%llu,%llu,0,0,%llu,%llu,%d\n",frames,phase,sequence,result.count,result.digest,
-                (unsigned long long)compute_us,(unsigned long long)frame_us,(unsigned long long)gpu_begin,(unsigned long long)gpu_end,gpu_valid);
+        /* elapsed timebase ticks (Plan A r2 2.1/2.2): nonflip = frame - flip wait (still contains SPE waits, scheduling
+         * and other waits; not CPU time); drain = the drain after the PREVIOUS frame (0 for the first).  A field whose
+         * end reading is below its begin is NA; nonflip is NA when frame or flip wait is NA or flip wait > frame. */
+        char b_c[24],b_f[24],b_s[24],b_w[24],b_n[24],b_d[24],b_p[24];
+        int f_ok=frame_tb1>=frame_tb0,w_ok=g_scene_tb.flipwait_end>=g_scene_tb.flipwait_begin;
+        uint64_t f_tb=frame_tb1-frame_tb0,fw_tb=g_scene_tb.flipwait_end-g_scene_tb.flipwait_begin;
+        const char *nonflip=f_ok && w_ok && fw_tb<=f_tb ? el(b_n,sizeof b_n,fw_tb,f_tb) : "NA";
+        fprintf(log,"FRAME,%u,%d,%u,0,%u,%08x,%llu,%llu,0,0,%llu,%llu,%d,%s,%s,%s,%s,%s,%s,%s,%llu,0,0,0,0,0\n",frames,
+                phase,sequence,result.count,result.digest,(unsigned long long)compute_us,(unsigned long long)frame_us,
+                (unsigned long long)gpu_begin,(unsigned long long)gpu_end,gpu_valid,
+                el(b_c,sizeof b_c,compute_tb0,compute_tb1),el(b_f,sizeof b_f,frame_tb0,frame_tb1),
+                el(b_s,sizeof b_s,g_scene_tb.submit_begin,g_scene_tb.submit_end),
+                el(b_w,sizeof b_w,g_scene_tb.flipwait_begin,g_scene_tb.flipwait_end),nonflip,
+                el(b_d,sizeof b_d,drain_t0,drain_t1),el(b_p,sizeof b_p,pc0,pc1),(unsigned long long)tb_freq);
         ++frames;
-        if(PS3DK_PROF_DRAIN()!=0 || ferror(log)){puts("WORKLOAD_FAIL capture/log");goto done;}
+        drain_t0=ob_tb();
+        int drc=PS3DK_PROF_DRAIN();
+        drain_t1=ob_tb();
+        if(drc!=0 || ferror(log)){puts("WORKLOAD_FAIL capture/log");goto done;}
     }
     rc=0;
 done:
@@ -215,11 +272,12 @@ done:
     if(pool_owned && pool_close()!=0)rc=1;
     if(prof_owned && PS3DK_PROF_SHUTDOWN()!=0)rc=1;
 #endif
+    sample_mem(log,2);
 #if SAMPLE_LIVE
     sample_live_end(); /* after shutdown: a connected viewer receives END first */
 #endif
     if(scene_owned)scene_close();
-    fprintf(log,"END,%u,%u,0,0,%u,%d,0,0,0,0,0,0,0\n",frames,phase_seen,checked,rc);
+    fprintf(log,"END,%u,%u,0,0,%u,%d,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n",frames,phase_seen,checked,rc);
     if(fflush(log) || fsync(fileno(log)))rc=1;
     if(fclose(log))rc=1;
     printf("WORKLOAD_END frames=%u checked=%u phase_mask=%u rc=%d\n",frames,checked,phase_seen,rc);
