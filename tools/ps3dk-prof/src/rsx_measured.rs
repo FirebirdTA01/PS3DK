@@ -475,30 +475,24 @@ fn reduce_end(m: &mut Meter, e: End) -> Result<End, Limit> {
 /// margin is the minimum over the two prediction edges; an edge with an infinite prediction contributes no
 /// finite distance and is skipped.  Whole ticks are the floor of the exact rational distance.
 fn margin_ticks(lo: &End, hi: &End, tb0: i128, tb1: i128) -> u64 {
-    let dist = |e: &End| -> Option<u64> {
-        match e {
-            End::NegInf | End::PosInf => None,
-            End::At { value, .. } => {
-                // value = value.num / value.den with value.den > 0 (Rat is normalized).
-                let v = &value.num;
-                let d = &value.den;
-                // v < tb0*den iff value is to the left of the observed interval (v < tb0).
-                let v_lt = v < &(BigInt::from(tb0) * d);
-                let v_gt = v > &(BigInt::from(tb1) * d);
-                if v_lt {
-                    let num = BigInt::from(tb0) * d - v;
-                    Some((num / d).try_into().unwrap_or(u64::MAX))
-                } else if v_gt {
-                    let num = v.clone() - (BigInt::from(tb1) * d);
-                    Some((num / d).try_into().unwrap_or(u64::MAX))
-                } else {
-                    Some(0)
-                }
-            }
+    // The slack before a contradiction: how far the observation [tb0, tb1] could move before it no longer meets
+    // the prediction [lo, hi], i.e. min(tb1 - lo, hi - tb0), in whole ticks rounded down; 0 when it does not meet
+    // it.  An infinite end gives no limit on that side.
+    let slack = |num: BigInt, d: &BigInt| -> u64 {
+        if num.sign() == num_bigint::Sign::Minus {
+            0
+        } else {
+            (num / d).try_into().unwrap_or(u64::MAX)
         }
     };
-    let dl = dist(lo);
-    let dh = dist(hi);
+    let dl = match lo {
+        End::At { value, .. } => Some(slack(BigInt::from(tb1) * &value.den - &value.num, &value.den)),
+        _ => None,
+    };
+    let dh = match hi {
+        End::At { value, .. } => Some(slack(value.num.clone() - BigInt::from(tb0) * &value.den, &value.den)),
+        _ => None,
+    };
     match (dl, dh) {
         (Some(a), Some(b)) => a.min(b),
         (Some(a), None) => a,

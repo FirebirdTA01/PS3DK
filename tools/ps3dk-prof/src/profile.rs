@@ -236,10 +236,11 @@ pub struct TableEntry {
 }
 
 /// The runtime digests of the two RSX-R1 archives measured on the console (ILP32 and LP64 builds of the same
-/// sources), as printed by the archive's verify step.
+/// sources), as printed by the archive's verify step.  The digest leaves out the SDK version text, so these
+/// stay valid across version bumps until the runtime code changes.
 const RSX_R1_DIGESTS: [&str; 2] = [
-    "39dcb52ae3a1dc034b3974490c886f9935f049dcf854aed254ebae5e4e9e1fca",
-    "5b53c967cadf272c4b19746668a7b2deab3418eb06ff93e2bca55183fc9b480d",
+    "1664b32fc5957c273120d6ef4548b0fe289f5a0a807dd06676b4a704bd902690",
+    "d5c0fe7d9e9251e7674481b4e3fd86952a832365723be5598d9b848192a14fcb",
 ];
 
 fn digest_from_hex(s: &str) -> [u8; 32] {
@@ -254,8 +255,8 @@ fn digest_from_hex(s: &str) -> [u8; 32] {
 /// references (Plan B r2 4.3).
 ///
 /// RSX-R1 covers RSX units only.  Evidence: two console captures of the heterogeneous-workload sample, one per data
-/// model, each with 17 brackets, every GPU pair interpolated, the held-out bracket test 8 of 8 decisive and none
-/// contradicted, and the same slope within the fitted bounds in both data models.
+/// model, each with 17 brackets, every GPU pair interpolated, the held-out bracket test (odd 8 of 8, even 7 of 7) decisive and none
+/// contradicted in both the odd and even passes, and the same slope within the fitted bounds in both data models.
 pub fn builtin_table() -> Vec<TableEntry> {
     vec![TableEntry {
         profile_id: "RSX-R1".into(),
@@ -272,8 +273,8 @@ pub fn builtin_table() -> Vec<TableEntry> {
             (F_EXT_CONFIG, FieldRule::Any("each capture's held-out bracket test checks its own map".into())),
         ],
         evidence: vec![
-            "console capture, ILP32, heterogeneous-workload, 4777 frames, 9554 GPU pairs".into(),
-            "console capture, LP64, heterogeneous-workload, 4774 frames, 9548 GPU pairs".into(),
+            "console capture, ILP32, heterogeneous-workload, 4662 frames, 9324 GPU pairs".into(),
+            "console capture, LP64, heterogeneous-workload, 4467 frames, 8934 GPU pairs".into(),
         ],
     }]
 }

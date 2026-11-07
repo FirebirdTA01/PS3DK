@@ -221,7 +221,7 @@ fn m_hold_no_convention_is_measured_by_a_decisive_held_out_bracket() {
     let text = lines(&a, &res).join("\n");
     assert!(text.contains("H-SPLIT odd kept 3 held 1 decisive 1 contradicted 0"), "{text}");
     assert!(text.contains("H-SPLIT even kept 3 held 1 decisive 1 contradicted 0"), "{text}");
-    assert!(text.contains("margin min 0 median 0"), "{text}");
+    assert!(text.contains("margin min 6000 median 6000"), "{text}");
 }
 
 #[test]
@@ -1081,8 +1081,8 @@ fn the_builtin_rsx_r1_entry_binds_digests_and_timebase() {
         analyze(&a, &Options { table: table.clone(), convention: conv(), ..Options::default() }).unwrap()
     };
     for h in [
-        "39dcb52ae3a1dc034b3974490c886f9935f049dcf854aed254ebae5e4e9e1fca",
-        "5b53c967cadf272c4b19746668a7b2deab3418eb06ff93e2bca55183fc9b480d",
+        "1664b32fc5957c273120d6ef4548b0fe289f5a0a807dd06676b4a704bd902690",
+        "d5c0fe7d9e9251e7674481b4e3fd86952a832365723be5598d9b848192a14fcb",
     ] {
         let res = run(hex32(h), 79_800_000);
         assert!(res.classification.failures.is_empty(), "{:?}", res.classification.failures);
@@ -1141,14 +1141,14 @@ fn split_even_pass_alone_can_contradict_and_the_unit_is_unmeasured() {
         }
         let text = lines(&a, &res).join("\n");
         assert!(text.contains("H-SPLIT even kept 3 held 1 decisive 1 contradicted 1"), "{text}");
-        assert!(text.contains("margin min 50 median 50"), "{text}");
+        assert!(text.contains("contradicted 1 margin min 0 median 0"), "{text}");
         assert!(!text.contains("MAPPING MEASURED"), "{text}");
         assert_eq!(res.coverage.q, 0);
     }
 }
 
 /// Margins are per held-out bracket and are reported as min and median per pass.  Brackets all on-line, with the odd
-/// pass holding bracket 1 inside its prediction (margin 2) so the pass's margin distribution is non-trivial.
+/// pass holding bracket 1 inside its prediction (margin 8) so the pass's margin distribution is non-trivial.
 #[test]
 fn split_margin_is_printed_per_pass_min_and_median() {
     let mut r = baseline();
@@ -1157,10 +1157,10 @@ fn split_margin_is_printed_per_pass_min_and_median() {
     let (a, res) = run_with(&r, &opts(None));
     let u = unit1(&res);
     // The odd pass holds bracket 1 = [1102, 1108], predicted [1100, 1110] by the kept brackets {0, 2, 3}
-    // (line t = 1000 + f through (0,1000),(200,1200),(300,1300)).  Its margin is min(1102-1100, 1110-1108) = 2.
+    // (line t = 1000 + f through (0,1000),(200,1200),(300,1300)).  Its margin (slack before a contradiction) is min(1108-1100, 1110-1102) = 8.
     let o = u.split.odd.as_ref().unwrap();
     assert_eq!(o.held, 1, "{o:?}");
-    assert_eq!(o.margins, vec![2], "{o:?}");
+    assert_eq!(o.margins, vec![8], "{o:?}");
     assert_eq!(o.contradicted, 0, "{o:?}");
     // The even pass either ran (bracket 2 = 1200..1210 on-line -> margin 1 relative to [1201,1209] predicted) or is
     // not available; either way it contributes no contradiction.
@@ -1169,7 +1169,7 @@ fn split_margin_is_printed_per_pass_min_and_median() {
     }
     assert_eq!(u.state, State::Measured, "{:?}", u.state);
     let text = lines(&a, &res).join("\n");
-    assert!(text.contains("H-SPLIT odd kept 3 held 1 decisive 1 contradicted 0 margin min 2 median 2"), "{text}");
+    assert!(text.contains("H-SPLIT odd kept 3 held 1 decisive 1 contradicted 0 margin min 8 median 8"), "{text}");
 }
 
 /// The new even pass is also metered: a budget that covers the odd pass but not the even one must refuse explicitly
