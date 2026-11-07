@@ -53,9 +53,11 @@ for abi, subdir in [("ilp32", ""), ("lp64", "lp64")]:
             errors.append("installed archive missing")
         else:
             members = run([a.cross + "ar", "t", archive], abi + "-" + name + "-members")
-            expected = {"prof_core.o", "prof_drain.o", "pal_lv2.o"}
+            expected = {"prof_core.o", "prof_drain.o", "prof_version.o", "pal_lv2.o"}
             if automatic:
                 expected |= {"startup.o", "prof_arcs_writer.o"}
+            else:
+                expected |= {"live_agent.o", "live_os_lv2.o", "live_api.o"}
             actual = members.stdout.decode().splitlines()
             if members.returncode or set(actual) != expected or len(actual) != len(expected):
                 errors.append("wrong archive members: " + repr(actual))

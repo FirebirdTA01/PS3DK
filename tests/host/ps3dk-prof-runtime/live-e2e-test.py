@@ -32,7 +32,7 @@ if r.returncode != 0:
 api_serve = out / 'live-api-serve'
 cc = [os.environ.get('CC', 'cc'), '-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread',
       '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS', '-I', inc.parent, '-I', src / 'core',
-      '-I', src / 'pal', '-I', src / 'live', src / 'core/prof_core.c', src / 'core/prof_drain.c',
+      '-I', src / 'pal', '-I', src / 'live', src / 'core/prof_core.c', src / 'core/prof_drain.c', src / 'core/prof_version.c',
       src / 'pal/pal_host.c', src / 'live/live_agent.c', src / 'live/live_os_host.c', src / 'live/live_api.c',
       Path(__file__).parent / 'live_api_serve.c', '-o', api_serve]
 r = subprocess.run([str(x) for x in cc], capture_output=True, text=True)

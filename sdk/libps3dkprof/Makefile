@@ -22,7 +22,7 @@ PPU_FLAGS := -O2 -Wall -Wextra -Werror -Wno-prio-ctor-dtor -std=c11 -mcpu=cell \
              -ffunction-sections -fdata-sections -fno-instrument-functions \
              -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_LV2 -I../include -I"$(PS3DK)/ppu/include"
 CONFIG := $(BUILD)/config.h
-CORE := prof_core prof_drain pal_lv2
+CORE := prof_core prof_drain prof_version pal_lv2
 # The live link (ps3dk_prof_live_start/stop) is manual-lifecycle only: separate members, pulled in by a reference.
 LIVE := live_agent live_os_lv2 live_api
 MANUAL := $(CORE) $(LIVE)

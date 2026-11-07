@@ -41,11 +41,11 @@ else
 fi
 lib="$out/build/sdk/libps3dkprof"
 api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record \
-ps3dk_prof_init ps3dk_prof_live_get_stats ps3dk_prof_live_start ps3dk_prof_live_stop ps3dk_prof_set_sink_callbacks \
+ps3dk_prof_init ps3dk_prof_live_get_stats ps3dk_prof_live_start ps3dk_prof_live_stop ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks \
 ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin \
 ps3dk_prof_zone_end"
 auto_api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token \
-ps3dk_prof_get_capture_record ps3dk_prof_init ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path \
+ps3dk_prof_get_capture_record ps3dk_prof_init ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path \
 ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
 
 # 2. Members and symbols.
@@ -54,11 +54,11 @@ for abi in ilp32 lp64; do
         ar="$lib/$abi/$a.a"
         tag="$abi $a"
         if [ "$a" = libps3dkprof ]; then
-            want="live_agent.o live_api.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o"
+            want="live_agent.o live_api.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o prof_version.o"
             want_api="$api"
             extra=""
         else
-            want="pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o startup.o"
+            want="pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o prof_version.o startup.o"
             want_api="$auto_api"
             extra="__ps3dk_prof_startup_anchor __ps3dk_prof_thread_exit ps3prof_arcs_write"
         fi

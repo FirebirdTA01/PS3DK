@@ -25,7 +25,7 @@ step() { # name want command...
 }
 mkdir -p "$O/inc/ps3dk" && cp "$R/sdk/include/ps3dk/prof.h" "$O/inc/ps3dk/prof.h"
 FL="-std=c11 -O1 -g -pthread -Wall -Wextra -Werror -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_WITH_SPU -I$O/inc -I$S/core -I$S/pal -I$S/spu -I$S/rsx"
-SRCS="core/prof_core.c core/prof_drain.c pal/pal_host.c spu/psp_ppu.c spu/psp_spu.c spu/ext_runtime.c spu/psp_elf.c spu/psp_host_emul.c rsx/gpu_runtime.c rsx/prg.c rsx/gpu_port_gcm.c rsx/rsxcap.c"
+SRCS="core/prof_core.c core/prof_drain.c core/prof_version.c pal/pal_host.c spu/psp_ppu.c spu/psp_spu.c spu/ext_runtime.c spu/psp_elf.c spu/psp_host_emul.c rsx/gpu_runtime.c rsx/prg.c rsx/gpu_port_gcm.c rsx/rsxcap.c"
 step digest-tool 0 python3 -I -B "$H/digest_test.py" "$O/digest" "$CC"
 build_members() { # dir extra-flags
     mkdir -p "$1"

@@ -88,7 +88,7 @@ def build(d, src, mode_c, san, extra=(), harness=None):
              '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS', '-DPS3DK_PROF_WITH_SPU', f'-I{inc}', f'-I{src}/core',
              f'-I{src}/pal', f'-I{src}/spu', f'-I{src}/rsx', *SAN[san], *(['-DGPP_HOST_DEVMEM'] if mode_c else []),
              *extra]
-    srcs = [src / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
+    srcs = [src / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
                               'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
                               'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c')] + [harness or here / 'r4a_int.c']
     exe = d / 'r4a'

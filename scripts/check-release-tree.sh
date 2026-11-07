@@ -283,7 +283,7 @@ fi
 for abi in '' lp64/; do
     for lib in ps3dkprof ps3prof; do
         rel="ppu/lib/${abi}lib${lib}.a"
-        expected=(prof_core.o prof_drain.o pal_lv2.o)
+        expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o)
         [[ "$lib" != ps3prof ]] || expected+=(prof_arcs_writer.o startup.o)
         if [[ ! -f "$ROOT/$rel" ]]; then
             bad "$rel missing"

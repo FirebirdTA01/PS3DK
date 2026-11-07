@@ -9,7 +9,7 @@ trap 'rm -rf "$work"' EXIT
 passed=0 failed=0
 ar_tool=$(command -v ar)
 mkdir -p "$work/tree/ppu/lib/lp64" "$work/objects"
-for member in prof_core prof_drain pal_lv2 prof_arcs_writer startup extra; do
+for member in prof_core prof_drain prof_version pal_lv2 prof_arcs_writer startup extra; do
     printf 'membership fixture: %s\n' "$member" > "$work/objects/$member.o"
 done
 record() {
@@ -53,7 +53,7 @@ for abi in '' lp64/; do
     for lib in ps3dkprof ps3prof; do
         rel="ppu/lib/${abi}lib${lib}.a"
         archive="$work/tree/$rel"
-        members=(prof_core.o prof_drain.o pal_lv2.o)
+        members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o)
         [[ $lib != ps3prof ]] || members+=(prof_arcs_writer.o startup.o)
         restore() {
             rm -f "$archive"

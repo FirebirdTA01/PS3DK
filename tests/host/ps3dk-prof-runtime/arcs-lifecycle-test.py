@@ -50,7 +50,7 @@ if a.sanitize:
         # executable, so local-exec is valid and leaves nothing for ld to relax; the sanitizers and the null check stay
         # on.
         flags += ['-ftls-model=local-exec']
-files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
+files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
 if a.red_stub:
     files.append(a.red_stub.resolve())
 exe = out / 'lifecycle'

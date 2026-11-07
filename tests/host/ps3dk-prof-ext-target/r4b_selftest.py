@@ -421,7 +421,7 @@ def front_rows():
     return rows
 
 
-MK_GOOD = ('# comment\nEXT_MEMBERS := prof_core prof_drain pal_lv2 ext_runtime psp_ppu psp_elf gpu_runtime prg '
+MK_GOOD = ('# comment\nEXT_MEMBERS := prof_core prof_drain prof_version pal_lv2 ext_runtime psp_ppu psp_elf gpu_runtime prg '
            'gpu_port_gcm rsxcap\n')
 AR_GOOD = '\n'.join(A.MEMBERS) + '\n'
 HDR = ''.join(f"File: x.a({n})\nELF Header:\n  Magic:   7f 45 4c 46\n  Class:  ELF64\n"

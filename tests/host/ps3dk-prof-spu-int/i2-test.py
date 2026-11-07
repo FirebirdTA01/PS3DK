@@ -34,7 +34,7 @@ cc = os.environ.get('CC', 'cc')
 flags = ['-std=c11', '-O1', '-g', '-pthread', '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS',
          '-DPS3DK_PROF_WITH_SPU', '-Wall', '-Wextra', '-Werror', f'-I{inc}', f'-I{lib}/core', f'-I{lib}/pal',
          f'-I{lib}/spu', f'-I{lib}/rsx']
-srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'pal/pal_host.c', lib / 'spu/psp_ppu.c',
+srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'core/prof_version.c', lib / 'pal/pal_host.c', lib / 'spu/psp_ppu.c',
         lib / 'spu/psp_spu.c', lib / 'spu/ext_runtime.c', lib / 'spu/psp_elf.c', lib / 'spu/psp_host_emul.c',
         lib / 'rsx/gpu_runtime.c', lib / 'rsx/prg.c', lib / 'rsx/gpu_port_gcm.c', here / 'i2_test.c']
 wrap = '-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=posix_memalign,--wrap=aligned_alloc'

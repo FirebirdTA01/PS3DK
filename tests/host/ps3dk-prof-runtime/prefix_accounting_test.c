@@ -132,7 +132,7 @@ int main(int argc,char **argv) {
     CHECK(f->unregistered_refusals==(!strcmp(mode,"unregistered")));
     CHECK(f->abi==2 && f->consumer_mode==cfg.mode);CHECK(f->freq_hz==g_prof->tb_freq && f->tb_at_init==g_prof->tb_at_init);
     CHECK(f->session_id==f->tb_at_init);text_matches(f->app,"prefix");text_matches(f->build_id,"build");
-    text_matches(f->flags,"host");text_matches(f->workload_tag,"test");text_matches(f->sdk_version,PS3DK_PROF_SDK_VERSION);
+    text_matches(f->flags,"host");text_matches(f->workload_tag,"test");text_matches(f->sdk_version,ps3dk_prof_sdk_version);
 #if defined(__clang__)
     text_matches(f->compiler_identity,"clang " __clang_version__);
 #else

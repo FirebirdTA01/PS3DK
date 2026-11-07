@@ -13,6 +13,6 @@ for v in plain asan; do
   awk '{print $3" old_"$3}' $O/old-$v.nm > $O/old-$v.syms || rc=1
   [ -s $O/old-$v.syms ] || rc=1
   objcopy --redefine-syms=$O/old-$v.syms $O/old-$v.o $O/old-ren-$v.o || rc=1
-  cc $F $X $S/core/prof_core.c $S/core/prof_drain.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
+  cc $F $X $S/core/prof_core.c $S/core/prof_drain.c $S/core/prof_version.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
 done
 echo "i3b build rc=$rc"; exit $rc

@@ -45,7 +45,7 @@ if a.sanitize:
     # reports a false null (gcc 12.4 and 13.3 with binutils 2.42).  Every TLS object here is defined in this executable,
     # so local-exec is valid and leaves nothing for ld to relax; the sanitizers and the null check stay on.
     flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-ftls-model=local-exec']
-files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c',
+files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c',
                            'hooks/arcs.c', 'core/prof_arcs_stream.c']]
 files.append(a.red_stub.resolve() if a.red_stub else src / 'core/prof_arcs_export.c')
 exe = out / 'export'

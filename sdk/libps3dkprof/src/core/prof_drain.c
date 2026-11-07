@@ -303,7 +303,7 @@ static void dr_start(prof *p)
     enc_begin(p, C_HEADER);
     enc_str(p, p->app, p->app_len);
     enc_str(p, p->build_id, p->build_id_len);
-    enc_str(p, PS3DK_PROF_SDK_VERSION, clen(PS3DK_PROF_SDK_VERSION));
+    enc_str(p, ps3dk_prof_sdk_version, ps3dk_prof_sdk_version_len);
     enc_str(p, P_COMPILER, clen(P_COMPILER));
     enc_str(p, p->flags, p->flags_len);
     enc_str(p, p->workload_tag, p->workload_tag_len);
@@ -859,7 +859,7 @@ static void publish_finalization(prof *p, int result)
         .session_id = p->tb_at_init, .freq_hz = p->tb_freq, .tb_at_init = p->tb_at_init,
         .abi = sizeof(void *) == 4 ? 1 : 2, .consumer_mode = (uint8_t)p->cfg.mode,
         .app = {p->app, p->app_len}, .build_id = {p->build_id, p->build_id_len},
-        .sdk_version = {PS3DK_PROF_SDK_VERSION, (uint32_t)clen(PS3DK_PROF_SDK_VERSION)},
+        .sdk_version = {ps3dk_prof_sdk_version, ps3dk_prof_sdk_version_len},
         .compiler_identity = {P_COMPILER, (uint32_t)clen(P_COMPILER)},
         .flags = {p->flags, p->flags_len}, .workload_tag = {p->workload_tag, p->workload_tag_len},
 #endif

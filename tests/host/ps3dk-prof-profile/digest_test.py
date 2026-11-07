@@ -3,7 +3,8 @@
 
 An INDEPENDENT implementation (binutils `ar t` / `ar p` for the members, hashlib for the hashes; no shared code with
 the tool) recomputes ARCHIVE-DIGEST-V1 and must agree with the tool on every archive.  Controls: member order
-permuted (same digest); one member's bytes changed (digest changes); the identity member changed alone (the digest
+permuted (same digest); one member's bytes changed (digest changes); the version member changed alone (same
+digest), missing or duplicated (refused); the identity member changed alone (the digest
 of the others is unchanged); verify prints the embedded identity and, given the declared id, premises and kinds,
 refuses an archive whose identity differs in any one of them; a long member name (GNU long-name table); a duplicate member name, two identity
 members, no identity member and a tampered embedded digest are refused; emit refuses a bad id and an input that
@@ -44,7 +45,7 @@ def independent(archive):
     if len(set(names)) != len(names):
         return None
     msg = bytearray(b'ps3dkprof.archive-digest.v1\x00')
-    rest = sorted((n for n in names if n != 'prof_identity.o'), key=lambda n: n.encode())
+    rest = sorted((n for n in names if n not in ('prof_identity.o', 'prof_version.o')), key=lambda n: n.encode())
     msg += struct.pack('<I', len(rest))
     for n in rest:
         body = subprocess.run(['ar', 'p', str(archive), n], capture_output=True).stdout
@@ -63,7 +64,8 @@ def main():
     out, cc = Path(sys.argv[1]), sys.argv[2]
     out.mkdir()
     objs = []
-    for i, name in enumerate(['prof_core.o', 'gpu_port_gcm.o', 'a_very_long_member_name_for_the_table.o', 'prg.o']):
+    for i, name in enumerate(['prof_core.o', 'gpu_port_gcm.o', 'a_very_long_member_name_for_the_table.o', 'prg.o',
+                              'prof_version.o']):
         p = out / name
         p.write_bytes(os.urandom(64) + bytes([i]) * (100 + i))
         objs.append(p)
@@ -87,6 +89,24 @@ def main():
     ar(a3, *[changed / p.name for p in objs])
     rc, d3, _ = tool('digest', a3)
     check(rc == 0 and d3 != d1 and d3 == independent(a3), 'one byte of one member changed: the digest changes')
+    # the version member changed alone (a different SDK version text, other length): the digest is unchanged
+    ver = out / 'ver'
+    ver.mkdir()
+    for p in objs:
+        (ver / p.name).write_bytes(p.read_bytes() if p.name != 'prof_version.o' else os.urandom(40) + b'v0.99.1234')
+    av = out / 'mv.a'
+    ar(av, *[ver / p.name for p in objs])
+    rc, dv, _ = tool('digest', av)
+    check(rc == 0 and dv == d1 and independent(av) == d1, 'the version member changed alone: the same digest')
+    nover = out / 'nover.a'
+    ar(nover, *[p for p in objs if p.name != 'prof_version.o'])
+    rc, _, err = tool('digest', nover)
+    check(rc == 1 and '0 members named prof_version.o' in err, f'no version member is refused ({err})')
+    twover = out / 'twover.a'
+    ar(twover, *objs)
+    ar(twover, ver / 'prof_version.o', mode='q')
+    rc, _, err = tool('digest', twover)
+    check(rc == 1, f'two version members are refused ({err})')
     # emit -> compile -> final archive -> verify
     rc, src, err = tool('emit', a1, '--id', 'RSX-HOST', '--premises', '463', '--kinds', '1')
     check(rc == 0 and 'ps3dk_prof__identity' in src and d1 in src, f'emit ({err})')

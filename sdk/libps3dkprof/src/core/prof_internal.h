@@ -42,9 +42,9 @@ _Static_assert(__atomic_always_lock_free(8, 0), "ps3dk prof: 8-byte atomics must
 #define P_UNKNOWN         0xFFFFFFFFFFFFFFFFull
 #define P_FNV_BASIS       0xcbf29ce484222325ull
 
-#ifndef PS3DK_PROF_SDK_VERSION
-#define PS3DK_PROF_SDK_VERSION "unknown"   /* the SDK Makefile passes the release version */
-#endif
+/* The SDK version text, defined in prof_version.c (its own archive member, left out of the identity digest). */
+extern const char ps3dk_prof_sdk_version[];
+extern const uint32_t ps3dk_prof_sdk_version_len;
 
 enum { K_BEGIN = 1, K_BEGIN_PARENT = 2, K_END = 3, K_FRAME = 4, K_GAP = 5, K_REGERR = 6 };
 enum { C_HEADER = 1, C_CLOCKS = 2, C_DESCRIPTORS = 3, C_THREADS = 4, C_RECORDS = 5, C_TRAILER = 6, C_RETIRED = 7 };

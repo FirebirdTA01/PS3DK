@@ -76,7 +76,7 @@ if passed != len(cases) or a.red:
     raise SystemExit(passed != len(cases))
 if a.reader:
     exe = out / 'file-integration'
-    sources = ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c',
+    sources = ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'hooks/arcs.c',
                'core/prof_arcs_stream.c', 'core/prof_arcs_export.c', 'core/prof_arcs_file.c']
     r = run('integration-compile', [os.environ.get('CC', 'cc'), *flags,
             '-DPS3DK_PROF=1', '-DPS3DK_PROF_WITH_ARCS=1', '-DPS3DK_PROF_TEST_HOOKS',

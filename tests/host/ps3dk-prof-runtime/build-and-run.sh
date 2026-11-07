@@ -57,7 +57,7 @@ if [ "${source_hash%% *}" != "${copy_hash%% *}" ]; then
 fi
 inc=(-I"$public_inc" -I"$root/sdk/libps3dkprof/src/core" -I"$root/sdk/libps3dkprof/src/pal")
 warn=(-Wall -Wextra -Werror)
-lib_src=(prof_core prof_drain pal_host)
+lib_src=(prof_core prof_drain prof_version pal_host)
 test_c=(rt_main rt_util rt_t_lifecycle rt_t_stop rt_t_zones rt_t_init rt_t_sink rt_t_race rt_t_counters rt_t_capture)
 
 src_of() {
@@ -362,7 +362,7 @@ fi
 
 if [ "$lib_ok" = 1 ]; then
     api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record ps3dk_prof_init \
-ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
+ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
 ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # nm output goes to files first: under pipefail a `nm | grep -q` can exit 141 on an early match.
     nm -g --defined-only "${libobjs[@]}" >"$ob/nm-defined.txt" || bad "nm --defined-only failed"

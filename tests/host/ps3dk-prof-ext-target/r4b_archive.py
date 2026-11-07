@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 
-MEMBERS = ('prof_core.o', 'prof_drain.o', 'pal_lv2.o', 'ext_runtime.o', 'psp_ppu.o', 'psp_elf.o', 'gpu_runtime.o',
+MEMBERS = ('prof_core.o', 'prof_drain.o', 'prof_version.o', 'pal_lv2.o', 'ext_runtime.o', 'psp_ppu.o', 'psp_elf.o', 'gpu_runtime.o',
            'prg.o', 'gpu_port_gcm.o', 'rsxcap.o')
 # measured from the candidate libps3dkprof.a (nm, raw spelling) + the R3 GCM accessors + strcpy (psp_ppu.c lane name)
 IMPORTS_R4B_R2 = ('.TOC.', '__errno', 'clock_gettime', 'close', 'free', 'memalign', 'memcmp', 'memcpy', 'memset',
@@ -33,7 +33,7 @@ IMPORTS_R4B_R2 = ('.TOC.', '__errno', 'clock_gettime', 'close', 'free', 'memalig
 # (read), pal_rewind (lseek) and pal_sync (fsync), so the r2 baseline above was stale; target attempt 2 (r4b-t3)
 # failed on exactly them.  Any further unexpected import still stops the checkpoint.
 IMPORTS = IMPORTS_R4B_R2 + ('fsync', 'lseek', 'read')
-# LP64 (the -mlp64 build of the same ten members): MEASURED on the ext-lp64 archive and frozen for review, each name
+# LP64 (the -mlp64 build of the same eleven members): MEASURED on the ext-lp64 archive and frozen for review, each name
 # traced to its call site in a member (lp64-ext port, design section 3: never "whatever nm printed").  The set equals
 # the ILP32 one: the same sources call the same libc, pthread, LV2 and GCM entry points in both data models.
 IMPORTS_LP64 = IMPORTS

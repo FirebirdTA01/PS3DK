@@ -7,7 +7,8 @@ usage: archive_digest.py digest ARCHIVE
 Exit status: 0 success, 1 refused (the reason on stderr), 2 usage.
 
 Message M: the 27 ASCII bytes "ps3dkprof.archive-digest.v1", one 0x00, u32 LE N (the members other than
-prof_identity.o), then per member in increasing unsigned byte order of its name: u32 LE name length (1..255), the name,
+prof_identity.o and prof_version.o; the version member holds only the SDK version text, so a version change
+alone leaves the digest unchanged), then per member in increasing unsigned byte order of its name: u32 LE name length (1..255), the name,
 the 32-byte SHA-256 of the member's bytes.  digest = SHA-256(M).  Refused: two members with one name, a name longer
 than 255 bytes or containing '/', an archive that is not a GNU/System V `ar` archive; `emit` refuses an archive that
 already holds prof_identity.o; `verify` needs exactly one prof_identity.o and compares the digest in it (found by its
@@ -22,6 +23,8 @@ import sys
 
 MAGIC = b'!<arch>\n'
 IDENT = 'prof_identity.o'
+VERSION = 'prof_version.o'
+EXCLUDED = (IDENT, VERSION)
 MARKER = b'ps3dkprof.ident1'
 PREFIX = b'ps3dkprof.archive-digest.v1\x00'
 
@@ -75,7 +78,9 @@ def digest_of(ms):
     dup = sorted({n for n in names if names.count(n) > 1})
     if dup:
         raise Refused(f'duplicate member name(s): {dup}')
-    rest = sorted((n, b) for n, b in ms if n != IDENT)
+    if names.count(VERSION) != 1:
+        raise Refused(f'{names.count(VERSION)} members named {VERSION} (want exactly 1)')
+    rest = sorted((n, b) for n, b in ms if n not in EXCLUDED)
     msg = bytearray(PREFIX)
     msg += struct.pack('<I', len(rest))
     for n, b in sorted(rest, key=lambda x: x[0].encode('ascii')):
@@ -156,7 +161,7 @@ def main(argv):
                 if (pid, premises, kinds) != expect:
                     raise Refused(f'embedded identity {pid} premises {premises} kinds {kinds} != the declared '
                                   f'{expect[0]} premises {expect[1]} kinds {expect[2]}')
-            print(f'verified {want.hex()} over {sum(1 for n, _ in ms if n != IDENT)} members; identity {pid} '
+            print(f'verified {want.hex()} over {sum(1 for n, _ in ms if n not in EXCLUDED)} members; identity {pid} '
                   f'premises {premises} kinds {kinds}')
         elif cmd == 'emit' and len(argv) == 8 and argv[2::2] == ['--id', '--premises', '--kinds']:
             sys.stdout.write(emit(ms, argv[3], int(argv[5], 0), int(argv[7], 0)))

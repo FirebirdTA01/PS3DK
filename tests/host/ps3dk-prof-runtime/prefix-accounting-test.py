@@ -72,7 +72,7 @@ cases = ['normal', 'short1', 'short7', 'zeros', 'zero-limit', 'overcount', 'part
 
 
 def run_arcs():
-    files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
+    files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'hooks/arcs.c', 'core/prof_arcs_writer.c']]
     if a.red_stub:
         files.append(a.red_stub.resolve())
     exe = out / 'prefix'
@@ -144,7 +144,7 @@ CORE_CASES = [c for c in cases if c != 'chunk-overflow']
 
 def run_core():
     core_flags = [v for v in flags if v != '-DPS3DK_PROF_WITH_ARCS=1']
-    core_files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c']]
+    core_files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c']]
     exe = out / 'prefix-core'
     r = run('core-compile', [os.environ.get('CC', 'cc'), *core_flags, *core_files,
                              Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])

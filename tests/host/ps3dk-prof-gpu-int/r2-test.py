@@ -79,7 +79,7 @@ def build(d, src_root, extra):
     flags = ['-std=c11', '-O1', '-g', '-pthread', '-Wall', '-Wextra', '-Werror', '-DPS3DK_PROF=1',
              '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS', '-DPS3DK_PROF_WITH_SPU', f'-I{inc}', f'-I{s}/core',
              f'-I{s}/pal', f'-I{s}/spu', f'-I{s}/rsx', *extra]
-    srcs = [s / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
+    srcs = [s / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
                             'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
                             'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c')] + [here / 'gpu_int.c']
     r = run([cc, *flags, *srcs, '-o', d / 'gpu'], d / 'build.log')

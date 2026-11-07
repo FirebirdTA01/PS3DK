@@ -32,7 +32,7 @@ step() { # name expected-rc command...
 # the public header alone on the host include path (the SDK's libc wrappers target newlib)
 mkdir -p "$O/inc/ps3dk" && cp "$W/sdk/include/ps3dk/prof.h" "$O/inc/ps3dk/prof.h"
 PROFH="-I$O/inc -I$CORE -I$PAL -pthread -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS"
-LIB="$CORE/prof_core.c $CORE/prof_drain.c $PAL/pal_host.c"
+LIB="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c"
 ppu_build() { # out sanitizer-flags
     local objs=()
     for s in $LIB; do $CC $BASE $2 $PROFH -DPS3DK_PROF=1 -c "$s" -o "$1.$(basename "$s").o" || return 1; objs+=("$1.$(basename "$s").o"); done
@@ -61,7 +61,7 @@ step build-ob-life 0 $CC $BASE $SAN -pthread $LIFESRC "$H/test_ob_life.c" -o "$O
 step run-ob-life 0 env OB_LIFE_CSV="$O/ob-life.csv" OB_LIFE_GPU_CSV="$O/ob-life.gpu.csv" "$O/test_ob_life"
 # the GPU section on the REAL runtime and the REAL GCM port over fake device memory
 RSX=$W/sdk/libps3dkprof/src/rsx
-RTSRC="$CORE/prof_core.c $CORE/prof_drain.c $PAL/pal_host.c $SPU/psp_ppu.c $SPU/psp_spu.c $SPU/ext_runtime.c \
+RTSRC="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c $SPU/psp_ppu.c $SPU/psp_spu.c $SPU/ext_runtime.c \
     $SPU/psp_elf.c $SPU/psp_host_emul.c $RSX/gpu_runtime.c $RSX/prg.c $RSX/gpu_port_gcm.c $RSX/rsxcap.c"
 GSRC="$B/common/ob_gpu_run.c $B/common/ob_rsx.c $B/common/ob_sched.c $B/common/ob_io.c $B/common/ob_teardown.c"
 step build-ob-gpu-rt 0 $CC $BASE $SAN $PROFH -DPS3DK_PROF=1 -DPS3DK_PROF_WITH_SPU -I"$SPU" -I"$RSX" $RTSRC $GSRC \
