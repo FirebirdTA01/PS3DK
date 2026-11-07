@@ -99,6 +99,10 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetFogParams(this, p0, p1); }
     void SetFragmentProgram(CGprogram prog, uint32_t offset)
     { ::cellGcmSetFragmentProgram(this, prog, offset); }
+    void SetFragmentProgramControl(const rsxFragmentProgram *program, uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
+    { ::cellGcmSetFragmentProgramControl(this, program, allowTex, reserved0, reserved1); }
+    void SetFragmentProgramControlUnsafe(const rsxFragmentProgram *program, uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
+    { ::cellGcmSetFragmentProgramControlUnsafe(this, program, allowTex, reserved0, reserved1); }
     void SetFragmentProgramGammaEnable(uint32_t enable)
     { ::cellGcmSetFragmentProgramGammaEnable(this, enable); }
     void SetFragmentProgramParameter(CGprogram prog, CGparameter param, const float *values, uint32_t addrOffset)
@@ -197,6 +201,12 @@ struct CellGcmContext : public CellGcmContextData
     { ::cellGcmSetTwoSidedStencilTestEnable(this, enable); }
     void SetUpdateFragmentProgramParameter(uint32_t offset)
     { ::cellGcmSetUpdateFragmentProgramParameter(this, offset); }
+    void SetUpdateFragmentProgramParameterLocation(uint32_t offset, uint32_t location)
+    { ::cellGcmSetUpdateFragmentProgramParameterLocation(this, offset, location); }
+    void SetUpdateFragmentProgramParameterLocationUnsafe(uint32_t offset, uint32_t location)
+    { ::cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(this, offset, location); }
+    void SetUpdateFragmentProgramParameterUnsafe(uint32_t offset)
+    { ::cellGcmSetUpdateFragmentProgramParameterUnsafe(this, offset); }
     void SetUserClipPlaneControl(uint32_t plane0, uint32_t plane1, uint32_t plane2, uint32_t plane3, uint32_t plane4, uint32_t plane5)
     { ::cellGcmSetUserClipPlaneControl(this, plane0, plane1, plane2, plane3, plane4, plane5); }
     void SetVertexAttribInputMask(uint16_t mask)

@@ -243,6 +243,9 @@ jobs:
       - name: Test the SDK's fragment-program control word builder
         run: bash tests/sdk/fp-control-word-test.sh
 
+      - name: Test the GCM command-emitter surface (location arg + FP control wrapper)
+        run: bash tests/sdk/gcm-command-surface-test.sh
+
       - name: Test PPU header hygiene ratchet and install ownership
         run: |
           python3 tests/sdk/ppu-header-hygiene-test.py --self-test

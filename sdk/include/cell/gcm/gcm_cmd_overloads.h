@@ -324,6 +324,13 @@ static inline void cellGcmSetFrequencyDividerOperation(uint16_t op)
 static inline void cellGcmSetUpdateFragmentProgramParameter(uint32_t offset)
 { cellGcmSetUpdateFragmentProgramParameter(gCellGcmCurrentContext, offset); }
 
+static inline void cellGcmSetUpdateFragmentProgramParameterLocation(uint32_t offset, uint32_t location)
+{ cellGcmSetUpdateFragmentProgramParameterLocation(gCellGcmCurrentContext, offset, location); }
+
+static inline void cellGcmSetFragmentProgramControl(const rsxFragmentProgram *program,
+                                                    uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
+{ cellGcmSetFragmentProgramControl(gCellGcmCurrentContext, program, allowTex, reserved0, reserved1); }
+
 static inline void cellGcmSetInvalidateZcull(void)
 { cellGcmSetInvalidateZcull(gCellGcmCurrentContext); }
 

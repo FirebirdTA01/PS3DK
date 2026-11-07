@@ -711,9 +711,61 @@ static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisC
  * from the new offset/location, used when patching FP at runtime).
  * ========================================================== */
 
+/* Backed by rsxUpdateFragmentProgramLocation (NV40TCL_FP_ADDRESS).  Two
+ * forms:
+ *
+ *   cellGcmSetUpdateFragmentProgramParameter(ctx, offset)
+ *     Local-memory (RSX) update -- the original form; existing callers
+ *     (gcm_cmd_overloads.h and gcm_command_cpp_explicit.h) keep working.
+ *
+ *   cellGcmSetUpdateFragmentProgramParameterLocation(ctx, offset, location)
+ *     Explicit target: GCM_LOCATION_RSX (0) for local, GCM_LOCATION_CELL (1)
+ *     for main memory -- the "location" argument that was missing. */
+
 static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *thisContext, uint32_t offset)
 {
 	rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);
+}
+
+static inline void cellGcmSetUpdateFragmentProgramParameterUnsafe(CellGcmContextData *thisContext, uint32_t offset)
+{
+	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, GCM_LOCATION_RSX);
+}
+
+static inline void cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData *thisContext,
+                                                                     uint32_t offset, uint32_t location)
+{
+	rsxUpdateFragmentProgramLocation(thisContext, offset, location);
+}
+
+static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGcmContextData *thisContext,
+                                                                          uint32_t offset, uint32_t location)
+{
+	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);
+}
+
+/* ==========================================================
+ * Fragment-program control (NV40TCL_FP_CONTROL word).
+ *
+ * Thin forwarder to rsxSetFragmentProgramControl, which assembles the
+ * control word from the rsxFragmentProgram's num_regs + fp_control bits
+ * and the allowTex/reserved fields.  No command-word math here - the rsx
+ * emitter is the single source of truth for the NV40 bits, matching how
+ * every other cellGcmSet* wrapper in this header forwards to rsx* without
+ * re-deriving the encoding. */
+
+static inline void cellGcmSetFragmentProgramControl(CellGcmContextData *thisContext,
+                                                    const rsxFragmentProgram *program,
+                                                    uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
+{
+	rsxSetFragmentProgramControl(thisContext, program, allowTex, reserved0, reserved1);
+}
+
+static inline void cellGcmSetFragmentProgramControlUnsafe(CellGcmContextData *thisContext,
+                                                          const rsxFragmentProgram *program,
+                                                          uint8_t allowTex, uint8_t reserved0, uint8_t reserved1)
+{
+	rsxSetFragmentProgramControlUnsafe(thisContext, program, allowTex, reserved0, reserved1);
 }
 
 /* ==========================================================
