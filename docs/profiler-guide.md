@@ -180,8 +180,49 @@ Both archives must be the data model the sample is built for (`SAMPLE_ABI`, with
 
 GPU-side, the sample uses reports 32..63 and label 241 for the domain, and label 242 for the application fence. These values are part of the sample's build, not a public contract; they may change before release.
 
-**Status:** EXPERIMENTAL.  One ILP32 run of the heterogeneous-workload sample on a HEN console placed all six SPU lanes and the RSX domain on the timeline; LP64 builds, and its archives and linked test images pass the same target data-model, import, link and code-shape checks as ILP32; the sample's configure-time checks are still open, and no LP64 sample image has been built or run on a console yet; broader validation is pending.
+#### Cost and the drain
 
+Measured on a console with the heterogeneous-workload sample (ILP32): one PPU zone pair costs about 0.5 us; PPU profiling adds about 10 to 50 us per frame, and PPU plus SPU and RSX about 60 to 90 us.  One SPU zone pair costs about 21 decrementer ticks on the SPU.  The per-frame drain is the largest cost: about 0.2 ms per frame, and up to 1.6 ms per frame in phases with heavy SPU zone traffic.  The extension runs in APP mode, so the drain runs on the designated drain thread; to keep it off your render thread, make a separate PPU thread the designated drain thread and call `PS3DK_PROF_DRAIN` from it.
+
+#### SPU zone timing (decrementer ticks, not wall time)
+
+SPU zone durations are shown as **SPU decrementer ticks**, never as wall time. The viewer does not convert them to microseconds or seconds.
+
+Each SPU zone is placed on the timeline only inside the **PPU-side drain and ping** timestamps that bound it. The viewer draws those bounds; the SPU row does not extend past them.
+
+Tighter bounds come from **draining and pinging more often**: every drain and every ping adds a fresh PPU-side timestamp that the SPU row can sit inside.
+
+This placement does not use one straight-line fit per epoch (the clock map the W32 setting below selects). Under load the SPU decrementer does not run at a steady rate against the PPU clock, and a single fit per epoch is not a fair model of what the hardware was doing.
+
+One possible explanation, **not yet proven**: while LV2 has the SPU thread switched out, the decrementer may stop. The ticks would then be the time the SPU actually ran, which is what matters for optimisation; placement still comes from the PPU-side bounds.
+
+
+#### RSX zone states
+
+RSX timing is judged per RSX unit (one GPU domain and epoch), and every zone in a unit shares its state. A unit is in one of three states: `MEASURED`, `CONDITIONAL` or `UNMEASURED`.
+
+| State | What it means for you |
+|---|---|
+| `MEASURED` | The unit's zones are placed on the timeline within bounds the checks proved. On the console this was tested on, a placement is about **29 microseconds** wide; positions inside that width are not resolved. |
+| `CONDITIONAL` | The zones are placed, but at least one requirement for `MEASURED` is not met. The label names the reason, for example a hardware profile that has not been reviewed. |
+| `UNMEASURED` | The zones are in the capture but no placement could be proved for the unit. The label names the reason. |
+
+A unit reaches `MEASURED` only when all of these hold:
+
+- the capture's hardware profile is one the reader lists as reviewed;
+- a held-out bracket check: every other **interior PPU bracket** of the unit is held back, one straight-line clock map is fitted from the rest, and each held-out bracket lands inside the prediction the fit makes for it, with **at least one** bracket decisive and **none** contradicted;
+- at least **99 percent** of the capture's GPU begin/end pairs lie between the unit's first and last brackets (interpolated, not extrapolated).
+
+The viewer never claims more accuracy than these checks prove. A `MEASURED` span is a placement, not a measurement of the draw time.
+
+
+#### 32-bit and 64-bit builds
+
+The SPU-lane and RSX-domain extension now builds for **both 32-bit and 64-bit PPU apps**. Two archives are installed: one for each data model.
+
+The heterogeneous-workload sample checks at configure time that the archive's data model matches the app's (samples/profiling/prof-ext-abi.cmake); an app can reuse that check. A mismatch is a configure-time error, not a link-time or runtime surprise.
+
+**Status:** EXPERIMENTAL.  Console runs of the heterogeneous-workload sample, one ILP32 and one LP64, placed every SPU zone pair and every GPU pair; RSX units read `MEASURED` under the reviewed RSX-R1 profile; SPU lanes are valid and placed but read `TICKS-CONDITIONAL` until an SPU profile is reviewed.  SPU zones inside SPURS jobs have not been tested.
 ---
 
 ## 3. PC side
