@@ -100,6 +100,12 @@ samples that load an embedded shader library, or shaders through
 
 ## gcm/
 
+The diagnostic samples `hello-ppu-gcm-swizzle` and
+`hello-ppu-gcm-fp-control` check CPU texture conversion and private command
+emission respectively. Their READMEs distinguish those checks from GPU
+rendering. For build-time DXT1/3/5 assets, see the native host example in
+[`tools/dxt-encoder`](../tools/dxt-encoder/README.md).
+
 RSX / cellGcm graphics.  Incremental: start at "clear the framebuffer",
 grow toward shaders and full-pipeline samples.
 

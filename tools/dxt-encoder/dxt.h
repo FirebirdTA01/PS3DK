@@ -1,28 +1,10 @@
-/*
- * PS3 Custom Toolchain — tools/dxt-encoder/dxt.h
- *
- * Standard S3TC (DirectX Texture Co-compression) block encoder, plain C,
- * for the asset pipeline (t_a229ec8f patch 3).  Runs at asset BUILD time
- * on the host; speed is not critical.  Each 4x4 block of an RGBA8 source
- * is compressed to the standard DXT1 / DXT3 / DXT5 block layout that the
- * SDK's NV40 DXT1/DXT3/DXT5 texture formats expect:
- *
- *   DXT1 : 8  bytes/block — C0, C1 (5:6:5) + 16 four-bit colour indices
- *   DXT3 : 16 bytes/block — 16 four-bit alpha values + DXT1 colour
- *   DXT5 : 16 bytes/block — A0, A1 (8-bit) + 16 three-bit alpha indices
- *                           + DXT1 colour
- *
- * Endpoint selection is the bounding-box method (min/max RGB, min/max A);
- * it is "good enough" per the task spec and is what most reference
- * encoders use for a first pass.
- *
- * "DXT1 with 1-bit alpha" and "DXT1 without" (opaque) share this encoder:
- * the 8-byte block is byte-for-byte identical in both; the two modes differ
- * only in how a CONSUMER decodes palette index 3 in the 3-colour mode
- * (transparent vs opaque).  The encoder emits the standard block and the
- * caller chooses the mode at consumption time, so only one encoder is needed.
- *
- * No SDK / PPU dependencies — compiles with any C11 compiler.
+/* Portable C S3TC block encoder for build-time assets.
+ * Input: row-major RGBA8 bytes. Output: little-endian DXT blocks.
+ * DXT1: 8 bytes (two RGB565 endpoints and sixteen 2-bit selectors).
+ * DXT3: 16 bytes (sixteen 4-bit alphas followed by color data).
+ * DXT5: 16 bytes (two alpha endpoints, sixteen 3-bit alpha selectors, color).
+ * Color endpoints use a simple bounding box. DXT1 ignores source alpha;
+ * this API does not encode 1-bit transparency. Use DXT3/5 to retain alpha.
  */
 #ifndef PS3TC_DXT_ENCODER_H
 #define PS3TC_DXT_ENCODER_H
@@ -40,9 +22,9 @@ extern "C" {
 #define DXT5_BYTES_PER_BLOCK 16u
 
 /* Alpha handling for the DXT1 (8-byte) mode at consume time.  The encoder
- * output is identical for both; this value is informational for documents. */
+ * does not accept this enum and does not encode source alpha. */
 enum dxt1_alpha_mode {
-    DXT1_OPAQUE = 0,   /* no alpha; index-3 in 3-colour mode maps to C1   */
+    DXT1_OPAQUE = 0,   /* no alpha; index-3 in 3-colour mode decodes black   */
     DXT1_ONE_BIT      /* 1-bit alpha; index-3 in 3-colour mode is clear   */
 };
 

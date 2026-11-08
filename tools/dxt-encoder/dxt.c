@@ -115,12 +115,12 @@ int dxt1_encode_block(const uint8_t *src, uint8_t *dst)
 int dxt3_encode_block(const uint8_t *src, uint8_t *dst)
 {
     if (!src || !dst) return 0;
-    /* 4-bit explicit alpha: 16 nibbles, texel-major, MSB-first within each
-     * byte.  byte i/2, nibble (i&1?0:4).  dst[0..7]=alpha, dst[8..15]=colour. */
+    /* Explicit alpha is little-endian: texel zero is the low nibble.
+     * dst[0..7]=alpha, dst[8..15]=colour. */
     uint8_t alpha[8] = {0,0,0,0,0,0,0,0};
     for (int i = 0; i < 16; ++i) {
         uint8_t a = (uint8_t)(src[i * 4 + 3] >> 4);   /* 8-bit A -> 4-bit A */
-        alpha[i >> 1] |= (uint8_t)(a << ((i & 1) ? 0 : 4));
+        alpha[i >> 1] |= (uint8_t)(a << ((i & 1) * 4));
     }
     memcpy(dst, alpha, 8);
     encode_dxt1_color(src, dst + 8);
@@ -139,17 +139,15 @@ int dxt5_encode_block(const uint8_t *src, uint8_t *dst)
     uint8_t a0 = (uint8_t)amax, a1 = (uint8_t)amin;
     dst[0] = a0; dst[1] = a1;
 
-    uint8_t palette[6];
-    if ((int)a0 - (int)a1 >= 2) {
-        palette[2] = (uint8_t)((6*a0 + 1*a1) / 7u);
-        palette[3] = (uint8_t)((5*a0 + 2*a1) / 7u);
-        palette[4] = (uint8_t)((4*a0 + 3*a1) / 7u);
-        palette[5] = (uint8_t)((3*a0 + 4*a1) / 7u);
-    } else { /* a0 - a1 < 2: 6-entry with two zeros */
-        palette[2] = (uint8_t)((3*a0 + 1*a1) / 4u);
-        palette[3] = (uint8_t)((2*a0 + 2*a1) / 4u);
-        palette[4] = (uint8_t)((1*a0 + 3*a1) / 4u);
-        palette[5] = (uint8_t)0;
+    uint8_t palette[8];
+    if (a0 > a1) {
+        for (unsigned k = 2; k < 8; ++k)
+            palette[k] = (uint8_t)(((8-k)*a0 + (k-1)*a1) / 7u);
+    } else {
+        for (unsigned k = 2; k < 6; ++k)
+            palette[k] = (uint8_t)(((6-k)*a0 + (k-1)*a1) / 5u);
+        palette[6] = 0;
+        palette[7] = 255;
     }
     palette[0] = a0; palette[1] = a1;
 
@@ -157,7 +155,7 @@ int dxt5_encode_block(const uint8_t *src, uint8_t *dst)
     for (int i = 0; i < 16; ++i) {
         int a = src[i * 4 + 3];
         int best = 0; int bestd = 0x7fffffff;
-        for (int k = 0; k < 6; ++k) {
+        for (int k = 0; k < 8; ++k) {
             int d = a - palette[k]; if (d < 0) d = -d;
             if (d < bestd) { bestd = d; best = k; }
         }
