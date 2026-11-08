@@ -613,7 +613,7 @@ final_entry = u32 incarnation  u8 state  u8 limit_flags  u16 reserved=0
     - a recovered sink error (bit2), which loses no bytes (section 8);
     - NOT_QUIESCED (bit0) of an incarnation OTHER than O: O's stream is still complete.
     In all three cases a missing reference is IMPOSSIBLE, not tolerated.
-  - An unresolved reference keeps its (O, f) claim for listing, but contributes to no frame value.
+  - An unresolved frame link keeps its (O, f) claim for listing, but contributes to no frame value.
 - **Frame values (frame elapsed and per-lane attributed work; nothing is a cross-lane frame total):**
   - **Frame elapsed of (O, k):** the time from FRAME k to FRAME k + 1 of O, with both records present.
     - It is reported only if O is MEASUREMENT VALID.
