@@ -816,6 +816,9 @@ pub struct ForeignTimelineSlot {
     pub builds: AtomicU64,
     /// The SPU ticks analysis (files with order records), built once per Document whatever the W32 choice.
     pub spu: crate::timeline_spu::SpuSlot,
+    /// The SPU rows' budgets (the retained-bar cap and the row meter); the defaults unless a test lowers them.  The
+    /// rows, a refusal among them, are cached with the timeline.
+    pub spu_rows: TimelineBudgets,
 }
 
 impl std::fmt::Debug for ForeignTimelineSlot {
@@ -868,7 +871,7 @@ impl ForeignTimelineSlot {
                             e.phase
                         )
                     }));
-                    let (srcs, infos) = crate::timeline_spu::sources(&sv, &TimelineBudgets::default());
+                    let (srcs, infos) = crate::timeline_spu::sources(&sv, &self.spu_rows);
                     ft.sources.retain(|s| !matches!(s.source, SourceKey::Lane(_)));
                     let mut all = srcs;
                     all.append(&mut ft.sources);

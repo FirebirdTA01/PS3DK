@@ -1364,7 +1364,9 @@ fn unit(
                         }
                     }
                 }
-                h.margins.sort_unstable();
+                // The margin distribution: a counted merge sort, charged before it runs (stable; the same order
+                // as any sort of these integers).
+                msort(ops, &mut h.margins, |a, b| a < b).map_err(&p)?;
                 let slot = if even { &mut u.split.even } else { &mut u.split.odd };
                 *slot = Some(h);
             }

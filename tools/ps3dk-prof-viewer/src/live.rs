@@ -468,6 +468,39 @@ pub fn publish_decision(
     }
 }
 
+/// `PS3DK_PROF_ESINKFAIL` (prof.h): the runtime's shutdown result whenever it wrote no trailer.
+pub const SHUTDOWN_NO_TRAILER: i32 = -10;
+
+/// The END shutdown results that an END without a trailer may carry and still publish its accepted prefix:
+/// exactly the runtime's no-trailer result.  Every other result (0 beside a missing trailer is inconsistent;
+/// `PS3DK_PROF_ETHREAD` is a join failure; any other code is a failure of its own) refuses.
+pub const NO_TRAILER_FORGIVEN_RESULTS: [i32; 1] = [SHUTDOWN_NO_TRAILER];
+
+/// For an END that says no trailer was written: the reasons the missing trailer does NOT excuse.  Only three END
+/// facts are forgiven, all consequences of the missing trailer: `trailer_written` 0, `io_finalized` 0 (the runtime
+/// sets it only with a trailer) and a shutdown result in [`NO_TRAILER_FORGIVEN_RESULTS`].  A join failure, any
+/// other shutdown result and, when the I/O did finalize, an accepted byte count that is not the bytes received
+/// still refuse.  Empty for an END with a trailer (nothing is forgiven there).
+pub fn trailerless_end_refusals(e: &End, received: u64) -> Vec<String> {
+    let mut why = Vec::new();
+    if e.trailer_written {
+        return why;
+    }
+    if e.join_failed {
+        why.push("the profiler's drain thread did not join".to_string());
+    }
+    if !NO_TRAILER_FORGIVEN_RESULTS.contains(&e.shutdown_result) {
+        why.push(format!(
+            "shutdown result {} is not the runtime's no-trailer result {SHUTDOWN_NO_TRAILER}",
+            e.shutdown_result
+        ));
+    }
+    if e.io_finalized && e.accepted_bytes != received {
+        why.push(format!("the console wrote {} bytes, {received} arrived", e.accepted_bytes));
+    }
+    why
+}
+
 /// A local file name stem for a session: the session id, then the agent's
 /// file name without `.prof`, reduced to `[A-Za-z0-9_-]` (dots too become
 /// `_`) and at most 100 characters. Never empty, never a path.
@@ -650,6 +683,9 @@ pub enum EarlyStep {
     Sync,
     Close,
     Publish,
+    /// Not an early-publish step: checked before each append to the local copy while streaming; an error is
+    /// that append's write failure.
+    LocalAppend,
 }
 
 /// A test fault: called before each [`EarlyStep`]; an error it returns is that step's failure.  Production configs

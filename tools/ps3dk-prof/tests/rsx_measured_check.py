@@ -6,19 +6,21 @@ It shares no algorithm with the Rust solver: for each case it enumerates every v
 F_0 = {b >= 0, lo_i <= a + b f_i <= hi_i} and F_J = F_0 with the half-planes, with Fractions only (b = 0 is the open
 face: b > 0 is strict), and derives the states, F_J's slope interval with its open flag, and for every half-plane the
 H-CAUSAL pair (contradicted, decisive) against F_0's projection, exactly as the design defines them.  The joint
-cases have at least 2 distinct bracket coordinates, so F_0 and F_J are bounded.  H-SPLIT, on every case: the
-selection rule (odd ordinals 1..n-2 held out), the kept set's polyhedron by the same vertex enumeration, each
-held-out bracket's prediction with its open flags, its window [tb1 of j-1, tb0 of j+1], CONTRADICTED by interval
-intersection and DECISIVE by brute force over the integer observations of the window (no shared formula with the
-reader), or the NOT AVAILABLE class.  Separate H-SPLIT cases are admissible bracket sequences (tb0 < tb1, tb0 >= the
+cases have at least 2 distinct bracket coordinates, so F_0 and F_J are bounded.  H-SPLIT, on every case and for
+BOTH passes: the selection rule (the odd pass holds out the interior brackets at odd ordinals 1, 3, ... <= n-2; the
+even pass the interior brackets at even ordinals 2, 4, ... <= n-2), the kept set's polyhedron by the same vertex
+enumeration, each held-out bracket's prediction with its open flags, its window [tb1 of j-1, tb0 of j+1],
+CONTRADICTED by interval intersection and DECISIVE by brute force over the integer observations of the window (no
+shared formula with the reader), or the NOT AVAILABLE class.  Separate H-SPLIT cases are admissible bracket sequences (tb0 < tb1, tb0 >= the
 previous tb1), with abutting, planted-displacement and fixed boundary cases.  It runs examples/rsx_joint_cases on
 the same cases and compares every field.
 
 usage: rsx_measured_check.py <rsx_joint_cases executable> [--seed N] [--cases N] [--self-test]
 exit: 0 every case agrees (and, with --self-test, every corruption is caught); 1 a disagreement; 2 tool failure.
 --self-test: corrupts one expected value per field kind (states, slope bounds and flags, contradicted, decisive, and
-for H-SPLIT the class, contradicted, decisive and the prediction) and requires the comparison to FAIL on each, so the
-comparison is not vacuous.  Every run also requires every H-SPLIT outcome class to occur."""
+for each H-SPLIT pass the class, contradicted, decisive and the prediction) and requires the comparison to FAIL on
+each, so the comparison is not vacuous.  Every run also requires every H-SPLIT outcome class, and contradicted,
+decisive and non-decisive held-out brackets, to occur in each pass."""
 import itertools
 import json
 import random
@@ -66,7 +68,8 @@ def expected(obs, halves):
         out["fj_slope"] = None
     if not v0:
         out["hold"] = None
-        out["split"] = split_expected(obs)
+        out["split"] = split_expected(obs, False)
+        out["split_even"] = split_expected(obs, True)
         return out
     hold = []
     for f, side, t in halves:
@@ -82,15 +85,18 @@ def expected(obs, halves):
             dec = hi > t
         hold.append([contra, dec])
     out["hold"] = hold
-    out["split"] = split_expected(obs)
+    out["split"] = split_expected(obs, False)
+    out["split_even"] = split_expected(obs, True)
     return out
 
 
-def split_expected(obs):
+def split_expected(obs, even):
     n = len(obs)
-    held = [j for j in range(n) if j % 2 == 1 and 1 <= j <= n - 2]
+    # the interior ordinals 1..n-2 of the pass's parity (0 is never interior)
+    first = 2 if even else 1
+    held = list(range(first, n - 1, 2))
     if not held:
-        return {"na": f"fewer than 3 brackets ({n})"}
+        return {"na": f"no held-out {'even' if even else 'odd'} bracket (n {n})"}
     kept = [o for j, o in enumerate(obs) if j not in held]
     kd = len({f for f, _, _ in kept})
     if kd < 2:
@@ -170,6 +176,24 @@ def split_fixed():
     ]
 
 
+def split_fixed_even():
+    """The same controls for the even pass (bracket 2 held out of 4): the kept brackets 0, 1, 3 predict [1200, 1210]
+    at f 200; touching on both sides is compatible, one tick off on either side and a planted displacement are
+    contradicted; abutting colinear brackets are not decisive and the one-tick edge is; equal kept coordinates and
+    inconsistent kept brackets are NOT AVAILABLE, and 3 brackets have no even interior one."""
+    def k(t0, t1):
+        return [(0, 1000, 1010), (100, 1100, 1110), (200, t0, t1), (300, 1300, 1310)]
+    return [
+        [(0, 1000, 1100), (100, 1100, 1200), (200, 1200, 1300), (300, 1300, 1400)],
+        [(0, 1000, 1100), (100, 1100, 1199), (200, 1200, 1300), (300, 1300, 1400)],
+        [(0, 1000, 1100), (100, 1100, 1198), (200, 1200, 1300), (300, 1300, 1400)],
+        k(1190, 1200), k(1189, 1199), k(1210, 1220), k(1211, 1221), k(1250, 1260),
+        [(5, 0, 10), (5, 20, 30), (7, 40, 50), (5, 60, 70)],
+        [(200, 0, 10), (150, 20, 30), (0, 35, 36), (100, 40, 50)],
+        [(0, 0, 10), (100, 100, 110), (200, 200, 210)],
+    ]
+
+
 def gen(rng):
     b0 = Fraction(rng.randint(1, 9), rng.randint(1, 9))
     a0 = rng.randint(-1000, 1000)
@@ -190,6 +214,11 @@ def gen(rng):
     return obs, halves
 
 
+def skey(field):
+    """The result key a self-test field kind corrupts."""
+    return "split_even" if field.startswith('even_') else "split"
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -204,8 +233,9 @@ def main():
     br = [(0, 0, 10), (100, 100, 110), (200, 200, 210), (300, 300, 310)]
     cases[:0] = [(br, [(0, 'lo', 9), (50, 'hi', 51)]), (br, [(50, 'lo', 61)])]
     fixed = split_fixed()
+    fixed_even = split_fixed_even()
     first_fixed = len(cases)
-    cases += [(o, []) for o in fixed] + [(gen_split(rng), []) for _ in range(n)]
+    cases += [(o, []) for o in fixed] + [(o, []) for o in fixed_even] + [(gen_split(rng), []) for _ in range(n)]
     payload = {"cases": [{"obs": [[str(f), str(lo), str(hi)] for f, lo, hi in o],
                           "halves": [[str(f), s, str(t)] for f, s, t in h]} for o, h in cases]}
     try:
@@ -228,7 +258,9 @@ def main():
     # the H-SPLIT cases (from first_fixed on) may have fewer than 2 distinct coordinates, outside the joint fields'
     # domain (F_0 unbounded): only their H-SPLIT field is compared
     def differs(i, e):
-        return e["split"] != got[i]["split"] if i >= first_fixed else e != got[i]
+        if i >= first_fixed:
+            return e["split"] != got[i].get("split") or e["split_even"] != got[i].get("split_even")
+        return e != got[i]
     bad = [i for i in range(len(cases)) if differs(i, exp[i])]
     for i in bad[:20]:
         print(f'DISAGREE case {i}: {cases[i]}\n  expected {exp[i]}\n  got      {got[i]}')
@@ -242,30 +274,52 @@ def main():
     assert fx[3]["held"][0][3:7] == ['1100', False, '1110', False], fx[3]
     assert fx[8] == {"na": "kept brackets have 1 distinct coordinate (fewer than 2)"}, fx[8]
     assert fx[9] == {"na": "kept brackets inconsistent"}, fx[9]
-    assert [x["na"] for x in fx[10:]] == [f"fewer than 3 brackets ({i})" for i in range(3)], fx[10:]
-    sp = [e["split"] for e in exp]
-    sclasses = {x["na"].split(" (")[0] if "na" in x else "checked" for x in sp}
-    sheld = [h for x in sp if "held" in x for h in x["held"]]
-    scon = sum(1 for h in sheld if h[1])
-    sdec = sum(1 for h in sheld if h[2])
-    snd = sum(1 for h in sheld if not h[2])
+    assert [x["na"] for x in fx[10:]] == [f"no held-out odd bracket (n {i})" for i in range(3)], fx[10:]
+    e0 = first_fixed + len(fixed)
+    fe = [e["split_even"] for e in exp[e0:e0 + len(fixed_even)]]
+    assert all(x["held"][0][0] == 2 for x in fe[:8]), fe[:8]  # bracket 2 is the even pass's held-out one
+    assert fe[0]["held"][0][1:3] == [False, False], fe[0]  # abutting colinear: not decisive
+    assert fe[1]["held"][0][1:3] == [False, False], fe[1]  # w_lo + 1 = lo: not decisive
+    assert fe[2]["held"][0][1:3] == [False, True], fe[2]   # w_lo + 2 = lo: decisive
+    assert [x["held"][0][1] for x in fe[3:8]] == [False, True, False, True, True], fe[3:8]
+    assert fe[3]["held"][0][3:7] == ['1200', False, '1210', False], fe[3]
+    assert fe[8] == {"na": "kept brackets have 1 distinct coordinate (fewer than 2)"}, fe[8]
+    assert fe[9] == {"na": "kept brackets inconsistent"}, fe[9]
+    assert fe[10] == {"na": "no held-out even bracket (n 3)"}, fe[10]
+    # the odd pass on the even controls is a different selection: never the same held-out bracket
+    assert all("held" not in e["split"] or all(h[0] % 2 == 1 for h in e["split"]["held"]) for e in exp), "odd ordinals"
+    assert all("held" not in e["split_even"] or all(h[0] % 2 == 0 for h in e["split_even"]["held"]) for e in exp)
+
+    def tally(key):
+        sp = [e[key] for e in exp]
+        classes = {x["na"].split(" (")[0] if "na" in x else "checked" for x in sp}
+        held = [h for x in sp if "held" in x for h in x["held"]]
+        return (classes, held, sum(1 for h in held if h[1]), sum(1 for h in held if h[2]),
+                sum(1 for h in held if not h[2]))
+    sclasses, sheld, scon, sdec, snd = tally("split")
+    eclasses, eheld, econ, edec, end_ = tally("split_even")
     states = {(e["f0"], e["fj"]) for e in exp}
     contra = sum(1 for e in exp if e["hold"] for c, _ in e["hold"] if c)
     dec = sum(1 for e in exp if e["hold"] for _, d in e["hold"] if d)
     nondec = sum(1 for e in exp if e["hold"] for _, d in e["hold"] if not d)
     print(f'rsx_measured_check: {len(cases)} cases, {len(bad)} disagreements; state pairs {sorted(states)}; '
-          f'contradicted {contra} decisive {dec} non-decisive {nondec}; H-SPLIT classes {sorted(sclasses)}, held-out '
-          f'{len(sheld)}: contradicted {scon} decisive {sdec} non-decisive {snd}')
+          f'contradicted {contra} decisive {dec} non-decisive {nondec}; H-SPLIT odd classes {sorted(sclasses)}, held-out '
+          f'{len(sheld)}: contradicted {scon} decisive {sdec} non-decisive {snd}; H-SPLIT even classes '
+          f'{sorted(eclasses)}, held-out {len(eheld)}: contradicted {econ} decisive {edec} non-decisive {end_}')
     if bad:
         return 1
     if len(sclasses) != 4 or not (scon and sdec - scon and snd):
-        print('H-SPLIT outcome classes missing: the comparison would be vacuous for them')
+        print('H-SPLIT odd outcome classes missing: the comparison would be vacuous for them')
+        return 1
+    if len(eclasses) != 4 or not (econ and edec - econ and end_):
+        print('H-SPLIT even outcome classes missing: the comparison would be vacuous for them')
         return 1
     if '--self-test' in args:
         caught = 0
         kinds = 0
         for field in ('f0', 'fj', 'slope_lo', 'slope_open', 'slope_hi', 'contradicted', 'decisive', 'split_na',
-                      'split_contradicted', 'split_decisive', 'split_lo'):
+                      'split_contradicted', 'split_decisive', 'split_lo', 'even_na', 'even_contradicted',
+                      'even_decisive', 'even_lo'):
             for i, e in enumerate(exp):
                 c = json.loads(json.dumps(e))
                 if field in ('f0', 'fj'):
@@ -275,11 +329,11 @@ def main():
                     c["fj_slope"][k] = (not c["fj_slope"][k]) if k == 1 else c["fj_slope"][k] + "1"
                 elif field in ('contradicted', 'decisive') and c["hold"]:
                     c["hold"][0][0 if field == 'contradicted' else 1] ^= True
-                elif field == 'split_na' and "na" in c["split"]:
-                    c["split"]["na"] += " "
-                elif field.startswith('split_') and field != 'split_na' and c["split"].get("held"):
-                    k = {'split_contradicted': 1, 'split_decisive': 2, 'split_lo': 3}[field]
-                    h = c["split"]["held"][0]
+                elif field in ('split_na', 'even_na') and "na" in c[skey(field)]:
+                    c[skey(field)]["na"] += " "
+                elif field.split('_')[0] in ('split', 'even') and not field.endswith('_na') and c[skey(field)].get("held"):
+                    k = {'contradicted': 1, 'decisive': 2, 'lo': 3}[field.split('_', 1)[1]]
+                    h = c[skey(field)]["held"][0]
                     h[k] = (h[k] + "1") if k == 3 else (not h[k])
                 else:
                     continue
@@ -287,7 +341,7 @@ def main():
                 caught += differs(i, c)
                 break
         print(f'self-test: {caught} of {kinds} corrupted field kinds caught')
-        if caught != kinds or kinds != 11:
+        if caught != kinds or kinds != 15:
             return 1
     return 0
 

@@ -243,6 +243,12 @@ const RSX_R1_DIGESTS: [&str; 2] = [
     "d5c0fe7d9e9251e7674481b4e3fd86952a832365723be5598d9b848192a14fcb",
 ];
 
+/// The EXT_CONFIG field (40 bytes) of both measured captures.
+const RSX_R1_EXT_CONFIG: [u8; 40] = [
+    0x28, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x20, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
 fn digest_from_hex(s: &str) -> [u8; 32] {
     let mut d = [0u8; 32];
     for (i, b) in d.iter_mut().enumerate() {
@@ -264,13 +270,15 @@ pub fn builtin_table() -> Vec<TableEntry> {
         premise_bits: 0b1_1100_1111,
         digests: RSX_R1_DIGESTS.iter().map(|h| digest_from_hex(h)).collect(),
         fields: vec![
-            (F_SYS_SW_VERSION, FieldRule::Any("not readable by the runtime on the measured console".into())),
-            (F_HW_MODEL_CLASS, FieldRule::Any("not readable by the runtime on the measured console".into())),
+            (F_SYS_SW_VERSION, FieldRule::Any("not readable by the runtime; the profile is scoped to the measured console and is not a measurement across firmware".into())),
+            (F_HW_MODEL_CLASS, FieldRule::Any("not readable by the runtime; the profile is scoped to the measured console and is not a measurement across hardware models".into())),
             (F_TB_FREQ_HZ, FieldRule::RequiredMatch(vec![79_800_000u64.to_le_bytes().to_vec()])),
             (F_SPU_USABLE, FieldRule::Any("RSX placement does not use SPUs".into())),
-            (F_LOADER_HOOK, FieldRule::RequiredMatch(vec![vec![0], vec![1]])),
-            (F_LIVE_LINKED, FieldRule::RequiredMatch(vec![vec![0], vec![1]])),
-            (F_EXT_CONFIG, FieldRule::Any("each capture's held-out bracket test checks its own map".into())),
+            // Only the measured values: both console captures ran with the loader hook and the live link.
+            (F_LOADER_HOOK, FieldRule::RequiredMatch(vec![vec![1]])),
+            (F_LIVE_LINKED, FieldRule::RequiredMatch(vec![vec![1]])),
+            // The measured extension configuration (identical in both data models).
+            (F_EXT_CONFIG, FieldRule::RequiredMatch(vec![RSX_R1_EXT_CONFIG.to_vec()])),
         ],
         evidence: vec![
             "console capture, ILP32, heterogeneous-workload, 4662 frames, 9324 GPU pairs".into(),

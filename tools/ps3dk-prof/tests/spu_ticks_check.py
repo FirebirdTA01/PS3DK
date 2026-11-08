@@ -4,8 +4,9 @@
 It shares no code with the reader: it decodes each capture file itself (chunk walk, the extension chunks and the
 SPU_ORDER records), pairs the zones itself, and recomputes from the decoded records, by the DIRECT definitions of
 the design (every admitted bound, every i < j), every observation's [L, U] (with Upper-1 and Upper-2), every step
-classification, the segments, the tick counts, the per-segment availability reasons, the pair classes, the
-placement states and the coverage counts Q and q_p.  It runs examples/spu_ticks_json on the same files and compares
+classification, the segments, the tick counts, the per-segment availability reasons, the RMAX1 chain at the rate
+1/1 (by its direct definition, not the reader's forward and backward passes), the pair classes, the placement
+states and the coverage counts Q and q_p.  It runs examples/spu_ticks_json on the same files and compares
 every field.  Files the reader refuses (MALFORMED) are skipped by both and counted.
 
 usage: spu_ticks_check.py <spu_ticks_json executable> <fixture dir> [--self-test]
@@ -246,6 +247,23 @@ def expected(d):
             elif unpos.get(s[0], 0) > 0:
                 un.append('order coverage (unpositioned bracket)')
             s[4] = un or None
+        # RMAX1 at the reader's rate 1/1 (the decrementer never advances faster than the tb), by its DIRECT
+        # definition within each segment whose ticks are available: lower(k) = max over i <= k of L_i + (f_k - f_i),
+        # upper(k) = min over j >= k of U_j - (f_j - f_k).  A lower bound above its upper bound (or outside the tb
+        # range) contradicts RMAX1: every endpoint of a pair in such a segment is UNPLACED.
+        LR, UR, rbad = list(L), list(U), set()
+        for si, sg in enumerate(segs):
+            if sg[4] is not None:
+                continue
+            ks = range(sg[1], sg[2] + 1)
+            for k in ks:
+                lows = [L[i] + (f[k] - f[i]) for i in ks if i <= k and L[i] is not None]
+                ups = [U[j] - (f[j] - f[k]) for j in ks if j >= k and U[j] is not None]
+                lo = max(lows) if lows else None
+                up = min(ups) if ups else None
+                if (lo is not None and lo >= 1 << 64) or (up is not None and up < 0) or                         (lo is not None and up is not None and lo > up):
+                    rbad.add(si)
+                LR[k], UR[k] = lo, up
         # pairs (same epoch only)
         ev_obs = {o[1]: k for k, o in enumerate(obs) if o[0] == 'e'}
         ep = {x[0]: x[1] for x in events}
@@ -261,8 +279,10 @@ def expected(d):
                     return 'UNPLACED'
                 if epoch_of(obs[k]) in contra:
                     return 'UNPLACED'
+                if sb in rbad or se in rbad:
+                    return 'UNPLACED'
                 return {(True, True): 'PLACED', (True, False): 'LOWER-ONLY', (False, True): 'UPPER-ONLY',
-                        (False, False): 'UNPLACED'}[(L[k] is not None, U[k] is not None)]
+                        (False, False): 'UNPLACED'}[(LR[k] is not None, UR[k] is not None)]
             ticks, cls = None, None
             if t2:
                 cls = f'segment TICKS-UNAVAILABLE ({t2[0]})'

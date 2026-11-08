@@ -630,25 +630,62 @@ fn a_close_before_end_after_whole_event_chunks_is_published_early() {
 
 /// The app quit from the XMB: the agent sends END with `trailer_written` 0 (and a failed shutdown).  The bytes that
 /// arrived are a valid prefix, so the session is published as a normal `.prof`, never `.incomplete.prof`.
+/// END with every field chosen by the test.
+fn end_fields(io_finalized: u8, trailer: u8, join_failed: u8, result: i32, accepted: u64, sent: u64) -> Vec<u8> {
+    let mut p = vec![io_finalized, trailer, join_failed, 0];
+    p.extend_from_slice(&result.to_le_bytes());
+    p.extend_from_slice(&accepted.to_le_bytes());
+    p.extend_from_slice(&sent.to_le_bytes());
+    wire(T_END, &p)
+}
+
+/// A torn prefix of `capture_lanes(4)` (the first two RECORDS chunks whole, the third torn), streamed, then `end`
+/// and `tail`.
+fn trailerless_session(name: &str, end: Vec<u8>, tail: Vec<Step>, fault: Option<EarlyFault>) -> (LiveView, PathBuf) {
+    let (cap, _, rec) = capture_lanes(4);
+    let sent = rec[2] - 5;
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
+    script.push(Step::Send(end));
+    script.extend(tail);
+    let (port, _) = mock(script);
+    let dir = out_dir(name);
+    let mut k = cfg(port, &dir);
+    k.early_fault = fault;
+    let c = start(k);
+    wait(&c);
+    (c.view(), dir)
+}
+
+fn trailerless_sent() -> u64 {
+    let (_, _, rec) = capture_lanes(4);
+    (rec[2] - 5) as u64
+}
+
+/// A failure the missing trailer does not excuse: no normal `.prof`, the strict document on screen, and every
+/// needle among the reported reasons.
+fn assert_refused(v: &LiveView, dir: &Path, needles: &[&str]) {
+    let why = reasons(v.outcome.as_ref().unwrap());
+    for n in needles {
+        assert!(why.contains(n), "missing '{n}' in: {why}");
+    }
+    assert!(complete_files(dir).is_empty(), "{:?}", files(dir));
+    assert_eq!(v.doc.as_ref().unwrap().verdict().tone, VerdictTone::Incomplete, "strict document");
+}
+
+/// The app quit from the XMB: the runtime's END for a session without a trailer has `trailer_written` 0,
+/// `io_finalized` 0 (the runtime sets it only with a trailer), the shutdown result `PS3DK_PROF_ESINKFAIL` (-10) and
+/// no join failure.  Those three facts are the only ones forgiven: the valid prefix is published as a normal
+/// `.prof`, never `.incomplete.prof`.
 #[test]
 fn an_end_without_a_trailer_after_valid_data_is_published_as_a_normal_prof() {
     let (cap, _, rec) = capture_lanes(4);
-    let sent = rec[2] - 5; // a torn last chunk as well
-    let mut script = vec![Step::Send(hello_frame())];
-    script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
-    let mut p = vec![1, 0, 0, 0]; // io_finalized, no trailer, no join failure
-    p.extend_from_slice(&(-1i32).to_le_bytes());
-    p.extend_from_slice(&(sent as u64).to_le_bytes());
-    p.extend_from_slice(&(sent as u64).to_le_bytes());
-    script.push(Step::Send(wire(T_END, &p)));
-    let (port, _) = mock(script);
-    let dir = out_dir("end-no-trailer");
-    let c = start(cfg(port, &dir));
-    wait(&c);
-    let v = c.view();
+    let sent = trailerless_sent();
+    let (v, dir) =
+        trailerless_session("end-no-trailer", end_fields(0, 0, 0, SHUTDOWN_NO_TRAILER, sent, sent), vec![], None);
     let (p, cause, cut, torn) = early(v.outcome.as_ref().unwrap());
-    assert!(cause.contains("without a trailer"), "{cause}");
-    assert_eq!((cut as usize, torn as usize), (rec[1], sent - rec[1]));
+    assert!(cause.contains("without a trailer") && cause.contains("shutdown result -10"), "{cause}");
+    assert_eq!((cut as usize, torn), (rec[1], sent - rec[1] as u64));
     let name = p.path.to_string_lossy().into_owned();
     assert!(name.ends_with(".prof") && !name.ends_with(".incomplete.prof"), "{name}");
     assert_eq!(std::fs::read(&p.path).unwrap(), &cap[..rec[1]]);
@@ -658,17 +695,100 @@ fn an_end_without_a_trailer_after_valid_data_is_published_as_a_normal_prof() {
     assert!(doc.verdict().text.starts_with("COMPLETE (ended without a trailer"), "{}", doc.verdict().text);
 }
 
+/// A valid prefix, a whole local copy, END sent_bytes == received, but the I/O finalized with an accepted byte count
+/// that is not what arrived: an integrity failure, never published.
+#[test]
+fn an_end_without_a_trailer_and_an_accepted_byte_mismatch_stays_incomplete() {
+    let sent = trailerless_sent();
+    let (v, dir) = trailerless_session(
+        "end-no-trailer-accepted",
+        end_fields(1, 0, 0, SHUTDOWN_NO_TRAILER, sent - 1, sent),
+        vec![],
+        None,
+    );
+    let mismatch = format!("the console wrote {} bytes, {sent} arrived", sent - 1);
+    assert_refused(&v, &dir, &[&mismatch, "does not excuse"]);
+}
+
+#[test]
+fn an_end_without_a_trailer_and_a_join_failure_stays_incomplete() {
+    let sent = trailerless_sent();
+    let (v, dir) =
+        trailerless_session("end-no-trailer-join", end_fields(0, 0, 1, SHUTDOWN_NO_TRAILER, sent, sent), vec![], None);
+    assert_refused(&v, &dir, &["drain thread did not join", "does not excuse"]);
+}
+
+/// Only `PS3DK_PROF_ESINKFAIL` is forgiven: 0 beside a missing trailer is inconsistent, and any other result
+/// (`PS3DK_PROF_EPERM`, `PS3DK_PROF_ECLOSE`, `PS3DK_PROF_ETHREAD`) is a failure of its own.
+#[test]
+fn an_end_without_a_trailer_and_any_other_shutdown_result_stays_incomplete() {
+    let sent = trailerless_sent();
+    for result in [0, -1, -11, -12] {
+        let (v, dir) = trailerless_session(
+            &format!("end-no-trailer-result{result}"),
+            end_fields(0, 0, 0, result, sent, sent),
+            vec![],
+            None,
+        );
+        let why = format!("shutdown result {result} is not the runtime's no-trailer result -10");
+        assert_refused(&v, &dir, &[&why]);
+    }
+}
+
+/// END without a trailer, then the agent keeps the link open past `close_wait`: an unclean close refuses.
+#[test]
+fn an_end_without_a_trailer_and_no_close_stays_incomplete() {
+    let sent = trailerless_sent();
+    let (v, dir) = trailerless_session(
+        "end-no-trailer-no-close",
+        end_fields(0, 0, 0, SHUTDOWN_NO_TRAILER, sent, sent),
+        vec![Step::Hold(1500)], // close_wait is 300 ms
+        None,
+    );
+    assert_refused(&v, &dir, &["did not close the link after END"]);
+}
+
+/// END without a trailer, then a TCP reset instead of a clean FIN.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_end_without_a_trailer_and_a_reset_stays_incomplete() {
+    let sent = trailerless_sent();
+    let (v, dir) = trailerless_session(
+        "end-no-trailer-reset",
+        end_fields(0, 0, 0, SHUTDOWN_NO_TRAILER, sent, sent),
+        vec![Step::Sleep(50), Step::Reset],
+        None,
+    );
+    assert_refused(&v, &dir, &["connection error"]);
+}
+
+/// END without a trailer, but the local copy's first append failed (the DATA may arrive in a single read, so the
+/// first append is the one that always happens): the local copy does not hold every received byte, which no
+/// missing trailer excuses.
+#[test]
+fn an_end_without_a_trailer_and_a_local_copy_mismatch_stays_incomplete() {
+    let sent = trailerless_sent();
+    let n = Arc::new(AtomicU64::new(0));
+    let fault = EarlyFault(Arc::new(move |s| {
+        (s == EarlyStep::LocalAppend && n.fetch_add(1, Ordering::SeqCst) == 0).then(|| std::io::Error::other("injected"))
+    }));
+    let (v, dir) = trailerless_session(
+        "end-no-trailer-local",
+        end_fields(0, 0, 0, SHUTDOWN_NO_TRAILER, sent, sent),
+        vec![],
+        Some(fault),
+    );
+    assert_refused(&v, &dir, &["the local copy could not be written", &format!("the local copy holds 0 of {sent} bytes")]);
+    assert_eq!(v.local_error.as_deref(), Some("local write failed: injected"));
+}
+
 #[test]
 fn an_end_without_a_trailer_before_any_event_chunk_stays_incomplete() {
     let (cap, _, rec) = capture_lanes(2);
     let sent = rec[0] - 3;
     let mut script = vec![Step::Send(hello_frame())];
     script.extend(data_frames(&cap[..sent], 256).into_iter().map(Step::Send));
-    let mut p = vec![1, 0, 0, 0];
-    p.extend_from_slice(&0i32.to_le_bytes());
-    p.extend_from_slice(&(sent as u64).to_le_bytes());
-    p.extend_from_slice(&(sent as u64).to_le_bytes());
-    script.push(Step::Send(wire(T_END, &p)));
+    script.push(Step::Send(end_fields(0, 0, 0, SHUTDOWN_NO_TRAILER, sent as u64, sent as u64)));
     let (port, _) = mock(script);
     let dir = out_dir("end-no-trailer-no-events");
     let c = start(cfg(port, &dir));

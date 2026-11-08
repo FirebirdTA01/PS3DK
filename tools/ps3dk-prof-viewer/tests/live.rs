@@ -784,3 +784,37 @@ fn cut_file_checks_every_step_and_releases_the_handle() {
     let missing = cut_file(&dir.join("missing.partial"), 1, &None).unwrap_err();
     assert!(missing.contains("(Open)"), "{missing}");
 }
+
+/// The missing-trailer exception forgives exactly `trailer_written` 0, `io_finalized` 0 and the shutdown result
+/// `PS3DK_PROF_ESINKFAIL`; everything else an END reports still refuses, and an END with a trailer forgives nothing.
+#[test]
+fn the_missing_trailer_exception_forgives_only_the_enumerated_end_facts() {
+    assert_eq!(NO_TRAILER_FORGIVEN_RESULTS, [-10]);
+    let base = End {
+        io_finalized: false,
+        trailer_written: false,
+        join_failed: false,
+        shutdown_result: SHUTDOWN_NO_TRAILER,
+        accepted_bytes: 100,
+        sent_bytes: 100,
+    };
+    assert!(trailerless_end_refusals(&base, 100).is_empty());
+    // io_finalized 0: the accepted count is not checked (the runtime acknowledges positively written bytes only).
+    assert!(trailerless_end_refusals(&End { accepted_bytes: 7, ..base }, 100).is_empty());
+    assert!(trailerless_end_refusals(&End { io_finalized: true, ..base }, 100).is_empty());
+    let r = trailerless_end_refusals(&End { io_finalized: true, accepted_bytes: 99, ..base }, 100);
+    assert_eq!(r, vec!["the console wrote 99 bytes, 100 arrived".to_string()]);
+    let r = trailerless_end_refusals(&End { join_failed: true, ..base }, 100);
+    assert_eq!(r, vec!["the profiler's drain thread did not join".to_string()]);
+    for code in [0, -1, -2, -9, -11, -12, -13, i32::MIN, i32::MAX] {
+        let r = trailerless_end_refusals(&End { shutdown_result: code, ..base }, 100);
+        assert_eq!(r, vec![format!("shutdown result {code} is not the runtime's no-trailer result -10")], "{code}");
+    }
+    let all = trailerless_end_refusals(
+        &End { io_finalized: true, join_failed: true, shutdown_result: -12, accepted_bytes: 1, ..base },
+        100,
+    );
+    assert_eq!(all.len(), 3, "{all:?}");
+    // With a trailer the exception does not apply: publish_decision alone decides.
+    assert!(trailerless_end_refusals(&End { trailer_written: true, join_failed: true, ..base }, 100).is_empty());
+}

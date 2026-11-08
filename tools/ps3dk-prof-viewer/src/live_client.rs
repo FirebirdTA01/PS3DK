@@ -442,7 +442,14 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
                     }
                 }
                 if let Local::Open { copy, .. } = &mut r.local {
-                    copy.append(&new);
+                    match EarlyFault::check(&cfg.early_fault, EarlyStep::LocalAppend) {
+                        Ok(()) => copy.append(&new),
+                        Err(e) => {
+                            if copy.error.is_none() {
+                                copy.error = Some(format!("local write failed: {e}"));
+                            }
+                        }
+                    }
                     if let Some(e) = &copy.error {
                         sh.inner.lock().unwrap().view.local_error = Some(e.clone());
                     }
@@ -484,6 +491,14 @@ fn open_local(cfg: &ClientConfig, h: &Hello) -> Local {
     }
 }
 
+/// An end that may publish an accepted prefix, by kind.
+enum Early {
+    /// Before END: the user's Disconnect, EOF or a read error before END, no response, a failed PING.
+    BeforeEnd(String),
+    /// END said no trailer was written and reported nothing else that refuses.
+    NoTrailer(String),
+}
+
 fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
     // The received bytes are final: hand them to the worker and wait for its
     // parse of exactly these bytes (the only parse; no copy here).
@@ -505,21 +520,31 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
     // An early end may publish an accepted prefix only when the link itself did not fail a check: still
     // streaming (the user's Disconnect, no response, a failed PING) or closed before END.  END stays authoritative
     // even when a Disconnect raced it.
-    let early = r.early.take().filter(|_| {
+    let before_end = r.early.take().filter(|_| {
         matches!(state, LinkState::Handshake | LinkState::Streaming | LinkState::Failed(LinkError::Closed))
-    });
-    // An END that says no trailer was written (the app quit from the XMB, the console's shutdown failed) is an
-    // ending without a trailer too: the file is judged by its bytes, not by the missing trailer.
-    let early = early.or_else(|| match &state {
-        LinkState::Ended(e) if !e.trailer_written => {
-            Some("the console ended the capture without a trailer (app quit or the link ended)".to_string())
-        }
-        _ => None,
     });
     if matches!(state, LinkState::Ended(_)) && !r.clean_eof && r.extra.is_empty() {
         r.extra
             .push("the link did not end with a clean close".into());
     }
+    // An END that says no trailer was written is an ending without a trailer too, but only the missing trailer is
+    // forgiven (`trailerless_end_refusals` names exactly what is): a join failure, any other shutdown result, an
+    // accepted-byte mismatch, an unclean close or a local-copy failure still refuse, and are reported.
+    let mut refused_trailerless: Vec<String> = Vec::new();
+    let early = match (before_end, &state) {
+        (Some(c), _) => Some(Early::BeforeEnd(c)),
+        (None, LinkState::Ended(e)) if !e.trailer_written => {
+            refused_trailerless = trailerless_end_refusals(e, received);
+            refused_trailerless.is_empty().then(|| {
+                Early::NoTrailer(format!(
+                    "the console ended the capture without a trailer (app quit or the link ended); END forgiven: no trailer, I/O finalized {}, shutdown result {}",
+                    u8::from(e.io_finalized),
+                    e.shutdown_result
+                ))
+            })
+        }
+        _ => None,
+    };
     let outcome = match r.local {
         Local::NotYet | Local::Failed(_) => {
             let mut reasons = r.extra;
@@ -552,16 +577,26 @@ fn finish(sh: &Shared, cfg: &ClientConfig, mut r: NetResult) {
                 sh.inner.lock().unwrap().view.local_error = Some(e.clone());
             }
             let whole = local_ok && copy.written == received && copy.error.is_none();
+            let independent = !extra.is_empty() || !whole;
             let decision = match publish_decision(&state, received, reader_complete, local_ok) {
                 Publish::Complete if extra.is_empty() => Publish::Complete,
                 Publish::Complete => Publish::Incomplete(extra),
                 Publish::Incomplete(mut why) => {
                     why.extend(extra);
+                    if !refused_trailerless.is_empty() {
+                        why.push(format!(
+                            "no trailer was written, and END also reports what a missing trailer does not excuse: {}",
+                            refused_trailerless.join("; ")
+                        ));
+                    }
                     Publish::Incomplete(why)
                 }
             };
             let early = match (&decision, early) {
-                (Publish::Incomplete(_), Some(cause)) if whole => Some(cause),
+                // Before END the failure reasons are the early end itself; the local copy must still be whole.
+                (Publish::Incomplete(_), Some(Early::BeforeEnd(cause))) if whole => Some(cause),
+                // After END: no independent failure at all (clean close, no read error, a whole local copy).
+                (Publish::Incomplete(_), Some(Early::NoTrailer(cause))) if !independent => Some(cause),
                 _ => None,
             };
             let decision = match early {

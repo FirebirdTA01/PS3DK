@@ -50,6 +50,11 @@ const TWO32: i128 = 1 << 32;
 const UNIT_RECORD_OPS: u64 = 3;
 /// A lane's fixed records (state, rows, reason strings) before any evaluation.
 const LANE_FIXED_OPS: u64 = 8;
+/// The RMAX1 block's charge per observation: two bound vectors, then at most forward, backward, validation and
+/// publication steps (the per-segment visit is charged on top).
+pub const RMAX1_OBS_OPS: u64 = 6;
+/// The retention of a pair's view facts beyond its placements: the two causal-only placements and the depth.
+pub const PAIR_VIEW_OPS: u64 = 3;
 /// Map operations per published pair (the ticks class and the placement class) and the fixed publication records.
 const PUB_FIXED_OPS: u64 = 12;
 
@@ -154,6 +159,19 @@ impl Default for Options {
             provisional: false,
         }
     }
+}
+
+/// The checks on an RMAX1 rate (num, den) before any lane uses it: a zero numerator has no step (division by
+/// zero) and a zero denominator bounds no elapsed time.  Err names the refusal; a lane with order records is then
+/// REFUSED with it (never a silent zero step).  A step whose arithmetic overflows is refused where it is computed.
+pub fn rmax1_rate_ok((rn, rd): (u128, u128)) -> Result<(), String> {
+    if rn == 0 {
+        return Err(format!("RMAX1 rate {rn}/{rd} refused: a zero numerator (division by zero)"));
+    }
+    if rd == 0 {
+        return Err(format!("RMAX1 rate {rn}/{rd} refused: a zero denominator bounds no elapsed time"));
+    }
+    Ok(())
 }
 
 /// The SPU ticks entries compiled into the reader: empty, because no SPU ticks profile has been reviewed.
@@ -335,6 +353,17 @@ pub struct PairOut {
     pub tick_class: Option<String>,
     pub place_b: Place,
     pub place_e: Place,
+    /// The same endpoints from the causal bounds alone (before RMAX1): equal to `place_b` / `place_e` where the
+    /// RMAX1 chain did not run or did not tighten, and still bounds where an RMAX1 contradiction left the final
+    /// placement UNPLACED.
+    pub causal_b: Place,
+    pub causal_e: Place,
+    /// The RMAX1 chain ran over the endpoint's segment (the final placement is the causal bounds tightened by the
+    /// RMAX1 assumption); false for a PROVISIONAL lane and a segment whose ticks are unavailable.
+    pub rmax1_b: bool,
+    pub rmax1_e: bool,
+    /// The pair's nesting depth as decoded (for drawing).
+    pub depth: u8,
     /// The 9.2 conversion (x_lo, x_hi), only with the option, for TICKS pairs with an ISO entry.
     pub conv: Option<(String, String)>,
 }
@@ -346,7 +375,8 @@ pub enum LaneState {
     EmptyUnproven(Vec<String>),
     /// UNSUPPORTED-RESOURCE (capture budget) in <phase>: inventory only.
     Unsupported(String),
-    /// The lane's decoded inputs disagree (impossible for a decoded capture); nothing is evaluated.
+    /// The lane's decoded inputs disagree (impossible for a decoded capture), or the RMAX1 rate or one of its steps
+    /// is refused ([`rmax1_rate_ok`]); nothing is evaluated.
     Refused(String),
     /// file_flags bit 2 clear: every endpoint UNPLACED("no order records").
     NoOrder,
@@ -423,6 +453,19 @@ pub struct LaneOut {
     pub h1: Option<H1Lane>,
     /// The placements are PROVISIONAL: [`Options::provisional`] on a lane without ORDER_FINAL.
     pub provisional: bool,
+    /// The RMAX1 block's own accounting (the controls): zero when the block did not run.
+    pub rmax1_work: Rmax1Work,
+    /// The lane's image index (LANE_CREATED), for drawing; None when the lane is not in the lane table.
+    pub image: Option<u32>,
+}
+
+/// The RMAX1 block's accounting for one lane: the capture meter's use when the block began, what the block charged
+/// and the steps it counted where they were done.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Rmax1Work {
+    pub start_used: u64,
+    pub charged: u64,
+    pub steps: u64,
 }
 
 impl LaneOut {
@@ -452,6 +495,8 @@ impl LaneOut {
             w32: Vec::new(),
             h1: None,
             provisional: false,
+            rmax1_work: Rmax1Work::default(),
+            image: None,
         }
     }
     /// Eligible pairs (Q's part of this lane): every pair less the cross-epoch ones when known.
@@ -706,8 +751,13 @@ fn run(a: &Analysis, x: &ExtCapture, opts: &Options, ops: &mut Ops, res: &mut Sp
         }
         None => Vec::new(),
     };
+    // the lane table (image index for drawing): 2 per entry, walked in step with the lanes below (both in id order)
+    ops.charge(2 * x.lanes.len() as u64).map_err(stop("index"))?;
+    ops.step(x.lanes.len() as u64);
+    let lane_images: Vec<(u32, u32)> = x.lanes.iter().map(|(&k, li)| (k, li.image_index)).collect();
     let ix = Index { x, brackets: br };
     let mut oi = 0usize;
+    let mut ii = 0usize;
     for (n, &si) in lanes.iter().enumerate() {
         let s = &x.sources[si];
         let SourceKey::Lane(lane_id) = s.key else { unreachable!("lanes only") };
@@ -719,7 +769,12 @@ fn run(a: &Analysis, x: &ExtCapture, opts: &Options, ops: &mut Ops, res: &mut Sp
         }
         ops.step(1);
         let ord = order_lanes.get(oi).filter(|o| o.0 == lane_id).map(|o| o.1);
-        let r = one_lane(&ix, ops, opts, res, s, lane_id, ord);
+        while ii < lane_images.len() && lane_images[ii].0 < lane_id {
+            ops.step(1);
+            ii += 1;
+        }
+        let image = lane_images.get(ii).filter(|e| e.0 == lane_id).map(|e| e.1);
+        let r = one_lane(&ix, ops, opts, res, s, lane_id, ord, image);
         if let Err((l, phase)) = r {
             if ops.exhausted {
                 res.not_listed = Some(nlanes - n as u64 - 1);
@@ -738,9 +793,11 @@ struct PairIx {
     epoch: u32,
     cross: bool,
     desc: u32,
+    depth: u8,
 }
 
 /// One SPU lane: index, inventory, evaluation and atomic publication.
+#[allow(clippy::too_many_arguments)]
 fn one_lane(
     ix: &Index<'_>,
     ops: &mut Ops,
@@ -749,9 +806,11 @@ fn one_lane(
     s: &SourceReport,
     lane_id: u32,
     ord: Option<&LaneOrder>,
+    image: Option<u32>,
 ) -> Result<(), Fail> {
     let order = ix.x.order.is_some();
     let mut inv = LaneOut::inventory(s, lane_id, ord, order);
+    inv.image = image;
     // per-lane index: events (seq strictly increasing, epochs in range and non-decreasing), pairs located once
     let ev = &s.raw.events;
     let idx = (|| -> Result<Result<Vec<PairIx>, String>, Fail> {
@@ -776,7 +835,7 @@ fn one_lane(
                 return Ok(Err(format!("pair {}..{} names an event that is not decoded", pr.begin, pr.end)));
             }
             ops.step(1);
-            v.push(PairIx { b: bi, e: ei, epoch: ev[bi].epoch, cross: ev[bi].epoch != ev[ei].epoch, desc: pr.desc });
+            v.push(PairIx { b: bi, e: ei, epoch: ev[bi].epoch, cross: ev[bi].epoch != ev[ei].epoch, desc: pr.desc, depth: pr.depth });
         }
         Ok(Ok(v))
     })();
@@ -997,6 +1056,9 @@ fn evaluate(
     let empty = LaneOrder::default();
     let ord = ord.unwrap_or(&empty);
     let nep = s.epochs as usize;
+    if let Err(why) = rmax1_rate_ok(opts.rmax1) {
+        return Ok(Err(why));
+    }
     // ---- observations
     let p = ph("observations");
     ops.charge(LANE_FIXED_OPS + 2 * nep as u64).map_err(&p)?;
@@ -1324,26 +1386,37 @@ fn evaluate(
     // integer elapsed), so no bound is ever loosened the unsafe way.  A chain never crosses a segment; a lower bound
     // above its upper bound contradicts RMAX1 (or the causal bounds): counted, the segment marked, nothing clamped.
     let p = ph("rmax1");
-    ops.charge(2 * n as u64 + segs.len() as u64 + 2).map_err(&p)?;
     let (rn, rd) = opts.rmax1;
-    let step_of = |a: &ObsOut, b: &ObsOut| -> u128 {
+    // The block's cost model, from n and the segment count alone: the two n-element bound vectors (n each), one
+    // visit per segment, and per segment of k observations at most k - 1 forward, k - 1 backward, k validation and k
+    // publication (rl, ru) steps, so at most 6n + S in all.  Each step is counted where it is done (`ops.step`),
+    // separately from this charge, and the block's own count is kept in `u.rmax1_work` for the controls.
+    let start_used = ops.meter.used();
+    let (steps0, charged0) = (ops.work.steps, ops.work.own_charged);
+    ops.charge((n as u64).saturating_mul(RMAX1_OBS_OPS).saturating_add(segs.len() as u64)).map_err(&p)?;
+    let step_of = |a: &ObsOut, b: &ObsOut| -> Option<u128> {
         let m = u128::from(a.raw.wrapping_sub(b.raw));
-        if rn == 0 {
-            0
-        } else {
-            m.checked_mul(rd).map_or(0, |v| v.div_ceil(rn))
-        }
+        m.checked_mul(rd).map(|v| v.div_ceil(rn))
     };
-    let mut lo: Vec<Option<u128>> = obs.iter().map(|o| o.l.map(u128::from)).collect();
-    let mut up: Vec<Option<i128>> = obs.iter().map(|o| o.u.map(i128::from)).collect();
+    let overflow = |a: usize, b: usize, m: u32| {
+        format!("RMAX1 step refused: {m} ticks times the rate denominator {rd} overflows (observations {a}..{b})")
+    };
+    let mut lo: Vec<Option<u128>> = Vec::with_capacity(obs.len());
+    let mut up: Vec<Option<i128>> = Vec::with_capacity(obs.len());
+    for o in &obs {
+        ops.step(2);
+        lo.push(o.l.map(u128::from));
+        up.push(o.u.map(i128::from));
+    }
     for sg in 0..segs.len() {
+        ops.step(1);
         if matches!(segs[sg].state, TickState::Unavailable(_)) {
             continue;
         }
         let (f, l) = (segs[sg].first, segs[sg].last);
         for i in f + 1..=l {
             ops.step(1);
-            let st = step_of(&obs[i - 1], &obs[i]);
+            let Some(st) = step_of(&obs[i - 1], &obs[i]) else { return Ok(Err(overflow(i - 1, i, obs[i - 1].raw.wrapping_sub(obs[i].raw)))) };
             if let Some(prev) = lo[i - 1] {
                 let cand = prev.saturating_add(st);
                 lo[i] = Some(lo[i].map_or(cand, |v| v.max(cand)));
@@ -1351,7 +1424,8 @@ fn evaluate(
         }
         for i in (f..l).rev() {
             ops.step(1);
-            let st = i128::try_from(step_of(&obs[i], &obs[i + 1])).unwrap_or(i128::MAX);
+            let Some(st) = step_of(&obs[i], &obs[i + 1]) else { return Ok(Err(overflow(i, i + 1, obs[i].raw.wrapping_sub(obs[i + 1].raw)))) };
+            let st = i128::try_from(st).unwrap_or(i128::MAX);
             if let Some(next) = up[i + 1] {
                 let cand = next.saturating_sub(st);
                 up[i] = Some(up[i].map_or(cand, |v| v.min(cand)));
@@ -1381,16 +1455,22 @@ fn evaluate(
             }
         } else {
             for i in f..=l {
+                ops.step(1);
                 obs[i].rl = lo[i].and_then(|v| u64::try_from(v).ok());
                 obs[i].ru = up[i].and_then(|v| u64::try_from(v).ok());
             }
         }
     }
+    u.rmax1_work = Rmax1Work {
+        start_used,
+        charged: ops.work.own_charged - charged0,
+        steps: ops.work.steps - steps0,
+    };
     // ---- pairs
     let p = ph("pairs");
     let np = pairs.iter().filter(|q| !q.cross).count() as u64; // counted at index time
     let conv_on = opts.pairs && opts.isolation_scale && res.iso.is_some();
-    ops.charge(np.saturating_mul(RET_PAIR_OPS + 8) + 2 * segs.len() as u64).map_err(&p)?;
+    ops.charge(np.saturating_mul(RET_PAIR_OPS + 8 + PAIR_VIEW_OPS) + 2 * segs.len() as u64).map_err(&p)?;
     let gate = |o: &ObsOut| -> Option<Place> {
         if !p2_short.is_empty() {
             Some(Place::Unplaced(p2_short.clone()))
@@ -1415,7 +1495,7 @@ fn evaluate(
     let mut seg_width_c: Vec<Vec<u64>> = vec![Vec::new(); segs.len()];
     let mut out: Vec<PairOut> = Vec::with_capacity(np as usize);
     for pr in pairs.iter().filter(|q| !q.cross) {
-        ops.step(4);
+        ops.step(4 + PAIR_VIEW_OPS);
         let (ob, oe) = (ev_obs[pr.b], ev_obs[pr.e]);
         let (sb, se) = (obs[ob].seg, obs[oe].seg);
         let bad = segs[sb].rmax1_bad || segs[se].rmax1_bad;
@@ -1482,6 +1562,11 @@ fn evaluate(
             tick_class: class,
             place_b: pb,
             place_e: pe,
+            causal_b: cb,
+            causal_e: ce,
+            rmax1_b: !matches!(segs[sb].state, TickState::Unavailable(_)),
+            rmax1_e: !matches!(segs[se].state, TickState::Unavailable(_)),
+            depth: pr.depth,
             conv,
         });
     }
@@ -1840,6 +1925,8 @@ fn lane_state_text(u: &LaneOut) -> String {
         LaneState::Empty => "EMPTY".to_string(),
         LaneState::EmptyUnproven(r) => format!("EMPTY-UNPROVEN({})", r.join("; ")),
         LaneState::Unsupported(w) => format!("UNSUPPORTED-RESOURCE ({w}): inventory only"),
+        // an invalid RMAX1 rate or step is an option refusal, not a disagreement of the decoded inputs
+        LaneState::Refused(w) if w.starts_with("RMAX1 ") => format!("REFUSED ({w}): nothing evaluated"),
         LaneState::Refused(w) => format!("REFUSED (the decoded inputs disagree: {w}): nothing evaluated"),
         LaneState::NoOrder => "NO ORDER RECORDS: every endpoint UNPLACED (no order records)".to_string(),
     }

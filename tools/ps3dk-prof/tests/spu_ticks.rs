@@ -1601,37 +1601,121 @@ fn rmax1_chain_never_crosses_a_segment() {
     assert_eq!(u.rmax1_contradicted, 0, "{t}");
 }
 
+/// The RMAX1 block's steps counted from the published lane alone, independently of the reader's charge formula:
+/// both bound vectors (one push each per observation), one visit per segment, and in every segment whose ticks are
+/// available (k observations) k - 1 forward, k - 1 backward and k validation steps, then k publication steps unless
+/// the segment contradicts RMAX1 (one listed finding instead).
+fn rmax1_steps_from_the_lane(l: &ps3dk_prof::spu_ticks::LaneOut) -> u64 {
+    let n = l.obs.len() as u64;
+    let mut steps = 2 * n + l.segments.len() as u64;
+    for sg in &l.segments {
+        if matches!(sg.state, TickState::Unavailable(_)) {
+            continue;
+        }
+        let k = (sg.last - sg.first + 1) as u64;
+        steps += 2 * (k - 1) + k;
+        steps += if sg.rmax1_bad { 1 } else { k };
+    }
+    steps
+}
+
+/// The RMAX1 block (two n-element vectors, the forward, backward and validation passes, the endpoint publication):
+/// its steps, counted where they are done, equal the count derived from the published lane alone and never exceed
+/// its charge; the budgets that run out inside the block are exactly that charge (exact passes the block, one short
+/// stops in it, atomically, with no work after the exhaustion).
 #[test]
 fn rmax1_passes_are_charged_before_any_work() {
-    let b = chain_cap(&[1000, 900, 850, 800, 700, 600]).bytes();
-    let a = analysed(&b);
-    let o = opts();
-    let full = analyze(&a, &o).unwrap();
-    assert!(full.exhausted_at.is_none());
-    // the budgets that run out in the RMAX1 phase are exactly its charge: two passes over 6 observations, 1 segment
-    // and 2 fixed = 15; the next budget passes the phase, every budget below the first of them refuses earlier
-    let mut at_phase: Vec<u64> = Vec::new();
-    for budget in 0..full.used {
-        let r = analyze(&a, &at(&o, budget)).unwrap();
-        work_ok(&r, budget);
-        if r.exhausted_at.as_ref().is_some_and(|e| e.phase == "rmax1") {
-            at_phase.push(budget);
-            // atomic: the lane is the inventory only, nothing of the chain is published
-            let l = &r.lanes[0];
-            assert_eq!(l.state, LaneState::Unsupported("capture budget in rmax1".into()), "budget {budget}");
-            assert!(l.obs.is_empty() && l.segments.is_empty() && l.pairs_out.is_empty() && l.rmax1_contradicted == 0);
+    for (name, raws) in [
+        ("chain", &[1000u32, 900, 850, 800, 700, 600][..]),
+        ("contradiction", &[3000, 2400, 1800][..]),
+    ] {
+        let b = chain_cap(raws).bytes();
+        let a = analysed(&b);
+        let o = opts();
+        let full = analyze(&a, &o).unwrap();
+        assert!(full.exhausted_at.is_none(), "{name}");
+        let l = &full.lanes[0];
+        let w = l.rmax1_work;
+        let independent = rmax1_steps_from_the_lane(l);
+        assert_eq!(w.steps, independent, "{name}: counted steps against the lane-derived count");
+        assert!(w.steps <= w.charged, "{name}: {w:?}");
+        let n = l.obs.len() as u64;
+        let findings = u64::from(l.segments.iter().any(|s| s.rmax1_bad));
+        assert_eq!(w.charged, 6 * n + l.segments.len() as u64 + findings, "{name}: {w:?}");
+        // the meter's refusal window inside the block is exactly the block's charge
+        let mut at_phase: Vec<u64> = Vec::new();
+        for budget in w.start_used.saturating_sub(3)..w.start_used + w.charged + 3 {
+            let r = analyze(&a, &at(&o, budget)).unwrap();
+            work_ok(&r, budget);
+            if r.exhausted_at.as_ref().is_some_and(|e| e.phase == "rmax1") {
+                at_phase.push(budget);
+                let x = &r.lanes[0];
+                assert_eq!(x.state, LaneState::Unsupported("capture budget in rmax1".into()), "{name} {budget}");
+                assert!(x.obs.is_empty() && x.segments.is_empty() && x.pairs_out.is_empty() && x.rmax1_contradicted == 0);
+            }
         }
+        let want: Vec<u64> = (w.start_used..w.start_used + w.charged).collect();
+        assert_eq!(at_phase, want, "{name}: {w:?}");
+        // exact: the block's whole charge passes it; one short stops in it
+        let exact = analyze(&a, &at(&o, w.start_used + w.charged)).unwrap();
+        assert!(exact.exhausted_at.as_ref().map_or(true, |e| e.phase != "rmax1"), "{name}");
+        let short = analyze(&a, &at(&o, w.start_used + w.charged - 1)).unwrap();
+        assert_eq!(short.exhausted_at.as_ref().map(|e| e.phase), Some("rmax1"), "{name}");
+        assert_eq!(short.work.after_exhaustion, 0, "{name}");
+        // the whole capture: exactly enough, and one short refuses
+        let e = analyze(&a, &at(&o, full.used)).unwrap();
+        assert!(e.exhausted_at.is_none());
+        assert_eq!(e.lanes, full.lanes);
+        assert!(analyze(&a, &at(&o, full.used - 1)).unwrap().exhausted_at.is_some());
     }
-    assert_eq!(at_phase.len(), 15, "{at_phase:?}");
-    assert_eq!(*at_phase.last().unwrap() - at_phase[0], 14, "contiguous: {at_phase:?}");
-    let enough = *at_phase.last().unwrap() + 1;
-    let r = analyze(&a, &at(&o, enough)).unwrap();
-    assert!(r.exhausted_at.as_ref().map_or(true, |e| e.phase != "rmax1"));
-    // exactly enough for the whole capture, and one short refuses
-    let e = analyze(&a, &at(&o, full.used)).unwrap();
-    assert!(e.exhausted_at.is_none());
-    assert_eq!(e.lanes, full.lanes);
-    assert!(analyze(&a, &at(&o, full.used - 1)).unwrap().exhausted_at.is_some());
+}
+
+/// Over a capture with several segments, one of them a cross-epoch boundary, the counted steps still equal the
+/// lane-derived count (a segment-blind formula would miss the per-segment visits and the shorter passes).
+#[test]
+fn rmax1_block_steps_follow_the_segments() {
+    let mut c = Cap::new(1, 1000);
+    c.epoch(1, 0, 1500);
+    c.walk(1, 2000, &[Item::Ev(1000, D_WORK, BEGIN, 0), Item::Ev(900, D_WORK, END, 0), Item::Epoch(0xFFFF_FFFF)]);
+    c.walk(1, 3000, &[Item::Ev(500, D_WORK, BEGIN, 0), Item::Ev(400, D_WORK, END, 0)]);
+    c.finish(1);
+    let (_, r) = run_with(&c.bytes(), &opts());
+    let l = &r.lanes[0];
+    assert_eq!(l.segments.len(), 2);
+    assert_eq!(l.rmax1_work.steps, rmax1_steps_from_the_lane(l));
+    assert_eq!(l.rmax1_work.steps, 2 * 4 + 2 + 2 * (1 + 1 + 2 + 2));
+    assert!(l.rmax1_work.steps <= l.rmax1_work.charged);
+}
+
+/// A rate with a zero numerator or a zero denominator, or one whose step arithmetic overflows, is refused with a
+/// named reason: the lane is REFUSED, never placed with a silent zero step.
+#[test]
+fn invalid_rmax1_rates_are_refused_by_name() {
+    use ps3dk_prof::spu_ticks::rmax1_rate_ok;
+    assert_eq!(rmax1_rate_ok((1, 1)), Ok(()));
+    assert_eq!(rmax1_rate_ok((0, 1)), Err("RMAX1 rate 0/1 refused: a zero numerator (division by zero)".into()));
+    assert_eq!(rmax1_rate_ok((1, 0)), Err("RMAX1 rate 1/0 refused: a zero denominator bounds no elapsed time".into()));
+    let b = chain_cap(&[1000, 900, 850, 800, 700, 600]).bytes();
+    for (rate, want) in [
+        ((0u128, 1u128), "RMAX1 rate 0/1 refused: a zero numerator (division by zero)".to_string()),
+        ((1, 0), "RMAX1 rate 1/0 refused: a zero denominator bounds no elapsed time".to_string()),
+        (
+            (1, u128::MAX),
+            format!("RMAX1 step refused: 100 ticks times the rate denominator {} overflows (observations 0..1)", u128::MAX),
+        ),
+    ] {
+        let (a, r) = run_with(&b, &Options { rmax1: rate, ..opts() });
+        let l = &r.lanes[0];
+        assert_eq!(l.state, LaneState::Refused(want.clone()), "{rate:?}");
+        assert!(l.pairs_out.is_empty() && l.obs.is_empty(), "{rate:?}: nothing placed");
+        assert_eq!(r.coverage.refused_lanes, 1, "{rate:?}");
+        assert_eq!(r.coverage.q_p, 0, "{rate:?}");
+        let t = text(&a, &r);
+        assert!(t.contains(&want), "{rate:?}: {t}");
+    }
+    // the largest denominator that cannot overflow on these reads is still accepted
+    let (_, ok) = run_with(&b, &Options { rmax1: (1, u128::MAX / 100), ..opts() });
+    assert_eq!(ok.lanes[0].state, LaneState::Evaluated);
 }
 
 // ---- PROVISIONAL placement over a received prefix ---------------------------------------------------------------

@@ -1058,6 +1058,10 @@ fn split_exactly_on_the_boundary_is_compatible_and_one_tick_off_is_contradicted(
     }
 }
 
+fn hex_bytes(s: &str) -> Vec<u8> {
+    (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap()).collect()
+}
+
 fn hex32(s: &str) -> [u8; 32] {
     let mut d = [0u8; 32];
     for (i, b) in d.iter_mut().enumerate() {
@@ -1077,6 +1081,10 @@ fn the_builtin_rsx_r1_entry_binds_digests_and_timebase() {
         p.id = b"RSX-R1".to_vec();
         p.digest = digest;
         p.fields[2].value = freq.to_le_bytes().to_vec();
+        // The measured LOADER_HOOK, LIVE_LINKED and EXT_CONFIG values the entry pins.
+        p.fields[4].value = vec![1];
+        p.fields[5].value = vec![1];
+        p.fields[6].value = hex_bytes("28000000060000000004000000000400000020000000000001000000200000000000000000000000");
         let a = analysed(&r.bytes());
         analyze(&a, &Options { table: table.clone(), convention: conv(), ..Options::default() }).unwrap()
     };
@@ -1089,6 +1097,34 @@ fn the_builtin_rsx_r1_entry_binds_digests_and_timebase() {
     }
     let res = run([7; 32], 79_800_000);
     assert!(res.classification.failures.iter().any(|f| f.starts_with("runtime not reviewed for RSX-R1")), "{:?}", res.classification.failures);
+    // Unmeasured LOADER_HOOK / LIVE_LINKED values and another extension configuration are outside the entry.
+    let digest = hex32("1664b32fc5957c273120d6ef4548b0fe289f5a0a807dd06676b4a704bd902690");
+    for (field, value, name) in [(4usize, vec![0u8], "LOADER_HOOK"), (5, vec![0u8], "LIVE_LINKED")] {
+        let mut r = baseline();
+        let p = r.profile.as_mut().unwrap();
+        p.id = b"RSX-R1".to_vec();
+        p.digest = digest;
+        p.fields[4].value = vec![1];
+        p.fields[5].value = vec![1];
+        p.fields[6].value = hex_bytes("28000000060000000004000000000400000020000000000001000000200000000000000000000000");
+        p.fields[field].value = value;
+        let a = analysed(&r.bytes());
+        let res = analyze(&a, &Options { table: table.clone(), convention: conv(), ..Options::default() }).unwrap();
+        assert!(res.classification.failures.iter().any(|f| f.starts_with(&format!("outside profile scope: {name}"))),
+            "{name}: {:?}", res.classification.failures);
+    }
+    {
+        let mut r = baseline();
+        let p = r.profile.as_mut().unwrap();
+        p.id = b"RSX-R1".to_vec();
+        p.digest = digest;
+        p.fields[4].value = vec![1];
+        p.fields[5].value = vec![1];
+        let a = analysed(&r.bytes());
+        let res = analyze(&a, &Options { table: table.clone(), convention: conv(), ..Options::default() }).unwrap();
+        assert!(res.classification.failures.iter().any(|f| f.starts_with("outside profile scope: EXT_CONFIG")),
+            "{:?}", res.classification.failures);
+    }
     // A different timebase is refused even earlier (the PROFILE field must equal the CLOCKS frequency); the entry
     // itself accepts only the measured 79.8 MHz.
     let tb = table[0].fields.iter().find(|(id, _)| *id == ps3dk_prof::profile::F_TB_FREQ_HZ).unwrap();

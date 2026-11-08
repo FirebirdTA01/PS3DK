@@ -4,10 +4,11 @@
 //! usage: rsx_joint_cases < cases.json > results.json   (exit 0; 2 unreadable or malformed input)
 //! Input:  {"cases": [{"obs": [["f", "lo", "hi"], ...], "halves": [["f", "lo"|"hi", "T"], ...]}, ...]}
 //! Output: {"results": [{"f0": state, "fj": state, "fj_slope": [lo, lo_open, hi|null] | null,
-//!   "hold": [[contradicted, decisive], ...] | null, "split": {"na": class} | {"kept": k, "held": [[ordinal,
-//!   contradicted, decisive, lo, lo_open, hi, hi_open], ...]}}]}: the hold-out is evaluated only when F_0 is
-//!   COMPATIBLE with at least 2 distinct bracket coordinates (rsx_measured's rule); H-SPLIT ([`split_holdout`], the
-//!   reader's own function) on the brackets in the order given.  Rationals in lowest terms, "n" or "n/d"; an infinite
+//!   "hold": [[contradicted, decisive], ...] | null, "split": S, "split_even": S}]} with S = {"na": class} |
+//!   {"kept": k, "held": [[ordinal, contradicted, decisive, lo, lo_open, hi, hi_open], ...]}: the hold-out is
+//!   evaluated only when F_0 is COMPATIBLE with at least 2 distinct bracket coordinates (rsx_measured's rule);
+//!   H-SPLIT ([`split_holdout`], the reader's own function) on the brackets in the order given, the odd pass in
+//!   "split" and the even pass in "split_even".  Rationals in lowest terms, "n" or "n/d"; an infinite
 //!   end is "-inf" / "+inf".
 use std::io::Read;
 
@@ -83,7 +84,14 @@ fn case(c: &Value) -> Option<Value> {
         }
         _ => Value::Null,
     };
-    let split = match split_holdout(m, &obs, false).ok()? {
+    let split = split_json(split_holdout(m, &obs, false).ok()?);
+    let split_even = split_json(split_holdout(m, &obs, true).ok()?);
+    Some(json!({"f0": state(&f0), "fj": state(&fj), "fj_slope": fj_slope, "hold": hold, "split": split,
+                "split_even": split_even}))
+}
+
+fn split_json(o: SplitOutcome) -> Value {
+    match o {
         SplitOutcome::NotAvailable(why) => json!({ "na": why }),
         SplitOutcome::Checked { kept, held } => {
             let v: Vec<Value> = held
@@ -96,8 +104,7 @@ fn case(c: &Value) -> Option<Value> {
                 .collect();
             json!({ "kept": kept, "held": v })
         }
-    };
-    Some(json!({"f0": state(&f0), "fj": state(&fj), "fj_slope": fj_slope, "hold": hold, "split": split}))
+    }
 }
 
 fn main() {

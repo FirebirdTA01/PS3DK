@@ -265,9 +265,13 @@ fn placement_geometry_and_wording() {
     assert_eq!(by_pair(1).core, Some((500.0, 600.0)));
     // the bars are in the timeline order (unbounded begin first)
     assert_eq!(info.pair_of_bar, vec![1, 0, 2]);
-    // wording: the label is ticks; placement "placed between L and U (causal bounds)"; no banned word
+    // wording: the label is ticks; a final placement "placed between L and U (final bounds: causal, tightened by the
+    // RMAX1 assumption)"; no banned word
     let lines = details(info, "spu.work", 1, Some(79_800_000));
-    assert!(lines.iter().any(|x| x == "BEGIN placed between 100 and 200 (causal bounds)"), "{lines:?}");
+    assert!(
+        lines.iter().any(|x| x == "BEGIN placed between 100 and 200 (final bounds: causal, tightened by the RMAX1 assumption)"),
+        "{lines:?}"
+    );
     let banned = ["duration", "time", "elapsed", "execution", "cpu", "wall", "measured"];
     let mut all = lines.clone();
     all.push(info.header.clone());
@@ -527,4 +531,302 @@ fn drawn_bars_carry_ticks_in_the_tooltip_and_a_click_opens_the_details_panel() {
     // a newer snapshot drops the pick (its pair belongs to the old rows)
     st.refresh(a);
     assert!(st.spu_pick.is_none());
+}
+
+// ---- the SPU rows' work bound: one charge admits each lane before any scan, allocation or sort --------------------
+
+fn row_budgets(capture_ops: u64, retained_bars: u64) -> TimelineBudgets {
+    TimelineBudgets { capture_ops, retained_bars, ..TimelineBudgets::default() }
+}
+
+/// Every admitted lane: its counted steps never exceed the charge that admitted it; a refused lane did no step.
+#[track_caller]
+fn prep_bounded(infos: &std::collections::BTreeMap<u32, SpuTrackInfo>) {
+    for (id, i) in infos {
+        assert!(i.prep.steps <= i.prep.charged, "lane {id}: {:?}", i.prep);
+        if i.header.contains("rows UNSUPPORTED-RESOURCE") {
+            assert_eq!(i.prep, SpuPrep::default(), "lane {id}: a refused lane did nothing");
+        }
+    }
+}
+
+#[test]
+fn spu_rows_zero_budget_refuses_every_lane_before_any_scan_and_the_refusal_is_cached() {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let v = d.foreign_tl.spu.get(a);
+    let (srcs, infos) = sources(&v, &row_budgets(0, 1 << 20));
+    prep_bounded(&infos);
+    assert_eq!(infos.len(), 2);
+    for (s, (id, i)) in srcs.iter().zip(&infos) {
+        assert!(matches!(&s.state, FtSourceState::Bars(b) if b.is_empty()));
+        assert!(i.header.starts_with(&format!("SPU lane {id}: rows UNSUPPORTED-RESOURCE (SPU row budget: 0 of 0")), "{}", i.header);
+        assert!(i.header.ends_with("nothing drawn"), "{}", i.header);
+        assert!(i.pair_of_bar.is_empty());
+    }
+    // through the Document: the refusal is on the track, and the rows are built once
+    let mut d = doc(&b);
+    d.foreign_tl.spu_rows = row_budgets(0, 1 << 20);
+    let a = d.analysis().unwrap();
+    let mut st = TimelineState::new(a);
+    for _ in 0..5 {
+        st.sync_foreign(&d.foreign_tl, a);
+    }
+    let first = st.foreign.clone().unwrap();
+    st.sync_foreign(&d.foreign_tl, a);
+    assert!(Arc::ptr_eq(&first, st.foreign.as_ref().unwrap()), "the refused rows are cached");
+    assert_eq!(d.foreign_tl.builds.load(Ordering::Relaxed), 1);
+    assert_eq!(d.foreign_tl.spu.builds.load(Ordering::Relaxed), 1);
+    let lanes: Vec<_> = first.tracks.iter().filter(|t| t.spu.is_some()).collect();
+    assert_eq!(lanes.len(), 2);
+    for t in lanes {
+        assert!(t.bars.is_empty());
+        let r = t.refusal.as_deref().unwrap_or("");
+        assert!(r.contains("rows UNSUPPORTED-RESOURCE (SPU row budget"), "{r}");
+        assert!(t.header.contains("rows UNSUPPORTED-RESOURCE"), "{}", t.header);
+    }
+}
+
+#[test]
+fn spu_rows_exact_budget_admits_a_lane_and_one_short_refuses_it_and_every_later_lane() {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let v = d.foreign_tl.spu.get(a);
+    let r = v.result.as_ref().unwrap();
+    let cost = |i: usize, retain: u64| row_ops(r.lanes[i].segments.len() as u64, r.lanes[i].pairs_out.len() as u64, retain);
+    let (c1, c2) = (cost(0, 1 << 20), cost(1, (1 << 20) - 16));
+    let (_, full) = sources(&v, &TimelineBudgets::default());
+    prep_bounded(&full);
+    assert_eq!((full[&1].prep.charged, full[&2].prep.charged), (c1, c2));
+    // the counted steps of a lane are what it did: its segments, its pairs and their pushes, both sorts, its bars
+    for (id, i) in &full {
+        assert!(i.prep.steps > 1 + r.lanes[(*id - 1) as usize].pairs_out.len() as u64, "lane {id}: {:?}", i.prep);
+    }
+    let (_, exact) = sources(&v, &row_budgets(c1 + c2, 1 << 20));
+    assert_eq!(exact, full, "exact budget: the same rows");
+    let (_, short) = sources(&v, &row_budgets(c1 + c2 - 1, 1 << 20));
+    prep_bounded(&short);
+    assert_eq!(short[&1], full[&1], "lane 1 is paid");
+    assert!(short[&2].header.starts_with("SPU lane 2: rows UNSUPPORTED-RESOURCE"), "{}", short[&2].header);
+    let (_, first_short) = sources(&v, &row_budgets(c1 - 1, 1 << 20));
+    prep_bounded(&first_short);
+    assert!(first_short.values().all(|i| i.header.contains("rows UNSUPPORTED-RESOURCE")), "lane 1 and every later lane");
+}
+
+#[test]
+fn spu_rows_with_retain_zero_skip_the_bar_sort_and_count_every_zone_as_not_retained() {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let v = d.foreign_tl.spu.get(a);
+    let (srcs, infos) = sources(&v, &row_budgets(1 << 28, 0));
+    prep_bounded(&infos);
+    for (s, i) in srcs.iter().zip(infos.values()) {
+        assert!(matches!(&s.state, FtSourceState::Bars(b) if b.is_empty()));
+        assert_eq!(i.not_retained, 16);
+        assert!(i.header.contains("; 16 zones not retained"), "{}", i.header);
+        let u = i.lane_out();
+        assert_eq!(i.prep.charged, row_ops(u.segments.len() as u64, 16, 0));
+        assert!(i.prep.charged < row_ops(u.segments.len() as u64, 16, 1), "no bar sort is paid for");
+    }
+}
+
+/// A result of `lanes` lanes, each a copy of lane 1 with `pairs` copies of its first pair (0: no pair, no segment).
+fn synthetic_lanes(lanes: u32, pairs: usize) -> Arc<SpuView> {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let mut v = (*d.foreign_tl.spu.get(a)).clone();
+    let r = v.result.as_mut().unwrap();
+    let mut t = r.lanes[0].clone();
+    let p = t.pairs_out[0].clone();
+    t.pairs_out = (0..pairs).map(|_| p.clone()).collect();
+    if pairs == 0 {
+        t.segments.clear();
+    }
+    r.lanes = (1..=lanes).map(|id| {
+        let mut l = t.clone();
+        l.lane_id = id;
+        l
+    }).collect();
+    Arc::new(v)
+}
+
+#[test]
+fn spu_rows_of_many_empty_lanes_are_charged_a_fixed_amount_each_and_refused_once_unpaid() {
+    let v = synthetic_lanes(20_000, 0);
+    let per = row_ops(0, 0, 1 << 20);
+    assert_eq!(per, ROW_FIXED_OPS);
+    let (_, all) = sources(&v, &row_budgets(per * 20_000, 1 << 20));
+    prep_bounded(&all);
+    assert!(all.values().all(|i| i.prep.charged == per && !i.header.contains("UNSUPPORTED")));
+    let (_, half) = sources(&v, &row_budgets(per * 10_000, 1 << 20));
+    prep_bounded(&half);
+    let refused = half.values().filter(|i| i.header.contains("rows UNSUPPORTED-RESOURCE")).count();
+    assert_eq!(refused, 10_000);
+    assert!(half[&10_000].prep.charged == per && half[&10_001].header.contains("rows UNSUPPORTED-RESOURCE"));
+}
+
+#[test]
+fn spu_rows_of_a_lane_with_many_pairs_are_refused_before_its_scan_and_sorts() {
+    let n = 1usize << 18;
+    let v = synthetic_lanes(1, n);
+    let need = row_ops(v.result.as_ref().unwrap().lanes[0].segments.len() as u64, n as u64, 1 << 20);
+    assert!(need > 4 * n as u64, "the charge covers the scan and both sorts: {need}");
+    let (srcs, short) = sources(&v, &row_budgets(need - 1, 1 << 20));
+    prep_bounded(&short);
+    assert_eq!(short[&1].prep, SpuPrep::default(), "nothing scanned or sorted");
+    assert!(matches!(&srcs[0].state, FtSourceState::Bars(b) if b.is_empty()));
+    let (srcs, ok) = sources(&v, &row_budgets(need, 1 << 20));
+    prep_bounded(&ok);
+    assert_eq!(ok[&1].prep.charged, need);
+    assert!(matches!(&srcs[0].state, FtSourceState::Bars(b) if b.len() == n));
+}
+
+// ---- the cache key: every option the result depends on -----------------------------------------------------------
+
+#[test]
+fn spu_cache_rebuilds_when_the_rmax1_rate_changes() {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let slot = SpuSlot::default();
+    let one = slot.get_with(a, &Options::default());
+    assert_eq!(slot.get_with(a, &Options::default()).rmax1, (1, 1));
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 1);
+    let half = slot.get_with(a, &Options { rmax1: (2, 1), ..Options::default() });
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 2, "a changed rate is another key");
+    assert_eq!(half.rmax1, (2, 1));
+    let places = |v: &SpuView| -> Vec<Place> {
+        v.result.as_ref().unwrap().lanes.iter().flat_map(|l| l.pairs_out.iter().map(|p| p.place_b.clone())).collect()
+    };
+    assert_ne!(places(&one), places(&half), "the placements depend on the rate");
+    assert!(Arc::ptr_eq(&half, &slot.get_with(a, &Options { rmax1: (2, 1), ..Options::default() })));
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 2);
+    assert_ne!(SpuKey::of(&Options::default()), SpuKey::of(&Options { rmax1: (2, 1), ..Options::default() }));
+}
+
+#[test]
+fn spu_cache_rebuilds_for_a_same_id_entry_with_changed_rules_or_premises() {
+    use ps3dk_prof::profile::FieldRule;
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let slot = SpuSlot::default();
+    let base = test_table();
+    let mut rules = base.clone();
+    rules[0].entry.fields[2].1 = FieldRule::RequiredMatch(vec![(FREQ + 1).to_le_bytes().to_vec()]);
+    let mut premises = base.clone();
+    premises[0].entry.premise_bits ^= 1 << 3;
+    for t in [&rules, &premises] {
+        assert_eq!((&t[0].entry.profile_id, &t[0].entry.digests), (&base[0].entry.profile_id, &base[0].entry.digests), "same id");
+    }
+    let held = slot.get_with(a, &Options { table: base.clone(), ..Options::default() });
+    assert!(held.result.as_ref().unwrap().classification.holds());
+    let changed = slot.get_with(a, &Options { table: rules.clone(), ..Options::default() });
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 2, "same id, changed rules: another key");
+    assert!(!changed.result.as_ref().unwrap().classification.holds(), "the new rules no longer hold");
+    let p = slot.get_with(a, &Options { table: premises.clone(), ..Options::default() });
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 3, "same id, changed premises: another key");
+    assert!(!p.result.as_ref().unwrap().classification.failures.is_empty());
+    let again = slot.get_with(a, &Options { table: premises, ..Options::default() });
+    assert!(Arc::ptr_eq(&p, &again));
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 3);
+}
+
+// ---- wording: provisional causal-only bounds, final causal-plus-RMAX1 bounds -------------------------------------
+
+#[test]
+fn final_and_provisional_bounds_are_named_and_the_causal_bounds_stay_inspectable() {
+    let banned = ["duration", "time", "elapsed", "execution", "cpu", "wall", "measured", "ran", "running", "descheduled", "descheduling"];
+    let words_ok = |x: &str| {
+        let low = x.to_lowercase();
+        for w in banned {
+            assert!(!low.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == w), "{w:?} in {x}");
+        }
+    };
+    // FINAL: tightened by RMAX1, the causal-only bounds beside them, the assumption named
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let v = d.foreign_tl.spu.get(a);
+    let (_, infos) = sources(&v, &TimelineBudgets::default());
+    let info = &infos[&1];
+    let p = info.pair(0);
+    assert!(p.rmax1_b && p.rmax1_e);
+    let lines = details(info, "spu.work", 0, Some(FREQ));
+    assert!(lines[3].starts_with("BEGIN placed between ") && lines[3].ends_with("(final bounds: causal, tightened by the RMAX1 assumption)"), "{lines:?}");
+    assert!(lines.contains(&format!("BEGIN {}", place_text(&p.causal_b, Basis::CausalOnly))), "{lines:?}");
+    assert!(lines.contains(&format!("END {}", place_text(&p.causal_e, Basis::CausalOnly))), "{lines:?}");
+    let u = info.lane_out();
+    let o = &u.obs[p.b];
+    assert_eq!(p.causal_b, Place::Placed(o.l.unwrap(), o.u.unwrap()), "the causal-only bounds are the reader's");
+    assert!(lines.iter().any(|l| l.starts_with("RMAX1 assumption: the SPU decrementer advances at most 1 tick(s) per 1 tb tick(s)")
+        && l.contains("hold only under it")), "{lines:?}");
+    assert!(!lines.iter().any(|l| l.contains("PROVISIONAL")), "{lines:?}");
+    lines.iter().for_each(|l| words_ok(l));
+    // PROVISIONAL: causal only, no RMAX1 chain, no assumption line
+    let pb = f_base_with(false).torn_after(usize::MAX);
+    let mut pd = doc(&pb);
+    pd.foreign_tl.spu.options.provisional = true;
+    let pa = pd.analysis().unwrap();
+    let pv = pd.foreign_tl.spu.get(pa);
+    let (_, pinfos) = sources(&pv, &TimelineBudgets::default());
+    let plines = details(&pinfos[&1], "spu.work", 0, Some(FREQ));
+    assert!(plines[3].ends_with("(PROVISIONAL bounds: causal only, no RMAX1 chain yet)"), "{plines:?}");
+    assert!(!plines.iter().any(|l| l.starts_with("RMAX1 assumption") || l.contains("tightened")), "{plines:?}");
+    assert!(plines.iter().any(|l| l == PROVISIONAL_NOTE));
+    plines.iter().for_each(|l| words_ok(l));
+    // FINAL, but the chain did not run over the segment: causal only, said so
+    let nv = synthetic(1, &|_, p| {
+        p.rmax1_b = false;
+        p.rmax1_e = false;
+    });
+    let (_, ninfos) = sources(&nv, &TimelineBudgets::default());
+    let nlines = details(&ninfos[&1], "spu.work", 0, Some(FREQ));
+    assert!(nlines[3].ends_with("(final bounds: causal only, the RMAX1 chain did not apply)"), "{nlines:?}");
+    assert!(!nlines.iter().any(|l| l.starts_with("RMAX1 assumption")), "{nlines:?}");
+    // the caption: both kinds named, the solid core conditional on RMAX1, the causal-only bounds in the details
+    for want in [
+        "FINAL bounds are the causal bounds tightened by the RMAX1 assumption",
+        "PROVISIONAL bounds (a capture still arriving) are the causal bounds alone",
+        "which for final bounds holds only under the RMAX1 assumption",
+        "the details keep each zone's causal-only bounds",
+    ] {
+        assert!(CAPTION.contains(want), "{want:?} not in {CAPTION}");
+    }
+    assert!(!CAPTION.contains("causal bounds only (no"), "{CAPTION}");
+    words_ok(CAPTION);
+    words_ok(PROVISIONAL_NOTE);
+}
+
+/// The slot does no work beside the analysis: at a zero capture budget the analysis refuses before any step, and no
+/// drawing map is built before or beside it (each pair's depth and each lane's image come with the result).
+#[test]
+fn spu_slot_at_a_zero_budget_does_no_work_before_or_beside_the_analysis() {
+    let b = f_base().bytes();
+    let d = doc(&b);
+    let a = d.analysis().unwrap();
+    let slot = SpuSlot::default();
+    let v = slot.get_with(a, &Options { capture_ops: 0, ..Options::default() });
+    let r = v.result.as_ref().unwrap();
+    assert_eq!((r.work.steps, r.work.own_charged, r.used), (0, 0, 0));
+    assert!(r.lanes.is_empty() && r.exhausted_at.is_some());
+    let (srcs, infos) = sources(&v, &TimelineBudgets::default());
+    assert!(srcs.is_empty() && infos.is_empty());
+    assert!(Arc::ptr_eq(&v, &slot.get_with(a, &Options { capture_ops: 0, ..Options::default() })), "the refusal is cached");
+    assert_eq!(slot.builds.load(Ordering::Relaxed), 1);
+    // with a budget, the drawing facts are the decoded ones
+    let full = slot.get_with(a, &Options::default());
+    let x = a.capture.ext.as_ref().unwrap();
+    for u in &full.result.as_ref().unwrap().lanes {
+        assert_eq!(u.image, x.lanes.get(&u.lane_id).map(|l| l.image_index));
+        let s = x.sources.iter().find(|s| s.key == ps3dk_prof::ext::SourceKey::Lane(u.lane_id)).unwrap();
+        for p in &u.pairs_out {
+            let raw = s.raw.pairs.iter().find(|q| q.begin == p.begin).unwrap();
+            assert_eq!(p.depth, raw.depth);
+        }
+    }
 }
