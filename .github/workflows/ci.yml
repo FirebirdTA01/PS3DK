@@ -713,6 +713,14 @@ jobs:
       - name: Test render-target surface types use the surface enum family
         run: bash tests/sdk/surface-type-enum-test.sh
 
+      # cellGcmConvertSwizzleFormat: the 2-D Morton order must match
+      # psgl_morton2 (libPSGL).  The host test decodes the converter's
+      # output with an independent copy of the bit-interleave and checks
+      # it against the PSGL reference; it also verifies no texel collides
+      # and no gap is left.
+      - name: Test cellGcmConvertSwizzleFormat 2-D Morton order matches psgl_morton2
+        run: bash tests/sdk/gcm-swizzle-convert-test.sh
+
       # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
       # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
       # must follow the same resolved directory.
