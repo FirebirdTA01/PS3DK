@@ -1,5 +1,5 @@
-# Data-model checks for the profiling samples that link the uninstalled SPU/RSX extension archives (make -C
-# sdk/libps3dkprof ext-ilp32 / ext-lp64 [ext-live-ilp32 / ext-live-lp64]).  Configure-time, and independent of
+# Data-model checks for the profiling samples that link the SPU/RSX extension archives (installed, or a build-tree
+# make -C sdk/libps3dkprof ext-ilp32 / ext-lp64 [ext-live-ilp32 / ext-live-lp64]).  Configure-time, and independent of
 # whether the linker would refuse a mixed-data-model link:
 #   prof_ext_compiled_abi(<out>)  sets <out> to ilp32 or lp64 from the compiler's pointer size (CMAKE_SIZEOF_VOID_P);
 #                                 any other size is a FATAL_ERROR.

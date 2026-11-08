@@ -1,7 +1,7 @@
-/* The SPU lane extension's configuration (P3.2 integration, slice I1): INTERNAL and host-only in this checkpoint.
- * It is not installed under sdk/include and no target archive contains it; the runtime compiles the extension only
- * with PS3DK_PROF_WITH_SPU, which only host builds define.  Slice I1 provides init, config validation and the memory
- * layout; there is no lane API yet, so an enabled capture is a valid EMPTY extension file (spec r6).
+/* The SPU lane extension's PPU-side API.  Installed as <ps3dk/prof_spu.h>, with the psp_desc.h it includes, by
+ * `make -C sdk/libps3dkprof install`; its runtime is the extension archive libps3dkprof_ext.a (ppu/lib for ILP32,
+ * ppu/lib/lp64 for LP64), which an app links instead of ps3dkprof.  The runtime compiles the extension only with
+ * PS3DK_PROF_WITH_SPU, which the extension archives and host builds define.
  *
  * ps3dk_prof_config is unchanged.  ps3dk_prof_init(cfg) is ps3dk_prof_init_ex(cfg, NULL). */
 #ifndef PS3DK_PROF_SPU_EXT_H

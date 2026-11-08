@@ -280,11 +280,21 @@ if [[ -z "$AR" && "${OS:-}" == "Windows_NT" && -x "$ROOT/ppu/bin/powerpc64-ps3-e
     AR="$ROOT/ppu/bin/powerpc64-ps3-elf-ar.exe"
 fi
 [[ -n "$AR" ]] || AR="$(command -v ar 2>/dev/null || true)"
+# The manual archive also holds the live link members; the SPU/RSX extension
+# (both data models, director decision D1) ships as its PROFILE form, with the
+# generated identity member, plus a separate live link archive.
 for abi in '' lp64/; do
-    for lib in ps3dkprof ps3prof; do
+    for lib in ps3dkprof ps3prof ps3dkprof_ext ps3dkprof_ext_live; do
         rel="ppu/lib/${abi}lib${lib}.a"
-        expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o)
-        [[ "$lib" != ps3prof ]] || expected+=(prof_arcs_writer.o startup.o)
+        case "$lib" in
+            ps3dkprof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o
+                                 live_agent.o live_os_lv2.o live_api.o) ;;
+            ps3prof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o
+                               prof_arcs_writer.o startup.o) ;;
+            ps3dkprof_ext) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o ext_runtime.o psp_ppu.o
+                                     psp_elf.o gpu_runtime.o prg.o gpu_port_gcm.o rsxcap.o prof_identity.o) ;;
+            ps3dkprof_ext_live) expected=(live_agent.o live_os_lv2.o live_api.o) ;;
+        esac
         if [[ ! -f "$ROOT/$rel" ]]; then
             bad "$rel missing"
         elif [[ -z "$AR" ]]; then

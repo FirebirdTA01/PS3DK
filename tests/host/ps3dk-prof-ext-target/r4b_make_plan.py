@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P3.3 R4b shipped-build invariance (review 21:23 carry 2): for the default goal, `all` and `install`, the REACHABLE
+"""P3.3 R4b shipped-build invariance (review 21:23 carry 2): for the shipped goals, the REACHABLE
 dependency graph (each reachable target's prerequisites and recipe lines, from `make -p -n GOAL`) and the dry-run
 recipe output (`make -n GOAL`) are identical between two sdk/libps3dkprof trees, and neither mentions the extension
 (ext-ilp32 / ext-lp64 / ext-live / ilp32-ext / lp64-ext / libps3dkprof_ext / EXT_ / EXT64 / EXTL).  And for each
@@ -7,16 +7,26 @@ existing extension goal of the base tree (ext-ilp32, ext-ilp32-profile), the dry
 (the LP64 twin and the live targets must not change a single ILP32 extension command).  Nothing is built or installed
 (-n).
 
+Since director decision D1, all and install also build and install the extension's release form, so the shipped
+archives have their own goals, `shipped` and `install-shipped`.  With --pre-d1-base the BASE tree is one from before
+D1 and its '', all and install goals are compared with the candidate's shipped, shipped and install-shipped (the goal
+target itself renamed, nothing else); and the candidate's ext-lp64-profile dry run must equal the base's
+ext-ilp32-profile with the LP64 command-line overrides it replaces.  Without the flag both trees use the new goal names.
+
 Normalization, and nothing else: each tree's absolute root is replaced by the token <ROOT>.  The same scratch
 PS3_BUILD_ROOT / PS3DK / PS3DEV values and SDK_VERSION=r4b-plan (a command-line override, so version.sh is not run)
 are passed to both.  Any difference is printed in full.
 
-usage: r4b_make_plan.py BASE_LIBDIR CAND_LIBDIR SCRATCH      (exit 0 iff identical and extension-free)"""
+usage: r4b_make_plan.py BASE_LIBDIR CAND_LIBDIR SCRATCH [--pre-d1-base]   (exit 0 iff identical and extension-free)"""
 import re
 import subprocess
 import sys
 
-GOALS = ['', 'all', 'install']
+NEW_GOALS = [('shipped', 'shipped'), ('install-shipped', 'install-shipped')]
+PRE_D1_GOALS = [('', 'shipped'), ('all', 'shipped'), ('install', 'install-shipped')]
+PRE_D1_RENAME = {'shipped': 'all', 'install-shipped': 'install'}
+LP64_OVERRIDE = ['ext-ilp32-profile', 'EXTP_DIR=$(BUILD)/lp64-ext-profile',
+                 'EXTP_FLAGS=$(EXT_FLAGS_lp64) -DPS3DK_PROF_WITH_PROFILE']
 EXT = re.compile(r'ext-ilp32|ext-lp64|ext-live|ilp32-ext|lp64-ext|libps3dkprof_ext|EXT_|EXT64|EXTL')
 EXT_GOALS = ['ext-ilp32', 'ext-ilp32-profile']  # dry-run identical between the trees
 
@@ -60,19 +70,27 @@ def graph(db, goal_targets):
     return seen
 
 
+def renamed(g, rename):
+    """the graph with each target and prerequisite name mapped through rename (identity when absent)"""
+    return {rename.get(t, t): ([rename.get(p, p) for p in pre], rec) for t, (pre, rec) in g.items()}
+
+
 def main():
-    if len(sys.argv) != 4:
+    argv = sys.argv[1:]
+    pre_d1 = '--pre-d1-base' in argv
+    argv = [a for a in argv if a != '--pre-d1-base']
+    if len(argv) != 3:
         print(__doc__)
         return 2
-    base, cand, scratch = sys.argv[1:4]
+    base, cand, scratch = argv
     fail = 0
-    for g in GOALS:
-        name = g or '(default)'
+    for bg_goal, cg_goal in (PRE_D1_GOALS if pre_d1 else NEW_GOALS):
+        name = f'{bg_goal or "(default)"}/{cg_goal}'
         gfail = fail
         fail = 0
-        args = [g] if g else []
         out = {}
-        for tag, d in (('base', base), ('cand', cand)):
+        for tag, d, g in (('base', base, bg_goal), ('cand', cand, cg_goal)):
+            args = [g] if g else []
             rc1, dry, e1 = make(d, scratch, ['-n', *args])
             rc2, db, e2 = make(d, scratch, ['-p', '-n', *args])
             if rc1 != 0 or rc2 != 0:
@@ -80,7 +98,10 @@ def main():
                 fail = 1
                 continue
             goals = [g] if g else ['all']
-            out[tag] = (dry, graph(db, goals))
+            gr = graph(db, goals)
+            if tag == 'cand' and pre_d1:
+                gr = renamed(gr, PRE_D1_RENAME)
+            out[tag] = (dry, gr)
         if len(out) != 2:
             fail |= gfail
             continue
@@ -125,6 +146,21 @@ def main():
             fail = 1
         else:
             print(f'PASS {g}: dry-run identical ({len(out["cand"].splitlines())} lines)')
+    if pre_d1:
+        rb, db_, eb = make(base, scratch, ['-n', *LP64_OVERRIDE])
+        rc_, dc, ec = make(cand, scratch, ['-n', 'ext-lp64-profile'])
+        if rb != 0 or rc_ != 0 or not dc.strip():
+            print(f'FAIL ext-lp64-profile: make rc {rb}/{rc_}: {(eb + ec)[:400]}')
+            fail = 1
+        elif db_ != dc:
+            print('FAIL ext-lp64-profile: dry run differs from the base LP64 override')
+            print('--- base override')
+            print(db_)
+            print('--- cand ext-lp64-profile')
+            print(dc)
+            fail = 1
+        else:
+            print(f'PASS ext-lp64-profile: dry run equals the base LP64 override ({len(dc.splitlines())} lines)')
     print('R4B MAKE PLAN ' + ('PASS' if not fail else 'FAIL'))
     return fail
 

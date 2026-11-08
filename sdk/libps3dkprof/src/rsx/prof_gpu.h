@@ -1,6 +1,6 @@
-/* GPU (RSX) timestamp domains in the runtime (P3.3 R2; R4b target wiring): INTERNAL.  It is not installed under
- * sdk/include; the only target archives containing the GPU runtime are the UNINSTALLED ext archives (make ext-ilp32,
- * make ext-lp64), where the device is GCM; host builds use a test-hook device.  Enabled by
+/* GPU (RSX) timestamp domains in the runtime (P3.3 R2; R4b target wiring).  Installed as <ps3dk/prof_gpu.h> by
+ * `make -C sdk/libps3dkprof install`; the GPU runtime is only in the extension archives (libps3dkprof_ext.a, both
+ * data models), where the device is GCM; host builds use a test-hook device.  Enabled by
  * ps3dk_prof_ext_config.gpu_domains_max (prof_spu.h).
  *
  * Every call: EBUSY inside a drain, a sink callback or another GPU call (port callbacks included), checked before any

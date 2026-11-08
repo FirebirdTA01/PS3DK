@@ -9,7 +9,8 @@ trap 'rm -rf "$work"' EXIT
 passed=0 failed=0
 ar_tool=$(command -v ar)
 mkdir -p "$work/tree/ppu/lib/lp64" "$work/objects"
-for member in prof_core prof_drain prof_version pal_lv2 prof_arcs_writer startup extra; do
+for member in prof_core prof_drain prof_version pal_lv2 prof_arcs_writer startup live_agent live_os_lv2 live_api \
+              ext_runtime psp_ppu psp_elf gpu_runtime prg gpu_port_gcm rsxcap prof_identity extra; do
     printf 'membership fixture: %s\n' "$member" > "$work/objects/$member.o"
 done
 record() {
@@ -41,7 +42,10 @@ expect() {
 all=$(bash "$root/scripts/check-release-tree.sh" "$work/tree" 2>&1 || :)
 out=$all
 for rel in ppu/include/ps3dk/prof.h ppu/lib/libps3dkprof.a ppu/lib/lp64/libps3dkprof.a \
-           ppu/lib/libps3prof.a ppu/lib/lp64/libps3prof.a; do
+           ppu/lib/libps3prof.a ppu/lib/lp64/libps3prof.a \
+           ppu/include/ps3dk/prof_spu.h ppu/include/ps3dk/psp_desc.h ppu/include/ps3dk/prof_gpu.h \
+           ppu/lib/libps3dkprof_ext.a ppu/lib/lp64/libps3dkprof_ext.a \
+           ppu/lib/libps3dkprof_ext_live.a ppu/lib/lp64/libps3dkprof_ext_live.a; do
     if grep -qF "missing sdk_core: $rel" <<< "$all"; then
         record pass "required $rel"
     else
@@ -50,11 +54,17 @@ for rel in ppu/include/ps3dk/prof.h ppu/lib/libps3dkprof.a ppu/lib/lp64/libps3dk
 done
 
 for abi in '' lp64/; do
-    for lib in ps3dkprof ps3prof; do
+    for lib in ps3dkprof ps3prof ps3dkprof_ext ps3dkprof_ext_live; do
         rel="ppu/lib/${abi}lib${lib}.a"
         archive="$work/tree/$rel"
-        members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o)
-        [[ $lib != ps3prof ]] || members+=(prof_arcs_writer.o startup.o)
+        # An independent copy of the release contract, not read from the gate.
+        case $lib in
+            ps3dkprof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o live_agent.o live_os_lv2.o live_api.o) ;;
+            ps3prof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o prof_arcs_writer.o startup.o) ;;
+            ps3dkprof_ext) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o ext_runtime.o psp_ppu.o psp_elf.o
+                                    gpu_runtime.o prg.o gpu_port_gcm.o rsxcap.o prof_identity.o) ;;
+            ps3dkprof_ext_live) members=(live_agent.o live_os_lv2.o live_api.o) ;;
+        esac
         restore() {
             rm -f "$archive"
             (cd "$work/objects"; "$ar_tool" rcs "$archive" "${members[@]}")
@@ -86,17 +96,17 @@ printf '#!/usr/bin/env bash\nset -o pipefail\n%q "$@" | sed '\''s/$/\\r/'\''\n' 
 chmod +x "$work/crlf-ar"
 ar_tool="$work/crlf-ar"
 gate
-if [[ $(grep -c '^  ok      ppu/lib/.*libps3.*\.a has exactly ' <<< "$out") == 4 ]]; then
-    record pass 'CRLF ar listing accepts all four archives'
+if [[ $(grep -c '^  ok      ppu/lib/.*libps3.*\.a has exactly ' <<< "$out") == 8 ]]; then
+    record pass 'CRLF ar listing accepts all eight archives'
 else
-    record fail 'CRLF ar listing accepts all four archives'
+    record fail 'CRLF ar listing accepts all eight archives'
 fi
 ar_tool=/bin/false
 gate
-if [[ $(grep -c '^  FAIL    ppu/lib/.*libps3.*\.a ' <<< "$out") == 4 ]]; then
-    record pass 'ar failure rejects all four archives'
+if [[ $(grep -c '^  FAIL    ppu/lib/.*libps3.*\.a ' <<< "$out") == 8 ]]; then
+    record pass 'ar failure rejects all eight archives'
 else
-    record fail 'ar failure rejects all four archives'
+    record fail 'ar failure rejects all eight archives'
 fi
 echo "release-tree-profiler: tests=$((passed+failed)) pass=$passed fail=$failed"
 [[ $failed == 0 ]]

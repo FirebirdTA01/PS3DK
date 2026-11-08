@@ -326,6 +326,11 @@ jobs:
       - name: Test the sys_ synchronisation surface
         run: bash tests/sdk/sys-sync-surface-test.sh
 
+      # Skips without PS3DEV; the profiler's fresh-prefix install of both data
+      # models' extension archives and headers, with missing-artifact controls.
+      - name: Test the profiler fresh-prefix install
+        run: bash tests/sdk/prof-ext-install-test.sh
+
       # Skips without PS3DEV; every SDK header that compiles as C++ under
       # gnu++17 must still compile under gnu++20, ILP32 and LP64.
       - name: Test SDK headers for C++20 readiness
