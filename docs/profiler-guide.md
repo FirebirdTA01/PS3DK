@@ -162,21 +162,19 @@ This records:
 
 so the viewer's Timeline shows PPU, SPU and RSX rows.
 
-**Build it from the extension archive.** The SPU-lane / RSX-domain extension is not part of the installed SDK; it is the **uninstalled extension archive**, built from the SDK's `sdk/libps3dkprof` tree:
+**Link the installed extension archives.** The SDK installs `libps3dkprof_ext.a` and `libps3dkprof_ext_live.a` for each PPU ABI, in `ppu/lib` (ILP32) and `ppu/lib/lp64` (LP64). The extension headers `prof_spu.h`, `psp_desc.h` and `prof_gpu.h` are installed under `ppu/include/ps3dk`. The normal SDK build and install include these artifacts; the extension remains EXPERIMENTAL.
 
-```
-make -C sdk/libps3dkprof ext-ilp32 ext-live-ilp32   # ILP32: libps3dkprof_ext.a and libps3dkprof_ext_live.a
-make -C sdk/libps3dkprof ext-lp64 ext-live-lp64     # LP64 (-mlp64): the same members, in their own directories
-```
+For `samples/profiling/heterogeneous-workload`, set `SAMPLE_PROFILING=ON` and `SAMPLE_PROF_EXT=ON`; add `SAMPLE_LIVE=ON` for live viewing. Use the toolchain file matching `SAMPLE_ABI`. By default, the sample selects the installed extension archive and, when live viewing is enabled, its matching live archive. `SAMPLE_PROF_SDK` selects an alternative SDK root with the same layout.
 
-In the sample's `CMakeLists.txt`, turn it on with `-DSAMPLE_PROF_EXT=ON`, pointing:
+For development against build-tree archives, explicitly set `SAMPLE_EXT_ARCHIVE` and, with live viewing enabled, `SAMPLE_EXT_LIVE_ARCHIVE`. Do not mix an explicit extension archive with an implicitly selected live archive. `make -C sdk/libps3dkprof ext-release` builds the profile-enabled extension and live archives for both ABIs; the normal install places them in the SDK.
 
-- `SAMPLE_EXT_ARCHIVE` at the uninstalled `libps3dkprof_ext.a`, and
-- `SAMPLE_EXT_LIVE_ARCHIVE` (only with `SAMPLE_LIVE`) at the uninstalled `libps3dkprof_ext_live.a`.
+The sample still compiles the SPU writer from `SAMPLE_PROF_SRC`, which defaults to this repository's `sdk/libps3dkprof/src`. Installed PPU archives alone do not replace that source dependency. See the sample's README, CMakeLists.txt and `source/prof_ext.h` for the build and lifecycle example.
 
-Both archives must be the data model the sample is built for (`SAMPLE_ABI`, with the matching toolchain file); the sample checks every member's data-model tag at configure time.  The SPU program takes some PPU addresses as 32-bit values in both data models, which relies on every LV2 process address being below 4 GiB; the PPU side checks each one and refuses to pack a larger address (the worker then runs unprofiled, SPU profiling is reported off and `w32_eligible` is cleared).  `SAMPLE_PROF_EXT` requires `SAMPLE_PROFILING`; it links the extension archive (and the live archive, if live) instead of the SDK's `libps3dkprof.a`. An app that does not opt in is unchanged.  The extension has no installed public header yet; its use is documented by the sample: `samples/profiling/heterogeneous-workload/README.md`, its `CMakeLists.txt` and `source/prof_ext.h`, and the extension sources under `sdk/libps3dkprof/src`.
+The sample checks every archive member's data-model tag at configure time. Its SPU program receives some PPU addresses as 32-bit values in both data models; the PPU side checks each address and refuses to pack a value above 4 GiB. On refusal the worker runs unprofiled, SPU profiling is reported off, and `w32_eligible` is cleared. With extensions enabled, link the extension archive and its optional live archive instead of `libps3dkprof.a`. An app that does not opt in is unchanged.
 
-**The W32 premise.** SPU times come from each SPU's 32-bit decrementer.  W32 ("assume no decrementer wrap") is the premise that no worker's decrementer wrapped within an epoch.  It is not something the profiler guarantees: the app has to make it true and show it.  The sample does so with its own protocol: it resets a worker's decrementer on the first job word, when a reset is due (its dispatch threshold is 20 s, with acknowledgements, deadlines and a service bound under 22 s) or on a reset-only word, and any failed step permanently clears eligibility.  W32 is justified for a capture only when the sample's completed `.ext-end.txt` receipt for that run reports `w32_eligible=1` and its lifecycle checks passed.  Even then, W32 does not guarantee that every SPU zone can be placed: an epoch with too few clock observations, or a reader budget refusal, still leaves part of a lane unplaced.  Without W32 (the R64 premise), SPU lane rows show as UNMAPPABLE.
+**Legacy captures and W32.** For captures without SPU order records, W32 ("assume no decrementer wrap") is an application-supplied premise that no worker's decrementer wrapped within an epoch. The legacy sample supports that premise with first-job, due-reset and reset-only words, acknowledgements and deadlines. Its 20 s dispatch threshold and service bound under 22 s are checked, and a failed step permanently clears eligibility. Use W32 only with the matching complete `.ext-end.txt` receipt reporting `w32_eligible=1` and successful lifecycle checks. W32 alone does not guarantee placement or overcome resource refusals.
+
+Captures with SPU order records use the tick and causal-placement analysis described below. The W32 toggle does not establish the additional RMAX1 premise or turn SPU decrementer ticks into wall time.
 
 GPU-side, the sample uses reports 32..63 and label 241 for the domain, and label 242 for the application fence. These values are part of the sample's build, not a public contract; they may change before release.
 
@@ -188,37 +186,35 @@ Measured on a console with the heterogeneous-workload sample (ILP32): one PPU zo
 
 SPU zone durations are shown as **SPU decrementer ticks**, never as wall time. The viewer does not convert them to microseconds or seconds.
 
-Each SPU zone is placed on the timeline only inside the **PPU-side drain and ping** timestamps that bound it. The viewer draws those bounds; the SPU row does not extend past them.
+For captures with SPU order records, the reader first bounds each recorded observation using identity-bound PPU evidence: lane creation, ordered calibration or ping brackets, and drain timestamps. The causal-only bounds remain available for inspection.
 
-Tighter bounds come from **draining and pinging more often**: every drain and every ping adds a fresh PPU-side timestamp that the SPU row can sit inside.
+Finalized placement can tighten those bounds using **RMAX1**, an additional rate-ceiling assumption. Its default assumes the decrementer advances no faster than one decrementer tick per PPU timebase tick. The observed isolation rate does not establish this as an exact universal hardware ceiling. Placement and any solid core using the tightened endpoints are conditional on RMAX1 and the other declared premises; a contradiction leaves the affected endpoints unplaced.
 
-This placement does not use one straight-line fit per epoch (the clock map the W32 setting below selects). Under load the SPU decrementer does not run at a steady rate against the PPU clock, and a single fit per epoch is not a fair model of what the hardware was doing.
+Without `ORDER_FINAL`, supported prefix placement is **PROVISIONAL** and uses causal bounds alone. It contributes neither final tick counts nor final placement coverage. More frequent usable drains and brackets may tighten causal bounds, but cannot guarantee placement when identity, order or coverage is missing.
 
-One possible explanation, **not yet proven**: while LV2 has the SPU thread switched out, the decrementer may stop. The ticks would then be the time the SPU actually ran, which is what matters for optimisation; placement still comes from the PPU-side bounds.
-
+No single affine clock fit per epoch is used for this SPU placement. The measured workload captures contradicted that wall-clock model. The decrementer's behavior under descheduling remains an interpretation question: a tick count does not prove CPU execution time or the cause of a stall.
 
 #### RSX zone states
 
-RSX timing is judged per RSX unit (one GPU domain and epoch), and every zone in a unit shares its state. A unit is in one of three states: `MEASURED`, `CONDITIONAL` or `UNMEASURED`.
+RSX timing is judged per RSX unit (one GPU domain and epoch). A unit is `MEASURED`, `CONDITIONAL` or `UNMEASURED`; its state and reasons are distinct from the capture's coverage result.
 
-| State | What it means for you |
+| State | Meaning |
 |---|---|
-| `MEASURED` | The unit's zones are placed on the timeline within bounds the checks proved. On the console this was tested on, a placement is about **29 microseconds** wide; positions inside that width are not resolved. |
-| `CONDITIONAL` | The zones are placed, but at least one requirement for `MEASURED` is not met. The label names the reason, for example a hardware profile that has not been reviewed. |
-| `UNMEASURED` | The zones are in the capture but no placement could be proved for the unit. The label names the reason. |
+| `MEASURED` | The unit meets the reader's profile, raw-validity, clock-map, chronological-order, observation and hold-out checks. Its bounds remain conditional on the declared timing and producer premises. |
+| `CONDITIONAL` | A measurement qualification is missing; inspect the listed reasons, such as a profile that is not reviewed or no decisive hold-out. Any displayed bounds retain their stated assumptions. |
+| `UNMEASURED` | A required unit check failed, for example raw validity or a consistent bounded clock map. Inspect the reason and any separate placement output; this label alone is not a claim that every possible placement is unavailable. |
 
-A unit reaches `MEASURED` only when all of these hold:
+The reviewed RSX-R1 entry is scoped to its recorded runtime digests and configuration. This candidate requires `LOADER_HOOK=1`, `LIVE_LINKED=1` and the measured extension configuration. Hardware-model and system-software fields that the runtime cannot read remain explicitly unchecked; this is not evidence across other hardware or firmware.
 
-- the capture's hardware profile is one the reader lists as reviewed;
-- a held-out bracket check: every other **interior PPU bracket** of the unit is held back, one straight-line clock map is fitted from the rest, and each held-out bracket lands inside the prediction the fit makes for it, with **at least one** bracket decisive and **none** contradicted;
-- at least **99 percent** of the capture's GPU begin/end pairs lie between the unit's first and last brackets (interpolated, not extrapolated).
+The held-out bracket check, **H-SPLIT**, uses separate odd and even interior-bracket passes. In each pass, the kept brackets define a feasible affine map set. A held-out observation passes the compatibility check when its interval intersects the prediction, not only when the prediction contains the whole observation. A decisive check must be capable of rejecting an observation allowed by the surrounding evidence. These tests examine brackets; they do not independently establish event timing between them. Available identity-bound causal constraints are also checked separately against the bracket-only map. Qualification requires at least one decisive hold-out and no contradicted hold-out, alongside the other unit checks.
 
-The viewer never claims more accuracy than these checks prove. A `MEASURED` span is a placement, not a measurement of the draw time.
+The **99 percent coverage policy is capture-wide**. Its denominator is retained eligible GPU pairs across the RSX units; its numerator is pairs in `MEASURED` units with both endpoints between that unit's first and last bracket coordinates. The policy requires a nonempty denominator, and omissions or unknown inventory are reported separately. Passing this policy does not confer `MEASURED` on any unit or prove that omitted work was absent.
 
+Use the reported interval width for the particular capture and pair. A placement or zone duration bounds timestamped command intervals under the premises; it is not a direct measurement of shader cost, RSX busy time or utilization.
 
 #### 32-bit and 64-bit builds
 
-The SPU-lane and RSX-domain extension now builds for **both 32-bit and 64-bit PPU apps**. Two archives are installed: one for each data model.
+The SPU-lane and RSX-domain extension builds for **both ILP32 and LP64 PPU apps**. Each data model has its own `libps3dkprof_ext.a` and `libps3dkprof_ext_live.a`; select the pair matching the app ABI.
 
 The heterogeneous-workload sample checks at configure time that the archive's data model matches the app's (samples/profiling/prof-ext-abi.cmake); an app can reuse that check. A mismatch is a configure-time error, not a link-time or runtime surprise.
 
@@ -258,7 +254,7 @@ Open a capture either by passing the file on the command line, or from inside th
 ### 3.3 Pages
 
 - **Overview** — identity, clock, lanes, verdict; lists the extension sources when the capture carries SPU lanes or RSX domains.
-- **Timeline** — PPU threads, SPU lanes and RSX domains as separate rows. SPU rows are interpreted under the W32 or R64 premise that is set for the capture ("SPU: assume no decrementer wrap (W32)"); bars whose timing was extrapolated are flagged. On SPU lanes and RSX domain tracks, shaded stretches labelled **no placed pairs** mark intervals where no placed completed pair's outer extent (earliest begin to latest end) meets that timeframe. This does *not* mean the SPU or RSX was idle: work that was not placed (such as unplaced pairs, censored spans, unpaired events, open spans, loss records, or epochs without an inventory whose events are unknown) may still fall in those stretches.
+- **Timeline** — PPU threads, SPU lanes and RSX domains as separate rows. SPU captures with order records use the causal-placement and RMAX1 qualifications in section 2.8; unfinished order evidence is shown as PROVISIONAL. Legacy SPU analysis uses the selected W32 or R64 premise. Bars whose timing was extrapolated are flagged. On SPU lanes and RSX domain tracks, shaded stretches labelled **no placed pairs** mark intervals where no placed completed pair's outer extent (earliest begin to latest end) meets that timeframe. This does *not* mean the SPU or RSX was idle: work that was not placed (such as unplaced pairs, censored spans, unpaired events, open spans, loss records, or epochs without an inventory whose events are unknown) may still fall in those stretches.
 - **Frames** — per-frame bars measured against a 30 / 60 FPS budget, over-budget frames in red; per-lane tables. The **Graph** selector offers four display modes (also selectable with `--graph`):
   - **Bars** (default): PPU frame duration graph with budget threshold line, and SPU/RSX foreign lane strips below sharing the same slot columns and horizontal scroll.
   - **Lines**: Plots all series (PPU and lanes) on one shared tick axis, with frame k at the same horizontal position for every series. The PPU point is the exact elapsed time. A lane point is drawn at the upper bound (hi) of its conservative included-work bound, with lo..hi rendered as a translucent band (an infinite hi has no line point; its band runs to the top with an open-arrow cap). The line breaks at any slot without a value (unknown, refused, nothing placed, no interval); gaps are never bridged and never drawn as 0. Dots on the baseline mark measured frames with nothing included on that lane.
@@ -303,9 +299,9 @@ The **Capture full frame** button on the app bar:
 
 ## 5. Capture RSX frame (PLANNED)
 
-A **Capture RSX frame** button next to **Capture full frame** is planned: it will time the supported draw calls of one frame on an RSX domain (safe-form array, index and inline draws and surface clears, from PSL1GHT `rsx*` and cell-style GCM callers), each only when it can be timed safely.  Other calls (the `Unsafe` forms, immediate mode, calls that do not fit the current command-buffer segment or are refused) are counted, not timed, and leave the capture PARTIAL, as can a per-frame draw cap or lost data.  It is a supported-draw timing, not a full frame acquisition.  It is planned to be opted into at build time by linking a hooked `librsx_prof.a` (with the extension archive) instead of `librsx.a`; that archive does not exist yet.
+A **Capture RSX frame** button next to **Capture full frame** is planned: it will time the supported draw calls of one frame on an RSX domain (safe-form array, index and inline draws and surface clears, from PSL1GHT `rsx*` and cell-style GCM callers), each only when it can be timed safely.  Other calls (the `Unsafe` forms, immediate mode, calls that do not fit the current command-buffer segment or are refused) are counted, not timed, and leave the capture PARTIAL, as can a per-frame draw cap or lost data.  It is a supported-draw timing, not a full frame acquisition.  It is planned to be opted into at build time by linking a hooked `librsx_prof.a` (with the extension archive) instead of `librsx.a`; that archive is not shipped by the normal SDK build described here.
 
-**Status: design approved, implementation not started.  Names, flags and libraries may change before release.**
+**Status: partial implementation, follow-up feature.** The reader and RSX frames page can inspect supported capture markers already present in a file, and runtime support exists. The live request/button integration and draw-hook packaging are not an available end-to-end capture workflow in this SDK tree. Names, flags and libraries may change before release.
 
 ---
 
@@ -316,13 +312,13 @@ A **Capture RSX frame** button next to **Capture full frame** is planned: it wil
 | Verdict | Meaning |
 |---|---|
 | `COMPLETE` | The reader found the file structurally complete (header to trailer, every chunk valid).  Whether the run itself finalized cleanly, including the file's close, is not in the bytes: it is the result of `ps3dk_prof_shutdown` on the console (and, for a live session, the agent's END status). |
-| `COMPLETE (ended without a trailer ...)` | Valid chunks, no trailer, at least one event chunk: the app quit, the link ended or the copy was cut short.  Reported by `ps3dk-prof` and the viewer alike (exit `0`, extra line `ending: NO-TRAILER`).  Every analysis runs on it as on a trailered file, up to the last whole chunk; a torn last chunk is dropped and its bytes are named in the note, and loss that was not yet reported at the cut cannot be seen.  SPU zones are placed PROVISIONALLY (causal bounds alone, no tick counts, counted apart from the final coverage) and the coverage says the lane final record was not received, because there is no `ORDER_FINAL`. |
+| `COMPLETE (ended without a trailer ...)` | Valid chunks, no trailer, at least one event chunk: the app quit, the link ended or the copy was cut short.  Reported by `ps3dk-prof` and the viewer alike (exit `0`, extra line `ending: NO-TRAILER`).  Analysis stops at the last whole chunk; a torn last chunk is dropped and its byte count is named in the note. Loss not yet reported at the cut cannot be seen. File acceptance does not establish source validity, clock-mapping qualification or complete-frame evidence. Each source keeps its own loss, open-span, final-record and mapping reasons. SPU order evidence without `ORDER_FINAL` uses the supported PROVISIONAL causal-placement path, without final tick counts or final coverage credit; trailer absence alone does not establish whether `ORDER_FINAL` is present. |
 | `INCOMPLETE` | The trailer says the run did not finish cleanly (`NOT_QUIESCED`, `SEQ_LIMIT`, a sink error), or the file has no event chunk at all (a header with nothing captured).  A live session that failed a check (a protocol, integrity or local-copy failure) keeps its copy as `<name>.incomplete.prof`; a missing trailer alone never does. |
 | `MALFORMED` | The capture broke a rule: a bad checksum, an out-of-range length, bad structure or inconsistent counts inside the bytes that are there.  Only the missing ending is forgiven; corruption in the prefix is not. |
 
 ### A capture that quit from the XMB
 
-The file has no trailer, and that is expected: the app did not reach `ps3dk_prof_shutdown`.  `ps3dk-prof check` prints `COMPLETE (ended without a trailer ...)` and exits `0`; the viewer shows the `COMPLETE` badge with the same note and saves a normal `.prof`.  Per-source lines of a domain-extension file still say `STRUCTURE INCOMPLETE (no DOMAIN_FINAL; the file has no valid TRAILER)`, which is the source's own fact and does not change the file's verdict.
+An abrupt exit may leave a file without a trailer. If the retained bytes satisfy the accepted-prefix checks and contain at least one event chunk, `ps3dk-prof check` reports `COMPLETE` with the no-trailer ending note and exits `0`; the viewer applies the same file policy. Missing ending bytes alone cannot identify why recording stopped or prove clean shutdown. Extension-source reasons are reported independently: a missing trailer does not imply a missing `DOMAIN_FINAL`. A source with its final record may report only the trailer reason; a source missing both reports both. These facts do not prove that all work in an earlier frame has been recorded. Protocol, integrity and publication failures remain failures, and reopening a kept `.incomplete.prof` does not promote it.
 
 ### A live view that never connects
 
@@ -332,4 +328,4 @@ The file has no trailer, and that is expected: the app did not reach `ps3dk_prof
 
 ### SPU rows UNMAPPABLE
 
-Turn on the W32 premise only when the app shows that no SPU decrementer wrapped within an epoch: for the sample, its completed `.ext-end.txt` receipt with `w32_eligible=1` and passing lifecycle checks.  Leave the R64 premise for captures you cannot justify as W32, and accept that those SPU rows will not map.  Under W32, a lane can still be PARTIAL or partly unplaced when an epoch had too few clock observations.
+First check whether the capture contains SPU order records. For those captures, inspect the tick analysis, causal bounds, RMAX1 qualification and any order, identity or budget refusal. For legacy captures without order records, enable W32 only with evidence of no wrap within each epoch, such as the matching complete sample receipt with `w32_eligible=1` and successful lifecycle checks. W32 cannot repair missing observations or loss, and these two analysis paths must not be treated as interchangeable.
