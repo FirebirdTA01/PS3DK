@@ -24,6 +24,7 @@ VERSION_SH  := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../scripts/version.
 TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 HEADERS := \
+    include/ps3dk/prof.h \
     include/ppu-types.h \
     include/ppu-asm.h \
     include/ppu-lv2.h \
@@ -593,7 +594,7 @@ HEADERS := \
     include/cell/daisy/ato_qctl.h \
     include/simdmath/fastf4.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis libps3dkprof
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code

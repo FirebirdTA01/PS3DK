@@ -1,0 +1,3 @@
+The pre-fix prof_gpu.h, byte-identical to blob 13b41649c5d755d2aff116170c5adeae21b1a183 of commit 4af2f8c9
+(sdk/libps3dkprof/src/rsx/prof_gpu.h).  A SEALED fixture for the old-defect control: compiled in C with
+gCellGcmCurrentContext it must still give -Wincompatible-pointer-types.  Never edited; no git access needed.

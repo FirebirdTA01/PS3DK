@@ -18,6 +18,15 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **Heterogeneous profiling sample.** `samples/profiling/heterogeneous-workload`
+  alternates checked PPU and SPE computation with light and heavy RSX rendering.
+  It includes named PPU capture scopes, per-worker telemetry, raw GPU reports,
+  an on-screen status display and a profiling-disabled comparison build.
+
+- **Profiler companion validation.** `ps3dk-prof check-pair` verifies an arc
+  capture against its timing companion and returns success only for a verified
+  final pair. Refused and provisional pairs return a failing exit status.
+
 - **RPCS3 source-debug launcher.** `ps3_add_debug_rpcs3()` adds a debug target,
   loads the unstripped ELF in GDB and holds short programs before main while
   attaching, using a private emulator configuration. The sample covers PPU

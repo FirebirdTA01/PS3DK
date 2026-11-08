@@ -29,6 +29,15 @@ cleanup in both ABIs. See its [README](input/hello-ppu-gem-basic/README.md)
 for controls and opt-in runtime checks. Hardware IMU, rumble and sphere colour
 verification is pending; emulator checks cover API/input/lifecycle only.
 
+## profiling/
+
+[`heterogeneous-workload`](profiling/heterogeneous-workload/README.md) cycles
+the same checked compute batch between the PPU and up to six persistent SPE
+workers, with light and heavy RSX rendering. It demonstrates manual PPU scopes,
+per-SPE job telemetry and raw GPU timestamp reports on non-DEX homebrew consoles.
+It currently requires the candidate profiler SDK; the raw device readings are
+not yet a calibrated system timeline. Profiling can be disabled for comparison.
+
 ## toolchain/
 
 Validate the toolchain, `libsysbase` lv2 glue, and .sys_proc_param ABI.

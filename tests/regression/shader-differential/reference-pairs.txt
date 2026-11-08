@@ -31,6 +31,8 @@
 samples/toolchain/hello-psgl-blend/shaders/fp_red.fcg|0
 samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg|0
 samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
+samples/profiling/heterogeneous-workload/shaders/heavy.fcg|0
+samples/profiling/heterogeneous-workload/shaders/light.fcg|0
 #
 # The remaining four measurement divergences (Class B: register allocation +
 # uniform pool offsets; Class C: we emit fewer instructions than the

@@ -52,6 +52,18 @@ say "building + installing SDK"
 # include guards, so each copy chains on to libc's header.
 make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
 
+# The profiler's SPU/RSX extension ships for both data models (director
+# decision D1): the libps3dkprof sublib's install above puts the PROFILE-form
+# libps3dkprof_ext.a, libps3dkprof_ext_live.a (ppu/lib and ppu/lib/lp64), the
+# ppu/include/ps3dk extension headers, and the SPU lane library
+# spu/lib/libps3dkprof_spu.a with its spu/include/ps3dk headers in place,
+# re-verifying each archive.
+# Check the INSTALLED tree again here, from the installed files alone, so a
+# sublib install that skipped or lost the extension fails the SDK build.
+say "verifying the installed profiler extension (ILP32 + LP64)"
+make -C "$PS3_TOOLCHAIN_ROOT/sdk/libps3dkprof" --no-print-directory verify-install-ext \
+    || die "installed profiler extension failed verify-install-ext"
+
 # Replace PSL1GHT's default ICON0.PNG with our PS3DK-branded one.
 # Samples that don't override ICON0 in their Makefile pick up whatever
 # lives at $PS3DEV/bin/ICON0.PNG; this install makes that our icon

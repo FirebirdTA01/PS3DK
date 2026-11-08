@@ -407,6 +407,13 @@ as **"absent — Add"** rows, so giving a retail SFO an `ATTRIBUTE` (to
 enable Vita remote play, say) is: open, Add, tick the box, Save.  Unknown
 keys are shown and preserved, never dropped.
 
+## Profiler
+
+`libps3dkprof` records named PPU zones and frames into a `.prof` capture, optionally with SPU-lane and RSX-domain
+zones (experimental); `ps3dk-prof` checks and reports a capture, and `ps3dk-prof-viewer` shows it, from a file or live
+over the network while the app runs.  How to enable and link it, use it on the PS3 and on the PC, and capture a frame:
+[docs/profiler-guide.md](docs/profiler-guide.md).
+
 ## Getting started
 
 ### Host dependencies
