@@ -721,6 +721,12 @@ jobs:
       - name: Test cellGcmConvertSwizzleFormat 2-D Morton order matches psgl_morton2
         run: bash tests/sdk/gcm-swizzle-convert-test.sh
 
+      # DXT1/3/5 block encoder (asset pipeline): decodes the encoder's output
+      # with an independent decoder and checks exact round-trip on lossless
+      # solids plus a bounded-error gradient, and verifies block byte sizes.
+      - name: Test the DXT1/3/5 block encoder against an independent decoder
+        run: bash tests/sdk/dxt-encoder-test.sh
+
       # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
       # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
       # must follow the same resolved directory.
