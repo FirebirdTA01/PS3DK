@@ -13,12 +13,14 @@ endif()
 # installed extension headers (ppu/include/ps3dk/prof_spu.h, prof_gpu.h); SAMPLE_PROF_SDK selects an overlay root of
 # the same layout.  SAMPLE_EXT_ARCHIVE (and SAMPLE_EXT_LIVE_ARCHIVE) explicitly select a build-tree archive instead
 # (`make -C sdk/libps3dkprof ext-ilp32` / `ext-lp64`, `ext-live-ilp32` / `ext-live-lp64`); the headers then come from
-# SAMPLE_PROF_SRC.  Every member of each archive must carry SAMPLE_ABI's data-model tag (checked at configure time).
-# The SPU lane writer is compiled from SAMPLE_PROF_SRC in both cases.  OFF: today's build.
+# SAMPLE_PROF_SRC, which must then be set.  Every member of each archive must carry SAMPLE_ABI's data-model tag
+# (checked at configure time).  The SPU worker links the installed SPU lane library (spu/lib/libps3dkprof_spu.a, headers
+# in spu/include/ps3dk) unless SAMPLE_PROF_SRC is set: that developer override compiles the lane writer from those
+# sources instead.  OFF: today's build.
 option(SAMPLE_PROF_EXT "Record SPU-lane and RSX-domain zones (needs SAMPLE_PROFILING; ILP32 or LP64; the installed ext archive of the same data model unless SAMPLE_EXT_ARCHIVE is set)" OFF)
 set(SAMPLE_EXT_ARCHIVE "" CACHE FILEPATH "an explicit libps3dkprof_ext.a (make ext-ilp32 / ext-lp64); empty: the installed one; SAMPLE_PROF_EXT only")
 set(SAMPLE_EXT_LIVE_ARCHIVE "" CACHE FILEPATH "an explicit libps3dkprof_ext_live.a (make ext-live-ilp32 / ext-live-lp64); empty: the installed one, or with SAMPLE_EXT_ARCHIVE required; SAMPLE_PROF_EXT + SAMPLE_LIVE only")
-set(SAMPLE_PROF_SRC "${CMAKE_CURRENT_LIST_DIR}/../../../sdk/libps3dkprof/src" CACHE PATH "libps3dkprof sources (internal headers)")
+set(SAMPLE_PROF_SRC "" CACHE PATH "Developer override: libps3dkprof sources (sdk/libps3dkprof/src) to compile the SPU lane writer and take the extension headers from; empty: the installed SDK's")
 set(SAMPLE_PHASE_SECONDS 8 CACHE STRING "Seconds per workload phase")
 set(SAMPLE_SESSION_SECONDS 120 CACHE STRING "Session seconds; 0 explicitly loops until exit")
 set(SAMPLE_IDLE_SECONDS 5 CACHE STRING "No-input idle baseline seconds")
@@ -64,7 +66,13 @@ if(SAMPLE_PROF_EXT)
   if(NOT SAMPLE_PROFILING)
     message(FATAL_ERROR "SAMPLE_PROF_EXT needs SAMPLE_PROFILING")
   endif()
+  if(SAMPLE_PROF_SRC AND NOT EXISTS "${SAMPLE_PROF_SRC}/spu/prof_spu_lane.h")
+    message(FATAL_ERROR "SAMPLE_PROF_SRC has no spu/prof_spu_lane.h (got '${SAMPLE_PROF_SRC}'; point it at sdk/libps3dkprof/src)")
+  endif()
   if(SAMPLE_EXT_ARCHIVE)
+    if(NOT SAMPLE_PROF_SRC)
+      message(FATAL_ERROR "SAMPLE_EXT_ARCHIVE (a build-tree archive) needs SAMPLE_PROF_SRC for the matching headers")
+    endif()
     # Explicit build-tree archives: the live archive must be explicit too (never mixed with an installed one).
     set(sample_ext_archive "${SAMPLE_EXT_ARCHIVE}")
     set(sample_ext_live_archive "${SAMPLE_EXT_LIVE_ARCHIVE}")
@@ -93,12 +101,20 @@ if(SAMPLE_PROF_EXT)
   if(SAMPLE_LIVE AND (NOT EXISTS "${sample_ext_live_archive}" OR IS_DIRECTORY "${sample_ext_live_archive}"))
     message(FATAL_ERROR "SAMPLE_PROF_EXT with SAMPLE_LIVE needs the ${sample_ext_live_what} (got '${sample_ext_live_archive}')")
   endif()
-  foreach(f spu/psp_spu.c spu/prof_spu_writer.c spu/prof_spu_lane.h)
-    if(NOT EXISTS "${SAMPLE_PROF_SRC}/${f}")
-      message(FATAL_ERROR "SAMPLE_PROF_EXT compiles the SPU lane writer from SAMPLE_PROF_SRC, which has no ${f} "
-        "(got '${SAMPLE_PROF_SRC}'; point it at sdk/libps3dkprof/src)")
-    endif()
-  endforeach()
+  if(SAMPLE_PROF_SRC)
+    foreach(f spu/psp_spu.c spu/prof_spu_writer.c)
+      if(NOT EXISTS "${SAMPLE_PROF_SRC}/${f}")
+        message(FATAL_ERROR "SAMPLE_PROF_SRC has no ${f} (got '${SAMPLE_PROF_SRC}'; point it at sdk/libps3dkprof/src)")
+      endif()
+    endforeach()
+  else()
+    foreach(f spu/lib/libps3dkprof_spu.a spu/include/ps3dk/prof_spu_lane.h)
+      if(NOT EXISTS "${sample_prof_root}/${f}")
+        message(FATAL_ERROR "SAMPLE_PROF_EXT: no installed ${sample_prof_root}/${f} (the SPU lane library; install the "
+          "SDK's profiler, or set SAMPLE_PROF_SRC to compile the lane writer from source)")
+      endif()
+    endforeach()
+  endif()
   prof_ext_require_abi(${SAMPLE_ABI} "${sample_ext_what}" "${sample_ext_archive}")
   if(SAMPLE_LIVE)
     prof_ext_require_abi(${SAMPLE_ABI} "${sample_ext_live_what}" "${sample_ext_live_archive}")
@@ -154,12 +170,22 @@ endif()
 target_link_libraries(heterogeneous-workload PRIVATE dbgfont gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
 set(SAMPLE_SPU_SDK "${PS3DK}" CACHE PATH "SPU SDK root; override only for a partial candidate PPU install")
 if(SAMPLE_PROF_EXT)
-  # The SPU worker with the lane writer (as ext-probe compiles it).
-  ps3_add_spu_image(heterogeneous-workload NAME workload_spu
-    SOURCES spu/main.c source/prof_ext.c source/worker_proto.c "${SAMPLE_PROF_SRC}/spu/psp_spu.c" "${SAMPLE_PROF_SRC}/spu/prof_spu_writer.c"
-    LIBS sputhread
-    CFLAGS "-DPS3DK_PROF=1" "-DSAMPLE_PROF_EXT=1" "-mno-error-reloc" "-I${SAMPLE_PROF_SRC}/spu" "-I${SAMPLE_SPU_SDK}/spu/include"
-    LDFLAGS "-L${SAMPLE_SPU_SDK}/spu/lib")
+  if(SAMPLE_PROF_SRC)
+    # Developer override: the SPU worker with the lane writer compiled from source (as ext-probe compiles it).
+    ps3_add_spu_image(heterogeneous-workload NAME workload_spu
+      SOURCES spu/main.c source/prof_ext.c source/worker_proto.c "${SAMPLE_PROF_SRC}/spu/psp_spu.c" "${SAMPLE_PROF_SRC}/spu/prof_spu_writer.c"
+      LIBS sputhread
+      CFLAGS "-DPS3DK_PROF=1" "-DSAMPLE_PROF_EXT=1" "-mno-error-reloc" "-I${SAMPLE_PROF_SRC}/spu" "-I${SAMPLE_SPU_SDK}/spu/include"
+      LDFLAGS "-L${SAMPLE_SPU_SDK}/spu/lib")
+  else()
+    # The SPU worker linking the installed SPU lane library.
+    ps3_add_spu_image(heterogeneous-workload NAME workload_spu
+      SOURCES spu/main.c source/prof_ext.c source/worker_proto.c
+      LIBS ps3dkprof_spu sputhread
+      CFLAGS "-DPS3DK_PROF=1" "-DSAMPLE_PROF_EXT=1" "-mno-error-reloc" "-I${sample_prof_root}/spu/include/ps3dk"
+             "-I${SAMPLE_SPU_SDK}/spu/include"
+      LDFLAGS "-L${sample_prof_root}/spu/lib" "-L${SAMPLE_SPU_SDK}/spu/lib")
+  endif()
 else()
   ps3_add_spu_image(heterogeneous-workload NAME workload_spu SOURCES spu/main.c LIBS sputhread
     CFLAGS "-I${SAMPLE_SPU_SDK}/spu/include" LDFLAGS "-L${SAMPLE_SPU_SDK}/spu/lib")

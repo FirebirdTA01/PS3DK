@@ -45,7 +45,9 @@ for rel in ppu/include/ps3dk/prof.h ppu/lib/libps3dkprof.a ppu/lib/lp64/libps3dk
            ppu/lib/libps3prof.a ppu/lib/lp64/libps3prof.a \
            ppu/include/ps3dk/prof_spu.h ppu/include/ps3dk/psp_desc.h ppu/include/ps3dk/prof_gpu.h \
            ppu/lib/libps3dkprof_ext.a ppu/lib/lp64/libps3dkprof_ext.a \
-           ppu/lib/libps3dkprof_ext_live.a ppu/lib/lp64/libps3dkprof_ext_live.a; do
+           ppu/lib/libps3dkprof_ext_live.a ppu/lib/lp64/libps3dkprof_ext_live.a \
+           spu/include/ps3dk/prof_spu_lane.h spu/include/ps3dk/psp_desc.h spu/include/ps3dk/psp_spu.h \
+           spu/include/ps3dk/psp_layout.h; do
     if grep -qF "missing sdk_core: $rel" <<< "$all"; then
         record pass "required $rel"
     else

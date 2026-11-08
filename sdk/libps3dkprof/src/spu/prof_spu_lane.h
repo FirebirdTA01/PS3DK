@@ -1,4 +1,4 @@
-/* The SPU side of a profiler lane (design I3 r2 section 2): INTERNAL, not installed; SPU builds only.
+/* The SPU side of a profiler lane (design I3 r2 section 2), installed as spu/include/ps3dk; SPU builds only.
  *
  * The PPU creates a lane (ps3dk_prof_spu_lane_create) and passes its ea_ring / ring_slots / ea_ctl to the SPU program
  * (for example as thread arguments); the SPU attaches a caller-owned writer to it.

@@ -243,15 +243,40 @@ $(EXTP64_DIR)/libps3dkprof_ext_profile.a: $(EXTP64_OBJS) $(EXTP64_ID_CONFIG) too
 -include $(EXTP64_OBJS:.o=.d)
 
 # The release form of the extension, built by all and installed by install, for BOTH data models (director decision
-# D1).  Per ABI: the PROFILE-identity archive, installed as libps3dkprof_ext.a beside that ABI's libps3dkprof.a
+# D1), plus the SPU lane library above.  Per ABI: the PROFILE-identity archive, installed as libps3dkprof_ext.a beside that ABI's libps3dkprof.a
 # (ppu/lib, ppu/lib/lp64), and the live members as libps3dkprof_ext_live.a; the plain ext-ilp32 / ext-lp64 archives
 # stay build-only.  An app links the ext archive INSTEAD of ps3dkprof (the live archive first, with the live link).
 # The public headers go to ppu/include/ps3dk/: prof_spu.h, the psp_desc.h it includes, and prof_gpu.h.  The install
 # re-verifies each INSTALLED profile archive (digest and declared identity) and compares every installed file with
 # its build output, so a partial or substituted install fails here.
 EXT_PUB_HEADERS := src/spu/prof_spu.h src/spu/psp_desc.h src/rsx/prof_gpu.h
+
+# The SPU side of a lane: the lane writer (prof_spu_writer) and the producer core it drives (psp_spu), compiled with
+# the SPU toolchain into libps3dkprof_spu.a, installed to spu/lib with its public headers under spu/include/ps3dk
+# (prof_spu_lane.h and the psp_desc.h / psp_spu.h / psp_layout.h it includes).  An SPU program links it with
+# -lps3dkprof_spu and compiles its zone macros with PS3DK_PROF=1.  The flags are those of ps3_add_spu_image's default
+# (position-independent) SPU thread image, so the archive links into those images and into position-dependent ones.
+SPU_CROSS ?= spu-elf-
+SPU_CC := $(SPU_CROSS)gcc
+SPU_AR := $(SPU_CROSS)ar
+SPUL_DIR := $(BUILD)/spu-lane
+SPUL_MEMBERS := psp_spu prof_spu_writer
+SPUL_OBJS := $(addprefix $(SPUL_DIR)/,$(addsuffix .o,$(SPUL_MEMBERS)))
+SPUL_FLAGS := -Os -Wall -ffunction-sections -fdata-sections -fpic -fno-exceptions -mno-error-reloc \
+              -DPS3DK_PROF=1 -Isrc/spu -I"$(PS3DK)/spu/include"
+SPU_PUB_HEADERS := src/spu/prof_spu_lane.h src/spu/psp_desc.h src/spu/psp_spu.h src/spu/psp_layout.h
+.PHONY: ext-spu
+ext-spu: $(SPUL_DIR)/libps3dkprof_spu.a
+$(SPUL_DIR)/%.o: src/spu/%.c Makefile
+	@mkdir -p "$(@D)"
+	$(SPU_CC) $(SPUL_FLAGS) -MMD -MP -c "$<" -o "$@"
+$(SPUL_DIR)/libps3dkprof_spu.a: $(SPUL_OBJS)
+	@rm -f "$@"
+	$(SPU_AR) rcsD "$@" $^
+-include $(SPUL_OBJS:.o=.d)
+
 .PHONY: ext-release install-ext verify-install-ext
-ext-release: ext-ilp32-profile ext-lp64-profile ext-live-ilp32 ext-live-lp64
+ext-release: ext-ilp32-profile ext-lp64-profile ext-live-ilp32 ext-live-lp64 ext-spu
 install-ext: ext-release
 	install -d "$(PS3DK)/ppu/lib" "$(PS3DK)/ppu/lib/lp64" "$(PS3DK)/ppu/include/ps3dk"
 	install -m 0644 "$(EXTP_DIR)/libps3dkprof_ext_profile.a" "$(PS3DK)/ppu/lib/libps3dkprof_ext.a"
@@ -259,6 +284,9 @@ install-ext: ext-release
 	install -m 0644 "$(EXTP64_DIR)/libps3dkprof_ext_profile.a" "$(PS3DK)/ppu/lib/lp64/libps3dkprof_ext.a"
 	install -m 0644 "$(EXTL64_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/lp64/libps3dkprof_ext_live.a"
 	install -m 0644 $(EXT_PUB_HEADERS) "$(PS3DK)/ppu/include/ps3dk/"
+	install -d "$(PS3DK)/spu/lib" "$(PS3DK)/spu/include/ps3dk"
+	install -m 0644 "$(SPUL_DIR)/libps3dkprof_spu.a" "$(PS3DK)/spu/lib/libps3dkprof_spu.a"
+	install -m 0644 $(SPU_PUB_HEADERS) "$(PS3DK)/spu/include/ps3dk/"
 	python3 tools/archive_digest.py verify "$(PS3DK)/ppu/lib/libps3dkprof_ext.a" --id "$(PROF_PROFILE_ID)" \
 	    --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)"
 	python3 tools/archive_digest.py verify "$(PS3DK)/ppu/lib/lp64/libps3dkprof_ext.a" --id "$(PROF_PROFILE_ID)" \
@@ -268,11 +296,14 @@ install-ext: ext-release
 	cmp "$(EXTP64_DIR)/libps3dkprof_ext_profile.a" "$(PS3DK)/ppu/lib/lp64/libps3dkprof_ext.a"
 	cmp "$(EXTL64_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/lp64/libps3dkprof_ext_live.a"
 	for h in $(EXT_PUB_HEADERS); do cmp "$$h" "$(PS3DK)/ppu/include/ps3dk/$${h##*/}" || exit 1; done
+	cmp "$(SPUL_DIR)/libps3dkprof_spu.a" "$(PS3DK)/spu/lib/libps3dkprof_spu.a"
+	for h in $(SPU_PUB_HEADERS); do cmp "$$h" "$(PS3DK)/spu/include/ps3dk/$${h##*/}" || exit 1; done
 # The installed tree alone, without the build directory (scripts/build-sdk.sh runs it after the SDK install): every
 # installed extension file is present and each installed profile archive verifies with the declared identity.
 verify-install-ext:
 	for f in ppu/lib/libps3dkprof_ext.a ppu/lib/libps3dkprof_ext_live.a ppu/lib/lp64/libps3dkprof_ext.a \
-	    ppu/lib/lp64/libps3dkprof_ext_live.a $(addprefix ppu/include/ps3dk/,$(notdir $(EXT_PUB_HEADERS))); do \
+	    ppu/lib/lp64/libps3dkprof_ext_live.a $(addprefix ppu/include/ps3dk/,$(notdir $(EXT_PUB_HEADERS))) \
+	    spu/lib/libps3dkprof_spu.a $(addprefix spu/include/ps3dk/,$(notdir $(SPU_PUB_HEADERS))); do \
 	    test -f "$(PS3DK)/$$f" || { echo "missing $(PS3DK)/$$f"; exit 1; }; done
 	python3 tools/archive_digest.py verify "$(PS3DK)/ppu/lib/libps3dkprof_ext.a" --id "$(PROF_PROFILE_ID)" \
 	    --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)"

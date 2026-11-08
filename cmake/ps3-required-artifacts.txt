@@ -263,6 +263,13 @@ sdk_core  ppu/lib/libps3dkprof_ext.a
 sdk_core  ppu/lib/lp64/libps3dkprof_ext.a
 sdk_core  ppu/lib/libps3dkprof_ext_live.a
 sdk_core  ppu/lib/lp64/libps3dkprof_ext_live.a
+# Its SPU side: the lane writer library (an SPU program links -lps3dkprof_spu)
+# and its public SPU headers (prof_spu_lane.h includes the other three).
+spu_lib   spu/lib/libps3dkprof_spu.a
+sdk_core  spu/include/ps3dk/prof_spu_lane.h
+sdk_core  spu/include/ps3dk/psp_desc.h
+sdk_core  spu/include/ps3dk/psp_spu.h
+sdk_core  spu/include/ps3dk/psp_layout.h
 # pthread shim (2026-08-30): the shadow header fronts newlib's _POSIX_THREADS-
 # gated <pthread.h>; libpthread.a is an INPUT(-lrt) LINKER SCRIPT, not an
 # archive (validated by presence -- an alias row would demand byte-identity

@@ -150,9 +150,10 @@ cmake --build "$PS3_BUILD_ROOT/heterogeneous-ext" --parallel 2
 
 For LP64 select `ps3-ppu-toolchain-lp64.cmake` with `SAMPLE_ABI=lp64`.  `SAMPLE_EXT_ARCHIVE` (with `SAMPLE_LIVE`,
 also `SAMPLE_EXT_LIVE_ARCHIVE`) explicitly selects a build-tree archive instead (`make -C sdk/libps3dkprof ext-ilp32`
-or `ext-lp64`, `ext-live-ilp32` or `ext-live-lp64`); the extension headers then come from `SAMPLE_PROF_SRC`.  The SPU
-lane writer is compiled from `SAMPLE_PROF_SRC` (default: this repository's `sdk/libps3dkprof/src`) in both cases, and
-configure refuses a tree without it.  Configure refuses a `SAMPLE_ABI` that is not the compiler's data model and an archive
+or `ext-lp64`, `ext-live-ilp32` or `ext-live-lp64`); the extension headers then come from `SAMPLE_PROF_SRC`, which
+must be set.  The SPU worker links the installed SPU lane library `$PS3DK/spu/lib/libps3dkprof_spu.a` (headers in
+`$PS3DK/spu/include/ps3dk`); setting `SAMPLE_PROF_SRC` to `sdk/libps3dkprof/src` is a developer override that compiles
+the lane writer from those sources instead.  Configure refuses a `SAMPLE_ABI` that is not the compiler's data model and an archive
 member whose data-model tag is not `SAMPLE_ABI`'s.  The SPU worker takes its work-slot and control-block addresses as
 32-bit values in both data models: the PPU side refuses (logged as `POOL pack-refused`) any address above 4 GiB
 instead of narrowing it, and a refusal turns SPU profiling off and clears `w32_eligible`.  The SPU decrementer is reset at least every 20 s per

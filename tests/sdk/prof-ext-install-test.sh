@@ -10,13 +10,14 @@
 # two-sided check; each restore must pass again.
 #
 # usage: prof-ext-install-test.sh [WORKDIR]   (WORKDIR must not exist; default: a new mktemp directory)
-# Needs PS3DEV with ppu/bin/powerpc64-ps3-elf-gcc, PS3DK with ppu/include/lv2/thread.h, and python3.  Skips (exit 0)
-# without them.
+# Needs PS3DEV with ppu/bin/powerpc64-ps3-elf-gcc and spu/bin/spu-elf-gcc, PS3DK with ppu/include/lv2/thread.h, and
+# python3.  Skips (exit 0) without them.
 set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cross="${PS3DEV:-}/ppu/bin/powerpc64-ps3-elf-"
-if [[ -z "${PS3DEV:-}" || ! -x "${cross}gcc" || -z "${PS3DK:-}" || ! -f "${PS3DK:-}/ppu/include/lv2/thread.h" ]]; then
-    echo "SKIP prof-ext-install: PS3DEV with ppu/bin/powerpc64-ps3-elf-gcc and PS3DK with ppu/include are required"
+spu_cross="${PS3DEV:-}/spu/bin/spu-elf-"
+if [[ -z "${PS3DEV:-}" || ! -x "${cross}gcc" || ! -x "${spu_cross}gcc" || -z "${PS3DK:-}" || ! -f "${PS3DK:-}/ppu/include/lv2/thread.h" ]]; then
+    echo "SKIP prof-ext-install: PS3DEV with the PPU and SPU compilers and PS3DK with ppu/include are required"
     exit 0
 fi
 headers=$PS3DK
@@ -37,17 +38,19 @@ record() {
 
 # The profiler rows, read from the manifest itself (a row removed from the manifest drops out of `expected` and then
 # fails the two-sided check as an unpromised installed file).
-expected=$(awk '$1 == "sdk_core" && $2 ~ /^ppu\/(include\/ps3dk\/(prof|psp_desc)|lib\/(lp64\/)?lib(ps3dkprof|ps3prof))/ \
+expected=$(awk '($1 == "sdk_core" || $1 == "spu_lib") && \
+    $2 ~ /^(ppu\/(include\/ps3dk\/(prof|psp_desc)|lib\/(lp64\/)?lib(ps3dkprof|ps3prof))|spu\/(include\/ps3dk\/|lib\/libps3dkprof_spu))/ \
     && $2 != "ppu/include/ps3dk/prof.h" { print $2 }' "$manifest" | LC_ALL=C sort)
 n_expected=$(grep -c . <<< "$expected")
-if [[ $n_expected == 11 ]]; then
-    record pass "manifest lists 11 sublib-installed profiler rows"
+if [[ $n_expected == 16 ]]; then
+    record pass "manifest lists 16 sublib-installed profiler rows"
 else
-    record fail "manifest lists 11 sublib-installed profiler rows (got $n_expected)"
+    record fail "manifest lists 16 sublib-installed profiler rows (got $n_expected)"
 fi
-ext_rows=$(grep -E 'prof_spu\.h|psp_desc\.h|prof_gpu\.h|libps3dkprof_ext' <<< "$expected")
+ext_rows=$(grep -E 'prof_spu\.h|psp_desc\.h|prof_gpu\.h|libps3dkprof_ext|^spu/' <<< "$expected")
 
-mk0=(make -C "$root/sdk/libps3dkprof" --no-print-directory CROSS="$cross" PS3DEV="$PS3DEV" PS3_BUILD_ROOT="$work/build")
+mk0=(make -C "$root/sdk/libps3dkprof" --no-print-directory CROSS="$cross" SPU_CROSS="$spu_cross" PS3DEV="$PS3DEV"
+     PS3_BUILD_ROOT="$work/build")
 mk=("${mk0[@]}" PS3DK="$prefix")
 if nice -n 10 "${mk0[@]}" PS3DK="$headers" -j"${JOBS:-4}" all > "$work/build.log" 2>&1; then
     record pass "make all against the existing SDK's headers"
@@ -61,7 +64,7 @@ else
     record fail "make install into the empty prefix (see $work/install.log)"
     tail -20 "$work/install.log"
 fi
-if grep -q -- "${cross}gcc\|${cross}ar " "$work/install.log"; then
+if grep -q -- "${cross}gcc\|${cross}ar \|${spu_cross}gcc\|${spu_cross}ar " "$work/install.log"; then
     record fail "the install into the empty prefix recompiled or re-archived nothing"
 else
     record pass "the install into the empty prefix recompiled or re-archived nothing"
