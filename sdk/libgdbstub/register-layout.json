@@ -1,0 +1,362 @@
+{
+  "count": 71,
+  "bytes": 556,
+  "hexChars": 1112,
+  "registers": [
+    {
+      "regnum": 0,
+      "name": "r0",
+      "bitsize": 64
+    },
+    {
+      "regnum": 1,
+      "name": "r1",
+      "bitsize": 64
+    },
+    {
+      "regnum": 2,
+      "name": "r2",
+      "bitsize": 64
+    },
+    {
+      "regnum": 3,
+      "name": "r3",
+      "bitsize": 64
+    },
+    {
+      "regnum": 4,
+      "name": "r4",
+      "bitsize": 64
+    },
+    {
+      "regnum": 5,
+      "name": "r5",
+      "bitsize": 64
+    },
+    {
+      "regnum": 6,
+      "name": "r6",
+      "bitsize": 64
+    },
+    {
+      "regnum": 7,
+      "name": "r7",
+      "bitsize": 64
+    },
+    {
+      "regnum": 8,
+      "name": "r8",
+      "bitsize": 64
+    },
+    {
+      "regnum": 9,
+      "name": "r9",
+      "bitsize": 64
+    },
+    {
+      "regnum": 10,
+      "name": "r10",
+      "bitsize": 64
+    },
+    {
+      "regnum": 11,
+      "name": "r11",
+      "bitsize": 64
+    },
+    {
+      "regnum": 12,
+      "name": "r12",
+      "bitsize": 64
+    },
+    {
+      "regnum": 13,
+      "name": "r13",
+      "bitsize": 64
+    },
+    {
+      "regnum": 14,
+      "name": "r14",
+      "bitsize": 64
+    },
+    {
+      "regnum": 15,
+      "name": "r15",
+      "bitsize": 64
+    },
+    {
+      "regnum": 16,
+      "name": "r16",
+      "bitsize": 64
+    },
+    {
+      "regnum": 17,
+      "name": "r17",
+      "bitsize": 64
+    },
+    {
+      "regnum": 18,
+      "name": "r18",
+      "bitsize": 64
+    },
+    {
+      "regnum": 19,
+      "name": "r19",
+      "bitsize": 64
+    },
+    {
+      "regnum": 20,
+      "name": "r20",
+      "bitsize": 64
+    },
+    {
+      "regnum": 21,
+      "name": "r21",
+      "bitsize": 64
+    },
+    {
+      "regnum": 22,
+      "name": "r22",
+      "bitsize": 64
+    },
+    {
+      "regnum": 23,
+      "name": "r23",
+      "bitsize": 64
+    },
+    {
+      "regnum": 24,
+      "name": "r24",
+      "bitsize": 64
+    },
+    {
+      "regnum": 25,
+      "name": "r25",
+      "bitsize": 64
+    },
+    {
+      "regnum": 26,
+      "name": "r26",
+      "bitsize": 64
+    },
+    {
+      "regnum": 27,
+      "name": "r27",
+      "bitsize": 64
+    },
+    {
+      "regnum": 28,
+      "name": "r28",
+      "bitsize": 64
+    },
+    {
+      "regnum": 29,
+      "name": "r29",
+      "bitsize": 64
+    },
+    {
+      "regnum": 30,
+      "name": "r30",
+      "bitsize": 64
+    },
+    {
+      "regnum": 31,
+      "name": "r31",
+      "bitsize": 64
+    },
+    {
+      "regnum": 32,
+      "name": "f0",
+      "bitsize": 64
+    },
+    {
+      "regnum": 33,
+      "name": "f1",
+      "bitsize": 64
+    },
+    {
+      "regnum": 34,
+      "name": "f2",
+      "bitsize": 64
+    },
+    {
+      "regnum": 35,
+      "name": "f3",
+      "bitsize": 64
+    },
+    {
+      "regnum": 36,
+      "name": "f4",
+      "bitsize": 64
+    },
+    {
+      "regnum": 37,
+      "name": "f5",
+      "bitsize": 64
+    },
+    {
+      "regnum": 38,
+      "name": "f6",
+      "bitsize": 64
+    },
+    {
+      "regnum": 39,
+      "name": "f7",
+      "bitsize": 64
+    },
+    {
+      "regnum": 40,
+      "name": "f8",
+      "bitsize": 64
+    },
+    {
+      "regnum": 41,
+      "name": "f9",
+      "bitsize": 64
+    },
+    {
+      "regnum": 42,
+      "name": "f10",
+      "bitsize": 64
+    },
+    {
+      "regnum": 43,
+      "name": "f11",
+      "bitsize": 64
+    },
+    {
+      "regnum": 44,
+      "name": "f12",
+      "bitsize": 64
+    },
+    {
+      "regnum": 45,
+      "name": "f13",
+      "bitsize": 64
+    },
+    {
+      "regnum": 46,
+      "name": "f14",
+      "bitsize": 64
+    },
+    {
+      "regnum": 47,
+      "name": "f15",
+      "bitsize": 64
+    },
+    {
+      "regnum": 48,
+      "name": "f16",
+      "bitsize": 64
+    },
+    {
+      "regnum": 49,
+      "name": "f17",
+      "bitsize": 64
+    },
+    {
+      "regnum": 50,
+      "name": "f18",
+      "bitsize": 64
+    },
+    {
+      "regnum": 51,
+      "name": "f19",
+      "bitsize": 64
+    },
+    {
+      "regnum": 52,
+      "name": "f20",
+      "bitsize": 64
+    },
+    {
+      "regnum": 53,
+      "name": "f21",
+      "bitsize": 64
+    },
+    {
+      "regnum": 54,
+      "name": "f22",
+      "bitsize": 64
+    },
+    {
+      "regnum": 55,
+      "name": "f23",
+      "bitsize": 64
+    },
+    {
+      "regnum": 56,
+      "name": "f24",
+      "bitsize": 64
+    },
+    {
+      "regnum": 57,
+      "name": "f25",
+      "bitsize": 64
+    },
+    {
+      "regnum": 58,
+      "name": "f26",
+      "bitsize": 64
+    },
+    {
+      "regnum": 59,
+      "name": "f27",
+      "bitsize": 64
+    },
+    {
+      "regnum": 60,
+      "name": "f28",
+      "bitsize": 64
+    },
+    {
+      "regnum": 61,
+      "name": "f29",
+      "bitsize": 64
+    },
+    {
+      "regnum": 62,
+      "name": "f30",
+      "bitsize": 64
+    },
+    {
+      "regnum": 63,
+      "name": "f31",
+      "bitsize": 64
+    },
+    {
+      "regnum": 64,
+      "name": "pc",
+      "bitsize": 64
+    },
+    {
+      "regnum": 65,
+      "name": "msr",
+      "bitsize": 64
+    },
+    {
+      "regnum": 66,
+      "name": "cr",
+      "bitsize": 32
+    },
+    {
+      "regnum": 67,
+      "name": "lr",
+      "bitsize": 64
+    },
+    {
+      "regnum": 68,
+      "name": "ctr",
+      "bitsize": 64
+    },
+    {
+      "regnum": 69,
+      "name": "xer",
+      "bitsize": 32
+    },
+    {
+      "regnum": 70,
+      "name": "fpscr",
+      "bitsize": 32
+    }
+  ]
+}
