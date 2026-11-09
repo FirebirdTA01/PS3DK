@@ -311,3 +311,5 @@ verify-install-ext:
 	    --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)"
 
 -include $(EXT_OBJS:.o=.d) $(EXT64_OBJS:.o=.d) $(EXTL_OBJS:.o=.d) $(EXTL64_OBJS:.o=.d)
+
+include waits.mk

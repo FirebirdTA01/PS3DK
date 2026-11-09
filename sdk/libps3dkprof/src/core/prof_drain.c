@@ -2,6 +2,9 @@
  * frontier, sealing, ps3dk_prof_drain and ps3dk_prof_shutdown.  The drainer is the ONLY consumer (5.4) and the only
  * code that frees a slot (r2 3.1).  References as in prof_core.c. */
 #include "prof_internal.h"
+#ifdef PS3DK_PROF_WITH_WAITS
+#include "../waits/wait_internal.h"
+#endif
 
 #include <string.h>
 
@@ -131,7 +134,7 @@ static void enc_end(prof *p)
 {
     drainer *d = &p->dr;
     uint8_t *b = d->buf;
-#if defined(PS3DK_PROF_WITH_ARCS)
+#if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS)
     if (d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
         return;
@@ -152,6 +155,17 @@ static void enc_end(prof *p)
         d->chunk_seq++;
 }
 
+#ifdef PS3DK_PROF_WITH_WAITS
+int p_wait_emit_chunk(prof *p,uint32_t type,const uint8_t *payload,size_t len)
+{
+    uint64_t seq=p->dr.chunk_seq;
+    if(p->snk.failed || len>P_CHUNK_CAP)return -1;
+    enc_begin(p,type);
+    if(payload!=pl(p))memcpy(pl(p),payload,len);
+    p->dr.pos=len;enc_end(p);
+    return !p->snk.failed && p->dr.chunk_seq==seq+1 ? 0:-1;
+}
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
 /* One extension chunk through the common framing; 0 only when the sink ACCEPTED the whole chunk. */
 int p_ext_emit(prof *p, uint32_t type, const uint8_t *payload, size_t len)
@@ -298,6 +312,9 @@ static void dr_start(prof *p)
 #ifdef PS3DK_PROF_WITH_SPU
     head[12] = p->ext_flags; /* file_flags bit 0 (DOMAIN_EXTENSIONS); 0 when the extension is off or disabled */
 #endif
+#ifdef PS3DK_PROF_WITH_WAITS
+    head[12]|=16;
+#endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
@@ -350,6 +367,9 @@ static void enc_threads(prof *p, const tdecl *t, uint32_t n)
 #ifdef PS3DK_PROF_WITH_SPU
     if (p->ext_flags && !p->snk.failed)
         p_ext_threads_accepted(p, t, n); /* exact identities, only once their THREADS chunks were accepted */
+#endif
+#ifdef PS3DK_PROF_WITH_WAITS
+    if(!p->snk.failed)p_wait_declared(p,t,n);
 #endif
 }
 
@@ -552,6 +572,9 @@ int p_drain_once(prof *p)
         p_ext_step3b(p);
 #endif
 
+#ifdef PS3DK_PROF_WITH_WAITS
+    (void)p_wait_emit_ready(p);
+#endif
     /* 4. Retirement: the RETIRED entry, then (and only then) the slot is free. */
     if (nret) {
         list_open(p, C_RETIRED, &cnt);
@@ -700,6 +723,9 @@ int p_quiesce_freeze_seal(prof *p)
     p->prefix_unregistered = unreg; /* same frozen value as the timing trailer and arc finish */
 #endif
     ST_REL(&d->frozen, 1);
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_freeze(p);
+#endif
     ST_REL(&p->phase, 2u);            /* SEALING; self-instrumentation is off (the caller is in_drain) */
 
     if (LD_RLX(&p->lock_failed))
@@ -761,6 +787,9 @@ int p_quiesce_freeze_seal(prof *p)
         /* The extension seal: after the frontier's THREADS and RETIRED, before the TRAILER. */
         if (p->ext_flags)
             p_ext_seal(p);
+#endif
+#ifdef PS3DK_PROF_WITH_WAITS
+        (void)p_wait_emit_status(p);
 #endif
         /* The TRAILER: ACKED and NOT_QUIESCED entries (6). */
         anylim = d->any_retired_limit;

@@ -140,6 +140,20 @@ jobs:
           READER: tools/target/debug/ps3dk-prof
         run: bash tests/host/ps3dk-prof-runtime/arcs-writer-test.sh "$RUNNER_TEMP/arcs-writer"
 
+      - name: Observed wait runtime, adapters and packaging guards
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/waits-test.py --out "$RUNNER_TEMP/waits-plain" --reader tools/target/debug/ps3dk-prof
+          python3 tests/host/ps3dk-prof-runtime/waits-test.py --out "$RUNNER_TEMP/waits-address" --reader tools/target/debug/ps3dk-prof --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/wait-pthread-test.py --out "$RUNNER_TEMP/wait-pthread-plain"
+          python3 tests/host/ps3dk-prof-runtime/wait-pthread-test.py --out "$RUNNER_TEMP/wait-pthread-address" --sanitize
+          python3 tests/host/ps3dk-prof-runtime/waits-startup-test.py --out "$RUNNER_TEMP/waits-startup"
+          python3 tests/host/ps3dk-prof-runtime/waits-link-check-test.py --out "$RUNNER_TEMP/waits-link-check"
+          python3 tests/host/ps3dk-prof-runtime/waits-manifest-test.py --out "$RUNNER_TEMP/waits-manifest"
+          python3 tests/host/ps3dk-prof-runtime/waits-order-check.py
+          python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --out "$RUNNER_TEMP/wait-sample-lifecycle"
+          python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --exercise-failure --out "$RUNNER_TEMP/wait-sample-failure-release"
+          python3 -B samples/profiling/wait-observations/host-tests/test_verify.py
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.

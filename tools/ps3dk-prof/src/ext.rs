@@ -461,6 +461,20 @@ struct Source {
 }
 
 impl Source {
+    fn event_observed(&mut self, event: RawEvent, evidence: Option<&mut crate::dependencies::Batch>, item_index: u32) {
+        let previous_pairs = self.raw.pairs.len();
+        if let Some(batch) = evidence {
+            batch.foreign_record(&event, item_index);
+            self.event(event);
+            // Protocol-invalid and unknown-stack ENDs remain raw events. Only
+            // the existing pairing state machine may create a matching fact.
+            if self.raw.pairs.len() > previous_pairs {
+                batch.foreign_pair(self.raw.pairs.last().unwrap(), item_index);
+            }
+        } else {
+            self.event(event);
+        }
+    }
     fn new(domain_id: u32) -> Source {
         Source { domain_id, known: true, ..Default::default() }
     }
@@ -558,6 +572,7 @@ fn source_key_of(kind: u8, id: u32) -> Result<SourceKey, Malformed> {
 }
 
 impl ExtReader {
+    pub(crate) fn declarations(&self) -> &ExtCapture { &self.cap }
     pub fn new() -> ExtReader {
         ExtReader::default()
     }
@@ -614,15 +629,20 @@ impl ExtReader {
     }
 
     pub fn chunk(&mut self, ty: u32, payload: &[u8], v1: &V1Refs<'_>) -> Result<(), Malformed> {
+        self.chunk_observed(ty, payload, v1, None, None, 0)
+    }
+
+    pub(crate) fn chunk_observed(&mut self, ty: u32, payload: &[u8], v1: &V1Refs<'_>,
+        evidence: Option<&mut crate::dependencies::DependencyIndex>, source: Option<&mut crate::source_checkpoints::Reader>, chunk_seq: u64) -> Result<(), Malformed> {
         match ty {
             CHUNK_DOMAIN => self.domain(payload),
             CHUNK_EPOCH => self.epoch(payload),
             CHUNK_CALIBRATION => self.calibration(payload),
             CHUNK_SPU_IMAGES => self.images(payload),
             CHUNK_SPU_LANES => self.lanes(payload, v1),
-            CHUNK_SPU_EVENTS => self.spu_events(payload),
-            CHUNK_GPU_EVENTS => self.gpu_events(payload, v1),
-            CHUNK_LOSS => self.loss(payload),
+            CHUNK_SPU_EVENTS => self.spu_events(payload, evidence, source, chunk_seq),
+            CHUNK_GPU_EVENTS => self.gpu_events(payload, v1, evidence, source, chunk_seq),
+            CHUNK_LOSS => self.loss(payload, evidence, source, chunk_seq),
             CHUNK_DOMAIN_FINAL => self.final_(payload),
             CHUNK_SPU_ORDER if self.order.is_some() => self.spu_order(payload),
             _ => unreachable!("extension chunk type {ty}"),
@@ -911,7 +931,7 @@ impl ExtReader {
         Ok(())
     }
 
-    fn spu_events(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+    fn spu_events(&mut self, payload: &[u8], mut evidence: Option<&mut crate::dependencies::DependencyIndex>, source: Option<&mut crate::source_checkpoints::Reader>, chunk_seq: u64) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "SPU_EVENTS");
         let lane_id = c.u32()?;
         let epoch = c.u32()?;
@@ -928,6 +948,9 @@ impl ExtReader {
         self.check_epoch(key, domain_id, epoch)?;
         self.tile(key, first, u64::from(n))?;
         let s = self.sources.get_mut(&key).unwrap();
+        let mut batch = evidence.as_deref_mut().and_then(|index| index.begin_counted(
+            crate::checkpoints::Source { kind: 2, id: lane_id, domain: domain_id }, chunk_seq, n as usize,
+            || payload[20..].chunks_exact(8).filter(|r| r[6] == EV_END).count()));
         for i in 0..u64::from(n) {
             let counter = c.u32()?;
             let desc = u32::from(c.u16()?);
@@ -941,12 +964,15 @@ impl ExtReader {
             }
             s.events += 1;
             let raw = u64::from(counter);
-            s.event(RawEvent { seq: first + i, epoch, raw, desc, kind, depth, frame_owner: 0, frame_id: 0 });
+            s.event_observed(RawEvent { seq: first + i, epoch, raw, desc, kind, depth, frame_owner: 0, frame_id: 0 }, batch.as_mut(), i as u32);
         }
-        c.done()
+        c.done()?;
+        if let Some(source) = source { source.observe(batch.as_ref(), chunk_seq)?; }
+        if let Some(batch) = batch { evidence.unwrap().commit(batch); }
+        Ok(())
     }
 
-    fn gpu_events(&mut self, payload: &[u8], v1: &V1Refs<'_>) -> Result<(), Malformed> {
+    fn gpu_events(&mut self, payload: &[u8], v1: &V1Refs<'_>, mut evidence: Option<&mut crate::dependencies::DependencyIndex>, source: Option<&mut crate::source_checkpoints::Reader>, chunk_seq: u64) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "GPU_EVENTS");
         let domain_id = c.u32()?;
         let epoch = c.u32()?;
@@ -964,6 +990,9 @@ impl ExtReader {
         self.check_epoch(key, domain_id, epoch)?;
         self.tile(key, first, u64::from(n))?;
         let s = self.sources.get_mut(&key).unwrap();
+        let mut batch = evidence.as_deref_mut().and_then(|index| index.begin_counted(
+            crate::checkpoints::Source { kind: 3, id: domain_id, domain: domain_id }, chunk_seq, n as usize,
+            || payload[20..].chunks_exact(28).filter(|r| r[12] == EV_END).count()));
         for i in 0..u64::from(n) {
             let raw = c.u64()?;
             let desc = c.u32()?;
@@ -1001,12 +1030,15 @@ impl ExtReader {
                 }
             }
             s.events += 1;
-            s.event(RawEvent { seq: first + i, epoch, raw, desc, kind, depth, frame_owner: owner, frame_id });
+            s.event_observed(RawEvent { seq: first + i, epoch, raw, desc, kind, depth, frame_owner: owner, frame_id }, batch.as_mut(), i as u32);
         }
-        c.done()
+        c.done()?;
+        if let Some(source) = source { source.observe(batch.as_ref(), chunk_seq)?; }
+        if let Some(batch) = batch { evidence.unwrap().commit(batch); }
+        Ok(())
     }
 
-    fn loss(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+    fn loss(&mut self, payload: &[u8], evidence: Option<&mut crate::dependencies::DependencyIndex>, observer: Option<&mut crate::source_checkpoints::Reader>, chunk_seq: u64) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "LOSS");
         let source = c.u32()?;
         let kind = c.u8()?;
@@ -1040,6 +1072,17 @@ impl ExtReader {
         s.lost = lost;
         s.raw.losses.push(LossRange { first, count, reason });
         s.go_unknown();
+        if let Some(index) = evidence {
+            let source = crate::checkpoints::Source { kind: if kind == 1 { 2 } else { 3 }, id: source, domain: s.domain_id };
+            if let Some(mut batch) = index.begin(source, chunk_seq, 1, 0) {
+                batch.entries.push(crate::dependencies::Entry::loss(first, count,
+                    crate::dependencies::Position { chunk_seq, item_index: 0 }).expect("validated LOSS range"));
+                if let Some(observer) = observer { observer.observe(Some(&batch), chunk_seq)?; }
+                index.commit(batch);
+            } else if let Some(observer) = observer {
+                observer.observe(None, chunk_seq)?;
+            }
+        }
         Ok(())
     }
 

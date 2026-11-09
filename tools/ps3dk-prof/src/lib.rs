@@ -9,8 +9,14 @@
 //! - [`load`] runs `read` and then [`analysis::analyze`], which applies rule 4.  `ps3dk-prof check`, `report` and
 //!   [`compare`] (which takes two [`Analysis`] values) all go through `load`.
 
+#[cfg(test)]
+extern crate self as ps3dk_prof;
+
 pub mod analysis;
 pub mod clockmap;
+pub mod checkpoints;
+pub mod source_checkpoints;
+pub mod dependencies;
 pub mod durations;
 pub mod ext;
 pub mod foreign_paths;
@@ -25,6 +31,7 @@ pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;
 pub mod spu_ticks;
+pub mod waits;
 
 pub use analysis::{
     compare, compare_with, load, load_file, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,

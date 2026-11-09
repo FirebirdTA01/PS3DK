@@ -10,6 +10,9 @@
 #error "ps3dk prof: the LV2 PAL is hook-free; test hooks exist only in the host PAL"
 #endif
 #include "pal.h"
+#ifdef PS3DK_PROF_WITH_WAITS
+#include "../core/prof_internal.h"
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -49,7 +52,17 @@ void pal_free(void *p) { free(p); }
  * statically initialised mutexes is never taken. */
 int pal_mutex_init(pal_mutex *m) { return pthread_mutex_init(m, NULL) == 0 ? 0 : -1; }
 int pal_mutex_destroy(pal_mutex *m) { return pthread_mutex_destroy(m) == 0 ? 0 : -1; }
+#ifdef PS3DK_PROF_WITH_WAITS
+int pal_mutex_lock(pal_mutex *m) {
+    unsigned saved = g_tls.wait_busy;
+    g_tls.wait_busy = 2; /* reserved internal-acquisition scope; restore nesting */
+    int rc = pthread_mutex_lock(m);
+    g_tls.wait_busy = saved;
+    return rc == 0 ? 0 : -1;
+}
+#else
 int pal_mutex_lock(pal_mutex *m) { return pthread_mutex_lock(m) == 0 ? 0 : -1; }
+#endif
 int pal_mutex_unlock(pal_mutex *m) { return pthread_mutex_unlock(m) == 0 ? 0 : -1; }
 
 /* The APP owner: the checked LV2 thread id (plan 5.4, Q1), NOT librt pthread_self, whose table is PT_THREADS_MAX 32

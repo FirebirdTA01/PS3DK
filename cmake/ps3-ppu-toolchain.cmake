@@ -162,3 +162,14 @@ link_libraries(rt)
 # Make ps3-self.cmake findable via include() from sample CMakeLists
 # -----------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+
+# Wait observation is a separate library selection. Defer setup until project()
+# has measured the actual pointer width.
+set(PS3_PROF_WAITS "OFF" CACHE STRING "Observed pthread waits: OFF, MANUAL, AUTO, EXT")
+set_property(CACHE PS3_PROF_WAITS PROPERTY STRINGS OFF MANUAL AUTO EXT)
+if(NOT PS3_PROF_WAITS STREQUAL "OFF" AND NOT PS3_PROF_WAITS STREQUAL "")
+    set(_ps3_wait_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-waits.cmake")
+    if(NOT _ps3_wait_include IN_LIST CMAKE_PROJECT_INCLUDE)
+        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_wait_include}")
+    endif()
+endif()

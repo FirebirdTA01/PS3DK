@@ -27,3 +27,11 @@ pub mod timeline;
 pub mod timeline_foreign;
 pub mod timeline_spu;
 pub mod timeline_ui;
+
+#[cfg(test)]
+#[path = "../../ps3dk-prof/tests/common/mod.rs"]
+#[rustfmt::skip]
+#[allow(clippy::all)]
+mod dependency_fixture;
+pub mod waits;
+pub mod waits_ui;
