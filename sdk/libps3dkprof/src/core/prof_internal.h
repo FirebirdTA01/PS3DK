@@ -236,6 +236,9 @@ typedef struct prof {
 #ifdef PS3DK_PROF_WITH_WAITS
     struct wait_capture *waits;
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    struct func_capture *func;  /* function paths (src/func), one allocation at init */
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
     /* The SPU lane extension (P3.2 slice I1, host builds only): all of it lives in the one init block. */
     uint8_t ext_flags;          /* file_flags byte 12: 1 when SPU lanes are enabled, else 0 (| 2: a PROFILE build;
@@ -279,6 +282,9 @@ typedef struct tls_state {
     uint32_t depth;
 #ifdef PS3DK_PROF_WITH_WAITS
     uint32_t wait_busy;
+#endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    uint32_t func_busy, func_reentry; /* inside a function-path hook; hook calls refused meanwhile */
 #endif
     uint64_t refused_top;
     struct {

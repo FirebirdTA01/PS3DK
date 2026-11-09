@@ -8,6 +8,9 @@
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+#include "../func/func_internal.h"
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
 #include "psp_ppu.h"
 #include "prof_spu.h"
@@ -543,6 +546,9 @@ static int thread_begin_impl(prof *p, const char *name)
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_enroll(p,inc,s->generation);
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    p_func_enroll(p, i, inc);
+#endif
     s->state = SLOT_LIVE;
     p_unlock(p, &p->thread_mutex);
 
@@ -572,6 +578,9 @@ static int auto_register(prof *p)
         return -1;
     return thread_begin_impl(p, "auto") == PS3DK_PROF_OK ? 0 : -1;
 }
+#ifdef PS3DK_PROF_WITH_FUNC
+int p_func_auto_register(prof *p) { return auto_register(p); }
+#endif
 
 #ifdef PS3DK_PROF_WITH_ARCS
 int ps3dk_prof__record_arc(uint64_t caller, uint64_t callee, uint32_t flags)
@@ -647,6 +656,9 @@ void p_observe_stop(prof *p)
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_ack(p);
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    p_func_stamp_final(p);
+#endif
     HOOK(before_ack_store);
     ST_REL(&cb->ack_retire, (uint32_t)ST_ACKED);   /* 5. the LAST write */
 }
@@ -680,6 +692,9 @@ void ps3dk_prof_thread_end(void)
     t->retired = 1;              /* 4. */
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_ack(p);
+#endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    p_func_stamp_final(p);
 #endif
     HOOK(before_retire_store);
     ST_REL(&cb->ack_retire, (uint32_t)ST_RETIRED);   /* 5. the LAST write */
@@ -1262,6 +1277,11 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     rc=p_wait_init(p);
     if(rc)goto fail_block;
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    rc = p_func_init(p);
+    if (rc)
+        goto fail_block;
+#endif
     if (pal_mutex_init(&p->thread_mutex) != 0) {
         rc = PS3DK_PROF_ENOMEM;
         goto fail_block;
@@ -1338,6 +1358,9 @@ fail_mutex1:
 fail_block:
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_unwind(p);
+#endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    p_func_unwind(p);
 #endif
     pal_free(p->block);
     memset(p, 0, sizeof *p);

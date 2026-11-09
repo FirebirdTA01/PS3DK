@@ -5,6 +5,9 @@
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+#include "../func/func_internal.h"
+#endif
 
 #include <string.h>
 
@@ -134,7 +137,7 @@ static void enc_end(prof *p)
 {
     drainer *d = &p->dr;
     uint8_t *b = d->buf;
-#if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS)
+#if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC)
     if (d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
         return;
@@ -164,6 +167,21 @@ int p_wait_emit_chunk(prof *p,uint32_t type,const uint8_t *payload,size_t len)
     if(payload!=pl(p))memcpy(pl(p),payload,len);
     p->dr.pos=len;enc_end(p);
     return !p->snk.failed && p->dr.chunk_seq==seq+1 ? 0:-1;
+}
+#endif
+#ifdef PS3DK_PROF_WITH_FUNC
+/* One function-path chunk through the common framing; 0 only when the sink accepted the whole chunk. */
+int p_func_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len)
+{
+    uint64_t seq = p->dr.chunk_seq;
+    if (p->snk.failed || len > P_CHUNK_CAP)
+        return -1;
+    enc_begin(p, type);
+    if (payload != pl(p))
+        memcpy(pl(p), payload, len);
+    p->dr.pos = len;
+    enc_end(p);
+    return !p->snk.failed && p->dr.chunk_seq == seq + 1 ? 0 : -1;
 }
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
@@ -314,6 +332,9 @@ static void dr_start(prof *p)
 #endif
 #ifdef PS3DK_PROF_WITH_WAITS
     head[12]|=16;
+#endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    head[12] |= 32; /* file_flags bit 5: function paths (chunk types 28-30) */
 #endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
@@ -575,6 +596,11 @@ int p_drain_once(prof *p)
 #ifdef PS3DK_PROF_WITH_WAITS
     (void)p_wait_emit_ready(p);
 #endif
+#ifdef PS3DK_PROF_WITH_FUNC
+    /* 3c. Function paths: published cuts, LAGGING rows and the FINAL of each retiring incarnation, before its slot is
+     * freed; then the next cut request. */
+    p_func_drain(p, d->snaps, n);
+#endif
     /* 4. Retirement: the RETIRED entry, then (and only then) the slot is free. */
     if (nret) {
         list_open(p, C_RETIRED, &cnt);
@@ -749,6 +775,9 @@ int p_quiesce_freeze_seal(prof *p)
         for (i = 0; i < d->nfront; i++)
             if (!d->front[i].done)
                 drain_ring(p, d->front[i].slot, d->front[i].incarnation, d->front[i].widx);
+#ifdef PS3DK_PROF_WITH_FUNC
+        p_func_seal(p); /* after the frontier's records, before its RETIRED and TRAILER */
+#endif
 
         /* F2: frozen-RETIRED entries in a RETIRED chunk, from the step-4 counters; the slot is NOT freed. */
         list_open(p, C_RETIRED, &cnt);

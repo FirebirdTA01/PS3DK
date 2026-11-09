@@ -154,6 +154,17 @@ jobs:
           python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --exercise-failure --out "$RUNNER_TEMP/wait-sample-failure-release"
           python3 -B samples/profiling/wait-observations/host-tests/test_verify.py
 
+      # Automatic function paths (libps3dkprof_func runtime): the deterministic call-tree, stack-loss, capacity,
+      # cut/ack and lifecycle controls, plain, ASan+UBSan and TSan, plus TSan mutants of the snapshot handoff.
+      - name: Function-path runtime host test
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-plain"
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-address" --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-thread" --sanitize thread
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-pub" --sanitize thread --mutant relaxed-pub
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-ack" --sanitize thread --mutant relaxed-ack
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-ignore" --sanitize thread --mutant ignore-ack
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
