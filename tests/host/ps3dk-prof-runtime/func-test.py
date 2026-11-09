@@ -11,6 +11,8 @@ ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--sanitize', choices=['address', 'thread'])
 ap.add_argument('--mutant', choices=['relaxed-pub', 'relaxed-ack', 'ignore-ack'],
                 help='break the handoff in a copy of the sources; the race control must then fail under TSan')
+ap.add_argument('--ext', action='store_true',
+                help='the extension (SPU lanes + GPU domains, PROFILE identity) runtime, as libps3dkprof_ext_func.a')
 a = ap.parse_args()
 root = Path(__file__).resolve().parents[3]
 here = Path(__file__).resolve().parent
@@ -57,12 +59,35 @@ if a.sanitize:
              '-fno-sanitize-recover=all', '-ftls-model=local-exec']
 lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c',
                          'func/func_runtime.c', 'func/func_hooks.c']]
+if a.ext:
+    base += ['-DPS3DK_PROF_WITH_SPU', '-DPS3DK_PROF_WITH_PROFILE', '-I', src / 'pal', '-I', src / 'spu', '-I', src / 'rsx']
+    lib += [src / s for s in ['spu/psp_ppu.c', 'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c',
+                              'spu/psp_host_emul.c', 'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c',
+                              'rsx/rsxcap.c']]
 objs = []
 for i, f in enumerate(lib + [here / 'func_test.c']):
-    o = out / f'o{i}.o'
-    r = run(f'compile-{i}', [cc, *base, '-fno-instrument-functions', '-c', f, '-o', o])
+    o = out / (f.stem + '.o')   # archive member names as the Makefile produces them
+    r = run(f'compile-{f.stem}', [cc, *base, '-fno-instrument-functions', '-c', f, '-o', o])
     assert r.returncode == 0, r.stderr.decode()
     objs.append(o)
+if a.ext:
+    # the release identity pipeline of func.mk with the host tools: members -> emit -> identity member -> verify
+    digest = root / 'sdk/libps3dkprof/tools/archive_digest.py'
+    ident = ['--id', 'RSX-HOST', '--premises', '463', '--kinds', '1']
+    r = run('ar-members', ['ar', 'rcsD', out / 'members.a', *objs[:-1]])
+    assert r.returncode == 0, r.stderr.decode()
+    r = run('emit-identity', ['python3', '-I', '-B', digest, 'emit', out / 'members.a', *ident])
+    assert r.returncode == 0, r.stderr.decode()
+    (out / 'prof_identity.c').write_bytes(r.stdout)
+    r = run('compile-identity', [cc, *base, '-c', out / 'prof_identity.c', '-o', out / 'prof_identity.o'])
+    assert r.returncode == 0, r.stderr.decode()
+    r = run('ar-final', ['ar', 'rcsD', out / 'libps3dkprof_ext_func.a', *objs[:-1], out / 'prof_identity.o'])
+    assert r.returncode == 0, r.stderr.decode()
+    r = run('verify-identity', ['python3', '-I', '-B', digest, 'verify', out / 'libps3dkprof_ext_func.a', *ident])
+    assert r.returncode == 0, r.stdout.decode() + r.stderr.decode()
+libobjs = objs[:-1]
+if a.ext:
+    objs = [objs[-1], out / 'libps3dkprof_ext_func.a']
 o = out / 'work.o'
 # x86-64 GCC tail-calls the exit hook of a void function after `leave` (its frame is then the caller's), which the
 # frame check correctly reports as a stack loss; the PPU ELFv1 hook call is bl+nop (no sibling call).  The host
@@ -70,10 +95,10 @@ o = out / 'work.o'
 r = run('compile-work', [cc, *base, '-finstrument-functions', '-fno-optimize-sibling-calls', '-c',
                          here / 'func_work.c', '-o', o])
 assert r.returncode == 0, r.stderr.decode()
-r = run('link', [cc, *base, *objs, o, '-o', out / 'func_test'])
+r = run('link', [cc, *base, o, *objs, '-o', out / 'func_test'])
 assert r.returncode == 0, r.stderr.decode()
 # The library is never instrumented: no hook call may appear in any library object.
-for obj in objs[:-1]:
+for obj in libobjs:
     r = run('nm-' + obj.stem, ['nm', '-u', obj])
     assert r.returncode == 0 and b'__cyg_profile_func' not in r.stdout, obj
 
@@ -88,7 +113,8 @@ def decode(path):
     b = path.read_bytes()
     assert b[:8] == b'PS3DKPRF', 'magic'
     major, minor, flags = struct.unpack_from('<HHI', b, 8)
-    assert (major, minor) == (1, 0) and flags == 32, (major, minor, flags)
+    # bit 5 alone; with the extension also bits 0 (domain extensions), 1 (PROFILE record) and 2 (SPU order records)
+    assert (major, minor) == (1, 0) and flags == (39 if a.ext else 32), (major, minor, flags)
     pos, seq, chunks = 16, 0, []
     while pos < len(b):
         typ, ln, s = struct.unpack_from('<IIQ', b, pos)
@@ -140,7 +166,7 @@ def decode(path):
             assert s0 == 1 and r == 0 and fl < 4
             cap['status'].append(dict(flags=fl, req=req, unreg=un, noactor=na))
         else:
-            assert typ <= 7, typ
+            assert typ <= 7 or (a.ext and typ <= 26), typ   # the extension's own chunks are not decoded here
     assert cap['status'] and cap['status'][-1]['flags'] & 1 and sum(s['flags'] & 1 for s in cap['status']) == 1
     # Per incarnation: definitions before use, consecutive intervals, contiguous ticks, at most one terminal chunk.
     per = defaultdict(lambda: dict(nodes={}, last=0, cut=None, term=0, totals=defaultdict(lambda: [0, 0, 0]),
@@ -173,6 +199,7 @@ def decode(path):
         for k, v in t['cnt'].items():
             st['cnt'][k] += v
     cap['per'] = per
+    assert not a.ext or 17 in cap['order'], 'the extension capture carries its PROFILE record'
     return cap
 
 
@@ -395,5 +422,5 @@ for name, fn in [('tree', t_tree), ('depth', t_depth), ('overflow', t_overflow),
                  ('span', t_span), ('reentry', t_reentry), ('reg', t_reg), ('unreg', t_unreg),
                  ('threads', t_threads), ('stop', t_stop), ('race', t_race), ('cost', t_cost)]:
     case(name, fn)
-print('cases=%d passed=%d sanitize=%s' % (12, len(results), a.sanitize), flush=True)
+print('cases=%d passed=%d sanitize=%s ext=%s' % (12, len(results), a.sanitize, a.ext), flush=True)
 raise SystemExit(0 if len(results) == 12 else 1)

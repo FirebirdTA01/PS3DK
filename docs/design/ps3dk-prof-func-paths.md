@@ -1,5 +1,12 @@
 # Automatic PPU function paths: schema 1
 
+Archives (explicit goals in `sdk/libps3dkprof/func.mk`, never part of `all`):
+`func` builds `libps3dkprof_func.a` (manual lifecycle) and `func-ext` builds
+`libps3dkprof_ext_func.a` (the SPU-lane and GPU-domain extension with its PROFILE
+identity member), each for ILP32 and LP64. An extension app links
+`libps3dkprof_ext_live.a` (unchanged) and `libps3dkprof_ext_func.a` in place of
+`libps3dkprof_ext.a`. There is no automatic-lifecycle (`libps3prof`) variant yet.
+
 An application compiled with `-finstrument-functions` and linked with the opt-in
 archive `libps3dkprof_func.a` records, per registered PPU thread, a call tree of
 the instrumented functions: entries and elapsed time per call path. No zone macro

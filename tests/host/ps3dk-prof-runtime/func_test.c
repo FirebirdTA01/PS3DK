@@ -5,6 +5,9 @@
 #include "prof_internal.h"
 #include "func_internal.h"
 #include <ps3dk/prof_func.h>
+#ifdef PS3DK_PROF_WITH_SPU
+#include "prof_spu.h"
+#endif
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,7 +70,18 @@ static void start(uint32_t actors, uint32_t nodes, uint32_t depth, int auto_reg,
     cfg.auto_register = auto_reg;
     CHECK(ps3dk_prof_func_configure(&fc) == 0);
     CHECK(ps3dk_prof_set_sink_callbacks(&sink) == 0);
+#ifdef PS3DK_PROF_WITH_SPU
+    {
+        /* the extension runtime with SPU lanes enabled (file flags bits 0 and 1 beside bit 5) */
+        ps3dk_prof_ext_config x;
+        memset(&x, 0, sizeof x);
+        x.size = sizeof x;
+        x.spu_lanes_max = 1;
+        CHECK(ps3dk_prof_init_ex(&cfg, &x) == 0);
+    }
+#else
     CHECK(ps3dk_prof_init(&cfg) == 0);
+#endif
 }
 static int finish(const char *path, int want_rc)
 {

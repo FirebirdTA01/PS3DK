@@ -164,6 +164,9 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-pub" --sanitize thread --mutant relaxed-pub
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-ack" --sanitize thread --mutant relaxed-ack
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-mutant-ignore" --sanitize thread --mutant ignore-ack
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-plain" --ext
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-address" --ext --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-thread" --ext --sanitize thread
 
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
