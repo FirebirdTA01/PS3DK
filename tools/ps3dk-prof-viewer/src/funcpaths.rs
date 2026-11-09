@@ -80,7 +80,7 @@ pub struct FuncView {
     pub more: Option<String>,
 }
 
-fn counters<T: std::fmt::Display>(c: &[T; 7]) -> String {
+fn counters<T: std::fmt::Display>(c: &[T; ps3dk_prof::func_paths::COUNTERS]) -> String {
     COUNTER_NAMES
         .iter()
         .zip(c)

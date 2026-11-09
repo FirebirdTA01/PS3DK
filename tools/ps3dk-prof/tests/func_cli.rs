@@ -171,7 +171,7 @@ fn cli_symbolizes_real_fn_values_through_opd_and_counts_unresolved() {
     let (code, out, err) = run(&["paths", "--functions", "--elf", &elf, &prof]);
     assert_eq!(code, Some(0), "{out}{err}");
     assert!(
-        out.contains("3 resolved, 1 unresolved (shown as raw hex) of 4 distinct fn value(s)"),
+        out.contains("3 resolved, 2 unresolved (shown as raw hex) of 5 distinct fn value(s)"),
         "{out}"
     );
     assert!(out.contains("tree_a > tree_c()"), "{out}");
@@ -187,7 +187,7 @@ fn cli_symbolizes_real_fn_values_through_opd_and_counts_unresolved() {
     // without --elf every fn is hex, and counted
     let (_, out, _) = run(&["paths", "--functions", &prof]);
     assert!(
-        out.contains("symbols: none (--elf not given): 4 distinct fn value(s) shown as raw hex"),
+        out.contains("symbols: none (--elf not given): 5 distinct fn value(s) shown as raw hex"),
         "{out}"
     );
     assert!(
@@ -212,7 +212,7 @@ fn cli_columns_counters_statuses_and_lost_row() {
         "function paths: RECORDED",
         "elapsed = timebase wall time",
         "not CPU time",
-        "counters (sum): depth_limit 0, lost 4, unbalanced 0, orphan 0, deferred 0, reentry 0, clock 0",
+        "counters (sum): depth_limit 0, lost 4, unbalanced 0, orphan 0, deferred 0, reentry 0, clock 0, abandoned 0",
         "chunk flags seen DATA|FINAL|LOST",
         "terminal FINAL",
         "incl = inclusive wall elapsed",
@@ -282,7 +282,7 @@ fn cli_json_has_every_counter_status_and_exact_ticks() {
     assert!(v["verdict"].as_str().unwrap().starts_with("COMPLETE"));
     let t = &v["threads"][0];
     assert_eq!(t["terminal"], "FINAL");
-    assert_eq!(t["counters"].as_object().unwrap().len(), 7);
+    assert_eq!(t["counters"].as_object().unwrap().len(), 8);
     let i = &t["selection"]["interval"];
     assert_eq!(i["state"], "DATA");
     assert_eq!(

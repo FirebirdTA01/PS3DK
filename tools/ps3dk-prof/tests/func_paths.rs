@@ -82,7 +82,9 @@ fn p(v: &[&str]) -> Vec<String> {
 fn tree_expect() -> Sums {
     [
         (p(&["tree_a"]), (2, 252, 12)),
-        (p(&["tree_a", "tree_b"]), (4, 40, 40)),
+        // tb_inl is an always_inline leaf: it nests in tree_b's physical frame
+        (p(&["tree_a", "tree_b"]), (4, 40, 0)),
+        (p(&["tree_a", "tree_b", "tb_inl"]), (4, 40, 40)),
         (p(&["tree_a", "tree_c"]), (2, 200, 200)),
         (p(&["rec"]), (1, 3, 1)),
         (p(&["rec", "rec"]), (1, 2, 1)),
@@ -172,12 +174,38 @@ fn depth_refusal_and_stack_reset_keep_counters_and_row_statuses() {
         );
     }
     assert!(!t.contains_key(&vec!["deep".to_string(); 9]));
+    for k in 1..=8usize {
+        let path = vec!["deep_inl".to_string(); k];
+        let want_child = if k < 8 { 12 - k as u128 } else { 0 };
+        assert_eq!(
+            t[&path],
+            (1, 13 - k as u128, 13 - k as u128 - want_child),
+            "{path:?}"
+        );
+        let mut leaf = path.clone();
+        leaf.push("di_leaf".to_string());
+        assert_eq!(
+            t.get(&leaf).copied(),
+            (k < 8).then_some((1, 0, 0)),
+            "{leaf:?}"
+        );
+    }
     let a = named(&c, "main");
-    assert_eq!(a.counters[0], 8, "depth_limit");
-    assert_eq!(a.counters[2], 1, "unbalanced");
+    assert_eq!(a.counters[0], 17, "depth_limit");
+    assert_eq!(a.counters[2], 2, "unbalanced");
+    assert_eq!(
+        a.counters[7], 11,
+        "abandoned: 4 refused levels, then levels 2-8"
+    );
     let rows = interval(&c, &s, "main", 1);
     assert!(rows[&vec!["deep".to_string(); 8]].flags & ROW_SELF_UNTIMED != 0);
-    for k in 1..=8 {
+    let j = rows[&p(&["deep_jump"])];
+    assert_eq!((j.calls, j.incl, j.child), (1, 12, 0));
+    assert!(
+        j.flags & ROW_SELF_UNTIMED != 0,
+        "the surviving parent has untimed children"
+    );
+    for k in 2..=8 {
         let r = rows[&vec!["deep_jump".to_string(); k]];
         assert!(
             r.flags & ROW_TRUNCATED != 0 && r.calls == 1 && r.incl == 0,
@@ -217,23 +245,138 @@ fn the_lost_node_is_its_own_row_and_never_a_parent() {
 }
 
 #[test]
-fn nonlocal_exits_give_unknown_caller_roots_and_truncated_rows() {
+fn nonlocal_exits_drop_deeper_activations_and_mark_survivors() {
     let c = read("longjmp");
     let s = symbols("longjmp");
-    let t = totals(&c, &s, "main");
-    assert_eq!(t[&p(&["?", "lj_after"])], (1, 4, 4));
-    assert_eq!(t[&p(&["?", "post_reset"])], (1, 2, 2));
-    for path in [
-        vec!["lj_outer"],
-        vec!["lj_outer", "lj_mid"],
-        vec!["?", "ra"],
-        vec!["?", "ra", "ra", "ra"],
-    ] {
-        assert_eq!(t[&p(&path)], (1, 0, 0), "{path:?}");
-    }
+    let want: Sums = [
+        (p(&["lj_outer"]), (1, 7, 7)),
+        (p(&["lj_outer", "lj_mid"]), (1, 0, 0)),
+        (p(&["lj_outer", "lj_mid", "lj_deep"]), (1, 0, 0)),
+        (p(&["lj_outer", "lj_mid", "lj_after"]), (1, 4, 4)),
+        (p(&["ra"]), (1, 3, 3)),
+        (p(&["ra", "ra"]), (1, 0, 0)),
+        (p(&["ra", "ra", "ra"]), (1, 0, 0)),
+        (p(&["post_reset"]), (1, 2, 2)),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(totals(&c, &s, "main"), want);
     let a = named(&c, "main");
-    assert_eq!((a.counters[2], a.counters[3]), (2, 1), "unbalanced, orphan");
-    assert!(a.flags_seen & STACK_RESET != 0 && a.flags_seen & STACK_UNKNOWN != 0);
+    assert_eq!(
+        (a.counters[2], a.counters[3], a.counters[7]),
+        (3, 0, 4),
+        "unbalanced, orphan, abandoned"
+    );
+    assert!(a.flags_seen & STACK_RESET != 0 && a.flags_seen & STACK_UNKNOWN == 0);
+    let fin = a.cuts.last().unwrap().interval;
+    let rows = interval(&c, &s, "main", fin);
+    for path in [vec!["lj_outer", "lj_mid"], vec!["ra", "ra", "ra"]] {
+        assert!(rows[&p(&path)].flags & ROW_TRUNCATED != 0, "{path:?}");
+    }
+    assert!(rows[&p(&["lj_outer"])].flags & ROW_SELF_UNTIMED != 0);
+    assert!(rows[&p(&["ra"])].flags & ROW_SELF_UNTIMED != 0);
+}
+
+#[test]
+fn an_emptied_stack_gives_unknown_caller_roots() {
+    let c = read("reset");
+    let s = symbols("reset");
+    let want: Sums = [
+        (p(&["k1"]), (1, 0, 0)),
+        (p(&["?", "post_reset"]), (1, 2, 2)),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(totals(&c, &s, "main"), want);
+    let a = named(&c, "main");
+    assert_eq!((a.counters[2], a.counters[7], a.counters[3]), (1, 1, 0));
+    assert!(a.cuts.last().unwrap().flags & STACK_UNKNOWN != 0);
+}
+
+#[test]
+fn inline_expansions_nest_without_stack_loss() {
+    let c = read("inline");
+    let s = symbols("inline");
+    let want: Sums = [
+        (p(&["inl_nest"]), (1, 5, 0)),
+        (p(&["inl_nest", "in_outer"]), (1, 5, 2)),
+        (p(&["inl_nest", "in_outer", "in_inner"]), (1, 3, 3)),
+        (p(&["inl_mix"]), (1, 10, 0)),
+        (p(&["inl_mix", "im_a"]), (1, 1, 1)),
+        (p(&["inl_mix", "real_leaf"]), (1, 4, 4)),
+        (p(&["inl_mix", "im_b"]), (1, 5, 1)),
+        (p(&["inl_mix", "im_b", "real_leaf"]), (1, 4, 4)),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(totals(&c, &s, "main"), want);
+    let a = named(&c, "main");
+    assert!(
+        [0, 2, 3, 7].iter().all(|&k| a.counters[k] == 0),
+        "{:?}",
+        a.counters
+    );
+}
+
+#[test]
+fn saturation_stays_visible_on_every_status_and_counter() {
+    let c = read("sat");
+    let i = inv(&c);
+    let got: Vec<_> = i
+        .statuses
+        .iter()
+        .map(|x| (x.unregistered, x.no_actor, x.flags))
+        .collect();
+    assert_eq!(got, [(2, 1, 2), (0, 0, 2), (0, 0, 2), (0, 0, 3)]);
+    assert!(i.status_saturated && i.final_status);
+    let a = named(&c, "main");
+    let ch: Vec<_> = a.cuts.iter().filter(|c| c.counters[5] != 0).collect();
+    assert_eq!(ch.len(), 1);
+    assert_eq!(ch[0].counters[5], u64::MAX);
+    assert!(ch[0].flags & ps3dk_prof::func_paths::SATURATED != 0);
+    // a later status that drops the sticky flag is refused
+    refused(
+        &mutate("sat", |s| {
+            let k = s.nth(30, 1);
+            let p = &mut s.chunks[k].payload;
+            let f = get16(p, 2);
+            put16(p, 2, f & !2);
+        }),
+        Rule::FuncStatus,
+        "SATURATED cleared",
+    );
+}
+
+fn ext_file(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/func/ext")
+        .join(name)
+}
+
+#[test]
+fn the_extension_variant_carries_function_paths_with_a_profile() {
+    for m in ["tree3", "threads", "stop"] {
+        let b = std::fs::read(ext_file(&format!("{m}.prof"))).unwrap();
+        assert_eq!(get32(&b, 12), 39, "{m}: bit 5 with bits 0-2");
+        let c = reader::read(&b).unwrap_or_else(|e| panic!("{m}: {e}"));
+        assert!(c.profile.is_some() && c.ext.is_some(), "{m}");
+        assert!(inv(&c).final_status, "{m}");
+        assert!(matches!(ps3dk_prof::load(&b), Outcome::Analysed(_)), "{m}");
+    }
+    let c = reader::read(&std::fs::read(ext_file("tree3.prof")).unwrap()).unwrap();
+    let text = std::fs::read_to_string(ext_file("tree3.sym")).unwrap();
+    let sym: BTreeMap<u64, String> = text
+        .lines()
+        .map(|l| {
+            let v: Vec<&str> = l.split_whitespace().collect();
+            (v[2].parse().unwrap(), v[1].to_string())
+        })
+        .collect();
+    assert_eq!(
+        totals(&c, &sym, "main"),
+        tree_expect(),
+        "the same call tree as the default variant"
+    );
 }
 
 #[test]
@@ -698,7 +841,18 @@ fn unknown_statuses_and_flags_are_refused() {
             put64(&mut s.chunks[i].payload, 120, 1);
         }),
         Rule::FuncTree,
-        "reserved",
+        "STACK_RESET and the abandoned counter",
+    );
+    // a stack-loss event that dropped nothing
+    refused(
+        &mutate("longjmp", |s| {
+            let i = s.chunks.iter().rposition(|c| c.ty == 29).unwrap();
+            let p = &mut s.chunks[i].payload;
+            assert!(get16(p, 2) & STACK_RESET != 0);
+            put64(p, 120, 1);
+        }),
+        Rule::FuncTree,
+        "abandoned 1 below unbalanced",
     );
     refused(
         &mutate("tree3", |s| {

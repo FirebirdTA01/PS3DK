@@ -340,9 +340,10 @@ fields and known flag bits above, it refuses:
   capacity; `max_probe` 0; a timebase other than the CLOCKS frequency; zero
   allocated bytes.
 - FUNC_STATUS: one before FUNC_CONFIG; an ordinary status whose requested epoch
-  is not the previous request plus one (the first is 1), or a FINAL one that
-  does not repeat the current request; any function-path chunk after the FINAL
-  status.
+  is not the previous request plus one (the first is 1), except that at the
+  exhaustion bound 2^64-2 a SATURATED status repeats it; a FINAL one that does
+  not repeat the current request; SATURATED clear after an earlier status set
+  it; any function-path chunk after the FINAL status.
 - FUNC_TREE, every chunk: one before FUNC_CONFIG; an undeclared incarnation, one
   after its RETIRED entry, or one whose slot is at or above `max_actors`; a
   requested epoch other than the current request (0 before the first status); a
@@ -354,8 +355,10 @@ fields and known flag bits above, it refuses:
   above the requested epoch, or whose LAGGING flag differs from `answered <
   requested`; an interval number that is not the previous plus one; a start tick
   other than the previous cut tick; LOST, STACK_RESET, CLOCK, DEPTH_LIMITED and
-  OPEN disagreeing with, in order, `lost > 0`, `unbalanced > 0`, `clock > 0`,
-  `depth_limit > 0 or refused levels > 0`, and `open > 0`; STACK_UNKNOWN before
+  OPEN disagreeing with, in order, `lost > 0`, `unbalanced > 0` (and
+  `abandoned > 0`), `clock > 0`, `depth_limit > 0 or refused levels > 0`, and
+  `open > 0`; without SATURATED, `abandoned` below `unbalanced` (every stack-loss
+  event drops at least one activation or refused level); STACK_UNKNOWN before
   any STACK_RESET of the incarnation; more open activations than `stack_depth`,
   or refused levels with a stack that is not full.
 - Definitions: a first data chunk without the LOST node; a node index that is
@@ -365,9 +368,10 @@ fields and known flag bits above, it refuses:
   of the incarnation and STACK_UNKNOWN on the chunk; a repeated `(parent, fn)`.
 - Rows: an undefined node; a second row for one node; unknown row flags or a
   nonzero reserved field; `child > incl`; the LOST row flag on any node but 0
-  (or missing on node 0); OPEN disagreeing with `open > 0`; TRUNCATED,
-  SELF_UNTIMED, SATURATED or OPEN without STACK_RESET, DEPTH_LIMITED, SATURATED
-  or OPEN on the chunk; open counts whose sum is not the header's open count.
+  (or missing on node 0); OPEN disagreeing with `open > 0`; TRUNCATED without
+  STACK_RESET, SELF_UNTIMED without DEPTH_LIMITED or STACK_RESET (a surviving
+  parent after a drop), SATURATED without SATURATED and OPEN without OPEN on the
+  chunk; open counts whose sum is not the header's open count.
 
 Whole-capture totals per node are exact sums (`u128`) of the rows. The rows of
 each interval are retained within a reader budget; past it the per-interval

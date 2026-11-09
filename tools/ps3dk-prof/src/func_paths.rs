@@ -83,7 +83,7 @@ pub const STATUS_FINAL: u16 = 1;
 pub const STATUS_SATURATED: u16 = 2;
 
 /// The per-interval counters of a FUNC_TREE header, in wire order.
-pub const COUNTER_NAMES: [&str; 7] = [
+pub const COUNTER_NAMES: [&str; 8] = [
     "depth_limit",
     "lost",
     "unbalanced",
@@ -91,11 +91,17 @@ pub const COUNTER_NAMES: [&str; 7] = [
     "deferred",
     "reentry",
     "clock",
+    "abandoned",
 ];
+/// The number of per-interval counters.
+pub const COUNTERS: usize = 8;
 const C_DEPTH: usize = 0;
 const C_LOST: usize = 1;
 const C_UNBALANCED: usize = 2;
 const C_CLOCK: usize = 6;
+const C_ABANDONED: usize = 7;
+/// The last requested epoch the writer can issue (exhaustion rule): later statuses repeat it with SATURATED.
+pub const MAX_REQUESTED: u64 = u64::MAX - 1;
 
 /// Names of the set bits of `flags`, joined by `|`; "none" when no bit is set.
 pub fn flag_text(flags: u16, names: &[(u16, &str)]) -> String {
@@ -173,7 +179,7 @@ pub struct Cut {
     /// Refused depth levels outstanding at the cut.
     pub refused_levels: u32,
     /// Per-interval deltas, in [`COUNTER_NAMES`] order.
-    pub counters: [u64; 7],
+    pub counters: [u64; COUNTERS],
     /// The rows (empty in a no-data chunk, and dropped when the retention budget refused them: see
     /// [`Inventory::refusal`]).
     pub rows: Vec<Row>,
@@ -230,7 +236,7 @@ pub struct Actor {
     pub totals: Vec<Total>,
     pub terminal: Option<Terminal>,
     /// Sums of the per-interval counters.
-    pub counters: [u128; 7],
+    pub counters: [u128; COUNTERS],
     /// Union of the chunk flags.
     pub flags_seen: u16,
     /// Data chunks and their summed interval lengths (None after a clock anomaly in any interval).
@@ -442,9 +448,19 @@ impl Reader {
         if reserved != 0 {
             return bad(Rule::FuncStatus, format!("{at}: reserved {reserved}"));
         }
-        // An ordinary drain advances the request by exactly one; the sealing status repeats the current request.
+        // SATURATED is sticky: once set, every later status (the FINAL one included) carries it.
+        if self.result.status_saturated && flags & STATUS_SATURATED == 0 {
+            return bad(
+                Rule::FuncStatus,
+                format!("{at}: SATURATED cleared after an earlier status set it"),
+            );
+        }
+        // An ordinary drain advances the request by exactly one; the sealing status repeats the current request.  At
+        // the exhaustion bound no further cut is requested: the request repeats and the status is SATURATED.
         let want = if flags & STATUS_FINAL != 0 {
             Some(self.requested)
+        } else if self.requested == MAX_REQUESTED {
+            (flags & STATUS_SATURATED != 0).then_some(MAX_REQUESTED)
         } else {
             self.requested.checked_add(1)
         };
@@ -500,11 +516,10 @@ impl Reader {
         let n_rows = c.u32()?;
         let open = c.u32()?;
         let refused_levels = c.u32()?;
-        let mut counters = [0u64; 7];
+        let mut counters = [0u64; COUNTERS];
         for k in &mut counters {
             *k = c.u64()?;
         }
-        let reserved = c.u64()?;
         let at = format!("{at}, incarnation {inc}");
         let expected = (TREE_HEADER_LEN as u64)
             + (DEF_LEN as u64) * u64::from(n_nodes)
@@ -520,9 +535,6 @@ impl Reader {
         }
         if flags & !CHUNK_FLAGS != 0 {
             return bad(Rule::FuncTree, format!("{at}: unknown flags {flags:#x}"));
-        }
-        if reserved != 0 {
-            return bad(Rule::FuncTree, format!("{at}: reserved {reserved}"));
         }
         let Some(info) = cap.lanes.get(&inc).and_then(|l| l.info.as_ref()) else {
             return bad(Rule::FuncTree, format!("{at}: undeclared incarnation"));
@@ -624,7 +636,12 @@ impl Reader {
             }
         }
         let reset_seen = a.reset_seen || flags & STACK_RESET != 0;
-        let checks: [(bool, bool, &str); 5] = [
+        let checks: [(bool, bool, &str); 6] = [
+            (
+                flags & STACK_RESET != 0,
+                counters[C_ABANDONED] > 0,
+                "STACK_RESET and the abandoned counter",
+            ),
             (
                 flags & LOST != 0,
                 counters[C_LOST] > 0,
@@ -651,6 +668,16 @@ impl Reader {
             if flag != value {
                 return bad(Rule::FuncTree, format!("{at}: {what} disagree"));
             }
+        }
+        // Every stack-loss event drops at least one activation or refused level (exact unless saturated).
+        if flags & SATURATED == 0 && counters[C_ABANDONED] < counters[C_UNBALANCED] {
+            return bad(
+                Rule::FuncTree,
+                format!(
+                    "{at}: abandoned {} below unbalanced {}",
+                    counters[C_ABANDONED], counters[C_UNBALANCED]
+                ),
+            );
         }
         if flags & STACK_UNKNOWN != 0 && !reset_seen {
             return bad(
@@ -795,8 +822,8 @@ impl Reader {
                 (ROW_TRUNCATED, STACK_RESET, "TRUNCATED without STACK_RESET"),
                 (
                     ROW_SELF_UNTIMED,
-                    DEPTH_LIMITED,
-                    "SELF_UNTIMED without DEPTH_LIMITED",
+                    DEPTH_LIMITED | STACK_RESET,
+                    "SELF_UNTIMED without DEPTH_LIMITED or STACK_RESET",
                 ),
                 (
                     ROW_SATURATED,

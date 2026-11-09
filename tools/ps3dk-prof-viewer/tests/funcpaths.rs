@@ -220,7 +220,7 @@ fn elf_symbols_name_rows_and_refusals_keep_hex() {
     assert!(
         v.lines
             .iter()
-            .any(|l| l.contains("app.elf: 3 resolved, 1 unresolved")),
+            .any(|l| l.contains("app.elf: 3 resolved, 2 unresolved")),
         "{:?}",
         v.lines
     );

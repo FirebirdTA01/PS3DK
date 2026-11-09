@@ -6,9 +6,9 @@
 
 use std::collections::BTreeMap;
 
-pub const MODES: [&str; 13] = [
-    "tree1", "tree3", "depth", "overflow", "longjmp", "span", "reentry", "reg", "unreg", "auto",
-    "threads", "stop", "race",
+pub const MODES: [&str; 16] = [
+    "tree1", "tree3", "depth", "overflow", "longjmp", "reset", "inline", "sat", "span", "reentry",
+    "reg", "unreg", "auto", "threads", "stop", "race",
 ];
 
 fn dir() -> std::path::PathBuf {

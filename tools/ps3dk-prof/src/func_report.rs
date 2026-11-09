@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use crate::elf_symbols::ElfSymbols;
 use crate::func_paths::{
     chain, flag_text, percent, view, Actor, Cut, Inventory, PathRoot, Selected, Selection,
-    Terminal, ViewRow, CHUNK_FLAG_NAMES, COUNTER_NAMES, INCOMPLETE_TAIL, LOST_NODE, ROW_FLAG_NAMES,
+    Terminal, ViewRow, CHUNK_FLAG_NAMES, COUNTERS, COUNTER_NAMES, INCOMPLETE_TAIL, LOST_NODE,
+    ROW_FLAG_NAMES,
 };
 use crate::model::Capture;
 
@@ -99,7 +100,7 @@ fn pct(p: Option<f64>) -> String {
     p.map_or("n/a".to_string(), |p| format!("{p:.1}%"))
 }
 
-fn counters_text<T: std::fmt::Display>(c: &[T; 7]) -> String {
+fn counters_text<T: std::fmt::Display>(c: &[T; COUNTERS]) -> String {
     COUNTER_NAMES
         .iter()
         .zip(c)
