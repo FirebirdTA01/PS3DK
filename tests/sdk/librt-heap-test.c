@@ -61,6 +61,9 @@ int main(void)
 {
     struct _reent alternate = {0};
     int terminated = setjmp(startup_exit);
+    /* The query exists and reports 0 until the arena is ready. */
+    CHECK(&__ps3tc_heap_capacity != NULL);
+    CHECK(__ps3tc_heap_capacity() == 0);
     if (!terminated) sbrk_init();
     if (EXPECT_FAILURE) {
         CHECK(terminated && startup_rc == 1);
@@ -69,7 +72,9 @@ int main(void)
         CHECK(strstr(diagnostic, "requested=") != NULL);
         CHECK(strstr(diagnostic, "error=") != NULL);
         CHECK(allocation_calls == EXPECT_ALLOCATION_CALLS);
+        CHECK(__ps3tc_heap_capacity() == 0);
     } else {
+        CHECK(__ps3tc_heap_capacity() == (uint64_t)EXPECT_CAPACITY);
         CHECK(!terminated);
         CHECK(allocation_calls == 1);
         CHECK(allocation_size == EXPECT_CAPACITY);
@@ -90,6 +95,7 @@ int main(void)
         CHECK(__librt_sbrk_r(&alternate, PTRDIFF_MIN) == (caddr_t)arena);
         CHECK(__librt_sbrk_r(&alternate, PTRDIFF_MAX) == (caddr_t)-1);
         CHECK(tty_calls == 1);
+        CHECK(__ps3tc_heap_capacity() == (uint64_t)EXPECT_CAPACITY);
     }
     if (!failures) puts("librt-heap: PASS");
     return failures ? 1 : 0;

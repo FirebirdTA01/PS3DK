@@ -159,6 +159,16 @@ sbrk_init(void)
 	__sbrk_ready = 1;
 }
 
+/* The malloc arena the runtime really mapped, in bytes (the requested
+ * __ps3tc_heap_size rounded up to whole pages), or 0 before the arena is
+ * ready.  Lets an application check at run time that its heap request was
+ * honoured instead of pinning library hashes. */
+uint64_t
+__ps3tc_heap_capacity(void)
+{
+	return __sbrk_ready ? (uint64_t)__sbrk_capacity : 0;
+}
+
 /* Other PPU threads can still use malloc storage while the exiting thread
  * runs finalizers. Keep the process-owned arena mapped until Lv-2 tears
  * down the process; no .fini callback may free it early. */

@@ -8,6 +8,10 @@ extern "C" {
 #endif
 extern const uint64_t __ps3tc_heap_size;
 extern const unsigned char __ps3tc_heap_config_anchor;
+/* The malloc arena actually mapped, in bytes (the request rounded up to whole
+ * 1 MiB pages), or 0 before the runtime is ready.  Runtimes older than this
+ * query do not define it: declare it weak to detect them. */
+uint64_t __ps3tc_heap_capacity(void);
 #ifdef __cplusplus
 }
 #endif

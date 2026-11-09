@@ -798,6 +798,9 @@ jobs:
       - name: Test librt heap configuration and failure diagnostics
         run: bash tests/sdk/librt-heap-test.sh
 
+      - name: Test librt exports the heap capacity query in both ABIs
+        run: bash tests/sdk/librt-heap-capacity-link-test.sh
+
       - name: Test librt low-level exit and finalizer registration
         run: bash tests/sdk/librt-exit-test.sh
 

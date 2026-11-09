@@ -53,6 +53,22 @@ from failure to allocate the arena at startup. Both diagnostic paths use a
 static buffer and the direct Lv-2 TTY syscall, with no `malloc`, stdio, or
 POSIX `write` calls. TTY delivery itself is best effort.
 
+## Querying the arena
+
+`uint64_t __ps3tc_heap_capacity(void)` (declared in `<sys/heap_config.h>`)
+returns the mapped arena size in bytes, which is the request rounded up to
+whole pages, so an application can check at boot that its `PS3TC_HEAP_SIZE`
+was honoured. It returns 0 until the arena is ready (the heap constructor, priority 83).
+Runtimes older than this query do not define it; declare it weak to detect
+them, because the address is then null:
+
+```c
+extern uint64_t __ps3tc_heap_capacity(void) __attribute__((weak));
+if (&__ps3tc_heap_capacity && __ps3tc_heap_capacity() < wanted) { /* ... */ }
+```
+
 `tests/sdk/librt-heap-test.sh` checks sizing, failure paths, extreme increments,
 one-time diagnostics, C/C++ definitions, LTO and archive extraction on the
-host. PPU runtime validation uses an isolated runtime overlay.
+host, plus the query and its weak control. `tests/sdk/librt-heap-capacity-link-test.sh`
+checks both ABIs of a built librt (and an older runtime, for the null weak
+address). PPU runtime validation uses an isolated runtime overlay.

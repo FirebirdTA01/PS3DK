@@ -31,6 +31,22 @@ run_case syscall-overflow 'UINT64_C(4294967296)' 0 1 268435456 0 0 0
 run_case unavailable 67108864 0 1 33554432 0 0 0
 run_case query-failure default 0 1 268435456 -17 0 0
 run_case allocation-failure default 0 1 268435456 0 -12 1
+# Weak detection: with no definition linked, a weak declaration reads null.
+cat > "$work/weak.c" <<'SRC'
+#include <stdint.h>
+#include <stdio.h>
+extern uint64_t __ps3tc_heap_capacity(void) __attribute__((weak));
+int main(void)
+{
+    puts(&__ps3tc_heap_capacity ? "present" : "absent");
+    return &__ps3tc_heap_capacity != 0;
+}
+SRC
+if "$cc" -std=c11 -O2 -Wall -Wextra -Werror "$work/weak.c" -o "$work/weak" && "$work/weak" > /dev/null; then
+    echo "heap capacity weak control: PASS"
+else
+    failed=1; echo "heap capacity weak control: FAIL"
+fi
 # Exercise the public macro in both languages, with both sides built with LTO.
 cxx=${CXX:-c++}
 ar=${AR:-ar}
