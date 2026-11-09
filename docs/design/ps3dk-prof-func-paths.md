@@ -11,8 +11,9 @@ An application compiled with `-finstrument-functions` and linked with the opt-in
 archive `libps3dkprof_func.a` records, per registered PPU thread, a call tree of
 the instrumented functions: entries and elapsed time per call path. No zone macro
 is needed. This document is the wire and runtime contract for stage 1 (runtime
-hooks and chunk writer). Reader decoding, symbolization and the viewer page are
-later stages and do not exist yet; nothing here claims they have passed.
+hooks and chunk writer) and stage 2 (the reader in `tools/ps3dk-prof`,
+`ps3dk-prof paths --functions`, `--elf` symbolization and the viewer's
+Functions source on the Hot paths page; see "Reader checks" at the end).
 
 Elapsed time is timebase wall time between two observed hook events of the same
 thread. It includes waits, preemption, descheduling and the cost of the hooks
@@ -324,3 +325,53 @@ overflow checks, must not exceed `max_bytes` or initialization fails with
 EINVAL. All of it is one allocation at init: nothing is allocated, locked or
 placed in thread-local storage per call. The only thread-local addition is a
 reentry flag.
+
+## Reader checks (stage 2)
+
+The reader (`tools/ps3dk-prof/src/func_paths.rs`) decodes each chunk whole and
+keeps nothing from a chunk that breaks a rule; every refusal is MALFORMED with
+rule FuncConfig, FuncTree or FuncStatus. Besides the lengths, schemas, reserved
+fields and known flag bits above, it refuses:
+
+- FUNC_CONFIG: a second one; `fn_kind` other than 1; pointer bytes that differ
+  from the HEADER abi (1: 4, 2: 8); `max_actors` outside 1 to the smaller of
+  1024 and `max_threads`; `node_capacity` outside 4 to 16384; `stack_depth`
+  outside 4 to 256; `hash_slots` not a power of two of at least twice the
+  capacity; `max_probe` 0; a timebase other than the CLOCKS frequency; zero
+  allocated bytes.
+- FUNC_STATUS: one before FUNC_CONFIG; an ordinary status whose requested epoch
+  is not the previous request plus one (the first is 1), or a FINAL one that
+  does not repeat the current request; any function-path chunk after the FINAL
+  status.
+- FUNC_TREE, every chunk: one before FUNC_CONFIG; an undeclared incarnation, one
+  after its RETIRED entry, or one whose slot is at or above `max_actors`; a
+  requested epoch other than the current request (0 before the first status); a
+  chunk after the incarnation's FINAL or INCOMPLETE_TAIL chunk.
+- No-data chunks: flags other than LAGGING and/or INCOMPLETE_TAIL (at least one),
+  any nonzero cut field or counter, or LAGGING alone for requested epoch 0.
+- Data chunks: INCOMPLETE_TAIL; a FINAL chunk with an answered epoch or LAGGING;
+  a non-FINAL chunk whose answered epoch is 0, not above the previous one or
+  above the requested epoch, or whose LAGGING flag differs from `answered <
+  requested`; an interval number that is not the previous plus one; a start tick
+  other than the previous cut tick; LOST, STACK_RESET, CLOCK, DEPTH_LIMITED and
+  OPEN disagreeing with, in order, `lost > 0`, `unbalanced > 0`, `clock > 0`,
+  `depth_limit > 0 or refused levels > 0`, and `open > 0`; STACK_UNKNOWN before
+  any STACK_RESET of the incarnation; more open activations than `stack_depth`,
+  or refused levels with a stack that is not full.
+- Definitions: a first data chunk without the LOST node; a node index that is
+  not the next one; more nodes than `node_capacity`; node 0 with another parent
+  or a nonzero `fn`; any other node whose parent is the LOST marker, the LOST
+  node, or a node not yet defined; an UNKNOWN_CALLER parent without a stack reset
+  of the incarnation and STACK_UNKNOWN on the chunk; a repeated `(parent, fn)`.
+- Rows: an undefined node; a second row for one node; unknown row flags or a
+  nonzero reserved field; `child > incl`; the LOST row flag on any node but 0
+  (or missing on node 0); OPEN disagreeing with `open > 0`; TRUNCATED,
+  SELF_UNTIMED, SATURATED or OPEN without STACK_RESET, DEPTH_LIMITED, SATURATED
+  or OPEN on the chunk; open counts whose sum is not the header's open count.
+
+Whole-capture totals per node are exact sums (`u128`) of the rows. The rows of
+each interval are retained within a reader budget; past it the per-interval
+views are refused visibly and the totals stay exact. A thread with no data
+chunk, a missing interval number and every no-data chunk are reported as
+UNKNOWN, never as zero. A cut tick below its start tick is not refused (no rule
+forbids it); that interval's length is UNKNOWN.

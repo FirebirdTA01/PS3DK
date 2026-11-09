@@ -14,6 +14,8 @@ pub mod foreign;
 pub mod foreign_hot;
 pub mod frames;
 pub mod frames_ui;
+pub mod funcpaths;
+pub mod funcpaths_ui;
 pub mod graphs;
 pub mod hotpaths;
 pub mod hotpaths_ui;

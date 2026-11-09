@@ -3,7 +3,8 @@ mod common;
 mod spu_support;
 use common::*;
 use ps3dk_prof::{reader,Rule};
-const MASKS:[u32;16]=[0,1,3,7,8,9,11,15,16,17,19,23,24,25,27,31];
+// Bit 5 (function paths) is independent of every other capability.
+const MASKS:[u32;32]=[0,1,3,7,8,9,11,15,16,17,19,23,24,25,27,31,32,33,35,39,40,41,43,47,48,49,51,55,56,57,59,63];
 fn headers(flags:u32)->File{
  let mut f=File::new(vec![chunk(1,Hdr{max_threads:64,..Default::default()}.payload()),chunk(2,clocks_payload(1,1,0,79_800_000,0))]);
  f.flags=flags;

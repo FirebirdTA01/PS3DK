@@ -231,15 +231,16 @@ fn policy_refusal_preserves_prior_inventory_and_exposes_the_omission() {
 #[test]
 fn partial_opt_in_headers_preserve_existing_prerequisites() {
     // Waits (bit 4) is independent: mixed masks preserve checkpoint prerequisites.
-    for flags in [8, 9, 11, 15, 24, 25, 27, 31] {
+    for flags in [8, 9, 11, 15, 24, 25, 27, 31, 40, 63] {
         let mut f = File::new(vec![]);
         f.flags = flags;
         for n in 13..16 {
             assert!(reader::read(&f.bytes()[..n]).is_ok());
         }
     }
-    // Bit 5 remains unknown; retain an unknown-bit control alongside prerequisite failures.
-    for flags in [10, 12, 13, 14, 40] {
+    // Bit 5 (function paths) is now defined and independent; bit 6 remains unknown, so keep an unknown-bit control
+    // alongside the prerequisite failures.
+    for flags in [10, 12, 13, 14, 72, 42] {
         let mut f = File::new(vec![]);
         f.flags = flags;
         for n in 13..=16 {
