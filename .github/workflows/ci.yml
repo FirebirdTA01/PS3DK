@@ -727,6 +727,9 @@ jobs:
       - name: Test the DXT1/3/5 block encoder against an independent decoder
         run: bash tests/sdk/dxt-encoder-test.sh
 
+      - name: Test rendering sample framebuffer checks
+        run: bash tests/sdk/gcm-render-pixels-test.sh
+
       # ps3_add_self must respect OUTPUT_DIRECTORY keyword and PS3_SELF_OUTPUT_DIRECTORY
       # variable, falling back to CMAKE_CURRENT_SOURCE_DIR by default. ps3_add_pkg
       # must follow the same resolved directory.

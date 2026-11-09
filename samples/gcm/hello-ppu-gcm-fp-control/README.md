@@ -1,10 +1,10 @@
-# Fragment-program control
+# Fragment-program control rendering
 
-Compiles the existing triangle sample's color-pass-through fragment shader,
-loads its `CGprogram`, and emits `cellGcmSetFragmentProgramControl` into a
-private two-word command buffer. The preallocated Unsafe form must emit the
-same words. The sample checks the command header, exact word count, and guards;
-it prints the shader metadata and control word for inspection.
+Three matching panels, left to right: normal program installation, installation
+plus explicit safe control, installation plus reserved Unsafe control. The RSX
+executes the same texture-sampling CGprogram in all three. The original private
+command-buffer checks remain in source/checks.c and run before initialization.
+ControlTxp and both reserved arguments are zero; bit 15 semantics remain open.
 
 Build with the SDK environment set:
 
@@ -13,11 +13,16 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$PS3DK/cmake/ps3-ppu-toolchain.cmake
 cmake --build build
 ```
 
-For a source checkout, use the repository's `cmake/ps3-ppu-toolchain.cmake`.
-Keep the sibling triangle sample present: it supplies the shader. Run the
-SELF and read its console output. Success returns 0; a mismatch returns 1.
+For a source checkout, use its cmake/ps3-ppu-toolchain.cmake. Keep the sibling
+hello-ppu-cellgcm-quad shaders and gcm/common helpers present. Run the signed
+SELF: it submits 600 frames and samples every source texel center in the first frame against the
+source pattern. RGB tolerance is 2/255.
+START exits early and cannot support PASS.
 
-There is no GCM initialization, display loop, or GPU submission. A PASS checks
-emission consistency, not shader execution. `controlTxp` and both reserved
-arguments are zero; the unresolved meaning of control bit 15 is not tested.
-For rendering and program installation, see `hello-ppu-cellgcm-triangle`.
+A fresh back-end label follows the framebuffer transfer to main memory. The
+sample saves a PPM and a checked, published text receipt under
+`/dev_hdd0/tmp/gcm-fp-control-*`. Successful startup checks, all pixel checks,
+image publication and all 600 submissions are required for PASS. Partial receipts
+have no authority; receipt=complete is required. Console output prints panel
+geometry and mismatches. Hardware acceptance requires the matching receipt
+and image, separately from host tests and builds.
