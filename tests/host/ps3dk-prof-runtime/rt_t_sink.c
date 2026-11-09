@@ -53,7 +53,11 @@ int rt_sink_short_write_limit(const char *out)
     CHECK_EQ(ps3dk_prof_shutdown(), PS3DK_PROF_ESINKFAIL);
     CHECK_EQ(g_zero_calls, 16);   /* nothing more is written after a failure */
     CHECK_EQ(rt_capture_path(out, path, sizeof path), 0);
-    rt_expect_path(path, 1);      /* no trailer */
+    /* The sink failure itself is asserted above (drain and shutdown both ESINKFAIL, no write after it).  The file is
+     * valid but unfinished: no trailer and no trailer flag, so the reader says COMPLETE, exit 0, ending NO-TRAILER. */
+    rt_expect_path(path, 0);
+    rt_report_line(path, "MATCH", "verdict: COMPLETE [(]ended without a trailer.*");
+    rt_report_line(path, "HAS", "ending: NO-TRAILER");
     return 0;
 }
 

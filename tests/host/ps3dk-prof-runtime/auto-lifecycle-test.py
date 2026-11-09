@@ -110,8 +110,10 @@ for mode in ["normal", "exit", "unregistered", "open", "abandoned", "immediate",
             if (report.returncode != 0 or "1 censored of 1" not in text
                     or "duration unknown (censored)" not in text):
                 errors.append("open worker span incorrectly accepted")
-        elif report.returncode != 1 or "TRAILER is missing" not in text:
-            errors.append("abrupt exit incorrectly finalized")
+        elif (report.returncode != 0 or "verdict: COMPLETE (ended without a trailer" not in text
+              or "ending: NO-TRAILER" not in text or "TRAILER is missing" in text):
+            # a valid capture that ends without a trailer reads COMPLETE, exit 0, ending NO-TRAILER
+            errors.append("abrupt exit not read as a trailerless complete capture")
     results.append({"case": mode, "pass": not errors, "errors": errors})
     print(("PASS " if not errors else "FAIL ") + mode + (": " + "; ".join(errors) if errors else ""))
 

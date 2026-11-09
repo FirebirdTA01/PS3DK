@@ -126,10 +126,16 @@ def run_arcs():
                 ok = meta['synthetic'] == 1 and meta['io'] == 0 and meta['crc'] == zlib.crc32(blob)
             if trailer:
                 ok = ok and meta['unregistered'] == unreg
-            expected = 1 if name in ['zero-limit','overcount','partial','trailer-fail','late',
+            expected = 1 if name in ['zero-limit','overcount','partial','late',
                                     'length-overflow','chunk-overflow','eintr'] else 0
             checker = run(name+'-reader', [a.reader, 'check', capture])
             ok = ok and checker.returncode == expected
+            if name == 'trailer-fail':
+                # The trailer write failed: the C test already required shutdown == ESINKFAIL, and here the record
+                # says no trailer and no io finalization.  The half-written trailer is a torn last chunk, so the reader
+                # drops it and reads a valid, unfinished file: COMPLETE, exit 0, ending NO-TRAILER.
+                ok = ok and meta['trailer'] == 0 and meta['io'] == 0 and not trailer
+                ok = ok and b'ending: NO-TRAILER' in checker.stdout and b'torn last chunk dropped' in checker.stdout
         passed += ok
         print(f'{name}: {"PASS" if ok else "FAIL"}', flush=True)
     print(f'prefix tests={len(cases)} pass={passed} fail={len(cases)-passed}', flush=True)
@@ -169,10 +175,14 @@ def run_core():
             ok = meta['bytes'] == len(blob) and meta['trailer'] == int(trailer)
             if name == 'length-overflow':
                 ok = meta['synthetic'] == 1 and meta['io'] == 0
-            expected = 1 if name in ['zero-limit', 'overcount', 'partial', 'trailer-fail', 'late',
+            expected = 1 if name in ['zero-limit', 'overcount', 'partial', 'late',
                                      'length-overflow', 'eintr'] else 0
             checker = run('core-' + name + '-reader', [a.reader, 'check', capture])
             ok = ok and checker.returncode == expected
+            if name == 'trailer-fail':
+                # same as the arcs case; result -10 is PS3DK_PROF_ESINKFAIL, the runtime's own verdict on the failure
+                ok = ok and meta['trailer'] == 0 and meta['io'] == 0 and meta['result'] == -10 and not trailer
+                ok = ok and b'ending: NO-TRAILER' in checker.stdout and b'torn last chunk dropped' in checker.stdout
         passed += ok
         print(f'core {name}: {"PASS" if ok else "FAIL"}', flush=True)
     print(f'prefix core tests={len(CORE_CASES)} pass={passed} fail={len(CORE_CASES)-passed}', flush=True)
