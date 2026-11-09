@@ -37,40 +37,77 @@ static NOI uint32_t lookup(func_capture *f, func_actor *a, uint32_t parent, uint
     return F_LOST;
 }
 
-/* Stack loss: drop every retained activation without charging anything after its cursor. */
-static NOI void reset(func_capture *f, func_actor *a)
+/* Stack loss: drop the retained activations [keep, depth) and every refused level without charging anything after
+ * their cursors.  One unbalanced event; each dropped activation counted in abandoned.  The surviving top's self time
+ * now includes untimed children; an emptied stack makes later root-level entries UNKNOWN_CALLER. */
+static NOI void abandon(func_capture *f, func_actor *a, uint32_t keep)
 {
     func_frame *fr = f_frames(f, a);
-    for (uint32_t i = 0; i < a->depth; i++) {
+    func_row *rw = f_rows(f, a);
+    uint32_t sat = 0;
+    uint64_t n = (uint64_t)(a->depth - keep) + a->suppressed;
+    if (!n)
+        return;
+    for (uint32_t i = keep; i < a->depth; i++) {
         f_touch(f, a, fr[i].node);
-        f_rows(f, a)[fr[i].node].flags |= FR_TRUNC;
+        rw[fr[i].node].flags |= FR_TRUNC;
     }
-    a->depth = 0;
+    a->depth = keep;
     a->suppressed = 0;
-    a->unknown = 1;
-    a->iflags |= FF_RESET;
+    f_add(&a->cnt[FC_ABANDON], n, &sat);
+    if (sat)
+        a->iflags |= FF_SAT;
     f_count(a, FC_UNBAL);
+    a->iflags |= FF_RESET;
+    if (keep) {
+        f_touch(f, a, fr[keep - 1].node);
+        rw[fr[keep - 1].node].flags |= FR_SELF_UNTIMED;
+    } else {
+        a->unknown = 1;
+    }
 }
 
+static NOI void refuse_depth(func_capture *f, func_actor *a)
+{
+    func_frame *top = &f_frames(f, a)[a->depth - 1];
+    f_count(a, FC_DEPTH);
+    a->iflags |= FF_DEPTH;
+    f_touch(f, a, top->node);
+    f_rows(f, a)[top->node].flags |= FR_SELF_UNTIMED;
+}
+
+/* Frames grow downward.  An inline expansion shares its container's physical frame, so an EQUAL frame is valid
+ * nesting; only a strictly shallower (higher) frame shows the stack was left (longjmp, unwinding without hooks). */
 static NOI void enter(func_capture *f, func_actor *a, uint64_t fn, uint64_t frame, uint64_t now)
 {
-    func_frame *fr = f_frames(f, a), *top = a->depth ? &fr[a->depth - 1] : NULL;
+    func_frame *fr = f_frames(f, a), *top;
     func_row *rw = f_rows(f, a);
-    uint32_t parent, node, sat = 0, nested = 0;
-    if (top && frame >= top->frame) {
-        /* a callee's frame is always below its caller's: the stack was left by a nonlocal exit */
-        reset(f, a);
-        top = NULL;
+    uint32_t parent, node, sat = 0, nested = 0, keep;
+    if (a->suppressed) {
+        if (frame <= a->sup_frame) {          /* deeper inside the refused region */
+            if (a->suppressed != UINT32_MAX)
+                a->suppressed++;
+            else
+                a->iflags |= FF_SAT;
+            refuse_depth(f, a);
+            return;
+        }
+        abandon(f, a, a->depth);              /* the refused region was left; the retained stack is checked below */
     }
-    if (a->suppressed || a->depth == f->cfg.stack_depth) {
-        if (a->suppressed != UINT32_MAX)
-            a->suppressed++;
-        f_count(a, FC_DEPTH);
-        a->iflags |= FF_DEPTH;
-        f_touch(f, a, top->node);
-        rw[top->node].flags |= FR_SELF_UNTIMED;
+    if (a->depth && frame > fr[a->depth - 1].frame) {
+        keep = a->depth;
+        while (keep && fr[keep - 1].frame < frame)
+            keep--;                           /* entries strictly deeper than the new frame were abandoned */
+        abandon(f, a, keep);
+    }
+    if (a->depth == f->cfg.stack_depth) {
+        a->suppressed = 1;
+        a->sup_frame = frame;
+        a->sup_fn = fn;
+        refuse_depth(f, a);
         return;
     }
+    top = a->depth ? &fr[a->depth - 1] : NULL;
     if (top) {
         parent = top->node;
     } else {
@@ -101,29 +138,13 @@ static NOI void enter(func_capture *f, func_actor *a, uint64_t fn, uint64_t fram
     fr->nested = nested;
 }
 
-static NOI void leave(func_capture *f, func_actor *a, uint64_t fn, uint64_t frame, uint64_t now)
+/* The top activation exits: charge it from its cursor, and its elapsed time to its parent's children. */
+static NOI void pop_charge(func_capture *f, func_actor *a, uint64_t now)
 {
-    func_frame *fr = f_frames(f, a), *top;
+    func_frame *fr = f_frames(f, a), *top = &fr[a->depth - 1];
     func_row *r;
     uint64_t el = 0;
     uint32_t sat = 0;
-    if (a->suppressed) {
-        /* refused levels are deeper than the top retained activation: never pop a retained frame for them */
-        if (frame >= fr[a->depth - 1].frame)
-            reset(f, a);
-        else
-            a->suppressed--;
-        return;
-    }
-    if (!a->depth) {
-        f_count(a, FC_ORPHAN);
-        return;
-    }
-    top = &fr[a->depth - 1];
-    if (top->fn != fn || frame > top->frame) {
-        reset(f, a); /* nonlocal exit or mismatch: invalidate, never guess */
-        return;
-    }
     a->depth--;
     if (top->nested)
         return;
@@ -143,6 +164,39 @@ static NOI void leave(func_capture *f, func_actor *a, uint64_t fn, uint64_t fram
         if (sat)
             a->iflags |= FF_SAT;
     }
+}
+
+static NOI void leave(func_capture *f, func_actor *a, uint64_t fn, uint64_t frame, uint64_t now)
+{
+    func_frame *fr = f_frames(f, a);
+    uint32_t j;
+    if (a->suppressed) {
+        /* refused levels are at or below the first refused frame; the last one must be the first refused function.
+         * Anything else left the refused region: drop it and match against the retained stack. */
+        if (frame <= a->sup_frame && (a->suppressed > 1 || fn == a->sup_fn)) {
+            a->suppressed--;
+            return;
+        }
+        abandon(f, a, a->depth);
+    }
+    if (!a->depth) {
+        f_count(a, FC_ORPHAN);
+        return;
+    }
+    /* the top: same function, and not above its frame (dynamic stack allocation may lower the PPU frame) */
+    if (fr[a->depth - 1].fn == fn && frame <= fr[a->depth - 1].frame) {
+        pop_charge(f, a, now);
+        return;
+    }
+    /* a nonlocal exit to an outer activation: the nearest retained entry with this (function, frame) */
+    for (j = a->depth - 1; j-- > 0;) {
+        if (fr[j].fn == fn && fr[j].frame == frame) {
+            abandon(f, a, j + 1);
+            pop_charge(f, a, now);
+            return;
+        }
+    }
+    abandon(f, a, 0); /* no retained activation matches: invalidate, never guess */
 }
 
 /* A new cut request: publish a cut at this hook's tick unless the previous buffer is still unacknowledged. */
@@ -188,7 +242,7 @@ static NOI void hook(uint64_t fn, uint64_t frame, int is_enter)
     t->func_busy = 1;
     if (!t->slot1) {
         if (is_enter && p_func_auto_register(p) != 0)
-            __atomic_fetch_add(&f->unregistered, 1, __ATOMIC_RELAXED);
+            p_func_count(f, &f->unregistered);
         if (!t->slot1)
             goto out;
     }
@@ -199,13 +253,13 @@ static NOI void hook(uint64_t fn, uint64_t frame, int is_enter)
     a = p_func_actor(f, t->slot1 - 1);
     if (!a || !a->live || a->incarnation != t->incarnation) {
         if (is_enter)
-            __atomic_fetch_add(&f->no_actor, 1, __ATOMIC_RELAXED);
+            p_func_count(f, &f->no_actor);
         goto out;
     }
     now = p_tb();
     maybe_cut(f, a, now);
     if (t->func_reentry) {
-        uint32_t sat = 0;
+        uint32_t sat = t->func_reentry == UINT32_MAX; /* the per-thread tally itself saturated */
         f_add(&a->cnt[FC_REENTRY], t->func_reentry, &sat);
         if (sat)
             a->iflags |= FF_SAT;

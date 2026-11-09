@@ -101,12 +101,15 @@ assert r.returncode == 0, r.stderr.decode()
 for obj in libobjs:
     r = run('nm-' + obj.stem, ['nm', '-u', obj])
     assert r.returncode == 0 and b'__cyg_profile_func' not in r.stdout, obj
+    # the hooks stay external to the application's LTO unit: no library object carries LTO sections
+    r = run('sections-' + obj.stem, ['readelf', '-SW', obj])
+    assert r.returncode == 0 and b'.gnu.lto_' not in r.stdout, obj
 
 FLAG_NAMES = dict(DATA=1, LAGGING=2, FINAL=4, INCOMPLETE=8, RESET=16, UNKNOWN=32, DEPTH=64, LOST=128, SAT=256,
                   OPEN=512, CLOCK=1024)
 F = type('F', (), FLAG_NAMES)
 ROOT, UNKNOWN, LOSTP = 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFFD
-CNT = ['depth_limit', 'lost', 'unbalanced', 'orphan', 'deferred', 'reentry', 'clock']
+CNT = ['depth_limit', 'lost', 'unbalanced', 'orphan', 'deferred', 'reentry', 'clock', 'abandoned']
 
 
 def decode(path):
@@ -148,7 +151,7 @@ def decode(path):
             h = struct.unpack_from('<HHIQQQQQIIII', body, 0)
             schema, fl, inc_, interval, ans, req, start, cut, nd, nr, opn, sup = h
             cnt = struct.unpack_from('<8Q', body, 64)
-            assert schema == 1 and cnt[7] == 0 and fl < 2048 and len(body) == 128 + 16 * nd + 40 * nr, h
+            assert schema == 1 and fl < 2048 and len(body) == 128 + 16 * nd + 40 * nr, h
             defs, rows, q = [], [], 128
             for _ in range(nd):
                 defs.append(struct.unpack_from('<IIQ', body, q)); q += 16
@@ -252,7 +255,8 @@ def case(name, fn):
     print(name, 'PASS', flush=True)
 
 
-TREE = {('tree_a',): (2, 252, 240), ('tree_a', 'tree_b'): (4, 40, 0), ('tree_a', 'tree_c'): (2, 200, 0),
+TREE = {('tree_a',): (2, 252, 240), ('tree_a', 'tree_b'): (4, 40, 40), ('tree_a', 'tree_b', 'tb_inl'): (4, 40, 0),
+        ('tree_a', 'tree_c'): (2, 200, 0),
         ('rec',): (1, 3, 2), ('rec', 'rec'): (1, 2, 1), ('rec', 'rec', 'rec'): (1, 1, 0)}
 
 
@@ -260,6 +264,8 @@ def t_tree():
     c1, s1, _ = go('tree1')
     m1 = inc_named(c1, 'main')[0]
     assert totals(c1, s1, m1) == TREE, totals(c1, s1, m1)
+    # the always_inline leaf shares tree_b's physical frame: valid nesting, never a stack loss
+    assert all(c1['per'][m1]['cnt'][k] == 0 for k in ('unbalanced', 'orphan', 'abandoned')), c1['per'][m1]['cnt']
     c3, s3, _ = go('tree3')
     m3 = inc_named(c3, 'main')[0]
     assert totals(c3, s3, m3) == TREE, totals(c3, s3, m3)
@@ -283,14 +289,22 @@ def t_depth():
         p = ('deep',) * k
         assert tot[p] == (1, 13 - k, 12 - k if k < 8 else 0), (p, tot[p])
     assert ('deep',) * 9 not in tot
-    assert st['cnt']['depth_limit'] == 8 and st['cnt']['unbalanced'] == 1 and st['cnt']['orphan'] == 0, st['cnt']
+    # deep: 4 refused; deep_jump: 4 refused; deep_inl: the level-8 inline leaf, levels 9-12 and their 4 leaves
+    assert st['cnt']['depth_limit'] == 17 and st['cnt']['orphan'] == 0, st['cnt']
+    # the jump from the refused region to level 1: refused levels dropped (1 event, 4), then levels 2-8 (1 event, 7)
+    assert st['cnt']['unbalanced'] == 2 and st['cnt']['abandoned'] == 11, st['cnt']
     fin = st['chunks'][-1]
     assert fin['flags'] & F.DEPTH and fin['flags'] & F.RESET and fin['flags'] & F.FINAL
     rows = interval_rows(c, s, fin, m)
     assert rows[('deep',) * 8]['flags'] & 2, 'SELF_UNTIMED on the deepest retained level'
-    for k in range(1, 9):
+    r = rows[('deep_jump',)]
+    assert (r['calls'], r['incl'], r['child']) == (1, 12, 0) and r['flags'] & 2, r   # charged, untimed children
+    for k in range(2, 9):
         r = rows[('deep_jump',) * k]
         assert r['flags'] & 16 and r['calls'] == 1 and r['incl'] == 0, r   # TRUNCATED, never guessed
+    for k in range(1, 9):
+        assert tot[('deep_inl',) * k] == (1, 13 - k, 12 - k if k < 8 else 0), (k, tot[('deep_inl',) * k])
+        assert tot.get(('deep_inl',) * k + ('di_leaf',)) == ((1, 0, 0) if k < 8 else None), k
 
 
 def t_overflow():
@@ -308,14 +322,50 @@ def t_longjmp():
     c, s, _ = go('longjmp')
     m = inc_named(c, 'main')[0]
     st, tot = c['per'][m], totals(c, s, m)
-    assert st['cnt']['unbalanced'] == 2 and st['cnt']['orphan'] == 1, st['cnt']
-    assert tot[('?', 'lj_after')] == (1, 4, 0) and tot[('?', 'post_reset')] == (1, 2, 0), tot
-    for p in [('lj_outer',), ('lj_outer', 'lj_mid'), ('lj_outer', 'lj_mid', 'lj_deep'), ('?', 'ra'), ('?', 'ra', 'ra'),
-              ('?', 'ra', 'ra', 'ra')]:
-        assert tot[p] == (1, 0, 0), (p, tot.get(p))
+    # lj_after is called from the landing frame at the physical frame lj_mid had: the documented equal-frame limit
+    # attributes it under lj_mid (kept), while lj_deep (strictly deeper) is abandoned.  lj_outer's exit then finds
+    # its own (fn, frame) below lj_mid, abandons lj_mid and is charged; ra(3)'s exit finds ra(3) below ra(2), ra(1).
+    assert st['cnt']['unbalanced'] == 3 and st['cnt']['abandoned'] == 4 and st['cnt']['orphan'] == 0, st['cnt']
+    assert tot == {('lj_outer',): (1, 7, 0), ('lj_outer', 'lj_mid'): (1, 0, 0),
+                   ('lj_outer', 'lj_mid', 'lj_deep'): (1, 0, 0), ('lj_outer', 'lj_mid', 'lj_after'): (1, 4, 0),
+                   ('ra',): (1, 3, 0), ('ra', 'ra'): (1, 0, 0), ('ra', 'ra', 'ra'): (1, 0, 0),
+                   ('post_reset',): (1, 2, 0)}, tot
     fin = st['chunks'][-1]
-    assert fin['flags'] & F.RESET and fin['flags'] & F.UNKNOWN
-    assert all(r['flags'] & 16 for p, r in interval_rows(c, s, fin, m).items() if p[-1] in ('lj_outer', 'lj_mid', 'lj_deep', 'ra'))
+    assert fin['flags'] & F.RESET and not fin['flags'] & F.UNKNOWN
+    rows = interval_rows(c, s, fin, m)
+    for p in [('lj_outer', 'lj_mid'), ('lj_outer', 'lj_mid', 'lj_deep'), ('ra', 'ra'), ('ra', 'ra', 'ra')]:
+        assert rows[p]['flags'] & 16, p
+    assert rows[('lj_outer',)]['flags'] & 2 and rows[('ra',)]['flags'] & 2, 'charged parents have untimed children'
+
+
+def t_reset():
+    c, s, _ = go('reset')
+    m = inc_named(c, 'main')[0]
+    st, tot = c['per'][m], totals(c, s, m)
+    assert tot == {('k1',): (1, 0, 0), ('?', 'post_reset'): (1, 2, 0)}, tot
+    assert st['cnt']['unbalanced'] == 1 and st['cnt']['abandoned'] == 1 and st['cnt']['orphan'] == 0, st['cnt']
+    assert st['chunks'][-1]['flags'] & F.UNKNOWN
+
+
+def t_inline():
+    c, s, _ = go('inline')
+    m = inc_named(c, 'main')[0]
+    st, tot = c['per'][m], totals(c, s, m)
+    assert tot == {('inl_nest',): (1, 5, 5), ('inl_nest', 'in_outer'): (1, 5, 3),
+                   ('inl_nest', 'in_outer', 'in_inner'): (1, 3, 0), ('inl_mix',): (1, 10, 10),
+                   ('inl_mix', 'im_a'): (1, 1, 0), ('inl_mix', 'real_leaf'): (1, 4, 0),
+                   ('inl_mix', 'im_b'): (1, 5, 4), ('inl_mix', 'im_b', 'real_leaf'): (1, 4, 0)}, tot
+    assert all(st['cnt'][k] == 0 for k in ('unbalanced', 'orphan', 'abandoned', 'depth_limit')), st['cnt']
+
+
+def t_sat():
+    c, s, _ = go('sat')
+    st = c['status']
+    got = [(x['unreg'], x['noactor'], x['flags']) for x in st]
+    assert got == [(2, 1, 2), (0, 0, 2), (0, 0, 2), (0, 0, 3)], got   # saturation stays visible on every status
+    m = inc_named(c, 'main')[0]
+    ch = [t for t in c['per'][m]['chunks'] if t['cnt']['reentry']]
+    assert len(ch) == 1 and ch[0]['cnt']['reentry'] == 2 ** 64 - 1 and ch[0]['flags'] & F.SAT, ch
 
 
 def t_span():
@@ -419,8 +469,8 @@ if a.mutant:
     print('mutant %s detected=%s rc=%d' % (a.mutant, hit, r.returncode), flush=True)
     raise SystemExit(0 if hit else 1)
 for name, fn in [('tree', t_tree), ('depth', t_depth), ('overflow', t_overflow), ('longjmp', t_longjmp),
-                 ('span', t_span), ('reentry', t_reentry), ('reg', t_reg), ('unreg', t_unreg),
+                 ('reset', t_reset), ('inline', t_inline), ('sat', t_sat), ('span', t_span), ('reentry', t_reentry), ('reg', t_reg), ('unreg', t_unreg),
                  ('threads', t_threads), ('stop', t_stop), ('race', t_race), ('cost', t_cost)]:
     case(name, fn)
-print('cases=%d passed=%d sanitize=%s ext=%s' % (12, len(results), a.sanitize, a.ext), flush=True)
-raise SystemExit(0 if len(results) == 12 else 1)
+print('cases=%d passed=%d sanitize=%s ext=%s' % (15, len(results), a.sanitize, a.ext), flush=True)
+raise SystemExit(0 if len(results) == 15 else 1)

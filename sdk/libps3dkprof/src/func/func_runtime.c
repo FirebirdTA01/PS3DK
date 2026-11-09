@@ -10,6 +10,40 @@ void (*ps3dk_prof__func_test_hook)(unsigned point);
 
 static uint64_t al8(uint64_t n) { return (n + 7u) & ~(uint64_t)7u; }
 
+/* Bounded: at most four compare-and-swap attempts.  At the ceiling, or when contention exhausts the attempts, the
+ * count stops being exact; the sticky status_sat makes every later FUNC_STATUS say so (a lower bound). */
+void p_func_count(func_capture *f, uint64_t *c)
+{
+    uint64_t v = LD_RLX(c);
+    for (unsigned i = 0; i < 4; i++) {
+        if (v == UINT64_MAX)
+            break;
+        if (__atomic_compare_exchange_n(c, &v, v + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+            if (v + 1 != UINT64_MAX)
+                return;
+            break;
+        }
+    }
+    ST_RLX(&f->status_sat, 1u);
+}
+
+#ifdef PS3DK_PROF_TEST_HOOKS
+void ps3dk_prof__func_test_seed(uint64_t unregistered, uint64_t no_actor)
+{
+    func_capture *f = g_prof->func;
+    ST_RLX(&f->unregistered, unregistered);
+    ST_RLX(&f->no_actor, no_actor);
+    f->rep_unreg = unregistered;
+    f->rep_noactor = no_actor;
+}
+void ps3dk_prof__func_test_seed_counter(unsigned k, uint64_t v)
+{
+    func_actor *a = p_func_actor(g_prof->func, g_tls.slot1 - 1);
+    if (a && k < FC_N)
+        a->cnt[k] = v;
+}
+#endif
+
 /* Resolve defaults and compute the whole layout with overflow checks; 0 or EINVAL. */
 int p_func_layout(ps3dk_prof_func_config *c, uint32_t nslots, func_capture *o)
 {
@@ -131,7 +165,7 @@ void p_func_stamp_final(prof *p)
     if (!a || !a->live || a->incarnation != g_tls.incarnation)
         return;
     if (g_tls.func_reentry) {
-        uint32_t sat = 0;
+        uint32_t sat = g_tls.func_reentry == UINT32_MAX;
         f_add(&a->cnt[FC_REENTRY], g_tls.func_reentry, &sat);
         if (sat)
             a->iflags |= FF_SAT;
@@ -316,7 +350,7 @@ static void emit_status(prof *p, uint64_t req, uint16_t flags)
     uint64_t u = LD_RLX(&f->unregistered), n = LD_RLX(&f->no_actor);
     memset(b, 0, 32);
     p_le16(b, 1);
-    p_le16(b + 2, (uint16_t)(flags | (u == UINT64_MAX || n == UINT64_MAX ? 2u : 0u)));
+    p_le16(b + 2, (uint16_t)(flags | (LD_RLX(&f->status_sat) ? 2u : 0u))); /* sticky: lower bounds from then on */
     p_le64(b + 8, req);
     p_le64(b + 16, u - f->rep_unreg);
     p_le64(b + 24, n - f->rep_noactor);
@@ -359,8 +393,16 @@ void p_func_drain(prof *p, const snap *s, uint32_t n)
     }
     if (p->snk.failed)
         return;
-    ST_REL(&f->epoch, req + 1); /* the next cut request */
-    emit_status(p, req + 1, 0);
+    /* The next cut request.  Exhaustion rule: the epoch never passes UINT64_MAX - 1; from then on no further cut is
+     * requested (owners keep accumulating into their FINAL) and FUNC_STATUS carries SATURATED.  An interval number
+     * is at most the number of answered epochs plus the FINAL, so it cannot pass the epoch bound. */
+    if (req < UINT64_MAX - 1) {
+        ST_REL(&f->epoch, req + 1);
+        req++;
+    } else {
+        ST_RLX(&f->status_sat, 1u);
+    }
+    emit_status(p, req, 0);
 }
 
 /* Sealing, after the frontier's records: FINAL for every acknowledged incarnation, INCOMPLETE_TAIL otherwise. */

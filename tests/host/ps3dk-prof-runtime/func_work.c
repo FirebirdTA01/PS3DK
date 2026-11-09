@@ -9,13 +9,19 @@
 void advance(uint64_t n);
 void work_note(int what);
 
-W void tree_b(void) { advance(10); }
+#define I static inline __attribute__((always_inline))
+/* the review's counterexample: tree_b's work inside an instrumented always_inline leaf (same physical frame) */
+I void tb_inl(void) { advance(10); }
+W void tree_b(void) { tb_inl(); }
 W void tree_c(void) { advance(100); }
 W void tree_a(void) { advance(1); tree_b(); advance(2); tree_b(); tree_c(); advance(3); }
 W void rec(int n) { advance(1); if (n > 1) rec(n - 1); }
 
 /* depth: stack_depth 8 and 12 levels; each level costs 1 tick before descending */
 W void deep(int n) { advance(1); if (n > 1) deep(n - 1); }
+/* depth refusal through inline expansions: an inline leaf at every level, sharing that level's frame */
+I void di_leaf(void) { }
+W void deep_inl(int n) { advance(1); di_leaf(); if (n > 1) deep_inl(n - 1); }
 static jmp_buf deep_jb;
 W void deep_jump(int n, int top)
 {
@@ -88,6 +94,41 @@ W void v_fn(void) { }
 W void re_fn(void) { advance(1); }
 W void reg_inner(void) { advance(6); }
 W void reg_boot(void) { work_note(1); reg_inner(); advance(1); }
+
+/* inline nesting and inline beside real calls at the same frame */
+I void in_inner(void) { advance(3); }
+I void in_outer(void) { advance(2); in_inner(); }
+W void inl_nest(void) { in_outer(); }
+W void real_leaf(void) { advance(4); }
+I void im_a(void) { advance(1); }
+I void im_b(void) { advance(1); real_leaf(); }
+W void inl_mix(void) { im_a(); real_leaf(); im_b(); }
+
+/* a nonlocal exit to a frame entered before registration: no retained activation matches, the stack resets */
+void work_note(int what);
+static jmp_buf k_jb;
+W void k1(void) { advance(1); longjmp(k_jb, 1); }
+W void boot3(void)
+{
+    if (!setjmp(k_jb)) {
+        work_note(1);
+        k1();
+    }
+    advance(1);
+}
+
+/* addresses of the inline functions for the symbol map (taken before init, so their hooks are not observed) */
+W void *inline_addr(int k)
+{
+    switch (k) {
+    case 0: return (void *)tb_inl;
+    case 1: return (void *)di_leaf;
+    case 2: return (void *)in_inner;
+    case 3: return (void *)in_outer;
+    case 4: return (void *)im_a;
+    default: return (void *)im_b;
+    }
+}
 
 /* the race and the cost probes */
 W void rq(void) { }

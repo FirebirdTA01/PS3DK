@@ -21,6 +21,8 @@ void reg_boot(void); void rp(void); void leaf(void);
 void tree_b(void); void tree_c(void); void ov_f1(void); void ov_f2(void); void ov_f3(void); void ov_f4(void);
 void ov_f5(void); void ov_g(void); void lj_mid(void); void lj_deep(void); void lj_after(void); void sp_inner(void);
 void sp_leaf(void); void r_leaf(void); void reg_inner(void); void rq(void);
+void deep_inl(int); void inl_nest(void); void inl_mix(void); void real_leaf(void); void k1(void); void boot3(void);
+void *inline_addr(int);
 
 static uint64_t g_now = 1000;
 static int real_clock;
@@ -272,6 +274,35 @@ static void reentry_hook(unsigned point)
     if (point == 1)
         re_fn();                      /* an instrumented call from inside a hook */
 }
+static void reentry_sat_hook(unsigned point)
+{
+    if (point == 1) {
+        ps3dk_prof__func_test_seed_counter(FC_REENTRY, UINT64_MAX - 1); /* after the cut zeroed the interval */
+        re_fn();
+        re_fn();                      /* 4 refused hook calls onto UINT64_MAX - 1: saturates, never wraps */
+    }
+}
+static int run_sat(const char *path)
+{
+    pthread_t t;
+    start(1, 64, 16, 0, 0);
+    ps3dk_prof__func_test_seed(UINT64_MAX - 2, UINT64_MAX - 1);
+    CHECK(ps3dk_prof_thread_begin("main") == 0);
+    CHECK(pthread_create(&t, NULL, unreg_worker, NULL) == 0);   /* 5 entries: +2 to the ceiling */
+    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(pthread_create(&t, NULL, noactor_worker, NULL) == 0); /* 3 entries: +1 to the ceiling */
+    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(ps3dk_prof_drain() == 0);
+    CHECK(pthread_create(&t, NULL, unreg_worker, NULL) == 0);   /* saturated: the deltas stay 0, flagged */
+    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(ps3dk_prof_drain() == 0);
+    ps3dk_prof__func_test_hook = reentry_sat_hook;
+    leaf();
+    ps3dk_prof__func_test_hook = NULL;
+    leaf();
+    CHECK(ps3dk_prof_drain() == 0);
+    return finish(path, PS3DK_PROF_OK);
+}
 
 /* ---- race: a running owner, a concurrent drainer ---------------------------------------------------------------- */
 #define RACE_N 200000
@@ -344,7 +375,12 @@ int main(int argc, char **argv)
     SYM(ov_f2); SYM(ov_f3); SYM(ov_f4); SYM(ov_f5); SYM(ov_g); SYM(lj_outer); SYM(lj_mid); SYM(lj_deep);
     SYM(lj_after); SYM(ra); SYM(post_reset); SYM(sp_outer); SYM(sp_inner); SYM(sp_leaf); SYM(w1); SYM(r_outer);
     SYM(r_leaf); SYM(s_spin); SYM(u_fn); SYM(v_fn); SYM(re_fn); SYM(reg_boot); SYM(reg_inner); SYM(rp); SYM(rq);
-    SYM(leaf);
+    SYM(leaf); SYM(deep_inl); SYM(inl_nest); SYM(inl_mix); SYM(real_leaf); SYM(k1); SYM(boot3);
+    {
+        static const char *const inl[] = {"tb_inl", "di_leaf", "in_inner", "in_outer", "im_a", "im_b"};
+        for (int k = 0; k < 6; k++)
+            printf("sym %s %llu\n", inl[k], (unsigned long long)(uintptr_t)inline_addr(k));
+    }
     fflush(stdout);
     if (!strcmp(mode, "threads"))
         return run_threads(argv[2]);
@@ -358,6 +394,13 @@ int main(int argc, char **argv)
         return run_race(argv[2]);
     if (!strcmp(mode, "cost"))
         return run_cost(argv[2]);
+    if (!strcmp(mode, "sat"))
+        return run_sat(argv[2]);
+    if (!strcmp(mode, "reset")) {
+        boot3();                      /* entered before init; k1's longjmp lands in it; its exit matches nothing */
+        post_reset();
+        return finish(argv[2], PS3DK_PROF_OK);
+    }
     if (!strcmp(mode, "reg")) {
         reg_boot();                   /* entered before init; registers inside; its exit is an orphan */
         return finish(argv[2], PS3DK_PROF_OK);
@@ -378,8 +421,12 @@ int main(int argc, char **argv)
     } else if (!strcmp(mode, "depth")) {
         deep(12);
         deep_jump(12, 12);
+        deep_inl(12);
     } else if (!strcmp(mode, "overflow")) {
         ov_root();
+    } else if (!strcmp(mode, "inline")) {
+        inl_nest();
+        inl_mix();
     } else if (!strcmp(mode, "longjmp")) {
         lj_outer();
         ra(3);

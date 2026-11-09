@@ -25,7 +25,7 @@
 #define F_DEF_DEPTH      256u
 #define F_DEF_BYTES      8388608u
 enum { C_FUNC_CONFIG = 28, C_FUNC_TREE = 29, C_FUNC_STATUS = 30 };
-enum { FC_DEPTH, FC_LOST, FC_UNBAL, FC_ORPHAN, FC_DEFER, FC_REENTRY, FC_CLOCK, FC_N };
+enum { FC_DEPTH, FC_LOST, FC_UNBAL, FC_ORPHAN, FC_DEFER, FC_REENTRY, FC_CLOCK, FC_ABANDON, FC_N };
 enum { FF_DATA = 1, FF_LAGGING = 2, FF_FINAL = 4, FF_INCOMPLETE = 8, FF_RESET = 16, FF_UNKNOWN = 32, FF_DEPTH = 64,
        FF_LOST = 128, FF_SAT = 256, FF_OPEN = 512, FF_CLOCK = 1024 };
 enum { FR_OPEN = 1, FR_SELF_UNTIMED = 2, FR_LOST = 4, FR_SAT = 8, FR_TRUNC = 16, FR_DIRTY = 0x8000u };
@@ -43,6 +43,7 @@ typedef struct func_actor {
     uint32_t live, incarnation;        /* set at enrolment, under thread_mutex */
     uint64_t enroll_epoch, last_pub, deferred_epoch, start, interval, final_tick, pub_len;
     uint32_t depth, suppressed, nodes, defined, ndirty, iflags, unknown, final_set;
+    uint64_t sup_frame, sup_fn;        /* the first refused level's frame and function, while suppressed > 0 */
     uint64_t cnt[FC_N];
     uint64_t d_acked;                  /* drainer-private */
     uint32_t d_done, d_pad;
@@ -54,7 +55,8 @@ typedef struct func_capture {
     uint64_t allocated, stride;
     uint64_t off_frames, off_nodes, off_rows, off_hash, off_dirty, off_buf;
     uint64_t epoch;                    /* atomic: drainer RELEASE, owners load */
-    uint64_t unregistered, no_actor;   /* atomic counters, relaxed */
+    uint64_t unregistered, no_actor;   /* atomic saturating counters, relaxed */
+    uint32_t status_sat, pad2;         /* atomic, sticky: a capture counter saturated or is a lower bound */
     uint64_t rep_unreg, rep_noactor;   /* drainer-private: already reported */
 } func_capture;
 
@@ -70,6 +72,7 @@ typedef struct func_capture {
 #define p_func_cut ps3dk_prof__func_cut
 #define p_func_options ps3dk_prof__func_options
 #define p_func_layout ps3dk_prof__func_layout
+#define p_func_count ps3dk_prof__func_count
 extern ps3dk_prof_func_config p_func_options;
 int p_func_layout(ps3dk_prof_func_config *c, uint32_t nslots, func_capture *out);
 int p_func_init(prof *p);
@@ -82,6 +85,7 @@ int p_func_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len
 int p_func_auto_register(prof *p);
 func_actor *p_func_actor(func_capture *f, uint32_t slot);
 void p_func_cut(func_capture *f, func_actor *a, uint64_t tick, uint64_t epoch, uint16_t flags);
+void p_func_count(func_capture *f, uint64_t *counter); /* a saturating capture-counter increment */
 
 static inline func_frame *f_frames(func_capture *f, func_actor *a) { return (func_frame *)(void *)((uint8_t *)a + f->off_frames); }
 static inline func_node *f_nodes(func_capture *f, func_actor *a) { return (func_node *)(void *)((uint8_t *)a + f->off_nodes); }
@@ -118,5 +122,7 @@ static inline __attribute__((no_instrument_function)) void f_touch(func_capture 
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 extern void (*ps3dk_prof__func_test_hook)(unsigned point); /* 1: a cut is complete, before its publication */
+void ps3dk_prof__func_test_seed(uint64_t unregistered, uint64_t no_actor); /* counters and their reported values */
+void ps3dk_prof__func_test_seed_counter(unsigned k, uint64_t v);         /* the calling thread's interval counter */
 #endif
 #endif

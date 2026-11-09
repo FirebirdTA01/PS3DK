@@ -160,46 +160,68 @@ elapsed time stays inside the activation that was running when it happened.
 ## Stack loss (conservative coverage)
 
 The shadow stack holds `stack_depth` retained activations, each with its function,
-node, cursor, child time and the activation's stack frame address (the caller's
-back-chain frame on the PPU). Recursion into the hooks themselves (a hook
-reached while a hook of the same thread runs) is refused and counted in
-`reentry`.
+node, cursor, child time and the activation's physical stack frame address (the
+instrumented function's back-chain frame on the PPU, its frame pointer on the
+host). Frames grow downward. Recursion into the hooks themselves (a hook reached
+while a hook of the same thread runs) is refused and counted in `reentry`.
 
-- Depth refusal: an entry with a full stack is not retained. The number of
-  refused nested activations is kept; while it is nonzero, an exit whose frame
-  is deeper than the top retained activation consumes one refused level, so an
-  exit from a refused recursive call can never pop a retained frame of the same
-  function. Refused entries are counted in `depth_limit` and the top retained row
-  gets SELF_UNTIMED: its self time includes untimed children. An exit at or
-  above the top retained frame while refused levels are outstanding is a stack
-  loss (below).
-- Matching: an exit matches the top retained activation only if the function is
-  equal AND the exit's frame address is not above the activation's frame.
-  Function equality alone cannot detect a nonlocal exit to an outer activation of
-  the same recursive function; the frame check does. An entry whose frame is not
-  below the top retained activation's frame (a call made from a frame the stack
-  was already left by) is a stack loss as well, detected before the entry is
-  attributed to a stale parent.
-- Sibling calls: the frame check needs the exit hook to be called from the
-  activation's own frame. GCC 16 on the PPU calls the external hook with `bl` +
-  `nop` (no sibling call; the TOC must be restored). Where the hook can be
-  tail-called (x86-64 host builds, or an LTO build that makes the hook local),
-  the instrumented code is built with `-fno-optimize-sibling-calls`; otherwise
-  every such exit is reported as a stack loss, visibly, never silently.
-- Stack loss: any other exit (a longjmp, an exception unwinding through code
-  without exit hooks, a mismatched frame) resets the actor's stack. All retained
-  activations are dropped without charging anything after their cursors, their
-  rows get TRUNCATED, `unbalanced` counts one reset, and the interval gets
-  STACK_RESET. Nonlocal exits are not recovered by searching for a matching
-  address. Later root-level entries of that incarnation use UNKNOWN_CALLER as
-  parent and set STACK_UNKNOWN in their interval. Earlier cuts stand.
-- An exit with an empty stack (a function entered before registration or before
-  a reset, including the thread's own entry function) is counted in `orphan` and
-  ignored. Entries before initialization are not observed; exits after the
-  incarnation's retirement or stop acknowledgement are ignored.
-- Dynamic stack allocation (alloca, VLAs) lowers the PPU frame address between
-  entry and exit; such exits still match. A nonlocal exit that lands in the same
-  activation depth with a lower frame is not detectable.
+GCC instruments inline expansions too, and an inline expansion runs in its
+container's physical frame. A frame EQUAL to the top activation's frame is
+therefore valid nesting (an inline child), and only a strictly shallower frame
+shows that the stack was left.
+
+- Entry: an entry whose frame is strictly above the top retained activation's
+  frame means the stack was abandoned (longjmp, unwinding without exit hooks).
+  Every retained activation strictly deeper than the new frame is dropped, the
+  rest are kept, and the entry is attributed to the new top.
+- Exit: an exit matches the top retained activation when the function is equal
+  and the exit's frame is not above the activation's frame (dynamic stack
+  allocation may lower the PPU frame of the top activation). Otherwise the
+  nearest retained activation below with the same function AND the same frame is
+  the one exiting: everything above it is dropped and it is charged normally.
+  When no retained activation matches, the whole stack is dropped.
+- Dropping: a dropped activation is charged nothing after its cursor (its row
+  gets TRUNCATED), `unbalanced` counts the event, `abandoned` counts every
+  dropped activation and refused level, and the interval gets STACK_RESET. The
+  surviving top's row gets SELF_UNTIMED (its self time now holds untimed child
+  time). Earlier cuts stand. When the stack is emptied by a drop, later
+  root-level entries of that incarnation use UNKNOWN_CALLER as parent and set
+  STACK_UNKNOWN in their interval.
+- Depth refusal: an entry with a full stack is not retained. The first refused
+  level's frame and function are kept with the number of refused levels. While it
+  is nonzero, an entry at or below that frame is one more refused level and an
+  exit at or below it consumes one (the last one must be the first refused
+  function), so an exit from a refused recursive call, or from an inline leaf
+  refused at the deepest retained level, never pops a retained frame. Anything
+  else left the refused region: its levels are dropped and the event is matched
+  against the retained stack as above. Refused entries are counted in
+  `depth_limit` and the top retained row gets SELF_UNTIMED.
+- An exit with an empty stack (a function entered before registration, including
+  the thread's own entry function) is counted in `orphan` and ignored. Entries
+  before initialization are not observed; exits after the incarnation's
+  retirement or stop acknowledgement are ignored.
+
+Stated limits (not detectable from function and frame alone):
+
+- Re-entry at an equal frame after a nonlocal exit: a function called from the
+  landing frame usually occupies the physical frame of the abandoned activation
+  that was called from there before. It is indistinguishable from an inline
+  child of that activation, so the abandoned activation is kept and the new call
+  is attributed under it until a later exit exposes the loss.
+- A nonlocal exit that lands in the same activation depth with a lower frame, or
+  a dynamically allocating activation that is not the top when it exits, cannot
+  be matched exactly and is treated as a drop.
+
+Hooks and sibling calls: the frame check needs the exit hook to be called from
+the activation's own frame. With the external hook, GCC 16 calls it with `bl` +
+`nop` before the frame is released in both PPU ABIs. A hook visible to LTO is
+tail-called after SP is restored, in both ABIs, which breaks every exit. So the
+hooks stay external: the function-path archives are never built with LTO (the
+build refuses any member carrying `.gnu.lto_` sections) and are never part of the
+application's LTO unit. An instrumented application built with LTO also uses
+`-fno-optimize-sibling-calls`. The x86-64 host test builds its workload with
+`-fno-optimize-sibling-calls` because that compiler tail-calls the external exit
+hook of a void function.
 
 ## FUNC_CONFIG (28)
 
@@ -240,12 +262,12 @@ Header, 128 bytes, then `n_nodes` definitions of 16 bytes, then `n_rows` rows of
 | 60 | u32 | refused depth levels outstanding at the cut |
 | 64 | u64 | depth_limit: entries refused by the stack depth |
 | 72 | u64 | lost: entries charged to the LOST node |
-| 80 | u64 | unbalanced: stack resets |
+| 80 | u64 | unbalanced: stack-loss events |
 | 88 | u64 | orphan: exits with an empty stack |
 | 96 | u64 | deferred: cuts deferred by an unacknowledged buffer |
 | 104 | u64 | reentry: hook calls refused inside a hook |
 | 112 | u64 | clock: clock anomalies |
-| 120 | u64 | reserved = 0 |
+| 120 | u64 | abandoned: activations and refused levels dropped by stack loss |
 
 Counters are per-interval deltas; their sum over an incarnation's chunks is its
 total. Chunk flags: bit 0 DATA (a cut is present), bit 1 LAGGING, bit 2 FINAL,
@@ -273,11 +295,23 @@ follows its RETIRED entry's drain.
 | Offset | Type | Meaning |
 | --- | --- | --- |
 | 0 | u16 | schema = 1 |
-| 2 | u16 | flags: bit 0 FINAL (sealing), bit 1 SATURATED |
+| 2 | u16 | flags: bit 0 FINAL (sealing), bit 1 SATURATED (sticky, below) |
 | 4 | u32 | reserved = 0 |
 | 8 | u64 | requested epoch after this drain (the next cut request) |
 | 16 | u64 | unregistered hook entries since the previous status |
 | 24 | u64 | no_actor hook entries since the previous status |
+
+The capture counters `unregistered` and `no_actor` are saturating: an increment
+is at most four compare-and-swap attempts. At 2^64-1, or when contention exhausts
+the attempts, the counter stops being exact, and from then on EVERY FUNC_STATUS,
+the FINAL one included, sets SATURATED: the deltas are lower bounds. A delta
+never wraps. The per-thread hook-reentry tally saturates at 2^32-1 and sets the
+chunk's SATURATED when it does.
+
+Exhaustion rule: the requested epoch never passes 2^64-2. From then on no further
+cut is requested (owners keep accumulating into their FINAL chunk) and every
+FUNC_STATUS sets SATURATED. An interval number is at most the number of answered
+epochs plus the FINAL, so it cannot pass that bound.
 
 ## Memory bounds and configuration
 

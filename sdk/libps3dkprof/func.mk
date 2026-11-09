@@ -2,6 +2,9 @@
 # -finstrument-functions hooks, compiled with PS3DK_PROF_WITH_FUNC, one archive per data model.  Explicit goals only:
 # no prerequisite of all/shipped/install, and its own object directories, so the shipped archives are unchanged.
 # The library itself is never instrumented (PPU_FLAGS carries -fno-instrument-functions).
+# The hooks must stay external to any LTO unit (a hook visible to LTO is tail-called after the frame is released):
+# every archive recipe refuses a member that carries .gnu.lto_ sections.
+PPU_READELF ?= $(CROSS)readelf
 FUNC_MEMBERS := func_runtime func_hooks
 FUNC_OBJ_NAMES := $(MANUAL) $(FUNC_MEMBERS)
 FUNC_DIR := $(BUILD)/func
@@ -20,6 +23,8 @@ $$(FUNC_DIR)/$(1)/%.o: %.c $$(CONFIG) Makefile func.mk
 	    -include "$$(CONFIG)" -MMD -MP -c "$$<" -o "$$@"
 $$(FUNC_DIR)/$(1)/libps3dkprof_func.a: $$(FUNC_OBJECTS_$(1))
 	@rm -f "$$@"
+	$$(PPU_READELF) -SW $$^ > "$$@.sections"
+	! grep -qF '.gnu.lto_' "$$@.sections"
 	$$(PPU_AR) rcs "$$@" $$^
 FUNC_LIBS += $$(FUNC_DIR)/$(1)/libps3dkprof_func.a
 -include $$(FUNC_OBJECTS_$(1):.o=.d)
@@ -58,6 +63,8 @@ $$(FUNCX_DIR_$(1))/%.o: %.c $$(CONFIG) Makefile func.mk ext-members.mk
 	$$(PPU_CC) $$(FUNCX_FLAGS_$(1)) -include "$$(CONFIG)" -MMD -MP -c "$$<" -o "$$@"
 $$(FUNCX_DIR_$(1))/libps3dkprof_ext_func.a: $$(FUNCX_OBJECTS_$(1)) $$(FUNCX_ID_CONFIG_$(1)) tools/archive_digest.py src/core/prof_identity.h
 	@rm -f "$$@" "$$@.tmp" "$$(FUNCX_DIR_$(1))/members.a" "$$(FUNCX_DIR_$(1))/prof_identity.c" "$$(FUNCX_DIR_$(1))/prof_identity.o"
+	$$(PPU_READELF) -SW $$(FUNCX_OBJECTS_$(1)) > "$$@.sections"
+	! grep -qF '.gnu.lto_' "$$@.sections"
 	$$(PPU_AR) rcsD "$$(FUNCX_DIR_$(1))/members.a" $$(FUNCX_OBJECTS_$(1))
 	python3 tools/archive_digest.py emit "$$(FUNCX_DIR_$(1))/members.a" --id "$$(PROF_PROFILE_ID)" \
 	    --premises "$$(PROF_PREMISES)" --kinds "$$(PROF_KINDS)" > "$$(FUNCX_DIR_$(1))/prof_identity.c"
