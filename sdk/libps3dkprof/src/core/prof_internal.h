@@ -233,6 +233,9 @@ typedef struct prof {
     uint32_t prefix_crc32;
 #endif
     uint8_t *block;
+#ifdef PS3DK_PROF_WITH_WAITS
+    struct wait_capture *waits;
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
     /* The SPU lane extension (P3.2 slice I1, host builds only): all of it lives in the one init block. */
     uint8_t ext_flags;          /* file_flags byte 12: 1 when SPU lanes are enabled, else 0 (| 2: a PROFILE build;
@@ -274,6 +277,9 @@ typedef struct tls_state {
     uint32_t generation, incarnation;
     uint8_t acked, retired, in_drain, in_gpu; /* in_gpu: inside a GPU domain API call (reentry is EBUSY) */
     uint32_t depth;
+#ifdef PS3DK_PROF_WITH_WAITS
+    uint32_t wait_busy;
+#endif
     uint64_t refused_top;
     struct {
         uint64_t span_id;

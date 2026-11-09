@@ -115,6 +115,7 @@ const MAJOR_LE: [u8; 2] = [1, 0];
 /// Per-file reader state.
 struct Reader {
     cap: Capture,
+    waits: Option<crate::waits::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -124,6 +125,8 @@ struct Reader {
     trailer_seen: bool,
     /// file_flags bit 0: the domain extensions (chunk types 8..16).
     ext: Option<crate::ext::ExtReader>,
+    checkpoints: Option<crate::checkpoints::Reader>,
+    source_checkpoints: Option<crate::source_checkpoints::Reader>,
 }
 
 /// The STRUCTURAL pass: sections 1-6.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
@@ -131,13 +134,51 @@ struct Reader {
 /// A successful `read` is NOT a full validity verdict: token rule 4 (section 9) needs the whole file and is applied
 /// by [`crate::analysis::analyze`].  Use [`crate::analysis::load`] for the verdict of a file.
 pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
+    read_with_checkpoints(bytes, crate::checkpoints::Budgets::default())
+}
+
+/// Structural reading with an explicit policy budget for opt-in checkpoint
+/// inventory. Budgets do not change files without the capability.
+pub fn read_with_checkpoints(bytes: &[u8], budgets: crate::checkpoints::Budgets) -> Result<Capture, Malformed> {
+    read_with_evidence(bytes, budgets, crate::dependencies::DependencyBudgets::default())
+}
+
+/// Independent PC-side limits for membership and accepted dependency evidence.
+pub fn read_with_evidence(bytes: &[u8], budgets: crate::checkpoints::Budgets,
+    dependencies: crate::dependencies::DependencyBudgets) -> Result<Capture, Malformed> {
+    read_with_source_evidence(bytes, budgets, dependencies, crate::source_checkpoints::Budgets::default())
+}
+
+/// Independent policy limits for source proof; no change to flag-clear files.
+pub fn read_with_source_evidence(bytes: &[u8], budgets: crate::checkpoints::Budgets,
+    dependencies: crate::dependencies::DependencyBudgets,
+    source: crate::source_checkpoints::Budgets) -> Result<Capture, Malformed> {
+    read_with_budgets(bytes, budgets, dependencies, source, crate::waits::Budgets::default())
+}
+
+/// Read with a bounded automatic-wait inventory. Exhaustion is a visible wait
+/// refusal; it never relaxes legacy chunk/CRC/sequence validation.
+pub fn read_with_waits(bytes: &[u8], budgets: crate::waits::Budgets) -> Result<Capture, Malformed> {
+    read_with_budgets(bytes, crate::checkpoints::Budgets::default(),
+        crate::dependencies::DependencyBudgets::default(),
+        crate::source_checkpoints::Budgets::default(), budgets)
+}
+
+// All public entrypoints share one parser with independent evidence budgets.
+fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
+    dependencies: crate::dependencies::DependencyBudgets,
+    source: crate::source_checkpoints::Budgets,
+    waits: crate::waits::Budgets) -> Result<Capture, Malformed> {
     let mut r = Reader {
         cap: Capture::default(),
+        waits: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
         trailer_seen: false,
         ext: None,
+        checkpoints: None,
+        source_checkpoints: None,
     };
     if bytes.len() < FILE_HEADER_LEN {
         // A file cut inside its 16-byte header is torn only if EVERY constrained byte present is right: the magic,
@@ -155,11 +196,17 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         }
         // file_flags: byte 12 may be 0, FLAG_DOMAIN_EXTENSIONS or that plus FLAG_PROFILE_RECORD (bit 1 requires
         // bit 0); bytes 13..15 must be 0, as far as they are present.
-        if n > 12 && (!matches!(bytes[12], 0 | 1 | 3 | 7) || bytes[13..n].iter().any(|&b| b != 0)) {
-            // A file without bit 1 keeps the baseline's exact message (its output is byte-identical to the baseline
-            // reader's); only a byte with bit 1 set names the new allowed values (bit 2 requires bits 0 and 1).
-            let allowed = if bytes[12] & 2 == 0 { "0 or 1" } else { "0, 1, 3 or 7" };
+        if n > 12 && (!matches!(bytes[12], 0 | 1 | 3 | 7 | 8 | 9 | 11 | 15 | 16 | 17 | 19 | 23 | 24 | 25 | 27 | 31)
+            || bytes[13..n].iter().any(|&b| b != 0)) {
+            // Keep each existing family's diagnostic when the other capability is absent.
+            let allowed = if bytes[12] & 24 == 24 { "0, 1, 3, 7, 8, 9, 11, 15, 16, 17, 19, 23, 24, 25, 27 or 31" }
+                else if bytes[12] & 8 != 0 { "0, 1, 3, 7, 8, 9, 11 or 15" }
+                else if bytes[12] & 16 != 0 { "0, 1, 3, 7, 16, 17, 19 or 23" }
+                else if bytes[12] & 2 == 0 { "0 or 1" } else { "0, 1, 3 or 7" };
             return malformed(Rule::FileFlagsNonzero, format!("{n}-byte file: file_flags bytes are not {allowed}"));
+        }
+        if n > 12 && bytes[12] & crate::waits::FLAG_WAITS as u8 != 0 {
+            r.cap.waits = Some(crate::waits::Inventory::default());
         }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
@@ -176,8 +223,9 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
     }
     let profile_flag = crate::profile::FLAG_PROFILE_RECORD;
     let order_flag = crate::ext::FLAG_SPU_ORDER;
+    let checkpoint_flag = crate::checkpoints::FLAG_FRAME_CHECKPOINTS;
     // bit 2 (SPU_ORDER) requires bits 0 and 1; without bit 1 every refusal keeps the baseline's exact message
-    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag) != 0
+    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
@@ -186,6 +234,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 1 without bit 0"));
     }
     r.cap.profile_flag = file_flags & profile_flag != 0;
+    if file_flags & checkpoint_flag != 0 {
+        r.checkpoints = Some(crate::checkpoints::Reader::new(budgets));
+        r.source_checkpoints = Some(crate::source_checkpoints::Reader::new(source));
+        r.cap.dependencies = Some(crate::dependencies::DependencyIndex::new(dependencies));
+    }
+    if file_flags & crate::waits::FLAG_WAITS != 0 {
+        r.waits = Some(crate::waits::Reader::new(waits));
+    }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
             crate::ext::ExtReader::with_order()
@@ -240,11 +296,14 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
             }
         }
         let profile_ty = r.cap.profile_flag && ty == crate::profile::CHUNK_PROFILE;
+        let checkpoint_ty = r.checkpoints.is_some() && (19..=20).contains(&ty);
+        let source_ty = r.source_checkpoints.is_some() && matches!(ty, 21 | 25 | 26);
         let ext_ty = r.ext.as_ref().is_some_and(|x| {
             (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&ty)
                 || (ty == crate::ext::CHUNK_SPU_ORDER && x.order_enabled())
         });
-        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty {
+        let wait_ty = r.waits.is_some() && (crate::waits::CHUNK_WAIT_CONFIG..=crate::waits::CHUNK_WAIT_STATUS).contains(&ty);
+        if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
         if index == 0 && ty != CHUNK_HEADER {
@@ -257,28 +316,54 @@ pub fn read(bytes: &[u8]) -> Result<Capture, Malformed> {
             return malformed(Rule::DuplicateHeaderOrClocks, format!("chunk {index} is a second HEADER or CLOCKS"));
         }
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
+        if wait_ty {
+            r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
         match ty {
             CHUNK_HEADER => r.header(payload, minor)?,
             CHUNK_CLOCKS => r.clocks(payload)?,
             CHUNK_DESCRIPTORS => r.descriptors(payload)?,
             CHUNK_THREADS => r.threads(payload)?,
-            CHUNK_RECORDS => r.records(payload)?,
+            CHUNK_RECORDS => r.records(payload, chunk_seq)?,
             CHUNK_RETIRED => r.retired(payload)?,
             CHUNK_TRAILER => r.trailer(payload)?,
             crate::profile::CHUNK_PROFILE if profile_ty => {
                 let freq = r.cap.clock.as_ref().expect("CLOCKS is chunk 1").freq_hz;
                 r.cap.profile = Some(crate::profile::parse(payload, freq)?);
             }
+            _ if checkpoint_ty => {
+                let ext = r.ext.as_ref().map(|x| x.declarations());
+                r.checkpoints.as_mut().unwrap().chunk(ty, payload, chunk_seq, &r.cap, ext)?;
+                if ty == 19 && r.checkpoints.as_ref().unwrap().result.refusal.is_none() && matches!(payload[2], 1 | 3) {
+                    let mut key = Cursor::new(&payload[24..40], "membership source");
+                    let source = crate::checkpoints::key(&mut key)?;
+                    r.source_checkpoints.as_mut().unwrap().participate(source, chunk_seq);
+                }
+            }
+            _ if source_ty => {
+                let ext = r.ext.as_ref().map(|x| x.declarations());
+                r.source_checkpoints.as_mut().unwrap().chunk(
+                    ty, payload, chunk_seq, &r.cap, ext, r.checkpoints.as_ref().unwrap())?;
+            }
             _ => {
                 let refs = crate::ext::V1Refs { descriptors: &r.cap.descriptors, declared_incarnations: &r.declared };
-                r.ext.as_mut().expect("extension chunk only with the flag").chunk(ty, payload, &refs)?
+                r.ext.as_mut().expect("extension chunk only with the flag").chunk_observed(
+                    ty, payload, &refs, r.cap.dependencies.as_mut(), r.source_checkpoints.as_mut(), chunk_seq)?
             }
         }
         pos += total;
         index += 1;
     }
     let ext = r.ext.take();
+    let checkpoints = r.checkpoints.take();
+    let source_checkpoints = r.source_checkpoints.take();
+    r.cap.waits = r.waits.take().map(|x| x.result);
     let mut cap = r.finish(torn)?;
+    cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
+    cap.checkpoints = checkpoints.map(|x| x.result);
     if let Some(x) = ext {
         let frames: BTreeMap<u32, BTreeSet<u64>> =
             cap.lanes.iter().map(|(&inc, l)| (inc, l.frames.iter().map(|f| f.id).collect())).collect();
@@ -518,7 +603,7 @@ impl Reader {
         Ok(())
     }
 
-    fn records(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+    fn records(&mut self, payload: &[u8], chunk_seq: u64) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "RECORDS");
         let inc = c.u32()?;
         let n = c.u32()?;
@@ -539,7 +624,15 @@ impl Reader {
             return malformed(Rule::RecordsAfterRetired, format!("RECORDS of {inc} after its RETIRED entry"));
         }
         let recs: Vec<RawRecord> = payload[8..].chunks_exact(RECORD_LEN).map(RawRecord::decode).collect();
-        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs)
+        let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
+            crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
+            || recs.iter().filter(|r| r.kind == KIND_END).count()));
+        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut())?;
+        // No identity is published until the entire legacy chunk has succeeded,
+        // including the final pending-BEGIN / pending-GAP checks.
+        if let Some(source) = self.source_checkpoints.as_mut() { source.observe(batch.as_ref(), chunk_seq)?; }
+        if let Some(batch) = batch { self.cap.dependencies.as_mut().unwrap().commit(batch); }
+        Ok(())
     }
 
     fn finish(mut self, torn: bool) -> Result<Capture, Malformed> {
@@ -664,6 +757,7 @@ fn process_records(
     declared: &BTreeSet<u32>,
     inc: u32,
     recs: &[RawRecord],
+    mut evidence: Option<&mut crate::dependencies::Batch>,
 ) -> Result<(), Malformed> {
     for (i, r) in recs.iter().enumerate() {
         let at = || format!("incarnation {inc}, record {i} (seq {})", r.seq);
@@ -701,6 +795,7 @@ fn process_records(
             lane.stack.clear();
             lane.base_unknown = true;
             lane.gap_since_frame = true;
+            if let Some(batch) = evidence.as_deref_mut() { batch.ppu_record(r, i as u32); }
             continue;
         }
 
@@ -748,7 +843,13 @@ fn process_records(
                 let begin = lane.pending_begin.take().expect("checked above");
                 begin_span(lane, spans, inc, &begin, r).map_err(|(rule, d)| Malformed { rule, detail: format!("{}: {d}", at()) })?;
             }
-            KIND_END => end_span(lane, spans, r).map_err(|(rule, d)| Malformed { rule, detail: format!("{}: {d}", at()) })?,
+            KIND_END => {
+                let matched = lane.stack.last().copied();
+                end_span(lane, spans, r).map_err(|(rule, d)| Malformed { rule, detail: format!("{}: {d}", at()) })?;
+                if let (Some(top), Some(batch)) = (matched, evidence.as_deref_mut()) {
+                    batch.ppu_pair(&spans[top], r, i as u32);
+                }
+            },
             KIND_FRAME => {
                 let id = r.c;
                 // Strictly increasing by 1, or skipping ahead only across a GAP; never repeated, never after the
@@ -776,6 +877,7 @@ fn process_records(
             KIND_REGERR => lane.regerr_records += 1,
             _ => unreachable!(),
         }
+        if let Some(batch) = evidence.as_deref_mut() { batch.ppu_record(r, i as u32); }
     }
     if lane.pending_gap.is_some() {
         return malformed(Rule::GapPlacement, format!("incarnation {inc}: GAP is the last record of its chunk"));

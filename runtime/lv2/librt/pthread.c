@@ -138,6 +138,10 @@ pt_err(s32 rc)
 	return (int)lv2error(rc);
 }
 
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+#include "prof_wait_adapter.h"
+#endif
+
 /* pt_err for the rwlock try-locks.  POSIX gives them one way to fail on a
  * held lock, EBUSY, whoever holds it; Lv-2 reports a lock the calling thread
  * already holds for writing as a self-deadlock (EDEADLK), which a call that
@@ -571,6 +575,11 @@ pt_thread_cleanup(struct pt_thread *self, void *retval)
 	 * A failed table lock also leaves the producer unacknowledged.
 	 * Cancellation is ENOSYS, so a refused cancel does not retire a thread. */
 	/* Invariant: invoke the hook outside the recursive thread-table lock. */
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	if (cleanup_ok && __ps3dk_prof_wait_thread_exit != NULL)
+		pt_wait_notify(__ps3dk_prof_wait_thread_exit);
+	else
+#endif
 	if (cleanup_ok && __ps3dk_prof_thread_exit != NULL)
 		__ps3dk_prof_thread_exit();
 
@@ -596,6 +605,9 @@ pt_trampoline(void *arg)
 	void *retval;
 
 	pt_self_cookie = self;
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	pt_wait_notify(__ps3dk_prof_wait_thread_start);
+#endif
 	retval = self->start(self->arg);
 	pt_thread_cleanup(self, retval);
 	sysThreadExit(0);
@@ -623,6 +635,9 @@ pt_raw_trampoline(void *p)
 	struct pt_raw_start start = *(struct pt_raw_start *)p;
 
 	free(p);
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	pt_wait_notify(__ps3dk_prof_wait_thread_start);
+#endif
 	start.entry(start.arg);
 	__lv2_thread_exit(0);
 }
@@ -886,7 +901,11 @@ pthread_mutex_lock(pthread_mutex_t *mutex)
 
 	if (err != 0)
 		return err;
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_wait_call(1, id, 0, 0, PT_WAIT_SITE);
+#else
 	return pt_err(sysMutexLock(id, 0));
+#endif
 }
 
 int
@@ -1001,7 +1020,11 @@ pt_deadline_usec(clockid_t clock_id, const struct timespec *abstime, u64 *usec)
  * checked first: an unknown clock is EINVAL either way. */
 static int
 pt_mutex_timed(pthread_mutex_t *mutex, clockid_t clock_id,
-               const struct timespec *abstime)
+               const struct timespec *abstime
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+               , uint64_t site
+#endif
+               )
 {
 	sys_mutex_t id;
 	u64 usec;
@@ -1022,20 +1045,32 @@ pt_mutex_timed(pthread_mutex_t *mutex, clockid_t clock_id,
 	err = pt_deadline_usec(clock_id, abstime, &usec);
 	if (err != 0)
 		return err;
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_wait_call(2, id, 0, usec, site);
+#else
 	return pt_err(sysMutexLock(id, usec));
+#endif
 }
 
 int
 pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime)
 {
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_mutex_timed(mutex, CLOCK_REALTIME, abstime, PT_WAIT_SITE);
+#else
 	return pt_mutex_timed(mutex, CLOCK_REALTIME, abstime);
+#endif
 }
 
 int
 pthread_mutex_clocklock(pthread_mutex_t *mutex, clockid_t clock_id,
                         const struct timespec *abstime)
 {
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_mutex_timed(mutex, clock_id, abstime, PT_WAIT_SITE);
+#else
 	return pt_mutex_timed(mutex, clock_id, abstime);
+#endif
 }
 
 /* ------------------------------------------------------------------ *
@@ -1222,7 +1257,11 @@ pt_cond_resolve(pthread_cond_t *cond, sys_mutex_t mutex_id, sys_cond_t *out)
 }
 
 static int
-pt_cond_wait_common(pthread_cond_t *cond, pthread_mutex_t *mutex, u64 timeout)
+pt_cond_wait_common(pthread_cond_t *cond, pthread_mutex_t *mutex, u64 timeout
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+                    , uint64_t site
+#endif
+                    )
 {
 	sys_mutex_t mutex_id;
 	sys_cond_t cond_id;
@@ -1234,13 +1273,21 @@ pt_cond_wait_common(pthread_cond_t *cond, pthread_mutex_t *mutex, u64 timeout)
 	err = pt_cond_resolve(cond, mutex_id, &cond_id);
 	if (err != 0)
 		return err;
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_wait_call(3, cond_id, mutex_id, timeout, site);
+#else
 	return pt_err(sysCondWait(cond_id, timeout));
+#endif
 }
 
 int
 pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return pt_cond_wait_common(cond, mutex, 0, PT_WAIT_SITE);
+#else
 	return pt_cond_wait_common(cond, mutex, 0);
+#endif
 }
 
 int
@@ -1250,7 +1297,11 @@ pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	u64 usec;
 	int err = pt_deadline_usec(CLOCK_REALTIME, abstime, &usec);
 
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return err ? err : pt_cond_wait_common(cond, mutex, usec, PT_WAIT_SITE);
+#else
 	return err ? err : pt_cond_wait_common(cond, mutex, usec);
+#endif
 }
 
 int
@@ -1260,7 +1311,11 @@ pthread_cond_clockwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 	u64 usec;
 	int err = pt_deadline_usec(clock_id, abstime, &usec);
 
+#if defined(PS3DK_PROF_WAIT_OBSERVE)
+	return err ? err : pt_cond_wait_common(cond, mutex, usec, PT_WAIT_SITE);
+#else
 	return err ? err : pt_cond_wait_common(cond, mutex, usec);
+#endif
 }
 
 /* Signal (ALL = 0) or broadcast a cond, counted in pt_cond_inflight from

@@ -57,6 +57,11 @@ pub const END_SINK_ERROR: u32 = 4;
 /// One MALFORMED rule.  The section of the format that states it is in the comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Rule {
+    /// Opt-in frame membership or closure violates its wire contract.
+    Checkpoint,
+    WaitConfig,
+    WaitRecord,
+    WaitStatus,
     // 1. Primitives
     StringTooLong,
     StringInvalidUtf8,
@@ -432,6 +437,14 @@ impl Lane {
 /// A decoded capture that is not MALFORMED.  It may be INCOMPLETE; then `incomplete` says why.
 #[derive(Debug, Clone, Default)]
 pub struct Capture {
+    pub(crate) dependencies: Option<crate::dependencies::DependencyIndex>,
+    /// Opt-in inventory evidence, separate from legacy source validity and from
+    /// completion of the work. None for files without file_flags bit 3.
+    pub checkpoints: Option<crate::checkpoints::Inventory>,
+    /// Opt-in source proof, independent of legacy validity. Admission alone
+    /// never publishes a completed source result.
+    pub source_checkpoints: Option<crate::source_checkpoints::Evidence>,
+    pub waits: Option<crate::waits::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
@@ -450,6 +463,19 @@ pub struct Capture {
 }
 
 impl Capture {
+    pub fn dependency_status(&self) -> Option<crate::dependencies::IndexStatus> {
+        self.dependencies.as_ref().map(|i| i.status.clone())
+    }
+    pub fn dependency_record(&self, id: crate::dependencies::RecordId, expected: crate::dependencies::Expected,
+        before_chunk: u64, budget: crate::dependencies::QueryBudget) -> crate::dependencies::Lookup<crate::dependencies::RecordFact> {
+        self.dependencies.as_ref().map_or(crate::dependencies::Lookup::Unavailable(crate::dependencies::UnavailableReason::HistoryNotIndexed),
+            |i| i.record(id, expected, before_chunk, budget))
+    }
+    pub fn dependency_pair(&self, begin: crate::dependencies::RecordId, expected: crate::dependencies::Expected,
+        before_chunk: u64, budget: crate::dependencies::QueryBudget) -> crate::dependencies::Lookup<crate::dependencies::PairFact> {
+        self.dependencies.as_ref().map_or(crate::dependencies::Lookup::Unavailable(crate::dependencies::UnavailableReason::HistoryNotIndexed),
+            |i| i.pair(begin, expected, before_chunk, budget))
+    }
     pub fn has_trailer(&self) -> bool {
         self.trailer.is_some()
     }

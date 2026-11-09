@@ -263,7 +263,9 @@ fn prefix_cut(bytes: &[u8]) -> Result<(usize, u64, u64), String> {
             break; // torn inside a payload or its CRC
         }
         let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().expect("4 bytes"));
-        if matches!(ty, CHUNK_RECORDS | crate::ext::CHUNK_SPU_EVENTS | crate::ext::CHUNK_GPU_EVENTS) {
+        let wait_data = ty == crate::waits::CHUNK_WAIT_RECORDS && len >= 8
+            && u32::from_le_bytes(bytes[pos + CHUNK_HEADER_LEN + 4..pos + CHUNK_HEADER_LEN + 8].try_into().unwrap()) != 0;
+        if matches!(ty, CHUNK_RECORDS | crate::ext::CHUNK_SPU_EVENTS | crate::ext::CHUNK_GPU_EVENTS) || wait_data {
             data += 1;
         }
         pos += total;
@@ -274,7 +276,7 @@ fn prefix_cut(bytes: &[u8]) -> Result<(usize, u64, u64), String> {
 
 /// A capture that ended early (a live session the user disconnected, a dropped link, a copy cut short), analysed
 /// up to its last whole chunk.  Accepted only when ALL hold, checked here:
-/// - at least one whole event chunk (RECORDS, SPU or GPU events): metadata alone is not a capture;
+/// - at least one whole event chunk (RECORDS, SPU, GPU or wait events): metadata alone is not a capture;
 /// - after the last whole chunk there is at most a torn final chunk (a whole chunk is never dropped);
 /// - the strict [`load`] of the cut bytes is `Analysed` and its only reasons are `NoTrailer` (required) and
 ///   `MissingFinalEntry`.

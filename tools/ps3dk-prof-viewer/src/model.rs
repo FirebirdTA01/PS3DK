@@ -26,6 +26,8 @@ pub struct Document {
     pub foreign: crate::foreign::ForeignSlot,
     /// The Hot paths page, computed ONCE here (reader budgets bound it); None for a MALFORMED document.
     pub hot: Option<crate::hotpaths::HotView>,
+    /// Automatic wait observations, owned by this exact immutable document.
+    pub waits: Option<crate::waits::WaitsView>,
     /// The Hot paths page's SPU/RSX lanes (F3b): a one-entry cache keyed by W32, filled on first need.
     pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
     /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
@@ -98,12 +100,19 @@ impl Document {
 
     fn build(path: PathBuf, bytes: &[u8], prefix_ok: bool) -> Document {
         let loaded = if prefix_ok { load_file(bytes) } else { load(bytes) };
-        let (state, ext, frames, hot) = match loaded {
+        Self::from_outcome(path, bytes.len(), prefix_ok, loaded)
+    }
+
+    // One construction path for file/live results and policy-controlled parser
+    // results. It never accepts an index from another capture.
+    pub(crate) fn from_outcome(path: PathBuf, size: usize, prefix_ok: bool, loaded: Outcome) -> Document {
+        let (state, ext, frames, hot, waits) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
                 },
                 ExtView::None,
+                None,
                 None,
                 None,
             ),
@@ -112,18 +121,20 @@ impl Document {
                 let frames = crate::frames::FramesIndex::build(&a);
                 let pm = ps3dk_prof::paths::paths(&a, &ps3dk_prof::paths::PathBudgets::default());
                 let hot = crate::hotpaths::build(&a, &pm);
-                (DocState::Analysed(a), ext, Some(frames), Some(hot))
+                let waits = crate::waits::WaitsView::build(&a.capture, crate::waits::Budget::default());
+                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits))
             }
         };
         Document {
             path,
-            size: bytes.len(),
+            size,
             prefix_ok,
             state,
             ext,
             frames,
             foreign: crate::foreign::ForeignSlot::default(),
             hot,
+            waits,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
             rsx: crate::rsx::RsxSlot::default(),
@@ -263,6 +274,7 @@ pub struct LaneRow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Overview {
+    pub dependency_warning: Option<String>,
     /// (label, value) pairs for the header and clock.
     pub identity: Vec<(String, String)>,
     pub minor_warning: bool,
@@ -342,6 +354,8 @@ pub fn overview(a: &Analysis) -> Overview {
         None => Vec::new(),
     };
     Overview {
+        dependency_warning: cap.dependency_status().filter(|s| s.refusal.is_some())
+            .map(|s| ps3dk_prof::dependencies::status_text(&s)),
         identity,
         minor_warning: cap.minor_warning,
         lanes,

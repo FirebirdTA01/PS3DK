@@ -180,6 +180,17 @@ pub const EXT_EMPTY_LINE: &str =
     "domain extensions: 0 sources declared (no SPU/RSX work is recorded; no SPU/RSX coverage is claimed)";
 
 pub fn extension_lines(cap: &Capture) -> Vec<String> {
+    let mut out = domain_lines(cap);
+    if let Some(w) = &cap.waits {
+        let status = if let Some(why) = w.refusal { why }
+            else if w.config.is_none() || !w.status_present { "INCOMPLETE: config or status missing" }
+            else { "status RECORDED; counters may be lower bounds" };
+        out.push(format!("wait observations: {status}; {} retained call(s); dependency UNKNOWN; use waits for API-call elapsed time and coverage",w.observations));
+    }
+    out
+}
+
+fn domain_lines(cap: &Capture) -> Vec<String> {
     let Some(x) = &cap.ext else { return Vec::new() };
     if x.sources.is_empty() {
         return vec![EXT_EMPTY_LINE.to_string()];
@@ -325,6 +336,12 @@ pub fn render(a: &Analysis) -> String {
     }
     if cap.minor_warning {
         let _ = writeln!(o, "warning: minor version > 0; read as v1");
+    }
+    if let Some(status) = cap.dependency_status() {
+        let _ = writeln!(o, "{}", crate::dependencies::status_text(&status));
+    }
+    if let Some(evidence) = &cap.source_checkpoints {
+        o.push_str(&crate::source_checkpoints::report(evidence));
     }
     // Only files with file_flags bit 1 carry a PROFILE; every other file's report is unchanged.
     if let Some(p) = &cap.profile {

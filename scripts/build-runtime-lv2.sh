@@ -70,6 +70,12 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# This opt-in path must return before env setup, header installation, or any
+# default-runtime writes. It takes explicit compiler/SDK/build/install paths.
+if [[ "${1:-}" == --waits-only ]]; then
+    shift
+    exec python3 "$script_dir/build-prof-wait-runtime.py" "$@"
+fi
 # shellcheck disable=SC1091
 source "$script_dir/env.sh"
 # The compiler adds the SDK include directory by default (gcc-16.x patch 0068); building the

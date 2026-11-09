@@ -11,7 +11,7 @@ fn main() -> eframe::Result<()> {
         println!("ps3dk-prof-viewer {}", ps3dk_version::VERSION);
         return Ok(());
     }
-    // ps3dk-prof-viewer [--page=overview|timeline|zones|frames|paths] [--view=START:LEN]
+    // ps3dk-prof-viewer [--page=overview|timeline|zones|frames|paths|waits] [--view=START:LEN]
     //                   [--graph=bars|lines|distribution|map]
     //                   [--connect=IP:PORT] [--capture-dir=DIR] [--min-size]
     //                   [capture.prof]
@@ -37,6 +37,8 @@ fn main() -> eframe::Result<()> {
         Page::Frames
     } else if args.iter().any(|a| a == "--page=paths") {
         Page::HotPaths
+    } else if args.iter().any(|a| a == "--page=waits") {
+        Page::Waits
     } else {
         Page::Overview
     };

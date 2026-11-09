@@ -5,6 +5,9 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#ifdef PS3DK_PROF_WITH_WAITS
+#include "../waits/wait_internal.h"
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
 #include "psp_ppu.h"
 #include "prof_spu.h"
@@ -537,6 +540,9 @@ static int thread_begin_impl(prof *p, const char *name)
                                   s->arc_index, p->arc_index_capacity);
     }
 #endif
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_enroll(p,inc,s->generation);
+#endif
     s->state = SLOT_LIVE;
     p_unlock(p, &p->thread_mutex);
 
@@ -638,6 +644,9 @@ void p_observe_stop(prof *p)
     t->depth = 0;         /* 3. clear the stack */
     t->refused_top = 0;
     t->acked = 1;         /* 4. the thread-local flag */
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_ack(p);
+#endif
     HOOK(before_ack_store);
     ST_REL(&cb->ack_retire, (uint32_t)ST_ACKED);   /* 5. the LAST write */
 }
@@ -669,6 +678,9 @@ void ps3dk_prof_thread_end(void)
     t->depth = 0;                /* 3. clear the stack */
     t->refused_top = 0;
     t->retired = 1;              /* 4. */
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_ack(p);
+#endif
     HOOK(before_retire_store);
     ST_REL(&cb->ack_retire, (uint32_t)ST_RETIRED);   /* 5. the LAST write */
 }
@@ -1246,6 +1258,10 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         }
 #endif
     }
+#ifdef PS3DK_PROF_WITH_WAITS
+    rc=p_wait_init(p);
+    if(rc)goto fail_block;
+#endif
     if (pal_mutex_init(&p->thread_mutex) != 0) {
         rc = PS3DK_PROF_ENOMEM;
         goto fail_block;
@@ -1320,6 +1336,9 @@ fail_mutex2:
 fail_mutex1:
     (void)pal_mutex_destroy(&p->thread_mutex);
 fail_block:
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_unwind(p);
+#endif
     pal_free(p->block);
     memset(p, 0, sizeof *p);
     return rc;
@@ -1372,6 +1391,9 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
     publish_capture_record(&g_storage);
     g_prof = &g_storage;
     ST_REL(&g_gate, (uint32_t)G_READY);       /* step 8: publish, */
+#ifdef PS3DK_PROF_WITH_WAITS
+    (void)thread_begin_impl(&g_storage,"init");
+#endif
     ST_REL(&g_storage.start_gate, 1u);        /* then open the start gate */
     return PS3DK_PROF_OK;
 }

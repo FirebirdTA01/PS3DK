@@ -25,6 +25,8 @@ TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 HEADERS := \
     include/ps3dk/prof.h \
+    include/ps3dk/prof_wait.h \
+    include/ps3dk/prof_wait_internal.h \
     include/ppu-types.h \
     include/ppu-asm.h \
     include/ppu-lv2.h \

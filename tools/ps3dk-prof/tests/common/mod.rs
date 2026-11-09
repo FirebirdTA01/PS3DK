@@ -50,7 +50,11 @@ fn crc_table() -> [u32; 256] {
     for (n, slot) in t.iter_mut().enumerate() {
         let mut c = n as u32;
         for _ in 0..8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
         }
         *slot = c;
     }
@@ -160,7 +164,15 @@ impl Rec {
 }
 
 pub fn rec(kind: u8, depth: u8, flags: u16, a: u32, seq: u64, b: u64, c: u64) -> Rec {
-    Rec { kind, depth, flags, a, seq, b, c }
+    Rec {
+        kind,
+        depth,
+        flags,
+        a,
+        seq,
+        b,
+        c,
+    }
 }
 pub fn begin(seq: u64, desc: u32, depth: u8, tb: u64, span: u64) -> Rec {
     rec(1, depth, 0, desc, seq, tb, span)
@@ -188,10 +200,25 @@ pub fn regerr(seq: u64, code: u32) -> Rec {
 }
 /// BEGIN + BEGIN_PARENT at seq and seq + 1.
 pub fn zone(seq: u64, desc: u32, depth: u8, tb: u64, span: u64, parent: u64) -> Vec<Rec> {
-    vec![begin(seq, desc, depth, tb, span), bparent(seq + 1, depth, parent)]
+    vec![
+        begin(seq, desc, depth, tb, span),
+        bparent(seq + 1, depth, parent),
+    ]
 }
-pub fn zone_tok(seq: u64, desc: u32, depth: u8, tb: u64, span: u64, parent: u64, owner: u32, frame: u64) -> Vec<Rec> {
-    vec![begin(seq, desc, depth, tb, span), bparent_tok(seq + 1, depth, parent, owner, frame)]
+pub fn zone_tok(
+    seq: u64,
+    desc: u32,
+    depth: u8,
+    tb: u64,
+    span: u64,
+    parent: u64,
+    owner: u32,
+    frame: u64,
+) -> Vec<Rec> {
+    vec![
+        begin(seq, desc, depth, tb, span),
+        bparent_tok(seq + 1, depth, parent, owner, frame),
+    ]
 }
 
 /// Assigns consecutive sequences to `recs` from `first` (GAPs take none and get seq = b), so tests write records
@@ -319,7 +346,11 @@ pub fn descs_payload(ds: &[Desc]) -> Vec<u8> {
     let mut b = Buf::default();
     b.u32(ds.len() as u32);
     for d in ds {
-        b.u32(d.index).u64(d.id.unwrap_or_else(|| d.real_id())).u8(d.scope).u8(d.reserved).u32(d.line);
+        b.u32(d.index)
+            .u64(d.id.unwrap_or_else(|| d.real_id()))
+            .u8(d.scope)
+            .u8(d.reserved)
+            .u32(d.line);
         b.bytes_str(&d.name).bytes_str(&d.tag).bytes_str(&d.file);
     }
     b.0
@@ -334,7 +365,12 @@ pub struct Thr {
 }
 
 pub fn thr(inc: u32) -> Thr {
-    Thr { inc, slot: inc % 8, os: 1000 + u64::from(inc), name: format!("t{inc}") }
+    Thr {
+        inc,
+        slot: inc % 8,
+        os: 1000 + u64::from(inc),
+        name: format!("t{inc}"),
+    }
 }
 
 pub fn threads_payload(ts: &[Thr]) -> Vec<u8> {
@@ -371,8 +407,16 @@ pub struct Fin {
 
 impl Fin {
     pub fn encode(&self, b: &mut Buf) {
-        b.u32(self.inc).u8(self.state).u8(self.limit).u16(self.reserved);
-        b.u64(self.produced).u64(self.written).u64(self.dropped).u64(self.refused).u64(self.regerr).u64(self.open);
+        b.u32(self.inc)
+            .u8(self.state)
+            .u8(self.limit)
+            .u16(self.reserved);
+        b.u64(self.produced)
+            .u64(self.written)
+            .u64(self.dropped)
+            .u64(self.refused)
+            .u64(self.regerr)
+            .u64(self.open);
     }
 }
 
@@ -403,7 +447,11 @@ impl Trl {
         for f in &self.fins {
             f.encode(&mut b);
         }
-        b.u64(self.sink_errors).i32(self.first_error).u32(self.reserved).u64(self.unregistered).u64(self.desc_count);
+        b.u64(self.sink_errors)
+            .i32(self.first_error)
+            .u32(self.reserved)
+            .u64(self.unregistered)
+            .u64(self.desc_count);
         b.0
     }
 }
@@ -485,7 +533,10 @@ impl File {
 
     /// Index of the first chunk of type `ty`.
     pub fn find(&self, ty: u32) -> usize {
-        self.chunks.iter().position(|c| c.ty == ty).expect("chunk type present")
+        self.chunks
+            .iter()
+            .position(|c| c.ty == ty)
+            .expect("chunk type present")
     }
 
     pub fn without_trailer(mut self) -> File {
@@ -498,7 +549,11 @@ impl File {
 
 /// Three standard descriptors: 0 "zoneA", 1 "zoneB", 2 "zoneC".
 pub fn std_descs() -> Vec<Desc> {
-    vec![desc(0, "zoneA", ""), desc(1, "zoneB", ""), desc(2, "zoneC", "")]
+    vec![
+        desc(0, "zoneA", ""),
+        desc(1, "zoneB", ""),
+        desc(2, "zoneC", ""),
+    ]
 }
 
 /// One incarnation in a scenario.
@@ -516,15 +571,34 @@ pub struct Lane {
 }
 
 pub fn lane(inc: u32, recs: Vec<Rec>) -> Lane {
-    Lane { inc, recs, state: 2, terminal: 0, refused: 0, regerr: 0, limit: false }
+    Lane {
+        inc,
+        recs,
+        state: 2,
+        terminal: 0,
+        refused: 0,
+        regerr: 0,
+        limit: false,
+    }
 }
 
 impl Lane {
     /// The final entry the writer would emit, counted from this lane's records.
     pub fn fin(&self) -> Fin {
         let written = self.recs.iter().filter(|r| r.sequenced()).count() as u64;
-        let gaps: u64 = self.recs.iter().filter(|r| r.kind == 5).map(|r| r.c - r.b + 1).sum();
-        let next = self.recs.iter().filter(|r| r.sequenced()).map(|r| r.seq + 1).max().unwrap_or(0);
+        let gaps: u64 = self
+            .recs
+            .iter()
+            .filter(|r| r.kind == 5)
+            .map(|r| r.c - r.b + 1)
+            .sum();
+        let next = self
+            .recs
+            .iter()
+            .filter(|r| r.sequenced())
+            .map(|r| r.seq + 1)
+            .max()
+            .unwrap_or(0);
         if self.state == 3 {
             return Fin {
                 inc: self.inc,
@@ -564,12 +638,22 @@ pub struct Scenario {
 }
 
 pub fn scenario(lanes: Vec<Lane>) -> Scenario {
-    Scenario { descs: std_descs(), lanes, sink_errors: 0, trailer: true }
+    Scenario {
+        descs: std_descs(),
+        lanes,
+        sink_errors: 0,
+        trailer: true,
+    }
 }
 
 impl Scenario {
     pub fn trailer_struct(&self) -> Trl {
-        let fins: Vec<Fin> = self.lanes.iter().filter(|l| l.state != 1).map(|l| l.fin()).collect();
+        let fins: Vec<Fin> = self
+            .lanes
+            .iter()
+            .filter(|l| l.state != 1)
+            .map(|l| l.fin())
+            .collect();
         let all: Vec<Fin> = self.lanes.iter().map(|l| l.fin()).collect();
         let mut end_flags = 0;
         if fins.iter().any(|f| f.state == 3) {
@@ -637,16 +721,31 @@ pub fn base_with(extra: Vec<Chunk>) -> File {
 /// Slot reuse: incarnation 1 (slot 1) records one zone and RETIRES; incarnation 2 is declared on the SAME slot 1, either
 /// after the RETIRED entry (`retire_first`, valid reuse) or before it (two live incarnations on one slot).
 pub fn slot_reuse_file(retire_first: bool) -> Vec<u8> {
-    let one = seqd(0, [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)]].concat());
+    let one = seqd(
+        0,
+        [zone(0, 0, 0, 100, 1, 0), vec![end(0, 0, 0, 200, 1)]].concat(),
+    );
     let mut l1 = lane(1, one);
     l1.state = 1;
-    let l2 = lane(2, seqd(0, [zone(0, 1, 0, 500, 1, 0), vec![end(0, 1, 0, 600, 1)]].concat()));
+    let l2 = lane(
+        2,
+        seqd(
+            0,
+            [zone(0, 1, 0, 500, 1, 0), vec![end(0, 1, 0, 600, 1)]].concat(),
+        ),
+    );
     let t1 = thr(1);
-    let t2 = Thr { slot: t1.slot, ..thr(2) };
+    let t2 = Thr {
+        slot: t1.slot,
+        ..thr(2)
+    };
     let trailer = scenario(vec![l1.clone(), l2.clone()]).trailer_struct();
     let retired = chunk(T_RETIRED, retired_payload(&[l1.fin()]));
     let threads2 = chunk(T_THREADS, threads_payload(&[t2]));
-    let mut extra = vec![chunk(T_THREADS, threads_payload(&[t1])), chunk(T_RECORDS, records_payload(1, &l1.recs))];
+    let mut extra = vec![
+        chunk(T_THREADS, threads_payload(&[t1])),
+        chunk(T_RECORDS, records_payload(1, &l1.recs)),
+    ];
     if retire_first {
         extra.push(retired);
         extra.push(threads2);

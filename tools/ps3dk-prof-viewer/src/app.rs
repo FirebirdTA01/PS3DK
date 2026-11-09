@@ -31,6 +31,7 @@ pub enum Page {
     Frames,
     Zones,
     HotPaths,
+    Waits,
     /// RSX frame captures found in the data.
     RsxFrames,
     /// One frame snapshot (`App::shown`).
@@ -69,6 +70,7 @@ pub struct App {
     pub hot: crate::hotpaths_ui::HotState,
     /// The RSX frames page selection.
     pub rsx: crate::rsx_ui::RsxState,
+    pub waits: crate::waits_ui::WaitState,
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
@@ -158,6 +160,7 @@ impl App {
             frames: frames_ui::FramesState::default(),
             hot: crate::hotpaths_ui::HotState::default(),
             rsx: crate::rsx_ui::RsxState::default(),
+            waits: crate::waits_ui::WaitState::default(),
             live: None,
             connect: None,
             last_host: String::new(),
@@ -219,6 +222,7 @@ impl App {
             self.hot = crate::hotpaths_ui::HotState::default();
             // RSX frames: a newer snapshot keeps the selected cap (the page shows nothing if it is gone).
             self.rsx = crate::rsx_ui::RsxState::default();
+            self.waits = crate::waits_ui::WaitState::default();
         }
         self.doc = Some(doc);
     }
@@ -248,6 +252,7 @@ impl App {
         self.frames.reset(None);
         self.hot = crate::hotpaths_ui::HotState::default();
         self.rsx = crate::rsx_ui::RsxState::default();
+        self.waits = crate::waits_ui::WaitState::default();
         self.zone_rows.clear();
         self.selected_zone = None;
         self.error = None;
@@ -588,6 +593,9 @@ impl eframe::App for App {
                     if ui::nav_item(side, self.page == Page::HotPaths, "🔥", "Hot paths", None).clicked() {
                         self.page = Page::HotPaths;
                     }
+                    if ui::nav_item(side, self.page == Page::Waits, "⏱", "Waits", None).clicked() {
+                        self.page = Page::Waits;
+                    }
                     if let Some(n) = rsx_count {
                         if ui::nav_item(side, self.page == Page::RsxFrames, "🖼", crate::rsx_ui::TITLE, Some(n)).clicked() {
                             self.page = Page::RsxFrames;
@@ -661,6 +669,7 @@ impl eframe::App for App {
         let timeline = &mut self.timeline;
         let hot = &mut self.hot;
         let rsx = &mut self.rsx;
+        let waits = &mut self.waits;
         let mut nav: Option<(u32, u64)> = None;
         ui::page(ctx, |p| {
             match &self.doc {
@@ -696,6 +705,10 @@ impl eframe::App for App {
                     Page::RsxFrames => {
                         crate::rsx_ui::page(p, a, &d.rsx.get(a), rsx, &mut crate::rsx_ui::Drawn::default())
                     }
+                    Page::Waits => match &d.waits {
+                        Some(v) => crate::waits_ui::page(p, v, waits, &mut crate::waits_ui::Drawn::default()),
+                        None => ui::field_message(p, ui::Tone::Neutral, "No wait analysis for this document."),
+                    },
                 },
             },
         }
@@ -839,6 +852,10 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx:
         );
     }
     egui::ScrollArea::vertical().show(p, |p| {
+        if let Some(warning) = &o.dependency_warning {
+            ui::field_message(p, ui::Tone::Warning, warning);
+            p.add_space(ui::SPACE_LG);
+        }
         ui::section_label(p, "IDENTITY");
         kv_grid(p, "identity", &o.identity);
         p.add_space(ui::SPACE_LG);
@@ -899,6 +916,10 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx:
         }
     });
 }
+
+#[cfg(test)]
+#[path = "dependency_tests.rs"]
+mod dependency_tests;
 
 /// A wrapped "Label: value" line (long reasons wrap at the window width; nothing is tooltip-only).
 fn fact(p: &mut egui::Ui, label: &str, value: &str) {

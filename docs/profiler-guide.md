@@ -114,7 +114,8 @@ A zone handle `kind` is `0 INERT`, `1 PUSHED`, `2 REFUSED`, or `3 SPENT`; a zero
 
 - `PS3DK_PROF_FRAME()` advances to the next frame on the calling thread.
 - `PS3DK_PROF_FRAME_TOKEN()` returns the current frame token (`{owner, reserved, frame}`); `PS3DK_PROF_TOKEN_NONE` is `{0,0,0}` (owner `NONE`). Tie a zone to a frame with `_FOR`.
-- Register each PPU thread that records zones with `ps3dk_prof_thread_begin(name)` before its first zone (or set `auto_register`); `ps3dk_prof_thread_end` releases it.
+- Register each PPU thread that records zones with `ps3dk_prof_thread_begin(name)` before its first zone (or set `auto_register`); `ps3dk_prof_thread_end` releases it. The opt-in wait-observation variants also register the caller of successful profiler initialization as `init`; registering that thread again returns the expected `PS3DK_PROF_EALREADY`. Default archives do not add that automatic registration. For an existing worker that explicitly registers after initialization, establish that its runtime start hook has finished before initialization; creating the thread alone does not establish that ordering.
+- The initial wait-observation adapter records timed mutex calls only after their initial trylock reports busy and the deadline is validated. Immediate-success timed locks and validation refusals are uncovered; absence of a timed-wait row is not a count of those calls or evidence of a dropped record.
 
 `ps3dk_prof_init`, `ps3dk_prof_live_start`, `ps3dk_prof_shutdown` and `ps3dk_prof_live_stop` are caller-serialized: the app must never call two of them at the same time (and `ps3dk_prof_live_get_stats` is serialized with `live_start` and `live_stop`).
 
