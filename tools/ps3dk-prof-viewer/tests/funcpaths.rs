@@ -173,6 +173,10 @@ fn both_sources_draw_and_the_view_is_cached_per_selection() {
 
 /// tree1's real fn values, symbolized by an independent PPU-shaped ELF (as the CLI test).
 fn tree1_elf() -> Vec<u8> {
+    tree1_elf_id(None)
+}
+
+fn tree1_elf_id(build_id: Option<Vec<u8>>) -> Vec<u8> {
     let s = symbols("tree1");
     let at = |n: &str| *s.iter().find(|(_, x)| x.as_str() == n).unwrap().0;
     let (a, b, c, r) = (at("tree_a"), at("tree_b"), at("tree_c"), at("rec"));
@@ -201,6 +205,7 @@ fn tree1_elf() -> Vec<u8> {
                 size: 0x20,
             },
         ],
+        build_id,
     }
     .bytes()
 }
@@ -242,4 +247,89 @@ fn elf_symbols_name_rows_and_refusals_keep_hex() {
         2,
         "each symbol change rebuilt once"
     );
+}
+
+#[test]
+fn a_chosen_thread_without_function_chunks_never_shows_another_thread() {
+    let a = mode("unreg");
+    let noactor = inc_of(&a, "noactor");
+    let v = build(&a, Some(noactor), Selection::Whole, None);
+    assert_eq!(v.thread, Some(noactor));
+    assert!(
+        v.notice
+            .as_deref()
+            .unwrap()
+            .starts_with("No function data for this thread"),
+        "{v:?}"
+    );
+    assert!(
+        v.rows.is_empty() && v.lost.is_none() && v.choices.is_empty() && v.thread_lines.is_empty(),
+        "{v:?}"
+    );
+    // with no choice the first thread with data is shown
+    let main = inc_of(&a, "main");
+    assert_eq!(build(&a, None, Selection::Whole, None).thread, Some(main));
+}
+
+#[test]
+fn the_tree_is_sorted_by_self_time_with_inclusive_beside_it() {
+    let a = mode("inline");
+    let names = symbols("inline");
+    let v = build(&a, None, Selection::Whole, None);
+    // without an ELF the labels are the raw fn values; name them from the harness's symbol lines
+    let name =
+        |l: &str| names[&u64::from_str_radix(l.trim_start_matches("0x"), 16).unwrap()].clone();
+    let labels: Vec<(usize, String)> = v.rows.iter().map(|r| (r.depth, name(&r.label))).collect();
+    let mix = labels
+        .iter()
+        .position(|(d, l)| *d == 0 && l == "inl_mix")
+        .unwrap();
+    // inl_mix's children: real_leaf (self 4) before im_b (self 1, incl 5) before im_a (self 1, incl 1)
+    let kids: Vec<&str> = labels[mix + 1..]
+        .iter()
+        .take_while(|(d, _)| *d > 0)
+        .filter(|(d, _)| *d == 1)
+        .map(|(_, l)| l.as_str())
+        .collect();
+    assert_eq!(kids, ["real_leaf", "im_b", "im_a"], "{labels:?}");
+    assert!(v.rows[mix + 1].self_pct.is_some() && v.rows[mix + 1].incl_pct.is_some());
+}
+
+#[test]
+fn elf_identity_is_shown_in_the_viewer() {
+    const ID: [u8; 4] = [1, 2, 3, 4];
+    let a = analysed(&with_build_id(&capture("tree1"), b"other"));
+    let elf = ps3dk_prof::elf_symbols::ElfSymbols::parse(&tree1_elf_id(Some(ID.to_vec()))).unwrap();
+    let v = build(&a, None, Selection::Whole, Some(("app.elf", &elf)));
+    assert_eq!(
+        v.elf_match,
+        Some(ps3dk_prof::elf_symbols::ElfMatch::Mismatch)
+    );
+    assert!(v
+        .elf_line
+        .as_deref()
+        .unwrap()
+        .starts_with("WARNING: ELF build id 01020304 does not match"));
+    assert!(
+        v.rows.iter().any(|r| r.label == "tree_c()"),
+        "names are still shown"
+    );
+    let a = analysed(&with_build_id(&capture("tree1"), &ID));
+    let v = build(&a, None, Selection::Whole, Some(("app.elf", &elf)));
+    assert_eq!(
+        v.elf_match,
+        Some(ps3dk_prof::elf_symbols::ElfMatch::Verified)
+    );
+    let a = mode("tree1");
+    let v = build(&a, None, Selection::Whole, Some(("app.elf", &elf)));
+    assert_eq!(
+        v.elf_match,
+        Some(ps3dk_prof::elf_symbols::ElfMatch::Unverified)
+    );
+    assert!(v
+        .elf_line
+        .as_deref()
+        .unwrap()
+        .starts_with("ELF match unverified"));
+    assert_eq!(build(&a, None, Selection::Whole, None).elf_line, None);
 }

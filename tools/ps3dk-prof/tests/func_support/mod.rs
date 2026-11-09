@@ -114,6 +114,23 @@ impl Split {
     }
 }
 
+/// The capture with its HEADER build_id replaced (the func fixtures declare no descriptors, whose ids hash it).
+pub fn with_build_id(bytes: &[u8], id: &[u8]) -> Vec<u8> {
+    let mut s = split(bytes);
+    assert!(s.chunks.iter().all(|c| c.ty != 3), "no DESCRIPTORS chunk");
+    let h = &mut s.chunks[0];
+    assert_eq!(h.ty, 1);
+    let app = u16::from_le_bytes([h.payload[0], h.payload[1]]) as usize;
+    let at = 2 + app;
+    let old = u16::from_le_bytes([h.payload[at], h.payload[at + 1]]) as usize;
+    let mut p = h.payload[..at].to_vec();
+    p.extend_from_slice(&(id.len() as u16).to_le_bytes());
+    p.extend_from_slice(id);
+    p.extend_from_slice(&h.payload[at + 2 + old..]);
+    h.payload = p;
+    s.bytes()
+}
+
 pub fn put16(b: &mut [u8], at: usize, v: u16) {
     b[at..at + 2].copy_from_slice(&v.to_le_bytes());
 }
@@ -148,6 +165,8 @@ pub struct Elf {
     /// (descriptor address, entry address); written as `.long entry, .long toc`.
     pub descriptors: Vec<(u64, u64)>,
     pub syms: Vec<Sym>,
+    /// The `.note.gnu.build-id` descriptor (no note section when None).
+    pub build_id: Option<Vec<u8>>,
 }
 
 fn be16(o: &mut Vec<u8>, v: u16) {
@@ -190,7 +209,28 @@ impl Elf {
             be64(&mut e, s.size);
             symtab.extend_from_slice(&e);
         }
-        let names = ["", ".text", ".opd", ".symtab", ".strtab", ".shstrtab"];
+        let names = [
+            "",
+            ".text",
+            ".opd",
+            ".symtab",
+            ".strtab",
+            ".shstrtab",
+            ".note.gnu.build-id",
+        ];
+        let nsec = if self.build_id.is_some() { 7 } else { 6 };
+        // an ELF note: namesz, descsz, type NT_GNU_BUILD_ID, "GNU\0", the descriptor padded to 4
+        let mut note = Vec::new();
+        if let Some(id) = &self.build_id {
+            be32(&mut note, 4);
+            be32(&mut note, id.len() as u32);
+            be32(&mut note, 3);
+            note.extend_from_slice(b"GNU\0");
+            note.extend_from_slice(id);
+            while note.len() % 4 != 0 {
+                note.push(0);
+            }
+        }
         let mut shstr = Vec::new();
         let mut name_off = Vec::new();
         for n in names {
@@ -212,6 +252,7 @@ impl Elf {
         let o_sym = place(&symtab);
         let o_str = place(&strtab);
         let o_shs = place(&shstr);
+        let o_note = place(&note);
         while body.len() % 8 != 0 {
             body.push(0);
         }
@@ -229,7 +270,7 @@ impl Elf {
         be16(&mut o, 56);
         be16(&mut o, 0);
         be16(&mut o, 64);
-        be16(&mut o, names.len() as u16);
+        be16(&mut o, nsec);
         be16(&mut o, 5);
         o.extend_from_slice(&body);
         let sh = |o: &mut Vec<u8>,
@@ -320,6 +361,21 @@ impl Elf {
             1,
             0,
         );
+        if nsec == 7 {
+            sh(
+                &mut o,
+                name_off[6],
+                7,
+                2,
+                0,
+                o_note,
+                note.len() as u64,
+                0,
+                0,
+                4,
+                0,
+            );
+        }
         o
     }
 }

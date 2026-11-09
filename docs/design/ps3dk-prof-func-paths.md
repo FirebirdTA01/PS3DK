@@ -349,7 +349,9 @@ fields and known flag bits above, it refuses:
   requested epoch other than the current request (0 before the first status); a
   chunk after the incarnation's FINAL or INCOMPLETE_TAIL chunk.
 - No-data chunks: flags other than LAGGING and/or INCOMPLETE_TAIL (at least one),
-  any nonzero cut field or counter, or LAGGING alone for requested epoch 0.
+  any nonzero cut field or counter, any definition or row (`n_nodes` and
+  `n_rows` are 0, so the chunk is exactly 128 bytes), or LAGGING alone for
+  requested epoch 0.
 - Data chunks: INCOMPLETE_TAIL; a FINAL chunk with an answered epoch or LAGGING;
   a non-FINAL chunk whose answered epoch is 0, not above the previous one or
   above the requested epoch, or whose LAGGING flag differs from `answered <
@@ -371,7 +373,15 @@ fields and known flag bits above, it refuses:
   (or missing on node 0); OPEN disagreeing with `open > 0`; TRUNCATED without
   STACK_RESET, SELF_UNTIMED without DEPTH_LIMITED or STACK_RESET (a surviving
   parent after a drop), SATURATED without SATURATED and OPEN without OPEN on the
-  chunk; open counts whose sum is not the header's open count.
+  chunk; open counts whose sum is not the header's open count; LOST row calls
+  (0 without a LOST row) other than the `lost` counter, except that with
+  SATURATED they may differ where one of the two is 2^64-1.
+
+Symbolization (`--elf`, the viewer's ELF button) compares the ELF's
+`.note.gnu.build-id` with the capture HEADER `build_id` (equal bytes, or the
+note's hex text): a mismatch prints a WARNING and names are still shown; when
+either is absent the names are labelled "ELF match unverified". JSON reports
+`elf_match` as verified, mismatch or unverified.
 
 Whole-capture totals per node are exact sums (`u128`) of the rows. The rows of
 each interval are retained within a reader budget; past it the per-interval

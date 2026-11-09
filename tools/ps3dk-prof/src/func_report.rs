@@ -72,6 +72,13 @@ pub struct Query<'a> {
     pub symbols: Symbols<'a>,
 }
 
+/// The capture's HEADER build_id (empty when there is no HEADER).
+pub fn capture_build_id(cap: &Capture) -> &[u8] {
+    cap.header
+        .as_ref()
+        .map_or(&[][..], |h| h.build_id.as_slice())
+}
+
 /// The text of a path: the caller chain outermost first.
 pub fn path_text(actor: &Actor, node: u32, sym: &Symbols<'_>) -> String {
     let (root, fns) = chain(actor, node);
@@ -294,6 +301,9 @@ pub fn text(cap: &Capture, q: &Query<'_>) -> Vec<String> {
     }
     let sel = threads(cap, q.thread);
     out.push(symbols_line(inv, &sel, &q.symbols));
+    if let Symbols::Elf { elf, .. } = q.symbols {
+        out.push(crate::elf_symbols::match_line(capture_build_id(cap), elf));
+    }
     if sel.is_empty() {
         out.push(match q.thread {
             Some(t) => format!("no thread named {t:?}"),
@@ -476,7 +486,11 @@ pub fn json(cap: &Capture, q: &Query<'_>) -> Value {
         Symbols::Refused { path, why } => {
             json!({"elf": path, "refused": why, "resolved": 0, "unresolved": raw})
         }
-        Symbols::Elf { path, .. } => json!({"elf": path, "resolved": ok, "unresolved": raw}),
+        Symbols::Elf { path, elf } => json!({
+            "elf": path, "resolved": ok, "unresolved": raw,
+            "elf_match": crate::elf_symbols::elf_match(capture_build_id(cap), elf).name(),
+            "elf_match_text": crate::elf_symbols::match_line(capture_build_id(cap), elf),
+        }),
     };
     let mut threads = Vec::new();
     for (inc, name, slot) in &sel {

@@ -1016,3 +1016,98 @@ fn a_torn_last_chunk_contributes_nothing() {
     assert!(a.terminal.is_none() && !inv(&c).final_status);
     assert!(c.torn());
 }
+
+#[test]
+fn a_no_data_chunk_with_rows_is_refused() {
+    // claim one row and carry its 40 bytes: the length is consistent, the chunk is not
+    refused(
+        &mutate("threads", |s| {
+            let i = s.nth(29, 0);
+            let p = &mut s.chunks[i].payload;
+            assert_eq!(get16(p, 2), LAGGING);
+            put32(p, 52, 1);
+            p.extend_from_slice(&[0u8; 40]);
+        }),
+        Rule::FuncTree,
+        "no-data chunk with nonzero cut fields, definitions or rows",
+    );
+    // a row count without its bytes is a length refusal
+    refused(
+        &mutate("threads", |s| {
+            let i = s.nth(29, 0);
+            put32(&mut s.chunks[i].payload, 52, 1);
+        }),
+        Rule::FuncTree,
+        "expected 168",
+    );
+}
+
+/// The data chunk of the overflow capture that carries the LOST row, and that row's offset.
+fn lost_chunk(s: &Split) -> (usize, usize) {
+    for k in 0.. {
+        let i = s.nth(29, k);
+        let p = &s.chunks[i].payload;
+        if get16(p, 2) & DATA == 0 {
+            continue;
+        }
+        let r0 = row0(p);
+        for r in 0..get32(p, 52) as usize {
+            if get32(p, r0 + 40 * r) == 0 {
+                return (i, r0 + 40 * r);
+            }
+        }
+    }
+    unreachable!()
+}
+
+#[test]
+fn the_lost_row_calls_must_equal_the_lost_counter() {
+    // the real capture agrees (4 and 4)
+    let s = split(&capture("overflow"));
+    let (i, r) = lost_chunk(&s);
+    assert_eq!(
+        u64::from_le_bytes(s.chunks[i].payload[72..80].try_into().unwrap()),
+        4
+    );
+    assert_eq!(
+        u64::from_le_bytes(s.chunks[i].payload[r + 16..r + 24].try_into().unwrap()),
+        4
+    );
+    // without SATURATED any difference is refused, in either value
+    refused(
+        &mutate("overflow", |s| {
+            let (i, _) = lost_chunk(s);
+            put64(&mut s.chunks[i].payload, 72, 5);
+        }),
+        Rule::FuncTree,
+        "LOST row calls 4 disagree with the lost counter 5",
+    );
+    refused(
+        &mutate("overflow", |s| {
+            let (i, r) = lost_chunk(s);
+            put64(&mut s.chunks[i].payload, r + 16, 3);
+        }),
+        Rule::FuncTree,
+        "LOST row calls 3 disagree",
+    );
+    // with SATURATED only a value at the 2^64-1 ceiling may differ
+    let sat = |p: &mut Vec<u8>| {
+        let f = get16(p, 2);
+        put16(p, 2, f | ps3dk_prof::func_paths::SATURATED);
+    };
+    let ok = mutate("overflow", |s| {
+        let (i, _) = lost_chunk(s);
+        sat(&mut s.chunks[i].payload);
+        put64(&mut s.chunks[i].payload, 72, u64::MAX);
+    });
+    reader::read(&ok).expect("a saturated counter may exceed the row");
+    refused(
+        &mutate("overflow", |s| {
+            let (i, _) = lost_chunk(s);
+            sat(&mut s.chunks[i].payload);
+            put64(&mut s.chunks[i].payload, 72, 5);
+        }),
+        Rule::FuncTree,
+        "disagree with the lost counter 5",
+    );
+}

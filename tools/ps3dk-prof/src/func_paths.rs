@@ -585,7 +585,7 @@ impl Reader {
             rows: Vec::new(),
         };
         if flags & DATA == 0 {
-            return self.no_data(base, inc, &at);
+            return self.no_data(base, n_rows, inc, &at);
         }
         if flags & INCOMPLETE_TAIL != 0 {
             return bad(
@@ -847,6 +847,21 @@ impl Reader {
             });
         }
         c.done()?;
+        // Every entry charged to the LOST node is one call of its row and one count of `lost`.  Both saturate at
+        // 2^64-1; with SATURATED they may differ only where one of them reached that ceiling.
+        let lost_calls = rows
+            .iter()
+            .find(|r| r.node == LOST_NODE)
+            .map_or(0, |r| r.calls);
+        let lost = counters[C_LOST];
+        if lost_calls != lost
+            && (flags & SATURATED == 0 || (lost_calls != u64::MAX && lost != u64::MAX))
+        {
+            return bad(
+                Rule::FuncTree,
+                format!("{at}: LOST row calls {lost_calls} disagree with the lost counter {lost}"),
+            );
+        }
         if open_sum != u64::from(open) {
             return bad(
                 Rule::FuncTree,
@@ -914,7 +929,7 @@ impl Reader {
         Ok(())
     }
 
-    fn no_data(&mut self, cut: Cut, inc: u32, at: &str) -> Result<(), Malformed> {
+    fn no_data(&mut self, cut: Cut, n_rows: u32, inc: u32, at: &str) -> Result<(), Malformed> {
         let f = cut.flags;
         if f & !(LAGGING | INCOMPLETE_TAIL) != 0 || f & (LAGGING | INCOMPLETE_TAIL) == 0 {
             return bad(
@@ -927,13 +942,14 @@ impl Reader {
             || cut.start != 0
             || cut.cut != 0
             || cut.new_nodes != 0
+            || n_rows != 0
             || cut.open != 0
             || cut.refused_levels != 0
             || cut.counters.iter().any(|&v| v != 0)
         {
             return bad(
                 Rule::FuncTree,
-                format!("{at}: no-data chunk with nonzero cut fields"),
+                format!("{at}: no-data chunk with nonzero cut fields, definitions or rows"),
             );
         }
         if f == LAGGING && cut.requested == 0 {
@@ -1047,8 +1063,21 @@ pub enum Selected {
     Refused(&'static str),
 }
 
-/// The view of `actor` for `sel`.
+/// How siblings are ordered in a view's tree (descending; ties by the other value, then node).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Order {
+    #[default]
+    Inclusive,
+    SelfTime,
+}
+
+/// The view of `actor` for `sel`, siblings by inclusive elapsed.
 pub fn view(inv: &Inventory, actor: &Actor, sel: Selection) -> Selected {
+    view_ordered(inv, actor, sel, Order::Inclusive)
+}
+
+/// The view of `actor` for `sel`, siblings in `order`.
+pub fn view_ordered(inv: &Inventory, actor: &Actor, sel: Selection, order_by: Order) -> Selected {
     let n = actor.nodes.len();
     let mut totals: Vec<Total>;
     let (elapsed, cut) = match sel {
@@ -1097,10 +1126,12 @@ pub fn view(inv: &Inventory, actor: &Actor, sel: Selection) -> Selected {
     }
     let order = |v: &mut Vec<u32>| {
         v.sort_by(|a, b| {
-            totals[*b as usize]
-                .incl
-                .cmp(&totals[*a as usize].incl)
-                .then(a.cmp(b))
+            let (ta, tb) = (&totals[*a as usize], &totals[*b as usize]);
+            let (ka, kb) = match order_by {
+                Order::Inclusive => ((ta.incl, ta.self_ticks()), (tb.incl, tb.self_ticks())),
+                Order::SelfTime => ((ta.self_ticks(), ta.incl), (tb.self_ticks(), tb.incl)),
+            };
+            kb.cmp(&ka).then(a.cmp(b))
         })
     };
     order(&mut tops);

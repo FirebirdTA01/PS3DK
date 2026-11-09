@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use ps3dk_prof::elf_symbols::ElfSymbols;
 use ps3dk_prof::func_paths::{
-    flag_text, percent, view, Inventory, Selected, Selection, Terminal, ViewRow, CHUNK_FLAG_NAMES,
+    flag_text, percent, Inventory, Selected, Selection, Terminal, ViewRow, CHUNK_FLAG_NAMES,
     COUNTER_NAMES, INCOMPLETE_TAIL, ROW_FLAG_NAMES,
 };
 use ps3dk_prof::func_report::{path_text, Symbols, ELAPSED_NOTE, LOST_LABEL, UNKNOWN_LABEL};
@@ -78,6 +78,10 @@ pub struct FuncView {
     pub rows: Vec<FRow>,
     pub lost: Option<FRow>,
     pub more: Option<String>,
+    /// Whether the loaded ELF is the capture's build (None without an ELF), and its line: a WARNING on a mismatch
+    /// (names are still shown), "ELF match unverified" when either build id is absent.
+    pub elf_match: Option<ps3dk_prof::elf_symbols::ElfMatch>,
+    pub elf_line: Option<String>,
 }
 
 fn counters<T: std::fmt::Display>(c: &[T; ps3dk_prof::func_paths::COUNTERS]) -> String {
@@ -189,8 +193,18 @@ pub fn build(
                 .push((inc, format!("thread {inc} {}{state}", i.name)));
         }
     }
+    if let Some((_, elf)) = symbols {
+        let id = ps3dk_prof::func_report::capture_build_id(cap);
+        v.elf_match = Some(ps3dk_prof::elf_symbols::elf_match(id, elf));
+        v.elf_line = Some(ps3dk_prof::elf_symbols::match_line(id, elf));
+    }
+    // An explicitly chosen thread is never replaced by another one: without chunks it has no function data.
+    if let Some(t) = thread.filter(|t| !inv.actors.contains_key(t)) {
+        v.thread = Some(t);
+        v.notice = Some("No function data for this thread (no function-path chunk).".to_string());
+        return v;
+    }
     let chosen = thread
-        .filter(|t| inv.actors.contains_key(t))
         .or_else(|| {
             inv.actors
                 .iter()
@@ -253,7 +267,12 @@ pub fn build(
             ));
         }
     }
-    match view(inv, actor, sel) {
+    match ps3dk_prof::func_paths::view_ordered(
+        inv,
+        actor,
+        sel,
+        ps3dk_prof::func_paths::Order::SelfTime,
+    ) {
         Selected::Missing => {
             v.notice = Some(match sel {
                 Selection::Whole => {

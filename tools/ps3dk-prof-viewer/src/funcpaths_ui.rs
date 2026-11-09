@@ -45,15 +45,16 @@ fn row_cells(g: &mut egui::Ui, r: &FRow) {
         h.label(text).on_hover_text(&r.path);
     });
     g.label(&r.calls);
-    g.label(&r.incl);
-    g.label(&r.self_time);
-    let frac = r.incl_pct.map_or(0.0, |p| (p / 100.0) as f32);
+    // Self is the sort key (as in the CLI) and the emphasised column; inclusive is shown beside it.
+    g.label(egui::RichText::new(&r.self_time).strong());
+    let frac = r.self_pct.map_or(0.0, |p| (p / 100.0) as f32);
     g.add(
         egui::ProgressBar::new(frac.clamp(0.0, 1.0))
             .desired_width(90.0)
-            .text(pct(r.incl_pct)),
+            .text(pct(r.self_pct)),
     );
-    g.label(pct(r.self_pct));
+    g.label(&r.incl);
+    g.label(pct(r.incl_pct));
     g.label(&r.flags);
     g.end_row();
 }
@@ -106,6 +107,13 @@ pub fn draw(p: &mut egui::Ui, a: &Analysis, st: &mut HotState, slot: &FuncSlot) 
             crate::hotpaths_ui::clear_symbols(st);
         }
     });
+    if let Some(l) = &v.elf_line {
+        let tone = match v.elf_match {
+            Some(ps3dk_prof::elf_symbols::ElfMatch::Mismatch) => ui::Tone::Warning,
+            _ => ui::Tone::Neutral,
+        };
+        ui::field_message(p, tone, l);
+    }
     for l in &v.lines {
         p.add(egui::Label::new(l).wrap());
     }
@@ -159,7 +167,14 @@ pub fn draw(p: &mut egui::Ui, a: &Analysis, st: &mut HotState, slot: &FuncSlot) 
     p.add_space(ui::SPACE_SM);
     egui::ScrollArea::vertical().id_salt("func-tree").show(p, |p| {
         egui::Grid::new("func-tree-grid").num_columns(7).striped(true).spacing([ui::SPACE_LG, ui::SPACE_XS]).show(p, |g| {
-            for h in ["Function (caller chain indented)", "Calls", "Inclusive (wall)", "Self (wall)", "Incl %", "Self %", "Status"] {
+            for h in ["Function (caller chain indented)",
+                    "Calls",
+                    "Self (wall), sorted",
+                    "Self %",
+                    "Inclusive (wall)",
+                    "Incl %",
+                    "Status",
+                ] {
                 g.label(egui::RichText::new(h).strong());
             }
             g.end_row();

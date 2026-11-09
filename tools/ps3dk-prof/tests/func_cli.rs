@@ -44,6 +44,10 @@ fn addr(mode: &str, name: &str) -> u64 {
 /// symbols, tree_c through its ELFv1 descriptor symbol (a mangled C++ name), and rec's descriptor points to code
 /// no symbol covers.
 fn tree1_elf() -> Vec<u8> {
+    tree1_elf_id(None)
+}
+
+fn tree1_elf_id(build_id: Option<Vec<u8>>) -> Vec<u8> {
     let (a, b, c, r) = (
         addr("tree1", "tree_a"),
         addr("tree1", "tree_b"),
@@ -76,6 +80,7 @@ fn tree1_elf() -> Vec<u8> {
                 size: 0x20,
             },
         ],
+        build_id,
     }
     .bytes()
 }
@@ -113,6 +118,7 @@ fn the_resolver_reads_opd_entry_words_for_ilp32_addresses_and_demangles() {
                 size: 0x20,
             },
         ],
+        build_id: None,
     };
     let s = ElfSymbols::parse(&e.bytes()).unwrap();
     assert_eq!(s.label(0x1005_0000).as_deref(), Some("main"));
@@ -367,4 +373,93 @@ fn cli_usage_errors_and_unchanged_commands() {
     let plain = tmp("plain.prof", &s.bytes()).display().to_string();
     let (_, out, _) = run(&["paths", "--functions", &plain]);
     assert!(out.contains("function paths: UNSUPPORTED"), "{out}");
+}
+
+const ID: [u8; 8] = [0xde, 0xad, 0xbe, 0xef, 0x01, 0x23, 0x45, 0x67];
+
+/// (code, stdout, JSON elf_match) of the CLI on tree1 with `capture_id` in the HEADER and an ELF with `elf_id`.
+fn identity(
+    capture_id: &[u8],
+    elf_id: Option<Vec<u8>>,
+    tag: &str,
+) -> (Option<i32>, String, String) {
+    let prof = tmp(
+        &format!("id-{tag}.prof"),
+        &with_build_id(&capture("tree1"), capture_id),
+    )
+    .display()
+    .to_string();
+    let elf = tmp(&format!("id-{tag}.elf"), &tree1_elf_id(elf_id))
+        .display()
+        .to_string();
+    let (code, out, _) = run(&["paths", "--functions", "--elf", &elf, &prof]);
+    let (_, js, _) = run(&["paths", "--functions", "--json", "--elf", &elf, &prof]);
+    let v: serde_json::Value = serde_json::from_str(&js).unwrap();
+    (
+        code,
+        out,
+        v["symbols"]["elf_match"].as_str().unwrap().to_string(),
+    )
+}
+
+#[test]
+fn the_build_id_note_is_read() {
+    let s = ElfSymbols::parse(&tree1_elf_id(Some(ID.to_vec()))).unwrap();
+    assert_eq!(s.build_id.as_deref(), Some(&ID[..]));
+    assert_eq!(ElfSymbols::parse(&tree1_elf()).unwrap().build_id, None);
+}
+
+#[test]
+fn elf_identity_verified_raw_and_hex() {
+    for (tag, cap) in [
+        ("raw", ID.to_vec()),
+        ("hex", b"DEADBEEF01234567\n".to_vec()),
+    ] {
+        let (code, out, m) = identity(&cap, Some(ID.to_vec()), tag);
+        assert_eq!(code, Some(0));
+        assert_eq!(m, "verified", "{tag}");
+        assert!(
+            out.contains("ELF match verified: build id deadbeef01234567"),
+            "{out}"
+        );
+        assert!(out.contains("tree_a > tree_c()"), "{out}");
+    }
+}
+
+#[test]
+fn elf_identity_mismatch_warns_and_still_names() {
+    let (code, out, m) = identity(b"another-build", Some(ID.to_vec()), "mismatch");
+    assert_eq!(code, Some(0), "a mismatch is a warning, never a refusal");
+    assert_eq!(m, "mismatch");
+    let w: Vec<&str> = out
+        .lines()
+        .filter(|l| l.starts_with("WARNING: ELF build id deadbeef01234567 does not match"))
+        .collect();
+    assert_eq!(w.len(), 1, "{out}");
+    assert!(w[0].contains("\"another-build\""), "{}", w[0]);
+    assert!(
+        out.contains("tree_a > tree_c()"),
+        "names are still shown: {out}"
+    );
+}
+
+#[test]
+fn elf_identity_unverified_when_either_id_is_absent() {
+    for (tag, cap, elf) in [
+        ("no-note", ID.to_vec(), None),
+        ("no-capture-id", Vec::new(), Some(ID.to_vec())),
+    ] {
+        let (code, out, m) = identity(&cap, elf, tag);
+        assert_eq!(code, Some(0));
+        assert_eq!(m, "unverified", "{tag}");
+        assert!(
+            out.lines().any(|l| l.starts_with("ELF match unverified")),
+            "{tag}: {out}"
+        );
+        assert!(!out.contains("WARNING"), "{tag}: {out}");
+    }
+    // without --elf there is no match line and no elf_match
+    let (_, js, _) = run(&["paths", "--functions", "--json", &fixture("tree1")]);
+    let v: serde_json::Value = serde_json::from_str(&js).unwrap();
+    assert!(v["symbols"]["elf_match"].is_null());
 }

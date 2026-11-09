@@ -22,6 +22,8 @@ struct Func {
 /// The `.opd` section and the function ranges of one PPU executable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElfSymbols {
+    /// The `.note.gnu.build-id` descriptor, when the file has one.
+    pub build_id: Option<Vec<u8>>,
     opd_addr: u64,
     opd: Vec<u8>,
     funcs: Vec<Func>,
@@ -135,7 +137,14 @@ impl ElfSymbols {
                 .then(a.name.cmp(&b.name))
         });
         funcs.dedup_by(|b, a| a.start == b.start);
+        let build_id = file
+            .build_id()
+            .ok()
+            .flatten()
+            .filter(|b| !b.is_empty())
+            .map(<[u8]>::to_vec);
         Ok(ElfSymbols {
+            build_id,
             opd_addr,
             opd: opd_data,
             funcs,
@@ -172,5 +181,68 @@ impl ElfSymbols {
     /// The label of `fn_addr`, or None (the caller prints the raw address).
     pub fn label(&self, fn_addr: u64) -> Option<String> {
         self.resolve(fn_addr).ok().map(|r| r.label())
+    }
+}
+
+/// Whether an ELF is the executable a capture was made from, by build id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElfMatch {
+    /// The capture's HEADER build_id equals the ELF's `.note.gnu.build-id` (raw bytes, or their hex text).
+    Verified,
+    /// Both are present and differ: the names may belong to another build.
+    Mismatch,
+    /// One of them is absent: the match cannot be checked.
+    Unverified,
+}
+
+impl ElfMatch {
+    pub fn name(self) -> &'static str {
+        match self {
+            ElfMatch::Verified => "verified",
+            ElfMatch::Mismatch => "mismatch",
+            ElfMatch::Unverified => "unverified",
+        }
+    }
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// Compares the capture HEADER `build_id` with the ELF's build-id note.  The HEADER field is free bytes: it matches
+/// when it equals the note's bytes, or is their hex text (either case, surrounding whitespace ignored).
+pub fn elf_match(capture_build_id: &[u8], elf: &ElfSymbols) -> ElfMatch {
+    let (Some(note), false) = (&elf.build_id, capture_build_id.is_empty()) else {
+        return ElfMatch::Unverified;
+    };
+    let text = std::str::from_utf8(capture_build_id).map(|s| s.trim().to_ascii_lowercase());
+    if capture_build_id == note.as_slice() || text.is_ok_and(|t| t == hex(note)) {
+        ElfMatch::Verified
+    } else {
+        ElfMatch::Mismatch
+    }
+}
+
+/// The line that labels names from `elf` for a capture: a WARNING on a mismatch, "ELF match unverified" when either
+/// build id is absent.  Names are shown in every case.
+pub fn match_line(capture_build_id: &[u8], elf: &ElfSymbols) -> String {
+    let note = elf.build_id.as_deref().map_or("absent".to_string(), hex);
+    let cap = if capture_build_id.is_empty() {
+        "absent".to_string()
+    } else {
+        match std::str::from_utf8(capture_build_id) {
+            Ok(s) if s.chars().all(|c| !c.is_control()) => format!("{s:?}"),
+            _ => hex(capture_build_id),
+        }
+    };
+    match elf_match(capture_build_id, elf) {
+        ElfMatch::Verified => format!("ELF match verified: build id {note}"),
+        ElfMatch::Mismatch => format!(
+            "WARNING: ELF build id {note} does not match the capture build_id {cap}: the names may belong to another \
+             build (still shown)"
+        ),
+        ElfMatch::Unverified => {
+            format!("ELF match unverified: ELF build id {note}, capture build_id {cap}")
+        }
     }
 }
