@@ -8,6 +8,9 @@
 #ifdef PS3DK_PROF_WITH_FUNC
 #include "../func/func_internal.h"
 #endif
+#ifdef PS3DK_PROF_WITH_FIFO
+#include "../fifo/fifo_internal.h"
+#endif
 
 #include <string.h>
 
@@ -184,6 +187,23 @@ int p_func_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len
     return !p->snk.failed && p->dr.chunk_seq == seq + 1 ? 0 : -1;
 }
 #endif
+#ifdef PS3DK_PROF_WITH_FIFO
+/* One FIFO chunk through the common framing, encoded in place in the chunk buffer; 0 only when the sink accepted the
+ * whole chunk. */
+uint8_t *p_fifo_payload(prof *p) { return pl(p); }
+int p_fifo_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len)
+{
+    uint64_t seq = p->dr.chunk_seq;
+    if (p->snk.failed || len > P_CHUNK_CAP)
+        return -1;
+    enc_begin(p, type);
+    if (payload != pl(p))
+        memcpy(pl(p), payload, len);
+    p->dr.pos = len;
+    enc_end(p);
+    return !p->snk.failed && p->dr.chunk_seq == seq + 1 ? 0 : -1;
+}
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
 /* One extension chunk through the common framing; 0 only when the sink ACCEPTED the whole chunk. */
 int p_ext_emit(prof *p, uint32_t type, const uint8_t *payload, size_t len)
@@ -335,6 +355,10 @@ static void dr_start(prof *p)
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
     head[12] |= 32; /* file_flags bit 5: function paths (chunk types 28-30) */
+#endif
+#ifdef PS3DK_PROF_WITH_FIFO
+    if (p->ext_flags)
+        head[12] |= 64; /* file_flags bit 6: FIFO wrap events (chunk types 31-33); needs bit 0 */
 #endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
@@ -587,6 +611,12 @@ int p_drain_once(prof *p)
     /* 3. Records up to the snapshot. */
     for (i = 0; i < n; i++)
         drain_ring(p, d->snaps[i].slot, d->snaps[i].incarnation, d->snaps[i].widx);
+#ifdef PS3DK_PROF_WITH_FIFO
+    /* 3a. FIFO wrap events, before the extension step.  This step takes no lock; an owner parked in a wrap holds no
+     * profiler mutex (no reserve is made under one), so its queued boundaries reach the sink while it waits. */
+    if (p->ext_flags)
+        p_fifo_drain(p, 0);
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
     /* 3b. The SPU lane extension: after the v1 records, before retirement frees any owner slot. */
     if (p->ext_flags)
@@ -816,6 +846,10 @@ int p_quiesce_freeze_seal(prof *p)
         /* The extension seal: after the frontier's THREADS and RETIRED, before the TRAILER. */
         if (p->ext_flags)
             p_ext_seal(p);
+#endif
+#ifdef PS3DK_PROF_WITH_FIFO
+        if (p->ext_flags)
+            p_fifo_drain(p, 1); /* after the extension seal (its DOMAIN declarations), before the TRAILER */
 #endif
 #ifdef PS3DK_PROF_WITH_WAITS
         (void)p_wait_emit_status(p);

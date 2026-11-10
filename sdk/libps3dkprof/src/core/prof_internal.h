@@ -264,6 +264,9 @@ typedef struct prof {
     struct gpu_slot *gpu;            /* gpu_max table slots, in the block */
     struct prg_ledger *gpu_ledger;   /* the GPU share of the file-wide aggregates, under spu_mutex */
     const rsxcap_ops *rsxcap;        /* S2: atomic (release once under spu_mutex, acquire); NULL: not enabled */
+#ifdef PS3DK_PROF_WITH_FIFO
+    uint64_t gpu_declared;           /* drainer-private: bit (id - 1026) once that RSX domain's DOMAIN was accepted */
+#endif
 #endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];

@@ -253,12 +253,31 @@ int p_gpu_init(prof *p)
     return 0;
 }
 
+#ifdef PS3DK_PROF_WITH_FIFO
+/* the drainer: remember each RSX domain whose DOMAIN chunk was accepted (the FIFO CONFIG prerequisite) */
+static void note_declared(prof *p)
+{
+    uint32_t i, id;
+    for (i = 0; i < p->gpu_max; i++) {
+        if (LD_ACQ(&p->gpu[i].state) != GPU_S_LIVE || !p->gpu[i].dom.declared)
+            continue;
+        id = LD_SC_(&p->gpu[i].id);
+        if (id >= GPU_ID_BASE && id < GPU_ID_BASE + GPU_LIFETIME_MAX)
+            p->gpu_declared |= 1ull << (id - GPU_ID_BASE);
+    }
+}
+
+#endif
+
 void p_gpu_step(prof *p)
 {
     uint32_t i;
     for (i = 0; i < p->gpu_max; i++)
         if (LD_ACQ(&p->gpu[i].state) == GPU_S_LIVE)
             prg_drain_held(&p->gpu[i].dom);
+#ifdef PS3DK_PROF_WITH_FIFO
+    note_declared(p);
+#endif
 }
 
 /* The detach acknowledgement, in two halves around the drainer's closing extension unlock (review 16:11).
@@ -305,6 +324,9 @@ void p_gpu_seal(prof *p)
     for (i = 0; i < p->gpu_max; i++)
         if (LD_ACQ(&p->gpu[i].state) == GPU_S_LIVE)
             prg_seal_held(&p->gpu[i].dom); /* idempotent: the second call finds a terminal state */
+#ifdef PS3DK_PROF_WITH_FIFO
+    note_declared(p);
+#endif
 }
 
 /* the free scan: the drainer, under thread_mutex, before decl_acc[slot] is cleared.  Every installed entry naming
@@ -401,6 +423,21 @@ static int done(gpu_slot *g, int rc)
     unpin(g);
     return rc;
 }
+
+#ifdef PS3DK_PROF_WITH_FIFO
+/* FIFO attach: domain h is live, attached by the calling thread, for ctx */
+int p_gpu_fifo_owner(prof *p, uint32_t h, void *ctx);
+int p_gpu_fifo_owner(prof *p, uint32_t h, void *ctx)
+{
+    prof *q;
+    gpu_slot *g;
+    int rc = prologue(h, &q, &g);
+    (void)p;
+    if (rc != PS3DK_PROF_OK)
+        return rc;
+    return done(g, ctx == g->ctx ? PS3DK_PROF_OK : PS3DK_PROF_EINVAL);
+}
+#endif
 
 /* the producer calls' common checks after the prologue: the ctx, then the shutdown claim (admitted-before-stop
  * calls that passed it proceed; the core's SC handshake decides their side of the frozen frontier) */

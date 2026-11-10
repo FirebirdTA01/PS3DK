@@ -170,6 +170,19 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-address" --ext --sanitize address
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-thread" --ext --sanitize thread
 
+      # FIFO wrap phase events (libps3dkprof_ext_fifo + the GCM host model): independent drain while the owner is
+      # parked (also inside a GPU zone) and blocked-sink controls, STOP inside a phase, refusals, plain, ASan+UBSan and
+      # TSan, the reader on every capture, and the four mutants the controls must catch.
+      - name: FIFO wrap events runtime host test
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-plain" --reader tools/target/debug/ps3dk-prof
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-address" --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-thread" --sanitize thread
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-pub" --sanitize thread --mutant relaxed-pub
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-reuse" --sanitize thread --mutant early-reuse
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-ack" --mutant ack-early
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-owner" --mutant owner-drain
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
@@ -705,6 +718,11 @@ jobs:
       # the one-phase protocol it replaced must fail the idle-lap scenario.
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
+
+      # The observed wrap variant (libgcm_cmd_prof_fifo.a): six boundaries per wrap, the protocol trace unchanged
+      # against the plain build for every observer mode, and three mutants the model must catch.
+      - name: Test the observed GCM FIFO wrap reports its boundaries without changing the protocol
+        run: bash tests/sdk/fifo-wrap-observe-test.sh
 
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
