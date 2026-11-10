@@ -117,6 +117,37 @@ sequences, the second is the exact successor of the first (the next kind of the 
 WRAP_ENTER of the next wrap id after WRAP_EXIT). A sequence gap means the attempts between were
 dropped: no pairing crosses it.
 
+### Timestamp ordering and cost
+
+In the observed GCM build every bracket endpoint comes from one helper, `ps3tc_fifo_tb`, which is
+`sync; mftb; isync` in a single volatile asm with a memory clobber. Compiled with GCC 16.1.0 at
+`-O2 -mcpu=cell` it is `hwsync; mftb r3; isync; blr` in both data models
+(`tests/sdk/fifo-tb-order-test.sh` checks that sequence statically; it is not a hardware ordering
+test). The claim is instruction-execution order on the issuing PPU, as described in the public IBM
+Cell Broadband Engine Programming Handbook v1.1, sections 20.1.2.1 and 20.1.2.4: the full `sync`
+orders the execution of preceding instructions before the timebase read, the trailing `isync`
+keeps subsequent instructions from executing ahead of the completed read, and the memory clobber
+stops the compiler from moving memory accesses across it. It is NOT device completion: the
+handbook distinguishes this ordering from the physical completion of preceding storage accesses,
+so a stamp proves neither RSX completion, nor an external device's acknowledgement, nor GPU idle.
+`lwsync` and `eieio` are not substitutes across the cacheable command memory and the uncached
+control register. The original protocol's stores, barriers and waits are unchanged.
+
+The END bracket's lower endpoint is re-read after every failed wait iteration, before the next GET
+check (no event is emitted per iteration), so the bracket surrounds the issuing PPU's final,
+successful GET observation. Without that read the lower endpoint would stay at BEGIN's upper
+endpoint and could span the whole wait. The bracket is about the PPU's observation, not the
+instant the RSX first reached the target; a pause or scheduling delay can still widen it.
+
+Cost: a completed observed wrap with N1 and N2 failed iterations in its two phases makes
+`8 + N1 + N2` timestamp reads (the two wrap endpoints, three reads per phase, and one per failed
+iteration), and each read adds one `sync` and one `isync`: `2 x (8 + N1 + N2)` barrier instructions
+beside the protocol's own three. The handbook (section 10.7.2.10) describes both barriers as
+stalling both PPE threads, and `isync` also discards the issuing thread's prefetched
+instructions; their cost depends on outstanding work, so no fixed cycle, nanosecond or upper-bound
+cost is claimed. Recorded intervals include this observer cost; nothing is subtracted. A default
+(unobserved) build makes none of these reads.
+
 ## FIFO_STATUS (33), 80 bytes
 
 u16 schema = 1, u16 flags, u32 instance, then nine u64: attempted, written, dropped, refused, last

@@ -724,6 +724,11 @@ jobs:
       - name: Test the observed GCM FIFO wrap reports its boundaries without changing the protocol
         run: bash tests/sdk/fifo-wrap-observe-test.sh
 
+      # Skips without PS3DEV; the observed wrap's timestamp helper must compile to sync; mftb; isync in both data
+      # models (a static instruction-sequence check), the previous helper must fail it, and default objects must match.
+      - name: Test the observed GCM FIFO wrap timestamp ordering sequence
+        run: bash tests/sdk/fifo-tb-order-test.sh
+
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 

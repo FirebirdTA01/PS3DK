@@ -59,8 +59,15 @@ static ps3tc_fifo_obs_state g_obs;
 
 static uint64_t ps3tc_fifo_tb(void *arg)
 {
+    uint64_t tb;
     (void)arg;
-    return __builtin_ppc_get_timebase();
+    /* Order the issuing PPU's instruction execution around this observation.
+     * sync covers prior storage instructions; isync prevents later accesses
+     * starting before mftb completes. Neither stamp proves RSX completion.
+     * The memory clobber also prevents compiler motion of memory accesses. */
+    __asm__ __volatile__("sync\n\tmftb %0\n\tisync"
+                         : "=r"(tb) : : "memory");
+    return tb;
 }
 
 static void ps3tc_fifo_observe_phase(void *arg, unsigned int kind, uint64_t tb_before, uint64_t tb_after)
