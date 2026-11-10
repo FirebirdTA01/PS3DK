@@ -127,7 +127,7 @@ int main(void)
         seg_display_target(ring, &disp);                  /* surface set in the ring */
         if (cellGcmSegmentCall(ring, &seg[slot]) != CELL_OK) { printf("GCM_SPUSEG_FAIL frame=%u call\n", f); ok = 0; break; }
         cellGcmSetClearSurface(ring, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);  /* indicator */
-        if (!seg_display_flip(ring, &disp, 2000000)) { printf("GCM_SPUSEG_FAIL frame=%u flip timeout\n", f); ok = 0; break; }
+        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { printf("GCM_SPUSEG_FAIL frame=%u flip timeout\n", f); ok = 0; break; }
         ++frames;
     }
     for (unsigned k = 0; ok && k < 2; ++k) {

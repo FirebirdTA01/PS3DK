@@ -1,10 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
 project(hello-ppu-gcm-nested-call C)
 include(ps3-self)
-add_executable(hello-ppu-gcm-nested-call source/main.c)
-target_compile_features(hello-ppu-gcm-nested-call PRIVATE c_std_11)
-target_compile_options(hello-ppu-gcm-nested-call PRIVATE -O2 -Wall -Wextra -Werror)
-target_link_libraries(hello-ppu-gcm-nested-call PRIVATE gcm_cmd gcm_sys sysutil_stub sysutil rt lv2)
-ps3_add_self(hello-ppu-gcm-nested-call)
-ps3_add_pkg(hello-ppu-gcm-nested-call
-    APPID "GCMS00002" CONTENTID "UP0001-GCMS00002_00-PS3DKSAMPLES0000")
+
+# The default SELF runs only the controls (a ring label and one level of
+# CALL); -nested adds the nested-CALL probe.
+foreach(variant "" "-nested")
+    set(t hello-ppu-gcm-nested-call${variant})
+    add_executable(${t} source/main.c)
+    target_compile_features(${t} PRIVATE c_std_11)
+    target_compile_options(${t} PRIVATE -O2 -Wall -Wextra -Werror)
+    if(variant STREQUAL "-nested")
+        target_compile_definitions(${t} PRIVATE GCM_NEST_VARIANT_NESTED=1)
+        set(id GCMS00021)
+    else()
+        set(id GCMS00002)
+    endif()
+    target_link_libraries(${t} PRIVATE gcm_cmd gcm_sys sysutil_stub sysutil rt lv2)
+    ps3_add_self(${t})
+    ps3_add_pkg(${t} APPID "${id}" CONTENTID "UP0001-${id}_00-PS3DKSAMPLES0000")
+endforeach()

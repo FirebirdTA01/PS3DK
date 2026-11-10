@@ -86,16 +86,17 @@ static inline void seg_rect(CellGcmContextData *ctx, uint32_t x, uint32_t y,
     cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
 }
 
-/* Flip the current buffer and wait at most timeout_us for the flip. */
-static inline int seg_display_flip(CellGcmContextData *ctx, SegDisplay *d, uint64_t timeout_us)
+/* Flip the current buffer and poll the flip status at most max_polls times
+ * (200 us apart).  An iteration count, not a timer, bounds the wait. */
+#define SEG_FLIP_POLLS 10000u
+static inline int seg_display_flip(CellGcmContextData *ctx, SegDisplay *d, uint32_t max_polls)
 {
-    uint64_t start;
+    uint32_t polls = 0;
     cellGcmResetFlipStatus();
     if (cellGcmSetFlip(ctx, (uint8_t)d->buffer_id)) return 0;
     cellGcmFlush(ctx);
-    start = (uint64_t)sys_time_get_system_time();
     while (cellGcmGetFlipStatus() != 0) {
-        if ((uint64_t)sys_time_get_system_time() - start >= timeout_us) return 0;
+        if (polls++ == max_polls) return 0;
         usleep(200);
     }
     d->buffer_id ^= 1u;

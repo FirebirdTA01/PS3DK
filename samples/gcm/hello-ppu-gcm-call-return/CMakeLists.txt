@@ -1,10 +1,25 @@
 cmake_minimum_required(VERSION 3.20)
 project(hello-ppu-gcm-call-return C)
 include(ps3-self)
-add_executable(hello-ppu-gcm-call-return source/main.c)
-target_compile_features(hello-ppu-gcm-call-return PRIVATE c_std_11)
-target_compile_options(hello-ppu-gcm-call-return PRIVATE -O2 -Wall -Wextra -Werror)
-target_link_libraries(hello-ppu-gcm-call-return PRIVATE gcm_cmd gcm_sys sysutil_stub sysutil rt lv2)
-ps3_add_self(hello-ppu-gcm-call-return)
-ps3_add_pkg(hello-ppu-gcm-call-return
-    APPID "GCMS00001" CONTENTID "UP0001-GCMS00001_00-PS3DKSAMPLES0000")
+
+# One SELF per variant.  The default runs only main-memory segments (plus the
+# overflow refusal, which issues no CALL); -local and -large run the riskier
+# phases on their own.
+foreach(variant "" "-local" "-large")
+    set(t hello-ppu-gcm-call-return${variant})
+    add_executable(${t} source/main.c)
+    target_compile_features(${t} PRIVATE c_std_11)
+    target_compile_options(${t} PRIVATE -O2 -Wall -Wextra -Werror)
+    if(variant STREQUAL "-local")
+        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_LOCAL=1)
+        set(id GCMS00011)
+    elseif(variant STREQUAL "-large")
+        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_LARGE=1)
+        set(id GCMS00012)
+    else()
+        set(id GCMS00001)
+    endif()
+    target_link_libraries(${t} PRIVATE gcm_cmd gcm_sys sysutil_stub sysutil rt lv2)
+    ps3_add_self(${t})
+    ps3_add_pkg(${t} APPID "${id}" CONTENTID "UP0001-${id}_00-PS3DKSAMPLES0000")
+endforeach()
