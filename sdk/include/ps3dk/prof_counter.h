@@ -1,8 +1,9 @@
 /* <ps3dk/prof_counter.h> -- named per-frame counters in a ps3dk-prof capture (format section 11: file flag bit 8,
  * chunk type 39 COUNTERS).
  *
- * The call exists only in a runtime built with PS3DK_PROF_WITH_COUNTERS (src/counters); the default archives are
- * unchanged and never set bit 8.  The installed counters archive variants are a follow-up step.  Build with -DPS3DK_PROF=1; with PS3DK_PROF undefined or 0, PS3DK_PROF_COUNTER compiles to
+ * The call exists only in a runtime built with PS3DK_PROF_WITH_COUNTERS: link libps3dkprof_counters.a in place of
+ * libps3dkprof.a, or libps3dkprof_ext_counters.a in place of libps3dkprof_ext.a (sdk/libps3dkprof `make counters`
+ * / `install-counters`).  The default archives are unchanged and never set bit 8.  Build with -DPS3DK_PROF=1; with PS3DK_PROF undefined or 0, PS3DK_PROF_COUNTER compiles to
  * nothing that runs and references no function.
  *
  * PS3DK_PROF_COUNTER(name, value) records one sample: the calling thread's incarnation, the counter, the thread's
