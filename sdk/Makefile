@@ -191,6 +191,8 @@ HEADERS := \
     include/cell/gcm/gcm_command_c.h \
     include/cell/gcm/gcm_command_link.h \
     include/cell/gcm/gcm_command_cpp_explicit.h \
+    include/cell/gcm/gcm_segment.h \
+    include/cell/gcm/gcm_spu_prepare.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
     include/cell/cell_audio_in.h \
@@ -597,7 +599,7 @@ HEADERS := \
     include/cell/daisy/ato_qctl.h \
     include/simdmath/fastf4.h
 
-SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis libps3dkprof
+SUBLIBS := libgcm_cmd librsx libdbgfont libspurs_task libsputhread libspurs_job libspurs_jq libdma libgcm_spu_cmd libfiber libatomic libsheap libsync2 libsync liblv2 libface libperf libmixer libmt19937 libhash libfontGcm libdbgrsx libcgb libPSGL libPSGLFX_stub libPSGLU libsscgpu libspuPSGL libsimdmath libovis libps3dkprof
 
 # Headers shared across PPU + SPU sides - the SPU job runtime needs to
 # see the same CellSpursJobHeader / CellSpursJobContext2 / error-code
@@ -731,6 +733,7 @@ SPU_HEADERS := \
     include-spu/math.h \
     include-spu/cell/atomic.h \
     include-spu/cell/dma.h \
+    include-spu/cell/gcm/gcm_spu_cmd.h \
     include-spu/cell/sync.h \
     include-spu/cell/sync/error.h \
     include-spu/cell/sync/barrier.h \

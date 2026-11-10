@@ -706,6 +706,16 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      # GCM command segments: cellGcmSetupContextData plus the label-fenced
+      # segment helper, run against a host model of the RSX front end.
+      - name: Test GCM command segments refuse overflow and retire by label
+        run: bash tests/sdk/gcm-segment-test.sh
+
+      # The SPU GCM command writer must emit, for every call, the words its
+      # PPU counterpart emits; a one-method mutant must be caught.
+      - name: Test the SPU GCM command writer is byte-exact with the PPU emitters
+        run: bash tests/sdk/gcm-spu-cmd-test.sh
+
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 
