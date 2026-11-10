@@ -190,6 +190,9 @@ pub fn extension_lines(cap: &Capture) -> Vec<String> {
     if let Some(f) = &cap.func_paths {
         out.push(crate::func_paths::summary_line(f));
     }
+    if let Some(f) = &cap.fifo {
+        out.push(crate::fifo::summary_line(f));
+    }
     out
 }
 

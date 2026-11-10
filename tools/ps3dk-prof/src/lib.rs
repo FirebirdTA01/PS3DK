@@ -19,6 +19,7 @@ pub mod source_checkpoints;
 pub mod dependencies;
 pub mod durations;
 pub mod ext;
+pub mod fifo;
 pub mod foreign_paths;
 pub mod foreign_timeline;
 pub mod func_paths;

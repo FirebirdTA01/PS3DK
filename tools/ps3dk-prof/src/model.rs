@@ -68,6 +68,12 @@ pub enum Rule {
     FuncTree,
     /// A FUNC_STATUS chunk violates its wire or ordering rules.
     FuncStatus,
+    /// FIFO wrap events (file_flags bit 6, chunk types 31-33; ps3dk-prof-fifo.md): FIFO_CONFIG.
+    FifoConfig,
+    /// A FIFO_EVENTS chunk violates its wire or ordering rules.
+    FifoEvents,
+    /// A FIFO_STATUS chunk violates its wire, conservation or ordering rules.
+    FifoStatus,
     // 1. Primitives
     StringTooLong,
     StringInvalidUtf8,
@@ -453,6 +459,8 @@ pub struct Capture {
     pub waits: Option<crate::waits::Inventory>,
     /// Automatic function paths (file_flags bit 5); None without the capability.
     pub func_paths: Option<crate::func_paths::Inventory>,
+    /// FIFO wrap phase events (file_flags bit 6): present exactly when the flag is.
+    pub fifo: Option<crate::fifo::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
