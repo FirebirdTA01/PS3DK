@@ -66,7 +66,7 @@ static uint32_t label_value(uint8_t index)
  * scissor and clear colour set for the indicator box the ring clears after
  * RETURN, so the box shows whether state set inside a segment survives.
  * phase 0 (main memory): green stripe, one bar; phase 1 (local): blue, two. */
-static void build_frame(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
+__attribute__((unused)) static void build_frame(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
 {
     static const uint32_t stripe[2][2] = {{0xff30c080, 0xff208050}, {0xff5080ff, 0xff3050c0}};
     uint32_t w = disp.width, h = disp.height, bar = w / 16;
@@ -102,7 +102,7 @@ typedef struct {
 } PhaseStats;
 
 /* Check what the slot's previous segment left in its progress label. */
-static void check_progress(PhaseStats *st, unsigned slot, uint32_t expect)
+__attribute__((unused)) static void check_progress(PhaseStats *st, unsigned slot, uint32_t expect)
 {
     uint32_t v = label_value(progress_label[slot]);
     if (v == expect) return;
@@ -115,7 +115,7 @@ static void check_progress(PhaseStats *st, unsigned slot, uint32_t expect)
     }
 }
 
-static int wait_slot(PhaseStats *st, CellGcmSegment *s, unsigned slot, unsigned frame, uint32_t *polls)
+__attribute__((unused)) static int wait_slot(PhaseStats *st, CellGcmSegment *s, unsigned slot, unsigned frame, uint32_t *polls)
 {
     int32_t rc = cellGcmSegmentWaitRetired(s, WAIT_POLLS, WAIT_US, polls);
     if (rc == CELL_OK) return 1;
@@ -127,7 +127,8 @@ static int wait_slot(PhaseStats *st, CellGcmSegment *s, unsigned slot, unsigned 
     return 0;
 }
 
-static int run_phase(CellGcmContextData *ring, CellGcmSegment seg[2], unsigned phase, PhaseStats *st)
+/* The -large variant runs no frame phase. */
+__attribute__((unused)) static int run_phase(CellGcmContextData *ring, CellGcmSegment seg[2], unsigned phase, PhaseStats *st)
 {
     seg_step("%s begin frames=%u", st->name, FRAMES);
     for (unsigned frame = 0; frame < FRAMES; ++frame) {
