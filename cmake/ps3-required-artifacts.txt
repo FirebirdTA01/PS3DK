@@ -215,6 +215,7 @@ ppu_stub  ppu/lib/libvpost_stub.a
 # Same criterion as ppu_stub, for spu/lib.  The manifest had ZERO spu coverage
 # until 2026-08-27: 14 SPU archives shipped and none were validated.
 spu_lib   spu/lib/libfiber.a
+spu_lib   spu/lib/libgcm_spu_cmd.a
 spu_lib   spu/lib/libovis.a
 spu_lib   spu/lib/libsimdmath.a
 spu_lib   spu/lib/libspuPSGL.a
