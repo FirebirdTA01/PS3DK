@@ -28,6 +28,10 @@ impl<'a> Cursor<'a> {
         self.pos += n;
         Ok(out)
     }
+    /// Bytes not yet consumed.
+    pub(crate) fn remaining(&self) -> usize {
+        self.bytes.len() - self.pos
+    }
     pub(crate) fn u8(&mut self) -> Result<u8, Malformed> {
         Ok(self.take(1)?[0])
     }

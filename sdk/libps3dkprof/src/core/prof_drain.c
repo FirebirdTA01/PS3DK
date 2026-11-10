@@ -8,6 +8,9 @@
 #ifdef PS3DK_PROF_WITH_FUNC
 #include "../func/func_internal.h"
 #endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+#include "../counters/counter_internal.h"
+#endif
 
 #include <string.h>
 
@@ -137,7 +140,7 @@ static void enc_end(prof *p)
 {
     drainer *d = &p->dr;
     uint8_t *b = d->buf;
-#if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC)
+#if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC) || defined(PS3DK_PROF_WITH_COUNTERS)
     if (d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
         return;
@@ -167,6 +170,21 @@ int p_wait_emit_chunk(prof *p,uint32_t type,const uint8_t *payload,size_t len)
     if(payload!=pl(p))memcpy(pl(p),payload,len);
     p->dr.pos=len;enc_end(p);
     return !p->snk.failed && p->dr.chunk_seq==seq+1 ? 0:-1;
+}
+#endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+/* One COUNTERS chunk (type 39) through the common framing; 0 only when the sink accepted the whole chunk. */
+int p_counter_emit_chunk(prof *p, const uint8_t *payload, size_t len)
+{
+    uint64_t seq = p->dr.chunk_seq;
+    if (p->snk.failed || len > P_CHUNK_CAP)
+        return -1;
+    enc_begin(p, CNT_CHUNK);
+    if (payload != pl(p))
+        memcpy(pl(p), payload, len);
+    p->dr.pos = len;
+    enc_end(p);
+    return !p->snk.failed && p->dr.chunk_seq == seq + 1 ? 0 : -1;
 }
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
@@ -335,6 +353,9 @@ static void dr_start(prof *p)
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
     head[12] |= 32; /* file_flags bit 5: function paths (chunk types 28-30) */
+#endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    head[13] |= 1; /* file_flags bit 8: named per-frame counters (chunk type 39) */
 #endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
@@ -545,6 +566,10 @@ int p_drain_once(prof *p)
         return -1;
     }
     dr_start(p);
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    /* 0. The counter snapshot BEFORE the table snapshot: every sample below it was made by a thread step 2 declares. */
+    p_counter_snapshot(p);
+#endif
 
     /* 1. Snapshot the table under the mutex, then (outside it) each ack word BEFORE its write index, so a RETIRED
      * incarnation's every publication is below the snapshot. */
@@ -595,6 +620,9 @@ int p_drain_once(prof *p)
 
 #ifdef PS3DK_PROF_WITH_WAITS
     (void)p_wait_emit_ready(p);
+#endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    (void)p_counter_emit(p, 0);
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
     /* 3c. Function paths: published cuts, LAGGING rows and the FINAL of each retiring incarnation, before its slot is
@@ -752,6 +780,9 @@ int p_quiesce_freeze_seal(prof *p)
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_freeze(p);
 #endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    p_counter_freeze(p); /* after the frontier's thread set is fixed: every sample's incarnation is in it */
+#endif
     ST_REL(&p->phase, 2u);            /* SEALING; self-instrumentation is off (the caller is in_drain) */
 
     if (LD_RLX(&p->lock_failed))
@@ -819,6 +850,9 @@ int p_quiesce_freeze_seal(prof *p)
 #endif
 #ifdef PS3DK_PROF_WITH_WAITS
         (void)p_wait_emit_status(p);
+#endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+        (void)p_counter_emit(p, 1); /* the FINAL COUNTERS chunk, after the frontier's THREADS, before the TRAILER */
 #endif
         /* The TRAILER: ACKED and NOT_QUIESCED entries (6). */
         anylim = d->any_retired_limit;

@@ -364,7 +364,8 @@ fn t0_unknown_flag_bits_are_malformed_in_every_byte() {
     // bit 0); with bit 0 (3) the file must carry a PROFILE at chunk 2, which this file does not (ProfileMissing).
     // Bit 2 (SPU_ORDER, spu-ticks slice design 3) requires bits 0 and 1: 4, 5 and 6 are FileFlagsNonzero; 7 is
     // defined and also needs the PROFILE.
-    for flags in [2u32, 4, 5, 6, 0x100, 0x10000, 0x8000_0000] {
+    // Bit 8 (0x100, COUNTERS) is defined too (tests/counters.rs); 0x200 is the lowest undefined bit of byte 13.
+    for flags in [2u32, 4, 5, 6, 0x200, 0x10000, 0x8000_0000] {
         let mut f = ext_file(std_ext());
         f.flags = flags;
         dump(&format!("t0-flags-{flags:x}"), &f.bytes());

@@ -117,6 +117,8 @@ struct Reader {
     cap: Capture,
     waits: Option<crate::waits::Reader>,
     func: Option<crate::func_paths::Reader>,
+    /// file_flags bit 8: named per-frame counters (chunk type 39).
+    counters: Option<crate::counters::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -184,6 +186,7 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         cap: Capture::default(),
         waits: None,
         func: None,
+        counters: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -211,7 +214,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         // Bits 0-5 are defined; bit 1 needs bit 0 and bit 2 needs bit 1.
         let v = bytes.get(12).copied().unwrap_or(0);
         let known = v & !63 == 0 && (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0);
-        if n > 12 && (!known || bytes[13..n].iter().any(|&b| b != 0)) {
+        // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte); bytes 14..15 must be 0
+        let high_ok = !(n > 13 && bytes[13] & !1 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
+        if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
             let allowed = if bytes[12] & 32 != 0 {
                 "a combination of bits 0-5 (bit 1 needs bit 0, bit 2 needs bit 1)"
@@ -223,6 +228,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if n > 12 && bytes[12] & crate::waits::FLAG_WAITS as u8 != 0 {
             r.cap.waits = Some(crate::waits::Inventory::default());
+        }
+        if n > 13 && bytes[13] & 1 != 0 {
+            r.cap.counters = Some(crate::counters::Inventory::default());
         }
         if n > 12 && u32::from(bytes[12]) & crate::func_paths::FLAG_FUNC_PATHS != 0 {
             r.cap.func_paths = Some(crate::func_paths::Inventory::default());
@@ -245,7 +253,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let checkpoint_flag = crate::checkpoints::FLAG_FRAME_CHECKPOINTS;
     // bit 2 (SPU_ORDER) requires bits 0 and 1; without bit 1 every refusal keeps the baseline's exact message
     let func_flag = crate::func_paths::FLAG_FUNC_PATHS;
-    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag) != 0
+    let counters_flag = crate::counters::FLAG_COUNTERS;
+    if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
+        | counters_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
@@ -264,6 +274,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & func_flag != 0 {
         r.func = Some(crate::func_paths::Reader::new(func));
+    }
+    if file_flags & counters_flag != 0 {
+        r.counters = Some(crate::counters::Reader::new());
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -328,8 +341,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let wait_ty = r.waits.is_some() && (crate::waits::CHUNK_WAIT_CONFIG..=crate::waits::CHUNK_WAIT_STATUS).contains(&ty);
         let func_ty = r.func.is_some()
             && (crate::func_paths::CHUNK_FUNC_CONFIG..=crate::func_paths::CHUNK_FUNC_STATUS).contains(&ty);
+        let counters_ty = r.counters.is_some() && ty == crate::counters::CHUNK_COUNTERS;
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty
+            && !func_ty && !counters_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -345,6 +359,12 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
         if wait_ty {
             r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if counters_ty {
+            r.counters.as_mut().unwrap().chunk(payload, &r.cap)?;
             pos += total;
             index += 1;
             continue;
@@ -395,6 +415,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let source_checkpoints = r.source_checkpoints.take();
     r.cap.waits = r.waits.take().map(|x| x.result);
     r.cap.func_paths = r.func.take().map(|x| x.result);
+    if let Some(c) = r.counters.take() {
+        r.cap.counters = Some(c.finish(r.trailer_seen)?);
+    }
     let mut cap = r.finish(torn)?;
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);

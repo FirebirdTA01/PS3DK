@@ -903,6 +903,27 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx:
             let tone = if rsx.caps.anomaly_count() > 0 { ui::Tone::Danger } else { ui::Tone::Neutral };
             ui::field_message(p, tone, &format!("{line} (see the RSX frames page)"));
         }
+        if let Some((status, rows)) = &o.counters {
+            p.add_space(ui::SPACE_LG);
+            ui::section_label(p, "COUNTERS");
+            let tone = if status.contains("not final") { ui::Tone::Danger } else { ui::Tone::Neutral };
+            ui::field_message(p, tone, status);
+            egui::Grid::new("counters").striped(true).show(p, |g| {
+                for h in ["Counter", "Samples", "Frames", "Min", "Max", "Last"] {
+                    g.strong(h);
+                }
+                g.end_row();
+                for r in rows {
+                    g.label(&r.name);
+                    g.label(r.samples.to_string());
+                    g.label(r.frames.to_string());
+                    g.label(r.min.to_string());
+                    g.label(r.max.to_string());
+                    g.label(r.last.to_string());
+                    g.end_row();
+                }
+            });
+        }
         p.add_space(ui::SPACE_LG);
         ui::section_label(p, "TRAILER");
         if o.trailer.is_empty() {

@@ -26,6 +26,7 @@ TOOLCHAIN_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 HEADERS := \
     include/ps3dk/prof.h \
     include/ps3dk/prof_func.h \
+    include/ps3dk/prof_counter.h \
     include/ps3dk/prof_wait.h \
     include/ps3dk/prof_wait_internal.h \
     include/ppu-types.h \
@@ -193,6 +194,7 @@ HEADERS := \
     include/cell/gcm/gcm_command_cpp_explicit.h \
     include/cell/gcm/gcm_segment.h \
     include/cell/gcm/gcm_spu_prepare.h \
+    include/cell/gcm/ps3tc_gcm_labels.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
     include/cell/cell_audio_in.h \

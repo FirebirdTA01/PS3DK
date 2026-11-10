@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-gcm-label-reuse C ASM)
+include(ps3-self)
+add_executable(hello-ppu-gcm-label-reuse source/main.c)
+target_compile_features(hello-ppu-gcm-label-reuse PRIVATE c_std_11)
+target_compile_options(hello-ppu-gcm-label-reuse PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(hello-ppu-gcm-label-reuse PRIVATE gcm_cmd gcm_sys sysutil rt lv2 m)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-label-reuse shaders/arena_vp.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-label-reuse shaders/arena_fp.fcg)
+ps3_add_self(hello-ppu-gcm-label-reuse)
+ps3_add_pkg(hello-ppu-gcm-label-reuse
+    APPID "GCML00001" CONTENTID "UP0001-GCML00001_00-PS3DKSAMPLES0000")

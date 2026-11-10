@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-gcm-main-arena C ASM)
+include(ps3-self)
+add_executable(hello-ppu-gcm-main-arena source/main.c)
+target_compile_features(hello-ppu-gcm-main-arena PRIVATE c_std_11)
+target_compile_options(hello-ppu-gcm-main-arena PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(hello-ppu-gcm-main-arena PRIVATE gcm_cmd gcm_sys sysutil rt lv2 m)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-main-arena shaders/arena_vp.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-main-arena shaders/arena_fp.fcg)
+ps3_add_self(hello-ppu-gcm-main-arena)
+ps3_add_pkg(hello-ppu-gcm-main-arena
+    APPID "GCMA00001" CONTENTID "UP0001-GCMA00001_00-PS3DKSAMPLES0000")
