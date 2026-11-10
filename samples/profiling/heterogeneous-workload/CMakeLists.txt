@@ -18,6 +18,19 @@ endif()
 # in spu/include/ps3dk) unless SAMPLE_PROF_SRC is set: that developer override compiles the lane writer from those
 # sources instead.  OFF: today's build.
 option(SAMPLE_PROF_EXT "Record SPU-lane and RSX-domain zones (needs SAMPLE_PROFILING; ILP32 or LP64; the installed ext archive of the same data model unless SAMPLE_EXT_ARCHIVE is set)" OFF)
+option(SAMPLE_FUNC_PATHS "Instrument own PPU sources with automatic function paths (needs PROFILING, EXT and LIVE)" OFF)
+option(SAMPLE_FUNC_REGISTRATION_PROBE "Diagnostic only: retain one registration-spanning instrumented function" OFF)
+set(SAMPLE_FUNC_FRAMES 0 CACHE STRING "Fixed frame count for the automatic-function gate; 0 keeps the timed session")
+if(NOT "${SAMPLE_FUNC_FRAMES}" MATCHES "^[0-9]+$" OR SAMPLE_FUNC_FRAMES GREATER 4096)
+  message(FATAL_ERROR "SAMPLE_FUNC_FRAMES must be 0 to 4096")
+endif()
+if((SAMPLE_FUNC_PATHS OR SAMPLE_FUNC_FRAMES GREATER 0) AND
+   (NOT SAMPLE_PROFILING OR NOT SAMPLE_PROF_EXT OR NOT SAMPLE_LIVE))
+  message(FATAL_ERROR "Function-path sample needs SAMPLE_PROFILING, SAMPLE_PROF_EXT and SAMPLE_LIVE")
+endif()
+if(SAMPLE_FUNC_REGISTRATION_PROBE AND NOT SAMPLE_FUNC_PATHS)
+  message(FATAL_ERROR "SAMPLE_FUNC_REGISTRATION_PROBE needs SAMPLE_FUNC_PATHS")
+endif()
 set(SAMPLE_EXT_ARCHIVE "" CACHE FILEPATH "an explicit libps3dkprof_ext.a (make ext-ilp32 / ext-lp64); empty: the installed one; SAMPLE_PROF_EXT only")
 set(SAMPLE_EXT_LIVE_ARCHIVE "" CACHE FILEPATH "an explicit libps3dkprof_ext_live.a (make ext-live-ilp32 / ext-live-lp64); empty: the installed one, or with SAMPLE_EXT_ARCHIVE required; SAMPLE_PROF_EXT + SAMPLE_LIVE only")
 set(SAMPLE_PROF_SRC "" CACHE PATH "Developer override: libps3dkprof sources (sdk/libps3dkprof/src) to compile the SPU lane writer and take the extension headers from; empty: the installed SDK's")
@@ -83,9 +96,13 @@ if(SAMPLE_PROF_EXT)
     if(SAMPLE_EXT_LIVE_ARCHIVE)
       message(FATAL_ERROR "SAMPLE_EXT_LIVE_ARCHIVE is set but SAMPLE_EXT_ARCHIVE is not: set both or neither")
     endif()
-    set(sample_ext_archive "${sample_prof_lib}/libps3dkprof_ext.a")
+    if(SAMPLE_FUNC_PATHS)
+      set(sample_ext_archive "${sample_prof_lib}/libps3dkprof_ext_func.a")
+    else()
+      set(sample_ext_archive "${sample_prof_lib}/libps3dkprof_ext.a")
+    endif()
     set(sample_ext_live_archive "${sample_prof_lib}/libps3dkprof_ext_live.a")
-    set(sample_ext_what "installed libps3dkprof_ext.a")
+    set(sample_ext_what "installed extension archive ${sample_ext_archive}")
     set(sample_ext_live_what "installed libps3dkprof_ext_live.a")
     foreach(h prof.h prof_spu.h psp_desc.h prof_gpu.h)
       if(NOT EXISTS "${sample_prof_root}/ppu/include/ps3dk/${h}")
@@ -121,6 +138,25 @@ if(SAMPLE_PROF_EXT)
   endif()
 endif()
 add_executable(heterogeneous-workload source/main.c source/spu_pool.c source/scene.c)
+if(SAMPLE_FUNC_PATHS OR SAMPLE_FUNC_FRAMES GREATER 0)
+  if(NOT "${SAMPLE_BUILD_ID}" MATCHES "^[A-Za-z0-9_.+-]+$")
+    message(FATAL_ERROR "Function sample build id must be a plain identifier")
+  endif()
+  target_sources(heterogeneous-workload PRIVATE source/func_workload.c)
+endif()
+if(SAMPLE_FUNC_PATHS)
+  # This target contains own PPU sources only. ps3_add_spu_image uses a separate
+  # command and does not inherit these flags. Header exclusions keep SDK inlines
+  # out; bootstrap functions span registration and are separately probed.
+  target_compile_options(heterogeneous-workload PRIVATE
+    "$<$<COMPILE_LANGUAGE:C>:-finstrument-functions>" "$<$<COMPILE_LANGUAGE:C>:-fno-optimize-sibling-calls>"
+    "$<$<COMPILE_LANGUAGE:C>:-finstrument-functions-exclude-file-list=/ppu/include/,/sdk/include/>"
+    "$<$<COMPILE_LANGUAGE:C>:-finstrument-functions-exclude-function-list=b_thread_begin,pe_start,pe_rt_start>")
+endif()
+target_compile_definitions(heterogeneous-workload PRIVATE
+  SAMPLE_FUNC_PATHS=$<BOOL:${SAMPLE_FUNC_PATHS}>
+  SAMPLE_FUNC_REGISTRATION_PROBE=$<BOOL:${SAMPLE_FUNC_REGISTRATION_PROBE}>
+  SAMPLE_FUNC_FRAMES=${SAMPLE_FUNC_FRAMES})
 if(SAMPLE_LIVE)
   target_sources(heterogeneous-workload PRIVATE source/live.c)
 endif()

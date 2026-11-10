@@ -1,5 +1,6 @@
 #include "workload.h"
 #include "spu_pool.h"
+#include "func_workload.h"
 #include "scene.h"
 #include <ps3dk/prof.h>
 #include <sys/process.h>
@@ -84,6 +85,36 @@ static int ext_publish_end(const char *csv_path,const char *line)
 SYS_PROCESS_PARAM(1001,0x100000);
 static const char *names[4]={"PPU serial / light RSX","SPE parallel / light RSX",
                             "SPE parallel / heavy RSX","PPU serial / heavy RSX"};
+#if SAMPLE_FUNC_REGISTRATION_PROBE
+/* Diagnostic-only: entered before init/registration, exits after registration.
+ * It deliberately has no retained entry and must not acquire invented time. */
+__attribute__((noipa)) int sample_func_registration_probe(unsigned n)
+{
+    return pe_rt_start(n);
+}
+#endif
+#if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0
+static int func_receipt(const ps3dk_prof_capture_record *capture,const char *csv,unsigned frames,unsigned checked,
+                        uint64_t ticks,uint64_t freq,uint64_t checksum,int rc)
+{
+    char tmp[288],fin[288],line[1400];
+    const char *arm=SAMPLE_FUNC_REGISTRATION_PROBE?"ON-PROBE":SAMPLE_FUNC_PATHS?"ON":"OFF";
+    if(!capture->path[0])return -1;
+    if(snprintf(tmp,sizeof tmp,"%s.func.tmp",capture->path)>=(int)sizeof tmp ||
+       snprintf(fin,sizeof fin,"%s.func.txt",capture->path)>=(int)sizeof fin)return -1;
+    int n=snprintf(line,sizeof line,
+        "{\"schema\":1,\"arm\":\"%s\",\"build\":\"%s\",\"session\":\"%016llx\","
+        "\"frames\":%u,\"checked\":%u,\"frame_limit\":%u,\"iterations_per_frame\":64,"
+        "\"entries_per_iteration\":8,\"tree_ticks\":%llu,\"frequency_hz\":%llu,"
+        "\"checksum\":%llu,\"rc\":%d}\n",arm,SAMPLE_BUILD_ID,
+        (unsigned long long)capture->session_id,frames,checked,(unsigned)SAMPLE_FUNC_FRAMES,
+        (unsigned long long)ticks,(unsigned long long)freq,(unsigned long long)checksum,rc);
+    if(n<0 || n>=(int)sizeof line || pe_receipt_publish(&receipt_io,tmp,fin,line))return -1;
+    if(!rc)printf("FUNC_SAMPLE_OK arm=%s session=%016llx capture=%s receipt=%s csv=%s\n",arm,
+                  (unsigned long long)capture->session_id,capture->path,fin,csv);
+    return 0;
+}
+#endif
 int main(void)
 {
     int rc=1,scene_owned=0,pool_owned=0,prof_owned=0;
@@ -91,6 +122,10 @@ int main(void)
     int ext_ran=0,ext_join=0,ext_eligible=0;const char *ext_why=NULL;
 #endif
     unsigned checked=0,phase_seen=0,frames=0;
+#if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0
+    ps3dk_prof_capture_record func_capture={0};
+    uint64_t func_ticks=0,func_checksum=0;
+#endif
     uint32_t sequence=0;
     uint64_t gpu_begin=0,gpu_end=0,frame_us=0;
     int gpu_valid=0;
@@ -121,7 +156,11 @@ int main(void)
     if(pool_create()){puts("WORKLOAD_FAIL no usable SPE pool");goto done;}
     pool_owned=1;
     printf("WORKLOAD_POOL workers=%u\n",pool_count());
+    #if SAMPLE_FUNC_REGISTRATION_PROBE
+    if(sample_func_registration_probe(pool_count())){puts("WORKLOAD_FAIL profiler-init");goto done;}
+#else
     if(pe_rt_start(pool_count())){puts("WORKLOAD_FAIL profiler-init");goto done;}
+#endif
     prof_owned=1;
     if(pool_start_ext()){puts("WORKLOAD_FAIL no usable SPE pool");pool_owned=0;goto done;}
     pe_rt_gpu_start();
@@ -143,6 +182,9 @@ int main(void)
     prof_owned=1;
     if(PS3DK_PROF_THREAD_BEGIN("main")){puts("WORKLOAD_FAIL profiler-thread");goto done;}
 #endif
+    #if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0
+    if(ps3dk_prof_get_capture_record(&func_capture)){puts("WORKLOAD_FAIL capture-identity");goto done;}
+#endif
     sample_mem(log,1);
 #if SAMPLE_LIVE
     {
@@ -158,6 +200,9 @@ int main(void)
 #endif
     uint64_t start=sample_now_us();int previous=-1;
     for(;;){
+#if SAMPLE_FUNC_FRAMES > 0
+        if(frames >= SAMPLE_FUNC_FRAMES)break;
+#endif
         uint64_t begin=sample_now_us(),elapsed=begin-start,frame_tb0=ob_tb();
         int poll=scene_poll();if(poll<0)goto done;if(poll>0)break;
         if(SAMPLE_SESSION_SECONDS && elapsed>=(uint64_t)SAMPLE_SESSION_SECONDS*1000000)break;
@@ -177,6 +222,16 @@ int main(void)
 #endif
         if(sequence==UINT32_MAX){puts("WORKLOAD_FAIL sequence-limit");goto done;}
         ++sequence;
+#if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0
+        uint32_t tree_sum=0;
+        uint64_t tree_begin=ob_tb();
+        for(unsigned k=0;k<SAMPLE_FUNC_ITERATIONS;++k)tree_sum+=sample_func_root(k);
+        uint64_t tree_end=ob_tb();
+        if(tree_sum!=SAMPLE_FUNC_FRAME_SUM || tree_end<tree_begin || UINT64_MAX-func_ticks<tree_end-tree_begin){
+            puts("WORKLOAD_FAIL function-tree");goto done;
+        }
+        func_ticks+=tree_end-tree_begin;func_checksum+=tree_sum;
+#endif
         work_result result={0,0};uint64_t compute_begin=sample_now_us(),compute_tb0=ob_tb(),spe_t0=0,spe_t1=0;
         if(phase==0 || phase==3){
             PS3DK_PROF_ZONE("compute.ppu_serial");
@@ -258,6 +313,7 @@ int main(void)
         drain_t1=ob_tb();
         if(drc!=0 || ferror(log)){puts("WORKLOAD_FAIL capture/log");goto done;}
     }
+    if(SAMPLE_FUNC_FRAMES && frames != SAMPLE_FUNC_FRAMES){puts("WORKLOAD_FAIL fixed-frames-incomplete");goto done;}
     rc=0;
 done:
 #if SAMPLE_PROF_EXT
@@ -288,6 +344,9 @@ done:
         if(pe_end_line(line,sizeof line,ext_join,ext_eligible,ext_why,rc,frames,checked,phase_seen)<0 || ext_publish_end(path,line))
             puts("WORKLOAD_PROF_EXT END receipt NOT published: the run cannot be accepted");
     }
+#endif
+#if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0
+    if(func_receipt(&func_capture,path,frames,checked,func_ticks,tb_freq,func_checksum,rc))rc=1;
 #endif
     return rc;
 }

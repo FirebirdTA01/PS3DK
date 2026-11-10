@@ -235,6 +235,21 @@ ps3dk-prof paths --functions [--elf app.elf] [--thread NAME] [--interval N | --a
 
 Run these before interpreting a capture.
 
+Instrument selectively with `-finstrument-functions`: omit tiny hot leaf files
+with `-finstrument-functions-exclude-file-list`, or mark individual functions
+`__attribute__((no_instrument_function))`. A fixed ILP32 console sample measured
+about 0.43 microseconds of added elapsed time per instrumented entry in one
+OFF/ON/OFF sequence. This is a descriptive workload comparison, not an isolated
+hook-cost estimate; both self and inclusive times include hook cost. Keep the
+same selection when comparing captures.
+
+Start observation before entering the functions whose paths you need. If an
+instrumented function enters before profiler initialization and exits after
+registration, its unmatched exit increments the orphan counter without adding
+a call path or elapsed time. An absent path does not mean the function took
+zero wall time. The heterogeneous-workload sample offers a separate registration
+probe for this case; it is outside that sample's exact call-tree check.
+
 `paths --functions` prints, per thread, each caller chain with its calls, inclusive and self elapsed time and their share of the thread's interval, then the thread's counters (depth_limit, lost, unbalanced, orphan, deferred, reentry, clock) and statuses. Elapsed is wall time between the thread's hook events (waits, preemption and hook cost included), not CPU time. The default is the whole capture; `--interval N` shows one of the thread's own intervals and `--all` every chunk in order. A drain the thread did not answer (LAGGING) and an unacknowledged tail (INCOMPLETE_TAIL) are printed as UNKNOWN, never as zero. The LOST row (lost parent attribution: the node table was full or the probe was refused) is listed on its own, never under a caller. `--elf` names functions by reading each `.opd` descriptor's entry word and the FUNC symbol of `.symtab` that contains it (C++ names demangled); without it, or for an address that does not resolve, the raw `fn` value is printed in hex and counted. When both the ELF's `.note.gnu.build-id` and the capture's build id are present they are compared: a mismatch prints a WARNING (names are still shown); otherwise the names are labelled "ELF match unverified".
 
 Pass `--elf` the unstripped linked ELF, not the packaged one. The packaging step strips the `.elf` it places beside the SELF, so that file has no function symbols, and `--elf` given a stripped ELF refuses to symbolize and keeps the raw rows. In a CMake project the unstripped file is the link target's own output (for the heterogeneous-workload sample, `heterogeneous-workload` in the build directory, with no `.elf` suffix); keep it together with the SELF you run, because it must come from the same link.

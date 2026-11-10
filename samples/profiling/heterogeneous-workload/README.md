@@ -184,3 +184,44 @@ four phases, matching per-worker/aggregate results and a successful END record.
 Verify the `.prof` with the production reader separately. A successful emulator
 run proves functionality, not hardware performance. Keep baseline/failed runs,
 including a console hang, separate from accepted measurements.
+# Automatic PPU function paths (opt-in)
+
+`SAMPLE_FUNC_PATHS=ON` instruments this sample's own PPU C sources with
+`-finstrument-functions` and selects `libps3dkprof_ext_func.a` with the unchanged
+`libps3dkprof_ext_live.a`. It requires `SAMPLE_PROFILING`, `SAMPLE_PROF_EXT` and
+`SAMPLE_LIVE`. The function variant must be installed in the selected profiler
+overlay, or selected explicitly using `SAMPLE_EXT_ARCHIVE` and the matching
+`SAMPLE_PROF_SRC`. The SPU sources and SDK libraries are not instrumented. SDK
+header inlines are excluded too; uninstrumented work contributes to caller self
+elapsed time. Function elapsed includes waits and scheduling, not just CPU work.
+
+For the fixed console gate, set `SAMPLE_FUNC_FRAMES=64`,
+`SAMPLE_SESSION_SECONDS=30` and `SAMPLE_IDLE_SECONDS=1` in both OFF and ON builds.
+OFF means `SAMPLE_FUNC_PATHS=OFF`, with the other settings unchanged. Both run
+64 iterations of the known tree per frame: root calls left (two leaf calls) and
+right (three leaf calls). There are 32768 function entries across 64 frames,
+with exact path counts 4096 root, 4096 left, 8192 left/leaf, 4096 right and
+12288 right/leaf. These functions contain no manual zones. The enclosing sample
+still records its existing zone and extension streams separately.
+
+Each frame checks an independent arithmetic result. The `.prof.func.txt`
+receipt records the exact population, checksum, elapsed ticks and frequency.
+`tools/verify_func.py` checks that receipt and the decoder's whole-thread JSON
+against descriptor addresses from the matching ELF. A session that ends before
+the fixed frame count fails. OFF/ON/OFF elapsed per entry is descriptive and must
+be shown beside OFF-to-OFF variation; it is not an isolated hook-cost estimate.
+
+Keep the **unstripped linked ELF** with the SELF from the same build. For this
+CMake target it is `<build>/heterogeneous-workload`, with no `.elf` suffix.
+Use that file with `ps3dk-prof paths --functions --elf ...`; the packaged
+`heterogeneous-workload.elf` is stripped and cannot supply function names.
+The descriptor and known-function code bytes must match the packaged image.
+
+The exact-count build excludes the three bootstrap functions `pe_start`,
+`pe_rt_start` and `b_thread_begin`, which span thread registration. A separate
+`SAMPLE_FUNC_REGISTRATION_PROBE=ON` diagnostic adds one instrumented function
+around registration. It is outside the three-arm acceptance sequence: its
+expected result is an unmatched exit counter, with no invented call duration,
+because its entry preceded registration. That expectation requires a separately
+approved console run; a build alone does not establish the result. This is a
+real application boundary to account for when instrumenting initialization.
