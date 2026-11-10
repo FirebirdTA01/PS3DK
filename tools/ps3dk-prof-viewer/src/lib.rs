@@ -35,5 +35,7 @@ pub mod timeline_ui;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 mod dependency_fixture;
+pub mod fifo;
+pub mod fifo_ui;
 pub mod waits;
 pub mod waits_ui;

@@ -32,6 +32,8 @@ pub enum Page {
     Zones,
     HotPaths,
     Waits,
+    /// FIFO wrap waits on the PPU clock (file_flags bit 6 captures).
+    Fifo,
     /// RSX frame captures found in the data.
     RsxFrames,
     /// One frame snapshot (`App::shown`).
@@ -596,6 +598,11 @@ impl eframe::App for App {
                     if ui::nav_item(side, self.page == Page::Waits, "⏱", "Waits", None).clicked() {
                         self.page = Page::Waits;
                     }
+                    if self.doc.as_ref().and_then(|d| d.fifo.as_ref()).is_some_and(|v| v.capability)
+                        && ui::nav_item(side, self.page == Page::Fifo, "⏳", "FIFO wrap waits", None).clicked()
+                    {
+                        self.page = Page::Fifo;
+                    }
                     if let Some(n) = rsx_count {
                         if ui::nav_item(side, self.page == Page::RsxFrames, "🖼", crate::rsx_ui::TITLE, Some(n)).clicked() {
                             self.page = Page::RsxFrames;
@@ -708,6 +715,10 @@ impl eframe::App for App {
                     Page::Waits => match &d.waits {
                         Some(v) => crate::waits_ui::page(p, v, waits, &mut crate::waits_ui::Drawn::default()),
                         None => ui::field_message(p, ui::Tone::Neutral, "No wait analysis for this document."),
+                    },
+                    Page::Fifo => match &d.fifo {
+                        Some(v) => crate::fifo_ui::page(p, v, &mut crate::fifo_ui::Drawn::default()),
+                        None => ui::field_message(p, ui::Tone::Neutral, "No FIFO wrap analysis for this document."),
                     },
                 },
             },

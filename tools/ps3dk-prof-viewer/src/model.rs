@@ -28,6 +28,8 @@ pub struct Document {
     pub hot: Option<crate::hotpaths::HotView>,
     /// Automatic wait observations, owned by this exact immutable document.
     pub waits: Option<crate::waits::WaitsView>,
+    /// FIFO wrap waits (file_flags bit 6), owned by this exact immutable document; None when MALFORMED.
+    pub fifo: Option<crate::fifo::FifoView>,
     /// The Hot paths page's SPU/RSX lanes (F3b): a one-entry cache keyed by W32, filled on first need.
     pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
     /// The Hot paths page's automatic function paths: a one-entry cache keyed by (thread, selection, symbols).
@@ -108,12 +110,13 @@ impl Document {
     // One construction path for file/live results and policy-controlled parser
     // results. It never accepts an index from another capture.
     pub(crate) fn from_outcome(path: PathBuf, size: usize, prefix_ok: bool, loaded: Outcome) -> Document {
-        let (state, ext, frames, hot, waits) = match loaded {
+        let (state, ext, frames, hot, waits, fifo) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
                 },
                 ExtView::None,
+                None,
                 None,
                 None,
                 None,
@@ -124,7 +127,8 @@ impl Document {
                 let pm = ps3dk_prof::paths::paths(&a, &ps3dk_prof::paths::PathBudgets::default());
                 let hot = crate::hotpaths::build(&a, &pm);
                 let waits = crate::waits::WaitsView::build(&a.capture, crate::waits::Budget::default());
-                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits))
+                let fifo = crate::fifo::FifoView::build(&a.capture);
+                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo))
             }
         };
         Document {
@@ -137,6 +141,7 @@ impl Document {
             foreign: crate::foreign::ForeignSlot::default(),
             hot,
             waits,
+            fifo,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
