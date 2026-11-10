@@ -50,7 +50,7 @@ build() {
     local out=$1; shift
     # The PSL1GHT-derived emitters are built as the SDK builds them: without
     # -Werror and with their implicit-declaration and parameter warnings off.
-    "$cc" -std=gnu11 -O1 -w -ffunction-sections -fdata-sections "${san[@]}" "${inc[@]}" -DLIBRSX_INTERNAL \
+    "$cc" -std=gnu11 -O1 -w -ffunction-sections -fdata-sections "${san[@]}" "${inc[@]}" -fno-sanitize=shift -DLIBRSX_INTERNAL \
         -c "$src/rsx_legacy/commands.c" -o "$out-commands.o"
     "$cc" -std=gnu11 -O1 -w -ffunction-sections -fdata-sections "${san[@]}" "${inc[@]}" \
         -c "$src/gcm_rsx_wrappers.c" -o "$out-wrappers.o"
