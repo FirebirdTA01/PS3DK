@@ -110,4 +110,52 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
 
+# --- Observed FIFO wrap variant (docs/design/ps3dk-prof-fifo.md) ---
+# libgcm_cmd_prof_fifo.a, per data model: the default members with
+# ps3tc_fifo_wrap.o replaced by the same source compiled with
+# PS3TC_FIFO_OBSERVE (the six phase-boundary observation points and the
+# private observer bridge).  Explicit goals only: no prerequisite of all,
+# install or clean, and its own object directories, so the default archives
+# and their build plan are unchanged.  The shared default objects are
+# prerequisites, never rewritten here.
+FIFO_OBJ_DIR      := $(OBJ_DIR)-fifo
+FIFO_LP64_OBJ_DIR := $(OBJ_DIR)-fifo-lp64
+FIFO_ARCHIVE      := $(FIFO_OBJ_DIR)/libgcm_cmd_prof_fifo.a
+FIFO_LP64_ARCHIVE := $(FIFO_LP64_OBJ_DIR)/libgcm_cmd_prof_fifo.a
+FIFO_OBJS         := $(filter-out $(OBJ_DIR)/ps3tc_fifo_wrap.o,$(OBJS)) $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o
+FIFO_LP64_OBJS    := $(filter-out $(LP64_OBJ_DIR)/ps3tc_fifo_wrap.o,$(LP64_OBJS)) $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o
+
+.PHONY: fifo install-fifo fifo-clean
+fifo: $(FIFO_ARCHIVE) $(FIFO_LP64_ARCHIVE)
+
+$(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DPS3TC_FIFO_OBSERVE=1 $(DEPFLAGS) -c -o $@ $<
+
+$(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LP64_CFLAGS) -DPS3TC_FIFO_OBSERVE=1 $(DEPFLAGS) -c -o $@ $<
+
+$(FIFO_ARCHIVE): $(FIFO_OBJS) $(LEGACY_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+$(FIFO_LP64_ARCHIVE): $(FIFO_LP64_OBJS) $(LP64_LEGACY_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+install-fifo: fifo
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB)/lp64
+	install -m 0644 $(FIFO_ARCHIVE) $(INSTALL_LIB)/libgcm_cmd_prof_fifo.a
+	install -m 0644 $(FIFO_LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd_prof_fifo.a
+	cmp $(FIFO_ARCHIVE) $(INSTALL_LIB)/libgcm_cmd_prof_fifo.a
+	cmp $(FIFO_LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd_prof_fifo.a
+
+fifo-clean:
+	rm -f $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.d $(FIFO_ARCHIVE)
+	rm -f $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.d $(FIFO_LP64_ARCHIVE)
+
 -include $(wildcard $(OBJ_DIR)/*.d)
+-include $(wildcard $(FIFO_OBJ_DIR)/*.d $(FIFO_LP64_OBJ_DIR)/*.d)

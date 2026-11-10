@@ -54,7 +54,37 @@ typedef struct ps3tc_fifo_port {
     void (*pause)(void *arg, uint32_t want, uint32_t spins,
                   unsigned int phase, uint64_t elapsed_us);
     void *arg;
+#ifdef PS3TC_FIFO_OBSERVE
+    /* The observed variant only (libgcm_cmd_prof_fifo.a; docs/design/ps3dk-prof-fifo.md).  observe NULL: no
+     * observation and no extra clock read, the trace of the plain protocol.  The protocol reports the four phase
+     * boundaries with their timebase brackets; the caller reports WRAP_ENTER and WRAP_EXIT itself. */
+    void (*observe)(void *arg, unsigned int kind, uint64_t tb_before, uint64_t tb_after);
+    uint64_t (*tb)(void *arg);
+#endif
 } ps3tc_fifo_port;
+
+/* Observation points.  In the default build every one expands to an empty statement, so the protocol's stores,
+ * barriers, waits and pause calls are exactly the plain protocol's.  In the observed build they read the clock and
+ * report: BEGIN = [before the PUT store, after the barrier that follows it]; END = [after the last wait iteration
+ * (or the BEGIN's after, with none), after the GET check that succeeded].  No store, barrier or wait changes. */
+#ifdef PS3TC_FIFO_OBSERVE
+#define PS3TC_FIFO_OBSERVE_POINTS 1
+#define PS3TC_FIFO_OBS_TB(p) ((p)->observe ? (p)->tb((p)->arg) : 0u)
+#define PS3TC_FIFO_OBS_DECL uint64_t ps3tc_ob_before = 0, ps3tc_ob_last = 0
+#define PS3TC_FIFO_OBS_PRE(p) (ps3tc_ob_before = PS3TC_FIFO_OBS_TB(p))
+#define PS3TC_FIFO_OBS_BEGIN(p, kind) \
+    do { ps3tc_ob_last = PS3TC_FIFO_OBS_TB(p); \
+         if ((p)->observe) (p)->observe((p)->arg, (kind), ps3tc_ob_before, ps3tc_ob_last); } while (0)
+#define PS3TC_FIFO_OBS_SPIN(p) (ps3tc_ob_last = PS3TC_FIFO_OBS_TB(p))
+#define PS3TC_FIFO_OBS_END(p, kind) \
+    do { if ((p)->observe) (p)->observe((p)->arg, (kind), ps3tc_ob_last, (p)->tb((p)->arg)); } while (0)
+#else
+#define PS3TC_FIFO_OBS_DECL do { } while (0)
+#define PS3TC_FIFO_OBS_PRE(p) do { } while (0)
+#define PS3TC_FIFO_OBS_BEGIN(p, kind) do { } while (0)
+#define PS3TC_FIFO_OBS_SPIN(p) do { } while (0)
+#define PS3TC_FIFO_OBS_END(p, kind) do { } while (0)
+#endif
 
 /* Phase numbers passed to pause.  1 = waiting for GET to reach tail after
  * the lap is published: the lap is retired up to the JUMP, and the JUMP
@@ -82,26 +112,38 @@ static inline void ps3tc_fifo_wrap_protocol(volatile uint32_t *tail,
 {
     uint32_t spins;
 
+    PS3TC_FIFO_OBS_DECL;
+
     *tail = begin_off | PS3TC_NV40_JUMP_FLAG;
     p->barrier(p->arg);
 
     /* Phase 1: publish the lap up to, not including, the JUMP.
      * The wait's start is here (when PUT is set to the tail), not earlier. */
     const uint64_t phase1_start = p->now_us(p->arg);
+    PS3TC_FIFO_OBS_PRE(p);
     *p->put = tail_off;
     p->barrier(p->arg);
-    for (spins = 0; *p->get != tail_off; ++spins)
+    PS3TC_FIFO_OBS_BEGIN(p, 2u);
+    for (spins = 0; *p->get != tail_off; ++spins) {
         p->pause(p->arg, tail_off, spins,
                  PS3TC_FIFO_PHASE_1, p->now_us(p->arg) - phase1_start);
+        PS3TC_FIFO_OBS_SPIN(p);
+    }
+    PS3TC_FIFO_OBS_END(p, 3u);
 
     /* Phase 2: release the JUMP; the GPU follows it and parks at begin.
      * Re-measure the start of this phase's own wait. */
     const uint64_t phase2_start = p->now_us(p->arg);
+    PS3TC_FIFO_OBS_PRE(p);
     *p->put = begin_off;
     p->barrier(p->arg);
-    for (spins = 0; *p->get != begin_off; ++spins)
+    PS3TC_FIFO_OBS_BEGIN(p, 4u);
+    for (spins = 0; *p->get != begin_off; ++spins) {
         p->pause(p->arg, begin_off, spins,
                  PS3TC_FIFO_PHASE_2, p->now_us(p->arg) - phase2_start);
+        PS3TC_FIFO_OBS_SPIN(p);
+    }
+    PS3TC_FIFO_OBS_END(p, 5u);
 }
 
 #endif /* PS3TC_FIFO_WRAP_PROTOCOL_H */

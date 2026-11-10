@@ -20,6 +20,9 @@
 #include <cell/gcm/ps3tc_fifo_wrap.h>
 
 #include "ps3tc_fifo_wrap_protocol.h"
+#ifdef PS3TC_FIFO_OBSERVE
+#include "ps3tc_fifo_observe.h"
+#endif
 
 /* Wrap statistics (ps3tc_fifo_wrap_stats).  The callback runs on the thread
  * that emits into the context, so plain counters suffice; ticks are
@@ -42,7 +45,29 @@ static uint64_t ticks_to_us(uint64_t ticks, uint64_t hz)
 typedef struct {
     gcmControlRegister volatile *ctrl;
     uint64_t hz;                    /* 0 if the syscall gave no frequency */
+#ifdef PS3TC_FIFO_OBSERVE
+    ps3tc_fifo_obs_wrap obs;        /* the observed wrap's frozen offsets */
+#endif
 } ps3tc_fifo_wait;
+
+#ifdef PS3TC_FIFO_OBSERVE
+/* The observed variant (libgcm_cmd_prof_fifo.a): the bridge state of
+ * ps3tc_fifo_observe.h.  Written by install/remove and read by the callback,
+ * all on the context owner thread (the bridge's precondition), so plain
+ * fields suffice. */
+static ps3tc_fifo_obs_state g_obs;
+
+static uint64_t ps3tc_fifo_tb(void *arg)
+{
+    (void)arg;
+    return __builtin_ppc_get_timebase();
+}
+
+static void ps3tc_fifo_observe_phase(void *arg, unsigned int kind, uint64_t tb_before, uint64_t tb_after)
+{
+    ps3tc_fifo_obs_emit(&g_obs, kind, tb_before, tb_after, &((const ps3tc_fifo_wait *)arg)->obs);
+}
+#endif
 
 /* The protocol's clock, in microseconds from the timebase origin.  The
  * function-pointer form lets the host model install its own clock. */
@@ -112,11 +137,28 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
         __builtin_trap();
     }
 
-    ps3tc_fifo_wait wait = { gcmGetControlRegister(), sysGetTimebaseFrequency() };
+    ps3tc_fifo_wait wait = { gcmGetControlRegister(), sysGetTimebaseFrequency()
+#ifdef PS3TC_FIFO_OBSERVE
+                             , { 0u, 0u, 0u, 0u }
+#endif
+    };
     gcmControlRegister volatile *ctrl = wait.ctrl;
+#ifdef PS3TC_FIFO_OBSERVE
+    /* WRAP_ENTER: after every check that can return or halt, before the tail
+     * JUMP store.  Only the registered context is observed. */
+    const int observed = g_obs.reg.event && g_obs.ctx == (const void *)ctx;
+    wait.obs = (ps3tc_fifo_obs_wrap){ begin_off, tail_off, count, 0u };
+    if (observed) {
+        const uint64_t t = ps3tc_fifo_tb(NULL);
+        ps3tc_fifo_obs_emit(&g_obs, PS3TC_FIFO_B_WRAP_ENTER, t, t, &wait.obs);
+    }
+#endif
     const ps3tc_fifo_port port = {
         &ctrl->put, &ctrl->get, ps3tc_fifo_sync, ps3tc_fifo_now_us,
         ps3tc_fifo_pause, &wait
+#ifdef PS3TC_FIFO_OBSERVE
+        , observed ? ps3tc_fifo_observe_phase : NULL, ps3tc_fifo_tb
+#endif
     };
     const uint64_t t0 = __builtin_ppc_get_timebase();
     ps3tc_fifo_wrap_protocol((volatile uint32_t *)ctx->current,
@@ -128,6 +170,12 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
         wrap_max_ticks = ticks;
 
     ctx->current = ctx->begin;
+#ifdef PS3TC_FIFO_OBSERVE
+    if (observed) {
+        const uint64_t t = ps3tc_fifo_tb(NULL);
+        ps3tc_fifo_obs_emit(&g_obs, PS3TC_FIFO_B_WRAP_EXIT, t, t, &wait.obs);
+    }
+#endif
     return 0;
 }
 
@@ -154,3 +202,28 @@ void ps3tc_fifo_wrap_install(gcmContextData *ctx)
     if (!ctx) return;
     ctx->callback = (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(ps3tc_fifo_wrap_callback);
 }
+
+#ifdef PS3TC_FIFO_OBSERVE
+/* The bridge (ps3tc_fifo_observe.h), on the quiescent context owner.  The ring
+ * offsets are validated once here: both ends map, are 4-aligned, below the
+ * JUMP bit, and the IO extent equals the effective-address extent. */
+int ps3tc_fifo_observe_install(struct _gcmCtxData *ctx, const ps3tc_fifo_observer *obs,
+                               uint32_t *begin_off, uint32_t *end_off)
+{
+    uint32_t b = 0, e = 0;
+    if (!ctx || !ctx->begin || !ctx->end)
+        return -1;
+    if (gcmAddressToOffset((void *)ctx->begin, &b) != 0 || gcmAddressToOffset((void *)ctx->end, &e) != 0)
+        return -1;
+    return ps3tc_fifo_obs_install(&g_obs, ctx, obs, b, e,
+                                  (uint64_t)((uintptr_t)(void *)ctx->end - (uintptr_t)(void *)ctx->begin),
+                                  begin_off, end_off);
+}
+
+int ps3tc_fifo_observe_remove(struct _gcmCtxData *ctx, const ps3tc_fifo_observer *obs)
+{
+    return ps3tc_fifo_obs_remove(&g_obs, ctx, obs);
+}
+
+uint64_t ps3tc_fifo_observe_suppressed(void) { return g_obs.suppressed; }
+#endif
