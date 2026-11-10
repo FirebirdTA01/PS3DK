@@ -140,8 +140,8 @@ CellGcmSegmentContext *cellGcmSegmentBegin(CellGcmSegment *s)
 
 int32_t cellGcmSegmentEnd(CellGcmSegment *s)
 {
-    if (!s || s->state != CELL_GCM_SEGMENT_STATE_OPEN)
-        return CELL_GCM_SEGMENT_ERROR_STATE;
+    if (!s || s->state != CELL_GCM_SEGMENT_STATE_OPEN || !s->context.begin)
+        return CELL_GCM_SEGMENT_ERROR_STATE;     /* not open, or claimed externally */
     /* An emitter can only have advanced current up to end, which leaves the
      * reserved last word; anything else means the context was rewritten. */
     if (s->context.current < s->buffer || s->context.current > s->context.end ||
@@ -155,6 +155,31 @@ int32_t cellGcmSegmentEnd(CellGcmSegment *s)
     s->state = CELL_GCM_SEGMENT_STATE_CLOSED;
     __sync_synchronize();   /* the words reach memory before any CALL */
     return s->overflowWords ? CELL_GCM_SEGMENT_ERROR_OVERFLOW : CELL_OK;
+}
+
+void *cellGcmSegmentBeginExternal(CellGcmSegment *s)
+{
+    if (!s || s->state == CELL_GCM_SEGMENT_STATE_OPEN ||
+        (s->state != CELL_GCM_SEGMENT_STATE_CLOSED && !cellGcmSegmentIsRetired(s)))
+        return NULL;
+    s->context.begin = s->context.end = s->context.current = NULL;
+    s->overflowWords = 0;
+    s->usedBytes = 0;
+    s->state = CELL_GCM_SEGMENT_STATE_OPEN;
+    return s->buffer;
+}
+
+int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
+{
+    if (!s || s->state != CELL_GCM_SEGMENT_STATE_OPEN || s->context.begin)
+        return CELL_GCM_SEGMENT_ERROR_STATE;
+    __sync_synchronize();   /* the writer's data is read after its completion */
+    if (usedBytes < 4u || (usedBytes & 3u) || usedBytes > s->sizeBytes ||
+        ((volatile uint32_t *)s->buffer)[usedBytes / 4u - 1u] != SEGMENT_RETURN_WORD)
+        return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
+    s->usedBytes = usedBytes;
+    s->state = CELL_GCM_SEGMENT_STATE_CLOSED;
+    return CELL_OK;
 }
 
 int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)

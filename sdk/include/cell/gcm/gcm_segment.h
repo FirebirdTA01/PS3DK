@@ -119,6 +119,15 @@ CellGcmSegmentContext *cellGcmSegmentBegin(CellGcmSegment *segment);
  * not be called; Begin it again). */
 int32_t cellGcmSegmentEnd(CellGcmSegment *segment);
 
+/* A segment written by someone else (an SPU job, a DMA): BeginExternal
+ * claims a retired segment and returns its buffer (NULL when in flight);
+ * once the writer is done and its data has reached memory, EndExternal
+ * closes it.  `usedBytes` is what was written, a multiple of 4 within the
+ * buffer whose last word is the RETURN; anything else is refused with
+ * CELL_GCM_SEGMENT_ERROR_INVALID_VALUE and the segment stays claimed. */
+void *cellGcmSegmentBeginExternal(CellGcmSegment *segment);
+int32_t cellGcmSegmentEndExternal(CellGcmSegment *segment, uint32_t usedBytes);
+
 /* Emit, into `ring`, a CALL to the segment followed by its retirement
  * label.  The segment must be closed without overflow. */
 int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *segment);

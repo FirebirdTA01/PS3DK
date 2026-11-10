@@ -321,6 +321,38 @@ static void test_nested(void)
     printf("  one-slot model: nested CALL flagged after label 1\n");
 }
 
+/* A segment written by another writer (the SPU path). */
+static void test_external(void)
+{
+    CellGcmSegment s;
+    uint32_t *m;
+
+    puts("external:");
+    ring_reset();
+    CHECK("init", cellGcmSegmentInit(&s, &arena[8192], 256, GCM_LOCATION_CELL, 209) == CELL_OK);
+    m = cellGcmSegmentBeginExternal(&s);
+    CHECK("claim", m == &arena[8192]);
+    if (!m) return;
+    CHECK("no ppu begin", cellGcmSegmentBegin(&s) == NULL);
+    CHECK("no double claim", cellGcmSegmentBeginExternal(&s) == NULL);
+    CHECK("no internal end", cellGcmSegmentEnd(&s) != CELL_OK);
+    /* SEMAPHORE_OFFSET = label 210, SEMAPHORE_RELEASE 0x77, RETURN. */
+    m[0] = 0x00040064u; m[1] = 0x10u * 210u; m[2] = 0x0004006cu; m[3] = 0x77u;
+    m[4] = 0x00020000u;
+    CHECK("bad size", cellGcmSegmentEndExternal(&s, 18) == CELL_GCM_SEGMENT_ERROR_INVALID_VALUE);
+    CHECK("no return", cellGcmSegmentEndExternal(&s, 16) == CELL_GCM_SEGMENT_ERROR_INVALID_VALUE);
+    CHECK("too big", cellGcmSegmentEndExternal(&s, 260) == CELL_GCM_SEGMENT_ERROR_INVALID_VALUE);
+    CHECK("end", cellGcmSegmentEndExternal(&s, 20) == CELL_OK);
+    CHECK("used", cellGcmSegmentGetUsedBytes(&s) == 20u);
+    labels[210] = 0;
+    CHECK("call", cellGcmSegmentCall(&ring, &s) == CELL_OK);
+    ring_flush();
+    CHECK("run", model_run(10000));
+    CHECK("ran", labels[210] == 0x77u && labels[209] == 1u);
+    CHECK("reclaim", cellGcmSegmentBeginExternal(&s) != NULL);
+    printf("  claimed, bad sizes and a missing RETURN refused, ran, reclaimed after retirement\n");
+}
+
 int main(void)
 {
     test_emitters();
@@ -328,6 +360,7 @@ int main(void)
     test_lifecycle();
     test_double_buffer();
     test_nested();
+    test_external();
     if (failures) { printf("gcm-segment: %d check(s) FAILED\n", failures); return 1; }
     puts("gcm-segment: all checks passed");
     return 0;
