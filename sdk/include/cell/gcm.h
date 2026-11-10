@@ -935,4 +935,7 @@ namespace cell { namespace Gcm {
 /* cell::Gcm::CellGcmContext: the C++ command context (generated). */
 #include <cell/gcm/gcm_command_cpp_explicit.h>
 
+/* RSX label/report reservations and the non-blocking label query (cellGcmIsLabelPassed). */
+#include <cell/gcm/ps3tc_gcm_labels.h>
+
 #endif /* __PSL1GHT_CELL_GCM_H__ */

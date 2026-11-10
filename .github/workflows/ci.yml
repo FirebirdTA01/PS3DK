@@ -706,6 +706,12 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      # RSX label/report reservations, the non-blocking label query's serial
+      # wrap-around, and a scan that every index the SDK and samples use lies
+      # in the declared set (docs/gcm-labels.md).
+      - name: Test GCM label reservations and the label query
+        run: bash tests/sdk/gcm-labels-test.sh
+
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 
