@@ -5,6 +5,8 @@ HERE=Path(__file__).resolve().parent
 ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True);ap.add_argument('--sanitize',action='store_true');ap.add_argument('--mutants',action='store_true')
 a=ap.parse_args();out=a.out.resolve();out.mkdir(parents=True,exist_ok=False)
 jobs=[(name,[sys.executable,str(HERE/f'auto-rsx-{name}-test.py')]) for name in ('read','fixture')]
+jobs.append(('target-lifetime',[sys.executable,str(HERE/'auto-target-model-test.py'),'--out',str(out/'target-lifetime')]+
+             (['--mutants'] if a.mutants else [])))
 for name in ('rsx','wait'):
     jobs.append((name,[sys.executable,str(HERE/f'auto-{name}-model-test.py'),'--out',str(out/name)]+(['--sanitize'] if a.sanitize else [])))
 if a.mutants:

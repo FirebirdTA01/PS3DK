@@ -157,6 +157,57 @@ and frame/dependency association before these become user-facing evidence.
 
 ## Running and later gates
 
+### Target-integration prerequisite model
+
+`auto_target_model.py` adds a separate sequential specification for automatic
+GCM initialization, cumulative labels and bounded frame queues. It neither
+replaces the C emitter model nor writes to a device. Run
+`auto-target-model-test.py --out NEW_DIRECTORY --mutants`.
+
+The selected init path attempts attachment without a public attach call.
+Unknown resources, unqualified old writes, missing independent drain and an
+application init error are named outcomes. Application return values and
+delegated operations remain intact. Optional overrides are refused after the
+first marker, clock anchor or accepted configuration. The physical lease does
+not reset on a second attachment; a terminal seal wins against an attaching
+owner, including its failed unwind.
+
+A fake device supplies explicit completed report facts. A later cumulative
+label can cover missed intermediate labels, but only within the issued,
+prepublished and actually published frontiers. A stale CPU publication snapshot
+defers the observation. Future or regressed labels cannot retire reports.
+Stable ordered report facts and whole metadata acceptance are both necessary;
+an accepted INCOMPLETE record changes the unreported gauge without freeing its
+quarantined reports. Clock slots are distinct and their writes and metadata
+must retire too. Actual device ordering and safe cross-context handoff remain
+target gates, not consequences of these supplied model facts.
+
+Completed report facts cannot be rewritten. A detected resource collision or
+context reset stops admission and quarantines outstanding reports, including
+completed facts not yet accepted by the sink. Clock anchors have their own
+prepublication, PUT and device frontiers; a label without the report cannot
+retire an anchor. Their device-generation tag is an explicit input of the
+model trace, not a field the target can read from a physical label. It models
+the required handoff premise and does not prove that handoff is available.
+
+Frame coverage snapshots are never overwritten. A full queue advances the
+frame allocation frontier and counts a lost snapshot, so neither an old frame
+nor a lost frame can later be presented as a fresh exact result. Short sink
+acceptance retains the original queue head. Complete zero-operation frames
+still have a snapshot; missing coverage is never an empty-success answer.
+
+Headroom alternative reviewed for later implementation: only a known native
+two-phase callback with a validated extent can be considered for a single
+expanded reservation. Validate that the entire application operation plus
+12 words fits the empty extent before requesting it, so the native callback's
+oversize trap cannot be introduced by instrumentation. Its other refusals are
+context/mapping failures, not count-dependent retries. An arbitrary callback
+may reject N+12 while accepting N; retrying N would add a second call, while
+dropping the application would lose work. Such a callback must keep the
+current-room policy. Even the native alternative needs a separate projection,
+failure and target review before enabling it. No expanded reservation is
+implemented by this model delta.
+
 Run `auto-host-model-suite-test.py --out NEW_DIRECTORY --mutants`, then
 the same command with a different directory and `--sanitize`. The suite
 builds only host fixtures. Named mutants must fail their intended semantic
