@@ -183,6 +183,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-ack" --mutant ack-early
           python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-owner" --mutant owner-drain
 
+      - name: Automatic RSX host models
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-plain" --mutants
+          python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-address" --sanitize
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
