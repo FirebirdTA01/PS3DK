@@ -30,6 +30,8 @@ pub struct Document {
     pub waits: Option<crate::waits::WaitsView>,
     /// The Hot paths page's SPU/RSX lanes (F3b): a one-entry cache keyed by W32, filled on first need.
     pub foreign_hot: crate::foreign_hot::ForeignHotSlot,
+    /// The Hot paths page's automatic function paths: a one-entry cache keyed by (thread, selection, symbols).
+    pub func_paths: crate::funcpaths::FuncSlot,
     /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
     pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
     /// The RSX frames page (captures found in the data): built once, on first need.
@@ -136,6 +138,7 @@ impl Document {
             hot,
             waits,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
+            func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
             rsx: crate::rsx::RsxSlot::default(),
         }

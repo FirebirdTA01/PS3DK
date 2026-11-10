@@ -34,6 +34,7 @@ rust-version = "1.88"
 anyhow = "1.0"
 ar = "0.9"
 clap = { version = "4.5", features = ["derive"] }
+cpp_demangle = "0.4"
 hex = "0.4"
 num-bigint = "0.4"
 num-integer = "0.1"

@@ -699,7 +699,7 @@ impl eframe::App for App {
                     },
                     Page::Zones => draw_zones(p, a, rows, sort, selected),
                     Page::HotPaths => match &d.hot {
-                        Some(hv) => nav = crate::hotpaths_ui::draw(p, hv, hot, Some((a, &d.foreign_hot))),
+                        Some(hv) => nav = crate::hotpaths_ui::page(p, hv, hot, a, &d.foreign_hot, &d.func_paths),
                         None => ui::field_message(p, ui::Tone::Neutral, "No hot paths for this document."),
                     },
                     Page::RsxFrames => {

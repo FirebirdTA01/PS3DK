@@ -187,6 +187,9 @@ pub fn extension_lines(cap: &Capture) -> Vec<String> {
             else { "status RECORDED; counters may be lower bounds" };
         out.push(format!("wait observations: {status}; {} retained call(s); dependency UNKNOWN; use waits for API-call elapsed time and coverage",w.observations));
     }
+    if let Some(f) = &cap.func_paths {
+        out.push(crate::func_paths::summary_line(f));
+    }
     out
 }
 

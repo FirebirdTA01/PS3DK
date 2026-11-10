@@ -21,6 +21,11 @@ const USAGE: &str = "usage:
   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
                                                       affine bounds (exit status as check)
   ps3dk-prof paths <file>    print the verdict and the PPU hot paths (exit status as check)
+  ps3dk-prof paths --functions [--elf app.elf] [--thread NAME] [--interval N | --all] [--top K]
+                   [--json] <file>
+                             automatic function paths (file_flags bit 5): caller chain, calls,
+                             inclusive and self wall elapsed, % of the thread's interval, counters
+                             and statuses; --elf resolves fn through .opd (exit status as check)
   ps3dk-prof measured [--xrsx-submit NAME --xrsx-wait NAME] <file>
                              print the verdict and the profile-bound RSX mapping states of a file
                              with a PROFILE record (exit status as check)
@@ -353,8 +358,113 @@ fn waits(args: &[String]) -> ExitCode {
     }
 }
 
+/// `paths --functions [options] <file>`: each option at most once, `--interval` and `--all` exclusive.
+fn func_paths(rest: &[String]) -> ExitCode {
+    use ps3dk_prof::elf_symbols::ElfSymbols;
+    use ps3dk_prof::func_report::{json, text, Mode, Query, Symbols};
+    let usage = || {
+        eprintln!("{USAGE}");
+        ExitCode::from(3)
+    };
+    let (mut elf, mut thread, mut interval, mut all, mut top, mut as_json, mut functions, mut path) =
+        (None::<&str>, None::<&str>, None::<u64>, false, None::<usize>, false, false, None::<&str>);
+    let mut seen: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        let a = rest[i].as_str();
+        if a.starts_with('-') {
+            if seen.contains(&a) {
+                eprintln!("ps3dk-prof: {a} given twice");
+                return ExitCode::from(3);
+            }
+            seen.push(a);
+        }
+        let value = rest.get(i + 1).map(String::as_str).filter(|v| !v.is_empty());
+        match a {
+            "--functions" => functions = true,
+            "--all" => all = true,
+            "--json" => as_json = true,
+            "--elf" | "--thread" | "--interval" | "--top" => {
+                let Some(v) = value else { return usage() };
+                match a {
+                    "--elf" => elf = Some(v),
+                    "--thread" => thread = Some(v),
+                    "--interval" => match v.parse::<u64>() {
+                        Ok(n) if n > 0 => interval = Some(n),
+                        _ => return usage(),
+                    },
+                    _ => match v.parse::<usize>() {
+                        Ok(k) if k > 0 => top = Some(k),
+                        _ => return usage(),
+                    },
+                }
+                i += 1;
+            }
+            a if a.starts_with('-') || path.is_some() => return usage(),
+            a => path = Some(a),
+        }
+        i += 1;
+    }
+    let (Some(path), true, false) = (path, functions, all && interval.is_some()) else { return usage() };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let elf_bytes = match elf.map(|p| (p, std::fs::read(p))) {
+        None => None,
+        Some((p, Ok(b))) => Some((p, b)),
+        Some((p, Err(e))) => {
+            eprintln!("ps3dk-prof: {p}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    let parsed = elf_bytes.as_ref().map(|(p, b)| (*p, ElfSymbols::parse(b)));
+    let symbols = match &parsed {
+        None => Symbols::None,
+        Some((p, Ok(elf))) => Symbols::Elf { path: p, elf },
+        Some((p, Err(why))) => Symbols::Refused { path: p, why },
+    };
+    let mode = match (interval, all) {
+        (Some(n), _) => Mode::Interval(n),
+        (None, true) => Mode::All,
+        (None, false) => Mode::Whole,
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            if let Some(t) = thread {
+                if !a.capture.lanes.values().any(|l| l.info.as_ref().is_some_and(|i| i.name == t)) {
+                    eprintln!("ps3dk-prof: no thread named {t:?}");
+                    return ExitCode::from(3);
+                }
+            }
+            let q = Query { thread, mode, top, symbols };
+            if as_json {
+                let mut v = json(&a.capture, &q);
+                v["verdict"] = report::verdict_block(&a).into();
+                println!("{v}");
+            } else {
+                println!("{}", report::verdict_block(&a));
+                for line in text(&a.capture, &q) {
+                    println!("{line}");
+                }
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|c| c == "paths") && args.iter().any(|a| a == "--functions") {
+        return func_paths(&args[1..]);
+    }
     if args.first().is_some_and(|c| c == "waits") {
         return waits(&args[1..]);
     }

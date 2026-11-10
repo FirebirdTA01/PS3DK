@@ -18,6 +18,65 @@ pub struct HotState {
     pub foreign: Option<SourceKey>,
     /// The SPU coordinate premise for the SPU/RSX lanes (page-local, off by default).
     pub w32: bool,
+    /// Zones or automatic function paths (offered only for a capture with the function-path capability).
+    pub source: crate::funcpaths::Source,
+    /// The function-path thread and selection (None: the whole capture).
+    pub func_thread: Option<u32>,
+    pub func_interval: Option<u64>,
+    /// The ELF the function names come from: (file name, parsed symbols or the refusal).
+    pub symbols: Option<(String, Result<std::sync::Arc<ps3dk_prof::elf_symbols::ElfSymbols>, String>)>,
+    /// Bumped at every symbol change: part of the function view's cache key.
+    pub symbols_gen: u64,
+}
+
+/// Loads `bytes` (named `name`) as the function-path symbol source; a refusal is kept and shown.
+pub fn set_symbols(st: &mut HotState, name: String, bytes: &[u8]) {
+    let parsed = ps3dk_prof::elf_symbols::ElfSymbols::parse(bytes).map(std::sync::Arc::new);
+    st.symbols = Some((name, parsed));
+    st.symbols_gen += 1;
+}
+
+pub fn clear_symbols(st: &mut HotState) {
+    st.symbols = None;
+    st.symbols_gen += 1;
+}
+
+/// The whole page: for a capture with automatic function paths, a source selector (Zones / Functions
+/// (automatic)) above the page; otherwise exactly [`draw`].
+pub fn page(
+    p: &mut egui::Ui,
+    hv: &HotView,
+    st: &mut HotState,
+    a: &Analysis,
+    foreign: &ForeignHotSlot,
+    func: &crate::funcpaths::FuncSlot,
+) -> Option<(u32, u64)> {
+    use crate::funcpaths::Source;
+    if a.capture.func_paths.is_none() {
+        return draw(p, hv, st, Some((a, foreign)));
+    }
+    let caption = match st.source {
+        Source::Functions => crate::funcpaths::CAPTION,
+        Source::Zones if st.foreign.is_some() => crate::foreign_hot::CAPTION,
+        Source::Zones => CAPTION,
+    };
+    ui::page_header(p, "Hot paths", caption);
+    p.horizontal_wrapped(|h| {
+        h.label(egui::RichText::new("Source").strong());
+        if h.selectable_label(st.source == Source::Zones, "Zones").clicked() {
+            st.source = Source::Zones;
+        }
+        if h.selectable_label(st.source == Source::Functions, "Functions (automatic)").clicked() {
+            st.source = Source::Functions;
+        }
+    });
+    match st.source {
+        Source::Zones => body(p, hv, st, Some((a, foreign))),
+        Source::Functions => {
+            crate::funcpaths_ui::draw(p, a, st, func);
+            None
+        }
+    }
 }
 
 /// Sets the SPU premise; a change clears the selected row (its rank belongs to the other premise's ranking).
@@ -38,6 +97,16 @@ pub fn draw(
 ) -> Option<(u32, u64)> {
     // The header caption follows the selected lane kind (PPU spans, or SPU/RSX completed pairs).
     ui::page_header(p, "Hot paths", if st.foreign.is_some() { crate::foreign_hot::CAPTION } else { CAPTION });
+    body(p, hv, st, foreign)
+}
+
+/// The zone (and SPU/RSX) hot paths below the page header.
+fn body(
+    p: &mut egui::Ui,
+    hv: &HotView,
+    st: &mut HotState,
+    foreign: Option<(&Analysis, &ForeignHotSlot)>,
+) -> Option<(u32, u64)> {
     let foreign = foreign.filter(|(a, _)| a.capture.ext.is_some());
     // The premise toggle is applied BEFORE the view is taken, so a click never shows old bounds beside the new premise.
     if foreign.is_some() {

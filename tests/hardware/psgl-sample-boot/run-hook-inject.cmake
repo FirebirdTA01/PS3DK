@@ -53,11 +53,18 @@ function(_ps3dk_inject_run_hook)
             set(wrapper "${CMAKE_BINARY_DIR}/run-hook/hook_main_${t}.c")
         endif()
         configure_file("${_ps3dk_inject_dir}/hook_main.c" "${wrapper}" COPYONLY)
-        target_sources(${t} PRIVATE "${wrapper}"
+        set(loader_sources "${wrapper}"
             "${hook}/hook/ps3dk_run_hook.c"
             "${hook}/common/prn_net.c"
             "${hook}/common/prn_sha256.c"
             "${hook}/common/prn_hmac.c")
+        target_sources(${t} PRIVATE ${loader_sources})
+        # Loader entry and transport can run before profiler registration or
+        # after teardown. Keep them outside application function observation.
+        foreach(s IN LISTS loader_sources)
+            set_property(SOURCE "${s}" TARGET_DIRECTORY ${t}
+                         APPEND PROPERTY COMPILE_OPTIONS -fno-instrument-functions)
+        endforeach()
         target_include_directories(${t} PRIVATE "${hook}/hook")
         # libnet loads its sysmodule through the sysmodule stubs.
         target_link_libraries(${t} PRIVATE net sysmodule_stub)

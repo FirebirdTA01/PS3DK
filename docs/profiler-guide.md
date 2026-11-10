@@ -229,9 +229,30 @@ The heterogeneous-workload sample checks at configure time that the archive's da
 ```
 ps3dk-prof check  capture.prof    # validate; report the verdict
 ps3dk-prof report capture.prof    # print a human-readable report
+ps3dk-prof paths --functions [--elf app.elf] [--thread NAME] [--interval N | --all] [--top K] [--json] capture.prof
+                                  # automatic function paths (captures from libps3dkprof_func.a)
 ```
 
 Run these before interpreting a capture.
+
+Instrument selectively with `-finstrument-functions`: omit tiny hot leaf files
+with `-finstrument-functions-exclude-file-list`, or mark individual functions
+`__attribute__((no_instrument_function))`. A fixed ILP32 console sample measured
+about 0.43 microseconds of added elapsed time per instrumented entry in one
+OFF/ON/OFF sequence. This is a descriptive workload comparison, not an isolated
+hook-cost estimate; both self and inclusive times include hook cost. Keep the
+same selection when comparing captures.
+
+Start observation before entering the functions whose paths you need. If an
+instrumented function enters before profiler initialization and exits after
+registration, its unmatched exit increments the orphan counter without adding
+a call path or elapsed time. An absent path does not mean the function took
+zero wall time. The heterogeneous-workload sample offers a separate registration
+probe for this case; it is outside that sample's exact call-tree check.
+
+`paths --functions` prints, per thread, each caller chain with its calls, inclusive and self elapsed time and their share of the thread's interval, then the thread's counters (depth_limit, lost, unbalanced, orphan, deferred, reentry, clock) and statuses. Elapsed is wall time between the thread's hook events (waits, preemption and hook cost included), not CPU time. The default is the whole capture; `--interval N` shows one of the thread's own intervals and `--all` every chunk in order. A drain the thread did not answer (LAGGING) and an unacknowledged tail (INCOMPLETE_TAIL) are printed as UNKNOWN, never as zero. The LOST row (lost parent attribution: the node table was full or the probe was refused) is listed on its own, never under a caller. `--elf` names functions by reading each `.opd` descriptor's entry word and the FUNC symbol of `.symtab` that contains it (C++ names demangled); without it, or for an address that does not resolve, the raw `fn` value is printed in hex and counted. When both the ELF's `.note.gnu.build-id` and the capture's build id are present they are compared: a mismatch prints a WARNING (names are still shown); otherwise the names are labelled "ELF match unverified".
+
+Pass `--elf` the unstripped linked ELF, not the packaged one. The packaging step strips the `.elf` it places beside the SELF, so that file has no function symbols, and `--elf` given a stripped ELF refuses to symbolize and keeps the raw rows. In a CMake project the unstripped file is the link target's own output (for the heterogeneous-workload sample, `heterogeneous-workload` in the build directory, with no `.elf` suffix); keep it together with the SELF you run, because it must come from the same link.
 
 Exit status: `0` COMPLETE, `1` INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean.  A capture that ends without a trailer (the app quit from the XMB, the link ended, a copy cut short) is COMPLETE and exits `0`; its output has the extra line `ending: NO-TRAILER` (a file with a trailer has no `ending:` line), so a script that must tell the two apart greps for that line.
 
@@ -265,7 +286,7 @@ Open a capture either by passing the file on the command line, or from inside th
   - **Verdict map**: Dense matrix with one row per series and one cell per frame, colored by budget verdict or slot state: `OVER`, `WITHIN`, `UNDETERMINED` (striped), `no verdict` (no budget or clock), `verdict unavailable` (exact comparison refused), `nothing included` (dot), `unknown` (outline), `refused` (crossed), or `no interval` (empty cell; no measured interval on lane).
   - **Stated limits**: Series are never summed: lanes run concurrently with the PPU and with each other, and lane values represent start-attributed, unclipped included work, not occupancy (neither stacked totals nor per-frame utilization ratios are established by the reader). Percentiles cover only frames with bars. Edge arrows mark +inf, non-representable or out-of-scale values. A refused lane distribution is shown as unavailable; only the Fit p99 axis falls back to that lane's finite maximum, with a warning.
 - **Zones** — named-zone statistics for PPU zones only, from PPU lanes that are MEASUREMENT VALID (`ps3dk-prof report` prints each lane's validity; spans on other lanes are excluded); SPU and RSX zones are not listed. Columns: Zone (name and tag), Instances, Completed, Censored, Total, Mean, p50, p90, p99 and Max (all durations inclusive), and Qualification. Percentiles use the usable completed duration samples and are refused when there are fewer than 20 of them. Unknown values sort last.
-- **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains.
+- **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains. For a capture with automatic function paths, a **Source** selector switches between **Zones** and **Functions (automatic)**; the latter shows one thread's indented call tree (calls, inclusive, self, % of the selection's wall elapsed, row statuses) for the whole capture or one interval, with the counters and statuses above it, the LOST row apart from the tree, and **Load ELF symbols...** for names.
 
 ### 3.4 Live sessions
 

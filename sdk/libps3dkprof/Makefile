@@ -313,3 +313,4 @@ verify-install-ext:
 -include $(EXT_OBJS:.o=.d) $(EXT64_OBJS:.o=.d) $(EXTL_OBJS:.o=.d) $(EXTL64_OBJS:.o=.d)
 
 include waits.mk
+include func.mk
