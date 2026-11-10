@@ -706,6 +706,11 @@ jobs:
       - name: Test the GCM FIFO wrap never loses an unpublished lap
         run: bash tests/sdk/fifo-wrap-protocol-test.sh
 
+      # GCM command segments: cellGcmSetupContextData plus the label-fenced
+      # segment helper, run against a host model of the RSX front end.
+      - name: Test GCM command segments refuse overflow and retire by label
+        run: bash tests/sdk/gcm-segment-test.sh
+
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 
