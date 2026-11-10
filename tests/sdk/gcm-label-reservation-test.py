@@ -49,6 +49,7 @@ FORWARDERS = {
     "sdk/include/cell/gcm.h", "sdk/include/cell/gcm/gcm_cmd_overloads.h", "sdk/include/cell/gcm/gcm_command_c.h",
     "sdk/include/cell/gcm/gcm_command_cpp_explicit.h", "sdk/include/cell/gcm/ps3tc_gcm_labels.h",
     "sdk/libgcm_sys_legacy/src/gcm_legacy_wrappers.c", "sdk/libgcm_cmd/src/gcm_rsx_wrappers.c",
+    "sdk/libgcm_cmd/src/gcm_segment.c",  # the segment helper writes the label its caller chose
     "sdk/libps3dkprof/src/rsx/gpu_port_gcm.c",
 }
 # (path, call, normalised index expression regex) -> declared value specs: "A" or "A..B", evaluated from the tree
