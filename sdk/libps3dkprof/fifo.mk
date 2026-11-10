@@ -50,3 +50,19 @@ install-fifo-ext: fifo-ext
 	        --id "$(PROF_PROFILE_ID)" --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)" || exit 1; \
 	done
 	install -m 0644 ../include/ps3dk/prof_fifo.h "$(PS3DK)/ppu/include/ps3dk/"
+
+# Run after sdk/libgcm_cmd install-fifo. This explicit goal adds only the
+# observed package and its unchanged live companion; no default archive write.
+FIFO_SOURCE_COMMIT ?= $(shell git rev-parse HEAD)
+PPU_READELF ?= $(CROSS)readelf
+.PHONY: install-fifo-package
+install-fifo-package: install-fifo-ext ext-live-ilp32 ext-live-lp64
+	install -m 0644 "$(EXTL_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/"
+	install -m 0644 "$(EXTL64_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/lp64/"
+	install -m 0644 ../include/ps3dk/prof.h $(EXT_PUB_HEADERS) "$(PS3DK)/ppu/include/ps3dk/"
+	install -d "$(PS3DK)/cmake"
+	install -m 0644 ../../cmake/ps3-prof-fifo.cmake ../../cmake/ps3-prof-fifo-check.py "$(PS3DK)/cmake/"
+	for abi in ilp32 lp64; do \
+	    python3 "$(PS3DK)/cmake/ps3-prof-fifo-check.py" --root "$(PS3DK)" --abi "$$abi" \
+	        --seal --readelf "$(PPU_READELF)" --source-commit "$(FIFO_SOURCE_COMMIT)" || exit 1; \
+	done

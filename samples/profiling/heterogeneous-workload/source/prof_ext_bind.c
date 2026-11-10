@@ -4,6 +4,7 @@
 #include "workload.h"
 #include <cell/gcm.h>
 #include <ps3dk/prof.h>
+#include "sample_drain.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/sys_time.h>
@@ -12,6 +13,14 @@
 #include "prof_gpu.h"
 #include "prof_spu.h"
 #include "workload_spu_bin.h"
+
+#ifdef SAMPLE_FIFO_EVENTS
+#include <ps3dk/prof_fifo.h>
+static uint32_t g_fifo_instance;
+/* Missing attach must fail the sample's final result, even if GPU setup
+ * returned early. No successful build or zero-wrap run proves observation. */
+static int g_fifo_result = -1;
+#endif
 
 static pe_state g_pe;
 static pe_fence_state g_fence;
@@ -34,6 +43,9 @@ static int b_init(void *c, unsigned lanes)
     cfg.build_id = SAMPLE_BUILD_ID;
     cfg.workload_tag = "ppu-spe-rsx-loop";
     cfg.mode = PS3DK_PROF_MODE_APP;
+#ifdef SAMPLE_FIFO_EVENTS
+    cfg.mode = PS3DK_PROF_MODE_THREAD;
+#endif
     cfg.max_threads = 1;
     cfg.max_descriptors = 64;
     cfg.ring_records = 512;
@@ -91,7 +103,17 @@ static int b_lane_end(void *c, uint32_t handle)
 static int b_gpu_attach(void *c, uint32_t *gpu)
 {
     (void)c;
+#ifdef SAMPLE_FIFO_EVENTS
+    int rc = ps3dk_prof_gpu_attach(gCellGcmCurrentContext, PE_GPU_REPORT_FIRST, PE_GPU_REPORT_COUNT, PE_GPU_LABEL, gpu);
+    if (!rc) {
+        g_fifo_result = ps3dk_prof_fifo_attach(*gpu, gCellGcmCurrentContext, NULL, &g_fifo_instance);
+        b_log(NULL, "fifo-attach", g_fifo_result);
+    }
+    /* Preserve GPU ownership for normal cleanup even if FIFO attach failed. */
+    return rc;
+#else
     return ps3dk_prof_gpu_attach(gCellGcmCurrentContext, PE_GPU_REPORT_FIRST, PE_GPU_REPORT_COUNT, PE_GPU_LABEL, gpu);
+#endif
 }
 
 static int b_gpu_calibrate(void *c, uint32_t gpu)
@@ -103,7 +125,7 @@ static int b_gpu_calibrate(void *c, uint32_t gpu)
 static int b_drain(void *c)
 {
     (void)c;
-    return ps3dk_prof_drain();
+    return sample_prof_drain();
 }
 
 /* The application's completion fence: pe_fence (host-tested) on GCM.  It writes only PE_FENCE_LABEL; label
@@ -149,6 +171,14 @@ static int b_fence(void *c)
 static int b_gpu_detach(void *c, uint32_t gpu)
 {
     (void)c;
+#ifdef SAMPLE_FIFO_EVENTS
+    if (g_fifo_instance) {
+        int frc = ps3dk_prof_fifo_detach(g_fifo_instance);
+        b_log(NULL, "fifo-detach", frc);
+        if (frc) { g_fifo_result = frc; return frc; }
+        g_fifo_instance = 0;
+    }
+#endif
     int rc = 0;
     for (int k = 0; k < 3; ++k) {
         rc = ps3dk_prof_gpu_detach(gpu, gCellGcmCurrentContext, PE_WAIT_US);
@@ -176,7 +206,12 @@ static int b_thread_end(void *c)
 static int b_shutdown(void *c)
 {
     (void)c;
+#ifdef SAMPLE_FIFO_EVENTS
+    int rc = ps3dk_prof_shutdown();
+    return rc ? rc : g_fifo_result;
+#else
     return ps3dk_prof_shutdown();
+#endif
 }
 
 static const pe_port g_port = {NULL,        b_init,       b_thread_begin, b_register,   b_lane_create,

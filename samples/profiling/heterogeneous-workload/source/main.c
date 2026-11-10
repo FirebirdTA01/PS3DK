@@ -3,6 +3,7 @@
 #include "func_workload.h"
 #include "scene.h"
 #include <ps3dk/prof.h>
+#include "sample_drain.h"
 #include <sys/process.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -309,7 +310,7 @@ int main(void)
                 el(b_d,sizeof b_d,drain_t0,drain_t1),el(b_p,sizeof b_p,pc0,pc1),(unsigned long long)tb_freq);
         ++frames;
         drain_t0=ob_tb();
-        int drc=PS3DK_PROF_DRAIN();
+        int drc=sample_prof_drain();
         drain_t1=ob_tb();
         if(drc!=0 || ferror(log)){puts("WORKLOAD_FAIL capture/log");goto done;}
     }

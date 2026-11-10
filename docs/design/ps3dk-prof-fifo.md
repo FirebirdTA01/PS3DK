@@ -262,3 +262,37 @@ refusal counters. Register samples, prepared and published bytes, RSX-reached ma
 views are reported as not enabled in this capture, not as zero. The viewer's `FIFO wrap waits (PPU
 clock)` page draws one bar per phase on the PPU timebase axis with open ends marked, and keeps the
 RSX lane's execution status UNKNOWN.
+# Installed selection (offline integration)
+
+The supported package is `libps3dkprof_ext_fifo.a` with
+`libgcm_cmd_prof_fifo.a`, and optionally the unchanged
+`libps3dkprof_ext_live.a`. It supports ILP32 and LP64. Composition with the
+function or pthread-wait variants is not implemented.
+
+Build and install the observed GCM archive with the `fifo` / `install-fifo`
+goals in `sdk/libgcm_cmd`. Then use `install-fifo-package` in
+`sdk/libps3dkprof`, with the same `PS3DK` destination and cross compiler.
+This explicit goal installs the observed extension, the unchanged live
+companion, public headers, CMake selector and per-ABI `prof-fifo.json`.
+It does not replace any default archive. The manifest records archive and
+header hashes after checking every member's target ABI attribute. Supply
+`FIFO_SOURCE_COMMIT` when building an exported source tree without Git.
+
+After adding an application's ordinary libraries, include
+`${PS3DK}/cmake/ps3-prof-fifo.cmake` and call
+`ps3_target_prof_fifo(app ROOT "${PS3DK}")`. This target-only selector replaces
+the ordinary extension and GCM libraries in their existing link positions.
+It requires CMake 3.21 with Ninja or Makefiles and an installed package.
+It refuses unsupported profiler compositions, checks the manifest before
+linking, and checks the GNU link map's actual providers after linking.
+The map must identify the installed observed core, GPU attach, FIFO
+attach/detach, wrap callback and observer bridge. Selecting a default or
+mixed profiler/GCM member is an error. These checks establish link identity,
+not runtime observation or independent drain progress on hardware.
+
+The heterogeneous-workload sample's `SAMPLE_FIFO_EVENTS=ON` selects this
+package, uses THREAD mode, attaches on the GCM owner after GPU attach,
+and removes the FIFO observer before GPU detach. FIFO attach/detach failures
+make its final result fail. Its ordinary application drain calls become
+no-ops because the background thread owns draining. A successful build or
+zero-wrap capture does not establish the console wrap gate.

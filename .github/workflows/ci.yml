@@ -729,6 +729,12 @@ jobs:
       - name: Test the observed GCM FIFO wrap timestamp ordering sequence
         run: bash tests/sdk/fifo-tb-order-test.sh
 
+      - name: Test FIFO installed identity and link-provider refusals
+        run: python3 tests/host/ps3dk-prof-runtime/fifo-link-check-test.py
+
+      - name: Test FIFO sample frame and lifecycle drain policy
+        run: python3 tests/host/ps3dk-prof-runtime/fifo-sample-test.py
+
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py
 
