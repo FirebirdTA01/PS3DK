@@ -168,6 +168,17 @@ owner, with the context quiescent:
 - ESTOPPED after the shutdown claim; ETHREAD for an unregistered owner thread; EFULL for a second
   attach in the same capture (v1 has one instance per capture, never reattached); ENOMEM.
 
+Admission and the seal are linearized by one claim on the instance state. The seal, first in its
+path and before any sink check, turns an unattached or still-attaching instance into SEALED by
+compare-and-swap. Attach claims the instance (NONE to ATTACHING) only after its validation,
+re-checks the shutdown claim and stop latch after winning it, and publishes with ATTACHING to
+ATTACHED. An attach that loses the first claim, sees the stop, or loses the publication returns
+ESTOPPED with instance 0, its observer removed and its block freed (the seal never touches the
+block of an instance it sealed while attaching). Every failed-attach unwind releases its claim
+only by ATTACHING to NONE, so it can never replace SEALED. An instance already ATTACHED when the
+seal begins is drained by the seal; if the sink failed, the seal's last step makes it SEALED so the
+owner refuses later boundaries and its detach is ESTOPPED.
+
 On any refusal `instance` is 0 and nothing is installed. `ps3dk_prof_fifo_detach(instance)` on the
 owner removes the observer and publishes the owner's final counters; it does not wait (the drain
 thread writes the remaining events and the exact FINAL status). It is EBUSY from inside the
@@ -198,8 +209,11 @@ allocated per event.
 
 `tools/ps3dk-prof/src/fifo.rs` decodes each chunk whole, validates it before committing it, and
 refuses a chunk breaking any rule above as MALFORMED (rules FifoConfig, FifoEvents, FifoStatus).
-Retained events are charged against a reader budget before they are stored; on exhaustion the
-inventory keeps what it had, names the refusal and keeps validating.
+Retained events are charged against a retention budget (`events`, `admission_ops`) before they
+are stored; on exhaustion the inventory keeps what it had, names the refusal and keeps validating.
+These budgets account for retention admission only: they do not bound the parser's total work or
+its transient per-chunk validation allocation, since every later chunk is still decoded and
+validated (and refused when malformed) after a retention refusal.
 
 Pairing is exact or absent:
 

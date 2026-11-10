@@ -745,6 +745,9 @@ int p_quiesce_freeze_seal(prof *p)
     uint64_t unreg;
     int trailer = 0, any3 = 0, anylim;
 
+#ifdef PS3DK_PROF_WITH_FIFO
+    p_fifo_seal_claim(); /* before the wait and every sink check: no FIFO attach publishes after this */
+#endif
     quiesce_wait(p);
     HOOK(before_frontier);
 
@@ -894,6 +897,9 @@ int p_quiesce_freeze_seal(prof *p)
     }
 #ifdef PS3DK_PROF_WITH_ARCS
 close_capture:
+#endif
+#ifdef PS3DK_PROF_WITH_FIFO
+    p_fifo_seal_close();
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     /* a failed sink skipped the seal above: retire and release every lane anyway (psp_seal is idempotent) */

@@ -20,6 +20,13 @@ static inline void bump(uint64_t *c)
 
 int p_gpu_fifo_owner(prof *p, uint32_t gpu, void *ctx); /* gpu_runtime.c (PS3DK_PROF_WITH_FIFO) */
 
+/* a failed attach's release of its claim: only ATTACHING -> NONE; a SEALED the seal installed meanwhile stays */
+static void unclaim(fifo_capture *f)
+{
+    uint32_t exp = FS_ATTACHING;
+    (void)CAS_ACQREL(&f->state, &exp, (uint32_t)FS_NONE);
+}
+
 /* The owner's wrap boundary.  No lock, no SDK call, no allocation, no sink work; it never changes the protocol. */
 static void fifo_event(void *user, const ps3tc_fifo_boundary *b)
 {
@@ -140,12 +147,24 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
     rc = p_gpu_fifo_owner(p, gpu, ctx);
     if (rc != PS3DK_PROF_OK)
         return rc;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof__fifo_test_hook)
+        ps3dk_prof__fifo_test_hook(2, 0); /* every validation passed; the instance is not claimed yet */
+#endif
+    /* The admission/seal linearization point is the instance claim: the seal claims NONE or ATTACHING as SEALED at its
+     * start (p_fifo_seal_claim).  An attach that loses the claim to it refuses here; one that wins re-checks the stop
+     * after the claim (so a shutdown that began earlier is never missed) and can then only lose its publication CAS
+     * below.  Every unwind returns ATTACHING -> NONE by CAS, so it never overwrites a terminal SEALED. */
     exp = FS_NONE;
     if (!CAS_ACQREL(&f->state, &exp, (uint32_t)FS_ATTACHING))
-        return PS3DK_PROF_EFULL; /* one instance per capture, never reattached */
+        return exp == FS_SEALED ? PS3DK_PROF_ESTOPPED : PS3DK_PROF_EFULL; /* one instance per capture, never reattached */
+    if (LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->stop_latch)) {
+        unclaim(f);
+        return PS3DK_PROF_ESTOPPED;
+    }
     f->block = (uint8_t *)pal_alloc((size_t)need);
     if (!f->block) {
-        ST_REL(&f->state, (uint32_t)FS_NONE);
+        unclaim(f);
         return PS3DK_PROF_ENOMEM;
     }
     memset(f->block, 0, (size_t)need);
@@ -174,6 +193,10 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
     }
     f->begin_off = b;
     f->end_off = e;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof__fifo_test_hook)
+        ps3dk_prof__fifo_test_hook(3, 0); /* claimed and installed, not yet published */
+#endif
     exp = FS_ATTACHING;
     if (!CAS_ACQREL(&f->state, &exp, (uint32_t)FS_ATTACHED)) {
         /* the seal claimed the instance first; it never touched the block */
@@ -188,7 +211,7 @@ unwind:
     pal_free(f->block);
     f->block = NULL;
     f->ring = NULL;
-    ST_REL(&f->state, (uint32_t)FS_NONE);
+    unclaim(f);
     return rc;
 }
 
@@ -218,4 +241,5 @@ int ps3dk_prof_fifo_detach(uint32_t instance)
 void ps3dk_prof__fifo_test_seed(uint64_t attempted) { ST_REL(&g_fifo.attempted, attempted); }
 uint64_t ps3dk_prof__fifo_test_read_idx(void) { return LD_ACQ(&g_fifo.read_idx); }
 uint32_t ps3dk_prof__fifo_test_state(void) { return LD_ACQ(&g_fifo.state); }
+const void *ps3dk_prof__fifo_test_block(void) { return g_fifo.block; }
 #endif

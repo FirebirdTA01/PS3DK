@@ -91,7 +91,7 @@ fn unsupported_and_refused_states() {
     assert!(draw(&v, None).status.starts_with("UNSUPPORTED"));
     let evs = wrap(1, 1, 1000, 5, 5);
     let c = ps3dk_prof::reader::read_with_fifo_budgets(&with(vec![events(&evs)]).bytes(),
-        ps3dk_prof::fifo::Budgets { events: 1, ops: 1 << 20 }).unwrap();
+        ps3dk_prof::fifo::Budgets { events: 1, admission_ops: 1 << 20 }).unwrap();
     let v = FifoView::build(&c);
     assert!(v.bars.is_empty() && v.rows.is_empty() && v.refusal.is_some(), "a refusal is never an empty success");
     let d = draw(&v, None);

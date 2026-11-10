@@ -77,17 +77,23 @@ typedef struct fifo_capture {
 #define p_fifo_drain ps3dk_prof__fifo_drain
 #define p_fifo_emit_chunk ps3dk_prof__fifo_emit_chunk
 #define p_fifo_payload ps3dk_prof__fifo_payload
+#define p_fifo_seal_claim ps3dk_prof__fifo_seal_claim
+#define p_fifo_seal_close ps3dk_prof__fifo_seal_close
 #define g_fifo ps3dk_prof__g_fifo
 extern fifo_capture g_fifo;
 void p_fifo_drain(prof *p, int seal);  /* the drainer: an ordinary drain (0) or the seal (1) */
+void p_fifo_seal_claim(void);          /* the seal, first: NONE / ATTACHING -> SEALED (the admission linearization) */
+void p_fifo_seal_close(void);          /* the seal, last: an undrained ATTACHED -> SEALED */
 int p_fifo_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len); /* 0: the sink took it whole */
 uint8_t *p_fifo_payload(prof *p);      /* the drainer's chunk payload buffer (P_CHUNK_CAP bytes) */
 
 #ifdef PS3DK_PROF_TEST_HOOKS
-/* point 1: inside the owner callback, before admission (kind in `v`) */
+/* point 1: inside the owner callback, before admission (kind in `v`); point 2: attach, every validation passed, before
+ * the instance claim; point 3: attach, claimed and installed, before the publication */
 extern void (*ps3dk_prof__fifo_test_hook)(unsigned point, unsigned v);
 void ps3dk_prof__fifo_test_seed(uint64_t attempted); /* the owner's attempt counter (the ceiling controls) */
 uint64_t ps3dk_prof__fifo_test_read_idx(void);
 uint32_t ps3dk_prof__fifo_test_state(void);
+const void *ps3dk_prof__fifo_test_block(void); /* the attach allocation, NULL when none is live */
 #endif
 #endif

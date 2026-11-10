@@ -251,9 +251,19 @@ static atomic_int go_on;       /* main -> owner: continue */
 static int detach_rc = 99, incb_rc = 99;
 static uint64_t seed;
 
+static atomic_int at_hook, resume_hook; /* attachrace / attachseal: the owner is held at a hook point */
 static void hook(unsigned point, unsigned kind)
 {
-    (void)point;
+    if (point != 1) {
+        int n = 0;
+        if (((point == 2 && !strcmp(mode, "attachrace")) || (point == 3 && !strcmp(mode, "attachseal"))) &&
+            !atomic_load(&at_hook)) {
+            atomic_store(&at_hook, 1);
+            while (!atomic_load(&resume_hook) && n++ < 20000)
+                sleep_us(1000);
+        }
+        return;
+    }
     if (!strcmp(mode, "incb") && kind == PS3TC_FIFO_B_PHASE1_BEGIN && incb_rc == 99)
         incb_rc = ps3dk_prof_fifo_detach(g_inst);
     if (!strcmp(mode, "recursion") && kind == PS3TC_FIFO_B_PHASE1_BEGIN && stat_count == 2)
@@ -334,6 +344,21 @@ static void *owner_main(void *arg)
         }
         owner_finish(0);
     }
+    return NULL;
+}
+
+/* ---- attach against the seal: the owner held before the claim (attachrace) or before the publication (attachseal),
+ * shutdown completes meanwhile; the attach must then refuse with nothing installed and nothing live ---- */
+static int race_rc = 99;
+static uint32_t race_inst = 77;
+static void *race_owner(void *arg)
+{
+    (void)arg;
+    CHECK(ps3dk_prof_thread_begin("owner") == 0);
+    CHECK(ps3dk_prof_gpu_attach((ps3dk_prof_gcm_ctx *)&CTX, 0, 2, 64, &g_gpu) == 0);
+    race_rc = ps3dk_prof_fifo_attach(g_gpu, (ps3dk_prof_gcm_ctx *)&CTX, NULL, &race_inst);
+    lap(100, 0); /* not observed */
+    ps3dk_prof_thread_end();
     return NULL;
 }
 
@@ -451,6 +476,19 @@ int main(int argc, char **argv)
     if (!strcmp(mode, "lostfinal"))
         fail_final = 1;
     CHECK(start(PS3DK_PROF_MODE_THREAD, 1) == 0);
+    if (!strcmp(mode, "attachrace") || !strcmp(mode, "attachseal")) {
+        CHECK(pthread_create(&t, NULL, race_owner, NULL) == 0);
+        WAIT_FOR(atomic_load(&at_hook), 10000);
+        rc = ps3dk_prof_shutdown(); /* the owner is held inside attach and never acknowledges */
+        printf("shutdown rc=%d\n", rc);
+        atomic_store(&resume_hook, 1);
+        CHECK(pthread_join(t, NULL) == 0);
+        printf("attach rc=%d instance=%u observer=%d block=%d state=%u\n", race_rc, (unsigned)race_inst,
+               OBS.reg.event != NULL, ps3dk_prof__fifo_test_block() != NULL, (unsigned)ps3dk_prof__fifo_test_state());
+        CHECK(race_rc == PS3DK_PROF_ESTOPPED && race_inst == 0 && OBS.reg.event == NULL &&
+              ps3dk_prof__fifo_test_block() == NULL && ps3dk_prof__fifo_test_state() == FS_SEALED);
+        goto done;
+    }
     if (!strcmp(mode, "refusals")) {
         refusals();
         rc = ps3dk_prof_shutdown();

@@ -38,15 +38,20 @@ pub const ST_OWNER_UNACK: u16 = 8;
 const SEQ_CEIL: u64 = 1 << 63;
 const JUMP_BIT_LIMIT: u32 = 0x2000_0000;
 
-/// Reader policy limits for retained FIFO evidence.  Exhaustion is a named refusal; validation never relaxes.
+/// Reader policy limits for RETAINED FIFO evidence.  Exhaustion is a named refusal; validation never relaxes.
+///
+/// Both limits are retention-admission accounting: `events` caps the events kept, and `admission_ops` is charged only
+/// when a validated chunk's events are admitted to retention.  Neither bounds the parser's total work or its transient
+/// per-chunk validation allocation: every chunk is still decoded and validated after a refusal (so a malformed chunk
+/// later in the file is still MALFORMED), and that work is not charged.
 #[derive(Debug, Clone, Copy)]
 pub struct Budgets {
     pub events: u64,
-    pub ops: u64,
+    pub admission_ops: u64,
 }
 impl Default for Budgets {
     fn default() -> Self {
-        Self { events: 1 << 20, ops: 64_000_000 }
+        Self { events: 1 << 20, admission_ops: 64_000_000 }
     }
 }
 
@@ -124,7 +129,8 @@ pub struct Inventory {
     pub last_status: Option<Status>,
     pub final_seen: bool,
     pub refusal: Option<&'static str>,
-    pub used_ops: u64,
+    /// Retention-admission charge so far (see [`Budgets`]); not the parser's total work.
+    pub admission_ops_used: u64,
 }
 impl Inventory {
     pub fn coverage_status(&self) -> &'static str {
@@ -432,10 +438,10 @@ impl Reader {
         if self.result.refusal.is_none() {
             if (self.result.events.len() as u64).saturating_add(n) > self.budgets.events {
                 self.result.refusal = Some("FIFO event retention budget");
-            } else if self.result.used_ops.saturating_add(charge) > self.budgets.ops {
-                self.result.refusal = Some("FIFO reader work budget");
+            } else if self.result.admission_ops_used.saturating_add(charge) > self.budgets.admission_ops {
+                self.result.refusal = Some("FIFO retention admission budget");
             } else {
-                self.result.used_ops += charge;
+                self.result.admission_ops_used += charge;
                 self.result.events.extend(local);
             }
         }

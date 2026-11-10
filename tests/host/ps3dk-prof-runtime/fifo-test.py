@@ -18,6 +18,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--sanitize', choices=['address', 'thread'])
+ap.add_argument('--case', action='append', help='run only these cases (repeatable)')
 ap.add_argument('--reader', type=Path, help='a built ps3dk-prof; each capture is also checked by it')
 ap.add_argument('--mutant', choices=['relaxed-pub', 'early-reuse', 'ack-early', 'owner-drain'])
 a = ap.parse_args()
@@ -350,6 +351,15 @@ def t_recursion():
     assert final(c)['completed'] == 20 and len(c['events']) == 120
 
 
+def t_attach(mode):
+    # attachrace: held after validation, before the instance claim; attachseal: claimed and installed, before the
+    # publication.  Shutdown completes meanwhile; the attach must refuse, leave no observer and no live allocation.
+    capf, so = go(mode)
+    assert 'attach rc=-15 instance=0 observer=0 block=0 state=5' in so, so
+    c = decode(capf)
+    assert c['config'] is None and not c['events'] and not c['status'], c
+
+
 def t_race(mode='race'):
     capf, so = go(mode)
     c = decode(capf)
@@ -377,7 +387,11 @@ cases = [('basic', t_basic), ('parked1', lambda: t_parked('parked1')), ('parked2
          ('gpuzone', lambda: t_parked('gpuzone')), ('stop1', lambda: t_stop('stop1')),
          ('stop2', lambda: t_stop('stop2')), ('blocked', t_blocked), ('shortwrite', t_shortwrite),
          ('lostfinal', t_lostfinal), ('refusals', t_refusals), ('app', t_app), ('nogpu', t_nogpu), ('incb', t_incb),
-         ('nearmax', t_nearmax), ('recursion', t_recursion), ('race', t_race), ('pace', lambda: t_race('pace'))]
+         ('nearmax', t_nearmax), ('attachrace', lambda: t_attach('attachrace')),
+         ('attachseal', lambda: t_attach('attachseal')), ('recursion', t_recursion), ('race', t_race), ('pace', lambda: t_race('pace'))]
+if a.case:
+    assert set(a.case) <= {n for n, _ in cases}, a.case
+    cases = [(n, f) for n, f in cases if n in a.case]
 for name, fn in cases:
     fn()
     results.append(name)

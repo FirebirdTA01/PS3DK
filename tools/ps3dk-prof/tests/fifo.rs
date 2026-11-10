@@ -399,17 +399,24 @@ fn budget_refusal_keeps_prior_evidence_and_validation() {
     let mut evs = wrap(1, 1, 1000, 5, 5);
     evs.extend(wrap(7, 2, 3000, 5, 5));
     let f = with(vec![events(&evs[..6]), events(&evs[6..]), St::new(1, 12, 12, 0, 12, 2, 2, 0).chunk()]);
-    let c = reader::read_with_fifo_budgets(&f.bytes(), ps3dk_prof::fifo::Budgets { events: 8, ops: 1 << 20 }).unwrap();
+    let c = reader::read_with_fifo_budgets(&f.bytes(), ps3dk_prof::fifo::Budgets { events: 8, admission_ops: 1 << 20 }).unwrap();
     let inv = c.fifo.as_ref().unwrap();
     assert_eq!(inv.refusal, Some("FIFO event retention budget"));
     assert_eq!((inv.events.len(), inv.parsed_events), (6, 12));
     let r = analyze(&c);
     assert!(r.wraps.is_empty() && r.refusal.is_some(), "no wrap analysis after a refusal (never an empty success)");
+    // the admission charge (16 per retained event) refuses retention, never validation or the other feature data
+    let c = reader::read_with_fifo_budgets(&f.bytes(), ps3dk_prof::fifo::Budgets { events: 1 << 20, admission_ops: 100 })
+        .unwrap();
+    let inv = c.fifo.as_ref().unwrap();
+    assert_eq!(inv.refusal, Some("FIFO retention admission budget"));
+    assert_eq!((inv.events.len(), inv.parsed_events, inv.admission_ops_used), (6, 12, 96));
+    assert!(inv.final_seen, "the status after the refusal is still validated and read");
     // validation does not relax after the refusal
     let mut bad = evs.clone();
     bad[8].z0 = 1;
     let f = with(vec![events(&bad[..6]), events(&bad[6..])]);
-    let e = reader::read_with_fifo_budgets(&f.bytes(), ps3dk_prof::fifo::Budgets { events: 3, ops: 1 << 20 });
+    let e = reader::read_with_fifo_budgets(&f.bytes(), ps3dk_prof::fifo::Budgets { events: 3, admission_ops: 1 << 20 });
     assert_eq!(e.unwrap_err().rule, Rule::FifoEvents);
 }
 

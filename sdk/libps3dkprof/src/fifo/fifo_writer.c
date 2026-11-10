@@ -124,6 +124,30 @@ static void close_detached(fifo_capture *f)
     f->ring = NULL;
 }
 
+/* The seal's claim, first in p_quiesce_freeze_seal, before any sink check: an unattached or still-attaching instance
+ * becomes SEALED, so no attach can publish after the seal began (fifo_runtime.c, the instance claim).  An ATTACHED one
+ * is left to the seal's drain. */
+void p_fifo_seal_claim(void)
+{
+    fifo_capture *f = &g_fifo;
+    uint32_t exp = FS_NONE;
+    if (CAS_ACQREL(&f->state, &exp, (uint32_t)FS_SEALED)) {
+        f->d_closed = 1;
+        return;
+    }
+    exp = FS_ATTACHING;
+    if (CAS_ACQREL(&f->state, &exp, (uint32_t)FS_SEALED))
+        f->d_closed = 1; /* that attach unwinds its own block; nothing of it was published */
+}
+
+/* The seal's end, after any sink outcome: an instance the seal could not drain (a failed sink) is SEALED too, so the
+ * owner refuses every later boundary and its detach is ESTOPPED; its block stays allocated (quarantined). */
+void p_fifo_seal_close(void)
+{
+    uint32_t exp = FS_ATTACHED;
+    (void)CAS_ACQREL(&g_fifo.state, &exp, (uint32_t)FS_SEALED);
+}
+
 void p_fifo_drain(prof *p, int seal)
 {
     fifo_capture *f = &g_fifo;
