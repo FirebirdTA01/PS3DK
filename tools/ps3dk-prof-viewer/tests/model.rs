@@ -409,3 +409,31 @@ fn a_kept_incomplete_copy_is_never_promoted_whatever_its_case() {
         assert_eq!(d.verdict().tone, VerdictTone::CompleteEarly, "{name}");
     }
 }
+
+// Named per-frame counters (file flag bit 8, chunk 39): the Overview's counters row.
+fn counters_payload(flags: u16, names: &[&str], samples: &[(u32, u32, u64, i64)]) -> Vec<u8> {
+    let mut b = Buf::default();
+    b.u16(1).u16(flags).u32(names.len() as u32).u32(samples.len() as u32).u32(0).u64(0).u64(1);
+    for (i, n) in names.iter().enumerate() {
+        b.u32(i as u32).u16(n.len() as u16);
+        b.0.extend_from_slice(n.as_bytes());
+    }
+    for &(inc, id, frame, v) in samples {
+        b.u32(inc).u32(id).u64(frame).u64(5 + frame).u64(v as u64);
+    }
+    b.0
+}
+
+#[test]
+fn overview_shows_a_counters_row_only_with_the_capability() {
+    let s = scenario(vec![lane(1, seqd(0, vec![frame(0, 10, 0)]))]);
+    assert!(overview(&analysed(&s.file().bytes())).counters.is_none());
+    let mut f = s.file();
+    let trailer = f.chunks.pop().unwrap();
+    f.chunks.push(chunk(39, counters_payload(1, &["arena.bytes_used"], &[(1, 0, 0, 10), (1, 0, 1, 30)])));
+    f.chunks.push(trailer);
+    f.flags = 256;
+    let (status, rows) = overview(&analysed(&f.bytes())).counters.expect("counters row");
+    assert_eq!(status, "1 counters, 2 samples over 2 frames; dropped 0, refused 1");
+    assert_eq!(rows, vec![CounterRow { name: "arena.bytes_used".into(), samples: 2, frames: 2, min: 10, max: 30, last: 30 }]);
+}
