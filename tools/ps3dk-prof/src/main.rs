@@ -18,6 +18,7 @@ const USAGE: &str = "usage:
   ps3dk-prof check <file>    print the verdict
   ps3dk-prof report <file>   print the verdict and the full report
   ps3dk-prof waits [--json] <file>   API-call observations and explicit unknown dependencies
+  ps3dk-prof counters [--json] <file>   named per-frame counters (exit status as check)
   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
                                                       affine bounds (exit status as check)
   ps3dk-prof paths <file>    print the verdict and the PPU hot paths (exit status as check)
@@ -358,6 +359,30 @@ fn waits(args: &[String]) -> ExitCode {
     }
 }
 
+/// `counters [--json] <file>`: the named per-frame counters; exit status as `check`.
+fn counters(args: &[String]) -> ExitCode {
+    let (json, path) = match args {
+        [path] if !path.starts_with('-') => (false, path),
+        [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
+        _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            let mut out = std::io::stdout().lock();
+            let inv = a.capture.counters.as_ref();
+            let result = if json { ps3dk_prof::counters::write_json(&mut out, inv) }
+                else { ps3dk_prof::counters::write_text(&mut out, inv) };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            verdict_code(&a)
+        }
+    }
+}
+
 /// `paths --functions [options] <file>`: each option at most once, `--interval` and `--all` exclusive.
 fn func_paths(rest: &[String]) -> ExitCode {
     use ps3dk_prof::elf_symbols::ElfSymbols;
@@ -467,6 +492,9 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|c| c == "waits") {
         return waits(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "counters") {
+        return counters(&args[1..]);
     }
     if args.first().is_some_and(|c| c == "spu-ticks") {
         return spu_ticks(&args[1..]);

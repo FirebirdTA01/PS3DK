@@ -62,6 +62,8 @@ pub enum Rule {
     WaitConfig,
     WaitRecord,
     WaitStatus,
+    /// Named per-frame counters (file_flags bit 8, chunk 39) violate their wire contract.
+    Counters,
     /// Function paths (file_flags bit 5, chunk types 28-30; ps3dk-prof-func-paths.md): FUNC_CONFIG.
     FuncConfig,
     /// A FUNC_TREE chunk violates its wire, ordering or definition rules.
@@ -453,6 +455,8 @@ pub struct Capture {
     pub waits: Option<crate::waits::Inventory>,
     /// Automatic function paths (file_flags bit 5); None without the capability.
     pub func_paths: Option<crate::func_paths::Inventory>,
+    /// Named per-frame counters (file_flags bit 8); None without the capability.
+    pub counters: Option<crate::counters::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
