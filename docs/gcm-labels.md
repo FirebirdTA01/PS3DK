@@ -2,8 +2,8 @@
 
 This page states the label and report reservation rule, the non-blocking completion query, what a completion
 label guarantees before a buffer is reused, and the rules for drawing from a `cellGcmMapMainMemory` arena. Each
-statement says how it is verified. "RPCS3" means one run of the named sample on the desktop RPCS3 build;
-nothing here has been run on a console yet.
+statement says how it is verified. "RPCS3" means one run of the named sample on the desktop RPCS3 build.
+"Console" means a run of the hooked SELF on a retail PS3 through the loader, as reported back from that run.
 
 The API is in `<cell/gcm/ps3tc_gcm_labels.h>`. `<cell/gcm.h>` includes it, so the cell-style names below are
 available wherever the GCM headers are. These are canonical cell-style names. PSL1GHT has no equivalent, so no
@@ -105,12 +105,40 @@ The PPU then checks the copy:
 
 **Warm-up.** RPCS3 compiles shaders asynchronously, so warm-up trials without poison run first, until one renders.
 
-| Mode | Label | RPCS3 result (32 trials) |
-|---|---|---|
-| backend | `cellGcmSetWriteBackEndLabel` after the last draw | 0 corrupt |
-| texture | `cellGcmSetWriteTextureLabel` after the last draw | 0 corrupt |
-| command (control) | `cellGcmSetWriteCommandLabel` after the last draw | 0 corrupt |
-| early (control) | `cellGcmSetWriteCommandLabel` before the first draw | 32 corrupt, every one a late vertex fetch |
+| Mode | Label | RPCS3 (32 trials) | Console (32 trials) |
+|---|---|---|---|
+| backend | `cellGcmSetWriteBackEndLabel` after the last draw | 0 corrupt | 0 corrupt |
+| texture | `cellGcmSetWriteTextureLabel` after the last draw | 0 corrupt | 0 corrupt |
+| command (control) | `cellGcmSetWriteCommandLabel` after the last draw | 0 corrupt | 0 corrupt |
+| early (control) | `cellGcmSetWriteCommandLabel` before the first draw | 32 corrupt, every one a late vertex fetch | 32 corrupt (676 bad samples each) |
+
+**Console result: A2 INCONCLUSIVE.** The signed SELF exited 0 with the detector sensitive (the early control is
+caught). But the command-label control is clean on silicon too, so this workload finishes too fast to separate a
+command label from a back-end label, and the clean back-end and texture rows prove nothing yet.
+
+**Heavy variant.** `samples/gcm/hello-ppu-gcm-label-reuse-heavy` builds the same source with `LABEL_REUSE_HEAVY`:
+
+- a 1024x1024 texture (4 MiB of arena);
+- 256 draws over a 512x512 target;
+- a fragment program that makes eight cache-missing texture fetches per pixel and combines them with `max()`, which
+  is exact at any precision.
+
+The aim is to keep the RSX reading the arena long after its front end passes a command label. It prints
+`GCM_LABEL_REUSE_A2 conclusive` only when the command control is caught while backend and texture stay clean. Every
+wait is bounded. Each line is also appended to `/dev_hdd0/tmp/gcmlabel-crumb.txt` and fsync'd.
+
+**RPCS3, heavy:**
+
+| Mode | Corrupt trials |
+|---|---|
+| backend | 0/32 |
+| texture | 0/32 |
+| command (control) | 0/32 |
+| early (control) | 32/32 |
+
+The verdict is `GCM_LABEL_REUSE_A2 inconclusive`. RPCS3 cannot show the command-label hazard at any workload size:
+its RSX thread reads a draw's vertices and textures when it executes the draw, in FIFO order, so a later command
+label is always written after those reads. Only the console run of the heavy variant can make A2 conclusive.
 
 What this shows, and what it does not:
 
@@ -126,9 +154,9 @@ What this shows, and what it does not:
   that frame's vertex, index and texture memory only after `cellGcmIsLabelPassed` reports it. The back-end label is
   released after the frame's rendering reaches the back end, which follows every earlier vertex fetch and texture
   read. `cellGcmSetWriteTextureLabel` is released when earlier texture reads are done. Use it only to reuse
-  textures early, never for vertex or index buffers. Both statements are UNVERIFIED on hardware. The sample is the
-  hardware test: the expected hardware result is backend = texture = 0 with the command control corrupt. A clean
-  command control on hardware would mean the draws were too light to expose the window.
+  textures early, never for vertex or index buffers. Both statements are UNVERIFIED on hardware. The heavy variant
+  is the hardware test: the expected result is backend = texture = 0 with the command control corrupt. The light
+  sample's clean command control on hardware (above) means its draws were too light to expose the window.
 - **Not in scope.** The sample does not cover command segments (CALL/RETURN).
 
 ## 4. Drawing from a main-memory arena (A3)
@@ -145,8 +173,10 @@ and linear A8R8G8B8 texture all sit in a mapped arena (`CELL_GCM_LOCATION_MAIN`)
 **Check.** Every frame, a 128x128 window at the screen centre is copied to the arena and compared at 50 points.
 The frame completes on application label 100.
 
-**RPCS3 result.** `GCM_ARENA_OK frames=180`: 3 warm-up frames, then every checked frame correct in all three
-phases. The run kept no screenshot: the sample finished before the capture point.
+**RPCS3 result.** `GCM_ARENA_OK frames=180`: a few warm-up frames, then every checked frame correct in all three
+phases. A later run (r-arena-3) captured a screenshot showing the colour-A quad on screen.
+
+**Console result: A3 PASS.** The main-arena SELF drew all 180 checked frames on silicon with `GCM_ARENA_OK`.
 
 Rules:
 

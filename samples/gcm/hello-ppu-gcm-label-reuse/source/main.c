@@ -16,9 +16,14 @@
  * The controls measure whether this platform can show the hazard at all: a platform whose controls report no
  * corruption cannot confirm or refute the rule for the other two modes (see the README).
  *
- * Output: GCM_LABEL_REUSE_* lines; the verdict line is GCM_LABEL_REUSE_OK (backend and texture modes clean) or
- * GCM_LABEL_REUSE_FAIL, followed by GCM_LABEL_REUSE_DETECTOR sensitive|not-sensitive. */
+ * Output: GCM_LABEL_REUSE_* lines (also appended, fsync'd, to /dev_hdd0/tmp/gcmlabel-crumb.txt); the verdict line
+ * is GCM_LABEL_REUSE_OK (backend and texture modes clean) or GCM_LABEL_REUSE_FAIL, then
+ * GCM_LABEL_REUSE_DETECTOR sensitive|not-sensitive (the early control) and GCM_LABEL_REUSE_A2 conclusive|inconclusive:
+ * conclusive only when the command control is caught, i.e. the workload is heavy enough that a label written by the
+ * front end is too early, and the backend and texture modes still stay clean.  Built twice: this light form, and
+ * hello-ppu-gcm-label-reuse-heavy (LABEL_REUSE_HEAVY: a larger texture, target and draw count, 8-tap fetches). */
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,19 +39,34 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
+#ifdef LABEL_REUSE_HEAVY
+/* The heavy variant (hello-ppu-gcm-label-reuse-heavy): a 1024x1024 texture (4 MiB), 256 draws over a 512x512
+ * target and an 8-tap fragment program, so the RSX is still fetching from the arena long after the front end has
+ * passed a command label.  Bounds scale with the work: every wait stays finite and is reported as a failure. */
+enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 8 << 20 };
+enum { RT = 512, TEX_W = 1024, TEX_H = 1024, DRAWS = 256, TRIALS = 32, MODES = 4 };
+#define ARENA_TEX 0x100000u
+#define ARENA_READBACK 0x600000u
+#define POLLS 4000000u /* x 5 us: at least a 20 s watchdog per wait */
+#define VARIANT "heavy"
+#else
 enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 1 << 20 };
 enum { RT = 256, TEX_W = 64, TEX_H = 64, DRAWS = 64, TRIALS = 32, MODES = 4 };
+#define ARENA_TEX 0x10000u
+#define ARENA_READBACK 0x40000u
+#define POLLS 400000u /* x 5 us: at least a 2 s watchdog per wait, reported as a failure */
+#define VARIANT "light"
+#endif
 #define DONE_LABEL 101u     /* the trial's completion label, written by the mode under test */
 #define READBACK_LABEL 102u /* back-end label after the readback transfer */
 #define ARENA_VBO 0x00000u
 #define ARENA_IBO 0x01000u
-#define ARENA_TEX 0x10000u
-#define ARENA_READBACK 0x40000u
 #define COLOR_POISON 0xffff00ffu
 #define COLOR_CLEAR 0xff000000u
 #define SENTINEL 0x5a5a5a5au
 #define WARMUP_MAX 600u /* unchecked warm-up trials at most */
-#define POLLS 400000u /* x 5 us: a 2 s watchdog per wait, reported as a failure */
+#define CRUMB_PATH "/dev_hdd0/tmp/gcmlabel-crumb.txt"
+#define SPIN_POLLS 100000u /* label polls without sleeping before the POLLS x 5 us bound starts */
 
 _Static_assert(DONE_LABEL >= CELL_GCM_LABEL_APP_FIRST && READBACK_LABEL <= CELL_GCM_LABEL_APP_LAST, "app labels");
 _Static_assert(ARENA_READBACK + RT * RT * 4 <= ARENA_BYTES, "readback fits the arena");
@@ -65,6 +85,27 @@ static int wait_readback(uint32_t serial)
     return -1;
 }
 
+/* One progress line, appended and fsync'd before returning, so a console that hangs still leaves the last step on
+ * disk.  Best effort: a crumb that cannot be written never changes the verdict. */
+static void crumb(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void crumb(const char *fmt, ...)
+{
+    char line[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    puts(line);
+    FILE *f = fopen(CRUMB_PATH, "a");
+    if (!f)
+        return;
+    fputs(line, f);
+    fputc('\n', f);
+    if (fflush(f) == 0)
+        (void)fsync(fileno(f));
+    fclose(f);
+}
+
 static uint32_t good_color(uint32_t trial)
 {
     /* distinct per trial, never POISON, CLEAR or SENTINEL in the low 24 bits */
@@ -80,10 +121,11 @@ int main(void)
     unsigned corrupt[MODES] = {0}, poison[MODES] = {0}, clear[MODES] = {0};
     uint32_t polls_total[MODES] = {0};
 
-    printf("GCM_LABEL_REUSE_BEGIN modes=%u trials=%u draws=%u target=%ux%u\n", MODES, TRIALS, DRAWS, RT, RT);
+    crumb("GCM_LABEL_REUSE_BEGIN variant=%s modes=%u trials=%u draws=%u target=%ux%u texture=%ux%u", VARIANT, MODES,
+          TRIALS, DRAWS, RT, RT, TEX_W, TEX_H);
     if (gcm_host_buffer_alloc(HOST_BYTES, &host) || cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host) ||
         arena_display_init(&d)) {
-        puts("GCM_LABEL_REUSE_FAIL init");
+        crumb("GCM_LABEL_REUSE_FAIL init");
         return 1;
     }
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
@@ -92,7 +134,7 @@ int main(void)
         gcm_host_buffer_alloc(ARENA_BYTES, &arena_ea) ||
         cellGcmMapMainMemory((const void *)(uintptr_t)arena_ea, ARENA_BYTES, &arena_off) ||
         arena_program_init(&d, &prog, arena_vp_vpo, arena_fp_fpo)) {
-        puts("GCM_LABEL_REUSE_FAIL setup");
+        crumb("GCM_LABEL_REUSE_FAIL setup");
         return 1;
     }
     uint8_t *arena = (uint8_t *)(uintptr_t)arena_ea;
@@ -144,13 +186,16 @@ int main(void)
             cellGcmFlush(ctx);
 
             /* reuse the arena the moment the label says so: vertices first (smallest), then the texture */
+            /* spin first (react at once), then sleep between polls; finite either way */
             uint32_t polls = 0;
             while (!cellGcmIsLabelPassed(DONE_LABEL, serial)) {
-                if (++polls > POLLS * 10u) {
-                    printf("GCM_LABEL_REUSE_FAIL done-label wait mode=%s trial=%u label=0x%08x serial=%u\n",
-                           mode_name[mode], trial, *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL), serial);
+                if (++polls > SPIN_POLLS + POLLS) {
+                    crumb("GCM_LABEL_REUSE_FAIL done-label wait mode=%s trial=%u label=0x%08x serial=%u",
+                          mode_name[mode], trial, *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL), serial);
                     return 1;
                 }
+                if (polls > SPIN_POLLS)
+                    usleep(5);
             }
             if (mode >= 0) {
                 arena_quad(vbo, 2.0f, 2.0f, 3.0f, 3.0f);
@@ -158,7 +203,7 @@ int main(void)
                 polls_total[mode] += polls;
             }
             if (wait_readback(serial)) {
-                printf("GCM_LABEL_REUSE_FAIL readback wait mode=%s trial=%u\n", mode_name[mode], trial);
+                crumb("GCM_LABEL_REUSE_FAIL readback wait mode=%s trial=%u", mode_name[mode], trial);
                 return 1;
             }
             unsigned bad = 0, saw_poison = 0, saw_clear = 0, sentinel = 0;
@@ -169,13 +214,15 @@ int main(void)
                 v &= 0x00ffffffu;
                 if (v != (good & 0x00ffffffu)) {
                     bad++;
-                    saw_poison += v == (COLOR_POISON & 0x00ffffffu);
+                    /* not the clear colour: a fetch read poisoned texels (exactly POISON in the light form, a
+                     * max() of GOOD and POISON in the heavy one) */
+                    saw_poison += v != (COLOR_CLEAR & 0x00ffffffu);
                     saw_clear += v == (COLOR_CLEAR & 0x00ffffffu);
                 }
             }
             if (sentinel) {
-                printf("GCM_LABEL_REUSE_FAIL readback not landed mode=%s trial=%u sentinel=%u\n", mode_name[mode],
-                       trial, sentinel);
+                crumb("GCM_LABEL_REUSE_FAIL readback not landed mode=%s trial=%u sentinel=%u", mode_name[mode], trial,
+                      sentinel);
                 return 1;
             }
             if (mode < 0) {
@@ -190,25 +237,30 @@ int main(void)
                 corrupt[mode]++;
                 poison[mode] += saw_poison != 0;
                 clear[mode] += saw_clear != 0;
-                printf("GCM_LABEL_REUSE_CORRUPT mode=%s trial=%u bad_samples=%u poison=%u clear=%u polls=%u\n",
-                       mode_name[mode], trial, bad, saw_poison, saw_clear, polls);
+                crumb("GCM_LABEL_REUSE_CORRUPT mode=%s trial=%u bad_samples=%u poison=%u clear=%u polls=%u",
+                      mode_name[mode], trial, bad, saw_poison, saw_clear, polls);
+            } else {
+                crumb("GCM_LABEL_REUSE_TRIAL mode=%s trial=%u clean polls=%u", mode_name[mode], trial, polls);
             }
         }
         if (mode < 0) {
             if (!warm_ok) {
-                printf("GCM_LABEL_REUSE_FAIL warm-up: no clean trial in %u\n", WARMUP_MAX);
+                crumb("GCM_LABEL_REUSE_FAIL warm-up: no clean trial in %u", WARMUP_MAX);
                 return 1;
             }
-            printf("GCM_LABEL_REUSE_WARMUP trials=%u (the last one clean)\n", warmup);
+            crumb("GCM_LABEL_REUSE_WARMUP trials=%u (the last one clean)", warmup);
             continue;
         }
-        printf("GCM_LABEL_REUSE_MODE mode=%s trials=%u corrupt=%u late_texture=%u late_vertex=%u mean_polls=%u\n",
-               mode_name[mode], TRIALS, corrupt[mode], poison[mode], clear[mode], polls_total[mode] / TRIALS);
+        crumb("GCM_LABEL_REUSE_MODE mode=%s trials=%u corrupt=%u late_texture=%u late_vertex=%u mean_polls=%u",
+              mode_name[mode], TRIALS, corrupt[mode], poison[mode], clear[mode], polls_total[mode] / TRIALS);
     }
     int ok = corrupt[0] == 0 && corrupt[1] == 0;
-    printf("%s backend=%u/%u texture=%u/%u control_command=%u/%u control_early=%u/%u\n",
-           ok ? "GCM_LABEL_REUSE_OK" : "GCM_LABEL_REUSE_FAIL", corrupt[0], TRIALS, corrupt[1], TRIALS, corrupt[2],
-           TRIALS, corrupt[3], TRIALS);
-    printf("GCM_LABEL_REUSE_DETECTOR %s\n", corrupt[3] ? "sensitive" : "not-sensitive");
+    crumb("%s variant=%s backend=%u/%u texture=%u/%u control_command=%u/%u control_early=%u/%u",
+          ok ? "GCM_LABEL_REUSE_OK" : "GCM_LABEL_REUSE_FAIL", VARIANT, corrupt[0], TRIALS, corrupt[1], TRIALS,
+          corrupt[2], TRIALS, corrupt[3], TRIALS);
+    crumb("GCM_LABEL_REUSE_DETECTOR %s", corrupt[3] ? "sensitive" : "not-sensitive");
+    crumb("GCM_LABEL_REUSE_A2 %s", !ok ? "refuted (a backend or texture trial read the reused arena)"
+                                   : corrupt[2] ? "conclusive"
+                                                : "inconclusive (the command control was not caught)");
     return ok ? 0 : 1;
 }

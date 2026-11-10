@@ -1,0 +1,19 @@
+// Heavy label-reuse fragment program: eight texture fetches spread over the texture, combined with max().
+// The texture is one uniform colour per trial, so the result is that colour exactly (max is exact at any precision)
+// when every fetch read the trial's texels; a fetch that read poisoned texels (0xff00ff) raises red and blue.  The
+// spread keeps the fetches missing the texture cache, so each draw keeps reading the arena.
+void main(
+    float2 in_texcoord    : TEXCOORD0,
+    uniform sampler2D tex : TEXUNIT0,
+    out float4 out_color  : COLOR)
+{
+    float4 s = tex2D(tex, in_texcoord);
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.125f, 0.375f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.250f, 0.750f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.375f, 0.125f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.500f, 0.500f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.625f, 0.875f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.750f, 0.250f))));
+    s = max(s, tex2D(tex, frac(in_texcoord + float2(0.875f, 0.625f))));
+    out_color = s;
+}
