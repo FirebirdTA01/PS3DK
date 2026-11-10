@@ -8,8 +8,9 @@ ring.
 
 This page covers the SDK pieces, the rules for using them and what has been
 measured. Each rule says what backs it: a host test, an RPCS3 run of a
-sample, or nothing yet (**UNVERIFIED**). Hardware (PS3 console) results are
-not recorded here yet.
+sample, or nothing yet (**UNVERIFIED**). Console rows come from one run per
+signed SELF on a PS3 through the ps3dk-run loader on 2026-11-10; the evidence
+records are named `hw-s-<sample>`.
 
 ## The pieces
 
@@ -91,24 +92,29 @@ PPU cannot see the completion before the segment's bytes are in memory. The
 PPU's `sync` orders its later reads and the CALL after the completion it
 saw; `cellGcmFlush` publishes the ring.
 
+Measured on RPCS3 and on the console (`hw-s-spu-segment`): 120 SPU-built
+frames, 320 bytes each (the measured size matched the bytes written), 0
+progress mismatches, the SPU's one-shot overflow check refused 26 words, and
+the SPU thread joined.
+
 ## Limits and alignment (B3)
 
 | Rule | Backing |
 |---|---|
 | The CALL word carries a 4-byte-aligned offset below 512 MiB (`offset & 0x1ffffffc`, flag `0x2`). | Encoding; RPCS3's FIFO masks the same bits. |
 | The helper requires 128-byte alignment and a size that is a multiple of 128, at least 128 bytes. | Helper rule (keeps segments whole SPU DMA lines). |
-| A 1 MiB segment (NOPs plus a label) runs and retires. | RPCS3 (desktop build, 2026-11-10, ILP32): `GCM_SEG_LARGE ok bytes=1048576 used=1048576`. Console **UNVERIFIED**. |
-| Segments in main memory work. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): 120 frames from two 64 KiB segments in `cellGcmMapMainMemory` memory, 0 progress mismatches; `hello-spu-gcm-segment` 120 SPU-built frames. Console **UNVERIFIED**. |
-| Segments in RSX local memory. | RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`: all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset, so RPCS3 reads a CALL target as an IO offset and local-memory segments do not run there. Console **UNVERIFIED** (the same sample reports it). Keep segments in mapped main memory. |
-| Nested CALL (a segment that CALLs another segment). | RPCS3 (desktop build, 2026-11-10, ILP32): not supported. The ring CALL and a single-level CALL both worked (`GCM_NEST_CONTROL ring=ok single_call=ok`); the nested CALL logged `FIFO: CALL found inside a subroutine` 21 times, then `Dead FIFO commands queue state has been detected!` and RPCS3 froze emulation, so the sample could not print its label report. Console **UNVERIFIED**. Do not nest; join sub-segments with `cellGcmSetJumpCommand` instead. |
+| A 1 MiB segment (NOPs plus a label) runs and retires. | RPCS3 (desktop build, 2026-11-10, ILP32): `GCM_SEG_LARGE ok bytes=1048576 used=1048576`. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_LARGE ok bytes=1048576 used=1048576 polls=2`, exit 0 (`hw-s-call-return-large`). |
+| Segments in main memory work. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): 120 frames from two 64 KiB segments in `cellGcmMapMainMemory` memory, 0 progress mismatches; `hello-spu-gcm-segment` 120 SPU-built frames. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_PASS variant=main frames=120`, 360-byte segments, 0 progress mismatches, exit 0 (`hw-s-call-return`); `GCM_SPUSEG_PASS frames=120 ... exact_fit=yes` (`hw-s-spu-segment`). |
+| Segments in RSX local memory. | RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`: all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset, so RPCS3 reads a CALL target as an IO offset and local-memory segments do not run there. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): **hangs** (`hw-s-call-return-local`). The last crumb is `local begin frames=120`; the frame-0 crumb, written after the PPU has built the first segment and before its CALL, never came, and the client timed out (the loader recovered). So the hang came while the PPU wrote the first segment into RSX local memory, before any local-memory CALL was issued. Likely cause (inferred, not yet tested): the emitters store some word pairs with 64-bit `std` (for example `rsxClearSurface`), and a misaligned store to RSX local memory, unlike one to cached main memory, faults. **Keep segments in mapped main memory**; the local-memory CALL itself remains untested on the console. |
+| Nested CALL (a segment that CALLs another segment). | RPCS3 (desktop build, 2026-11-10, ILP32): not supported. The ring CALL and a single-level CALL both worked (`GCM_NEST_CONTROL ring=ok single_call=ok`); the nested CALL logged `FIFO: CALL found inside a subroutine` 21 times, then `Dead FIFO commands queue state has been detected!` and RPCS3 froze emulation, so the sample could not print its label report. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): **stalls**. `GCM_NEST_LABELS A=2 I=1 B=0 R=1` (I=1 and R=1 are the control's values): the outer segment ran up to the inner CALL and nothing after it, the bounded wait on label 209 expired, the post-probe flip timed out (`NESTED-STALLED`), and the loader came back without READY (`hw-s-nested`). **One CALL level only.** Join sub-segments with `cellGcmSetJumpCommand` instead (`hello-ppu-gcm-call-return-jump`). |
 
 ## State across CALL and RETURN (B4)
 
 | Rule | Backing |
 |---|---|
-| Render state set inside a segment (scissor, clear colour) is still set after RETURN: the ring's clear after the CALL uses the segment's scissor and colour. | RPCS3 (desktop build, 2026-11-10, ILP32): the yellow (PPU sample) and cyan (SPU sample) indicator boxes appear in the screenshots: the ring clear after RETURN used the scissor and colour the segment left. Console **UNVERIFIED**. |
-| A surface (render target) set inside a segment applies to the segment's clears. | RPCS3 (desktop build, 2026-11-10, ILP32): `hello-ppu-gcm-call-return` sets the surface inside every segment and draws into both buffers. Console **UNVERIFIED**. |
-| Command (front-end) labels written inside a segment arrive. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): every per-slot progress label matched its frame in both samples. Console **UNVERIFIED**. |
+| Render state set inside a segment (scissor, clear colour) is still set after RETURN: the ring's clear after the CALL uses the segment's scissor and colour. | RPCS3 (desktop build, 2026-11-10, ILP32): the yellow (PPU sample) and cyan (SPU sample) indicator boxes appear in the screenshots: the ring clear after RETURN used the scissor and colour the segment left. Console: the yellow indicator was on screen in the first console run of `hello-ppu-gcm-call-return` (observed on the display; no capture). |
+| A surface (render target) set inside a segment applies to the segment's clears. | RPCS3 (desktop build, 2026-11-10, ILP32): `hello-ppu-gcm-call-return` sets the surface inside every segment and draws into both buffers. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): the same sample completed 120 flipped frames at 1920x1080 (`hw-s-call-return`). |
+| Command (front-end) labels written inside a segment arrive. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): every per-slot progress label matched its frame in both samples. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): 0 progress mismatches in `hw-s-call-return` and `hw-s-spu-segment`. |
 | Back-end retirement labels belong in the ring after the CALL (the helper does this), not inside the segment: a segment can be reused only after the front end has also left it. | Design rule. |
 | Flip (`cellGcmSetFlip`) and wait-flip inside a segment. | **UNVERIFIED**: the samples keep flips in the ring. Keep them there. |
 | Reports and timestamps inside a segment. | **UNVERIFIED**. |
