@@ -18,6 +18,25 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **RSX label and report reservations.** `<cell/gcm/ps3tc_gcm_labels.h>`, included
+  by `<cell/gcm.h>`, declares which label and local-report indices the system,
+  libPSGL and the profiler reserve, and which are the application's.
+  `cellGcmGetReservedLabelRanges`, `cellGcmGetReservedReportRanges`,
+  `cellGcmGetLabelOwner` and `cellGcmGetReportOwner` query them. A host test
+  fails if SDK or sample code uses an index outside the declared set. See
+  [docs/gcm-labels.md](docs/gcm-labels.md).
+
+- **Non-blocking label query.** `cellGcmIsLabelPassed(index, serial)` reads a
+  label once, with a `sync` after the read, and compares it in 32-bit serial
+  arithmetic, so frame serials may wrap.
+
+- **Main-memory arena samples.** `samples/gcm/hello-ppu-gcm-main-arena` draws
+  vertices, indices and a texture from a `cellGcmMapMainMemory` arena and checks
+  the result by readback. `samples/gcm/hello-ppu-gcm-label-reuse` tests whether
+  back-end and texture labels are written late enough for the arena to be reused,
+  with controls that show whether the platform can detect a label written too
+  early.
+
 - **Heterogeneous profiling sample.** `samples/profiling/heterogeneous-workload`
   alternates checked PPU and SPE computation with light and heavy RSX rendering.
   It includes named PPU capture scopes, per-worker telemetry, raw GPU reports,
