@@ -195,6 +195,7 @@ HEADERS := \
     include/cell/gcm/gcm_segment.h \
     include/cell/gcm/gcm_spu_prepare.h \
     include/cell/gcm/ps3tc_gcm_labels.h \
+    include/cell/gcm/gcm_swizzle_func.h \
     include/cell/cell_video_out.h \
     include/cell/cell_audio_out.h \
     include/cell/cell_audio_in.h \

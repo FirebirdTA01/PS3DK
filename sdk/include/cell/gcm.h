@@ -702,6 +702,11 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
  * PSL1GHT's rsx_program layer already provides. */
 #include <cell/gcm/gcm_cg_bridge.h>
 
+/* CPU-side texture swizzle converter (libgcm_cmd.a).  Declared here,
+ * not in cell/texture.h: cellGcmConvertSwizzleFormat is the canonical
+ * CPU entry point for the linear -> Morton-swizzled copy. */
+#include <cell/gcm/gcm_swizzle_func.h>
+
 /* Command-emitter forwarders.  Cell OS source includes the
  * command-emitter family transitively through <cell/gcm.h>; we
  * preserve that. */
