@@ -801,3 +801,71 @@ atomic STOP admission and publication, and post-ack immutability are proved only
     - **Frame tokens:** a token taken before the first frame is NONE; a refused FRAME leaves `current_frame` unchanged;
       a dropped FRAME still assigns its id, so a later token resolves as UNRESOLVED-LOSS.
 - **Stage 5, overhead and cross-check:** the barrier and anti-DCE inspection of section 5.5.
+
+## 11. Named per-frame counters (file flag bit 8, chunk type 39)
+
+This is an opt-in family. A runtime built with `PS3DK_PROF_WITH_COUNTERS` sets file_flags bit 8 (value 256, byte
+13 bit 0) and writes chunk type 39 COUNTERS. Bit 8 has no prerequisite bit. Without bit 8, type 39 is an unknown
+chunk (MALFORMED). A reader that does not know bit 8 refuses the flag. The default archives never set the bit and
+write none of these chunks. Bits 6 and 7 and chunks 31..38 are allocated elsewhere; chunk 39 and bit 8 are the next
+free numbers.
+
+API: `<ps3dk/prof_counter.h>`, `PS3DK_PROF_COUNTER(name, value)` / `ps3dk_prof_counter(name, value)`.
+
+COUNTERS payload (little-endian):
+
+| off | type | field |
+|---|---|---|
+| 0 | u16 | schema = 1 |
+| 2 | u16 | flags: bit 0 FINAL; every other bit 0 |
+| 4 | u32 | n_names |
+| 8 | u32 | n_samples |
+| 12 | u32 | reserved = 0 |
+| 16 | u64 | dropped: cumulative samples lost to a full buffer |
+| 24 | u64 | refused: cumulative calls refused (no incarnation, bad name, name table full, inside a drain) |
+| 32 | n_names × {u32 id, u16 len, len bytes} | name declarations |
+| … | n_samples × 32 bytes | {u32 incarnation, u32 id, u64 frame, u64 tb, i64 value} |
+
+Every rule below is MALFORMED (reader rule `Counters`) when broken:
+
+- **Header fields.**
+  - schema 1.
+  - No unknown flag bit, and reserved = 0.
+  - A non-final chunk declares at least one name or carries at least one sample.
+- **Names.**
+  - Ids are dense: each declared id equals the number of names declared before it in the file.
+  - A name is 1..64 bytes of 0x21..0x7e and is declared once.
+  - A file declares at most 64 names.
+- **Samples.**
+  - A sample names a counter id declared in this or an earlier chunk.
+  - It names an incarnation declared by an earlier THREADS chunk (declaration before use, section 3).
+  - The payload length is exactly the header, plus the declarations, plus 32 × n_samples.
+- **Counts.** dropped and refused never decrease from one chunk to the next.
+- **FINAL.**
+  - No COUNTERS chunk follows a FINAL one.
+  - A file with a TRAILER carries exactly one FINAL chunk. Its counts are the capture's totals.
+  - A file without a TRAILER keeps the samples it has, and reports the inventory as not final.
+
+`frame` is the emitting incarnation's frame marker at the call: 0 before its first FRAME, else 1 + the id of its
+last FRAME (its `current_frame`, section 5.6). It is not checked against the FRAME records, because a lost FRAME
+leaves a marker with no record. `tb` is the raw timebase.
+
+Writer (normative for the counters runtime):
+
+- **Producer side.**
+  - Producers append under one mutex.
+  - A drain snapshots (names, write index) under that mutex before its thread-table snapshot (section 5.4 step 1),
+    so every sample in the chunk was made by an incarnation declared no later than that drain's THREADS.
+  - The sink is never called under the mutex.
+- **Freeze and FINAL.**
+  - The final drain freezes the table at the frontier. Later calls are refused with ESTOPPED and are not counted.
+  - The FINAL chunk follows the frontier's records and THREADS and precedes the TRAILER.
+- **Loss.** A sample that finds the 4096-sample buffer full is dropped and counted. Nothing waits on the sink.
+
+Verified by:
+
+- **Reader:** `tools/ps3dk-prof/tests/counters.rs`, with every rule above refused once, and the flag-mask tests.
+- **Runtime:** `tests/host/ps3dk-prof-runtime/counters-test.py`.
+  - It covers the end-to-end values, frames, refusals and totals on the host PAL.
+  - It also checks that the zone names and records of a counters capture are identical to those of a
+    default-runtime capture of the same program.

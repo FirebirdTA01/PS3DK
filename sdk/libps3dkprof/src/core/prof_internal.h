@@ -236,6 +236,9 @@ typedef struct prof {
 #ifdef PS3DK_PROF_WITH_WAITS
     struct wait_capture *waits;
 #endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    struct counter_capture *counters; /* named per-frame counters (src/counters), one allocation at init */
+#endif
 #ifdef PS3DK_PROF_WITH_FUNC
     struct func_capture *func;  /* function paths (src/func), one allocation at init */
 #endif

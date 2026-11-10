@@ -11,6 +11,9 @@
 #ifdef PS3DK_PROF_WITH_FUNC
 #include "../func/func_internal.h"
 #endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+#include "../counters/counter_internal.h"
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
 #include "psp_ppu.h"
 #include "prof_spu.h"
@@ -1277,6 +1280,11 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     rc=p_wait_init(p);
     if(rc)goto fail_block;
 #endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    rc = p_counter_init(p);
+    if (rc)
+        goto fail_block;
+#endif
 #ifdef PS3DK_PROF_WITH_FUNC
     rc = p_func_init(p);
     if (rc)
@@ -1358,6 +1366,9 @@ fail_mutex1:
 fail_block:
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_unwind(p);
+#endif
+#ifdef PS3DK_PROF_WITH_COUNTERS
+    p_counter_unwind(p);
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
     p_func_unwind(p);
