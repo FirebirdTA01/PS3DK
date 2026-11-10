@@ -140,6 +140,11 @@ The verdict is `GCM_LABEL_REUSE_A2 inconclusive`. RPCS3 cannot show the command-
 its RSX thread reads a draw's vertices and textures when it executes the draw, in FIFO order, so a later command
 label is always written after those reads. Only the console run of the heavy variant can make A2 conclusive.
 
+**Console, heavy** (signed SELF on a PS3, 2026-11-10, evidence `hw-s-label-heavy`): exit 0; backend 0/32, texture
+0/32, command (control) 0/32, early (control) 32/32; `GCM_LABEL_REUSE_A2 inconclusive (the command control was not
+caught)`. **A2 remains INCONCLUSIVE on silicon:** even this workload did not expose the command-label hazard, so the
+clean backend and texture results do not yet show those labels are late enough.
+
 What this shows, and what it does not:
 
 - **The detector works on RPCS3.** The early control is caught in every trial, so a label that the emulator
