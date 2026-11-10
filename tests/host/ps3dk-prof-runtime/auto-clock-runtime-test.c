@@ -1,0 +1,45 @@
+/* Actual owner/frame/drainer path with explicit synthetic device writes. */
+#include <assert.h>
+#include <stdio.h>
+#include <ps3dk/prof_auto.h>
+#include "prof_internal.h"
+#include "prof_test_hooks.h"
+#include "gpu_port_gcm.h"
+#include "ps3tc_prof_auto.h"
+static uint64_t reports[2048][2];
+static uint32_t labels[256],words[512],flushes;
+static gpp_ctx context;
+#ifndef TEST_CLOCK_FRAMES
+#define TEST_CLOCK_FRAMES 64
+#endif
+static void *report(uint32_t n) {return reports[n];}
+static void *label(uint32_t n) {return &labels[n];}
+static uint64_t ld64(volatile uint64_t *a) {return __atomic_load_n(a,__ATOMIC_SEQ_CST);}
+static uint32_t ld32(volatile uint32_t *a) {return __atomic_load_n(a,__ATOMIC_SEQ_CST);}
+static void st64(volatile uint64_t *a,uint64_t v) {__atomic_store_n(a,v,__ATOMIC_SEQ_CST);}
+static void st32(volatile uint32_t *a,uint32_t v) {__atomic_store_n(a,v,__ATOMIC_SEQ_CST);}
+static void flush(gpp_ctx *ctx) {
+    uint32_t serial=++flushes;
+    assert(ctx==&context && ctx->current==words+6*serial && serial<=16);
+    uint32_t *w=ctx->current-6;
+    assert(w[0]==0x41800 && w[1]==0x1000000u+(1024+serial-1)*16);
+    assert(w[2]==0x41d6c && w[3]==238*16 && w[4]==0x41d70);
+    assert(w[5]==serial<<16 && ld64(&reports[1024+serial-1][0])==UINT64_MAX);
+    uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);assert(op==0);
+    ps3dk_prof__auto_publish_after((void *)ctx,op); /* supplied original PUT seam */
+    st64(&reports[1024+serial-1][0],10000*serial);st32(&labels[238],serial);
+}
+static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
+void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
+int main(void) {
+    context=(gpp_ctx){words,words+512,words,NULL};
+    ps3dk_prof_test_hooks.gpu_gpp_dev=&device;
+    ps3dk_prof__auto_gcm_init_result(&context,sizeof words,sizeof words,words,0);
+    for(unsigned frame=0;frame<TEST_CLOCK_FRAMES;frame++) {
+        ps3dk_prof_frame();
+        ps3dk_prof_token token=ps3dk_prof_frame_token();assert(token.owner && token.frame==frame);
+        assert(ps3dk_prof_auto_frame_end(1,token)==0);
+    }
+    assert(flushes==(TEST_CLOCK_FRAMES==64 ? 9:16) && context.current==words+6*flushes);
+    puts("AUTO actual bounded scheduled clock capture PASS");
+}

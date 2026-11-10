@@ -61,6 +61,10 @@ typedef struct ps3tc_fifo_port {
     void (*observe)(void *arg, unsigned int kind, uint64_t tb_before, uint64_t tb_after);
     uint64_t (*tb)(void *arg);
 #endif
+#ifdef PS3TC_PROF_AUTO
+    uint32_t (*publish_before)(void *arg);
+    void (*publish_after)(void *arg, uint32_t frontier);
+#endif
 } ps3tc_fifo_port;
 
 /* Observation points.  In the default build every one expands to an empty statement, so the protocol's stores,
@@ -120,9 +124,15 @@ static inline void ps3tc_fifo_wrap_protocol(volatile uint32_t *tail,
     /* Phase 1: publish the lap up to, not including, the JUMP.
      * The wait's start is here (when PUT is set to the tail), not earlier. */
     const uint64_t phase1_start = p->now_us(p->arg);
+#ifdef PS3TC_PROF_AUTO
+    const uint32_t frontier1 = p->publish_before(p->arg);
+#endif
     PS3TC_FIFO_OBS_PRE(p);
     *p->put = tail_off;
     p->barrier(p->arg);
+#ifdef PS3TC_PROF_AUTO
+    p->publish_after(p->arg, frontier1);
+#endif
     PS3TC_FIFO_OBS_BEGIN(p, 2u);
     for (spins = 0; *p->get != tail_off; ++spins) {
         p->pause(p->arg, tail_off, spins,
@@ -134,9 +144,15 @@ static inline void ps3tc_fifo_wrap_protocol(volatile uint32_t *tail,
     /* Phase 2: release the JUMP; the GPU follows it and parks at begin.
      * Re-measure the start of this phase's own wait. */
     const uint64_t phase2_start = p->now_us(p->arg);
+#ifdef PS3TC_PROF_AUTO
+    const uint32_t frontier2 = p->publish_before(p->arg);
+#endif
     PS3TC_FIFO_OBS_PRE(p);
     *p->put = begin_off;
     p->barrier(p->arg);
+#ifdef PS3TC_PROF_AUTO
+    p->publish_after(p->arg, frontier2);
+#endif
     PS3TC_FIFO_OBS_BEGIN(p, 4u);
     for (spins = 0; *p->get != begin_off; ++spins) {
         p->pause(p->arg, begin_off, spins,

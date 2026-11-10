@@ -375,16 +375,31 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
  * details). */
 #include <cell/gcm/ps3tc_fifo_wrap.h>
 
+#ifdef PS3TC_PROF_AUTO
+/* Selected together with the observed GCM/runtime providers. A strong symbol
+ * makes a missing provider a link failure, rather than silent non-observation.
+ * The notification cannot replace the application's initialization result. */
+void ps3dk_prof__auto_gcm_init_result(gcmContextData *, uint32_t, uint32_t, const void *, int32_t);
+#endif
+
 static inline int32_t cellGcmInit(uint32_t cmdSize, uint32_t ioSize, void *ioAddress)
 {
 	gcmContextData *tmp = NULL;
 	s32 rc = rsxInit(&tmp, cmdSize, ioSize, ioAddress);
 	if (rc == 0) {
 		rc = ps3tc_fifo_init_extent(tmp, cmdSize, ioSize, ioAddress);
-		if (rc != 0) return (int32_t)rc;
+		if (rc != 0) {
+#ifdef PS3TC_PROF_AUTO
+			ps3dk_prof__auto_gcm_init_result(tmp, cmdSize, ioSize, ioAddress, (int32_t)rc);
+#endif
+			return (int32_t)rc;
+		}
 		gGcmContext = (gcmContextData *)(uintptr_t)tmp;
 		ps3tc_fifo_wrap_install(tmp);
 	}
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_gcm_init_result(tmp, cmdSize, ioSize, ioAddress, (int32_t)rc);
+#endif
 	return (int32_t)rc;
 }
 

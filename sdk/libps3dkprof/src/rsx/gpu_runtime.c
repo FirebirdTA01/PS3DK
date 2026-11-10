@@ -431,6 +431,11 @@ int p_gpu_fifo_owner(prof *p, uint32_t h, void *ctx)
 {
     prof *q;
     gpu_slot *g;
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (g_tls.in_drain || g_tls.in_gpu) return PS3DK_PROF_EBUSY;
+    int automatic = p_auto_lease_owner(p,h,ctx);
+    if (automatic != PS3DK_PROF_ENOTSUP) return automatic;
+#endif
     int rc = prologue(h, &q, &g);
     (void)p;
     if (rc != PS3DK_PROF_OK)
@@ -482,6 +487,98 @@ static int ext_enter(prof *p)
 
 /* ---- the API ---- */
 
+#ifdef PS3DK_PROF_WITH_AUTO
+static int auto_label_valid(uint32_t n)
+{
+    return n==64 || (n>=69 && n<=254);
+}
+
+static int auto_lease_conflict(const auto_resource_lease *a, void *ctx,
+                               uint32_t first, uint32_t count, uint32_t label)
+{
+    return a->ctx && (a->ctx==ctx || label==a->operation_label || label==a->clock_label ||
+                     (first<a->first+a->count && a->first<first+count));
+}
+
+int p_auto_lease_claim(prof *p, void *ctx, uint32_t first, uint32_t count,
+                      uint32_t operation_label, uint32_t clock_label,
+                      uint32_t *domain, uint32_t *ticket)
+{
+    auto_resource_lease *a=&p->auto_lease;
+    pal_owner owner;
+    uint32_t id;
+    if(domain) *domain=0;
+    if(ticket) *ticket=0;
+    if(!domain || !ticket || !ctx || count<18 || count>1024 || (count&1) ||
+       first>GPU_REPORTS-count || !auto_label_valid(operation_label) ||
+       !auto_label_valid(clock_label) || operation_label==clock_label)
+        return PS3DK_PROF_EINVAL;
+    if(LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->stop_latch) || LD_ACQ(&p->ext_fault) || p->ext_sealed)
+        return PS3DK_PROF_ESTOPPED;
+    if(LD_ACQ(&a->published)) return PS3DK_PROF_EBUSY;
+    if(a->ctx && a->ctx!=ctx) return PS3DK_PROF_EINVAL;
+    for(uint32_t i=0;i<p->gpu_max;i++) {
+        const gpu_slot *g=&p->gpu[i];
+        if(LD_ACQ(&g->state)==GPU_S_FREE) continue;
+        if(g->ctx==ctx || g->label==operation_label || g->label==clock_label ||
+           (first<g->report_first+g->report_count && g->report_first<first+count))
+            return PS3DK_PROF_EINVAL;
+    }
+    if(a->next_ticket==UINT32_MAX || (!a->ctx && p->gpu_lifetime>=GPU_LIFETIME_MAX))
+        return PS3DK_PROF_EFULL;
+    if(!g_tls.slot1 || g_tls.acked || g_tls.retired || pal_owner_get(&owner)!=0)
+        return PS3DK_PROF_ETHREAD;
+    if(a->ctx && (a->owner_incarnation!=g_tls.incarnation ||
+       a->owner_generation!=g_tls.generation || !pal_owner_is_self(&a->owner)))
+        return PS3DK_PROF_EPERM;
+    id=a->ctx ? a->domain : GPU_ID_BASE+p->gpu_lifetime++;
+    a->ctx=ctx; a->domain=id; a->first=first; a->count=count;
+    a->operation_label=operation_label; a->clock_label=clock_label;
+    a->ticket=++a->next_ticket;
+    a->owner=owner;a->owner_incarnation=g_tls.incarnation;a->owner_generation=g_tls.generation;
+    *domain=id; *ticket=a->ticket;
+    return PS3DK_PROF_OK;
+}
+
+int p_auto_lease_owner(prof *p,uint32_t domain,void *ctx)
+{
+    int rc=ext_enter(p);
+    if(rc!=PS3DK_PROF_OK)return rc;
+    const auto_resource_lease *a=&p->auto_lease;
+    rc=PS3DK_PROF_ENOTSUP;
+    if(a->ctx && a->domain==domain) {
+        if(LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->stop_latch) || p->ext_sealed)
+            rc=PS3DK_PROF_ESTOPPED;
+        else if(ctx!=a->ctx)rc=PS3DK_PROF_EINVAL;
+        else if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||
+                a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation ||
+                !pal_owner_is_self(&a->owner))rc=PS3DK_PROF_EPERM;
+        else rc=PS3DK_PROF_OK;
+    }
+    if(p_ext_unlock_site(p,U_GPU_ATTACH)!=0)return PS3DK_PROF_ESTOPPED;
+    return rc;
+}
+
+int p_auto_lease_mark(prof *p, uint32_t ticket)
+{
+    auto_resource_lease *a=&p->auto_lease;
+    if(!a->ctx || !ticket || a->ticket!=ticket || LD_ACQ(&p->shutdown_once) ||
+       LD_ACQ(&p->stop_latch) || LD_ACQ(&p->ext_fault)) return 0;
+    ST_REL(&a->published,1u);
+    return 1;
+}
+
+int p_auto_lease_drop(prof *p, uint32_t ticket)
+{
+    auto_resource_lease *a=&p->auto_lease;
+    uint32_t next=a->next_ticket;
+    if(!a->ctx || !ticket || a->ticket!=ticket || LD_ACQ(&a->published)) return 0;
+    memset(a,0,sizeof *a);
+    a->next_ticket=next;
+    return 1;
+}
+#endif
+
 int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32_t report_count,
                           uint32_t label, uint32_t *gpu)
 {
@@ -526,6 +623,12 @@ int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32
         rc = PS3DK_PROF_ESTOPPED;
         goto out;
     }
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (auto_lease_conflict(&p->auto_lease,ctx,report_first,report_count,label)) {
+        rc = PS3DK_PROF_EINVAL;
+        goto out;
+    }
+#endif
     for (i = 0; i < p->gpu_max; i++) { /* no overlap with any domain that may still use its resources */
         const gpu_slot *o = &p->gpu[i];
         if (LD_ACQ(&o->state) == GPU_S_FREE)

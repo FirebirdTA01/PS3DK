@@ -1,0 +1,59 @@
+#ifndef PS3DK_PROF_AUTO_INTERNAL_H
+#define PS3DK_PROF_AUTO_INTERNAL_H
+#include "../core/prof_internal.h"
+#include "auto_config.h"
+#include "auto_writer.h"
+#include "auto_queue.h"
+#include "auto_completion.h"
+#include "auto_frames.h"
+#include "auto_clock.h"
+#include "../rsx/gpu_port_gcm.h"
+#include <ps3dk/prof_auto.h>
+#if !defined(PS3DK_PROF_WITH_SPU) || !defined(PS3DK_PROF_WITH_FIFO)
+#error "automatic RSX observation requires the extension and FIFO provider"
+#endif
+
+#define p_auto_init ps3dk_prof__auto_init
+#define p_auto_drain ps3dk_prof__auto_drain
+#define p_auto_seal_claim ps3dk_prof__auto_seal_claim
+#define p_auto_owner_retire ps3dk_prof__auto_owner_retire
+#define p_auto_frame ps3dk_prof__auto_frame
+
+/* Supplied by the mandatory selector link step, before linking. The external
+ * execution manifest binds these identities to the final ELF and SELF. */
+extern const uint8_t ps3dk_prof__auto_mechanism[32];
+extern const uint8_t ps3dk_prof__auto_build_binding[32];
+extern const char ps3dk_prof__auto_build_id[];
+extern const char ps3dk_prof__auto_app[];
+
+/* One allocation before observation; variable queues follow this control block
+ * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
+typedef struct auto_capture {
+    pal_owner owner;
+    uint32_t owner_slot, owner_incarnation, owner_generation, lease_ticket;
+    uint32_t fifo_instance;
+    gpp_ctx *context;
+    gpp_port operations_port, clock_port;
+    prg_port operations_device, clock_device;
+    auto_queue operations;
+    auto_publication publication;
+    auto_completion completion; /* drainer only */
+    auto_frames coverage;
+    auto_queue_entry *active; /* owner only, between canonical begin/end */
+    uintptr_t expected_end;
+    uint32_t device_initialized, saturated, owner_done;
+    uint64_t admitted, unassociated, internal_suppressed, conflicts;
+    auto_wire_frame *frames;
+    uint32_t frame_capacity;
+    auto_clock clocks;
+    uint32_t clock_put_frontier; /* owner-only snapshot around original PUT */
+    uint64_t allocated;
+    uint32_t owner_declared, domain_declared, epoch_declared, final_declared;
+} auto_capture;
+
+void p_auto_init(prof *p); /* before READY/start_gate publication */
+void p_auto_drain(prof *p, int seal); /* sole encoder, core drain serialization */
+void p_auto_seal_claim(void); /* before quiescence and every sink check */
+void p_auto_owner_retire(void); /* before the core owner's final acknowledgement */
+void p_auto_frame(uint64_t frame,uint64_t tb); /* registered GCM owner only */
+#endif

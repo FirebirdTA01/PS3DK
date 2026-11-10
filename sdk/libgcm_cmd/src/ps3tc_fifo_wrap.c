@@ -20,6 +20,9 @@
 #include <cell/gcm/ps3tc_fifo_wrap.h>
 
 #include "ps3tc_fifo_wrap_protocol.h"
+#ifdef PS3TC_PROF_AUTO
+#include "ps3tc_prof_auto.h"
+#endif
 #ifdef PS3TC_FIFO_OBSERVE
 #include "ps3tc_fifo_observe.h"
 #endif
@@ -48,7 +51,22 @@ typedef struct {
 #ifdef PS3TC_FIFO_OBSERVE
     ps3tc_fifo_obs_wrap obs;        /* the observed wrap's frozen offsets */
 #endif
+#ifdef PS3TC_PROF_AUTO
+    gcmContextData *context;
+#endif
 } ps3tc_fifo_wait;
+
+#ifdef PS3TC_PROF_AUTO
+static uint32_t ps3tc_fifo_publish_before(void *arg)
+{
+    return ps3dk_prof__auto_publish_before(((ps3tc_fifo_wait *)arg)->context);
+}
+
+static void ps3tc_fifo_publish_after(void *arg, uint32_t frontier)
+{
+    ps3dk_prof__auto_publish_after(((ps3tc_fifo_wait *)arg)->context, frontier);
+}
+#endif
 
 #ifdef PS3TC_FIFO_OBSERVE
 /* The observed variant (libgcm_cmd_prof_fifo.a): the bridge state of
@@ -148,6 +166,9 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
 #ifdef PS3TC_FIFO_OBSERVE
                              , { 0u, 0u, 0u, 0u }
 #endif
+#ifdef PS3TC_PROF_AUTO
+                             , ctx
+#endif
     };
     gcmControlRegister volatile *ctrl = wait.ctrl;
 #ifdef PS3TC_FIFO_OBSERVE
@@ -165,6 +186,9 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
         ps3tc_fifo_pause, &wait
 #ifdef PS3TC_FIFO_OBSERVE
         , observed ? ps3tc_fifo_observe_phase : NULL, ps3tc_fifo_tb
+#endif
+#ifdef PS3TC_PROF_AUTO
+        , ps3tc_fifo_publish_before, ps3tc_fifo_publish_after
 #endif
     };
     const uint64_t t0 = __builtin_ppc_get_timebase();

@@ -87,6 +87,20 @@ void p_fifo_seal_close(void);          /* the seal, last: an undrained ATTACHED 
 int p_fifo_emit_chunk(prof *p, uint32_t type, const uint8_t *payload, size_t len); /* 0: the sink took it whole */
 uint8_t *p_fifo_payload(prof *p);      /* the drainer's chunk payload buffer (P_CHUNK_CAP bytes) */
 
+#ifdef PS3DK_PROF_WITH_AUTO
+#define p_fifo_auto_prepare ps3dk_prof__fifo_auto_prepare
+#define p_fifo_auto_publish ps3dk_prof__fifo_auto_publish
+#define p_fifo_auto_cancel ps3dk_prof__fifo_auto_cancel
+/* Sole GCM owner, with AUTO's mutable CONFIG claim held. Prepare validates the
+ * shared lease and installs an unpublished observer; it holds no lock on return.
+ * Publish follows AUTO CONFIG commit. Cancel is only for an unpublished prepare,
+ * including one claimed SEALED in the meantime; the drainer never reads it. */
+int p_fifo_auto_prepare(uint32_t domain, ps3dk_prof_gcm_ctx *ctx);
+int p_fifo_auto_publish(void);
+void p_fifo_auto_cancel(void);
+void ps3dk_prof__auto_fifo_boundary(void *ctx);
+#endif
+
 #ifdef PS3DK_PROF_TEST_HOOKS
 /* point 1: inside the owner callback, before admission (kind in `v`); point 2: attach, every validation passed, before
  * the instance claim; point 3: attach, claimed and installed, before the publication */

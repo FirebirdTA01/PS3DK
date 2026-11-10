@@ -3,8 +3,9 @@ import hashlib,re
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[3]
-SOURCE=ROOT/'sdk/libgcm_cmd/src/rsx_legacy/commands_impl.h'
-SOURCE_LF_SHA256='9c522540894a0521ee52aac209ed71ea19bdc6820605d4e43deea6b9b530dcce'
+SOURCE=Path(__file__).resolve().parent/'data/auto-emitter-60fe5924.h'
+SOURCE_LF_SHA256='8263d31aa17547a9df4c9d2f774ed60a4848ee80cb83e0b4ae6c410544a8d987'
+ORIGINAL_SOURCE_LF_SHA256='9c522540894a0521ee52aac209ed71ea19bdc6820605d4e43deea6b9b530dcce'
 
 def extract(text,signature):
     assert text.count(signature)==1,signature
@@ -30,7 +31,7 @@ def write(dest):
 #include <stdint.h>
 #include <rsx/nv40.h>
 typedef uint8_t u8; typedef uint32_t u32;
-typedef struct { u32 *current, *end; } gcmContextData;
+typedef struct _gcmCtxData { u32 *current, *end; } gcmContextData;
 typedef struct { u32 *start; u32 count; } fixture_group;
 static fixture_group fixture_groups[64];
 static unsigned fixture_group_count;
@@ -51,4 +52,5 @@ static void fixture_reserve(gcmContextData *context,u32 n) {
 '''
     dest.write_bytes((pre+'\n\n'.join(bodies)+'\n').encode())
     return {'source':str(SOURCE.relative_to(ROOT)),'sha256':hashlib.sha256(SOURCE.read_bytes()).hexdigest(),'lf_sha256':SOURCE_LF_SHA256,
+            'original_source_lf_sha256':ORIGINAL_SOURCE_LF_SHA256,
             'bodies':{s:hashlib.sha256(b.encode()).hexdigest() for s,b in zip(signatures,bodies)}}

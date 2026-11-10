@@ -48,6 +48,9 @@ static void fifo_event(void *user, const ps3tc_fifo_boundary *b)
         bump(&f->refused);
         goto out;
     }
+#ifdef PS3DK_PROF_WITH_AUTO
+    ps3dk_prof__auto_fifo_boundary(f->ctx);
+#endif
     seq = LD_RLX(&f->attempted) + 1u;
     if (seq >= P_CEIL) {
         ST_REL(&f->saturated, 1u); /* sticky: no sequence wraps or repeats */
@@ -103,8 +106,13 @@ out:
     f->o_in_cb = 0;
 }
 
+#ifdef PS3DK_PROF_WITH_AUTO
+static int fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_fifo_options *o,
+                           uint32_t *instance, int deferred)
+#else
 int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_fifo_options *o,
                            uint32_t *instance)
+#endif
 {
     fifo_capture *f = &g_fifo;
     prof *p;
@@ -113,7 +121,11 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
     int rc;
     if (instance)
         *instance = 0;
-    if (g_tls.in_drain || g_tls.in_gpu)
+    if (g_tls.in_drain || (g_tls.in_gpu
+#ifdef PS3DK_PROF_WITH_AUTO
+                          && !deferred
+#endif
+                         ))
         return PS3DK_PROF_EBUSY;
     p = p_ready() ? g_prof : NULL;
     if (!p)
@@ -144,7 +156,11 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
         return PS3DK_PROF_ESTOPPED;
     if (!g_tls.slot1 || g_tls.acked || g_tls.retired)
         return PS3DK_PROF_ETHREAD;
+#ifdef PS3DK_PROF_WITH_AUTO
+    rc = deferred ? p_auto_lease_owner(p, gpu, ctx) : p_gpu_fifo_owner(p, gpu, ctx);
+#else
     rc = p_gpu_fifo_owner(p, gpu, ctx);
+#endif
     if (rc != PS3DK_PROF_OK)
         return rc;
 #ifdef PS3DK_PROF_TEST_HOOKS
@@ -197,6 +213,9 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
     if (ps3dk_prof__fifo_test_hook)
         ps3dk_prof__fifo_test_hook(3, 0); /* claimed and installed, not yet published */
 #endif
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (deferred) return PS3DK_PROF_OK;
+#endif
     exp = FS_ATTACHING;
     if (!CAS_ACQREL(&f->state, &exp, (uint32_t)FS_ATTACHED)) {
         /* the seal claimed the instance first; it never touched the block */
@@ -211,9 +230,44 @@ unwind:
     pal_free(f->block);
     f->block = NULL;
     f->ring = NULL;
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (deferred) f->instance = 0;
+#endif
     unclaim(f);
     return rc;
 }
+
+#ifdef PS3DK_PROF_WITH_AUTO
+int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_fifo_options *o,
+                          uint32_t *instance)
+{
+    return fifo_attach(gpu,ctx,o,instance,0);
+}
+int p_fifo_auto_prepare(uint32_t domain,ps3dk_prof_gcm_ctx *ctx)
+{
+    uint32_t unused;
+    return fifo_attach(domain,ctx,NULL,&unused,1);
+}
+void p_fifo_auto_cancel(void)
+{
+    fifo_capture *f=&g_fifo;
+    /* No successful ATTACHED publication occurred. Only the preparing owner
+     * can call this, and a sealing drainer touches only state/d_closed. */
+    (void)ps3tc_fifo_observe_remove((struct _gcmCtxData *)f->ctx,&f->reg);
+    pal_free(f->block);f->block=NULL;f->ring=NULL;f->instance=0;
+    unclaim(f);
+}
+int p_fifo_auto_publish(void)
+{
+    uint32_t expected=FS_ATTACHING;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if(ps3dk_prof__fifo_test_hook)ps3dk_prof__fifo_test_hook(4,0);
+#endif
+    if(CAS_ACQREL(&g_fifo.state,&expected,(uint32_t)FS_ATTACHED))return PS3DK_PROF_OK;
+    p_fifo_auto_cancel();
+    return PS3DK_PROF_ESTOPPED;
+}
+#endif
 
 int ps3dk_prof_fifo_detach(uint32_t instance)
 {

@@ -2,6 +2,9 @@
  * frontier, sealing, ps3dk_prof_drain and ps3dk_prof_shutdown.  The drainer is the ONLY consumer (5.4) and the only
  * code that frees a slot (r2 3.1).  References as in prof_core.c. */
 #include "prof_internal.h"
+#ifdef PS3DK_PROF_WITH_AUTO
+#include "../auto_rsx/auto_internal.h"
+#endif
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
 #endif
@@ -360,6 +363,10 @@ static void dr_start(prof *p)
     if (p->ext_flags)
         head[12] |= 64; /* file_flags bit 6: FIFO wrap events (chunk types 31-33); needs bit 0 */
 #endif
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (p->ext_flags)
+        head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
+#endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
@@ -611,6 +618,10 @@ int p_drain_once(prof *p)
     /* 3. Records up to the snapshot. */
     for (i = 0; i < n; i++)
         drain_ring(p, d->snaps[i].slot, d->snaps[i].incarnation, d->snaps[i].widx);
+#ifdef PS3DK_PROF_WITH_AUTO
+    if (p->ext_flags)
+        p_auto_drain(p, 0);
+#endif
 #ifdef PS3DK_PROF_WITH_FIFO
     /* 3a. FIFO wrap events, before the extension step.  This step takes no lock; an owner parked in a wrap holds no
      * profiler mutex (no reserve is made under one), so its queued boundaries reach the sink while it waits. */
@@ -748,6 +759,9 @@ int p_quiesce_freeze_seal(prof *p)
 #ifdef PS3DK_PROF_WITH_FIFO
     p_fifo_seal_claim(); /* before the wait and every sink check: no FIFO attach publishes after this */
 #endif
+#ifdef PS3DK_PROF_WITH_AUTO
+    p_auto_seal_claim();
+#endif
     quiesce_wait(p);
     HOOK(before_frontier);
 
@@ -849,6 +863,10 @@ int p_quiesce_freeze_seal(prof *p)
         /* The extension seal: after the frontier's THREADS and RETIRED, before the TRAILER. */
         if (p->ext_flags)
             p_ext_seal(p);
+#endif
+#ifdef PS3DK_PROF_WITH_AUTO
+        if (p->ext_flags)
+            p_auto_drain(p, 1);
 #endif
 #ifdef PS3DK_PROF_WITH_FIFO
         if (p->ext_flags)

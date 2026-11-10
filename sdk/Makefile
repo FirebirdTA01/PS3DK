@@ -28,6 +28,7 @@ HEADERS := \
     include/ps3dk/prof_func.h \
     include/ps3dk/prof_wait.h \
     include/ps3dk/prof_fifo.h \
+    include/ps3dk/prof_auto.h \
     include/ps3dk/prof_wait_internal.h \
     include/ppu-types.h \
     include/ppu-asm.h \
