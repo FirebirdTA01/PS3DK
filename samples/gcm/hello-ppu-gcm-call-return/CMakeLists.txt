@@ -4,8 +4,8 @@ include(ps3-self)
 
 # One SELF per variant.  The default runs only main-memory segments (plus the
 # overflow refusal, which issues no CALL); -local and -large run the riskier
-# phases on their own.
-foreach(variant "" "-local" "-large")
+# phases on their own; -jump chains two sub-segments with a JUMP.
+foreach(variant "" "-local" "-large" "-jump")
     set(t hello-ppu-gcm-call-return${variant})
     add_executable(${t} source/main.c)
     target_compile_features(${t} PRIVATE c_std_11)
@@ -14,6 +14,8 @@ foreach(variant "" "-local" "-large")
         target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_LOCAL=1)
     elseif(variant STREQUAL "-large")
         target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_LARGE=1)
+    elseif(variant STREQUAL "-jump")
+        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_JUMP=1)
     else()
         set(id GCMS00001)
     endif()

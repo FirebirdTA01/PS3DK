@@ -9,6 +9,9 @@
  *   -local   overflow refusal + 120 frames from RSX local memory, with a decoy
  *            at the equal IO offset (GCM_SEG_VARIANT_LOCAL)
  *   -large   overflow refusal + one 1 MiB segment (GCM_SEG_VARIANT_LARGE)
+ *   -jump    overflow refusal + 120 frames from mapped main memory, each a
+ *            CALLed segment that JUMPs to a second sub-segment, which RETURNs
+ *            (GCM_SEG_VARIANT_JUMP)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
 #include <cell/gcm/gcm_segment.h>
@@ -27,6 +30,8 @@
 #define VARIANT "local"
 #elif defined(GCM_SEG_VARIANT_LARGE)
 #define VARIANT "large"
+#elif defined(GCM_SEG_VARIANT_JUMP)
+#define VARIANT "jump"
 #else
 #define VARIANT "main"
 #endif
@@ -66,19 +71,39 @@ static uint32_t label_value(uint8_t index)
  * scissor and clear colour set for the indicator box the ring clears after
  * RETURN, so the box shows whether state set inside a segment survives.
  * phase 0 (main memory): green stripe, one bar; phase 1 (local): blue, two. */
-__attribute__((unused)) static void build_frame(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
+static const uint32_t stripe[2][2] = {{0xff30c080, 0xff208050}, {0xff5080ff, 0xff3050c0}};
+
+/* First part: target, background, stripe.  The JUMP variant draws its
+ * stripe in orange so the screen shows which variant ran. */
+__attribute__((unused)) static void build_frame_head(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
 {
-    static const uint32_t stripe[2][2] = {{0xff30c080, 0xff208050}, {0xff5080ff, 0xff3050c0}};
     uint32_t w = disp.width, h = disp.height, bar = w / 16;
+    (void)phase;
     seg_display_target(c, &disp);
     seg_rect(c, 0, 0, w, h, 0xff101824);
+#ifdef GCM_SEG_VARIANT_JUMP
+    seg_rect(c, (frame * 9u) % (w - bar), 48, bar, h - 96, slot ? 0xffe08020 : 0xffc06010);
+#else
     seg_rect(c, (frame * 9u) % (w - bar), 48, bar, h - 96, stripe[phase][slot]);
+#endif
+}
+
+/* Second part: phase bars, progress bar, progress label, indicator state. */
+__attribute__((unused)) static void build_frame_tail(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
+{
+    uint32_t w = disp.width, h = disp.height;
     for (unsigned n = 0; n <= phase; ++n)                 /* phase bars */
         seg_rect(c, 16 + n * 80, 8, 64, 12, stripe[phase][0]);
     seg_rect(c, 16, h - 16, (w - 32) * (frame % FRAMES + 1) / FRAMES, 8, stripe[phase][0]);
     cellGcmSetWriteCommandLabel(c, progress_label[slot], frame);
     cellGcmSetScissor(c, w - 96, 8, 80, 24);              /* indicator box state */
     cellGcmSetClearColor(c, 0xffffd040);
+}
+
+__attribute__((unused)) static void build_frame(CellGcmContextData *c, unsigned phase, unsigned frame, unsigned slot)
+{
+    build_frame_head(c, phase, frame, slot);
+    build_frame_tail(c, phase, frame, slot);
 }
 
 #ifdef GCM_SEG_VARIANT_LOCAL
@@ -178,6 +203,67 @@ __attribute__((unused)) static int run_phase(CellGcmContextData *ring, CellGcmSe
     seg_step("%s end frames=%u decoy=%u mismatches=%u", st->name, st->frames, st->decoy_hits, st->mismatches);
     return 1;
 }
+
+#ifdef GCM_SEG_VARIANT_JUMP
+/* Each frame: segment A (CALLed) draws the head and JUMPs to sub-segment B,
+ * which draws the tail (including the progress label) and RETURNs.  B is
+ * never CALLed itself; it is rebuilt only after A's retirement label, which
+ * the back end writes after the RETURN that ends B. */
+static int run_jump_phase(CellGcmContextData *ring, CellGcmSegment a[2], CellGcmSegment b[2], PhaseStats *st)
+{
+    seg_step("%s begin frames=%u", st->name, FRAMES);
+    for (unsigned frame = 0; frame < FRAMES; ++frame) {
+        unsigned slot = frame & 1u;
+        int loud = frame < 3 || frame % 30 == 0;
+        uint32_t polls = 0;
+        int32_t rc;
+        if (cellSysutilCheckCallback() || quit_requested) return 0;
+        if (!wait_slot(st, &a[slot], slot, frame, &polls)) return 0;
+        if (polls) st->waits_polled++;
+        if (polls > st->max_polls) st->max_polls = polls;
+        if (frame >= 2) check_progress(st, slot, frame - 2);
+        CellGcmContextData *cb = cellGcmSegmentBegin(&b[slot]);
+        if (!cb) { printf("GCM_SEG_FAIL phase=%s frame=%u sub-segment begin refused\n", st->name, frame); return 0; }
+        build_frame_tail(cb, 0, frame, slot);
+        if ((rc = cellGcmSegmentEnd(&b[slot])) != CELL_OK) {
+            printf("GCM_SEG_FAIL phase=%s frame=%u sub-segment end rc=%08x\n", st->name, frame, (unsigned)rc);
+            return 0;
+        }
+        CellGcmContextData *ca = cellGcmSegmentBegin(&a[slot]);
+        if (!ca) { printf("GCM_SEG_FAIL phase=%s frame=%u begin refused\n", st->name, frame); return 0; }
+        build_frame_head(ca, 0, frame, slot);
+        cellGcmSetJumpCommand(ca, b[slot].offset);
+        if ((rc = cellGcmSegmentEnd(&a[slot])) != CELL_OK) {   /* its RETURN is never reached */
+            printf("GCM_SEG_FAIL phase=%s frame=%u end rc=%08x\n", st->name, frame, (unsigned)rc);
+            return 0;
+        }
+        st->used_bytes = cellGcmSegmentGetUsedBytes(&a[slot]) + cellGcmSegmentGetUsedBytes(&b[slot]);
+        if (loud) seg_step("%s frame=%u slot=%u call offset=0x%08x jump offset=0x%08x bytes=%u", st->name,
+                           frame, slot, (unsigned)a[slot].offset, (unsigned)b[slot].offset, st->used_bytes);
+        if ((rc = cellGcmSegmentCall(ring, &a[slot])) != CELL_OK) {
+            printf("GCM_SEG_FAIL phase=%s frame=%u call rc=%08x\n", st->name, frame, (unsigned)rc);
+            return 0;
+        }
+        cellGcmSetClearSurface(ring, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) {
+            printf("GCM_SEG_FAIL phase=%s frame=%u flip not done after %u polls (retire label %u = %u, serial %u)\n",
+                   st->name, frame, SEG_FLIP_POLLS, retire_label[slot],
+                   (unsigned)label_value(retire_label[slot]), (unsigned)a[slot].serial);
+            seg_step("%s FAIL flip frame=%u", st->name, frame);
+            return 0;
+        }
+        if (loud) seg_step("%s frame=%u flipped", st->name, frame);
+        st->frames++;
+    }
+    for (unsigned slot = 0; slot < 2; ++slot) {
+        uint32_t polls = 0;
+        if (!wait_slot(st, &a[slot], slot, FRAMES + slot, &polls)) return 0;
+        check_progress(st, slot, FRAMES - 2 + slot);
+    }
+    seg_step("%s end frames=%u mismatches=%u", st->name, st->frames, st->mismatches);
+    return 1;
+}
+#endif
 
 /* An overfull segment is refused, reported and never called. */
 static int overflow_check(CellGcmContextData *ring, uint32_t *mem)
@@ -290,6 +376,21 @@ int main(void)
            (unsigned)local_off, st.waits_polled, st.max_polls, st.used_bytes, st.mismatches,
            st.decoy_hits, outcome);
     if (!strcmp(outcome, "LOCAL-MIXED")) { puts("GCM_SEG_FAIL local outcome mixed"); return 1; }
+#elif defined(GCM_SEG_VARIANT_JUMP)
+    CellGcmSegment sub[2];
+    for (unsigned k = 0; k < 2; ++k)
+        if (cellGcmSegmentInit(&seg[k], pool_bytes + (1 + k) * SEG_BYTES, SEG_BYTES,
+                               CELL_GCM_LOCATION_MAIN, retire_label[k]) != CELL_OK ||
+            cellGcmSegmentInit(&sub[k], pool_bytes + (3 + k) * SEG_BYTES, SEG_BYTES,
+                               CELL_GCM_LOCATION_MAIN, SEG_LABEL_PROBE) != CELL_OK) {
+            puts("GCM_SEG_FAIL jump segment init"); return 1;
+        }
+    if (!run_jump_phase(ring, seg, sub, &st)) return 1;
+    printf("GCM_SEG_PHASE name=jump frames=%u calls=%u jumps=%u waits_polled=%u max_polls=%u bytes_per_frame=%u "
+           "progress_mismatches=%u\n", st.frames, seg[0].calls + seg[1].calls, st.frames,
+           st.waits_polled, st.max_polls, st.used_bytes, st.mismatches);
+    if (st.mismatches || st.frames != FRAMES) { puts("GCM_SEG_FAIL progress"); return 1; }
+    outcome = "jump-ok";
 #else
     for (unsigned k = 0; k < 2; ++k)
         if (cellGcmSegmentInit(&seg[k], pool_bytes + (1 + k) * SEG_BYTES, SEG_BYTES,
