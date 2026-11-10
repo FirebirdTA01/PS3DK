@@ -97,18 +97,18 @@ saw; `cellGcmFlush` publishes the ring.
 |---|---|
 | The CALL word carries a 4-byte-aligned offset below 512 MiB (`offset & 0x1ffffffc`, flag `0x2`). | Encoding; RPCS3's FIFO masks the same bits. |
 | The helper requires 128-byte alignment and a size that is a multiple of 128, at least 128 bytes. | Helper rule (keeps segments whole SPU DMA lines). |
-| A 1 MiB segment (NOPs plus a label) runs and retires. | **UNVERIFIED**: `hello-ppu-gcm-call-return` (`GCM_SEG_LARGE`) measures it; not run yet. |
-| Segments in main memory work. | Host test (model front end). On RPCS3 and console **UNVERIFIED**: `hello-ppu-gcm-call-return` phase `main`; not run yet. |
-| Segments in RSX local memory. | **UNVERIFIED**. RPCS3 fetches FIFO words only through the IO map, so a local offset is likely read as an IO offset. `hello-ppu-gcm-call-return` phase `local` places a decoy at the equal IO offset and reports `LOCAL-OK`, `LOCAL-IO-ALIAS` or `LOCAL-STALLED`; not run yet. Until measured, keep segments in mapped main memory. |
-| Nested CALL (a segment that CALLs another segment). | **UNVERIFIED** on RPCS3 and console: `hello-ppu-gcm-nested-call` reports which labels were reached; not run yet. RPCS3's FIFO code keeps one return slot and treats a CALL inside a subroutine as an error, and the host model does the same. Do not nest; join sub-segments with `cellGcmSetJumpCommand` instead. |
+| A 1 MiB segment (NOPs plus a label) runs and retires. | RPCS3 (desktop build, 2026-11-10, ILP32): `GCM_SEG_LARGE ok bytes=1048576 used=1048576`. Console **UNVERIFIED**. |
+| Segments in main memory work. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): 120 frames from two 64 KiB segments in `cellGcmMapMainMemory` memory, 0 progress mismatches; `hello-spu-gcm-segment` 120 SPU-built frames. Console **UNVERIFIED**. |
+| Segments in RSX local memory. | RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`: all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset, so RPCS3 reads a CALL target as an IO offset and local-memory segments do not run there. Console **UNVERIFIED** (the same sample reports it). Keep segments in mapped main memory. |
+| Nested CALL (a segment that CALLs another segment). | RPCS3 (desktop build, 2026-11-10, ILP32): not supported. The ring CALL and a single-level CALL both worked (`GCM_NEST_CONTROL ring=ok single_call=ok`); the nested CALL logged `FIFO: CALL found inside a subroutine` 21 times, then `Dead FIFO commands queue state has been detected!` and RPCS3 froze emulation, so the sample could not print its label report. Console **UNVERIFIED**. Do not nest; join sub-segments with `cellGcmSetJumpCommand` instead. |
 
 ## State across CALL and RETURN (B4)
 
 | Rule | Backing |
 |---|---|
-| Render state set inside a segment (scissor, clear colour) is still set after RETURN: the ring's clear after the CALL uses the segment's scissor and colour. | **UNVERIFIED**: `hello-ppu-gcm-call-return` draws an indicator box this way (a visible check); not run yet. |
-| A surface (render target) set inside a segment applies to the segment's clears. | **UNVERIFIED**: `hello-ppu-gcm-call-return` sets the surface inside each segment; not run yet. |
-| Command (front-end) labels written inside a segment arrive. | Host test (model). On RPCS3 and console **UNVERIFIED**: the samples check a per-slot progress label; not run yet. |
+| Render state set inside a segment (scissor, clear colour) is still set after RETURN: the ring's clear after the CALL uses the segment's scissor and colour. | RPCS3 (desktop build, 2026-11-10, ILP32): the yellow (PPU sample) and cyan (SPU sample) indicator boxes appear in the screenshots: the ring clear after RETURN used the scissor and colour the segment left. Console **UNVERIFIED**. |
+| A surface (render target) set inside a segment applies to the segment's clears. | RPCS3 (desktop build, 2026-11-10, ILP32): `hello-ppu-gcm-call-return` sets the surface inside every segment and draws into both buffers. Console **UNVERIFIED**. |
+| Command (front-end) labels written inside a segment arrive. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): every per-slot progress label matched its frame in both samples. Console **UNVERIFIED**. |
 | Back-end retirement labels belong in the ring after the CALL (the helper does this), not inside the segment: a segment can be reused only after the front end has also left it. | Design rule. |
 | Flip (`cellGcmSetFlip`) and wait-flip inside a segment. | **UNVERIFIED**: the samples keep flips in the ring. Keep them there. |
 | Reports and timestamps inside a segment. | **UNVERIFIED**. |
