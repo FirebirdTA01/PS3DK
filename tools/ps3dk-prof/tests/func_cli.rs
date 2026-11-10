@@ -2,16 +2,42 @@
 //! resolver on independent big-endian ELF64 PowerPC64 fixtures written by tests/func_support.
 mod func_support;
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use func_support::*;
 use ps3dk_prof::elf_symbols::{demangle, ElfSymbols, Unresolved};
 
 fn tmp(tag: &str, bytes: &[u8]) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("ps3dk-prof-func-{}-{tag}", std::process::id()));
-    std::fs::write(&p, bytes).unwrap();
-    p
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    loop {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "ps3dk-prof-func-{}-{id}-{tag}",
+            std::process::id()
+        ));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+            Ok(mut file) => {
+                file.write_all(bytes).unwrap();
+                return p;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("create {}: {e}", p.display()),
+        }
+    }
+}
+
+#[test]
+fn temporary_inputs_with_same_tag_do_not_overwrite_each_other() {
+    let first = tmp("shared.prof", b"first capture");
+    let second = tmp("shared.prof", b"second capture");
+    assert_eq!(std::fs::read(&first).unwrap(), b"first capture");
+    assert_eq!(std::fs::read(&second).unwrap(), b"second capture");
+    assert_ne!(first, second);
+    std::fs::remove_file(first).unwrap();
+    std::fs::remove_file(second).unwrap();
 }
 
 fn run(args: &[&str]) -> (Option<i32>, String, String) {
