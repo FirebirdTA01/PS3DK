@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-gcm-call-return C)
+include(ps3-self)
+add_executable(hello-ppu-gcm-call-return source/main.c)
+target_compile_features(hello-ppu-gcm-call-return PRIVATE c_std_11)
+target_compile_options(hello-ppu-gcm-call-return PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(hello-ppu-gcm-call-return PRIVATE gcm_cmd gcm_sys sysutil_stub sysutil rt lv2)
+ps3_add_self(hello-ppu-gcm-call-return)
+ps3_add_pkg(hello-ppu-gcm-call-return
+    APPID "GCMS00001" CONTENTID "UP0001-GCMS00001_00-PS3DKSAMPLES0000")
