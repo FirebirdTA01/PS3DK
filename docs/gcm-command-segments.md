@@ -99,14 +99,27 @@ the SPU thread joined.
 
 ## Limits and alignment (B3)
 
+Rules, all measured on a PS3 unless marked:
+
+- Chain sub-segments with `cellGcmSetJumpCommand`; use one CALL level only (a nested CALL stalls the front end).
+- CALL and JUMP offsets are IO offsets. A local-memory offset is fetched from the equal IO offset, so segments
+  live in main memory mapped with `cellGcmMapMainMemory` (or the `cellGcmInit` IO region).
+- Never set up a GCM context in RSX local memory. Writing segments straight into local memory hung the PPU
+  (`hw-s-call-return-local`: the last crumb is the phase start, before the first segment was finished); copying
+  the same segments in with 32-bit stores did not (`hw-s-localcopy`). The cellGcm and rsx emitters use 8-byte
+  `std` stores into the command buffer: a disassembly of `libgcm_cmd.a` finds them in 43 emitters in both ABIs
+  (for example `rsxClearSurface`, `rsxSetVertexProgramConstants`, `rsxDrawVertexArray`). That the hang is an
+  alignment fault from a misaligned 8-byte store to RSX local memory is INFERRED, not measured.
+
 | Rule | Backing |
 |---|---|
 | The CALL word carries a 4-byte-aligned offset below 512 MiB (`offset & 0x1ffffffc`, flag `0x2`). | Encoding; RPCS3's FIFO masks the same bits. |
 | The helper requires 128-byte alignment and a size that is a multiple of 128, at least 128 bytes. | Helper rule (keeps segments whole SPU DMA lines). |
 | A 1 MiB segment (NOPs plus a label) runs and retires. | RPCS3 (desktop build, 2026-11-10, ILP32): `GCM_SEG_LARGE ok bytes=1048576 used=1048576`. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_LARGE ok bytes=1048576 used=1048576 polls=2`, exit 0 (`hw-s-call-return-large`). |
 | Segments in main memory work. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): 120 frames from two 64 KiB segments in `cellGcmMapMainMemory` memory, 0 progress mismatches; `hello-spu-gcm-segment` 120 SPU-built frames. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_PASS variant=main frames=120`, 360-byte segments, 0 progress mismatches, exit 0 (`hw-s-call-return`); `GCM_SPUSEG_PASS frames=120 ... exact_fit=yes` (`hw-s-spu-segment`). |
-| Segments in RSX local memory. | RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`: all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset, so RPCS3 reads a CALL target as an IO offset and local-memory segments do not run there. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): **hangs** (`hw-s-call-return-local`). The last crumb is `local begin frames=120`; the frame-0 crumb, written after the PPU has built the first segment and before its CALL, never came, and the client timed out (the loader recovered). So the hang came while the PPU wrote the first segment into RSX local memory, before any local-memory CALL was issued. Likely cause (inferred, not yet tested): the emitters store some word pairs with 64-bit `std` (for example `rsxClearSurface`), and a misaligned store to RSX local memory, unlike one to cached main memory, faults. **Keep segments in mapped main memory**; the local-memory CALL itself remains untested on the console. |
+| Segments in RSX local memory. | **Not supported: CALL and JUMP offsets are IO offsets.** RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`, all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs): the same on silicon (`hw-s-localcopy`): segments built in main memory, copied into RSX local memory with 32-bit stores and CALLed at local offset 0x01400000 ran the decoy at IO offset 0x01400000 in all 120 frames (`outcome=LOCAL-IO-ALIAS`, exit 0). **Segments live in mapped main memory.** |
 | Nested CALL (a segment that CALLs another segment). | RPCS3 (desktop build, 2026-11-10, ILP32): not supported. The ring CALL and a single-level CALL both worked (`GCM_NEST_CONTROL ring=ok single_call=ok`); the nested CALL logged `FIFO: CALL found inside a subroutine` 21 times, then `Dead FIFO commands queue state has been detected!` and RPCS3 froze emulation, so the sample could not print its label report. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): **stalls**. `GCM_NEST_LABELS A=2 I=1 B=0 R=1` (I=1 and R=1 are the control's values): the outer segment ran up to the inner CALL and nothing after it, the bounded wait on label 209 expired, the post-probe flip timed out (`NESTED-STALLED`), and the loader came back without READY (`hw-s-nested`). **One CALL level only.** Join sub-segments with `cellGcmSetJumpCommand` instead (`hello-ppu-gcm-call-return-jump`). |
+| A JUMP from a CALLed segment to a second sub-segment, which RETURNs. | RPCS3 (2026-11-10) and console (`hw-s-jump`): `GCM_SEG_PHASE name=jump frames=120 calls=120 jumps=120 ... progress_mismatches=0`, exit 0. **Chain sub-segments with JUMP; one CALL level only.** |
 
 ## State across CALL and RETURN (B4)
 
