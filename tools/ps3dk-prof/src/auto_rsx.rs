@@ -60,6 +60,9 @@ pub const FR_LOSS: u16 = 8;
 pub const FR_OPEN: u16 = 16;
 /// The frame was opened by a flip queued on the owner thread (15/11 CONFIG masks only).
 pub const FR_FLIP: u16 = 32;
+/// The writer observed flip-status polling in this frame: u32@12 completed waits, u64@56 owner PPU ticks between
+/// the first pending poll and the done poll (15/11 CONFIG masks only).  Without it there is no presentation evidence.
+pub const FR_PRESENT: u16 = 64;
 pub const ST_FINAL: u16 = 1;
 pub const ST_LOWER_BOUND: u16 = 2;
 pub const ST_SATURATED: u16 = 4;
@@ -242,6 +245,9 @@ pub struct Coverage {
     pub lost: u64,
     /// ARRAY, INDEX, CLEAR: visited, observed, ten exclusions.
     pub rows: [[u64; 12]; 3],
+    /// FR_PRESENT rows: completed flip-status waits and their owner PPU ticks.
+    pub present_waits: u32,
+    pub present_wait: u64,
 }
 impl Coverage {
     pub fn excluded(&self, kind: usize) -> u64 {
@@ -695,10 +701,11 @@ impl Reader {
         }
         c.done()?;
         let at = format!("AUTO coverage frame {owner}/{frame}");
-        if schema != 1 || instance != cfg.instance || r0 != 0 || r1 != 0 {
+        let present = flags & FR_PRESENT != 0;
+        if schema != 1 || instance != cfg.instance || (!present && (r0 != 0 || r1 != 0)) {
             return bad(r, format!("{at}: schema {schema} instance {instance} or a reserved field"));
         }
-        let known: u16 = if cfg.segments_covered() { 63 } else { 31 };
+        let known: u16 = if cfg.segments_covered() { 127 } else { 31 };
         if flags & !known != 0 || flags & FR_FINAL == 0 {
             return bad(r, format!("{at}: flags {flags:#x} (schema 1 rows are FINAL)"));
         }
@@ -716,6 +723,9 @@ impl Reader {
             if o == owner && frame <= f {
                 return bad(r, format!("{at}: frame not above {f}"));
             }
+        }
+        if present && r0 == 0 && r1 != 0 {
+            return bad(r, format!("{at}: presentation waits {r0} with {r1} ticks"));
         }
         if lost < self.last_lost || (lost != 0) != (flags & FR_LOSS != 0) {
             return bad(r, format!("{at}: lost count {lost} against LOSS / earlier {}", self.last_lost));
@@ -738,7 +748,8 @@ impl Reader {
             self.result.refusal.get_or_insert("AUTO coverage retention ceiling");
             return Ok(());
         }
-        self.result.frames.push(Coverage { flags, owner, frame, tb_begin, tb_end, unsupported, lost, rows });
+        self.result.frames.push(Coverage { flags, owner, frame, tb_begin, tb_end, unsupported, lost, rows,
+            present_waits: r0, present_wait: r1 });
         Ok(())
     }
 
@@ -1021,6 +1032,10 @@ fn sat(v: &BigInt) -> u64 {
 /// A share threshold num/den: `part * den >= whole * num`.
 pub const WAIT_SHARE: (u64, u64) = (1, 4);
 pub const RSX_SPAN_SHARE: (u64, u64) = (1, 2);
+/// Presentation (flip-status) wait share of the PPU frame interval that, with the RSX not limiting, reads as pacing.
+pub const PACING_SHARE: (u64, u64) = (1, 4);
+pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
+pub const FINAL_FRAME: &str = "final frame closed at shutdown (no end mark)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -1076,6 +1091,8 @@ pub struct FrameView {
     pub rsx_frame_ppu: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
+    /// Owner PPU ticks polling flip status in this frame (FR_PRESENT rows), with the number of completed waits.
+    pub present_wait: Option<(u64, u32)>,
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1161,6 +1178,7 @@ pub fn analyze(cap: &Capture) -> Report {
             rsx_frame_raw,
             rsx_frame_ppu: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
+            present_wait: (f.flags & FR_PRESENT != 0).then_some((f.present_wait, f.present_waits)),
             verdict: Verdict::Unknown,
             reason: String::new(),
         };
@@ -1183,6 +1201,8 @@ pub fn analyze(cap: &Capture) -> Report {
         let wait = fifo_wait(cap, &fifo, f.owner, f.frame);
         v.fifo_wait = wait.as_ref().ok().copied();
         let d = f.tb_end.saturating_sub(f.tb_begin);
+        let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
+        let present = v.present_wait;
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
                 return Err(format!("capture not final ({})", inv.state()));
@@ -1192,6 +1212,9 @@ pub fn analyze(cap: &Capture) -> Report {
             }
             if f.flags & FR_TOKEN == 0 {
                 return Err("unassociated coverage row".into());
+            }
+            if last && inv.final_seen && f.flags & FR_OPEN != 0 && v.rsx_frame_raw.1.is_none() {
+                return Err(FINAL_FRAME.into());
             }
             if f.flags & (FR_OPEN | FR_SATURATED | FR_LOSS) != 0 {
                 return Err("coverage row OPEN, SATURATED or after coverage loss".into());
@@ -1224,13 +1247,18 @@ pub fn analyze(cap: &Capture) -> Report {
             let rsx_long = share(span.0, d, RSX_SPAN_SHARE);
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
             let waited = share(w, d, WAIT_SHARE);
-            // No presentation or vsync wait is observed by this family, so PACING is never established here.
+            // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
+            // where the RSX is not limiting is PACING only with observed presentation waits, otherwise UNKNOWN.
             if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
             } else if w == 0 && rsx_short {
-                Ok((Verdict::PpuBound, format!("no FIFO wait; RSX reached-marker span <= {} of {d} PPU ticks \
-                    (compute, scheduling, I/O and synchronization not distinguished)", span.1)))
+                match present {
+                    Some((p, n)) if share(p, d, PACING_SHARE) => Ok((Verdict::Pacing, format!("presentation: owner \
+                        polled flip status for >= {p} of {d} PPU ticks ({n} wait(s)); no FIFO wait; RSX reached-marker \
+                        span <= {} ticks", span.1))),
+                    _ => Err(NOT_DISTINGUISHED.into()),
+                }
             } else if w > 0 && !waited && rsx_long {
                 Ok((Verdict::Mixed, format!("owner waited >= {w} of {d} PPU ticks; RSX reached-marker span >= {} \
                     ticks", span.0)))
@@ -1322,7 +1350,7 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     for f in &r.frames {
         writeln!(out, "frame {}/{}: {} - {}; ppu {} ticks; visited {:?} observed {:?} excluded {:?} unsupported {}; \
             ops {} valid {} incomplete ({} in segments); rsx span raw {} ppu {}; rsx frame marks {}..{} ppu {}; \
-            fifo wait {}",
+            presentation wait {}; fifo wait {}",
             f.owner, f.frame, f.verdict.label(), f.reason, f.tb_end.saturating_sub(f.tb_begin), f.visited, f.observed,
             f.excluded, f.unsupported, f.ops_valid, f.ops_incomplete, f.segment_ops,
             f.rsx_span_raw.map_or("UNKNOWN".into(), |x| x.to_string()),
@@ -1330,6 +1358,7 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.rsx_frame_raw.0.map_or("UNKNOWN".into(), |x| x.to_string()),
             f.rsx_frame_raw.1.map_or("UNKNOWN".into(), |x| x.to_string()),
             f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
+            f.present_wait.map_or("not observed".into(), |(p, n)| format!("{p} ticks in {n} wait(s)")),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
     }
     Ok(())
@@ -1370,6 +1399,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,
         "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
+        "presentation_wait":f.present_wait.map(|(p, n)| json!({"ticks":p,"waits":n})),
         "verdict":f.verdict.key(),"reason":f.reason})).collect();
     let clocks: Vec<serde_json::Value> = r.clocks.iter().map(|a| json!({"id":a.id,"slot":a.slot,
         "outcome":a.outcome(),"frame":a.frame,"tb_before":a.tb_before,"tb_after":a.tb_after,"raw":a.raw,
@@ -1389,7 +1419,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "clock_map": map,
         "clocks": clocks,
         "frames": frames,
-        "thresholds": {"wait_share": [WAIT_SHARE.0, WAIT_SHARE.1], "rsx_span_share": [RSX_SPAN_SHARE.0, RSX_SPAN_SHARE.1]},
+        "thresholds": {"wait_share": [WAIT_SHARE.0, WAIT_SHARE.1], "rsx_span_share": [RSX_SPAN_SHARE.0, RSX_SPAN_SHARE.1],
+            "pacing_share": [PACING_SHARE.0, PACING_SHARE.1]},
     });
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)

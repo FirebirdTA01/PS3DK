@@ -128,18 +128,19 @@ struct ARow {
     unsupported: u64,
     lost: u64,
     rows: [[u64; 12]; 3],
+    present: (u32, u64),
 }
 /// A complete row with `clears` observed clears.
 fn row(frame: u64, tb: (u64, u64), clears: u64) -> ARow {
     let mut rows = [[0u64; 12]; 3];
     rows[2][0] = clears;
     rows[2][1] = clears;
-    ARow { flags: 3, owner: OWNER, frame, tb, unsupported: 0, lost: 0, rows }
+    ARow { flags: 3, owner: OWNER, frame, tb, unsupported: 0, lost: 0, rows, present: (0, 0) }
 }
 fn coverage(r: &ARow) -> Chunk {
     let mut b = Buf::default();
-    b.u16(1).u16(r.flags).u32(1).u32(r.owner).u32(0).u64(r.frame).u64(r.tb.0).u64(r.tb.1).u64(r.unsupported)
-        .u64(r.lost).u64(0);
+    b.u16(1).u16(r.flags).u32(1).u32(r.owner).u32(r.present.0).u64(r.frame).u64(r.tb.0).u64(r.tb.1).u64(r.unsupported)
+        .u64(r.lost).u64(r.present.1);
     for k in r.rows {
         for v in k {
             b.u64(v);
@@ -229,13 +230,54 @@ fn verdicts_follow_the_evidence() {
     assert_eq!(m.anchors, 9);
     assert!(m.decisive.0 > 0 && m.decisive.1 > 0);
     let v: Vec<Verdict> = r.frames.iter().map(|f| f.verdict).collect();
-    assert_eq!(v, [Verdict::RsxBound, Verdict::PpuBound, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
+    // frame 1: the RSX is not limiting, and without presentation evidence that is never PPU-bound
+    assert_eq!(v, [Verdict::RsxBound, Verdict::Unknown, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
     assert!(r.frames[0].reason.starts_with("fetch:"), "{}", r.frames[0].reason);
-    assert!(r.frames[1].reason.contains("not distinguished"));
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::NOT_DISTINGUISHED);
     assert!(r.frames[3].reason.starts_with("unresolved"));
     let (lo, hi) = r.frames[0].rsx_span_ppu.unwrap();
     assert!(lo <= 60_000 && 60_000 <= hi && lo >= 50_000, "{lo}..{hi}");
     assert!(r.frames.iter().all(|f| f.verdict != Verdict::Pacing), "no presentation evidence: never PACING");
+    assert!(r.frames.iter().all(|f| f.verdict != Verdict::PpuBound), "no busy evidence: never PPU-bound");
+}
+
+/// four_frames with the 15/11 CONFIG masks, every row carrying FR_PRESENT with `present[i]` (waits, ticks).
+fn four_frames_present(present: [(u32, u64); 4]) -> File {
+    let mut f = four_frames();
+    let at = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+    f.chunks[at] = seg_cfg().chunk();
+    let rows: Vec<usize> = f.chunks.iter().enumerate().filter(|(_, c)| c.ty == 36).map(|(i, _)| i).collect();
+    for (k, (&i, t)) in rows.iter().zip([10_000u64, 110_000, 210_000, 310_000]).enumerate() {
+        let mut x = row(k as u64, (t, t + 100_000), 1);
+        x.flags |= 64;
+        x.present = present[k];
+        f.chunks[i] = coverage(&x);
+    }
+    f
+}
+
+#[test]
+fn pacing_needs_presentation_waits() {
+    // frame 1 (RSX not limiting) polled flip status for 60% of its interval: PACING; with a short poll: UNKNOWN
+    let r = analyze(&reader::read(&four_frames_present([(0, 0), (1, 60_000), (0, 0), (0, 0)]).bytes()).expect("reads"));
+    let v: Vec<Verdict> = r.frames.iter().map(|f| f.verdict).collect();
+    assert_eq!(v, [Verdict::RsxBound, Verdict::Pacing, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
+    assert!(r.frames[1].reason.starts_with("presentation: owner polled flip status for >= 60000 of 100000"),
+        "{}", r.frames[1].reason);
+    assert_eq!(r.frames[1].present_wait, Some((60_000, 1)));
+    let r = analyze(&reader::read(&four_frames_present([(0, 0), (1, 1_000), (0, 0), (0, 0)]).bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::NOT_DISTINGUISHED);
+    // presentation fields need FR_PRESENT, ticks need a wait, and a first-writer capture knows none of it
+    let mut x = row(0, (10, 20), 0);
+    x.present = (1, 5);
+    assert_eq!(rule(&seg_file(vec![coverage(&x)])), Rule::AutoCoverage);
+    x.flags |= 64;
+    x.present = (0, 5);
+    assert_eq!(rule(&seg_file(vec![coverage(&x)])), Rule::AutoCoverage);
+    x.present = (1, 5);
+    assert!(reader::read(&seg_file(vec![coverage(&x)]).bytes()).is_ok());
+    assert_eq!(rule(&auto_file(vec![coverage(&x)])), Rule::AutoCoverage);
 }
 
 #[test]
@@ -647,6 +689,19 @@ fn flip_frames_and_frame_source() {
     // and FRAMES_FLIP/EXPLICIT stay sticky across statuses
     let e = reader::read(&seg_file(vec![status(256, [0; 15]), status(1, [0; 15])]).bytes()).unwrap_err();
     assert_eq!(e.rule, Rule::AutoStatus);
+}
+
+#[test]
+fn second_console_capture() {
+    // flip frames, a qualified map, and the shutdown-closed final frame: no PPU-bound, the final frame named
+    let r = read_fixture("console-r2");
+    assert_eq!(ps3dk_prof::auto_rsx::frame_source(&r), "FLIP");
+    assert!(matches!(&r.map, Some(MapState::Qualified(m)) if m.anchors == 16));
+    assert_eq!(r.frames.len(), 120);
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.present_wait.is_none()));
+    assert_eq!(r.frames.iter().filter(|f| f.reason == ps3dk_prof::auto_rsx::NOT_DISTINGUISHED).count(), 112);
+    assert_eq!(r.frames[119].reason, ps3dk_prof::auto_rsx::FINAL_FRAME);
+    assert!(r.frames[..112].iter().all(|f| f.rsx_frame_ppu.is_some()));
 }
 
 #[test]
