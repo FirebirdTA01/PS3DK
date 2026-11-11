@@ -325,6 +325,16 @@ A **Capture RSX frame** button next to **Capture full frame** is planned: it wil
 
 **Status: partial implementation, follow-up feature.** The reader and RSX frames page can inspect supported capture markers already present in a file, and runtime support exists. The live request/button integration and draw-hook packaging are not an available end-to-end capture workflow in this SDK tree. Names, flags and libraries may change before release.
 
+### 5.1 Automatic RSX observation (`PS3_PROF_AUTO`, beta)
+
+A separate, opt-in build mode that needs no profiler code in the application: configure with the SDK's PPU CMake toolchain file and `-DPS3_PROF_AUTO=ON`. That one option selects the automatic providers for every executable in the project (`libps3dkprof_auto.a`, `libgcm_cmd_prof_auto.a` and `libps3dkprof_ext_live.a` in place of `gcm_cmd`, both ABIs), checks them against the sealed `prof-auto.json` in `ppu/lib` (or `ppu/lib/lp64`), writes a link map and a pre-link identity object (`cmake/ps3-prof-auto-identity.py`), and refuses the configure or link when anything does not match. It needs CMake 3.21 or newer with Ninja or Makefiles, and it cannot be combined with `PS3_PROF_WAITS`.
+
+At run time the profiler starts itself, attaches at the application's `cellGcmInit` and writes `/dev_hdd0/tmp/<executable>-<timebase>.prof`. Frames come from the application's flips (`cellGcmSetFlip` / `cellGcmSetPrepareFlip` on the attached context); an explicit `ps3dk_prof_frame` takes precedence. Covered draws and clears (array, index, clear; including draws inside CALL segments built with `cellGcmSegment*`) get reached-marker timestamps, each frame gets RSX begin/end marks, and the capture carries its own RSX clock anchors.
+
+Read the capture with `ps3dk-prof auto [--json] capture.prof`: coverage per frame, reached-marker intervals (they include queued work; they are not isolated draw cost), the capture's own clock map and a per-frame verdict. A frame is PACING when the RSX is not limiting and the frame spent at least a quarter of its interval in observed flip-status waits; it is UNKNOWN, with the missing input named, when the evidence is not there. A frame where the RSX is not limiting and no presentation wait was seen reads UNKNOWN ("PPU work vs presentation pacing not distinguished"): PPU-bound is never reported without busy evidence, which this mode does not collect yet. The final frame is closed at shutdown without an end mark and reads UNKNOWN.
+
+Status: beta, not yet code reviewed. ILP32 has run on hardware; LP64 archives are built and sealed but have not been run on hardware. Design and wire format: `docs/design/ps3dk-prof-auto-rsx.md`.
+
 ---
 
 ## 6. Troubleshooting

@@ -59,8 +59,10 @@ cellGcmSegmentCall(ring, s);                      /* CALL + retirement label */
   (`cellGcmSetWriteBackEndLabel`) carrying the segment's next serial. The
   five words are one reservation: if the ring lacks room, its callback is
   asked once for all five (it may wrap or flush). If it refuses, or returns
-  without making room, Call returns `CELL_GCM_SEGMENT_ERROR_BUSY`, writes
-  nothing and leaves the segment closed and callable. Host test:
+  without making room, Call returns `CELL_GCM_SEGMENT_ERROR_BUSY`, emits no
+  CALL or label and leaves the segment unchanged, closed and callable. It
+  cannot undo anything the ring's own callback did to the ring before
+  refusing (a flush or a wrap, say). Host test:
   `gcm-segment-test.sh` (1 to 4 free words with a refusing callback; a
   wrapping callback puts all five words after the wrap).
 * **WaitRetired** polls that label at most `maxPolls` times, sleeping between
@@ -162,8 +164,9 @@ RETURN).
 Refusals are sticky: the overflow count and the measured count saturate at
 0xffffffff instead of wrapping, so no later refusal can bring the overflow
 count back to zero, and `cellGcmSpuEnd` then returns
-`CELL_GCM_SPU_ERROR_OVERFLOW`. `cellGcmSpuGetUsedBytes` returns 0xffffffff
-when the byte count does not fit in 32 bits. A writing context over fewer
+`CELL_GCM_SPU_ERROR_OVERFLOW`. `cellGcmSpuGetUsedBytes` still returns a
+`uint32_t`: it computes the byte count with 64-bit arithmetic and saturates
+at 0xffffffff when the count does not fit in 32 bits. A writing context over fewer
 than 4 bytes has no room for the RETURN: it starts with an overflow count of
 1, refuses every call, and End returns `CELL_GCM_SPU_ERROR_OVERFLOW` without
 writing anything. `ctx->ended` is one of `CELL_GCM_SPU_CONTEXT_OPEN`,
