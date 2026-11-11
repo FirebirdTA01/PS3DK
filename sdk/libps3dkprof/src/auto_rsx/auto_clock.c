@@ -16,6 +16,20 @@ static void count(auto_clock *q,uint64_t *counter)
     if(n==UINT64_MAX) REL(&q->saturated,1u);
     else REL(counter,n+1u);
 }
+/* Round-robin from the cursor, so reuse cycles through every free slot. */
+static int free_slot(const auto_clock *q)
+{
+    for(uint32_t i=0;i<AUTO_CLOCK_SLOTS;i++) {
+        uint32_t s=(q->cursor+i)%AUTO_CLOCK_SLOTS;
+        if(ACQ(&q->slots[s])==AUTO_CLOCK_FREE) return (int)s;
+    }
+    return -1;
+}
+int auto_clock_room(const auto_clock *q)
+{
+    return q && ACQ(&q->write_idx)-ACQ(&q->read_idx)<AUTO_CLOCK_RECORDS &&
+           q->serial<UINT32_MAX-1u && free_slot(q)>=0;
+}
 uint32_t auto_clock_before(const auto_clock *q) {return ACQ(&q->prepared);}
 int auto_clock_after(auto_clock *q,uint32_t serial)
 {
@@ -34,21 +48,32 @@ static int elapsed(auto_clock *q,auto_wire_clock *r,uint64_t now,uint64_t previo
 }
 int auto_clock_sample(auto_clock *q,const auto_clock_port *p,uint32_t owner,uint64_t frame)
 {
-    uint32_t index;
+    uint64_t w,prior;
+    uint32_t index,serial,s,emitted=0,release;
+    int found;
     auto_wire_clock *r;
-    uint64_t prior;
     if(!q || !p || !owner || q->active || !p->tb || !p->live || !p->emit || !p->flush ||
        !p->label || !p->timer || !p->sync) return 0;
     count(q,&q->attempted);
-    index=ACQ(&q->write_idx);
-    if(index==AUTO_CLOCK_SLOTS) {count(q,&q->lost);return 2;}
+    w=ACQ(&q->write_idx);
+    found=free_slot(q);
+    /* No modular serial wrap: UINT32_MAX is never issued, as for operations. */
+    if(w-ACQ(&q->read_idx)>=AUTO_CLOCK_RECORDS || found<0 || q->serial>=UINT32_MAX-1u) {
+        count(q,&q->lost);return 2;
+    }
+    s=(uint32_t)found;serial=q->serial+1u;q->serial=serial;
+    index=(uint32_t)(w%AUTO_CLOCK_RECORDS);
     q->active=1;r=&q->records[index];memset(r,0,sizeof *r);
-    r->instance=q->instance;r->epoch=q->epoch;r->id=index+1;r->serial=index+1;r->slot=q->first+index;
+    r->instance=q->instance;r->epoch=q->epoch;r->id=r->serial=serial;r->slot=q->first+s;
     r->owner=owner;r->frame=frame;r->flags=8;
+    /* HELD before any device access: the drainer alone can return it. */
+    REL(&q->slots[s],AUTO_CLOCK_HELD);
+    q->cursor=(s+1u)%AUTO_CLOCK_SLOTS;
     r->tb_before=prior=p->tb(p->user);
     if(q->invalid || !p->live(p->user) || !p->emit(p->user,r->slot,r->serial)) {
         (void)elapsed(q,r,p->tb(p->user),prior);goto publish;
     }
+    emitted=1;
     /* The metadata identity above exists before the original PUT path can
      * publish this serial. The final readback fact is published separately. */
     REL(&q->prepared,r->serial);
@@ -62,6 +87,9 @@ int auto_clock_sample(auto_clock *q,const auto_clock_port *p,uint32_t owner,uint
         if(!elapsed(q,r,now,prior)) goto publish;
         prior=now;
         if(!p->live(p->user)) goto publish;
+        /* Cumulative label: below the last accepted value is a regression, above
+         * this serial a future write; both invalidate. Between them is an
+         * earlier (for example timed-out) anchor completing late: keep polling. */
         if(r->label_first<q->last_label || r->label_first>r->serial) {q->invalid=1;goto publish;}
         q->last_label=r->label_first;
         if(r->label_first!=r->serial) continue;
@@ -76,18 +104,28 @@ int auto_clock_sample(auto_clock *q,const auto_clock_port *p,uint32_t owner,uint
     }
     r->polls=AUTO_CLOCK_POLLS;r->flags=2;
 publish:
+    /* Reusable only after an exact valid completion (no write to the slot can
+     * still be outstanding) or when no command word was written at all. */
+    release=r->flags==1u || !emitted;
+    q->release[index]=release;
     q->active=0;
-    REL(&q->write_idx,index+1u);
+    REL(&q->write_idx,w+1u);
     return 1;
 }
 const auto_wire_clock *auto_clock_peek(auto_clock *q)
 {
-    uint32_t r=ACQ(&q->read_idx);
-    return r==ACQ(&q->write_idx) ? NULL:&q->records[r];
+    uint64_t r=ACQ(&q->read_idx);
+    return r==ACQ(&q->write_idx) ? NULL:&q->records[r%AUTO_CLOCK_RECORDS];
 }
 int auto_clock_ack(auto_clock *q,uint32_t id,int whole)
 {
     const auto_wire_clock *r=auto_clock_peek(q);
+    uint64_t n;
+    uint32_t s;
     if(!whole || !r || r->id!=id) return 0;
-    REL(&q->read_idx,ACQ(&q->read_idx)+1u);return 1;
+    n=ACQ(&q->read_idx);s=r->slot-q->first;
+    if(q->release[n%AUTO_CLOCK_RECORDS]) REL(&q->slots[s],AUTO_CLOCK_FREE);
+    else {REL(&q->slots[s],AUTO_CLOCK_QUARANTINED);REL(&q->quarantined,ACQ(&q->quarantined)+1u);}
+    REL(&q->read_idx,n+1u);
+    return 1;
 }

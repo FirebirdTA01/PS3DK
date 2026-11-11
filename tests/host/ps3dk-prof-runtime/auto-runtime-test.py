@@ -216,7 +216,9 @@ if a.case=='fifopost':
 if a.case in ('clocks','clockcap'):
     frames=256 if a.case=='clockcap' else 64
     schedule=[f for f in range(frames) for condition in (f%8==0,f%64==63) if condition]
-    rows=[b for k,b in auto if k==38];assert len(rows)==min(16,len(schedule))
+    # Sixteen physical slots are reused after validated completion and whole
+    # acceptance: the cadence holds past sixteen anchors with no capacity loss.
+    rows=[b for k,b in auto if k==38];assert len(rows)==len(schedule),(len(rows),len(schedule))
     if a.mutant=='clock-put':
         assert all(struct.unpack_from('<H',b,2)[0]==8 for b in rows)
         assert all(struct.unpack_from('<2Q',b,48)==(0,0) for b in rows)
@@ -225,7 +227,7 @@ if a.case in ('clocks','clockcap'):
     owner=struct.unpack_from('<I',rows[0],80)[0];assert owner
     for i,b in enumerate(rows):
         assert len(b)==96 and struct.unpack_from('<HH',b)==(1,1)
-        assert struct.unpack_from('<6I',b,4)==(1,1,i+1,0,1024+i,i+1)
+        assert struct.unpack_from('<6I',b,4)==(1,1,i+1,0,1024+i%16,i+1)
         assert 1<=struct.unpack_from('<I',b,28)[0]<=100000
         before,after,raw,repeated=struct.unpack_from('<4Q',b,32)
         assert after>=before and raw==repeated==10000*(i+1)

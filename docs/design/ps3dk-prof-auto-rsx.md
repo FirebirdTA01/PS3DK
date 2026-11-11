@@ -172,8 +172,8 @@ completion identity constrain a map; failed attempts stay visible.
 
 For the first console qualification, the owner samples at frame boundaries
 0, 8, 16, 24, 32, 40, 48 and 56, then at explicit frame-63 closure. The same
-eight-frame cadence and 64-frame block-end rule continue only while unique
-slots remain. Core FRAME timestamps retain their original position; sampling
+eight-frame cadence and 64-frame block-end rule continue for the whole capture
+while the drainer keeps accepting anchors (slot reuse below). Core FRAME timestamps retain their original position; sampling
 runs at the owner hook before coverage opens and application work resumes.
 Observer wait time is the CLOCK elapsed field, separate from application waits.
 No sampling occurs inside draw hooks, wrap callbacks or a sampler thread.
@@ -183,21 +183,37 @@ publishes metadata before original PUT, and uses ordered PPU reads with both
 a two-second deadline and a 100,000-poll bound. Deadline and regression checks
 precede acceptance, including after the repeated report read. A regressed or
 future physical label invalidates the instance. Failed anchors retain their
-identity and observed brackets; their raw/repeated fields are zero. The
-sixteen-slot implementation never recycles a slot after sink acceptance;
-later scheduled attempts increment the explicit clock-capacity loss counter.
+identity and observed brackets; their raw/repeated fields are zero.
+
+Sixteen physical clock reports are reused. Anchor id and serial are one
+per-instance counter, nonwrapping and independent of the slot: CLOCK rows can
+repeat a report slot, never an id or serial, and UINT32_MAX is never issued.
+Only the owner hands a free slot to a new anchor; only the drainer returns it,
+after the sink accepted that anchor's whole record, and only when the anchor
+completed validly (its exact serial seen twice, stable repeated read) or wrote
+no command at all. Any other outcome after a command was written (timeout,
+regression, future label, unpublished PUT, unstable or poison read, STOP while
+waiting) quarantines its slot for the rest of the instance, so a late write can
+only land on a slot nobody reads again. A partial sink write releases nothing.
+A label between the last accepted serial and the current one is an earlier
+anchor completing late and is not a completion; below or above that range
+invalidates the instance. With no free slot, no record room (sixteen records)
+or no serial left, the attempt is a capacity loss with no device write, counted
+in STATUS clock_lost. Slot state never passes to another instance or capture.
 
 The capture must establish its own bounded map and both H-SPLIT hold-outs. No
 nominal timestamp rate or per-application profile row substitutes for missing
 clock evidence. The timer, report-before-label/coherent-read, reuse and console
 gates remain separate from host encoding and lifecycle tests.
 
-The initial producer's sixteen unique anchor slots support the first fixed
-console qualification only. Sustained anchor cadence over long gameplay
-captures is a mandatory stage 2 beta/release gate. It requires a reviewed
-bounded reuse scheme with validated completion and whole-record sink acceptance
-before physical reuse, plus host lifetime controls and target evidence. Visible
-capacity loss does not satisfy that gate; no extrapolation fills missing support.
+Sustained anchor cadence over long gameplay captures is a mandatory stage 2
+beta/release gate. The reuse scheme above has host lifetime controls
+(tests/sdk/auto-clock-reuse-test.py: thousands of frames, delayed writes,
+cumulative labels, slot wrap, slow and refusing sinks, STOP in each
+transition). Both ABI builds and a separately reviewed target reuse control are
+still required before a sustained-capture timing claim; a unique-slot timer
+probe cannot prove reuse. Visible capacity loss does not satisfy that gate; no
+extrapolation fills missing support.
 
 ## Automatic FIFO attachment lifetime
 

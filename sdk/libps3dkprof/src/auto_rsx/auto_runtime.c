@@ -494,6 +494,16 @@ int ps3dk_prof_auto_frame_end(uint32_t instance,ps3dk_prof_token frame)
     return PS3DK_PROF_OK;
 }
 
+#ifdef PS3DK_PROF_TEST_HOOKS
+/* Host controls only: clock records published by the owner and not yet
+ * accepted by the drainer. Not part of any installed archive. */
+uint64_t ps3dk_prof__auto_test_clock_backlog(void)
+{
+    const auto_capture *a=capture;
+    return a ? LD_ACQ(&a->clocks.write_idx)-LD_ACQ(&a->clocks.read_idx):0;
+}
+#endif
+
 static uint32_t completion_label(void *user)
 {
     auto_capture *a=user;

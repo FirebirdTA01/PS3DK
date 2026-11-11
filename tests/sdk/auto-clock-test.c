@@ -24,7 +24,7 @@ static uint64_t tb(void *unused) {
 static int live(void *unused) {(void)unused;return fake.mode!=INVALIDATED || fake.ticks<2;}
 static int emit(void *unused,uint32_t slot,uint32_t serial) {
     (void)unused;
-    assert(slot==1024+serial-1 && serial<=16);
+    assert(slot==1024+(serial-1)%16); /* round-robin reuse of sixteen physical slots */
     if(fake.mode==NO_ROOM) return 0;
     fake.emits++;fake.serial=serial;return 1;
 }
@@ -39,7 +39,7 @@ static uint32_t label(void *unused) {
     return fake.mode==FUTURE ? fake.serial+1:fake.mode==NEVER ? 0:fake.serial;
 }
 static uint64_t timer(void *unused,uint32_t slot) {
-    (void)unused;assert(slot==1024+fake.serial-1);fake.reads++;
+    (void)unused;assert(slot==1024+(fake.serial-1)%16);fake.reads++;
     if(fake.mode==LATE_READ) fake.tick+=200;
     return fake.mode==POISON ? UINT64_MAX:fake.raw+(fake.mode==UNSTABLE ? fake.reads:0);
 }
@@ -99,10 +99,17 @@ int main(void) {
     pthread_t p,c;assert(!pthread_create(&p,NULL,produce,NULL));assert(!pthread_create(&c,NULL,consume,NULL));
     assert(!pthread_join(p,NULL));assert(!pthread_join(c,NULL));
     assert(clock_state.attempted==16 && !clock_state.lost && fake.emits==16);
-    assert(auto_clock_sample(&clock_state,&port,42,16)==2);
-    assert(clock_state.attempted==17 && clock_state.lost==1 && fake.emits==16);
-    assert(!auto_clock_peek(&clock_state)); /* no slot reuse, even after all ACKs */
+    /* After whole acceptance of valid records the slots return: serial 17
+     * reuses the first slot. Serial exhaustion is a loss with no write. */
+    fake.raw=2000;
+    assert(auto_clock_sample(&clock_state,&port,42,16)==1);
+    const auto_wire_clock *reused=auto_clock_peek(&clock_state);
+    assert(reused->flags==1 && reused->id==17 && reused->serial==17 && reused->slot==1024 && reused->raw==2000);
+    assert(clock_state.attempted==17 && !clock_state.lost && fake.emits==17);
+    assert(auto_clock_ack(&clock_state,17,1));
+    clock_state.serial=UINT32_MAX-1u;
+    assert(auto_clock_sample(&clock_state,&port,42,17)==2 && clock_state.lost==1 && fake.emits==17);
     clock_state.attempted=clock_state.lost=UINT64_MAX;
-    assert(auto_clock_sample(&clock_state,&port,42,17)==2 && clock_state.saturated);
-    puts("AUTO clock deadline, publication, stable identity, unique slots and handoff PASS");
+    assert(auto_clock_sample(&clock_state,&port,42,18)==2 && clock_state.saturated);
+    puts("AUTO clock deadline, publication, stable identity, slot reuse and handoff PASS");
 }

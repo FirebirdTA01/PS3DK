@@ -20,7 +20,7 @@ mutations={
     'unstable':('raw!=repeated','raw==0','r && r->flags==flags'),
     'label-regression':('r->label_first<q->last_label || ','','regressed->flags==8 && regressed->polls==1'),
     'partial-ack':('if(!whole || !r ||','(void)whole; if(!r ||','!auto_clock_ack(&clock_state,1,0)'),
-    'handoff':('REL(&q->write_idx,index+1u);','__atomic_store_n(&q->write_idx,index+1u,__ATOMIC_RELAXED);','WARNING: ThreadSanitizer: data race'),
+    'handoff':('REL(&q->write_idx,w+1u);','__atomic_store_n(&q->write_idx,w+1u,__ATOMIC_RELAXED);','WARNING: ThreadSanitizer: data race'),
 }
 if a.mutant:
     assert (a.sanitize=='thread')==(a.mutant=='handoff')

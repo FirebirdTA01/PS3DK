@@ -219,6 +219,13 @@ jobs:
             python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-$mutant" --mutant "$mutant"
           done
           python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-handoff" --sanitize thread --mutant handoff
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse"
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-address" --sanitize address
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-thread" --sanitize thread
+          for mutant in release-failed partial-ack owner-release slot-serial serial-wrap skip-cursor; do
+            python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-handoff" --sanitize thread --mutant handoff
           python3 tests/sdk/auto-gcm-command-test.py --out "$RUNNER_TEMP/auto-commands"
           python3 tests/sdk/auto-gcm-command-test.py --out "$RUNNER_TEMP/auto-commands-address" --sanitize
           python3 tests/sdk/auto-resource-command-test.py --out "$RUNNER_TEMP/auto-resource-commands"
