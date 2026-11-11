@@ -12,7 +12,10 @@
  *
  * Every call computes its full size first and reserves it in one go, so a
  * command is written whole or refused whole, and a measuring context
- * counts exactly what a writing context would write.
+ * counts exactly what a writing context would write.  Sizes are computed
+ * without wrapping, and a command whose size does not fit in 32 bits or
+ * whose count does not fit its method field is refused before any write
+ * (INVALID_WORDS).
  */
 #include <stdint.h>
 #include <string.h>
@@ -62,6 +65,13 @@ static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 /* Counts saturate at 0xffffffff instead of wrapping, so a refusal can never
  * be cancelled by a later one: once overflowWords is non-zero it stays so. */
 static uint32_t sat_add(uint32_t a, uint32_t b) { return a > UINT32_MAX - b ? UINT32_MAX : a + b; }
+
+/* The size of a command that cannot be written: its size does not fit in
+ * 32 bits, or a count does not fit its encoded field.  No buffer has room
+ * for it (sizes are 32-bit byte counts), so the reservation is refused in
+ * a writing context and saturates the count in a measuring one. */
+#define INVALID_WORDS UINT32_MAX
+static uint32_t checked_words(uint64_t words) { return words < INVALID_WORDS ? (uint32_t)words : INVALID_WORDS; }
 
 void FN(SpuSetupContextData)(CellGcmSpuContextData *c, uint32_t *buffer, uint32_t sizeBytes)
 {
@@ -291,7 +301,8 @@ void FN(SetDrawIndexArray)(CellGcmSpuContextData *c, uint8_t mode, uint32_t coun
 void FN(SetVertexProgramConstants)(CellGcmSpuContextData *c, uint32_t start, uint32_t count, const float *data)
 {
     uint32_t packets = count >> 5, rest = count & 31u;
-    RESERVE(packets * 34u + (rest ? 2u + rest : 0u));
+    uint64_t words = (uint64_t)packets * 34u + (rest ? 2u + rest : 0u);
+    RESERVE(checked_words(words));
     for (uint32_t p = 0; p < packets; ++p) {
         *w++ = M(VP_UPLOAD_CONST_ID, 33); *w++ = start + 8u * p;
         memcpy(w, data, 32u * 4u); w += 32; data += 32;
@@ -305,13 +316,15 @@ void FN(SetVertexProgramParameterBlock)(CellGcmSpuContextData *c, uint32_t baseC
                                         const float *values)
 {
     if (constCount == 0u || !values) return;
+    if (constCount > UINT32_MAX / 4u) { (void)FN(SpuReserve)(c, INVALID_WORDS); return; }   /* 4 floats per row */
     FN(SetVertexProgramConstants)(c, baseConst, constCount * 4u, values);
 }
 void FN(SetVertexProgramParameter)(CellGcmSpuContextData *c, const CellGcmSpuVertexParameter *p,
                                    const float *values)
 {
     if (!p || !values) return;
-    RESERVE(2u + p->words);
+    /* One packet: the method's count field (11 bits) holds words + 1. */
+    RESERVE(p->words < MAX_COUNT ? 2u + p->words : INVALID_WORDS);
     w[0] = M(VP_UPLOAD_CONST_ID, p->words + 1u);
     w[1] = p->resIndex;
     memcpy(w + 2, values, p->words * 4u);
@@ -338,7 +351,10 @@ void FN(SetFragmentProgramParameter)(CellGcmSpuContextData *c, const CellGcmSpuF
 {
     uint32_t total = 0;
     if (!p || !values || !addrOffset || p->patchCount > CELL_GCM_SPU_FP_PARAMETER_MAX_PATCHES) return;
-    for (uint32_t i = 0; i < p->patchCount; ++i) total += 12u + ((p->patch[i].words + 1u) & ~1u);
+    for (uint32_t i = 0; i < p->patchCount; ++i) {
+        uint32_t pad = (p->patch[i].words + 1u) & ~1u;
+        total = (pad > MAX_COUNT || total == INVALID_WORDS) ? INVALID_WORDS : total + 12u + pad;   /* IFC_COLOR count */
+    }
     RESERVE(total);
     for (uint32_t i = 0; i < p->patchCount; ++i) {
         uint32_t dst = addrOffset + p->patch[i].ucodeOffset, n = p->patch[i].words, pad = (n + 1u) & ~1u;

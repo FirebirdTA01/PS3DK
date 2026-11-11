@@ -89,6 +89,10 @@ review_mutant() {
 }
 
 # Overflow accounting that wraps again.
-review_mutant wrapping-overflow 's/c->overflowWords = sat_add(c->overflowWords, words);/c->overflowWords += words;/'     "two refusals saturate overflow" "end after two refusals"
+review_mutant wrapping-overflow 's/c->overflowWords = sat_add(c->overflowWords, words);/c->overflowWords += words;/' \
+    "two refusals saturate overflow" "end after two refusals"
+# The vertex-constant size computed in 32 bits again (count 0xf0f0f0ff wraps to 15 words).
+review_mutant wrapping-vp-size 's/(uint64_t)packets [*] 34u/packets * 34u/' \
+    "vp constants count 0xf0f0f0ff measured as not fitting"
 
 echo "gcm-spu-cmd-test: PASS"

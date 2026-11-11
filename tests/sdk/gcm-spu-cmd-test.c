@@ -315,6 +315,68 @@ static void test_accounting(void)
     EXPECT("one-word context ends", spuw_SpuEnd(&c) == CELL_OK && zero[0] == 0x00020000u);
 }
 
+/* Commands whose size does not fit in 32 bits, or whose count does not fit
+ * its 11-bit method field, are refused whole in both contexts before any
+ * write: the measuring context reports 0xffffffff bytes, the writing
+ * context writes nothing and its overflow count saturates. */
+static float big_values[0x10000];
+static CellGcmSpuVertexParameter vp_wide = {8, 0x7ffu}, vp_wrap = {8, 0xffffffffu}, vp_max = {8, 0x7feu};
+static CellGcmSpuFragmentParameter fp_wide = {1, {{0, 0, 0x800u}}}, fp_max = {1, {{0, 0, 0x7feu}}};
+
+typedef void (*Emit)(CellGcmSpuContextData *);
+static void e_consts(CellGcmSpuContextData *c) { spuw_SetVertexProgramConstants(c, 0, 0xf0f0f0ffu, big_values); }
+static void e_block(CellGcmSpuContextData *c) { spuw_SetVertexProgramParameterBlock(c, 0, 0x40000001u, big_values); }
+static void e_param_wide(CellGcmSpuContextData *c) { spuw_SetVertexProgramParameter(c, &vp_wide, big_values); }
+static void e_param_wrap(CellGcmSpuContextData *c) { spuw_SetVertexProgramParameter(c, &vp_wrap, big_values); }
+static void e_fp_wide(CellGcmSpuContextData *c) { spuw_SetFragmentProgramParameter(c, &fp_wide, big_values, 0x4000); }
+
+static void refused_whole(const char *name, Emit emit)
+{
+    char nm[128];
+    CellGcmSpuContextData c;
+    uint32_t measured;
+
+    spuw_SpuSetupMeasureContext(&c);
+    emit(&c);
+    measured = spuw_SpuGetUsedBytes(&c);
+    snprintf(nm, sizeof nm, "%s measured as not fitting", name);
+    EXPECT(nm, measured == 0xffffffffu);
+    if (measured != 0xffffffffu) {
+        printf("       measured %u bytes; the writing run is skipped\n",
+               measured);
+        return;
+    }
+    memset(spu_buf, 0xcd, sizeof(spu_buf));
+    spuw_SpuSetupContextData(&c, spu_buf, sizeof(spu_buf));
+    emit(&c);
+    snprintf(nm, sizeof nm, "%s refused whole", name);
+    EXPECT(nm, c.current == spu_buf && spu_buf[0] == 0xcdcdcdcdu && spuw_SpuGetOverflowWords(&c) == 0xffffffffu &&
+               spuw_SpuEnd(&c) == CELL_GCM_SPU_ERROR_OVERFLOW);
+}
+
+static void test_invalid_sizes(void)
+{
+    CellGcmSpuContextData c;
+
+    puts("sizes and fields:");
+    refused_whole("vp constants count 0xf0f0f0ff", e_consts);
+    refused_whole("vp block constCount 0x40000001", e_block);
+    refused_whole("vp parameter 0x7ff words", e_param_wide);
+    refused_whole("vp parameter 0xffffffff words", e_param_wrap);
+    refused_whole("fp parameter 0x800-word patch", e_fp_wide);
+
+    /* The largest counts that fit their fields are still written. */
+    spuw_SpuSetupMeasureContext(&c);
+    spuw_SetVertexProgramParameter(&c, &vp_max, big_values);
+    EXPECT("vp parameter 0x7fe words measured", spuw_SpuGetUsedBytes(&c) == 0x800u * 4u);
+    spuw_SpuSetupContextData(&c, spu_buf, sizeof(spu_buf));
+    spuw_SetVertexProgramParameter(&c, &vp_max, big_values);
+    EXPECT("vp parameter 0x7fe words written", c.current == spu_buf + 0x800u && spu_buf[0] == ((0x7ffu << 18) | 0x1efcu));
+    spuw_SpuSetupContextData(&c, spu_buf, sizeof(spu_buf));
+    spuw_SetFragmentProgramParameter(&c, &fp_max, big_values, 0x4000);
+    EXPECT("fp parameter 0x7fe-word patch written", spuw_SpuGetOverflowWords(&c) == 0 && c.current == spu_buf + 12u + 0x7feu);
+}
+
 int main(void)
 {
     static const U4 draws[] = {
@@ -376,6 +438,7 @@ int main(void)
     }
 
     test_accounting();
+    test_invalid_sizes();
 
     if (failures || check_failures) {
         printf("gcm-spu-cmd: %d of %d case(s) and %d of %d check(s) FAILED\n", failures, cases,

@@ -171,6 +171,14 @@ writing anything. `ctx->ended` is one of `CELL_GCM_SPU_CONTEXT_OPEN`,
 0x80000000-word reservations, a 2^32-byte measurement, 0- to 3-byte
 contexts).
 
+Sizes are computed without wrapping. A command whose size does not fit in
+32 bits (`cellGcmSetVertexProgramConstants` with a count such as 0xf0f0f0ff,
+`SetVertexProgramParameterBlock` with more than 0x3fffffff rows), or whose
+count does not fit its 11-bit method field (`SetVertexProgramParameter` with
+0x7ff or more words, a `SetFragmentProgramParameter` patch padded past 0x7ff
+words), is refused before any write: a writing context writes nothing and
+its overflow count saturates, a measuring context reports 0xffffffff bytes.
+
 | SPU call | PPU counterpart it matches |
 |---|---|
 | `cellGcmSetNopCommand`, `SetJumpCommand`, `SetCallCommand`, `SetReturnCommand` | same names |
