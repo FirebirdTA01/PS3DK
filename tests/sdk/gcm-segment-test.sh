@@ -101,10 +101,12 @@ rc=0; "$tmp/auto" > "$tmp/auto.log" 2>&1 || rc=$?
 cat "$tmp/auto.log"
 [[ "$rc" -eq 0 ]] || fail "observed segment seam: expected exit 0, got $rc"
 grep -q 'auto seam: open/close bracket every PPU-written segment' "$tmp/auto.log" || fail "observed seam not exercised"
+grep -q '8 or 4 words left: BUSY, ring and segment unchanged, no observer call; 9 words' "$tmp/auto.log" || fail "observed call room not exercised"
 test_defs=-DTEST_AUTO_SEGMENT build "$tmp/auto-control" "$src/gcm_segment.c"
 rc=0; "$tmp/auto-control" > "$tmp/auto-control.log" 2>&1 || rc=$?
 [[ "$rc" -eq 1 ]] || fail "unobserved seam control: expected exit 1, got $rc"
 grep -q 'FAIL auto open' "$tmp/auto-control.log" || fail "unobserved control did not fail the seam check"
+grep -q 'FAIL auto release room' "$tmp/auto-control.log" || fail "unobserved control did not fail the call-room check"
 echo "control: the default build reports no segment contexts (exit 1)"
 
 echo "gcm-segment-test: PASS"

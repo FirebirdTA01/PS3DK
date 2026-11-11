@@ -203,6 +203,16 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
 
 /* CALL (1 word) and the back-end retirement label (4 words). */
 #define SEGMENT_CALL_WORDS 5u
+/* The observed build also reserves, in the same request, the 4 words of the
+ * observer's operation-label release that follows the retirement label
+ * (ps3dk_prof__auto_segment_call), so a refused Call emits nothing at all and
+ * an accepted one always leaves the observer its room. */
+#ifdef PS3TC_PROF_AUTO
+#define SEGMENT_OBSERVE_WORDS 4u
+#else
+#define SEGMENT_OBSERVE_WORDS 0u
+#endif
+#define SEGMENT_CALL_RESERVE (SEGMENT_CALL_WORDS + SEGMENT_OBSERVE_WORDS)
 
 /* 1 when the ring has `words` free words before end (the emitters' test). */
 static int ring_has_room(const CellGcmSegmentContext *ring, uint32_t words)
@@ -216,13 +226,15 @@ int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)
     if (!ring || !s) return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     if (s->state != CELL_GCM_SEGMENT_STATE_CLOSED) return CELL_GCM_SEGMENT_ERROR_STATE;
     if (s->overflowWords) return CELL_GCM_SEGMENT_ERROR_OVERFLOW;
-    /* One reservation for both commands: the ring's callback is asked once
-     * for all five words (it may wrap or flush), and if it refuses, or
-     * returns without making room, nothing is written and the segment is
-     * left as it was.  With the room there, neither emitter calls it. */
-    if (!ring_has_room(ring, SEGMENT_CALL_WORDS) &&
-        (!ring->callback || ring->callback(ring, SEGMENT_CALL_WORDS) != 0 ||
-         !ring_has_room(ring, SEGMENT_CALL_WORDS)))
+    /* One reservation for both commands (and, in the observed build, the
+     * observer's release after them): the ring's callback is asked once for
+     * all the words (it may wrap or flush), and if it refuses, or returns
+     * without making room, nothing is written, the observer is not called and
+     * the segment is left as it was.  With the room there, neither emitter
+     * calls it. */
+    if (!ring_has_room(ring, SEGMENT_CALL_RESERVE) &&
+        (!ring->callback || ring->callback(ring, SEGMENT_CALL_RESERVE) != 0 ||
+         !ring_has_room(ring, SEGMENT_CALL_RESERVE)))
         return CELL_GCM_SEGMENT_ERROR_BUSY;
     rsxSetCallCommand(ring, s->offset);
     rsxSetWriteBackendLabel(ring, s->labelIndex, s->serial + 1u);

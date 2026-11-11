@@ -355,6 +355,14 @@ static void test_external(void)
 
 /* ---- Call: the CALL and the retirement label are one 5-word reservation ---- */
 
+/* The observed build (libgcm_cmd_prof_auto.a) asks for 4 more words in the
+ * same request: the observer's operation-label release after the CALL block. */
+#if defined(TEST_AUTO_SEGMENT) && defined(PS3TC_PROF_AUTO)
+#define CALL_BLOCK_WORDS 9u
+#else
+#define CALL_BLOCK_WORDS 5u
+#endif
+
 static unsigned cb_calls;
 static u32 cb_words;
 static s32 refuse_cb(gcmContextData *c, u32 n) { (void)c; ++cb_calls; cb_words = n; return -1; }
@@ -378,8 +386,9 @@ static void test_call_transaction(void)
     unsigned room;
 
     puts("call transaction:");
-    /* 1..4 words left: the CALL alone would fit, the label would not. */
-    for (room = 1; room <= 4; ++room) {
+    /* 1..4 words left: the CALL alone would fit, the label would not (and, in
+     * the observed build, up to 8: the observer's release would not). */
+    for (room = 1; room < CALL_BLOCK_WORDS; ++room) {
         int lying;
         for (lying = 0; lying < 2; ++lying) {
             ring_reset();
@@ -391,7 +400,7 @@ static void test_call_transaction(void)
             memcpy(&before, &s, sizeof(s));
             cb_calls = 0; cb_words = 0;
             CHECK("refused busy", cellGcmSegmentCall(&ring, &s) == CELL_GCM_SEGMENT_ERROR_BUSY);
-            CHECK("one 5-word request", cb_calls == 1 && cb_words == 5u);
+            CHECK("one 5-word request", cb_calls == 1 && cb_words == CALL_BLOCK_WORDS);
             CHECK("ring cursor kept", ring.current == ring.end - room);
             CHECK("ring words kept", memcmp(canary, ring_mem, sizeof(canary)) == 0);
             CHECK("segment kept", memcmp(&before, &s, sizeof(s)) == 0);
@@ -401,7 +410,7 @@ static void test_call_transaction(void)
     printf("  1-4 words left, refusing or room-less callback: BUSY, one 5-word request, ring and segment unchanged\n");
 
     /* A wrapping ring callback: all five words land together after the wrap. */
-    for (room = 1; room <= 4; ++room) {
+    for (room = 1; room < CALL_BLOCK_WORDS; ++room) {
         uint32_t off = 0;
         ring_reset();
         CHECK("setup", closed_segment(&s, 213));
@@ -411,7 +420,7 @@ static void test_call_transaction(void)
         memset(ring_mem, 0xc3, RING_WORDS * 4u);
         cb_calls = 0; cb_words = 0;
         CHECK("wrapped ok", cellGcmSegmentCall(&ring, &s) == CELL_OK);
-        CHECK("one 5-word request", cb_calls == 1 && cb_words == 5u);
+        CHECK("one 5-word request", cb_calls == 1 && cb_words == CALL_BLOCK_WORDS);
         CHECK("five words after the wrap", ring.current == ring.begin + 5);
         CHECK("call first", ring_mem[0] == (s.offset | 2u));
         CHECK("nothing before the wrap", ring_mem[RING_WORDS - 1u - room] == 0xc3c3c3c3u);
@@ -451,10 +460,12 @@ static void test_local_refused(void)
 static gcmContextData *auto_open_ctx[8];
 static unsigned auto_opens, auto_closes, auto_calls, auto_checking;
 static gcmContextData *auto_call_ring, *auto_call_ctx;
+static size_t auto_call_room;   /* words left in the ring when the observer was called */
 void ps3dk_prof__auto_segment_call(struct _gcmCtxData *r, struct _gcmCtxData *c)
 {
     if (!auto_checking) return;
     auto_call_ring = r; auto_call_ctx = c; ++auto_calls;
+    auto_call_room = (size_t)(r->end - r->current);
 }
 void ps3dk_prof__auto_segment_open(struct _gcmCtxData *c)
 {
@@ -495,12 +506,56 @@ static void test_auto_seam(void)
     auto_checking = 0;
     puts("  auto seam: open/close bracket every PPU-written segment, never an external claim");
 }
+
+/* The observed Call reserves the CALL, the retirement label and the observer's
+ * 4-word release as one request: a ring short of that block gives BUSY with
+ * the ring and segment unchanged and no observer call (so no release). */
+static void test_auto_call_room(void)
+{
+    static uint32_t canary[RING_WORDS];
+    CellGcmSegment s, before;
+    static const unsigned rooms[] = {CALL_BLOCK_WORDS - 1u, 4u};
+
+    puts("auto call room:");
+    for (unsigned k = 0; k < 2; ++k) {
+        ring_reset();
+        CHECK("setup", closed_segment(&s, 215));
+        auto_calls = 0; auto_checking = 1;
+        ring.current = ring.end - rooms[k];
+        ring.callback = refuse_cb;
+        memset(ring_mem, 0xc3, RING_WORDS * 4u);
+        memcpy(canary, ring_mem, sizeof(canary));
+        memcpy(&before, &s, sizeof(s));
+        cb_calls = 0; cb_words = 0;
+        CHECK("auto short busy", cellGcmSegmentCall(&ring, &s) == CELL_GCM_SEGMENT_ERROR_BUSY);
+        CHECK("auto one block request", cb_calls == 1 && cb_words == CALL_BLOCK_WORDS);
+        CHECK("auto ring cursor kept", ring.current == ring.end - rooms[k]);
+        CHECK("auto ring words kept", memcmp(canary, ring_mem, sizeof(canary)) == 0);
+        CHECK("auto segment kept", memcmp(&before, &s, sizeof(s)) == 0);
+        CHECK("auto no release", auto_calls == 0);
+        auto_checking = 0;
+    }
+    /* Exactly the block: accepted, and the observer is called with its 4 words left. */
+    ring_reset();
+    CHECK("setup", closed_segment(&s, 216));
+    auto_calls = 0; auto_checking = 1;
+    ring.current = ring.end - CALL_BLOCK_WORDS;
+    ring.callback = refuse_cb;
+    cb_calls = 0;
+    CHECK("auto exact ok", cellGcmSegmentCall(&ring, &s) == CELL_OK && cb_calls == 0);
+    CHECK("auto release room", auto_calls == 1 && auto_call_room >= 4u);
+    auto_checking = 0;
+    ring.callback = NULL;
+    printf("  %u or 4 words left: BUSY, ring and segment unchanged, no observer call; %u words: observer called with 4 left\n",
+           CALL_BLOCK_WORDS - 1u, CALL_BLOCK_WORDS);
+}
 #endif
 
 int main(void)
 {
 #ifdef TEST_AUTO_SEGMENT
     test_auto_seam();
+    test_auto_call_room();
 #endif
     test_emitters();
     test_overflow();
