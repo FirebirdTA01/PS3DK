@@ -22,8 +22,8 @@ mutations={
  'manual-clock':('label==a->clock_label','0', '0,16,238,&manual)==PS3DK_PROF_EINVAL'),
  'manual-range':('first<a->first+a->count && a->first<first+count','(void)first,(void)count,0','1023,2,240,&manual)==PS3DK_PROF_EINVAL'),
  'reverse-clock':('g->label==clock_label','0','1024,1024,239,240,&id,&token)==PS3DK_PROF_EINVAL'),
- 'stale-drop':('a->ticket!=ticket || a->published','a->published','!p_auto_lease_drop(p,old)'),
- 'published-drop':('a->ticket!=ticket || a->published','a->ticket!=ticket','!p_auto_lease_drop(p,token)'),
+ 'stale-drop':('a->ticket!=ticket || LD_ACQ(&a->published)','LD_ACQ(&a->published)','!p_auto_lease_drop(p,old)'),
+ 'published-drop':('a->ticket!=ticket || LD_ACQ(&a->published)','a->ticket!=ticket','!p_auto_lease_drop(p,token)'),
 }
 for name,(old,new,expected) in mutations.items():
     d=out/name;d.mkdir();assert original.count(old)==1,(name,old)
