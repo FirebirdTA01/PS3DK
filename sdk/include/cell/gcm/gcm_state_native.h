@@ -4,8 +4,11 @@
  * (or method sequence) so callers can no longer emit stale words.
  *
  * SAFE natives reserve via ps3tc_gcm_reserve (shared ring-full / callback
- * path, same as gcm_tex_bridge.h).  A NULL callback is silently skipped by
- * reserve; the write still happens and no fault is raised.  UNSAFE natives
+ * path, same as gcm_tex_bridge.h).  When (current + count) exceeds end and
+ * no callback is registered, the reservation is refused: the native emits
+ * nothing and current is left unchanged, so the safe path never writes past
+ * the ring.  If a callback is present it may relocate current/end and report
+ * success (resume the write) or refuse (no write).  UNSAFE natives
  * plain-write, no buffer check, no callback.
  *
  * Needs CellGcmContextData in scope (from <cell/gcm.h>, or a local

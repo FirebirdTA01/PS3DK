@@ -77,13 +77,28 @@ static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count
     return ctx->callback(ctx, count);
 }
 
-/* Reserve count u32 slots. The callback may rewrite the context fields;
- * read current again after the compiler-visible call. */
+/* Reserve count u32 slots. If (current + count) exceeds `end` the caller
+ * must supply a relocation callback; one is not supplied here, so the
+ * safe path refuses when the ring is full and the callback is NULL or
+ * refuses. The unsafe *_unsafe natives bypass this contract by writing
+ * unconditionally (documented; consumer-supplied ring is assumed sized).
+ *
+ * The callback may rewrite `ctx->current`/`ctx->end` (relocation) before
+ * reporting success; read both from the struct again after the
+ * compiler-visible call.
+ */
 static inline uint32_t *ps3tc_gcm_reserve(CellGcmContextData *ctx, uint32_t count)
 {
-    if ((ctx->current + count) > ctx->end)
+    if (ctx->current + count > ctx->end)
     {
-        if (ctx->callback && ps3tc_gcm_invoke_callback(ctx, count) != 0)
+        if (!ctx->callback)
+            return 0;
+        if (ps3tc_gcm_invoke_callback(ctx, count) != 0)
+            return 0;
+        /* Re-check: the callback may have relocated current/end, but
+         * reported success without making enough room for count.
+         * Refuse rather than overrun. */
+        if (ctx->current + count > ctx->end)
             return 0;
     }
     uint32_t *p = ctx->current;

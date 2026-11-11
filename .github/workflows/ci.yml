@@ -313,6 +313,16 @@ jobs:
       - name: Test public cellGcm* forwarders emit the shared native words
         run: bash tests/sdk/gcm-state-cellpath-test.sh
 
+      # GCM safe-path reservation contract on the SHARED reserve helper
+      # (ps3tc_gcm_reserve in gcm_cg_bridge.h): full ring + NULL callback
+      # must not write past end; refused callback must not write; a
+      # successful callback that relocates must be honored. Exercises the
+      # state-native and tex-bridge families and the public cellGcm* path.
+      # The corresponding unsafe *_unsafe natives are explicitly unchanged
+      # (documented unsafe: callers must size their own ring).
+      - name: Test GCM safe reserve refuses writes past a full ring
+        run: bash tests/sdk/gcm-reserve-null-callback-test.sh
+
       # Freestanding 32-bit compilation catches the original ILP32 shift
       # without requiring a PPU toolchain or host multilib runtime libraries.
       # Native host execution also verifies the wide-pointer debug trap.
