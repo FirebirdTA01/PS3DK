@@ -29,14 +29,14 @@ static void flush(gpp_ctx *ctx) {
     assert(ctx==&context && serial<=TEST_CLOCK_ANCHORS);
     uint32_t *w=ctx->current-6;
     assert(w[0]==0x41800 && w[1]==0x1000000u+slot*16);
-    assert(w[2]==0x41d6c && w[3]==238*16 && w[4]==0x41d70);
+    assert(w[2]==0x41d6c && w[3]==246*16 && w[4]==0x41d70);
     assert(w[5]==(((serial&0xff00ff00u)|((serial>>16)&0xffu)|((serial&0xffu)<<16))));
     assert(ld64(&reports[slot][0])==UINT64_MAX);
     uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);
     ps3dk_prof__auto_publish_after((void *)ctx,op); /* supplied original PUT seam */
-    st64(&reports[slot][0],10000*serial);st32(&labels[238],serial);
+    st64(&reports[slot][0],10000*serial);st32(&labels[246],serial);
     for(unsigned r=1040;r<2048;r++) st64(&reports[r][0],100000+r); /* FRAME mark reports */
-    st32(&labels[239],op);
+    st32(&labels[247],op);
 }
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);

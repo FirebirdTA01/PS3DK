@@ -18,6 +18,28 @@ static uintptr_t clean_begin, clean_current, clean_end;
 
 static int label_valid(uint32_t n) { return n==64 || (n>=69 && n<=254); }
 
+/* The defaults (no options: the automatic attach at cellGcmInit) must stay inside the profiler's reservation of
+ * <cell/gcm/ps3tc_gcm_labels.h>: labels 240..247 and reports 0..511 or 1024..2047. An override is the
+ * application's own choice of indices and keeps the general rule above. */
+#define AUTO_PROFILER_LABEL_FIRST 240u
+#define AUTO_PROFILER_LABEL_LAST 247u
+#define AUTO_PROFILER_REPORT_AUTO_FIRST 1024u
+#define AUTO_PROFILER_REPORT_AUTO_LAST 2047u
+#define AUTO_PROFILER_REPORT_LAST 511u
+static int profiler_label(uint32_t n) { return n>=AUTO_PROFILER_LABEL_FIRST && n<=AUTO_PROFILER_LABEL_LAST; }
+static int profiler_reports(uint32_t first, uint32_t count)
+{
+    uint64_t last=(uint64_t)first+count-1u;
+    if(!count) return 0;
+    return last<=AUTO_PROFILER_REPORT_LAST ||
+           (first>=AUTO_PROFILER_REPORT_AUTO_FIRST && last<=AUTO_PROFILER_REPORT_AUTO_LAST);
+}
+static int defaults_reserved(const ps3dk_prof_auto_options *o)
+{
+    return profiler_label(o->operation_label) && profiler_label(o->clock_label) &&
+           profiler_reports(o->report_first,o->report_count);
+}
+
 static int layout(const ps3dk_prof_auto_options *o, size_t *records, size_t *frames, size_t *total)
 {
     uint64_t n;
@@ -70,6 +92,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     p=p_ready() ? g_prof:NULL;
     if(!p) return PS3DK_PROF_ENOTINIT;
     if(!layout(o,&records,&frames,&bytes)) return rc;
+    if(!options && !defaults_reserved(o)) return rc; /* defaults never take application indices */
     /* Become a participant before owning mutable configuration or entering a
      * device accessor. Shutdown's owner inventory can then see this setup. */
     if(!application_rc && gc && !g_tls.slot1 && p->cfg.auto_register)

@@ -73,16 +73,16 @@ class TargetLifetime(unittest.TestCase):
         m = self.ready()
         m.submit()
         self.assertEqual(m.override(first=512, count=32, op_label=236, clock_label=237), 'LIVE_LEASE')
-        self.assertEqual((m.first, m.op_label), (1024, 239))
+        self.assertEqual((m.first, m.op_label), (1024, 247))
 
     def test_accepted_configuration_is_immutable(self):
         m = self.ready()
         m.config_accepted()
         self.assertEqual(m.override(first=512, count=32, op_label=236, clock_label=237), 'LIVE_LEASE')
-        self.assertEqual((m.first, m.op_label), (1024, 239))
+        self.assertEqual((m.first, m.op_label), (1024, 247))
 
     def test_default_resource_collision_is_visible(self):
-        for foreign in [(1024, 2, 240), (0, 2, 238), (0, 2, 239)]:
+        for foreign in [(1024, 2, 240), (0, 2, 246), (0, 2, 247)]:
             m = self.model(foreign=[foreign])
             self.assertEqual(m.gcm_init(clean=True, managed=True), 0)
             self.assertEqual(m.configs[-1][0], 'RESOURCE_CONFLICT')

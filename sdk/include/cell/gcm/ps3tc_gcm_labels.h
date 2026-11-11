@@ -6,8 +6,9 @@
  *     0..63     SYSTEM    never written or waited on by application code (CELL_GCM_INDEX_RANGE_LABEL_MIN is 64).
  *     65        PSGL      libPSGL prepared-buffer label.
  *     66..68    PSGL      libPSGL per-frame buffer-status labels (one per PSGL frame buffer, at most 3).
- *     240..247  PROFILER  the block the profiler samples lend to ps3dk_prof_gpu_attach and use for their fences.
- *                         The profiler library itself owns no fixed label: the application lends one.
+ *     240..247  PROFILER  the block the profiler samples lend to ps3dk_prof_gpu_attach and use for their fences,
+ *                         and the automatic profiler's default labels (246 clock anchor, 247 operation).
+ *                         The manual profiler library owns no fixed label: the application lends one.
  *     255       PSGL      libPSGL idle/finish token.
  *   Every other label (64, 69..239, 248..254) is the APPLICATION's.  The PSGL labels are only written when libPSGL
  *   is linked and initialised; a pure GCM application may treat them as its own, but should not, so that it never
@@ -15,8 +16,10 @@
  *
  *   Local reports (2048, cellGcmGetReportDataAddressLocation(i, CELL_GCM_LOCATION_LOCAL), cellGcmSetTimeStamp):
  *     0..511    PROFILER  the block the profiler samples lend to ps3dk_prof_gpu_attach and use for raw timestamps.
- *     512..2047 APPLICATION.
- *   No SDK library writes a local report today; the main-memory report area is entirely the application's.
+ *     512..1023 APPLICATION.
+ *     1024..2047 PROFILER the automatic profiler's default report pool (PS3_PROF_AUTO).
+ *   Only the automatic profiler writes local reports by default; the main-memory report area is entirely the
+ *   application's.
  *
  * A1 query: cellGcmGetReservedLabelRanges() / cellGcmGetReservedReportRanges() return the ranges above;
  * cellGcmGetLabelOwner() / cellGcmGetReportOwner() test one index.
@@ -67,7 +70,10 @@ extern "C" {
 #define CELL_GCM_REPORT_PROFILER_FIRST      0u
 #define CELL_GCM_REPORT_PROFILER_LAST       511u
 #define CELL_GCM_REPORT_APP_FIRST           512u
-#define CELL_GCM_REPORT_APP_LAST            2047u
+#define CELL_GCM_REPORT_APP_LAST            1023u
+/* the automatic profiler's default report pool (PS3_PROF_AUTO, <ps3dk/prof_auto.h>) */
+#define CELL_GCM_REPORT_PROFILER_AUTO_FIRST 1024u
+#define CELL_GCM_REPORT_PROFILER_AUTO_LAST  2047u
 
 /* One reserved range: [first, last] inclusive, owned by `owner` (CELL_GCM_INDEX_OWNER_*). */
 typedef struct CellGcmIndexRange {
@@ -97,6 +103,7 @@ static inline const CellGcmIndexRange *cellGcmGetReservedReportRanges(uint32_t *
 {
     static const CellGcmIndexRange ranges[] = {
         {CELL_GCM_REPORT_PROFILER_FIRST, CELL_GCM_REPORT_PROFILER_LAST, CELL_GCM_INDEX_OWNER_PROFILER, 0u},
+        {CELL_GCM_REPORT_PROFILER_AUTO_FIRST, CELL_GCM_REPORT_PROFILER_AUTO_LAST, CELL_GCM_INDEX_OWNER_PROFILER, 0u},
     };
     if (count)
         *count = (uint32_t)(sizeof ranges / sizeof ranges[0]);

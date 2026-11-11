@@ -149,8 +149,10 @@ Rules, all measured on a PS3 unless marked:
 
 The samples use labels 200-215, named in
 `samples/gcm/common/gcm_segment_labels.h`. They avoid the indices the SDK
-itself uses: libPSGL (65-68, 255) and the profiler (labels 240-242; reports
-32-63 and 512-528). The helper takes the label index from the caller.
+itself uses: libPSGL (65-68, 255) and the profiler (labels 240-247, of which
+the samples use 240-243 and the automatic profiler 246-247; reports 0-511 and
+1024-2047). Applications use reports 512-1023. The helper takes the label
+index from the caller.
 
 ## SPU writer calls
 

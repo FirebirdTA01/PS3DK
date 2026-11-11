@@ -29,8 +29,8 @@ static void complete(gpp_ctx *ctx,uint32_t clock_serial) {
     uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);
     ps3dk_prof__auto_publish_after((void *)ctx,op);
     for(unsigned r=1024;r<2048;r++) st64(&reports[r][0],100000+r);
-    if(clock_serial) {st64(&reports[1024+(clock_serial-1)%16][0],10000*clock_serial);st32(&labels[238],clock_serial);}
-    st32(&labels[239],op);
+    if(clock_serial) {st64(&reports[1024+(clock_serial-1)%16][0],10000*clock_serial);st32(&labels[246],clock_serial);}
+    st32(&labels[247],op);
 }
 static void flush(gpp_ctx *ctx) {assert(ctx==&context);complete(ctx,++anchors);}
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};

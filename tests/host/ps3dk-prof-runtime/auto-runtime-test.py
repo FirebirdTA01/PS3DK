@@ -398,7 +398,7 @@ assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
     assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,15,11)
-    assert struct.unpack_from('<IIIIIII',config,32)==(64,32,239,238,8,4,2)
+    assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
     domains=[b for k,b in chunks if k==8];assert len(domains)==1
     assert struct.unpack_from('<II',domains[0])==(1,1026)

@@ -12,7 +12,7 @@ class Capture:
         self.pairs = pairs
         self.independent_drain = independent_drain
         self.foreign = list(foreign)
-        self.first, self.count, self.op_label, self.clock_label = 1024, 1024, 239, 238
+        self.first, self.count, self.op_label, self.clock_label = 1024, 1024, 247, 246
         self.state = 'NONE'
         self.leased = False
         self.label = self.latched = self.prepared = self.put_frontier = 0

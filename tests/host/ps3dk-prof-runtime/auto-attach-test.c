@@ -46,6 +46,8 @@ int main(void)
     ps3dk_prof__auto_gcm_init_result(&context,sizeof words,sizeof words,words,0);
     assert(g_prof->auto_lease.ctx==&context);
     assert(g_prof->auto_lease.first==1024 && g_prof->auto_lease.count==1024);
+    /* the defaults are PROFILER-owned (ps3tc_gcm_labels.h): labels 247/246, reports 1024..2047 */
+    assert(g_prof->auto_lease.operation_label==247 && g_prof->auto_lease.clock_label==246);
     assert(auto_test_fifo_installs==1 && auto_test_fifo_observer && g_fifo.state==FS_ATTACHED);
     assert(g_fifo.domain==g_prof->auto_lease.domain && g_fifo.owner_inc==g_tls.incarnation);
     assert(p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==0);

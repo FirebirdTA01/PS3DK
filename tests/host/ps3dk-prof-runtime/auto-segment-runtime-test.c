@@ -26,7 +26,7 @@ static void flush(gpp_ctx *ctx) {
     assert(ctx==&context && ++flushes==1);
     uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);
     ps3dk_prof__auto_publish_after((void *)ctx,op);
-    st64(&reports[1024][0],10000);st32(&labels[238],1);
+    st64(&reports[1024][0],10000);st32(&labels[246],1);
 }
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
@@ -57,7 +57,7 @@ static void call(gpp_ctx *seg)
     uint32_t *before=context.current;
     for(unsigned n=0;n<6;n++) *context.current++=0xca110000u+n;
     ps3dk_prof__auto_segment_call((void *)&context,(void *)seg);
-    assert(context.current==before+10 && before[6]==0x41d6c && before[7]==239*16 && before[8]==0x41d70);
+    assert(context.current==before+10 && before[6]==0x41d6c && before[7]==247*16 && before[8]==0x41d70);
 }
 int main(void) {
     uint64_t counts[4];
@@ -96,7 +96,7 @@ int main(void) {
     uint32_t frontier=ps3dk_prof__auto_publish_before((void *)&context);
     ps3dk_prof__auto_publish_after((void *)&context,frontier);
     for(unsigned r=1040;r<1060;r++) st64(&reports[r][0],1000+10*r);
-    st32(&labels[239],frontier);
+    st32(&labels[247],frontier);
     assert(frontier==16);
     puts("AUTO segment timing and frame marks PASS");
 }

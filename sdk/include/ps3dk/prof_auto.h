@@ -24,7 +24,10 @@ typedef struct ps3dk_prof_auto_options {
     uint32_t max_bytes;         /* actual checked layout must fit; <= 2 MiB */
 } ps3dk_prof_auto_options;
 
-#define PS3DK_PROF_AUTO_OPTIONS_INIT {32u,1024u,1024u,239u,238u,1024u,256u,2097152u}
+/* Defaults: reports 1024..2047, operation label 247, clock label 246. All are PROFILER-owned in
+ * <cell/gcm/ps3tc_gcm_labels.h> (labels 240..247, reports 0..511 and 1024..2047), so they never collide with the
+ * application's labels (64, 69..239, 248..254) or reports (512..1023); the attach refuses defaults that would. */
+#define PS3DK_PROF_AUTO_OPTIONS_INIT {32u,1024u,1024u,247u,246u,1024u,256u,2097152u}
 
 /* Optional override, on the registered context owner before its first covered
  * operation, clock or frame observation. NULL options select the defaults.

@@ -30,10 +30,10 @@ static void st32(volatile uint32_t *a,uint32_t v) {__atomic_store_n(a,v,__ATOMIC
 static void flush(gpp_ctx *c) {
 #if TEST_FRAMES
     assert(c==&context && c->current==words+6);
-    assert(c->current[-5]==0x1000000u+64*16 && c->current[-3]==238*16);
+    assert(c->current[-5]==0x1000000u+64*16 && c->current[-3]==246*16);
     uint32_t frontier=ps3dk_prof__auto_publish_before((void *)c);
     ps3dk_prof__auto_publish_after((void *)c,frontier);
-    st64(&reports[64][0],10000);st32(&labels[238],1);
+    st64(&reports[64][0],10000);st32(&labels[246],1);
 #else
     (void)c;assert(0 && "observer must not flush inside operation hooks");
 #endif
@@ -71,9 +71,9 @@ int main(void) {
     clear.clear_mask=0xf3;context.current=words+250;
     assert(!ps3dk_prof__auto_begin(ctx,&clear,123) && context.current==words+250);
 #if TEST_FRAMES
-    assert(ld32(&labels[239])==0); /* the preceding owner-boundary clock initialized it */
+    assert(ld32(&labels[247])==0); /* the preceding owner-boundary clock initialized it */
 #else
-    assert(ld32(&labels[239])==0x5a5a5a5a); /* exclusions never initialize device state */
+    assert(ld32(&labels[247])==0x5a5a5a5a); /* exclusions never initialize device state */
 #endif
     context.current=application_begin;
     for(unsigned op=0;op<2;op++) {
@@ -83,7 +83,7 @@ int main(void) {
 #if TEST_FRAMES
         if(!op) assert(!ps3dk_prof__auto_begin(ctx,&clear,124));
 #endif
-        assert(ld32(&labels[239])==0 && ld32(&labels[238])==
+        assert(ld32(&labels[247])==0 && ld32(&labels[246])==
 #if TEST_FRAMES
                1
 #else
@@ -130,7 +130,7 @@ int main(void) {
 #endif
     st64(&reports[OP_REPORT][0],100);st64(&reports[OP_REPORT+1][0],110);
     st64(&reports[OP_REPORT+2][0],200);st64(&reports[OP_REPORT+3][0],220);
-    st32(&labels[239],FRONTIER); /* device facts are still supplied by this host fixture */
+    st32(&labels[247],FRONTIER); /* device facts are still supplied by this host fixture */
     assert(context.current==application_begin+36);
     puts("AUTO actual marker producer and cumulative completion PASS");
     return 0;
