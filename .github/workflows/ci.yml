@@ -258,7 +258,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap fifofail fifopre fifopost; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments fifofail fifopre fifopost; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -267,6 +267,7 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case stopvisit --mutant ignore-global-stop --out "$RUNNER_TEMP/auto-runtime-stopvisit-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case frames --mutant no-frame-boundary --out "$RUNNER_TEMP/auto-runtime-frame-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case clocks --mutant clock-put --out "$RUNNER_TEMP/auto-runtime-clock-put-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant segment-silent --out "$RUNNER_TEMP/auto-runtime-segment-silent-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopost --mutant fifo-publish --out "$RUNNER_TEMP/auto-runtime-fifo-publish-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopre --mutant fifo-cancel --out "$RUNNER_TEMP/auto-runtime-fifo-cancel-mutant"
           for mutant in fifo-owner fifo-freeze retired-owner; do

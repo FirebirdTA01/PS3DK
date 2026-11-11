@@ -165,7 +165,7 @@ fifo-clean:
 # never compose two independently observed GCM archives.
 AUTO_OBJ_DIR := $(OBJ_DIR)-auto
 AUTO_LP64_OBJ_DIR := $(OBJ_DIR)-auto-lp64
-AUTO_REPLACED := ps3tc_fifo_wrap rsx_legacy_commands rsx_legacy_buffer
+AUTO_REPLACED := ps3tc_fifo_wrap gcm_segment rsx_legacy_commands rsx_legacy_buffer
 AUTO_OBJS := $(filter-out $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED))),$(OBJS) $(LEGACY_OBJS)) \
              $(addprefix $(AUTO_OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED)))
 AUTO_LP64_OBJS := $(filter-out $(addprefix $(LP64_OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED))),$(LP64_OBJS) $(LP64_LEGACY_OBJS)) \
@@ -178,6 +178,12 @@ $(AUTO_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
 $(AUTO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LP64_CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_OBJ_DIR)/gcm_segment.o: $(SRC_DIR)/gcm_segment.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_LP64_OBJ_DIR)/gcm_segment.o: $(SRC_DIR)/gcm_segment.c Makefile
 	@mkdir -p $(@D)
 	$(CC) $(LP64_CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
 $(AUTO_OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c Makefile

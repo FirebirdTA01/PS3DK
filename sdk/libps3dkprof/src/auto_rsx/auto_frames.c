@@ -22,6 +22,14 @@ int auto_frames_count(auto_frames *q,uint32_t kind,uint32_t column)
     return 1;
 }
 
+int auto_frames_unsupported(auto_frames *q)
+{
+    if(!q->active) return 0;
+    if(q->live.unsupported==UINT64_MAX) {q->live.flags|=4;REL(&q->saturated,1u);}
+    else ++q->live.unsupported;
+    return 1;
+}
+
 int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,int open)
 {
     uint64_t w,r;

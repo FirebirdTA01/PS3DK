@@ -341,6 +341,43 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *context,uint32_t kind,u
     if(claim) auto_config_abort(&configuration,claim);
 }
 
+static int segment_find(const auto_capture *a,const void *ctx)
+{
+    for(uint32_t i=0;i<a->segments_open;i++) if(a->segments[i]==ctx) return (int)i;
+    return -1;
+}
+
+/* cellGcmSegmentBegin/End (observed build). Owner only: another thread's
+ * segment stays unregistered, and the owner never sees its emitters. */
+void ps3dk_prof__auto_segment_open(struct _gcmCtxData *context)
+{
+    auto_capture *a;
+    if(!context || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if((void *)context==(void *)a->context || segment_find(a,context)>=0) return;
+    if(a->segments_open==AUTO_SEGMENTS_OPEN) {increment(a,&a->segment_table_full);return;}
+    a->segments[a->segments_open++]=context;
+}
+void ps3dk_prof__auto_segment_close(struct _gcmCtxData *context)
+{
+    auto_capture *a;
+    int i;
+    if(!context || !p_ready() || !(a=owner_capture(NULL,0)) || (i=segment_find(a,context))<0) return;
+    a->segments[i]=a->segments[--a->segments_open];
+}
+
+/* A covered emitter on the owner thread writing into a context other than the
+ * attached ring: a CALL segment or a private/uninstrumented buffer. It gets no
+ * markers and its command runs unchanged, but it is never silently absent:
+ * the active COVERAGE row counts it as an unsupported-form visit, or STATUS
+ * counts it as unassociated when no frame is open. */
+static void foreign_visit(gpp_ctx *ctx,const ps3tc_auto_call *call)
+{
+    auto_capture *a;
+    if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active) return;
+    increment(a,segment_find(a,ctx)>=0 ? &a->segment_visits:&a->foreign_visits);
+    if(!auto_frames_unsupported(&a->coverage)) increment(a,&a->unassociated);
+}
+
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
@@ -349,7 +386,8 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     const auto_wire_config *c;
     auto_queue_entry *e;
     uint64_t words;
-    if(!a || !call || call->kind<1 || call->kind>3) return 0;
+    if(!a) {foreign_visit(ctx,call);return 0;}
+    if(!call || call->kind<1 || call->kind>3) return 0;
     if(g_tls.in_gpu && !a->active) {increment(a,&a->internal_suppressed);return 0;}
     if(!auto_frames_count(&a->coverage,call->kind,0)) increment(a,&a->unassociated);
     if(a->active) { (void)auto_frames_count(&a->coverage,call->kind,5);return 0; }
@@ -501,6 +539,13 @@ uint64_t ps3dk_prof__auto_test_clock_backlog(void)
 {
     const auto_capture *a=capture;
     return a ? LD_ACQ(&a->clocks.write_idx)-LD_ACQ(&a->clocks.read_idx):0;
+}
+/* Owner thread only: internal split of the unsupported-form visits. */
+void ps3dk_prof__auto_test_segment_counts(uint64_t out[4])
+{
+    const auto_capture *a=capture;
+    out[0]=a ? a->segment_visits:0;out[1]=a ? a->foreign_visits:0;
+    out[2]=a ? a->segment_table_full:0;out[3]=a ? a->segments_open:0;
 }
 #endif
 

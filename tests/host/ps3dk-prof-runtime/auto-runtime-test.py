@@ -16,14 +16,15 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
-                                  'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner'])
+                                  'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
+                                  'segment-silent'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
-                          'fifo-freeze':'init','retired-owner':'init'}[a.mutant] and not a.sanitize
+                          'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -55,7 +56,8 @@ def run(name,cmd,cwd=out):
                   'fifo-publish':b'g_fifo.state==FS_SEALED',
                   'fifo-cancel':b'auto_test_fifo_installs==1 && auto_test_fifo_removes==1',
                   'fifo-owner':b'p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==PS3DK_PROF_EPERM',
-                  'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED'}[a.mutant]
+                  'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
+                  'segment-silent':b'counts[0]==3 && counts[1]==2'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -73,6 +75,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
+if a.case=='segments':flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
 if a.sanitize=='address':
@@ -118,6 +121,9 @@ for rel in sources:
     elif a.mutant=='no-frame-boundary' and rel=='core/prof_core.c':
         code=source.read_text();old='p_auto_frame(fid,tb);';assert code.count(old)==1
         source=out/'prof_core.c';source.write_bytes(code.replace(old,'(void)fid;').encode())
+    elif a.mutant=='segment-silent' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text();old='if(!a) {foreign_visit(ctx,call);return 0;}';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_visit;return 0;}').encode())
     elif a.mutant=='clock-put' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='!auto_clock_after(&a->clocks,a->clock_put_frontier)';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'0').encode())
@@ -164,6 +170,7 @@ if a.case in ('fifofail','fifopre','fifopost'):application=Path(__file__).with_n
 if operations:application=Path(__file__).with_name('auto-operations-test.c').read_text()
 if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-clock-runtime-test.c').read_text()
 if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
+if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 run('link',[cc,*flags,out/'main.c',out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
@@ -179,6 +186,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO in-flight owner seal retains claim and lower bound PASS\n' if a.case=='stop'
                        else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
+                       else b'AUTO segment and foreign context visits counted without markers PASS\n' if a.case=='segments'
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
                        else b'AUTO FIFO refusal and unpublished cleanup PASS\n' if a.case in ('fifofail','fifopre','fifopost')
                        else b'application complete\n'),result.stdout
@@ -212,6 +220,19 @@ if a.case=='fifopost':
     assert chunks[-1][0]==6
     assert struct.unpack_from('<I',chunks[-1][1])[0]&1,'owner did not acknowledge shutdown'
     print('AUTO accepted before seal, unpublished FIFO cancelled, owner remains UNKNOWN PASS')
+    raise SystemExit(0)
+if a.case=='segments':
+    coverage=[b for k,b in auto if k==36];assert len(coverage)==2
+    for b,(frame,unsupported) in zip(coverage,[(0,5),(1,1)]):
+        assert len(b)==352 and struct.unpack_from('<H',b,2)[0]==3
+        assert struct.unpack_from('<Q',b,16)[0]==frame
+        assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
+        rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
+        assert rows[0]==rows[1]==(0,)*12
+        assert rows[2]==((1,1)+(0,)*10 if frame==0 else (0,)*12),rows[2]
+    fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+    assert fields[4]==1 and fields[10]==1,fields # admitted one ring clear; one unassociated visit
+    print('real capture: segment and foreign emitters counted as unsupported-form visits, ring clear observed PASS')
     raise SystemExit(0)
 if a.case in ('clocks','clockcap'):
     frames=256 if a.case=='clockcap' else 64

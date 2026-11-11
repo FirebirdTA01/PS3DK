@@ -19,4 +19,8 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
 /* Public application writes, safe and unsafe forms. kind 1 is a report index,
  * kind 2 a label index. Observation never redirects or suppresses the write. */
 void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
+/* cellGcmSegmentBegin/End in the observed build: the context between them is a
+ * segment context. Neither hook writes commands or changes the segment. */
+void ps3dk_prof__auto_segment_open(struct _gcmCtxData *);
+void ps3dk_prof__auto_segment_close(struct _gcmCtxData *);
 #endif

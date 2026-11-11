@@ -56,7 +56,7 @@ build() {
         -c "$src/gcm_rsx_wrappers.c" -o "$out-wrappers.o"
     "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror "${san[@]}" "${inc[@]}" "$@" \
         -DPS3TC_GCM_SEGMENT_HOST_TEST -c "$src/gcm_segment.c" -o "$out-segment.o"
-    "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror -Wno-missing-field-initializers "${san[@]}" "${inc[@]}" \
+    "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror -Wno-missing-field-initializers "${san[@]}" "${inc[@]}" ${test_defs:-} \
         -c "$repo_root/tests/sdk/gcm-segment-test.c" -o "$out-test.o"
     "$cc" "${san[@]}" -Wl,--gc-sections "$out-test.o" "$out-segment.o" "$out-wrappers.o" "$out-commands.o" -o "$out"
 }
@@ -71,5 +71,18 @@ cat "$tmp/control.log"
 [[ "$rc" -eq 1 ]] || fail "wrapping control: expected exit 1, got $rc"
 grep -q 'FAIL refused' "$tmp/control.log" || fail "wrapping control did not fail the refusal check"
 echo "control: a wrapping callback fails the overflow checks (exit 1)"
+
+# The observed build (libgcm_cmd_prof_auto.a) tells the automatic observer
+# which context is a segment context; without the seam the same test must fail.
+test_defs=-DTEST_AUTO_SEGMENT build "$tmp/auto" -DPS3TC_PROF_AUTO=1
+rc=0; "$tmp/auto" > "$tmp/auto.log" 2>&1 || rc=$?
+cat "$tmp/auto.log"
+[[ "$rc" -eq 0 ]] || fail "observed segment seam: expected exit 0, got $rc"
+grep -q 'auto seam: open/close bracket every PPU-written segment' "$tmp/auto.log" || fail "observed seam not exercised"
+test_defs=-DTEST_AUTO_SEGMENT build "$tmp/auto-control"
+rc=0; "$tmp/auto-control" > "$tmp/auto-control.log" 2>&1 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "unobserved seam control: expected exit 1, got $rc"
+grep -q 'FAIL auto open' "$tmp/auto-control.log" || fail "unobserved control did not fail the seam check"
+echo "control: the default build reports no segment contexts (exit 1)"
 
 echo "gcm-segment-test: PASS"

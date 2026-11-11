@@ -22,6 +22,17 @@ typedef gcmTransferSurface CellGcmTransferSurface;
 typedef gcmTransferSwizzle CellGcmTransferSwizzle;
 #include <cell/gcm/gcm_command_link.h>
 #include <cell/gcm/gcm_segment.h>
+#ifdef PS3TC_PROF_AUTO
+/* Observed build only (libgcm_cmd_prof_auto.a): the automatic observer learns
+ * which contexts are segment contexts, so covered emitters writing into a
+ * segment are counted as CALL-form visits instead of disappearing. */
+#include "ps3tc_prof_auto.h"
+#define SEGMENT_OBSERVE_OPEN(c) ps3dk_prof__auto_segment_open(c)
+#define SEGMENT_OBSERVE_CLOSE(c) ps3dk_prof__auto_segment_close(c)
+#else
+#define SEGMENT_OBSERVE_OPEN(c) ((void)0)
+#define SEGMENT_OBSERVE_CLOSE(c) ((void)0)
+#endif
 
 #ifdef PS3TC_GCM_SEGMENT_HOST_TEST
 void ps3tc_gcm_segment_test_sleep(uint32_t microseconds);
@@ -135,6 +146,7 @@ CellGcmSegmentContext *cellGcmSegmentBegin(CellGcmSegment *s)
     /* end = buffer + size - 4 bytes: the last word is kept for the RETURN. */
     cellGcmSetupContextData(&s->context, s->buffer, s->sizeBytes, segment_overflow);
     s->state = CELL_GCM_SEGMENT_STATE_OPEN;
+    SEGMENT_OBSERVE_OPEN(&s->context);
     return &s->context;
 }
 
@@ -142,6 +154,7 @@ int32_t cellGcmSegmentEnd(CellGcmSegment *s)
 {
     if (!s || s->state != CELL_GCM_SEGMENT_STATE_OPEN || !s->context.begin)
         return CELL_GCM_SEGMENT_ERROR_STATE;     /* not open, or claimed externally */
+    SEGMENT_OBSERVE_CLOSE(&s->context);
     /* An emitter can only have advanced current up to end, which leaves the
      * reserved last word; anything else means the context was rewritten. */
     if (s->context.current < s->buffer || s->context.current > s->context.end ||

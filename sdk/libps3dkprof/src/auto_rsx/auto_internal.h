@@ -26,6 +26,8 @@ extern const uint8_t ps3dk_prof__auto_build_binding[32];
 extern const char ps3dk_prof__auto_build_id[];
 extern const char ps3dk_prof__auto_app[];
 
+enum { AUTO_SEGMENTS_OPEN=8 };
+
 /* One allocation before observation; variable queues follow this control block
  * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
 typedef struct auto_capture {
@@ -42,6 +44,11 @@ typedef struct auto_capture {
     auto_queue_entry *active; /* owner only, between canonical begin/end */
     uintptr_t expected_end;
     uint32_t device_initialized, saturated, owner_done;
+    /* owner only: open segment contexts (cellGcmSegmentBegin..End) and the
+     * covered visits on contexts other than the attached ring */
+    void *segments[AUTO_SEGMENTS_OPEN];
+    uint32_t segments_open;
+    uint64_t segment_visits, foreign_visits, segment_table_full;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

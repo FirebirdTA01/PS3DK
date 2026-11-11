@@ -4,6 +4,7 @@
 #define auto_frames_init ps3dk_prof__auto_frames_init
 #define auto_frames_open ps3dk_prof__auto_frames_open
 #define auto_frames_count ps3dk_prof__auto_frames_count
+#define auto_frames_unsupported ps3dk_prof__auto_frames_unsupported
 #define auto_frames_close ps3dk_prof__auto_frames_close
 #define auto_frames_peek ps3dk_prof__auto_frames_peek
 #define auto_frames_ack ps3dk_prof__auto_frames_ack
@@ -25,6 +26,10 @@ int auto_frames_open(auto_frames *,uint64_t frame,uint64_t tb);
  * A visit and its outcome must reconcile before closure. No active frame means
  * false, so the caller records an unassociated visit rather than inventing one. */
 int auto_frames_count(auto_frames *,uint32_t kind,uint32_t column);
+/* One covered emitter outside the observed population (a segment or other
+ * foreign context): COVERAGE unsupported_form_visits. False without an active
+ * frame, as for auto_frames_count. */
+int auto_frames_unsupported(auto_frames *);
 /* 0: refused identity/accounting, unchanged; 1: queued; 2: queue loss recorded.
  * An implied closure or reversed clock is OPEN. Actual TB observations survive
  * a reversed clock; no replacement timestamp is invented. lost is cumulative. */

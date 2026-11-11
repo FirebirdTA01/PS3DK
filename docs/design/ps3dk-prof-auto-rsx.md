@@ -121,6 +121,13 @@ Flags are TOKEN=1, FINAL=2, SATURATED=4, LOSS=8 and OPEN=16. For a complete
 nonsaturated row, visited equals observed plus all exclusions, with checked sums.
 Only one final row exists per (instance, owner, frame). Observed counts markers
 emitted, not reports recovered or timing qualified.
+The unsupported count (offset 40) is the covered emitters the owner thread ran
+on a context other than the attached ring: a command segment built between
+`cellGcmSegmentBegin` and `cellGcmSegmentEnd` (the observed build announces
+those contexts), or any other private buffer. They get no markers, their
+commands run unchanged, and they are not in the per-kind rows; with no open
+frame they count as STATUS unassociated visits. Emitters on other threads and
+externally written (SPU/DMA) segments stay outside this count.
 Missing association is not assigned to an invented frame. Lost coverage and open
 frames stay visible; a bounded queue cannot turn dropped coverage into zero work.
 
