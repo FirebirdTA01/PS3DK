@@ -24,8 +24,8 @@ fn headers(flags: u32) -> File {
 
 #[test]
 fn neither_optional_feature_preserves_partial_header_masks_and_diagnostics() {
-    // Compare the legacy family only: bits 3, 4 and 5 now opt into independent extensions.
-    for flags in (0u8..=255).filter(|b| b & (8 | 16 | 32) == 0) {
+    // Compare the legacy family only: bits 3, 4, 5 and 6 now opt into independent extensions.
+    for flags in (0u8..=255).filter(|b| b & (8 | 16 | 32 | 64) == 0) {
         let mut f = headers(u32::from(flags));
         // No chunks are present: only the 13..15-byte header gate runs.
         f.chunks.clear();
@@ -49,7 +49,7 @@ fn neither_optional_feature_preserves_partial_header_masks_and_diagnostics() {
 #[test]
 fn neither_optional_feature_preserves_full_header_prerequisite_precedence() {
     // Combined-capability coverage is separate from these unchanged legacy diagnostics.
-    for flags in (0u32..=255).filter(|b| b & (8 | 16 | 32) == 0) {
+    for flags in (0u32..=255).filter(|b| b & (8 | 16 | 32 | 64) == 0) {
         if [0, 1, 3, 7].contains(&flags) {
             continue;
         }

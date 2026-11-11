@@ -119,6 +119,7 @@ struct Reader {
     func: Option<crate::func_paths::Reader>,
     /// file_flags bit 8: named per-frame counters (chunk type 39).
     counters: Option<crate::counters::Reader>,
+    fifo: Option<crate::fifo::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -182,11 +183,29 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     source: crate::source_checkpoints::Budgets,
     waits: crate::waits::Budgets,
     func: crate::func_paths::Budgets) -> Result<Capture, Malformed> {
+    read_all(bytes, budgets, dependencies, source, waits, func, crate::fifo::Budgets::default())
+}
+
+/// Read with an explicit FIFO wrap-event retention budget.  Exhaustion is a named FIFO refusal; validation and
+/// every other feature are unchanged.
+pub fn read_with_fifo_budgets(bytes: &[u8], fifo: crate::fifo::Budgets) -> Result<Capture, Malformed> {
+    read_all(bytes, crate::checkpoints::Budgets::default(), crate::dependencies::DependencyBudgets::default(),
+        crate::source_checkpoints::Budgets::default(), crate::waits::Budgets::default(),
+        crate::func_paths::Budgets::default(), fifo)
+}
+
+fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
+    dependencies: crate::dependencies::DependencyBudgets,
+    source: crate::source_checkpoints::Budgets,
+    waits: crate::waits::Budgets,
+    func: crate::func_paths::Budgets,
+    fifo: crate::fifo::Budgets) -> Result<Capture, Malformed> {
     let mut r = Reader {
         cap: Capture::default(),
         waits: None,
         func: None,
         counters: None,
+        fifo: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -211,14 +230,17 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         // file_flags: byte 12 may be 0, FLAG_DOMAIN_EXTENSIONS or that plus FLAG_PROFILE_RECORD (bit 1 requires
         // bit 0); bytes 13..15 must be 0, as far as they are present.
-        // Bits 0-5 are defined; bit 1 needs bit 0 and bit 2 needs bit 1.
+        // Bits 0-6 are defined; bit 1 needs bit 0, bit 2 needs bit 1 and bit 6 needs bit 0.
         let v = bytes.get(12).copied().unwrap_or(0);
-        let known = v & !63 == 0 && (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0);
+        let known = v & !127 == 0 && (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
+            && (v & 64 == 0 || v & 1 != 0);
         // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte); bytes 14..15 must be 0
         let high_ok = !(n > 13 && bytes[13] & !1 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
-            let allowed = if bytes[12] & 32 != 0 {
+            let allowed = if bytes[12] & 64 != 0 {
+                "a combination of bits 0-6 (bit 1 needs bit 0, bit 2 needs bit 1, bit 6 needs bit 0)"
+            } else if bytes[12] & 32 != 0 {
                 "a combination of bits 0-5 (bit 1 needs bit 0, bit 2 needs bit 1)"
             } else if bytes[12] & 24 == 24 { "0, 1, 3, 7, 8, 9, 11, 15, 16, 17, 19, 23, 24, 25, 27 or 31" }
                 else if bytes[12] & 8 != 0 { "0, 1, 3, 7, 8, 9, 11 or 15" }
@@ -234,6 +256,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if n > 12 && u32::from(bytes[12]) & crate::func_paths::FLAG_FUNC_PATHS != 0 {
             r.cap.func_paths = Some(crate::func_paths::Inventory::default());
+        }
+        if n > 12 && u32::from(bytes[12]) & crate::fifo::FLAG_FIFO != 0 {
+            r.cap.fifo = Some(crate::fifo::Inventory::default());
         }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
@@ -254,11 +279,15 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     // bit 2 (SPU_ORDER) requires bits 0 and 1; without bit 1 every refusal keeps the baseline's exact message
     let func_flag = crate::func_paths::FLAG_FUNC_PATHS;
     let counters_flag = crate::counters::FLAG_COUNTERS;
+    let fifo_flag = crate::fifo::FLAG_FIFO;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag) != 0
+        | counters_flag | fifo_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
+    }
+    if file_flags & fifo_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 6 without bit 0"));
     }
     if file_flags & profile_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 1 without bit 0"));
@@ -277,6 +306,9 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & counters_flag != 0 {
         r.counters = Some(crate::counters::Reader::new());
+    }
+    if file_flags & fifo_flag != 0 {
+        r.fifo = Some(crate::fifo::Reader::new(fifo));
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -342,8 +374,10 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let func_ty = r.func.is_some()
             && (crate::func_paths::CHUNK_FUNC_CONFIG..=crate::func_paths::CHUNK_FUNC_STATUS).contains(&ty);
         let counters_ty = r.counters.is_some() && ty == crate::counters::CHUNK_COUNTERS;
+        let fifo_ty = r.fifo.is_some()
+            && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty
+            && !func_ty && !counters_ty && !fifo_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -371,6 +405,17 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if func_ty {
             r.func.as_mut().unwrap().chunk(ty, payload, chunk_seq, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if fifo_ty {
+            // Bit 6 requires bit 0, so the extension reader exists; only RSX_TIMESTAMP domains are eligible.
+            let rsx: BTreeSet<u32> = r.ext.as_ref().map_or_else(BTreeSet::new, |x| {
+                x.declarations().domains.values().filter(|d| d.kind == crate::ext::KIND_RSX_TIMESTAMP)
+                    .map(|d| d.id).collect()
+            });
+            r.fifo.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared)?;
             pos += total;
             index += 1;
             continue;
@@ -418,6 +463,7 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     if let Some(c) = r.counters.take() {
         r.cap.counters = Some(c.finish(r.trailer_seen)?);
     }
+    r.cap.fifo = r.fifo.take().map(|x| x.result);
     let mut cap = r.finish(torn)?;
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);

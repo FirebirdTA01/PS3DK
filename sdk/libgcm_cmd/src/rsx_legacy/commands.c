@@ -4,6 +4,9 @@
 #include <ppu_intrinsics.h>
 
 #include "rsx_internal.h"
+#ifdef PS3TC_PROF_AUTO
+#include "../ps3tc_prof_auto.h"
+#endif
 
 #define RSX_INTERNAL	1
 

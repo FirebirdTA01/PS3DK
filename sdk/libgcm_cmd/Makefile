@@ -110,4 +110,96 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
 
+# --- Observed FIFO wrap variant (docs/design/ps3dk-prof-fifo.md) ---
+# libgcm_cmd_prof_fifo.a, per data model: the default members with
+# ps3tc_fifo_wrap.o replaced by the same source compiled with
+# PS3TC_FIFO_OBSERVE (the six phase-boundary observation points and the
+# private observer bridge).  Explicit goals only: no prerequisite of all,
+# install or clean, and its own object directories, so the default archives
+# and their build plan are unchanged.  The shared default objects are
+# prerequisites, never rewritten here.
+FIFO_OBJ_DIR      := $(OBJ_DIR)-fifo
+FIFO_LP64_OBJ_DIR := $(OBJ_DIR)-fifo-lp64
+FIFO_ARCHIVE      := $(FIFO_OBJ_DIR)/libgcm_cmd_prof_fifo.a
+FIFO_LP64_ARCHIVE := $(FIFO_LP64_OBJ_DIR)/libgcm_cmd_prof_fifo.a
+FIFO_OBJS         := $(filter-out $(OBJ_DIR)/ps3tc_fifo_wrap.o,$(OBJS)) $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o
+FIFO_LP64_OBJS    := $(filter-out $(LP64_OBJ_DIR)/ps3tc_fifo_wrap.o,$(LP64_OBJS)) $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o
+
+.PHONY: fifo install-fifo fifo-clean
+fifo: $(FIFO_ARCHIVE) $(FIFO_LP64_ARCHIVE)
+
+$(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DPS3TC_FIFO_OBSERVE=1 $(DEPFLAGS) -c -o $@ $<
+
+$(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LP64_CFLAGS) -DPS3TC_FIFO_OBSERVE=1 $(DEPFLAGS) -c -o $@ $<
+
+$(FIFO_ARCHIVE): $(FIFO_OBJS) $(LEGACY_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+$(FIFO_LP64_ARCHIVE): $(FIFO_LP64_OBJS) $(LP64_LEGACY_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+
+install-fifo: fifo
+	@install -d $(INSTALL_LIB) $(INSTALL_LIB)/lp64
+	install -m 0644 $(FIFO_ARCHIVE) $(INSTALL_LIB)/libgcm_cmd_prof_fifo.a
+	install -m 0644 $(FIFO_LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd_prof_fifo.a
+	cmp $(FIFO_ARCHIVE) $(INSTALL_LIB)/libgcm_cmd_prof_fifo.a
+	cmp $(FIFO_LP64_ARCHIVE) $(INSTALL_LIB)/lp64/libgcm_cmd_prof_fifo.a
+
+fifo-clean:
+	rm -f $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.o $(FIFO_OBJ_DIR)/ps3tc_fifo_wrap.d $(FIFO_ARCHIVE)
+	rm -f $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o $(FIFO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.d $(FIFO_LP64_ARCHIVE)
+
 -include $(wildcard $(OBJ_DIR)/*.d)
+-include $(wildcard $(FIFO_OBJ_DIR)/*.d $(FIFO_LP64_OBJ_DIR)/*.d)
+
+# AUTO uses the original default members except the canonical command,
+# publication and wrap objects. Compile those three together with both seams;
+# never compose two independently observed GCM archives.
+AUTO_OBJ_DIR := $(OBJ_DIR)-auto
+AUTO_LP64_OBJ_DIR := $(OBJ_DIR)-auto-lp64
+AUTO_REPLACED := ps3tc_fifo_wrap rsx_legacy_commands rsx_legacy_buffer
+AUTO_OBJS := $(filter-out $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED))),$(OBJS) $(LEGACY_OBJS)) \
+             $(addprefix $(AUTO_OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED)))
+AUTO_LP64_OBJS := $(filter-out $(addprefix $(LP64_OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED))),$(LP64_OBJS) $(LP64_LEGACY_OBJS)) \
+                  $(addprefix $(AUTO_LP64_OBJ_DIR)/,$(addsuffix .o,$(AUTO_REPLACED)))
+AUTO_FLAGS := -DPS3TC_FIFO_OBSERVE=1 -DPS3TC_PROF_AUTO=1
+.PHONY: auto install-auto
+auto: $(AUTO_OBJ_DIR)/libgcm_cmd_prof_auto.a $(AUTO_LP64_OBJ_DIR)/libgcm_cmd_prof_auto.a
+
+$(AUTO_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_LP64_OBJ_DIR)/ps3tc_fifo_wrap.o: $(SRC_DIR)/ps3tc_fifo_wrap.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LP64_CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LEGACY_CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_LP64_OBJ_DIR)/rsx_legacy_%.o: $(LEGACY_DIR)/%.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(LP64_LEGACY_CFLAGS) $(AUTO_FLAGS) $(DEPFLAGS) -c -o $@ $<
+$(AUTO_OBJ_DIR)/libgcm_cmd_prof_auto.a: $(AUTO_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+$(AUTO_LP64_OBJ_DIR)/libgcm_cmd_prof_auto.a: $(AUTO_LP64_OBJS)
+	@rm -f $@
+	$(AR) $(ARFLAGS) $@ $^
+	$(RANLIB) $@
+install-auto: auto
+	install -d $(INSTALL_LIB) $(INSTALL_LIB)/lp64 $(INSTALL_INC)/cell/gcm
+	install -m 0644 $(AUTO_OBJ_DIR)/libgcm_cmd_prof_auto.a $(INSTALL_LIB)/
+	install -m 0644 $(AUTO_LP64_OBJ_DIR)/libgcm_cmd_prof_auto.a $(INSTALL_LIB)/lp64/
+	cmp $(AUTO_OBJ_DIR)/libgcm_cmd_prof_auto.a $(INSTALL_LIB)/libgcm_cmd_prof_auto.a
+	cmp $(AUTO_LP64_OBJ_DIR)/libgcm_cmd_prof_auto.a $(INSTALL_LIB)/lp64/libgcm_cmd_prof_auto.a
+	install -m 0644 ../include/cell/gcm.h $(INSTALL_INC)/cell/
+	install -m 0644 include/cell/gcm/ps3tc_fifo_wrap.h $(INSTALL_INC)/cell/gcm/
+-include $(wildcard $(AUTO_OBJ_DIR)/*.d $(AUTO_LP64_OBJ_DIR)/*.d)
