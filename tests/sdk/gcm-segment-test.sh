@@ -96,7 +96,7 @@ mutant local-init 's/^        location != GCM_LOCATION_CELL)$/        (location 
 
 # The observed build (libgcm_cmd_prof_auto.a) tells the automatic observer
 # which context is a segment context; without the seam the same test must fail.
-test_defs=-DTEST_AUTO_SEGMENT build "$tmp/auto" "$src/gcm_segment.c" -DPS3TC_PROF_AUTO=1
+test_defs="-DTEST_AUTO_SEGMENT -DTEST_AUTO_OBSERVED" build "$tmp/auto" "$src/gcm_segment.c" -DPS3TC_PROF_AUTO=1
 rc=0; "$tmp/auto" > "$tmp/auto.log" 2>&1 || rc=$?
 cat "$tmp/auto.log"
 [[ "$rc" -eq 0 ]] || fail "observed segment seam: expected exit 0, got $rc"

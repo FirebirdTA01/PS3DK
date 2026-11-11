@@ -357,7 +357,7 @@ static void test_external(void)
 
 /* The observed build (libgcm_cmd_prof_auto.a) asks for 4 more words in the
  * same request: the observer's operation-label release after the CALL block. */
-#if defined(TEST_AUTO_SEGMENT) && defined(PS3TC_PROF_AUTO)
+#ifdef TEST_AUTO_OBSERVED   /* the test object of the observed build (gcm-segment-test.sh) */
 #define CALL_BLOCK_WORDS 9u
 #else
 #define CALL_BLOCK_WORDS 5u
