@@ -353,6 +353,79 @@ static void test_external(void)
     printf("  claimed, bad sizes and a missing RETURN refused, ran, reclaimed after retirement\n");
 }
 
+/* ---- Call: the CALL and the retirement label are one 5-word reservation ---- */
+
+static unsigned cb_calls;
+static u32 cb_words;
+static s32 refuse_cb(gcmContextData *c, u32 n) { (void)c; ++cb_calls; cb_words = n; return -1; }
+static s32 lying_cb(gcmContextData *c, u32 n) { (void)c; ++cb_calls; cb_words = n; return 0; }   /* no room made */
+static s32 wrap_cb(gcmContextData *c, u32 n) { ++cb_calls; cb_words = n; c->current = c->begin; return 0; }
+
+/* A closed segment, ready to call. */
+static int closed_segment(CellGcmSegment *s, uint8_t label)
+{
+    gcmContextData *c;
+    if (cellGcmSegmentInit(s, &arena[12288], 256, GCM_LOCATION_CELL, label) != CELL_OK) return 0;
+    if (!(c = cellGcmSegmentBegin(s))) return 0;
+    rsxSetWriteCommandLabel(c, 211, 0x5a);
+    return cellGcmSegmentEnd(s) == CELL_OK;
+}
+
+static void test_call_transaction(void)
+{
+    static uint32_t canary[RING_WORDS];
+    CellGcmSegment s, before;
+    unsigned room;
+
+    puts("call transaction:");
+    /* 1..4 words left: the CALL alone would fit, the label would not. */
+    for (room = 1; room <= 4; ++room) {
+        int lying;
+        for (lying = 0; lying < 2; ++lying) {
+            ring_reset();
+            CHECK("setup", closed_segment(&s, 212));
+            ring.current = ring.end - room;
+            ring.callback = lying ? lying_cb : refuse_cb;
+            memset(ring_mem, 0xc3, RING_WORDS * 4u);
+            memcpy(canary, ring_mem, sizeof(canary));
+            memcpy(&before, &s, sizeof(s));
+            cb_calls = 0; cb_words = 0;
+            CHECK("refused busy", cellGcmSegmentCall(&ring, &s) == CELL_GCM_SEGMENT_ERROR_BUSY);
+            CHECK("one 5-word request", cb_calls == 1 && cb_words == 5u);
+            CHECK("ring cursor kept", ring.current == ring.end - room);
+            CHECK("ring words kept", memcmp(canary, ring_mem, sizeof(canary)) == 0);
+            CHECK("segment kept", memcmp(&before, &s, sizeof(s)) == 0);
+            CHECK("still callable", s.state == CELL_GCM_SEGMENT_STATE_CLOSED && s.serial == 0 && s.calls == 0);
+        }
+    }
+    printf("  1-4 words left, refusing or room-less callback: BUSY, one 5-word request, ring and segment unchanged\n");
+
+    /* A wrapping ring callback: all five words land together after the wrap. */
+    for (room = 1; room <= 4; ++room) {
+        uint32_t off = 0;
+        ring_reset();
+        CHECK("setup", closed_segment(&s, 213));
+        labels[213] = 0;
+        ring.current = ring.end - room;
+        ring.callback = wrap_cb;
+        memset(ring_mem, 0xc3, RING_WORDS * 4u);
+        cb_calls = 0; cb_words = 0;
+        CHECK("wrapped ok", cellGcmSegmentCall(&ring, &s) == CELL_OK);
+        CHECK("one 5-word request", cb_calls == 1 && cb_words == 5u);
+        CHECK("five words after the wrap", ring.current == ring.begin + 5);
+        CHECK("call first", ring_mem[0] == (s.offset | 2u));
+        CHECK("nothing before the wrap", ring_mem[RING_WORDS - 1u - room] == 0xc3c3c3c3u);
+        CHECK("submitted", s.state == CELL_GCM_SEGMENT_STATE_SUBMITTED && s.serial == 1u && s.calls == 1u);
+        gcmAddressToOffset(ring.begin, &off);
+        model.get = off;
+        ring_flush();
+        CHECK("run", model_run(10000));
+        CHECK("retired by its label", labels[213] == 1u && cellGcmSegmentIsRetired(&s));
+    }
+    ring.callback = NULL;
+    printf("  wrapping callback: CALL + label written together after the wrap, retired by the model\n");
+}
+
 int main(void)
 {
     test_emitters();
@@ -361,6 +434,7 @@ int main(void)
     test_double_buffer();
     test_nested();
     test_external();
+    test_call_transaction();
     if (failures) { printf("gcm-segment: %d check(s) FAILED\n", failures); return 1; }
     puts("gcm-segment: all checks passed");
     return 0;

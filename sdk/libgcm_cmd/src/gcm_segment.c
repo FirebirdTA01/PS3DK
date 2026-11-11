@@ -182,18 +182,31 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
     return CELL_OK;
 }
 
+/* CALL (1 word) and the back-end retirement label (4 words). */
+#define SEGMENT_CALL_WORDS 5u
+
+/* 1 when the ring has `words` free words before end (the emitters' test). */
+static int ring_has_room(const CellGcmSegmentContext *ring, uint32_t words)
+{
+    return ring->current >= ring->begin && ring->current <= ring->end &&
+           (size_t)(ring->end - ring->current) >= words;
+}
+
 int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)
 {
-    uint32_t *before;
-
     if (!ring || !s) return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     if (s->state != CELL_GCM_SEGMENT_STATE_CLOSED) return CELL_GCM_SEGMENT_ERROR_STATE;
     if (s->overflowWords) return CELL_GCM_SEGMENT_ERROR_OVERFLOW;
-    before = ring->current;
+    /* One reservation for both commands: the ring's callback is asked once
+     * for all five words (it may wrap or flush), and if it refuses, or
+     * returns without making room, nothing is written and the segment is
+     * left as it was.  With the room there, neither emitter calls it. */
+    if (!ring_has_room(ring, SEGMENT_CALL_WORDS) &&
+        (!ring->callback || ring->callback(ring, SEGMENT_CALL_WORDS) != 0 ||
+         !ring_has_room(ring, SEGMENT_CALL_WORDS)))
+        return CELL_GCM_SEGMENT_ERROR_BUSY;
     rsxSetCallCommand(ring, s->offset);
     rsxSetWriteBackendLabel(ring, s->labelIndex, s->serial + 1u);
-    /* Both commands fit unless the ring's own callback refused. */
-    if (ring->current == before) return CELL_GCM_SEGMENT_ERROR_BUSY;
     s->serial += 1u;
     s->calls += 1u;
     s->state = CELL_GCM_SEGMENT_STATE_SUBMITTED;

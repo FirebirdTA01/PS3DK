@@ -52,7 +52,13 @@ cellGcmSegmentCall(ring, s);                      /* CALL + retirement label */
   are in `cellGcmSegmentGetUsedBytes`; refused words in
   `cellGcmSegmentGetOverflowWords`.
 * **Call** writes, into the ring, the CALL and then a back-end label
-  (`cellGcmSetWriteBackEndLabel`) carrying the segment's next serial.
+  (`cellGcmSetWriteBackEndLabel`) carrying the segment's next serial. The
+  five words are one reservation: if the ring lacks room, its callback is
+  asked once for all five (it may wrap or flush). If it refuses, or returns
+  without making room, Call returns `CELL_GCM_SEGMENT_ERROR_BUSY`, writes
+  nothing and leaves the segment closed and callable. Host test:
+  `gcm-segment-test.sh` (1 to 4 free words with a refusing callback; a
+  wrapping callback puts all five words after the wrap).
 * **WaitRetired** polls that label at most `maxPolls` times, sleeping between
   polls, and returns `CELL_GCM_SEGMENT_ERROR_TIMEOUT` instead of waiting
   forever. Serials compare modulo 2^32.
