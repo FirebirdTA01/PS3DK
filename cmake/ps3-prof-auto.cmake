@@ -91,6 +91,8 @@ function(ps3_target_prof_auto target)
     target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_clock_sample,-u,ps3dk_prof__auto_clock_before,-u,ps3dk_prof__auto_clock_after")
     target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_fifo_boundary,-u,ps3dk_prof__auto_lease_owner")
     target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__fifo_auto_prepare,-u,ps3dk_prof__fifo_auto_publish,-u,ps3dk_prof__fifo_auto_cancel")
+    # The observed CALL-segment member and its runtime seams, checked in the map like every provider above.
+    target_link_options("${target}" PRIVATE "-Wl,-u,cellGcmSegmentBegin,-u,cellGcmSegmentEnd,-u,cellGcmSegmentCall,-u,ps3dk_prof__auto_segment_open,-u,ps3dk_prof__auto_segment_close,-u,ps3dk_prof__auto_segment_call")
     set(map "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto.map")
     target_link_options("${target}" PRIVATE "-Wl,-Map,${map},--cref")
     foreach(lang C CXX)

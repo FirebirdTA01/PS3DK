@@ -56,7 +56,7 @@ install-auto-package: install-auto-rsx ext-live-ilp32 ext-live-lp64
 	install -m 0644 "$(EXTL_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/"
 	install -m 0644 "$(EXTL64_DIR)/libps3dkprof_ext_live.a" "$(PS3DK)/ppu/lib/lp64/"
 	install -d "$(PS3DK)/cmake"
-	install -m 0644 ../../cmake/ps3-prof-auto.cmake ../../cmake/ps3-prof-auto-check.py "$(PS3DK)/cmake/"
+	install -m 0644 ../../cmake/ps3-prof-auto.cmake ../../cmake/ps3-prof-auto-check.py ../../cmake/ps3-prof-auto-identity.py "$(PS3DK)/cmake/"
 	for abi in ilp32 lp64; do \
 	    python3 "$(PS3DK)/cmake/ps3-prof-auto-check.py" --root "$(PS3DK)" --abi "$$abi" \
 	        --seal --readelf "$(PPU_READELF)" --source-commit "$(AUTO_SOURCE_COMMIT)" || exit 1; \

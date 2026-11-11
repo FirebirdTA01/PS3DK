@@ -2,6 +2,7 @@
 """Seal/check a AUTO installation and its GNU link-map providers. No target execution."""
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import posixpath
@@ -47,6 +48,14 @@ REQUIRED = {
     'ps3tc_fifo_wrap_callback': (ARCHIVES[1], 'ps3tc_fifo_wrap.o'),
     'ps3tc_fifo_observe_install': (ARCHIVES[1], 'ps3tc_fifo_wrap.o'),
     'ps3tc_fifo_observe_remove': (ARCHIVES[1], 'ps3tc_fifo_wrap.o'),
+    # CALL segments: the observed gcm_segment.o announces segment contexts and calls; the default member would
+    # leave segment draws unobserved and their reports uncompleted.
+    'cellGcmSegmentBegin': (ARCHIVES[1], 'gcm_segment.o'),
+    'cellGcmSegmentEnd': (ARCHIVES[1], 'gcm_segment.o'),
+    'cellGcmSegmentCall': (ARCHIVES[1], 'gcm_segment.o'),
+    'ps3dk_prof__auto_segment_open': (ARCHIVES[0], 'auto_runtime.o'),
+    'ps3dk_prof__auto_segment_close': (ARCHIVES[0], 'auto_runtime.o'),
+    'ps3dk_prof__auto_segment_call': (ARCHIVES[0], 'auto_runtime.o'),
 }
 
 
@@ -135,6 +144,14 @@ def check(root, abi, mapfile=None):
     return {symbol:providers[symbol] for symbol in REQUIRED}
 
 
+def identity():
+    path = Path(__file__).with_name('ps3-prof-auto-identity.py')
+    spec = importlib.util.spec_from_file_location('ps3_prof_auto_identity', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True)
@@ -150,11 +167,16 @@ def main():
             raise ValueError('sealing requires readelf/source commit and no link command')
         seal(a.root.resolve(), a.abi, a.readelf, a.source_commit)
     check(a.root, a.abi)
+    prepared = None
     if a.command is not None:
         if not a.command or a.map is None: raise ValueError('link command/map required')
-        r = subprocess.run(a.command)
+        # Production identities: generated from the pinned link inputs before the link, checked after it.
+        prepared = identity().prepare(a.abi, locations(a.root.resolve(), a.abi)[0]/MANIFEST, a.map, a.command)
+        r = subprocess.run(prepared['command'])
         if r.returncode: return r.returncode
     providers = check(a.root, a.abi, a.map)
+    if prepared is not None:
+        identity().finish(prepared, a.map)
     if a.map:
         a.map.with_name(a.map.name+'.auto.json').write_bytes((json.dumps(providers, indent=2)+'\n').encode())
     print('AUTO installed identity'+(' and providers' if a.map else '')+' PASS')

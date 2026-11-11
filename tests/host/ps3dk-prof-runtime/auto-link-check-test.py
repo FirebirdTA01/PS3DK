@@ -105,6 +105,19 @@ class Checks(unittest.TestCase):
         self.manifest['automatic_attach']=False; self.save()
         with self.assertRaisesRegex(ValueError,'automatic attach'): self.check()
 
+    def test_observed_segment_member_is_required(self):
+        for symbol in ('cellGcmSegmentBegin', 'cellGcmSegmentEnd', 'cellGcmSegmentCall',
+                       'ps3dk_prof__auto_segment_open', 'ps3dk_prof__auto_segment_close',
+                       'ps3dk_prof__auto_segment_call'):
+            old=self.providers.pop(symbol); self.write_map()
+            with self.assertRaisesRegex(ValueError,'provider'): self.check()
+            self.providers[symbol]=old
+        # the default archive's member (unobserved segments) is refused even when every symbol resolves
+        self.write_map('/sdk/ppu/lib/libgcm_cmd.a(gcm_segment.o)')
+        with self.assertRaisesRegex(ValueError, 'default|mixed'): self.check()
+        self.providers['cellGcmSegmentCall']=str(self.root/'other/libgcm_cmd.a')+'(gcm_segment.o)'; self.write_map()
+        with self.assertRaisesRegex(ValueError, 'provider|default|mixed'): self.check()
+
     def test_readelf_members(self):
         text='File: a.a(one.o)\nAttribute Section: gnu\nFile Attributes\n  Tag_GNU_Power_CellOS_Data_Model: ILP32\n'
         C.check_attributes(text, 'ilp32')
