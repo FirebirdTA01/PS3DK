@@ -619,3 +619,49 @@ fn d1_d2_fixture_from_the_host_runtime() {
     // frame 0 also holds the never-called build's observed clear, which has no record: UNKNOWN, not complete
     assert_eq!(r.frames[0].verdict, Verdict::Unknown);
 }
+
+#[test]
+fn flip_frames_and_frame_source() {
+    // a flip-opened row (FR_FLIP 32) and STATUS FRAMES_FLIP (256) with the 15/11 masks
+    let mut x = row(0, (10, 20), 0);
+    x.flags |= 32;
+    let r = analyze(&reader::read(&seg_file(vec![coverage(&x), status(1 | 256, status_for(0, 1, 0, 0))]).bytes())
+        .expect("reads"));
+    assert_eq!(r.frames[0].flags & 32, 32);
+    assert_eq!(ps3dk_prof::auto_rsx::frame_source(&r), "FLIP");
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &r).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("frames delimited by: FLIP"), "{text}");
+    assert!(text.contains("note: An operation interval runs from the RSX reaching its begin marker"), "{text}");
+    // both sources: MIXED, shown, not hidden
+    let r = analyze(&reader::read(&seg_file(vec![coverage(&x), status(1 | 256 | 512, status_for(0, 1, 0, 0))]).bytes())
+        .expect("reads"));
+    assert!(ps3dk_prof::auto_rsx::frame_source(&r).starts_with("MIXED"));
+    // neither: no frames seen
+    let r = analyze(&reader::read(&seg_file(vec![status(1, [0; 15])]).bytes()).unwrap());
+    assert!(ps3dk_prof::auto_rsx::frame_source(&r).starts_with("NONE"));
+    // a first-writer capture knows neither the row flag nor the STATUS bits
+    assert_eq!(rule(&auto_file(vec![coverage(&x)])), Rule::AutoCoverage);
+    assert_eq!(rule(&auto_file(vec![status(1 | 256, [0; 15])])), Rule::AutoStatus);
+    // and FRAMES_FLIP/EXPLICIT stay sticky across statuses
+    let e = reader::read(&seg_file(vec![status(256, [0; 15]), status(1, [0; 15])]).bytes()).unwrap_err();
+    assert_eq!(e.rule, Rule::AutoStatus);
+}
+
+#[test]
+fn batched_ops_chunk_and_console_fixture() {
+    // one record per chunk (the first console capture) and many per chunk read the same records
+    let list: Vec<AOp> = (1..=5).map(|i| op(i, 0, (100 * i, 100 * i + 10))).collect();
+    let one = seg_file(list.iter().map(|o| ops(&[*o])).collect());
+    let many = seg_file(vec![ops(&list)]);
+    let a = reader::read(&one.bytes()).unwrap().auto.unwrap();
+    let b = reader::read(&many.bytes()).unwrap().auto.unwrap();
+    assert_eq!(a.ops, b.ops);
+    assert_eq!(a.ops_parsed, 5);
+    let r = read_fixture("console-r1");
+    assert_eq!(r.state, "FINAL");
+    assert_eq!((r.ops_parsed, r.ops_valid), (600, 600));
+    assert!(r.frames.is_empty() && r.clocks.is_empty());
+    assert!(ps3dk_prof::auto_rsx::frame_source(&r).starts_with("NONE"));
+}

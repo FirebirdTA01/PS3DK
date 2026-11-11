@@ -58,6 +58,8 @@ pub const FR_FINAL: u16 = 2;
 pub const FR_SATURATED: u16 = 4;
 pub const FR_LOSS: u16 = 8;
 pub const FR_OPEN: u16 = 16;
+/// The frame was opened by a flip queued on the owner thread (15/11 CONFIG masks only).
+pub const FR_FLIP: u16 = 32;
 pub const ST_FINAL: u16 = 1;
 pub const ST_LOWER_BOUND: u16 = 2;
 pub const ST_SATURATED: u16 = 4;
@@ -68,6 +70,10 @@ pub const ST_CONTEXT_RESET: u16 = 32;
 pub const ST_SEGMENT_QUARANTINE: u16 = 64;
 /// D2: at least one FRAME mark was refused (room or resources); frames without both marks have no RSX duration.
 pub const ST_FRAME_MARK_MISSED: u16 = 128;
+/// Some frames were delimited by flips the GCM layer saw on the owner thread.
+pub const ST_FRAMES_FLIP: u16 = 256;
+/// Some frames were delimited by explicit ps3dk_prof_frame calls (which then take precedence over flips).
+pub const ST_FRAMES_EXPLICIT: u16 = 512;
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -692,7 +698,8 @@ impl Reader {
         if schema != 1 || instance != cfg.instance || r0 != 0 || r1 != 0 {
             return bad(r, format!("{at}: schema {schema} instance {instance} or a reserved field"));
         }
-        if flags & !31 != 0 || flags & FR_FINAL == 0 {
+        let known: u16 = if cfg.segments_covered() { 63 } else { 31 };
+        if flags & !known != 0 || flags & FR_FINAL == 0 {
             return bad(r, format!("{at}: flags {flags:#x} (schema 1 rows are FINAL)"));
         }
         if flags & FR_TOKEN != 0 {
@@ -750,7 +757,7 @@ impl Reader {
         }
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
-        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 255 } else { 63 };
+        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 1023 } else { 63 };
         if schema != 1 || instance != cfg.instance() || flags & !known != 0 {
             return bad(r, format!("AUTO_STATUS schema {schema} instance {instance} flags {flags:#x}"));
         }
@@ -770,7 +777,8 @@ impl Reader {
                     return bad(r, format!("AUTO_STATUS {} decreased", STATUS_FIELDS[j]));
                 }
             }
-            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED] {
+            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED,
+                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -1245,6 +1253,18 @@ pub const SCOPE: &str = "Reached-marker intervals between two RSX command-stream
 clears, including dependencies and pipeline effects between them: not isolated draw cost, not utilization, not GPU \
 busy time. Frame tokens identify submission, not GPU execution containment.";
 
+/// What delimited the capture's frames, from STATUS (FLIP, EXPLICIT, both, or none seen).
+pub fn frame_source(r: &Report) -> &'static str {
+    match r.status.as_ref().map(|s| s.flags & (ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT)) {
+        Some(f) if f == ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT => "MIXED (flips until the first explicit ps3dk_prof_frame)",
+        Some(ST_FRAMES_FLIP) => "FLIP",
+        Some(ST_FRAMES_EXPLICIT) => "EXPLICIT",
+        _ => "NONE (no flip or explicit frame seen: operations unassociated)",
+    }
+}
+
+pub const INTERVAL_NOTE: &str = "An operation interval runs from the RSX reaching its begin marker to reaching its end marker, so it includes any work queued ahead of the operation that the RSX was still finishing: it is not the isolated cost of that draw or clear.";
+
 pub fn summary_line(inv: &Inventory) -> String {
     format!("Automatic RSX: {}; {} operation(s), {} frame row(s), {} clock anchor(s); use auto", inv.state(),
         inv.ops_parsed, inv.frames_parsed, inv.clocks_parsed)
@@ -1287,7 +1307,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
         writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
     }
+    writeln!(out, "frames delimited by: {}", frame_source(r))?;
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
+    writeln!(out, "note: {INTERVAL_NOTE}")?;
     let failed = r.clocks.iter().filter(|a| a.flags != CK_VALID).count();
     writeln!(out, "clock anchors: {} ({} failed)", r.clocks.len(), failed)?;
     match &r.map {
@@ -1362,6 +1384,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "status": status,
         "operations": {"parsed": r.ops_parsed, "raw_valid": r.ops_valid},
         "frame_marks_missed": r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0),
+        "frame_source": frame_source(r),
+        "interval_note": INTERVAL_NOTE,
         "clock_map": map,
         "clocks": clocks,
         "frames": frames,
