@@ -16,15 +16,16 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','flips','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
-                                  'segment-silent'])
+                                  'segment-silent','no-flip-frames','one-record-chunks'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
-                          'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments'}[a.mutant] and not a.sanitize
+                          'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments',
+                          'no-flip-frames':'flips','one-record-chunks':'segments'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -49,7 +50,7 @@ def run(name,cmd,cwd=out):
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
-    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner'):
+    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks'):
         expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
                   'no-frame-boundary':b'context.current==words+18',
@@ -57,7 +58,8 @@ def run(name,cmd,cwd=out):
                   'fifo-cancel':b'auto_test_fifo_installs==1 && auto_test_fifo_removes==1',
                   'fifo-owner':b'p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==PS3DK_PROF_EPERM',
                   'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
-                  'segment-silent':b'ticket && app==before+2'}[a.mutant]
+                  'segment-silent':b'ticket && app==before+2',
+                  'no-flip-frames':b'counts[0]==20'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -75,7 +77,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case=='segments':flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','flips'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
 if a.sanitize=='address':
@@ -121,6 +123,12 @@ for rel in sources:
     elif a.mutant=='no-frame-boundary' and rel=='core/prof_core.c':
         code=source.read_text();old='p_auto_frame(fid,tb);';assert code.count(old)==1
         source=out/'prof_core.c';source.write_bytes(code.replace(old,'(void)fid;').encode())
+    elif a.mutant=='no-flip-frames' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text();old='    a->in_flip_frame=1;\n    ps3dk_prof_frame();\n';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    a->in_flip_frame=1;\n').encode())
+    elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
     elif a.mutant=='segment-silent' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='if(!a) return foreign_begin(ctx,call,caller);';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_begin;return 0;}').encode())
@@ -171,6 +179,7 @@ if operations:application=Path(__file__).with_name('auto-operations-test.c').rea
 if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-clock-runtime-test.c').read_text()
 if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
+if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 run('link',[cc,*flags,out/'main.c',out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
@@ -187,6 +196,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
+                       else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
                        else b'AUTO FIFO refusal and unpublished cleanup PASS\n' if a.case in ('fifofail','fifopre','fifopost')
                        else b'application complete\n'),result.stdout
@@ -239,6 +249,13 @@ if a.case=='segments':
     expected=[(4,3,0,0,0,(1,2)),(3,3,0,0,0,(3,4)),(1,67,0,1,1,(5,6)),(2,67,0,1,1,(5,6)),(2 if False else 3,64|4|16,0,2,0,(7,8)),
               (4,3,0,0,0,(9,10)),(4,3,1,0,0,(11,12)),(1,67,1,1,2,(13,14)),(4,3,1,0,0,(15,16))]
     assert shape==expected,shape
+    # every record completes at once when the device writes the label, so one batched OPS chunk carries all nine
+    ops_chunks=[b for k,b in auto if k==35]
+    if a.mutant=='one-record-chunks':
+        assert len(ops_chunks)==9,len(ops_chunks)
+        print('one-record-chunks rejected: '+str(len(ops_chunks))+' OPS chunks where the batch is one')
+        raise SystemExit(0)
+    assert len(ops_chunks)==1,('one batched OPS chunk',len(ops_chunks))
     assert [r['args'][0] for r in records if r['kind']==4]==[1,2,1,2],'FRAME begin/end roles'
     assert all(r['raw'][0]<=r['raw'][1] and r['raw'][0] for r in records if r['flags']&2)
     assert records[4]['raw']==(0,0) and records[4]['published']==16
@@ -250,9 +267,34 @@ if a.case=='segments':
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
         assert [r[:2] for r in rows]==rows_expected and all(not any(r[2:]) for r in rows),rows
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
-    assert fields[1]==1|2|64,('FINAL, LOWER_BOUND (a held quarantined pair) and SEGMENT_QUARANTINE',fields[1])
+    assert fields[1]==1|2|64|512,('FINAL, LOWER_BOUND (a held quarantined pair), SEGMENT_QUARANTINE, FRAMES_EXPLICIT',fields[1])
     assert fields[3:6]==(9,9,9) and fields[17]==1,fields # nine records; one quarantined pair held
     print('real capture: segment builds timed per CALL, a never-called build quarantined, FRAME marks PASS')
+    raise SystemExit(0)
+if a.case=='flips':
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(15,11)
+    rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
+    flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
+    assert flags==[1|2|32]*19+[1|2|16|32,1|2|16,1|2],flags # flip rows; flip 19 closed OPEN by the explicit call
+    assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(22))
+    assert all(struct.unpack_from('<12Q',b,64+2*96)[:2]==(1,1) for b in rows),'one observed clear per frame'
+    records=[]
+    for k,b in auto:
+        if k!=35:continue
+        for i in range(struct.unpack_from('<I',b,8)[0]):
+            q=b[16+128*i:16+128*(i+1)]
+            records.append((struct.unpack_from('<H',q,12)[0],struct.unpack_from('<H',q,14)[0],struct.unpack_from('<Q',q,16)[0]))
+    assert len(records)==67,len(records)
+    assert sum(1 for r in records if r[0]==4)==44 and sum(1 for r in records if r[0]==3)==23
+    assert all(r[1]&2 for r in records),'every record raw-valid'
+    assert records[0]==(3,2,0),('the clear before the first flip is unassociated',records[0])
+    clocks=[b for k,b in auto if k==38];assert len(clocks)==3
+    assert [struct.unpack_from('<Q',b,72)[0] for b in clocks]==[0,8,16]
+    fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+    assert fields[1]==1|256|512,('FINAL with FRAMES_FLIP and FRAMES_EXPLICIT',fields[1])
+    assert fields[4]==67 and fields[5]==67 and fields[10]==1 and fields[17]==0,fields
+    print('real capture: frames from flips, explicit precedence, unassociated before the first flip PASS')
     raise SystemExit(0)
 if a.case in ('clocks','clockcap'):
     frames=256 if a.case=='clockcap' else 64
@@ -279,7 +321,7 @@ if a.case in ('clocks','clockcap'):
     assert all(not any(struct.unpack_from('<36Q',b,64)) for b in coverage)
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     marks=2*frames # a begin and an end FRAME mark per frame, each one serial pair
-    assert fields[:3]==(1,1,1) and fields[3:]==(marks,marks,marks,0,0,frames,0,0,0,len(schedule),len(rows),
+    assert fields[:3]==(1,1|512,1) and fields[3:]==(marks,marks,marks,0,0,frames,0,0,0,len(schedule),len(rows),
         len(schedule)-len(rows),0,2*marks,0),fields
     kinds=[struct.unpack_from('<HH',b,16+128*i+12) for k,b in auto if k==35 for i in range(struct.unpack_from('<I',b,8)[0])]
     assert len(kinds)==marks and all(k==(4,3) for k in kinds),'every FRAME mark raw-valid'
@@ -331,7 +373,7 @@ if operations:
             assert struct.unpack_from('<12Q',b,256)==expected,struct.unpack_from('<12Q',b,256)
         owner=struct.unpack_from('<I',rows[0],8)[0];assert owner
         assert all(struct.unpack_from('<I',b,8)[0]==owner for b in rows+ops+marks)
-        assert fields[:3]==(1,1|128,1),('FINAL with FRAME_MARK_MISSED: later marks found no report pair',fields)
+        assert fields[:3]==(1,1|128|512,1),('FINAL, FRAME_MARK_MISSED (later marks found no pair), FRAMES_EXPLICIT',fields)
         assert fields[3:]==(3,3,3,0,0,3,0,1,0,1,1,0,0,6,0),fields
         clocks=[b for k,b in auto if k==38];assert len(clocks)==1
         assert struct.unpack_from('<HH',clocks[0])==(1,1)

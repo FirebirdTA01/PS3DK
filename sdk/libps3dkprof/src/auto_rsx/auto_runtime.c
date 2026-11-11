@@ -733,11 +733,46 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
     if(a && !a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
+        int flip=a->in_flip_frame!=0;
+        if(!flip) a->explicit_seen=1; /* an explicit call takes precedence from here on */
         if(a->coverage.active) frame_mark(a,AUTO_FRAME_END); /* implied closure of the previous frame */
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
-        if(auto_frames_open(&a->coverage,frame,tb)) frame_mark(a,AUTO_FRAME_BEGIN);
+        if(auto_frames_open(&a->coverage,frame,tb)) {
+            if(flip) {a->coverage.live.flags|=AUTO_FRAME_ROW_FLIP;increment(a,&a->frames_by_flip);}
+            else increment(a,&a->frames_by_explicit);
+            frame_mark(a,AUTO_FRAME_BEGIN);
+        }
     }
+}
+
+/* Explicit closure of the owner's active frame: its end mark, the row, and the
+ * 64-frame block-end clock anchor. 0 when the token is not the active frame. */
+static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
+{
+    if(a->coverage.active && owner==a->coverage.owner && frame==a->coverage.live.frame)
+        frame_mark(a,AUTO_FRAME_END);
+    if(!auto_frames_close(&a->coverage,owner,frame,observation_tb(),0)) return 0;
+    if(frame%64u==63) sample_clock(a,frame);
+    return 1;
+}
+
+/* A flip queued on the owner thread through the GCM layer: it closes the
+ * active frame and opens the next one through the core frame call, so FRAME
+ * events, clock anchors and coverage behave as for explicit frames. Before the
+ * first flip nothing is associated; after an explicit ps3dk_prof_frame, flips
+ * no longer delimit frames and are counted as ignored. */
+void ps3dk_prof__auto_flip(struct _gcmCtxData *context,int32_t ok)
+{
+    auto_capture *a;
+    if(!ok || !context || !p_ready() || g_tls.in_gpu) return;
+    a=owner_capture((gpp_ctx *)(void *)context,1);
+    if(!a || a->active || a->segment_active || !auto_config_can_admit(&configuration)) return;
+    if(a->explicit_seen) {increment(a,&a->flips_ignored);return;}
+    if(a->coverage.active) (void)close_frame(a,a->coverage.owner,a->coverage.live.frame);
+    a->in_flip_frame=1;
+    ps3dk_prof_frame();
+    a->in_flip_frame=0;
 }
 
 int ps3dk_prof_auto_frame_end(uint32_t instance,ps3dk_prof_token frame)
@@ -746,10 +781,7 @@ int ps3dk_prof_auto_frame_end(uint32_t instance,ps3dk_prof_token frame)
     if(instance!=1 || !frame.owner || frame.reserved) return PS3DK_PROF_EINVAL;
     auto_capture *a=owner_capture(NULL,1);
     if(!a || a->active || g_tls.in_gpu) return PS3DK_PROF_EINVAL;
-    if(a->coverage.active && frame.owner==a->coverage.owner && frame.frame==a->coverage.live.frame)
-        frame_mark(a,AUTO_FRAME_END);
-    if(!auto_frames_close(&a->coverage,frame.owner,frame.frame,observation_tb(),0)) return PS3DK_PROF_EINVAL;
-    if(frame.frame%64u==63) sample_clock(a,frame.frame);
+    if(!close_frame(a,frame.owner,frame.frame)) return PS3DK_PROF_EINVAL;
     if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
     return PS3DK_PROF_OK;
 }
@@ -761,6 +793,12 @@ uint64_t ps3dk_prof__auto_test_clock_backlog(void)
 {
     const auto_capture *a=capture;
     return a ? LD_ACQ(&a->clocks.write_idx)-LD_ACQ(&a->clocks.read_idx):0;
+}
+/* Owner thread only: frames by source and flips ignored after an explicit call. */
+void ps3dk_prof__auto_test_frames(uint64_t out[3])
+{
+    const auto_capture *a=capture;
+    out[0]=a ? a->frames_by_flip:0;out[1]=a ? a->frames_by_explicit:0;out[2]=a ? a->flips_ignored:0;
 }
 /* Owner thread only: internal split of the unsupported-form visits. */
 void ps3dk_prof__auto_test_segment_counts(uint64_t out[4])
@@ -787,11 +825,20 @@ static void completion_sync(void *user)
     a->operations_device.sync(a->operations_device.ctx);
 }
 
+/* Drainer only: one OPS chunk carries up to this many records; each is
+ * acknowledged, in order, after the whole chunk was accepted. */
+enum { AUTO_OPS_BATCH=64 };
+static auto_wire_op batch[AUTO_OPS_BATCH];
+static uint8_t batch_ready[AUTO_OPS_BATCH];
+
 static int drain_operations(auto_capture *a,int seal)
 {
     const auto_queue_entry *head;
     auto_completion_port port={a,completion_label,completion_timer,completion_sync};
-    while((head=auto_queue_peek(&a->operations))!=NULL) {
+    for(;;) {
+    uint32_t n=0,i;
+    int stop=0;
+    while(n<AUTO_OPS_BATCH && (head=auto_queue_peek_at(&a->operations,n))!=NULL) {
         auto_wire_op record=head->op;
         auto_completion_fact fact={0};
         int result=AUTO_COMPLETION_REFUSED;
@@ -799,7 +846,7 @@ static int drain_operations(auto_capture *a,int seal)
             result=auto_completion_read(&a->completion,&a->publication,&port,
                                         record.report_begin,record.report_end,
                                         record.serial_begin,record.serial_end,&fact);
-        if((result==AUTO_COMPLETION_PENDING || result==AUTO_COMPLETION_DEFER) && !seal) return 1;
+        if((result==AUTO_COMPLETION_PENDING || result==AUTO_COMPLETION_DEFER) && !seal) {stop=1;break;}
         if(result==AUTO_COMPLETION_READY) {
             record.flags|=2;record.raw_begin=fact.raw_begin;record.raw_end=fact.raw_end;
             record.published=fact.published;
@@ -814,10 +861,14 @@ static int drain_operations(auto_capture *a,int seal)
         if(a->completion.invalid) {
             auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
         }
-        if(!auto_writer_ops(&writer,&record,1)) return 0;
-        if(!auto_queue_ack(&a->operations,record.id,result==AUTO_COMPLETION_READY,1)) return 0;
+        batch[n]=record;batch_ready[n]=result==AUTO_COMPLETION_READY;n++;
     }
-    return 1;
+    if(!n) return 1;
+    if(!auto_writer_ops(&writer,batch,n)) return 0;
+    for(i=0;i<n;i++)
+        if(!auto_queue_ack(&a->operations,batch[i].id,batch_ready[i],1)) return 0;
+    if(stop) return 1;
+    }
 }
 
 static int chunk(void *user, uint32_t type, const uint8_t *data, size_t bytes)
@@ -903,6 +954,8 @@ void p_auto_drain(prof *p, int seal)
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
         if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
         if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
+        if(LD_ACQ(&capture->frames_by_flip)) flags|=AUTO_STATUS_FRAMES_FLIP;
+        if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;
         if(LD_ACQ(&capture->saturated) || LD_ACQ(&capture->coverage.saturated) ||
            LD_ACQ(&capture->clocks.saturated)) flags|=AUTO_LOWER_BOUND|AUTO_SATURATED;
         if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}

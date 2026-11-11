@@ -119,7 +119,7 @@ static void status_refusals(void) {
     memset(counters,0,sizeof counters); counters[14]=505;
     assert(!auto_writer_status(&writer,AUTO_LOWER_BOUND,counters));
     counters[14]=0;
-    assert(!auto_writer_status(&writer,256,counters)); /* 64 SEGMENT_QUARANTINE, 128 FRAME_MARK_MISSED; 256 is unknown */
+    assert(!auto_writer_status(&writer,1024,counters)); /* 64..512 are defined (segments, frame marks, frame sources); 1024 is unknown */
     assert(!auto_writer_status(&writer,AUTO_OWNER_UNACK,counters));
     assert(!auto_writer_status(&writer,AUTO_SATURATED,counters));
 }

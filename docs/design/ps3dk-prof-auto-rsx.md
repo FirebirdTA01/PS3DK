@@ -80,6 +80,16 @@ neither timing nor coverage.
 
 ## OPS, type 35
 
+A chunk carries one or more records; the writer batches what the drainer has
+completed (up to 64 per chunk) and acknowledges each record, in order, only
+after the whole chunk was accepted. Readers accept any count from 1.
+
+An operation interval runs from the RSX reaching the begin marker to reaching
+the end marker. It therefore includes any work queued ahead of the operation
+that the RSX was still finishing (earlier draws, a CALLed segment's preceding
+commands, pipeline drains): it is not the isolated cost of that draw or clear.
+The reader prints this note with every report.
+
 Prefix 16 bytes: schema u16 at 0, reserved u16 at 2, instance u32 at 4, count u32
 at 8, record width u32 at 12 (128). Count is nonzero; exact size is `16+128*count`,
 within the 1 MiB chunk ceiling.
@@ -145,7 +155,22 @@ coverage count are u64 at 16, 24, 32, 40 and 48. Bytes 56..63 are reserved. Thre
 visited, observed and ten disjoint exclusions in this order: room, report
 capacity, metadata capacity, reentry, unsupported arguments, shutdown, ownership
 uncertainty, observer disabled, resource lease unverified, epoch invalid.
-Flags are TOKEN=1, FINAL=2, SATURATED=4, LOSS=8 and OPEN=16. For a complete
+Flags are TOKEN=1, FINAL=2, SATURATED=4, LOSS=8, OPEN=16 and, with the 15/11
+CONFIG masks, FLIP=32 (the row was opened by a flip).
+
+Frames need no profiler call. In a PS3_PROF_AUTO build, rsx/gcm_sys.h routes
+gcmSetFlip and gcmSetPrepareFlip (and so cellGcmSetFlip and
+cellGcmSetPrepareFlip) through a wrapper that reports each accepted flip on
+the owner's attached context. The first such flip opens frame 0; each later
+one closes the active frame (end mark, row, block-end clock anchor) and opens
+the next through the core frame call, so FRAME events and the 8-frame clock
+cadence behave as for explicit frames. Work before the first flip is
+unassociated. An explicit ps3dk_prof_frame takes precedence: the first one
+closes any flip frame as OPEN, and later flips are ignored (counted). STATUS
+records which sources delimited frames. Flips issued another way (a direct
+firmware call, cellGcmSetFlipImmediate from a VBlank handler, another
+thread) are not boundaries; with no boundary at all, every operation stays
+unassociated and the capture has raw RSX ticks only. For a complete
 nonsaturated row, visited equals observed plus all exclusions, with checked sums.
 Only one final row exists per (instance, owner, frame). Observed counts markers
 emitted, not reports recovered or timing qualified.
@@ -187,8 +212,9 @@ conflicts, last published serial, held report pairs.
 
 Flags are FINAL=1, LOWER_BOUND=2, SATURATED=4, OWNER_UNACK=8,
 RESOURCE_CONFLICT=16, CONTEXT_RESET=32 and, when CONFIG covers CALL,
-SEGMENT_QUARANTINE=64. Saturation, conflict, reset and segment quarantine stay
-sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
+SEGMENT_QUARANTINE=64, FRAME_MARK_MISSED=128, FRAMES_FLIP=256 and
+FRAMES_EXPLICIT=512 (both together: flips delimited frames until the first
+explicit call). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
 gauges and may decrease. Written counters equal accepted chunks. Exact admitted
 equals written plus dropped plus pending. Exact FINAL requires both gauges zero;
 an unacknowledged owner requires a lower bound. FINAL occurs once and forbids

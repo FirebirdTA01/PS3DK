@@ -27,4 +27,7 @@ void ps3dk_prof__auto_segment_close(struct _gcmCtxData *);
  * retirement label were written into the ring: the observer appends one
  * operation-label release completing the operations built in that segment. */
 void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
+/* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),
+ * after the flip was queued: ok is nonzero when it was accepted. */
+void ps3dk_prof__auto_flip(struct _gcmCtxData *, int32_t ok);
 #endif

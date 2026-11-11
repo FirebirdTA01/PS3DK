@@ -6,6 +6,7 @@
 #define auto_queue_claim ps3dk_prof__auto_queue_claim
 #define auto_queue_commit ps3dk_prof__auto_queue_commit
 #define auto_queue_peek ps3dk_prof__auto_queue_peek
+#define auto_queue_peek_at ps3dk_prof__auto_queue_peek_at
 #define auto_queue_ack ps3dk_prof__auto_queue_ack
 #define auto_queue_stop ps3dk_prof__auto_queue_stop
 #define auto_queue_held ps3dk_prof__auto_queue_held
@@ -43,6 +44,9 @@ int auto_queue_init(auto_queue *, auto_queue_entry *, uint32_t capacity, uint32_
 auto_queue_entry *auto_queue_claim(auto_queue *);
 void auto_queue_commit(auto_queue *);
 const auto_queue_entry *auto_queue_peek(auto_queue *);
+/* Consumer only: the k-th published entry after the head (0 is the head), or
+ * NULL. Lets the drainer gather a batch before acknowledging it in order. */
+const auto_queue_entry *auto_queue_peek_at(auto_queue *, uint64_t k);
 /* completed is supplied by validated device/report facts. This queue does not
  * read or infer them. Whole sink acceptance must belong to the exact head id. */
 int auto_queue_ack(auto_queue *, uint64_t id, int completed, int whole);

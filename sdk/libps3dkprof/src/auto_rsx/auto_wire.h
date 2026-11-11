@@ -17,7 +17,11 @@ enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_ALLOCATION_FAILED, AUTO_UNSUPPORTED_CONTEXT, AUTO_STOPPED, AUTO_NO_GCM_INIT };
 enum { AUTO_FINAL=1, AUTO_LOWER_BOUND=2, AUTO_SATURATED=4, AUTO_OWNER_UNACK=8,
        AUTO_STATUS_CONFLICT=16, AUTO_STATUS_RESET=32, AUTO_STATUS_SEGMENT_QUARANTINE=64,
-       AUTO_STATUS_FRAME_MARK_MISSED=128 /* at least one FRAME mark was refused */ };
+       AUTO_STATUS_FRAME_MARK_MISSED=128 /* at least one FRAME mark was refused */,
+       AUTO_STATUS_FRAMES_FLIP=256 /* some frames were delimited by flips */,
+       AUTO_STATUS_FRAMES_EXPLICIT=512 /* some frames were delimited by ps3dk_prof_frame */ };
+/* COVERAGE row flag: this frame was opened by a flip on the owner thread. */
+enum { AUTO_FRAME_ROW_FLIP=32 };
 /* CONFIG masks of this writer: ARRAY|INDEX|CLEAR|FRAME covered; unsafe, immediate
  * and direct/uninstrumented forms unsupported (CALL segments built through the
  * segment API are covered). A reader that requires the older 7/15 refuses. */

@@ -60,6 +60,11 @@ typedef struct auto_capture {
     uint32_t segments_used, segment_ordinal, call_ordinal, segment_quarantine;
     auto_segment *segment_active; /* between a segment emitter's begin and end */
     uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;
+    /* owner only: frame source. A flip opens frames until an explicit
+     * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
+     * ignored (counted). Both kinds are reported in STATUS. */
+    uint32_t in_flip_frame, explicit_seen;
+    uint64_t frames_by_flip, frames_by_explicit, flips_ignored;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

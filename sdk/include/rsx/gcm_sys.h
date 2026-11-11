@@ -1366,6 +1366,29 @@ s32 gcmDumpGraphicsError();
 
 void gcmSetUserCommand(void (*handler)(const u32 cause));
 
+/* PS3_PROF_AUTO: a flip queued on the owner thread is the automatic frame
+ * boundary. Only translation units built with PS3TC_PROF_AUTO (the selected
+ * application build) see these wrappers; the flip itself is unchanged and its
+ * result is returned as is. cellGcmSetFlip and cellGcmSetPrepareFlip reach the
+ * same wrappers, so each flip is observed once. */
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
+void ps3dk_prof__auto_flip(gcmContextData *context,s32 ok);
+static inline s32 ps3tc_auto_gcmSetFlip(gcmContextData *context,const u8 bufferId)
+{
+	s32 rc=(gcmSetFlip)(context,bufferId);
+	ps3dk_prof__auto_flip(context,rc==0);
+	return rc;
+}
+static inline u32 ps3tc_auto_gcmSetPrepareFlip(gcmContextData *context,const u8 id)
+{
+	u32 q=(gcmSetPrepareFlip)(context,id);
+	ps3dk_prof__auto_flip(context,(s32)q>=0);
+	return q;
+}
+#define gcmSetFlip ps3tc_auto_gcmSetFlip
+#define gcmSetPrepareFlip ps3tc_auto_gcmSetPrepareFlip
+#endif
+
 #ifdef __cplusplus
 	}
 #endif

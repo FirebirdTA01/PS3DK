@@ -98,6 +98,13 @@ const auto_queue_entry *auto_queue_peek(auto_queue *q)
     return &q->entries[r%q->capacity];
 }
 
+const auto_queue_entry *auto_queue_peek_at(auto_queue *q, uint64_t k)
+{
+    uint64_t r=RLX(&q->read_idx), w=ACQ(&q->write_idx);
+    if(w-r<=k) return NULL;
+    return &q->entries[(r+k)%q->capacity];
+}
+
 int auto_queue_ack(auto_queue *q, uint64_t id, int completed, int whole)
 {
     const auto_queue_entry *e=auto_queue_peek(q);
