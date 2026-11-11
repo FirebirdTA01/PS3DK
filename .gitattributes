@@ -43,6 +43,8 @@ patches/** -text
 
 # Function-path capture fixtures: the runtime writer's exact bytes.
 tools/ps3dk-prof/tests/fixtures/func/**/*.prof binary
+# Automatic RSX capture fixtures: the host runtime writer's exact bytes.
+tools/ps3dk-prof/tests/fixtures/auto/*.prof binary
 
 # Extension fixtures carry deliberate leading bytes (a UTF-8 BOM, a U+00A9)
 # and deliberately empty files; no normalisation may touch them or the

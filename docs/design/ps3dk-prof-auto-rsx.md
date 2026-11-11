@@ -253,3 +253,50 @@ registered thread, six ordered boundary records, override refusal after the
 first boundary, and owner retirement. These controls do not establish device
 progress or target callback timing. Target, whole-stack, installed consumer and
 console gates remain separate.
+
+## Reader: `ps3dk-prof auto [--json] <file>`
+
+`tools/ps3dk-prof/src/auto_rsx.rs` decodes bit 7 and chunks 34 to 38 with the
+rules above and refuses the whole file (MALFORMED, rules AutoConfig, AutoOps,
+AutoCoverage, AutoStatus, AutoClock) on any violation: unknown variants, flags,
+reasons or nonzero reserved fields, AUTO data before CONFIG or after FINAL,
+anything but one zero FINAL STATUS after a REFUSED CONFIG, decreasing
+operation, anchor or frame order, a second final row, broken row accounting,
+and a FINAL STATUS whose written counts differ from the parsed records. A
+reader that predates a later OPS flag (for example SEGMENT) refuses it as an
+unknown flag rather than misreading it. Retention ceilings (operations, rows,
+anchors) stop retention with a named refusal; every wire rule still applies.
+
+The exit status is that of `check`, or 1 when the capture has no AUTO family,
+a REFUSED CONFIG (shown as `automatic observation unavailable: <REASON>`) or a
+retention refusal.
+
+The capture maps RSX ticks only through its own anchors: every anchor VALID,
+no anchor lost to capacity, at least four distinct RSX coordinates, a
+nonempty exact affine feasible set with a slope bounded above and away from
+zero (the `clockmap` solver), and in both H-SPLIT parities at least one
+DECISIVE held-out anchor and no contradiction. Otherwise the map is
+`AUTO_CLOCK_UNQUALIFIED` with the missing condition and only raw ticks are
+shown. Conversion uses the slope interval and only inside the anchors' RSX
+support.
+
+Each COVERAGE row gets one verdict. It is UNKNOWN, with the first missing
+input named, unless: the capture has a FINAL status and no resource conflict
+or context reset; the row is associated, FINAL, not OPEN, SATURATED or after
+loss; no covered operation was excluded and no visit fell outside the observed
+population; every observed operation has a RAW_VALID record; the FIFO family
+is present and FINAL exact and every wrap tagged with the frame is complete;
+and the map is qualified. With D the row's PPU interval, W the owner's
+complete FIFO wrap wait tagged with the frame (lower bound) and S the frame's
+RSX reached-marker span (first operation begin to last end) on the PPU clock:
+
+| Verdict | Condition |
+|---|---|
+| RSX-bound candidate (fetch) | W >= D/4 and S >= D/2 (lower bound of S) |
+| PPU-bound candidate | W = 0 and S < D/2 (upper bound of S); compute, scheduling, I/O and synchronization are not distinguished |
+| mixed candidate | 0 < W < D/4 and S >= D/2 |
+| pacing | never from this family: it observes no presentation or vsync wait |
+| UNKNOWN | anything else, named as unresolved |
+
+The two shares are review proposals, printed with every JSON report. A
+verdict is a candidate with its evidence, never utilization or a busy share.

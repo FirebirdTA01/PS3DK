@@ -120,6 +120,8 @@ struct Reader {
     /// file_flags bit 8: named per-frame counters (chunk type 39).
     counters: Option<crate::counters::Reader>,
     fifo: Option<crate::fifo::Reader>,
+    /// file_flags bit 7: automatic RSX observation (chunk types 34-38).
+    auto: Option<crate::auto_rsx::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -183,7 +185,16 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     source: crate::source_checkpoints::Budgets,
     waits: crate::waits::Budgets,
     func: crate::func_paths::Budgets) -> Result<Capture, Malformed> {
-    read_all(bytes, budgets, dependencies, source, waits, func, crate::fifo::Budgets::default())
+    read_all(bytes, budgets, dependencies, source, waits, func, crate::fifo::Budgets::default(),
+        crate::auto_rsx::Budgets::default())
+}
+
+/// Read with explicit automatic-RSX retention ceilings.  Exhaustion is a named AUTO refusal; every wire rule is
+/// still applied to the whole file.
+pub fn read_with_auto_budgets(bytes: &[u8], auto: crate::auto_rsx::Budgets) -> Result<Capture, Malformed> {
+    read_all(bytes, crate::checkpoints::Budgets::default(), crate::dependencies::DependencyBudgets::default(),
+        crate::source_checkpoints::Budgets::default(), crate::waits::Budgets::default(),
+        crate::func_paths::Budgets::default(), crate::fifo::Budgets::default(), auto)
 }
 
 /// Read with an explicit FIFO wrap-event retention budget.  Exhaustion is a named FIFO refusal; validation and
@@ -191,7 +202,7 @@ fn read_with_budgets(bytes: &[u8], budgets: crate::checkpoints::Budgets,
 pub fn read_with_fifo_budgets(bytes: &[u8], fifo: crate::fifo::Budgets) -> Result<Capture, Malformed> {
     read_all(bytes, crate::checkpoints::Budgets::default(), crate::dependencies::DependencyBudgets::default(),
         crate::source_checkpoints::Budgets::default(), crate::waits::Budgets::default(),
-        crate::func_paths::Budgets::default(), fifo)
+        crate::func_paths::Budgets::default(), fifo, crate::auto_rsx::Budgets::default())
 }
 
 fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
@@ -199,13 +210,15 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     source: crate::source_checkpoints::Budgets,
     waits: crate::waits::Budgets,
     func: crate::func_paths::Budgets,
-    fifo: crate::fifo::Budgets) -> Result<Capture, Malformed> {
+    fifo: crate::fifo::Budgets,
+    auto: crate::auto_rsx::Budgets) -> Result<Capture, Malformed> {
     let mut r = Reader {
         cap: Capture::default(),
         waits: None,
         func: None,
         counters: None,
         fifo: None,
+        auto: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -232,13 +245,15 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         // bit 0); bytes 13..15 must be 0, as far as they are present.
         // Bits 0-6 are defined; bit 1 needs bit 0, bit 2 needs bit 1 and bit 6 needs bit 0.
         let v = bytes.get(12).copied().unwrap_or(0);
-        let known = v & !127 == 0 && (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
-            && (v & 64 == 0 || v & 1 != 0);
+        let known = (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
+            && (v & 64 == 0 || v & 1 != 0) && (v & 128 == 0 || v & 1 != 0);
         // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte); bytes 14..15 must be 0
         let high_ok = !(n > 13 && bytes[13] & !1 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
-            let allowed = if bytes[12] & 64 != 0 {
+            let allowed = if bytes[12] & 128 != 0 {
+                "a combination of bits 0-7 (bit 1 needs bit 0, bit 2 needs bit 1, bits 6 and 7 need bit 0)"
+            } else if bytes[12] & 64 != 0 {
                 "a combination of bits 0-6 (bit 1 needs bit 0, bit 2 needs bit 1, bit 6 needs bit 0)"
             } else if bytes[12] & 32 != 0 {
                 "a combination of bits 0-5 (bit 1 needs bit 0, bit 2 needs bit 1)"
@@ -260,6 +275,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         if n > 12 && u32::from(bytes[12]) & crate::fifo::FLAG_FIFO != 0 {
             r.cap.fifo = Some(crate::fifo::Inventory::default());
         }
+        if n > 12 && u32::from(bytes[12]) & crate::auto_rsx::FLAG_AUTO != 0 {
+            r.cap.auto = Some(crate::auto_rsx::Inventory::default());
+        }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
         return Ok(r.cap);
@@ -280,11 +298,15 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let func_flag = crate::func_paths::FLAG_FUNC_PATHS;
     let counters_flag = crate::counters::FLAG_COUNTERS;
     let fifo_flag = crate::fifo::FLAG_FIFO;
+    let auto_flag = crate::auto_rsx::FLAG_AUTO;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag | fifo_flag) != 0
+        | counters_flag | fifo_flag | auto_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
+    }
+    if file_flags & auto_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 7 without bit 0"));
     }
     if file_flags & fifo_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 6 without bit 0"));
@@ -309,6 +331,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & fifo_flag != 0 {
         r.fifo = Some(crate::fifo::Reader::new(fifo));
+    }
+    if file_flags & auto_flag != 0 {
+        r.auto = Some(crate::auto_rsx::Reader::new(auto));
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -374,10 +399,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let func_ty = r.func.is_some()
             && (crate::func_paths::CHUNK_FUNC_CONFIG..=crate::func_paths::CHUNK_FUNC_STATUS).contains(&ty);
         let counters_ty = r.counters.is_some() && ty == crate::counters::CHUNK_COUNTERS;
+        let auto_ty = r.auto.is_some()
+            && (crate::auto_rsx::CHUNK_AUTO_CONFIG..=crate::auto_rsx::CHUNK_AUTO_CLOCK).contains(&ty);
         let fifo_ty = r.fifo.is_some()
             && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -405,6 +432,17 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if func_ty {
             r.func.as_mut().unwrap().chunk(ty, payload, chunk_seq, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if auto_ty {
+            // Bit 7 requires bit 0, so the extension reader exists; only RSX_TIMESTAMP domains are eligible.
+            let rsx: BTreeSet<u32> = r.ext.as_ref().map_or_else(BTreeSet::new, |x| {
+                x.declarations().domains.values().filter(|d| d.kind == crate::ext::KIND_RSX_TIMESTAMP)
+                    .map(|d| d.id).collect()
+            });
+            r.auto.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared)?;
             pos += total;
             index += 1;
             continue;
@@ -464,6 +502,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         r.cap.counters = Some(c.finish(r.trailer_seen)?);
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
+    r.cap.auto = r.auto.take().map(|x| x.result);
     let mut cap = r.finish(torn)?;
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);

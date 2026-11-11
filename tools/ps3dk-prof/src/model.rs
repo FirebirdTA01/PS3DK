@@ -76,6 +76,16 @@ pub enum Rule {
     FifoEvents,
     /// A FIFO_STATUS chunk violates its wire, conservation or ordering rules.
     FifoStatus,
+    /// Automatic RSX observation (file_flags bit 7, chunk types 34-38; ps3dk-prof-auto-rsx.md): AUTO_CONFIG.
+    AutoConfig,
+    /// An AUTO_OPS chunk violates its wire or ordering rules.
+    AutoOps,
+    /// An AUTO_COVERAGE row violates its wire, accounting or ordering rules.
+    AutoCoverage,
+    /// An AUTO_STATUS chunk violates its wire, conservation or ordering rules.
+    AutoStatus,
+    /// An AUTO_CLOCK anchor violates its wire or identity rules.
+    AutoClock,
     // 1. Primitives
     StringTooLong,
     StringInvalidUtf8,
@@ -465,6 +475,8 @@ pub struct Capture {
     pub counters: Option<crate::counters::Inventory>,
     /// FIFO wrap phase events (file_flags bit 6): present exactly when the flag is.
     pub fifo: Option<crate::fifo::Inventory>,
+    /// Automatic RSX observation (file_flags bit 7): present exactly when the flag is.
+    pub auto: Option<crate::auto_rsx::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
