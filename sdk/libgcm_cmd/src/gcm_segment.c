@@ -61,10 +61,14 @@ int32_t cellGcmSegmentInit(CellGcmSegment *s, void *buffer, uint32_t sizeBytes,
     uint32_t offset = 0;
     volatile uint32_t *label;
 
+    /* Main memory only: the CALL carries an IO offset, so a segment in RSX
+     * local memory would run whatever sits at the equal IO offset
+     * (docs/gcm-command-segments.md).  Every refusal happens before the
+     * segment or its label is touched. */
     if (!s || !buffer || sizeBytes < CELL_GCM_SEGMENT_MIN_SIZE ||
         (sizeBytes % CELL_GCM_SEGMENT_ALIGN) != 0 ||
         ((uintptr_t)buffer % CELL_GCM_SEGMENT_ALIGN) != 0 ||
-        (location != GCM_LOCATION_RSX && location != GCM_LOCATION_CELL))
+        location != GCM_LOCATION_CELL)
         return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     if (gcmAddressToOffset(buffer, &offset) != 0 ||
         offset >= CELL_GCM_SEGMENT_OFFSET_LIMIT ||

@@ -78,10 +78,10 @@ enum {
 
 typedef struct CellGcmSegment {
     gcmContextData context;     /* first member: the overflow callback casts */
-    uint32_t *buffer;           /* segment storage (main or RSX local)       */
+    uint32_t *buffer;           /* segment storage (mapped main memory)      */
     uint32_t sizeBytes;         /* storage size, multiple of 128             */
     uint32_t offset;            /* RSX offset the CALL targets               */
-    uint8_t  location;          /* CELL_GCM_LOCATION_MAIN / _LOCAL           */
+    uint8_t  location;          /* CELL_GCM_LOCATION_MAIN                    */
     uint8_t  labelIndex;        /* retirement label                          */
     uint8_t  state;             /* CELL_GCM_SEGMENT_STATE_*                  */
     uint8_t  reserved;
@@ -93,7 +93,10 @@ typedef struct CellGcmSegment {
 
 /* Prepare a segment over `buffer`, which must already be RSX-visible:
  * main memory mapped with cellGcmMapMainMemory (or inside the cellGcmInit
- * IO region), or RSX local memory.  Sets the label to 0 (retired). */
+ * IO region), with `location` CELL_GCM_LOCATION_MAIN.  RSX local memory is
+ * refused (CELL_GCM_SEGMENT_ERROR_INVALID_VALUE): the CALL carries an IO
+ * offset.  Any refusal leaves the segment and the label untouched.  Sets
+ * the label to 0 (retired). */
 int32_t cellGcmSegmentInit(CellGcmSegment *segment, void *buffer,
                            uint32_t sizeBytes, uint8_t location,
                            uint8_t labelIndex);

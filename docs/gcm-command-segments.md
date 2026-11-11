@@ -40,9 +40,13 @@ if (cellGcmSegmentEnd(s) != CELL_OK) fail();      /* overflow is refused here */
 cellGcmSegmentCall(ring, s);                      /* CALL + retirement label */
 ```
 
-* **Init** takes RSX-visible memory: main memory mapped with
-  `cellGcmMapMainMemory` (or inside the `cellGcmInit` IO region), or RSX
-  local memory. It records the RSX offset and sets the segment's label to 0.
+* **Init** takes RSX-visible main memory: mapped with
+  `cellGcmMapMainMemory` (or inside the `cellGcmInit` IO region), with
+  `CELL_GCM_LOCATION_MAIN`. It records the IO offset and sets the segment's
+  label to 0. `CELL_GCM_LOCATION_LOCAL` is refused with
+  `CELL_GCM_SEGMENT_ERROR_INVALID_VALUE` (CALL offsets are IO offsets, see
+  Limits); like every Init refusal it leaves the segment and its label
+  untouched. Host test: `gcm-segment-test.sh`.
 * **Begin** sets up the segment context with `cellGcmSetupContextData` and
   a callback that never wraps or flushes. It refuses (NULL) a segment that is
   open or still in flight.
@@ -123,7 +127,7 @@ Rules, all measured on a PS3 unless marked:
 | The helper requires 128-byte alignment and a size that is a multiple of 128, at least 128 bytes. | Helper rule (keeps segments whole SPU DMA lines). |
 | A 1 MiB segment (NOPs plus a label) runs and retires. | RPCS3 (desktop build, 2026-11-10, ILP32): `GCM_SEG_LARGE ok bytes=1048576 used=1048576`. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_LARGE ok bytes=1048576 used=1048576 polls=2`, exit 0 (`hw-s-call-return-large`). |
 | Segments in main memory work. | Host test, and RPCS3 (desktop build, 2026-11-10, ILP32): 120 frames from two 64 KiB segments in `cellGcmMapMainMemory` memory, 0 progress mismatches; `hello-spu-gcm-segment` 120 SPU-built frames. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): `GCM_SEG_PASS variant=main frames=120`, 360-byte segments, 0 progress mismatches, exit 0 (`hw-s-call-return`); `GCM_SPUSEG_PASS frames=120 ... exact_fit=yes` (`hw-s-spu-segment`). |
-| Segments in RSX local memory. | **Not supported: CALL and JUMP offsets are IO offsets.** RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`, all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs): the same on silicon (`hw-s-localcopy`): segments built in main memory, copied into RSX local memory with 32-bit stores and CALLed at local offset 0x01400000 ran the decoy at IO offset 0x01400000 in all 120 frames (`outcome=LOCAL-IO-ALIAS`, exit 0). **Segments live in mapped main memory.** |
+| Segments in RSX local memory. | **Not supported: CALL and JUMP offsets are IO offsets.** RPCS3 (desktop build, 2026-11-10, ILP32): `LOCAL-IO-ALIAS`, all 120 CALLs to a local-memory offset ran the decoy placed at the equal IO offset. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs): the same on silicon (`hw-s-localcopy`): segments built in main memory, copied into RSX local memory with 32-bit stores and CALLed at local offset 0x01400000 ran the decoy at IO offset 0x01400000 in all 120 frames (`outcome=LOCAL-IO-ALIAS`, exit 0). **Segments live in mapped main memory.** Those runs used probe variants (`-local`, `-localcopy`) that built local segments through the helper. `cellGcmSegmentInit` now refuses `CELL_GCM_LOCATION_LOCAL` with `CELL_GCM_SEGMENT_ERROR_INVALID_VALUE`: `-localcopy` is gone and `-local` checks the refusal (`GCM_SEG_LOCAL refused ... untouched=yes`). Host test: `gcm-segment-test.sh`. |
 | Nested CALL (a segment that CALLs another segment). | RPCS3 (desktop build, 2026-11-10, ILP32): not supported. The ring CALL and a single-level CALL both worked (`GCM_NEST_CONTROL ring=ok single_call=ok`); the nested CALL logged `FIFO: CALL found inside a subroutine` 21 times, then `Dead FIFO commands queue state has been detected!` and RPCS3 froze emulation, so the sample could not print its label report. Console (PS3, HEN, 2026-11-10, signed ILP32 SELFs, evidence `hw-s-*`): **stalls**. `GCM_NEST_LABELS A=2 I=1 B=0 R=1` (I=1 and R=1 are the control's values): the outer segment ran up to the inner CALL and nothing after it, the bounded wait on label 209 expired, the post-probe flip timed out (`NESTED-STALLED`), and the loader came back without READY (`hw-s-nested`). **One CALL level only.** Join sub-segments with `cellGcmSetJumpCommand` instead (`hello-ppu-gcm-call-return-jump`). |
 | A JUMP from a CALLed segment to a second sub-segment, which RETURNs. | RPCS3 (2026-11-10) and console (`hw-s-jump`): `GCM_SEG_PHASE name=jump frames=120 calls=120 jumps=120 ... progress_mismatches=0`, exit 0. **Chain sub-segments with JUMP; one CALL level only.** |
 

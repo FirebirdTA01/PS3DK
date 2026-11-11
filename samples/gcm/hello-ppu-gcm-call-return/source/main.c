@@ -6,15 +6,13 @@
  *
  * Variants (CMakeLists.txt builds one SELF per variant):
  *   default  overflow refusal (no CALL) + 120 frames from mapped main memory
- *   -local   overflow refusal + 120 frames from RSX local memory, with a decoy
- *            at the equal IO offset (GCM_SEG_VARIANT_LOCAL)
+ *   -local   overflow refusal + cellGcmSegmentInit on RSX local memory, which
+ *            must be refused with the segment and its label untouched: CALL
+ *            offsets are IO offsets (GCM_SEG_VARIANT_LOCAL)
  *   -large   overflow refusal + one 1 MiB segment (GCM_SEG_VARIANT_LARGE)
  *   -jump    overflow refusal + 120 frames from mapped main memory, each a
  *            CALLed segment that JUMPs to a second sub-segment, which RETURNs
  *            (GCM_SEG_VARIANT_JUMP)
- *   -localcopy overflow refusal + 120 frames whose segments are built in main
- *            memory, copied into RSX local memory with 32-bit stores only, and
- *            CALLed there; decoys at the equal IO offsets (GCM_SEG_VARIANT_LOCALCOPY)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
 #include <cell/gcm/gcm_segment.h>
@@ -35,14 +33,8 @@
 #define VARIANT "large"
 #elif defined(GCM_SEG_VARIANT_JUMP)
 #define VARIANT "jump"
-#elif defined(GCM_SEG_VARIANT_LOCALCOPY)
-#define VARIANT "localcopy"
-#define GCM_SEG_HAVE_DECOY 1
 #else
 #define VARIANT "main"
-#endif
-#ifdef GCM_SEG_VARIANT_LOCAL
-#define GCM_SEG_HAVE_DECOY 1
 #endif
 
 SYS_PROCESS_PARAM(1001, 0x100000);
@@ -79,7 +71,7 @@ static uint32_t label_value(uint8_t index)
 /* The frame's drawing, written into the segment.  The segment also leaves
  * scissor and clear colour set for the indicator box the ring clears after
  * RETURN, so the box shows whether state set inside a segment survives.
- * phase 0 (main memory): green stripe, one bar; phase 1 (local): blue, two. */
+ * phase 0 (main memory): green stripe, one bar; phase 1: blue, two. */
 static const uint32_t stripe[2][2] = {{0xff30c080, 0xff208050}, {0xff5080ff, 0xff3050c0}};
 
 /* First part: target, background, stripe.  The JUMP variant draws its
@@ -114,20 +106,6 @@ __attribute__((unused)) static void build_frame(CellGcmContextData *c, unsigned 
     build_frame_head(c, phase, frame, slot);
     build_frame_tail(c, phase, frame, slot);
 }
-
-#ifdef GCM_SEG_HAVE_DECOY
-/* A segment that writes only a decoy progress tag.  Placed at the IO offset
- * that equals a local segment's offset: if the front end reads a CALL target
- * as an IO offset, it runs this instead of the local segment. */
-static void build_decoy(uint32_t *mem, uint32_t bytes, unsigned slot)
-{
-    CellGcmContextData c;
-    cellGcmSetupContextData(&c, mem, bytes, NULL);
-    cellGcmSetWriteCommandLabel(&c, progress_label[slot], DECOY_TAG | slot);
-    *c.current++ = 0x00020000u;    /* RETURN */
-    __sync_synchronize();
-}
-#endif
 
 typedef struct {
     const char *name;
@@ -274,68 +252,27 @@ static int run_jump_phase(CellGcmContextData *ring, CellGcmSegment a[2], CellGcm
 }
 #endif
 
-#ifdef GCM_SEG_VARIANT_LOCALCOPY
-/* Each frame: build the segment in main memory (staging, never called),
- * copy it word by word into the local-memory segment with volatile 32-bit
- * stores, sync, and CALL the local copy.  Nothing wider than 4 bytes is
- * stored to RSX local memory. */
-static int run_localcopy_phase(CellGcmContextData *ring, CellGcmSegment stage[2], CellGcmSegment local[2],
-                               PhaseStats *st)
+#ifdef GCM_SEG_VARIANT_LOCAL
+/* RSX local memory after the display buffers, 1 MiB aligned: Init must
+ * refuse it and leave the segment and its label as they were. */
+static int local_refusal_check(const CellGcmConfig *config)
 {
-    seg_step("%s begin frames=%u", st->name, FRAMES);
-    for (unsigned frame = 0; frame < FRAMES; ++frame) {
-        unsigned slot = frame & 1u;
-        int loud = frame < 3 || frame % 30 == 0;
-        uint32_t polls = 0;
-        int32_t rc;
-        if (cellSysutilCheckCallback() || quit_requested) return 0;
-        if (!wait_slot(st, &local[slot], slot, frame, &polls)) return 0;
-        if (polls) st->waits_polled++;
-        if (polls > st->max_polls) st->max_polls = polls;
-        if (frame >= 2) check_progress(st, slot, frame - 2);
-        CellGcmContextData *c = cellGcmSegmentBegin(&stage[slot]);
-        if (!c) { printf("GCM_SEG_FAIL phase=%s frame=%u staging begin refused\n", st->name, frame); return 0; }
-        build_frame(c, 1, frame, slot);
-        if ((rc = cellGcmSegmentEnd(&stage[slot])) != CELL_OK) {
-            printf("GCM_SEG_FAIL phase=%s frame=%u staging end rc=%08x\n", st->name, frame, (unsigned)rc);
-            return 0;
-        }
-        uint32_t bytes = cellGcmSegmentGetUsedBytes(&stage[slot]);
-        if (loud) seg_step("%s frame=%u slot=%u built in main memory bytes=%u", st->name, frame, slot, bytes);
-        volatile uint32_t *dst = (volatile uint32_t *)cellGcmSegmentBeginExternal(&local[slot]);
-        if (!dst) { printf("GCM_SEG_FAIL phase=%s frame=%u local claim refused\n", st->name, frame); return 0; }
-        const uint32_t *src = stage[slot].buffer;
-        for (uint32_t i = 0; i < bytes / 4u; ++i) dst[i] = src[i];
-        __sync_synchronize();
-        if (loud) seg_step("%s frame=%u copied %u bytes to local memory (32-bit stores)", st->name, frame, bytes);
-        if ((rc = cellGcmSegmentEndExternal(&local[slot], bytes)) != CELL_OK) {
-            printf("GCM_SEG_FAIL phase=%s frame=%u local end rc=%08x\n", st->name, frame, (unsigned)rc);
-            return 0;
-        }
-        st->used_bytes = bytes;
-        if (loud) seg_step("%s frame=%u slot=%u call offset=0x%08x", st->name, frame, slot, (unsigned)local[slot].offset);
-        if ((rc = cellGcmSegmentCall(ring, &local[slot])) != CELL_OK) {
-            printf("GCM_SEG_FAIL phase=%s frame=%u call rc=%08x\n", st->name, frame, (unsigned)rc);
-            return 0;
-        }
-        cellGcmSetClearSurface(ring, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
-        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) {
-            printf("GCM_SEG_FAIL phase=%s frame=%u flip not done after %u polls (retire label %u = %u, serial %u)\n",
-                   st->name, frame, SEG_FLIP_POLLS, retire_label[slot],
-                   (unsigned)label_value(retire_label[slot]), (unsigned)local[slot].serial);
-            seg_step("%s FAIL flip frame=%u", st->name, frame);
-            return 0;
-        }
-        if (loud) seg_step("%s frame=%u flipped", st->name, frame);
-        st->frames++;
-    }
-    for (unsigned slot = 0; slot < 2; ++slot) {
-        uint32_t polls = 0;
-        if (!wait_slot(st, &local[slot], slot, FRAMES + slot, &polls)) return 0;
-        check_progress(st, slot, FRAMES - 2 + slot);
-    }
-    seg_step("%s end frames=%u decoy=%u mismatches=%u", st->name, st->frames, st->decoy_hits, st->mismatches);
-    return 1;
+    CellGcmSegment s, before;
+    volatile uint32_t *label = (volatile uint32_t *)cellGcmGetLabelAddress(SEG_LABEL_RETIRE_L);
+    uint32_t local_off = (disp.local_used + 0xfffffu) & ~0xfffffu;
+    if (local_off + SEG_BYTES > config->localSize) { puts("GCM_SEG_FAIL local space"); return 0; }
+    void *mem = (void *)((uintptr_t)config->localAddress + local_off);
+    memset(&s, 0x5c, sizeof(s));
+    memcpy(&before, &s, sizeof(s));
+    *label = 0x600dcafeu;
+    int32_t rc = cellGcmSegmentInit(&s, mem, SEG_BYTES, CELL_GCM_LOCATION_LOCAL, SEG_LABEL_RETIRE_L);
+    int untouched = !memcmp(&s, &before, sizeof(s)) && *label == 0x600dcafeu;
+    int ok = rc == CELL_GCM_SEGMENT_ERROR_INVALID_VALUE && untouched;
+    printf("GCM_SEG_LOCAL %s local_offset=0x%08x init=%08x untouched=%s\n", ok ? "refused" : "FAIL",
+           (unsigned)local_off, (unsigned)rc, untouched ? "yes" : "no");
+    seg_step("local init %s rc=%08x untouched=%d", ok ? "refused" : "FAIL", (unsigned)rc, untouched);
+    *label = 0;
+    return ok;
 }
 #endif
 
@@ -422,44 +359,9 @@ int main(void)
 #if defined(GCM_SEG_VARIANT_LARGE)
     if (!large_check(ring, (uint32_t *)(pool_bytes + 3 * SEG_BYTES))) { puts("GCM_SEG_FAIL large"); return 1; }
     outcome = "large-ok";
-#elif defined(GCM_SEG_VARIANT_LOCAL) || defined(GCM_SEG_VARIANT_LOCALCOPY)
-    /* RSX local memory after the display buffers, 1 MiB aligned.  Each local
-     * segment gets a decoy at the equal IO offset (inside the host buffer). */
-    uint32_t local_off = (disp.local_used + 0xfffffu) & ~0xfffffu;
-    if (local_off + 2u * SEG_BYTES > config.localSize) { puts("GCM_SEG_FAIL local space"); return 1; }
-    for (unsigned k = 0; k < 2; ++k) {
-        uint32_t off = local_off + k * SEG_BYTES;
-        void *decoy = NULL;
-        if (cellGcmIoOffsetToAddress(off, &decoy) != CELL_OK ||
-            (uintptr_t)decoy < (uintptr_t)host + FIFO_BYTES ||
-            (uintptr_t)decoy + SEG_BYTES > (uintptr_t)host + HOST_BYTES) {
-            printf("GCM_SEG_FAIL no decoy room at io offset 0x%08x\n", (unsigned)off); return 1;
-        }
-        build_decoy((uint32_t *)decoy, SEG_BYTES, k);
-        void *mem = (void *)((uintptr_t)config.localAddress + local_off + k * SEG_BYTES);
-        if (cellGcmSegmentInit(&seg[k], mem, SEG_BYTES, CELL_GCM_LOCATION_LOCAL, retire_label[k]) != CELL_OK) {
-            puts("GCM_SEG_FAIL local segment init"); return 1;
-        }
-    }
-    seg_step("local segments at local offset 0x%08x, decoys at the equal io offsets", (unsigned)local_off);
-#ifdef GCM_SEG_VARIANT_LOCALCOPY
-    CellGcmSegment stage[2];
-    for (unsigned k = 0; k < 2; ++k)
-        if (cellGcmSegmentInit(&stage[k], pool_bytes + (1 + k) * SEG_BYTES, SEG_BYTES,
-                               CELL_GCM_LOCATION_MAIN, SEG_LABEL_PROBE) != CELL_OK) {
-            puts("GCM_SEG_FAIL staging segment init"); return 1;
-        }
-    if (!run_localcopy_phase(ring, stage, seg, &st)) { puts("GCM_SEG_LOCAL outcome=LOCAL-STALLED"); return 1; }
-#else
-    if (!run_phase(ring, seg, 1, &st)) { puts("GCM_SEG_LOCAL outcome=LOCAL-STALLED"); return 1; }
-#endif
-    outcome = (st.decoy_hits == FRAMES && !st.mismatches) ? "LOCAL-IO-ALIAS"
-            : (!st.decoy_hits && !st.mismatches) ? "LOCAL-OK" : "LOCAL-MIXED";
-    printf("GCM_SEG_PHASE name=" VARIANT " frames=%u local_offset=0x%08x waits_polled=%u max_polls=%u "
-           "bytes_per_segment=%u progress_mismatches=%u decoy=%u outcome=%s\n", st.frames,
-           (unsigned)local_off, st.waits_polled, st.max_polls, st.used_bytes, st.mismatches,
-           st.decoy_hits, outcome);
-    if (!strcmp(outcome, "LOCAL-MIXED")) { puts("GCM_SEG_FAIL local outcome mixed"); return 1; }
+#elif defined(GCM_SEG_VARIANT_LOCAL)
+    if (!local_refusal_check(&config)) { puts("GCM_SEG_FAIL local refusal"); return 1; }
+    outcome = "local-refused";
 #elif defined(GCM_SEG_VARIANT_JUMP)
     CellGcmSegment sub[2];
     for (unsigned k = 0; k < 2; ++k)

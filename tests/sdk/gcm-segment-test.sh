@@ -92,5 +92,7 @@ mutant() {
 
 # Call reserving only the CALL's word: the label is reserved on its own again.
 mutant call-split 's/^#define SEGMENT_CALL_WORDS 5u$/#define SEGMENT_CALL_WORDS 1u/'     "refused busy" "ring words kept" "segment kept" "call first"
+# Init accepting RSX local memory again.
+mutant local-init 's/^        location != GCM_LOCATION_CELL)$/        (location != GCM_LOCATION_CELL \&\& location != GCM_LOCATION_RSX))/'     "local refused" "segment untouched" "label untouched"
 
 echo "gcm-segment-test: PASS"

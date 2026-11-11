@@ -426,6 +426,25 @@ static void test_call_transaction(void)
     printf("  wrapping callback: CALL + label written together after the wrap, retired by the model\n");
 }
 
+/* RSX local memory is refused before anything changes: CALL offsets are IO
+ * offsets, so a local segment would run whatever sits at the equal IO offset. */
+static void test_local_refused(void)
+{
+    CellGcmSegment s, before;
+
+    puts("local:");
+    memset(&s, 0x5c, sizeof(s));
+    memcpy(&before, &s, sizeof(s));
+    labels[214] = 0x600dcafeu;
+    CHECK("local refused", cellGcmSegmentInit(&s, &arena[12288], 256, GCM_LOCATION_RSX, 214) ==
+                           CELL_GCM_SEGMENT_ERROR_INVALID_VALUE);
+    CHECK("segment untouched", memcmp(&before, &s, sizeof(s)) == 0);
+    CHECK("label untouched", labels[214] == 0x600dcafeu);
+    CHECK("main accepted", cellGcmSegmentInit(&s, &arena[12288], 256, GCM_LOCATION_CELL, 214) == CELL_OK &&
+                           labels[214] == 0u);
+    printf("  LOCAL init: INVALID_VALUE, segment and label untouched; MAIN accepted\n");
+}
+
 int main(void)
 {
     test_emitters();
@@ -435,6 +454,7 @@ int main(void)
     test_nested();
     test_external();
     test_call_transaction();
+    test_local_refused();
     if (failures) { printf("gcm-segment: %d check(s) FAILED\n", failures); return 1; }
     puts("gcm-segment: all checks passed");
     return 0;
