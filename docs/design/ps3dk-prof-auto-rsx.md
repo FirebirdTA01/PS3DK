@@ -29,7 +29,7 @@ preceding owner, domain and epoch declarations.
 | Offset | Type | Attached value |
 |---|---|---|
 | 8, 12, 16, 20 | u32 each | domain, epoch, owner incarnation, context generation |
-| 24, 28 | u32 each | covered kind mask 7, unsupported form mask 15 |
+| 24, 28 | u32 each | covered kind mask, unsupported form mask: 7/15 (first writer) or 15/11 (segment and frame-mark writer) |
 | 32, 36 | u32 each | report first, report count |
 | 40, 44 | u32 each | operation label, clock label |
 | 48, 52, 56, 60 | u32 each | pair capacity, metadata capacity, frame capacity, record width 128 |
@@ -40,6 +40,10 @@ preceding owner, domain and epoch declarations.
 | 128 | 32 bytes | build binding |
 
 Unsupported-form bits name unsafe=1, immediate=2, CALL=4 and direct/uninstrumented=8.
+Kind bits name ARRAY=1, INDEX=2, CLEAR=4 and FRAME=8. Exactly two pairs are
+valid: 7/15 for the first writer, and 15/11 for the writer that records FRAME
+marks and covers CALL segments built through the segment API. A reader that
+knows only 7/15 refuses the newer CONFIG, so it never misreads its records.
 Premise bits name report-before-label=1 and coherent stable read=2; these declare
 dependencies, not proven facts. Schema 1 reserves sixteen clock reports, so the
 report count is sixteen plus twice the pair capacity. The mechanism digest
@@ -87,14 +91,38 @@ within the 1 MiB chunk ceiling.
 | 16, 24, 32 | u64 each | frame id, PPU before, PPU after |
 | 40, 48, 56 | u64 each | raw begin, raw end, caller PC |
 | 64..88 | seven u32 | original word count, start, count, offset, index type, mode, clear mask |
-| 92 | u32 | reserved |
+| 92 | u32 | segment ordinal (SEGMENT only, else reserved zero) |
 | 96, 100, 104, 108, 112 | u32 each | begin report, end report, begin serial, end serial, generation |
-| 116 | u32 | reserved |
+| 116 | u32 | call ordinal (SEGMENT only, else reserved zero) |
 | 120 | u64 | actual publication snapshot |
 
-Kinds are ARRAY=1, INDEX=2 and CLEAR=3. Flags are TOKEN=1, RAW_VALID=2,
-INCOMPLETE=4, CLOCK_INVALID=8, READ_REFUSED=16 and PUBLICATION_UNKNOWN=32.
-Unknown bits are refused. Exactly one of RAW_VALID or INCOMPLETE is present;
+Kinds are ARRAY=1, INDEX=2, CLEAR=3 and, with kind mask bit 8, FRAME=4. Flags
+are TOKEN=1, RAW_VALID=2, INCOMPLETE=4, CLOCK_INVALID=8, READ_REFUSED=16,
+PUBLICATION_UNKNOWN=32 and, when CONFIG covers CALL, SEGMENT=64. Unknown bits
+are refused.
+
+A FRAME record (D2) marks one frame boundary on the RSX: role 1 (args[0]) is
+emitted in the ring when the owner opens the frame, role 2 when it closes it
+(explicitly, by the next frame or at owner retirement). Its report pair is
+written back to back; the begin mark's raw begin and the end mark's raw end
+bracket the frame's command stream on the RSX clock. It needs TOKEN and has no
+other argument; it is not counted in COVERAGE. A mark refused for room or
+resources is simply absent, and the frame's RSX begin or end is UNKNOWN.
+
+A SEGMENT record (D1) is a covered operation written into a CALL segment
+between cellGcmSegmentBegin and cellGcmSegmentEnd. Inside the segment it is
+bracketed by two report-only commands (four words, room checked against the
+segment's own end, no callback). At cellGcmSegmentCall the observer appends one
+operation-label release in the ring after the CALL and its retirement label;
+every record of that call shares that serial pair, so serials stay in
+execution order. The record carries the segment ordinal (u32@92, nonzero) and
+the call ordinal (u32@116, nonzero), and the frame of the call. A build that
+is rebuilt, never called, or called outside the attached ring is committed as
+INCOMPLETE with call ordinal zero and its pairs are quarantined (its reports
+may still be written if the buffer is executed some other way); STATUS then
+carries SEGMENT_QUARANTINE. Its coverage is counted at build time, in the
+build's frame. Segments written by another writer (SPU, DMA) and emitters on
+other threads stay outside the observed population. Exactly one of RAW_VALID or INCOMPLETE is present;
 RAW_VALID cannot coexist with READ_REFUSED or PUBLICATION_UNKNOWN. Unused
 kind-specific arguments are zero. A reversed emission bracket sets CLOCK_INVALID.
 
@@ -122,12 +150,14 @@ nonsaturated row, visited equals observed plus all exclusions, with checked sums
 Only one final row exists per (instance, owner, frame). Observed counts markers
 emitted, not reports recovered or timing qualified.
 The unsupported count (offset 40) is the covered emitters the owner thread ran
-on a context other than the attached ring: a command segment built between
-`cellGcmSegmentBegin` and `cellGcmSegmentEnd` (the observed build announces
-those contexts), or any other private buffer. They get no markers, their
-commands run unchanged, and they are not in the per-kind rows; with no open
-frame they count as STATUS unassociated visits. Emitters on other threads and
-externally written (SPU/DMA) segments stay outside this count.
+on a context other than the attached ring and other than an open registered
+segment (the observed build announces each segment from `cellGcmSegmentBegin`
+to `cellGcmSegmentEnd`; a full segment table leaves it unregistered): a private
+buffer. They get no markers, their commands run unchanged, and they are not in
+the per-kind rows; with no open frame they count as STATUS unassociated
+visits. Emitters inside an open registered segment are covered (SEGMENT
+records below). Emitters on other threads and externally written (SPU/DMA)
+segments stay outside this count.
 Missing association is not assigned to an invented frame. Lost coverage and open
 frames stay visible; a bounded queue cannot turn dropped coverage into zero work.
 
@@ -156,7 +186,8 @@ visits, internal suppressed, clock attempted, clock written, clock lost, resourc
 conflicts, last published serial, held report pairs.
 
 Flags are FINAL=1, LOWER_BOUND=2, SATURATED=4, OWNER_UNACK=8,
-RESOURCE_CONFLICT=16 and CONTEXT_RESET=32. Saturation, conflict and reset stay
+RESOURCE_CONFLICT=16, CONTEXT_RESET=32 and, when CONFIG covers CALL,
+SEGMENT_QUARANTINE=64. Saturation, conflict, reset and segment quarantine stay
 sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
 gauges and may decrease. Written counters equal accepted chunks. Exact admitted
 equals written plus dropped plus pending. Exact FINAL requires both gauges zero;
@@ -298,5 +329,9 @@ RSX reached-marker span (first operation begin to last end) on the PPU clock:
 | pacing | never from this family: it observes no presentation or vsync wait |
 | UNKNOWN | anything else, named as unresolved |
 
-The two shares are review proposals, printed with every JSON report. A
+The two shares are provisional starting values, printed with every JSON
+report, to be tuned against the first console capture. FRAME marks give each
+frame's RSX begin and end (raw, and mapped as a duration when the map
+qualifies); they are shown but do not yet enter the verdict. Segment records
+count toward their call frame. A
 verdict is a candidate with its evidence, never utilization or a busy share.

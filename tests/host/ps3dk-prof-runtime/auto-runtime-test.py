@@ -52,12 +52,12 @@ def run(name,cmd,cwd=out):
     if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner'):
         expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
-                  'no-frame-boundary':b'context.current==words+6',
+                  'no-frame-boundary':b'context.current==words+18',
                   'fifo-publish':b'g_fifo.state==FS_SEALED',
                   'fifo-cancel':b'auto_test_fifo_installs==1 && auto_test_fifo_removes==1',
                   'fifo-owner':b'p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==PS3DK_PROF_EPERM',
                   'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
-                  'segment-silent':b'counts[0]==3 && counts[1]==2'}[a.mutant]
+                  'segment-silent':b'ticket && app==before+2'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -122,8 +122,8 @@ for rel in sources:
         code=source.read_text();old='p_auto_frame(fid,tb);';assert code.count(old)==1
         source=out/'prof_core.c';source.write_bytes(code.replace(old,'(void)fid;').encode())
     elif a.mutant=='segment-silent' and rel=='auto_rsx/auto_runtime.c':
-        code=source.read_text();old='if(!a) {foreign_visit(ctx,call);return 0;}';assert code.count(old)==1
-        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_visit;return 0;}').encode())
+        code=source.read_text();old='if(!a) return foreign_begin(ctx,call,caller);';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_begin;return 0;}').encode())
     elif a.mutant=='clock-put' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='!auto_clock_after(&a->clocks,a->clock_put_frontier)';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'0').encode())
@@ -186,7 +186,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO in-flight owner seal retains claim and lower bound PASS\n' if a.case=='stop'
                        else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
-                       else b'AUTO segment and foreign context visits counted without markers PASS\n' if a.case=='segments'
+                       else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
                        else b'AUTO FIFO refusal and unpublished cleanup PASS\n' if a.case in ('fifofail','fifopre','fifopost')
                        else b'application complete\n'),result.stdout
@@ -222,17 +222,37 @@ if a.case=='fifopost':
     print('AUTO accepted before seal, unpublished FIFO cancelled, owner remains UNKNOWN PASS')
     raise SystemExit(0)
 if a.case=='segments':
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(15,11),'CONFIG kind/form masks of the D1/D2 writer'
+    records=[]
+    for k,b in auto:
+        if k!=35:continue
+        n=struct.unpack_from('<I',b,8)[0]
+        for i in range(n):
+            q=b[16+128*i:16+128*(i+1)]
+            records.append(dict(id=struct.unpack_from('<Q',q,0)[0],kind=struct.unpack_from('<H',q,12)[0],
+                flags=struct.unpack_from('<H',q,14)[0],frame=struct.unpack_from('<Q',q,16)[0],
+                raw=struct.unpack_from('<2Q',q,40),args=struct.unpack_from('<7I',q,64),
+                segment=struct.unpack_from('<I',q,92)[0],call=struct.unpack_from('<I',q,116)[0],
+                serials=struct.unpack_from('<2I',q,104),published=struct.unpack_from('<Q',q,120)[0]))
+    shape=[(r['kind'],r['flags'],r['frame'],r['segment'],r['call'],r['serials']) for r in records]
+    expected=[(4,3,0,0,0,(1,2)),(3,3,0,0,0,(3,4)),(1,67,0,1,1,(5,6)),(2,67,0,1,1,(5,6)),(2 if False else 3,64|4|16,0,2,0,(7,8)),
+              (4,3,0,0,0,(9,10)),(4,3,1,0,0,(11,12)),(1,67,1,1,2,(13,14)),(4,3,1,0,0,(15,16))]
+    assert shape==expected,shape
+    assert [r['args'][0] for r in records if r['kind']==4]==[1,2,1,2],'FRAME begin/end roles'
+    assert all(r['raw'][0]<=r['raw'][1] and r['raw'][0] for r in records if r['flags']&2)
+    assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
-    for b,(frame,unsupported) in zip(coverage,[(0,5),(1,1)]):
+    for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
         assert len(b)==352 and struct.unpack_from('<H',b,2)[0]==3
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
-        assert rows[0]==rows[1]==(0,)*12
-        assert rows[2]==((1,1)+(0,)*10 if frame==0 else (0,)*12),rows[2]
+        assert [r[:2] for r in rows]==rows_expected and all(not any(r[2:]) for r in rows),rows
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
-    assert fields[4]==1 and fields[10]==1,fields # admitted one ring clear; one unassociated visit
-    print('real capture: segment and foreign emitters counted as unsupported-form visits, ring clear observed PASS')
+    assert fields[1]==1|2|64,('FINAL, LOWER_BOUND (a held quarantined pair) and SEGMENT_QUARANTINE',fields[1])
+    assert fields[3:6]==(9,9,9) and fields[17]==1,fields # nine records; one quarantined pair held
+    print('real capture: segment builds timed per CALL, a never-called build quarantined, FRAME marks PASS')
     raise SystemExit(0)
 if a.case in ('clocks','clockcap'):
     frames=256 if a.case=='clockcap' else 64
@@ -258,7 +278,11 @@ if a.case in ('clocks','clockcap'):
     assert all(struct.unpack_from('<H',b,2)[0]==3 for b in coverage)
     assert all(not any(struct.unpack_from('<36Q',b,64)) for b in coverage)
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
-    assert fields[:3]==(1,1,1) and fields[3:]==(0,0,0,0,0,frames,0,0,0,len(schedule),len(rows),len(schedule)-len(rows),0,0,0),fields
+    marks=2*frames # a begin and an end FRAME mark per frame, each one serial pair
+    assert fields[:3]==(1,1,1) and fields[3:]==(marks,marks,marks,0,0,frames,0,0,0,len(schedule),len(rows),
+        len(schedule)-len(rows),0,2*marks,0),fields
+    kinds=[struct.unpack_from('<HH',b,16+128*i+12) for k,b in auto if k==35 for i in range(struct.unpack_from('<I',b,8)[0])]
+    assert len(kinds)==marks and all(k==(4,3) for k in kinds),'every FRAME mark raw-valid'
     assert chunks[-1][0]==6
     print('real capture: '+str(len(rows))+' CLOCK facts, '+str(frames)+' closed frames, '+str(len(schedule)-len(rows))+' lost anchors and FINAL accounting PASS')
     raise SystemExit(0)
@@ -279,12 +303,22 @@ if operations:
         assert struct.unpack_from('<HHI',b)==(1,0,1)
         n=struct.unpack_from('<I',b,8)[0];assert len(b)==16+n*128
         ops += [b[16+i*128:16+(i+1)*128] for i in range(n)]
+    marks=[b for b in ops if struct.unpack_from('<H',b,12)[0]==4]
+    if a.case=='frames':
+        # one begin FRAME mark (frame 0); every later mark found no free report pair
+        assert len(marks)==1 and struct.unpack_from('<QHH',marks[0])[0]==1
+        assert struct.unpack_from('<HH',marks[0],12)==(4,3) and struct.unpack_from('<QQ',marks[0],40)==(50,60)
+        assert struct.unpack_from('<I',marks[0],64)[0]==1
+    else:
+        assert not marks
+    first=1+len(marks);published=6 if a.case=='frames' else 4
+    ops=[b for b in ops if struct.unpack_from('<H',b,12)[0]!=4]
     assert len(ops)==2
     for i,b in enumerate(ops):
-        assert struct.unpack_from('<Q',b)[0]==i+1
+        assert struct.unpack_from('<Q',b)[0]==first+i
         assert struct.unpack_from('<HH',b,12)==(3,3 if a.case=='frames' else 2 if a.case=='ops' else 20)
         assert struct.unpack_from('<QQ',b,40)==(((100,110) if i==0 else (200,220)) if a.case in ('ops','frames') else (0,0))
-        assert struct.unpack_from('<Q',b,120)[0]==4
+        assert struct.unpack_from('<Q',b,120)[0]==published
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
@@ -296,9 +330,9 @@ if operations:
             expected=(6,2,1,1,0,1,1,0,0,0,0,0) if i==0 else (0,)*12 if i==1 else (1,0,0,0,0,0,1,0,0,0,0,0)
             assert struct.unpack_from('<12Q',b,256)==expected,struct.unpack_from('<12Q',b,256)
         owner=struct.unpack_from('<I',rows[0],8)[0];assert owner
-        assert all(struct.unpack_from('<I',b,8)[0]==owner for b in rows+ops)
+        assert all(struct.unpack_from('<I',b,8)[0]==owner for b in rows+ops+marks)
         assert fields[:3]==(1,1,1),fields
-        assert fields[3:]==(2,2,2,0,0,3,0,1,0,1,1,0,0,4,0),fields
+        assert fields[3:]==(3,3,3,0,0,3,0,1,0,1,1,0,0,6,0),fields
         clocks=[b for k,b in auto if k==38];assert len(clocks)==1
         assert struct.unpack_from('<HH',clocks[0])==(1,1)
         assert chunks[-1][0]==6
@@ -315,7 +349,7 @@ config,status=auto[0][1],auto[1][1]
 assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIII',config,8)==(1026,1,1,1,7)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,15,11)
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,239,238,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
     domains=[b for k,b in chunks if k==8];assert len(domains)==1

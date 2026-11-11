@@ -23,4 +23,8 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32
  * segment context. Neither hook writes commands or changes the segment. */
 void ps3dk_prof__auto_segment_open(struct _gcmCtxData *);
 void ps3dk_prof__auto_segment_close(struct _gcmCtxData *);
+/* cellGcmSegmentCall in the observed build, after the CALL and the segment's
+ * retirement label were written into the ring: the observer appends one
+ * operation-label release completing the operations built in that segment. */
+void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
 #endif

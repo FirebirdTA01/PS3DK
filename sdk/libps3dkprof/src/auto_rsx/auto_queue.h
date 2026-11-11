@@ -9,6 +9,9 @@
 #define auto_queue_ack ps3dk_prof__auto_queue_ack
 #define auto_queue_stop ps3dk_prof__auto_queue_stop
 #define auto_queue_held ps3dk_prof__auto_queue_held
+#define auto_queue_take_pair ps3dk_prof__auto_queue_take_pair
+#define auto_queue_quarantine_pair ps3dk_prof__auto_queue_quarantine_pair
+#define auto_queue_claim_held ps3dk_prof__auto_queue_claim_held
 
 enum { AUTO_PAIRS_MAX=504, AUTO_METADATA_MAX=1024 };
 enum { AUTO_QUEUE_NONE, AUTO_QUEUE_STOPPED, AUTO_QUEUE_REENTRY,
@@ -45,4 +48,15 @@ const auto_queue_entry *auto_queue_peek(auto_queue *);
 int auto_queue_ack(auto_queue *, uint64_t id, int completed, int whole);
 void auto_queue_stop(auto_queue *);
 uint32_t auto_queue_held(const auto_queue *); /* live scan, not an exact concurrent snapshot */
+/* Owner only, for CALL segments: a report pair owned before its record exists
+ * (reports written inside a segment that is executed later). Returns the pair
+ * index or -1 with refusal set. */
+int auto_queue_take_pair(auto_queue *);
+/* A taken pair whose reports may still be written but whose completion can
+ * never be established (segment rebuilt, never called, called elsewhere). */
+void auto_queue_quarantine_pair(auto_queue *, uint32_t pair);
+/* claim with a taken pair. share = 0 takes a new serial pair; otherwise share
+ * is the serial_end of the previous record of the same CALL, which completes
+ * every record of that call at once. */
+auto_queue_entry *auto_queue_claim_held(auto_queue *, uint32_t pair, uint32_t share);
 #endif

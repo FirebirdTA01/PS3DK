@@ -341,41 +341,252 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *context,uint32_t kind,u
     if(claim) auto_config_abort(&configuration,claim);
 }
 
-static int segment_find(const auto_capture *a,const void *ctx)
+static auto_segment *segment_find(auto_capture *a,const void *ctx)
 {
-    for(uint32_t i=0;i<a->segments_open;i++) if(a->segments[i]==ctx) return (int)i;
-    return -1;
+    for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].ctx==ctx) return &a->segments[i];
+    return NULL;
+}
+
+/* Built operations that will never complete through our label: commit each as
+ * an INCOMPLETE record (so accounting stays exact) whose pair the drainer then
+ * quarantines; with no metadata room, quarantine the pair directly. Their
+ * reports may still be written if the buffer is ever executed. */
+static void segment_drop(auto_capture *a,auto_segment *s)
+{
+    for(uint32_t i=0;i<s->count;i++) {
+        auto_segment_op *b=&s->ops[i];
+        auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,0);
+        if(e) {
+            uint64_t id=e->op.id;uint32_t sb=e->op.serial_begin,se=e->op.serial_end;
+            e->op=b->op;e->op.id=id;e->op.serial_begin=sb;e->op.serial_end=se;
+            e->op.flags=(uint16_t)((e->op.flags&(1u|AUTO_OP_SEGMENT))|4u);
+            ST_REL(&a->admitted,id);
+            auto_queue_commit(&a->operations);
+        } else auto_queue_quarantine_pair(&a->operations,b->pair);
+        ST_REL(&a->segment_quarantine,1u);
+    }
+    s->count=0;
 }
 
 /* cellGcmSegmentBegin/End (observed build). Owner only: another thread's
- * segment stays unregistered, and the owner never sees its emitters. */
+ * segment stays unregistered, and the owner never sees its emitters. Begin on
+ * a segment whose previous build was never called drops that build. */
 void ps3dk_prof__auto_segment_open(struct _gcmCtxData *context)
 {
     auto_capture *a;
+    auto_segment *s;
     if(!context || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
-    if((void *)context==(void *)a->context || segment_find(a,context)>=0) return;
-    if(a->segments_open==AUTO_SEGMENTS_OPEN) {increment(a,&a->segment_table_full);return;}
-    a->segments[a->segments_open++]=context;
+    if((void *)context==(void *)a->context) return;
+    if(!(s=segment_find(a,context))) {
+        if(a->segments_used==AUTO_SEGMENTS_OPEN || a->segment_ordinal==UINT32_MAX) {
+            increment(a,&a->segment_table_full);return;
+        }
+        s=&a->segments[a->segments_used++];
+        s->ctx=context;s->ordinal=++a->segment_ordinal;s->count=0;
+    }
+    if(s->count) segment_drop(a,s);
+    s->open=1;
 }
 void ps3dk_prof__auto_segment_close(struct _gcmCtxData *context)
 {
     auto_capture *a;
-    int i;
-    if(!context || !p_ready() || !(a=owner_capture(NULL,0)) || (i=segment_find(a,context))<0) return;
-    a->segments[i]=a->segments[--a->segments_open];
+    auto_segment *s;
+    if(!context || !p_ready() || !(a=owner_capture(NULL,0)) || !(s=segment_find(a,context))) return;
+    s->open=0;
 }
 
 /* A covered emitter on the owner thread writing into a context other than the
- * attached ring: a CALL segment or a private/uninstrumented buffer. It gets no
- * markers and its command runs unchanged, but it is never silently absent:
- * the active COVERAGE row counts it as an unsupported-form visit, or STATUS
- * counts it as unassociated when no frame is open. */
-static void foreign_visit(gpp_ctx *ctx,const ps3tc_auto_call *call)
+ * attached ring and not an open registered segment: a private/uninstrumented
+ * buffer (or a segment the table could not register). It gets no markers and
+ * its command runs unchanged, but it is never silently absent: the active
+ * COVERAGE row counts it as an unsupported-form visit, or STATUS counts it as
+ * unassociated when no frame is open. */
+static void foreign_visit(auto_capture *a)
+{
+    increment(a,&a->foreign_visits);
+    if(!auto_frames_unsupported(&a->coverage)) increment(a,&a->unassociated);
+}
+
+/* Two timestamp-report words, no label: the report alone, inside a segment. */
+static void segment_report(gpp_ctx *ctx,uint32_t report)
+{
+    uint32_t *w=(uint32_t *)(void *)ctx->current;
+    w[0]=(1u<<18)|0x1800u;              /* QUERY_GET, one word */
+    w[1]=(1u<<24)|(report*16u);         /* timestamp report at that index */
+    ctx->current=(void *)(w+2);
+}
+
+/* A covered emitter writing into an open registered segment: bracket it with
+ * two reports in the segment (four words, current room only, no callback). The
+ * operation-label release that completes it comes after the CALL, in ring
+ * order. Returns the ticket (nonzero) or 0 after counting the exclusion. */
+static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const ps3tc_auto_call *call,
+                              uint64_t caller)
+{
+    const auto_wire_config *c=auto_config_read(&configuration);
+    uint64_t words;
+    auto_segment_op *b;
+    int pair;
+    uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    if(!auto_frames_count(&a->coverage,call->kind,0)) increment(a,&a->unassociated);
+    increment(a,&a->segment_visits);
+    if(!auto_config_can_admit(&configuration) || LD_ACQ(&g_prof->stop_latch)) {
+        (void)auto_frames_count(&a->coverage,call->kind,LD_ACQ(&g_prof->stop_latch) ? 7:9);return 0;
+    }
+    words=auto_command_words(call);
+    if(!words) {(void)auto_frames_count(&a->coverage,call->kind,6);return 0;}
+    if(!cur || (cur&3u) || cur>end || words>UINT32_MAX-4u || words+4u>(uint64_t)(end-cur)/4u) {
+        (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
+    }
+    if(s->count==AUTO_SEGMENT_OPS) {(void)auto_frames_count(&a->coverage,call->kind,4);return 0;}
+    if(!initialize_device(a)) {(void)auto_frames_count(&a->coverage,call->kind,10);return 0;}
+    pair=auto_queue_take_pair(&a->operations);
+    if(pair<0) {
+        (void)auto_frames_count(&a->coverage,call->kind,
+                               a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:3);
+        return 0;
+    }
+    b=&s->ops[s->count];memset(b,0,sizeof *b);b->pair=(uint32_t)pair;
+    b->op.kind=(uint16_t)call->kind;b->op.caller=caller;b->op.generation=c->generation;
+    b->op.flags=AUTO_OP_SEGMENT;b->op.segment=s->ordinal;
+    b->op.args[0]=(uint32_t)words;
+    if(call->kind==1) {b->op.args[1]=call->start;b->op.args[2]=call->count;b->op.args[5]=call->mode;}
+    if(call->kind==2) {b->op.args[2]=call->count;b->op.args[3]=call->offset;
+        b->op.args[4]=call->index_type;b->op.args[5]=call->mode;}
+    if(call->kind==3) b->op.args[6]=call->clear_mask;
+    b->op.report_begin=c->report_first+16+(uint32_t)pair*2;b->op.report_end=b->op.report_begin+1;
+    a->operations_device.write_timer(a->operations_device.ctx,b->op.report_begin,PRG_POISON);
+    a->operations_device.write_timer(a->operations_device.ctx,b->op.report_end,PRG_POISON);
+    a->operations_device.sync(a->operations_device.ctx);
+    b->op.tb_before=observation_tb();
+    segment_report(ctx,b->op.report_begin);
+    a->expected_end=(uintptr_t)(void *)ctx->current+words*4;
+    a->segment_active=s;g_tls.in_gpu=1;
+    return 1;
+}
+
+static void segment_end(auto_capture *a,gpp_ctx *ctx)
+{
+    auto_segment *s=a->segment_active;
+    auto_segment_op *b=&s->ops[s->count];
+    uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    a->segment_active=NULL;g_tls.in_gpu=0;
+    if(cur!=a->expected_end || cur>end || end-cur<8) {
+        /* The application did not advance as admitted (or a segment overflow
+         * refused it): the begin report may run; no end report is written. */
+        auto_queue_quarantine_pair(&a->operations,b->pair);
+        ST_REL(&a->segment_quarantine,1u);
+        (void)auto_frames_count(&a->coverage,b->op.kind,11);
+        return;
+    }
+    segment_report(ctx,b->op.report_end);
+    b->op.tb_after=observation_tb();
+    if(b->op.tb_after<b->op.tb_before) b->op.flags|=8;
+    (void)auto_frames_count(&a->coverage,b->op.kind,1);
+    s->count++;
+}
+
+/* cellGcmSegmentCall (observed build), after its CALL and retirement label.
+ * One operation-label release in the ring, right here, completes every
+ * operation of this build in execution order. Its records take the owner's
+ * current frame. Anything else (no room, foreign ring, no metadata) commits the
+ * build as INCOMPLETE records and quarantines its pairs. */
+void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *segment)
 {
     auto_capture *a;
-    if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active) return;
-    increment(a,segment_find(a,ctx)>=0 ? &a->segment_visits:&a->foreign_visits);
-    if(!auto_frames_unsupported(&a->coverage)) increment(a,&a->unassociated);
+    auto_segment *s;
+    const auto_wire_config *c;
+    gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
+    uint32_t share=0,call,i;
+    uintptr_t cur,end;
+    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!(s=segment_find(a,segment)) || !s->count) return;
+    c=auto_config_read(&configuration);
+    cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
+    if(ctx!=a->context || !c || c->reason || a->active || a->call_ordinal==UINT32_MAX ||
+       LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
+       (cur&3u) || cur>end || end-cur<16 || a->operations.capacity-(uint32_t)(a->operations.write_idx-
+       LD_ACQ(&a->operations.read_idx))<s->count) {
+        segment_drop(a,s);return;
+    }
+    call=++a->call_ordinal;
+    for(i=0;i<s->count;i++) {
+        auto_segment_op *b=&s->ops[i];
+        auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,share);
+        uint64_t id;
+        uint32_t sb,se;
+        if(!e) {auto_queue_quarantine_pair(&a->operations,b->pair);ST_REL(&a->segment_quarantine,1u);continue;}
+        id=e->op.id;sb=e->op.serial_begin;se=e->op.serial_end;
+        e->op=b->op;e->op.id=id;e->op.serial_begin=sb;e->op.serial_end=se;e->op.call=call;
+        if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+        ST_REL(&a->admitted,id);
+        auto_queue_commit(&a->operations);
+        share=se;
+    }
+    s->count=0;
+    if(share) {
+        uint32_t *w=(uint32_t *)(void *)ctx->current;
+        w[0]=(1u<<18)|0x1d6cu;w[1]=c->op_label*16u;   /* SEMAPHORE_OFFSET */
+        w[2]=(1u<<18)|0x1d70u;                          /* BACKEND_WRITE_RELEASE */
+        w[3]=(share&0xff00ff00u)|((share>>16)&0xffu)|((share&0xffu)<<16);
+        ctx->current=(void *)(w+4);
+        if(!auto_publication_commit(&a->publication,share)) auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
+    }
+}
+
+/* D2: one FRAME mark (kind 4) in the ring at the owner's frame open (role 1) or
+ * close (role 2): a report pair back to back, twelve words in current room, no
+ * callback. Not coverage: a missed mark leaves that frame's RSX begin or end
+ * UNKNOWN, visible in the reader. */
+static void frame_mark(auto_capture *a,uint32_t role)
+{
+    const auto_wire_config *c=auto_config_read(&configuration);
+    gpp_ctx *ctx=a->context;
+    auto_queue_entry *e;
+    uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    if(!a->coverage.active || a->active || !c || c->reason || LD_ACQ(&g_prof->stop_latch) ||
+       !auto_config_can_admit(&configuration)) return;
+    if((uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end || (cur&3u) || cur>end || end-cur<48 ||
+       !initialize_device(a) || !(e=auto_queue_claim(&a->operations))) {
+        increment(a,&a->frame_marks_missed);return;
+    }
+    ST_REL(&a->admitted,e->op.id);
+    e->op.kind=AUTO_KIND_FRAME;e->op.flags=1;e->op.generation=c->generation;e->op.args[0]=role;
+    e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;
+    e->op.report_begin=c->report_first+16+e->pair*2;e->op.report_end=e->op.report_begin+1;
+    a->operations_device.write_timer(a->operations_device.ctx,e->op.report_begin,PRG_POISON);
+    a->operations_device.write_timer(a->operations_device.ctx,e->op.report_end,PRG_POISON);
+    a->operations_device.sync(a->operations_device.ctx);
+    g_tls.in_gpu=1;
+    e->op.tb_before=observation_tb();
+    if(a->operations_device.reserve_pair(a->operations_device.ctx,e->op.report_begin,c->op_label,e->op.serial_begin)!=0 ||
+       a->operations_device.reserve_pair(a->operations_device.ctx,e->op.report_end,c->op_label,e->op.serial_end)!=0) {
+        e->op.flags|=4|32;
+        auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
+    }
+    e->op.tb_after=observation_tb();
+    if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
+    {
+        int complete=!(e->op.flags&4);
+        uint32_t serial=e->op.serial_end;
+        auto_queue_commit(&a->operations);
+        if(complete && !auto_publication_commit(&a->publication,serial))
+            auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
+    }
+    g_tls.in_gpu=0;
+}
+
+/* A covered emitter on a context other than the attached ring. */
+static uint32_t foreign_begin(gpp_ctx *ctx,const ps3tc_auto_call *call,uint64_t caller)
+{
+    auto_capture *a;
+    auto_segment *s;
+    if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active ||
+       a->segment_active) return 0;
+    s=segment_find(a,ctx);
+    if(s && s->open) return segment_begin(a,s,ctx,call,caller);
+    foreign_visit(a);
+    return 0;
 }
 
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
@@ -386,7 +597,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     const auto_wire_config *c;
     auto_queue_entry *e;
     uint64_t words;
-    if(!a) {foreign_visit(ctx,call);return 0;}
+    if(!a) return foreign_begin(ctx,call,caller);
     if(!call || call->kind<1 || call->kind>3) return 0;
     if(g_tls.in_gpu && !a->active) {increment(a,&a->internal_suppressed);return 0;}
     if(!auto_frames_count(&a->coverage,call->kind,0)) increment(a,&a->unassociated);
@@ -456,7 +667,12 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
     const auto_wire_config *c;
     if(!ticket) return;
     a=owner_capture((gpp_ctx *)(void *)context,0);
-    if(!a || !(e=a->active)) return;
+    if(!a) {
+        a=owner_capture(NULL,0);
+        if(a && a->segment_active && a->segment_active->ctx==(void *)context) segment_end(a,(gpp_ctx *)(void *)context);
+        return;
+    }
+    if(!(e=a->active)) return;
     c=auto_config_read(&configuration);
     uintptr_t current=(uintptr_t)(void *)a->context->current,end=(uintptr_t)(void *)a->context->end;
     if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<24 ||
@@ -504,8 +720,11 @@ void p_auto_owner_retire(void)
     auto_capture *a=owner_capture(NULL,1);
     if(a && !a->active) {
         if(a->fifo_instance) (void)ps3dk_prof_fifo_detach(a->fifo_instance);
-        if(a->coverage.active)
+        for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].count) segment_drop(a,&a->segments[i]);
+        if(a->coverage.active) {
+            frame_mark(a,AUTO_FRAME_END);
             (void)auto_frames_close(&a->coverage,a->owner_incarnation,a->coverage.live.frame,observation_tb(),1);
+        }
         ST_REL(&a->owner_done,1u);
     }
 }
@@ -514,9 +733,10 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
     if(a && !a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
+        if(a->coverage.active) frame_mark(a,AUTO_FRAME_END); /* implied closure of the previous frame */
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
-        (void)auto_frames_open(&a->coverage,frame,tb);
+        if(auto_frames_open(&a->coverage,frame,tb)) frame_mark(a,AUTO_FRAME_BEGIN);
     }
 }
 
@@ -526,6 +746,8 @@ int ps3dk_prof_auto_frame_end(uint32_t instance,ps3dk_prof_token frame)
     if(instance!=1 || !frame.owner || frame.reserved) return PS3DK_PROF_EINVAL;
     auto_capture *a=owner_capture(NULL,1);
     if(!a || a->active || g_tls.in_gpu) return PS3DK_PROF_EINVAL;
+    if(a->coverage.active && frame.owner==a->coverage.owner && frame.frame==a->coverage.live.frame)
+        frame_mark(a,AUTO_FRAME_END);
     if(!auto_frames_close(&a->coverage,frame.owner,frame.frame,observation_tb(),0)) return PS3DK_PROF_EINVAL;
     if(frame.frame%64u==63) sample_clock(a,frame.frame);
     if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
@@ -545,7 +767,7 @@ void ps3dk_prof__auto_test_segment_counts(uint64_t out[4])
 {
     const auto_capture *a=capture;
     out[0]=a ? a->segment_visits:0;out[1]=a ? a->foreign_visits:0;
-    out[2]=a ? a->segment_table_full:0;out[3]=a ? a->segments_open:0;
+    out[2]=a ? a->segment_table_full:0;out[3]=a ? a->segments_used:0;
 }
 #endif
 
@@ -585,7 +807,8 @@ static int drain_operations(auto_capture *a,int seal)
             record.flags|=4;
             record.raw_begin=record.raw_end=0;
             record.published=auto_publication_read(&a->publication);
-            if(record.published<record.serial_end) {record.flags|=32;record.published=0;}
+            if(record.published<record.serial_end) record.flags|=32;
+            if(record.flags&32) record.published=0; /* PUBLICATION_UNKNOWN carries no snapshot */
             if(result==AUTO_COMPLETION_REFUSED) record.flags|=16;
         }
         if(a->completion.invalid) {
@@ -678,6 +901,7 @@ void p_auto_drain(prof *p, int seal)
         if(totals[4] || totals[6] || totals[14]) flags|=AUTO_LOWER_BOUND;
         if(totals[9]<totals[10] || totals[9]-totals[10]!=totals[11]) flags|=AUTO_LOWER_BOUND;
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
+        if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
         if(LD_ACQ(&capture->saturated) || LD_ACQ(&capture->coverage.saturated) ||
            LD_ACQ(&capture->clocks.saturated)) flags|=AUTO_LOWER_BOUND|AUTO_SATURATED;
         if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}

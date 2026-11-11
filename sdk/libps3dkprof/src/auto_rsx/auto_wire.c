@@ -22,7 +22,7 @@ size_t auto_encode_config(uint8_t *b, size_t cap, const auto_wire_config *c)
         le32(b+24,c->reason); le32(b+28,(uint32_t)c->application_rc);
     } else {
         le32(b+8,c->domain); le32(b+12,c->epoch); le32(b+16,c->owner); le32(b+20,c->generation);
-        le32(b+24,7); le32(b+28,15);
+        le32(b+24,AUTO_KIND_MASK); le32(b+28,AUTO_FORM_MASK);
         le32(b+32,c->report_first); le32(b+36,c->report_count);
         le32(b+40,c->op_label); le32(b+44,c->clock_label);
         le32(b+48,c->pairs); le32(b+52,c->metadata); le32(b+56,c->frames); le32(b+60,AUTO_OP_BYTES);
@@ -46,6 +46,7 @@ size_t auto_encode_ops(uint8_t *b, size_t cap, uint32_t instance, const auto_wir
         le64(q+16,o->frame); le64(q+24,o->tb_before); le64(q+32,o->tb_after);
         le64(q+40,o->raw_begin); le64(q+48,o->raw_end); le64(q+56,o->caller);
         for(j=0;j<7;j++) le32(q+64+j*4,o->args[j]);
+        le32(q+92,o->segment); le32(q+116,o->call);
         le32(q+96,o->report_begin); le32(q+100,o->report_end);
         le32(q+104,o->serial_begin); le32(q+108,o->serial_end); le32(q+112,o->generation);
         le64(q+120,o->published);

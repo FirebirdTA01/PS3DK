@@ -26,7 +26,17 @@ extern const uint8_t ps3dk_prof__auto_build_binding[32];
 extern const char ps3dk_prof__auto_build_id[];
 extern const char ps3dk_prof__auto_app[];
 
-enum { AUTO_SEGMENTS_OPEN=8 };
+enum { AUTO_SEGMENTS_OPEN=8, AUTO_SEGMENT_OPS=32 };
+/* One covered operation built inside a CALL segment: its report pair is owned
+ * from the build; its record is committed at cellGcmSegmentCall (or as an
+ * INCOMPLETE record when the segment is rebuilt, never called or called
+ * outside the attached ring). */
+typedef struct auto_segment_op { auto_wire_op op; uint32_t pair; } auto_segment_op;
+typedef struct auto_segment {
+    void *ctx;
+    uint32_t ordinal, open, count;
+    auto_segment_op ops[AUTO_SEGMENT_OPS];
+} auto_segment;
 
 /* One allocation before observation; variable queues follow this control block
  * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
@@ -46,9 +56,10 @@ typedef struct auto_capture {
     uint32_t device_initialized, saturated, owner_done;
     /* owner only: open segment contexts (cellGcmSegmentBegin..End) and the
      * covered visits on contexts other than the attached ring */
-    void *segments[AUTO_SEGMENTS_OPEN];
-    uint32_t segments_open;
-    uint64_t segment_visits, foreign_visits, segment_table_full;
+    auto_segment segments[AUTO_SEGMENTS_OPEN];
+    uint32_t segments_used, segment_ordinal, call_ordinal, segment_quarantine;
+    auto_segment *segment_active; /* between a segment emitter's begin and end */
+    uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

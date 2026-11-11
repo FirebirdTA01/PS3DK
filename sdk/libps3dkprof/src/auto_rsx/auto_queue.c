@@ -43,6 +43,47 @@ auto_queue_entry *auto_queue_claim(auto_queue *q)
     return e;
 }
 
+int auto_queue_take_pair(auto_queue *q)
+{
+    uint32_t i,pair=0;
+    q->refusal=AUTO_QUEUE_NONE;
+    if(ACQ(&q->stopped)) {q->refusal=AUTO_QUEUE_STOPPED;return -1;}
+    for(i=0;i<q->pairs;i++) {
+        pair=(q->pair_cursor+i)%q->pairs;
+        if(ACQ(&q->pair_state[pair])==0) break;
+    }
+    if(i==q->pairs) {q->refusal=AUTO_QUEUE_REPORTS;return -1;}
+    REL(&q->pair_state[pair],1u);
+    q->pair_cursor=(pair+1u)%q->pairs;
+    return (int)pair;
+}
+
+void auto_queue_quarantine_pair(auto_queue *q, uint32_t pair)
+{
+    if(pair<q->pairs) REL(&q->pair_state[pair],2u);
+}
+
+auto_queue_entry *auto_queue_claim_held(auto_queue *q, uint32_t pair, uint32_t share)
+{
+    uint64_t w,r;
+    auto_queue_entry *e;
+    q->refusal=AUTO_QUEUE_NONE;
+    if(pair>=q->pairs || ACQ(&q->pair_state[pair])!=1u) {q->refusal=AUTO_QUEUE_REPORTS;return NULL;}
+    if(ACQ(&q->stopped)) {q->refusal=AUTO_QUEUE_STOPPED;return NULL;}
+    if(q->claimed) {q->refusal=AUTO_QUEUE_REENTRY;return NULL;}
+    if(q->next_id==UINT64_MAX || (!share && q->next_serial>UINT32_MAX-2u) ||
+       (share && (share&1u || share+1u!=q->next_serial))) {q->refusal=AUTO_QUEUE_EXHAUSTED;return NULL;}
+    w=RLX(&q->write_idx); r=ACQ(&q->read_idx);
+    if(w-r>=q->capacity) {q->refusal=AUTO_QUEUE_METADATA;return NULL;}
+    e=&q->entries[w%q->capacity];
+    memset(e,0,sizeof *e);
+    e->pair=pair; e->op.id=q->next_id++;
+    if(share) {e->op.serial_begin=share-1u; e->op.serial_end=share;}
+    else {e->op.serial_begin=q->next_serial; e->op.serial_end=q->next_serial+1u; q->next_serial+=2u;}
+    q->claimed=1;
+    return e;
+}
+
 void auto_queue_commit(auto_queue *q)
 {
     if(!q->claimed) return;

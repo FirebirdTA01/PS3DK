@@ -29,9 +29,11 @@ typedef gcmTransferSwizzle CellGcmTransferSwizzle;
 #include "ps3tc_prof_auto.h"
 #define SEGMENT_OBSERVE_OPEN(c) ps3dk_prof__auto_segment_open(c)
 #define SEGMENT_OBSERVE_CLOSE(c) ps3dk_prof__auto_segment_close(c)
+#define SEGMENT_OBSERVE_CALL(r, c) ps3dk_prof__auto_segment_call(r, c)
 #else
 #define SEGMENT_OBSERVE_OPEN(c) ((void)0)
 #define SEGMENT_OBSERVE_CLOSE(c) ((void)0)
+#define SEGMENT_OBSERVE_CALL(r, c) ((void)0)
 #endif
 
 #ifdef PS3TC_GCM_SEGMENT_HOST_TEST
@@ -210,6 +212,7 @@ int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)
     s->serial += 1u;
     s->calls += 1u;
     s->state = CELL_GCM_SEGMENT_STATE_SUBMITTED;
+    SEGMENT_OBSERVE_CALL(ring, &s->context);
     return CELL_OK;
 }
 

@@ -357,7 +357,13 @@ static void test_external(void)
 /* Observer seam: every PPU-written segment context is announced between
  * cellGcmSegmentBegin and cellGcmSegmentEnd; external claims are not. */
 static gcmContextData *auto_open_ctx[8];
-static unsigned auto_opens, auto_closes, auto_checking;
+static unsigned auto_opens, auto_closes, auto_calls, auto_checking;
+static gcmContextData *auto_call_ring, *auto_call_ctx;
+void ps3dk_prof__auto_segment_call(struct _gcmCtxData *r, struct _gcmCtxData *c)
+{
+    if (!auto_checking) return;
+    auto_call_ring = r; auto_call_ctx = c; ++auto_calls;
+}
 void ps3dk_prof__auto_segment_open(struct _gcmCtxData *c)
 {
     if (!auto_checking) return;
@@ -376,12 +382,16 @@ static void test_auto_seam(void)
     gcmContextData *c;
 
     puts("auto seam:");
-    auto_opens = auto_closes = 0;
+    auto_opens = auto_closes = auto_calls = 0;
     auto_checking = 1;
+    ring_reset();
     CHECK("init", cellGcmSegmentInit(&s, &arena[12288], 256, GCM_LOCATION_CELL, 211) == CELL_OK);
     c = cellGcmSegmentBegin(&s);
     CHECK("auto open", c == &s.context && auto_opens == 1 && auto_open_ctx[0] == c && auto_closes == 0);
     CHECK("end", cellGcmSegmentEnd(&s) == CELL_OK && auto_closes == 1);
+    CHECK("auto call", cellGcmSegmentCall(&ring, &s) == CELL_OK && auto_calls == 1 &&
+          auto_call_ring == &ring && auto_call_ctx == &s.context);
+    labels[211] = s.serial;   /* retired */
     c = cellGcmSegmentBegin(&s);   /* a closed, uncalled segment may be rebuilt */
     CHECK("auto reopen", c && auto_opens == 2);
     for (unsigned i = 0; c && i < 1000 && cellGcmSegmentGetOverflowWords(&s) == 0; i++)

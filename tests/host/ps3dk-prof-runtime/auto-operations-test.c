@@ -12,6 +12,14 @@
 static uint64_t reports[2048][2];
 static uint32_t labels[256],words[256];
 static gpp_ctx context;
+/* With frames, the frame-0 begin FRAME mark takes the first report pair. */
+#if TEST_FRAMES
+#define OP_REPORT 82
+#define FRONTIER 6
+#else
+#define OP_REPORT 80
+#define FRONTIER 4
+#endif
 static void *report(uint32_t n) {return reports[n];}
 static void *label(uint32_t n) {return &labels[n];}
 static void flush(gpp_ctx *c);
@@ -45,7 +53,7 @@ int main(void) {
     ps3dk_prof__auto_resource_write(ctx,1,1); /* outside the initial lease */
     o.report_first=64;o.report_count=20;o.metadata_records=4;o.frame_records=2;
 #if TEST_FRAMES
-    o.frame_records=8;
+    o.frame_records=8;o.report_count=22; /* three pairs: the begin mark and the two operations */
 #endif
     assert(ps3dk_prof_auto_attach((void *)ctx,&o,&instance,&domain)==0);
 #if TEST_FRAMES
@@ -53,7 +61,7 @@ int main(void) {
     ps3dk_prof_frame();
     ps3dk_prof_token first=ps3dk_prof_frame_token();
     assert(first.owner && first.frame==0);
-    assert(context.current==words+6); /* the boundary schedules the first clock */
+    assert(context.current==words+18); /* the boundary's clock (6 words), then the begin FRAME mark (12) */
 #endif
     uint32_t *application_begin=context.current;
     clear.clear_mask=0x80000000;
@@ -82,12 +90,12 @@ int main(void) {
                0
 #endif
         );
-        assert(ld64(&reports[80+2*op][0])==UINT64_MAX);
+        assert(ld64(&reports[OP_REPORT+2*op][0])==UINT64_MAX);
         for(unsigned n=0;n<6;n++) *context.current++=0xcafe0000+n;
         ps3dk_prof__auto_end(ctx,ticket);
         assert(context.current==before+18 && !g_tls.in_gpu);
-        assert(before[0]==0x41800 && before[1]==(0x1000000u+(80+2*op)*16));
-        assert(before[12]==0x41800 && before[13]==(0x1000000u+(81+2*op)*16));
+        assert(before[0]==0x41800 && before[1]==(0x1000000u+(OP_REPORT+2*op)*16));
+        assert(before[12]==0x41800 && before[13]==(0x1000000u+(OP_REPORT+1+2*op)*16));
     }
     assert(g_prof->auto_lease.published);
 #if TEST_FRAMES
@@ -107,8 +115,8 @@ int main(void) {
     assert(ps3dk_prof_auto_frame_end(attached_instance,ps3dk_prof_frame_token())==0);
     clear.clear_mask=0xf3;
 #endif
-    assert(ps3dk_prof__auto_publish_before(ctx)==4);
-    ps3dk_prof__auto_publish_after(ctx,4);
+    assert(ps3dk_prof__auto_publish_before(ctx)==FRONTIER);
+    ps3dk_prof__auto_publish_after(ctx,FRONTIER);
 #if TEST_INVALIDATE == 1
     gpp_ctx foreign={words,words+256,words,NULL};
     ps3dk_prof__auto_resource_write((void *)&foreign,1,80);
@@ -117,9 +125,12 @@ int main(void) {
     ps3dk_prof__auto_context_reset(ctx);
     assert(!ps3dk_prof__auto_begin(ctx,&clear,126));
 #endif
-    st64(&reports[80][0],100);st64(&reports[81][0],110);
-    st64(&reports[82][0],200);st64(&reports[83][0],220);
-    st32(&labels[239],4); /* device facts are still supplied by this host fixture */
+#if TEST_FRAMES
+    st64(&reports[80][0],50);st64(&reports[81][0],60); /* the begin mark */
+#endif
+    st64(&reports[OP_REPORT][0],100);st64(&reports[OP_REPORT+1][0],110);
+    st64(&reports[OP_REPORT+2][0],200);st64(&reports[OP_REPORT+3][0],220);
+    st32(&labels[239],FRONTIER); /* device facts are still supplied by this host fixture */
     assert(context.current==application_begin+36);
     puts("AUTO actual marker producer and cumulative completion PASS");
     return 0;

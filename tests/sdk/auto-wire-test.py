@@ -37,7 +37,7 @@ int main(void) {
     op.frame=9; op.tb_before=10; op.tb_after=11; op.raw_begin=12; op.raw_end=13; op.caller=14;
     for(i=0;i<7;i++) op.args[i]=20+i;
     op.report_begin=1040; op.report_end=1041; op.serial_begin=1; op.serial_end=2;
-    op.generation=1; op.published=2;
+    op.generation=1; op.published=2; op.segment=0x31; op.call=0x32;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_ops(b,143,1,&op,1)!=0 || memcmp(b,before,sizeof b)) return 5;
     if(auto_encode_ops(b,sizeof b,1,&op,0)!=0 || memcmp(b,before,sizeof b)) return 6;
@@ -107,7 +107,7 @@ def main():
     assert run.returncode == 0, ('writer/short-buffer control', run.returncode)
     chunks = []
     c = bytearray(160)
-    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,7,15,1024,1024,239,238,504,1024,256,128,
+    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,15,11,1024,1024,239,238,504,1024,256,128,
                      79800000,262144,2097152,3,1)
     c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
     for reason in range(1,11):
@@ -117,7 +117,8 @@ def main():
         c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
     op=bytearray(144); struct.pack_into('<HHIII',op,0,1,0,1,1,128)
     struct.pack_into('<QIHH6Q7I',op,16,0x0102030405060708,7,2,3,9,10,11,12,13,14,*range(20,27))
-    struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2); chunks.append(bytes(op))
+    struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2)
+    struct.pack_into('<I',op,108,0x31); struct.pack_into('<I',op,132,0x32); chunks.append(bytes(op))
     f=bytearray(352); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,0,0,100,200,3,4,0)
     struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12))); chunks.append(bytes(f))
     chunks.append(struct.pack('<HHI15Q',1,49,1,*(0x1020304050607080+i for i in range(15))))

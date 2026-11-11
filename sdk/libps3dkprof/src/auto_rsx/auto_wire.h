@@ -16,7 +16,15 @@ enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
        AUTO_ALLOCATION_FAILED, AUTO_UNSUPPORTED_CONTEXT, AUTO_STOPPED, AUTO_NO_GCM_INIT };
 enum { AUTO_FINAL=1, AUTO_LOWER_BOUND=2, AUTO_SATURATED=4, AUTO_OWNER_UNACK=8,
-       AUTO_STATUS_CONFLICT=16, AUTO_STATUS_RESET=32 };
+       AUTO_STATUS_CONFLICT=16, AUTO_STATUS_RESET=32, AUTO_STATUS_SEGMENT_QUARANTINE=64 };
+/* CONFIG masks of this writer: ARRAY|INDEX|CLEAR|FRAME covered; unsafe, immediate
+ * and direct/uninstrumented forms unsupported (CALL segments built through the
+ * segment API are covered). A reader that requires the older 7/15 refuses. */
+enum { AUTO_KIND_MASK=15, AUTO_FORM_MASK=11 };
+/* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
+ * SEGMENT marks an operation built inside a CALL segment (u32@92 segment
+ * ordinal, u32@116 call ordinal, both nonzero). */
+enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=64 };
 
 /* Native writer inputs. No native struct is copied to the wire. Semantic
  * validation and immutable snapshot ownership belong to the runtime/reader;
@@ -38,6 +46,7 @@ typedef struct auto_wire_op {
     uint32_t args[7]; /* words, start, count, offset, index type, mode, clear mask */
     uint32_t report_begin, report_end, serial_begin, serial_end, generation;
     uint64_t published;
+    uint32_t segment, call; /* SEGMENT only; zero otherwise */
 } auto_wire_op;
 
 typedef struct auto_wire_frame {
