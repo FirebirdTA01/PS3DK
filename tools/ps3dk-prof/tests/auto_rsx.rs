@@ -486,3 +486,118 @@ fn cli_auto() {
     let o = run(&["auto", "--bad", "x"]);
     assert_eq!(o.status.code(), Some(3));
 }
+
+// ---- D1 segments and D2 frame marks (CONFIG masks 15/11) -----------------------------------------------------------
+
+fn seg_cfg() -> ACfg {
+    let mut c = ACfg::default();
+    c.words[4] = 15;
+    c.words[5] = 11;
+    c
+}
+fn seg_file(rest: Vec<Chunk>) -> File {
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(seg_cfg().chunk());
+    f.chunks.extend(rest);
+    f
+}
+fn mark(id: u64, frame: u64, role: u32, raw: u64) -> AOp {
+    let mut o = op(id, frame, (raw, raw + 1));
+    o.kind = 4;
+    o.args = [role, 0, 0, 0, 0, 0, 0];
+    o
+}
+fn seg_op(id: u64, frame: u64, raw: (u64, u64), segment: u32, call: u32, serials: (u32, u32)) -> AOp {
+    let mut o = op(id, frame, raw);
+    o.flags |= 64;
+    o.r0 = segment;
+    o.r1 = call;
+    o.serials = serials;
+    o.published = u64::from(serials.1);
+    o
+}
+
+#[test]
+fn segment_and_frame_records() {
+    // frame 0: begin mark, two segment draws of one call (shared serial pair), end mark
+    let mut list = vec![mark(1, 0, 1, 5000), seg_op(2, 0, (6000, 20_000), 1, 1, (3, 4)),
+        seg_op(3, 0, (21_000, 36_000), 1, 1, (3, 4)), mark(4, 0, 2, 90_000)];
+    list[3].serials = (5, 6);
+    list[3].published = 6;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 0)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops(&list)];
+    rest.push(coverage(&row(0, (10_000, 110_000), 2)));
+    rest.extend(anchors().iter().map(clock));
+    rest.push(status(1, status_for(4, 1, 9, 6)));
+    let r = analyze(&reader::read(&seg_file(rest).bytes()).expect("reads"));
+    let f = &r.frames[0];
+    assert_eq!(f.segment_ops, 2);
+    assert_eq!(f.rsx_frame_raw, (Some(5000), Some(90_001)));
+    let (lo, hi) = f.rsx_frame_ppu.expect("mapped");
+    assert!(lo <= 170_002 && 170_002 <= hi, "{lo}..{hi}");
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    let c = reader::read(&seg_file(vec![ops(&list)]).bytes()).unwrap();
+    let ops_read = &c.auto.as_ref().unwrap().ops;
+    assert_eq!((ops_read[1].segment, ops_read[1].call), (1, 1));
+}
+
+#[test]
+fn old_format_refuses_segment_and_frame_records() {
+    // A first-writer CONFIG (7/15) knows neither SEGMENT nor FRAME: both are refused, as an older reader would.
+    let s = seg_op(1, 0, (1, 2), 1, 1, (1, 2));
+    let e = reader::read(&auto_file(vec![ops(&[s])]).bytes()).unwrap_err();
+    assert_eq!(e.rule, Rule::AutoOps);
+    assert!(e.detail.contains("unknown flags"), "{}", e.detail);
+    let e = reader::read(&auto_file(vec![ops(&[mark(1, 0, 1, 5)])]).bytes()).unwrap_err();
+    assert!(e.detail.contains("kind 4"), "{}", e.detail);
+    let e = reader::read(&auto_file(vec![status(1 | 2 | 64, [0; 15])]).bytes()).unwrap_err();
+    assert_eq!(e.rule, Rule::AutoStatus);
+    // the first reader (157d7d749) required masks 7/15 exactly, so it refuses a 15/11 CONFIG outright; this reader
+    // accepts only the two defined pairs
+    let mut c = seg_cfg();
+    c.words[5] = 15;
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(c.chunk());
+    assert_eq!(rule(&f), Rule::AutoConfig);
+}
+
+#[test]
+fn segment_and_frame_refusals() {
+    let cases: Vec<(AOp, &str)> = vec![
+        (seg_op(1, 0, (1, 2), 0, 1, (1, 2)), "segment or call ordinal"),
+        (seg_op(1, 0, (1, 2), 1, 0, (1, 2)), "segment or call ordinal"),
+        ({ let mut o = mark(1, 0, 3, 5); o.flags = 3; o }, "FRAME mark"),
+        ({ let mut o = mark(1, 0, 1, 5); o.flags = 2; o.owner = 0; o.frame = 0; o }, "FRAME mark"),
+        ({ let mut o = mark(1, 0, 1, 5); o.args[6] = 1; o }, "FRAME mark"),
+        ({ let mut o = seg_op(1, 0, (1, 2), 1, 1, (1, 2)); o.kind = 4; o.args = [1, 0, 0, 0, 0, 0, 0]; o }, "FRAME mark"),
+    ];
+    for (o, want) in cases {
+        let e = reader::read(&seg_file(vec![ops(&[o])]).bytes()).expect_err(want);
+        assert_eq!(e.rule, Rule::AutoOps, "{want}");
+        assert!(e.detail.contains(want), "{want}: {}", e.detail);
+    }
+    // a never-called build: INCOMPLETE, call ordinal 0, and the quarantine status flag
+    let mut o = seg_op(1, 0, (0, 0), 2, 0, (1, 2));
+    o.flags = 64 | 4 | 16;
+    o.owner = 0;
+    o.frame = 0;
+    o.published = 0;
+    let mut n = status_for(1, 0, 0, 0);
+    n[14] = 1;
+    let c = reader::read(&seg_file(vec![ops(&[o]), status(1 | 2 | 64, n)]).bytes()).expect("reads");
+    assert_eq!(c.auto.unwrap().last_status.unwrap().flags, 67);
+}
+
+#[test]
+fn d1_d2_fixture_from_the_host_runtime() {
+    let r = read_fixture("d12-segments");
+    let Some(Config::Attached(a)) = &r.config else { panic!("attached") };
+    assert_eq!((a.kind_mask, a.form_mask), (15, 11));
+    assert!(r.status.as_ref().is_some_and(|s| s.flags & 64 != 0), "SEGMENT_QUARANTINE");
+    assert_eq!(r.frames.len(), 2);
+    assert_eq!(r.frames[0].segment_ops, 2);
+    assert_eq!(r.frames[1].segment_ops, 1);
+    assert!(r.frames.iter().all(|f| f.rsx_frame_raw.0.is_some() && f.rsx_frame_raw.1.is_some()));
+    // frame 0 also holds the never-called build's observed clear, which has no record: UNKNOWN, not complete
+    assert_eq!(r.frames[0].verdict, Verdict::Unknown);
+}

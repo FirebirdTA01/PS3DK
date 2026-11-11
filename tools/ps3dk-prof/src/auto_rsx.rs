@@ -38,12 +38,21 @@ pub const CONFIG_REFUSED: u16 = 1;
 pub const KIND_ARRAY: u16 = 1;
 pub const KIND_INDEX: u16 = 2;
 pub const KIND_CLEAR: u16 = 3;
+/// D2: a frame boundary mark (args[0] 1 = frame begin, 2 = frame end); only with CONFIG kind mask bit 3.
+pub const KIND_FRAME: u16 = 4;
+pub const FRAME_BEGIN: u32 = 1;
+pub const FRAME_END: u32 = 2;
+/// CONFIG masks: the first writer (no FRAME, CALL unsupported) and the D1/D2 writer (FRAME, CALL segments).
+pub const MASKS_V1: (u32, u32) = (7, 15);
+pub const MASKS_SEGMENTS: (u32, u32) = (15, 11);
 pub const OP_TOKEN: u16 = 1;
 pub const OP_RAW_VALID: u16 = 2;
 pub const OP_INCOMPLETE: u16 = 4;
 pub const OP_CLOCK_INVALID: u16 = 8;
 pub const OP_READ_REFUSED: u16 = 16;
 pub const OP_PUBLICATION_UNKNOWN: u16 = 32;
+/// D1: built inside a CALL segment; u32@92 segment ordinal, u32@116 call ordinal.  Only when CONFIG covers CALL.
+pub const OP_SEGMENT: u16 = 64;
 pub const FR_TOKEN: u16 = 1;
 pub const FR_FINAL: u16 = 2;
 pub const FR_SATURATED: u16 = 4;
@@ -55,6 +64,8 @@ pub const ST_SATURATED: u16 = 4;
 pub const ST_OWNER_UNACK: u16 = 8;
 pub const ST_RESOURCE_CONFLICT: u16 = 16;
 pub const ST_CONTEXT_RESET: u16 = 32;
+/// D1: report pairs of a segment build that can never complete were quarantined (held_report_pairs counts them).
+pub const ST_SEGMENT_QUARANTINE: u16 = 64;
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -133,6 +144,9 @@ pub struct Attached {
     pub pairs: u32,
     pub metadata: u32,
     pub frame_capacity: u32,
+    /// Covered kinds (bit k-1 for kind k) and unsupported forms (unsafe 1, immediate 2, CALL 4, direct 8).
+    pub kind_mask: u32,
+    pub form_mask: u32,
     pub frequency: u64,
     pub allocated: u64,
     pub ceiling: u64,
@@ -144,6 +158,14 @@ pub struct Attached {
 pub enum Config {
     Attached(Box<Attached>),
     Refused { instance: u32, reason: u32, application_rc: i32, frequency: u64, mechanism: [u8; 32], binding: [u8; 32] },
+}
+impl Attached {
+    pub fn frames_marked(&self) -> bool {
+        self.kind_mask & 8 != 0
+    }
+    pub fn segments_covered(&self) -> bool {
+        self.form_mask & 4 == 0
+    }
 }
 impl Config {
     pub fn instance(&self) -> u32 {
@@ -184,6 +206,9 @@ pub struct Op {
     pub serial_end: u32,
     pub generation: u32,
     pub published: u64,
+    /// SEGMENT only: segment ordinal and call ordinal (0 for a build that was never called).
+    pub segment: u32,
+    pub call: u32,
 }
 impl Op {
     pub fn raw_valid(&self) -> bool {
@@ -191,6 +216,10 @@ impl Op {
     }
     pub fn token(&self) -> Option<(u32, u64)> {
         (self.flags & OP_TOKEN != 0).then_some((self.frame_owner, self.frame))
+    }
+    /// A covered draw or clear (kinds 1-3), as opposed to a FRAME mark.
+    pub fn covered(&self) -> bool {
+        (KIND_ARRAY..=KIND_CLEAR).contains(&self.kind)
     }
 }
 
@@ -416,7 +445,7 @@ impl Reader {
                 if domain == 0 || epoch == 0 || owner == 0 || generation == 0 {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
-                if kinds != 7 || forms != 15 {
+                if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
                 if pairs == 0 || pairs > PAIRS_MAX || u64::from(count) != 16 + 2 * u64::from(pairs) {
@@ -459,6 +488,8 @@ impl Reader {
                     pairs,
                     metadata,
                     frame_capacity,
+                    kind_mask: kinds,
+                    form_mask: forms,
                     frequency,
                     allocated,
                     ceiling,
@@ -519,14 +550,27 @@ impl Reader {
             if id <= self.last_op {
                 return bad(r, format!("{at}: id not above {}", self.last_op));
             }
-            if r0 != 0 || r1 != 0 {
+            let known = if cfg.segments_covered() { 127 } else { 63 };
+            if flags & !known != 0 {
+                return bad(r, format!("{at}: unknown flags {flags:#x}"));
+            }
+            let segment_op = flags & OP_SEGMENT != 0;
+            if segment_op {
+                // r0 / r1 are the segment and call ordinals
+                if r0 == 0 || (r1 == 0 && flags & OP_INCOMPLETE == 0) {
+                    return bad(r, format!("{at}: SEGMENT without its segment or call ordinal"));
+                }
+            } else if r0 != 0 || r1 != 0 {
                 return bad(r, format!("{at}: reserved field nonzero"));
             }
-            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) {
+            let frame_kind = kind == KIND_FRAME && cfg.frames_marked();
+            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind {
                 return bad(r, format!("{at}: kind {kind}"));
             }
-            if flags & !63 != 0 {
-                return bad(r, format!("{at}: unknown flags {flags:#x}"));
+            if frame_kind && (segment_op || flags & OP_TOKEN == 0 || !(FRAME_BEGIN..=FRAME_END).contains(&args[0])
+                || args[1..].iter().any(|&a| a != 0))
+            {
+                return bad(r, format!("{at}: FRAME mark needs a token, role 1 or 2 and no other argument"));
             }
             let valid = flags & OP_RAW_VALID != 0;
             let incomplete = flags & OP_INCOMPLETE != 0;
@@ -561,6 +605,7 @@ impl Reader {
             let used: &[usize] = match kind {
                 KIND_ARRAY => &[1, 2, 5],
                 KIND_INDEX => &[2, 3, 4, 5],
+                KIND_FRAME => &[],
                 _ => &[6],
             };
             if (1..7).any(|j| !used.contains(&j) && args[j] != 0) {
@@ -609,6 +654,8 @@ impl Reader {
                 serial_end,
                 generation,
                 published,
+                segment: if segment_op { r0 } else { 0 },
+                call: if segment_op { r1 } else { 0 },
             });
         }
         c.done()
@@ -701,7 +748,8 @@ impl Reader {
         }
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
-        if schema != 1 || instance != cfg.instance() || flags & !63 != 0 {
+        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 127 } else { 63 };
+        if schema != 1 || instance != cfg.instance() || flags & !known != 0 {
             return bad(r, format!("AUTO_STATUS schema {schema} instance {instance} flags {flags:#x}"));
         }
         let fin = flags & ST_FINAL != 0;
@@ -720,7 +768,7 @@ impl Reader {
                     return bad(r, format!("AUTO_STATUS {} decreased", STATUS_FIELDS[j]));
                 }
             }
-            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET] {
+            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -730,9 +778,12 @@ impl Reader {
         if flags & (ST_OWNER_UNACK | ST_SATURATED) != 0 && !lower {
             return bad(r, "AUTO_STATUS OWNER_UNACK or SATURATED without LOWER_BOUND");
         }
-        let sum = n[2].checked_add(n[3]).and_then(|x| x.checked_add(n[4]));
-        if sum != Some(n[1]) {
-            return bad(r, "AUTO_STATUS admitted is not written + dropped + pending");
+        if flags & ST_SATURATED == 0 {
+            let sum = n[2].checked_add(n[3]).and_then(|x| x.checked_add(n[4]));
+            match sum {
+                Some(s) if s == n[1] || (lower && s <= n[1]) => {}
+                _ => return bad(r, "AUTO_STATUS admitted is not written + dropped + pending"),
+            }
         }
         if n[0] < self.last_op || n[13] < self.result.max_snapshot || n[13] > u64::from(u32::MAX) {
             return bad(r, "AUTO_STATUS frontier below the retained records");
@@ -1009,6 +1060,12 @@ pub struct FrameView {
     pub rsx_span_ppu: Option<(u64, u64)>,
     /// PPU ticks the owner provably waited in complete FIFO wrap phases tagged with this frame (lower bound).
     pub fifo_wait: Option<u64>,
+    /// D2: the raw RSX timestamps of the frame's begin and end marks (raw-valid marks only).
+    pub rsx_frame_raw: (Option<u64>, Option<u64>),
+    /// D2: end mark minus begin mark on the PPU clock through the qualified map: [lo, hi] ticks.
+    pub rsx_frame_ppu: Option<(u64, u64)>,
+    /// Covered operations recorded for this frame that were built inside CALL segments.
+    pub segment_ops: u64,
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1071,7 +1128,11 @@ pub fn analyze(cap: &Capture) -> Report {
     let status_ok = inv.final_seen && inv.refusal.is_none();
     let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
     for f in &inv.frames {
-        let ops: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some((f.owner, f.frame))).collect();
+        let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
+        let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
+        let mark = |role: u32| inv.ops.iter().filter(mine)
+            .find(|o| o.kind == KIND_FRAME && o.args[0] == role && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0);
+        let rsx_frame_raw = (mark(FRAME_BEGIN).map(|o| o.raw_begin), mark(FRAME_END).map(|o| o.raw_end));
         let mut v = FrameView {
             owner: f.owner,
             frame: f.frame,
@@ -1087,6 +1148,9 @@ pub fn analyze(cap: &Capture) -> Report {
             rsx_span_raw: None,
             rsx_span_ppu: None,
             fifo_wait: None,
+            rsx_frame_raw,
+            rsx_frame_ppu: None,
+            segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
             verdict: Verdict::Unknown,
             reason: String::new(),
         };
@@ -1099,6 +1163,11 @@ pub fn analyze(cap: &Capture) -> Report {
                 if i128::from(lo) >= m.fmin && i128::from(hi) <= m.fmax {
                     v.rsx_span_ppu = Some((sat(&floor_mul(hi - lo, &m.slope_lo)), sat(&ceil_mul(hi - lo, &m.slope_hi))));
                 }
+            }
+        }
+        if let (MapState::Qualified(m), (Some(b), Some(e))) = (&map, rsx_frame_raw) {
+            if b <= e && i128::from(b) >= m.fmin && i128::from(e) <= m.fmax {
+                v.rsx_frame_ppu = Some((sat(&floor_mul(e - b, &m.slope_lo)), sat(&ceil_mul(e - b, &m.slope_hi))));
             }
         }
         let wait = fifo_wait(cap, &fifo, f.owner, f.frame);
@@ -1225,11 +1294,15 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     }
     for f in &r.frames {
         writeln!(out, "frame {}/{}: {} - {}; ppu {} ticks; visited {:?} observed {:?} excluded {:?} unsupported {}; \
-            ops {} valid {} incomplete; rsx span raw {} ppu {}; fifo wait {}",
+            ops {} valid {} incomplete ({} in segments); rsx span raw {} ppu {}; rsx frame marks {}..{} ppu {}; \
+            fifo wait {}",
             f.owner, f.frame, f.verdict.label(), f.reason, f.tb_end.saturating_sub(f.tb_begin), f.visited, f.observed,
-            f.excluded, f.unsupported, f.ops_valid, f.ops_incomplete,
+            f.excluded, f.unsupported, f.ops_valid, f.ops_incomplete, f.segment_ops,
             f.rsx_span_raw.map_or("UNKNOWN".into(), |x| x.to_string()),
             f.rsx_span_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
+            f.rsx_frame_raw.0.map_or("UNKNOWN".into(), |x| x.to_string()),
+            f.rsx_frame_raw.1.map_or("UNKNOWN".into(), |x| x.to_string()),
+            f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
     }
     Ok(())
@@ -1268,6 +1341,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"unsupported":f.unsupported,
         "ops_valid":f.ops_valid,"ops_incomplete":f.ops_incomplete,"rsx_span_raw":f.rsx_span_raw,
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
+        "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,
+        "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
         "verdict":f.verdict.key(),"reason":f.reason})).collect();
     let clocks: Vec<serde_json::Value> = r.clocks.iter().map(|a| json!({"id":a.id,"slot":a.slot,
         "outcome":a.outcome(),"frame":a.frame,"tb_before":a.tb_before,"tb_after":a.tb_after,"raw":a.raw,
