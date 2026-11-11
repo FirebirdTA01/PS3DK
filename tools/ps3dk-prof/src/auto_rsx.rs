@@ -66,6 +66,8 @@ pub const ST_RESOURCE_CONFLICT: u16 = 16;
 pub const ST_CONTEXT_RESET: u16 = 32;
 /// D1: report pairs of a segment build that can never complete were quarantined (held_report_pairs counts them).
 pub const ST_SEGMENT_QUARANTINE: u16 = 64;
+/// D2: at least one FRAME mark was refused (room or resources); frames without both marks have no RSX duration.
+pub const ST_FRAME_MARK_MISSED: u16 = 128;
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -748,7 +750,7 @@ impl Reader {
         }
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
-        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 127 } else { 63 };
+        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 255 } else { 63 };
         if schema != 1 || instance != cfg.instance() || flags & !known != 0 {
             return bad(r, format!("AUTO_STATUS schema {schema} instance {instance} flags {flags:#x}"));
         }
@@ -768,7 +770,7 @@ impl Reader {
                     return bad(r, format!("AUTO_STATUS {} decreased", STATUS_FIELDS[j]));
                 }
             }
-            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE] {
+            for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -1282,6 +1284,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         let fields: Vec<String> = STATUS_FIELDS.iter().zip(s.counters.iter()).map(|(n, v)| format!("{n} {v}")).collect();
         writeln!(out, "status flags {:#x}: {}", s.flags, fields.join(", "))?;
     }
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
+        writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
+    }
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
     let failed = r.clocks.iter().filter(|a| a.flags != CK_VALID).count();
     writeln!(out, "clock anchors: {} ({} failed)", r.clocks.len(), failed)?;
@@ -1356,6 +1361,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "config": config,
         "status": status,
         "operations": {"parsed": r.ops_parsed, "raw_valid": r.ops_valid},
+        "frame_marks_missed": r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0),
         "clock_map": map,
         "clocks": clocks,
         "frames": frames,

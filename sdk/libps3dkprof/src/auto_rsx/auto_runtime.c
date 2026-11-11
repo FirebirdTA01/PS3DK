@@ -902,6 +902,7 @@ void p_auto_drain(prof *p, int seal)
         if(totals[9]<totals[10] || totals[9]-totals[10]!=totals[11]) flags|=AUTO_LOWER_BOUND;
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
         if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
+        if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
         if(LD_ACQ(&capture->saturated) || LD_ACQ(&capture->coverage.saturated) ||
            LD_ACQ(&capture->clocks.saturated)) flags|=AUTO_LOWER_BOUND|AUTO_SATURATED;
         if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}

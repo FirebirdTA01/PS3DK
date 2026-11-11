@@ -584,8 +584,26 @@ fn segment_and_frame_refusals() {
     o.published = 0;
     let mut n = status_for(1, 0, 0, 0);
     n[14] = 1;
-    let c = reader::read(&seg_file(vec![ops(&[o]), status(1 | 2 | 64, n)]).bytes()).expect("reads");
+    let c = reader::read(&seg_file(vec![ops(&[o.clone()]), status(1 | 2 | 64, n)]).bytes()).expect("reads");
     assert_eq!(c.auto.unwrap().last_status.unwrap().flags, 67);
+    // FRAME_MARK_MISSED (128): accepted with the 15/11 masks, refused by a first-writer capture
+    assert!(reader::read(&seg_file(vec![status(1 | 128, [0; 15])]).bytes()).is_ok());
+    assert_eq!(rule(&auto_file(vec![status(1 | 128, [0; 15])])), Rule::AutoStatus);
+}
+
+#[test]
+fn missed_frame_marks_leave_the_duration_unknown() {
+    // frame 0 has only its begin mark; the status says marks were missed
+    let list = [mark(1, 0, 1, 5000)];
+    let rest = vec![ops(&list), coverage(&row(0, (10_000, 110_000), 0)), status(1 | 128, status_for(1, 1, 0, 2))];
+    let r = analyze(&reader::read(&seg_file(rest).bytes()).expect("reads"));
+    assert_eq!(r.frames[0].rsx_frame_raw, (Some(5000), None));
+    assert_eq!(r.frames[0].rsx_frame_ppu, None);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &r).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("FRAME marks missed"), "{text}");
+    assert!(text.contains("rsx frame marks 5000..UNKNOWN ppu UNKNOWN"), "{text}");
 }
 
 #[test]

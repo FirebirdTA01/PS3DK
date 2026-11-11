@@ -331,7 +331,7 @@ if operations:
             assert struct.unpack_from('<12Q',b,256)==expected,struct.unpack_from('<12Q',b,256)
         owner=struct.unpack_from('<I',rows[0],8)[0];assert owner
         assert all(struct.unpack_from('<I',b,8)[0]==owner for b in rows+ops+marks)
-        assert fields[:3]==(1,1,1),fields
+        assert fields[:3]==(1,1|128,1),('FINAL with FRAME_MARK_MISSED: later marks found no report pair',fields)
         assert fields[3:]==(3,3,3,0,0,3,0,1,0,1,1,0,0,6,0),fields
         clocks=[b for k,b in auto if k==38];assert len(clocks)==1
         assert struct.unpack_from('<HH',clocks[0])==(1,1)
