@@ -42,6 +42,33 @@ static int name_ok(const char *n, size_t *len)
     return 1;
 }
 
+/* The drainer's lock sites (the test hook counter_lock_fail_site). */
+enum { CNT_LOCK_SNAPSHOT = 1, CNT_LOCK_FREEZE = 2, CNT_LOCK_COPY = 3, CNT_LOCK_COMMIT = 4 };
+
+/* The drainer's lock of the counter mutex.  A failure is terminal: the capture fails closed (lock_failed, which
+ * also fails the sealing) and the table emits nothing more (failed), so no chunk is retried. */
+static int cnt_lock(prof *p, counter_capture *c, uint32_t site)
+{
+    int rc = 0;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.counter_lock_fail_site == site) {
+        if (ps3dk_prof_test_hooks.counter_lock_fail_skip == 0) {
+            ps3dk_prof_test_hooks.counter_lock_fail_site = 0;
+            rc = -1;
+        } else {
+            ps3dk_prof_test_hooks.counter_lock_fail_skip--;
+        }
+    }
+#else
+    (void)site;
+#endif
+    if (rc == 0 && pal_mutex_lock(&c->mu) == 0)
+        return 0;
+    c->failed = 1;
+    ST_RLX(&p->lock_failed, 1);
+    return -1;
+}
+
 static void sat_inc(uint64_t *v)
 {
     if (*v != UINT64_MAX)
@@ -118,25 +145,31 @@ out:
     return rc;
 }
 
-void p_counter_snapshot(prof *p)
+int p_counter_snapshot(prof *p)
 {
     counter_capture *c = p->counters;
-    if (!c || c->frozen || pal_mutex_lock(&c->mu) != 0)
-        return;
+    if (!c || c->frozen)
+        return 0;
+    if (c->failed || cnt_lock(p, c, CNT_LOCK_SNAPSHOT) != 0)
+        return -1;
     c->snap_head = c->head;
     c->snap_names = c->names;
     (void)pal_mutex_unlock(&c->mu);
+    return 0;
 }
 
-void p_counter_freeze(prof *p)
+int p_counter_freeze(prof *p)
 {
     counter_capture *c = p->counters;
-    if (!c || c->frozen || pal_mutex_lock(&c->mu) != 0)
-        return;
+    if (!c || c->frozen)
+        return 0;
+    if (c->failed || cnt_lock(p, c, CNT_LOCK_FREEZE) != 0)
+        return -1; /* not frozen: p_counter_emit refuses the FINAL, never writes one from an older snapshot */
     c->snap_head = c->head;
     c->snap_names = c->names;
     c->frozen = 1;
     (void)pal_mutex_unlock(&c->mu);
+    return 0;
 }
 
 int p_counter_emit(prof *p, int final)
@@ -146,13 +179,13 @@ int p_counter_emit(prof *p, int final)
     uint32_t nn, ns;
     uint64_t dropped, refused;
 
-    if (!c || c->final_done || p->snk.failed)
+    if (!c || c->final_done || c->failed || p->snk.failed || (final && !c->frozen))
         return -1;
     nn = c->snap_names - c->names_emitted;
     ns = (uint32_t)(c->snap_head - c->tail);
     if (!final && nn == 0 && ns == 0)
         return 0;
-    if (pal_mutex_lock(&c->mu) != 0)
+    if (cnt_lock(p, c, CNT_LOCK_COPY) != 0)
         return -1;
     dropped = c->dropped;
     refused = c->refused;
@@ -178,12 +211,13 @@ int p_counter_emit(prof *p, int final)
     (void)pal_mutex_unlock(&c->mu);
     if (p_counter_emit_chunk(p, b, (size_t)(w - b)))
         return -1;
-    if (pal_mutex_lock(&c->mu) != 0)
-        return -1;
-    c->tail = c->snap_head; /* only now may producers reuse the slots */
-    (void)pal_mutex_unlock(&c->mu);
+    /* The sink accepted the chunk: its names and the FINAL are done even if the commit lock fails below. */
     c->names_emitted = c->snap_names;
     if (final)
         c->final_done = 1;
+    if (cnt_lock(p, c, CNT_LOCK_COMMIT) != 0)
+        return -1; /* the samples stay unreleased, and failed forbids emitting them again */
+    c->tail = c->snap_head; /* only now may producers reuse the slots */
+    (void)pal_mutex_unlock(&c->mu);
     return 0;
 }

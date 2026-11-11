@@ -28,6 +28,7 @@ typedef struct counter_capture {
     uint64_t dropped, refused;    /* cumulative, under mu */
     uint32_t frozen;              /* under mu: the final drain took the frontier */
     uint32_t final_done;          /* drainer-private */
+    uint32_t failed;              /* drainer-private: a drainer lock failed; nothing more is emitted */
     uint64_t snap_head;           /* drainer-private: this drain's snapshot */
     uint32_t snap_names;
     uint16_t len[CNT_NAMES];
@@ -44,11 +45,13 @@ typedef struct counter_capture {
 
 int p_counter_init(prof *p);
 void p_counter_unwind(prof *p);
+/* The drainer's calls return 0, or -1 when the capture must fail: a failed counter-mutex lock (which also sets
+ * lock_failed and stops all later emission) or, for emit, a sink failure.  The callers fail the sink on -1. */
 /* the drain's snapshot of (names, head); at the START of an ordinary drain */
-void p_counter_snapshot(prof *p);
-/* the final frontier: snapshot and freeze, once */
-void p_counter_freeze(prof *p);
-/* writes one COUNTERS chunk for the snapshot when it holds anything new (always when final) */
+int p_counter_snapshot(prof *p);
+/* the final frontier: snapshot and freeze, once; without it there is no FINAL */
+int p_counter_freeze(prof *p);
+/* writes one COUNTERS chunk for the snapshot when it holds anything new (always when final; FINAL only frozen) */
 int p_counter_emit(prof *p, int final);
 /* framing, in prof_drain.c */
 int p_counter_emit_chunk(prof *p, const uint8_t *payload, size_t len);

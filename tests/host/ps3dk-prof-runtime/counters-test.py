@@ -11,8 +11,14 @@ D4: an independent decoder here (not the reader) walks both files' DESCRIPTORS a
 zone names and, per thread name, the record kind/depth/descriptor-name sequence (timestamps and span ids differ
 between runs and are ignored).  They must be identical, so the counters runtime leaves wait.* / drain.* zones and
 their records unchanged.  The file header differs only in file_flags bit 8.
+
+Lock failures: counters_lock_test.c, built with the test hooks, makes the drainer's counter-mutex lock fail once
+at each site (the drain snapshot, the final freeze, an emit before the sink, an emit after the sink accepted the
+chunk; ordinary and final).  Each failure must fail the capture (the drain and the shutdown return ESINKFAIL, no
+TRAILER), no FINAL may follow a failed freeze or copy, and no name or sample may be emitted twice.  A mutant whose
+drain discards the emission error must fail.  --lock-only runs just these cases (no reader needed).
 """
-import argparse, json, os, struct, subprocess, sys
+import argparse, json, os, shutil, struct, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -88,14 +94,132 @@ def zones(data):
     return flags, sorted(descs.values()), recs
 
 
+# Counter-mutex lock failures (counters_lock_test.c, the counter_lock_fail_site hook): (name, site, skip, expected).
+# drain = the result of both manual drains (a failed first drain fails the second too), "fail" = PS3DK_PROF_ESINKFAIL.
+# Every failing case must leave no TRAILER and no FINAL COUNTERS chunk unless the sink accepted that FINAL before
+# the failure (commit-final), and no case may emit a name or a sample twice.
+ESINKFAIL = -10
+LOCK_CASES = [
+    ("no-failure", 0, 0, {"drains": (0, 0), "shutdown": 0, "trailer": True, "final": True}),
+    ("snapshot", 1, 0, {"drains": (ESINKFAIL, ESINKFAIL), "shutdown": ESINKFAIL, "trailer": False, "final": False}),
+    ("freeze", 2, 0, {"drains": (0, 0), "shutdown": ESINKFAIL, "trailer": False, "final": False}),
+    ("copy", 3, 0, {"drains": (ESINKFAIL, ESINKFAIL), "shutdown": ESINKFAIL, "trailer": False, "final": False}),
+    ("copy-final", 3, 2, {"drains": (0, 0), "shutdown": ESINKFAIL, "trailer": False, "final": False}),
+    ("commit", 4, 0, {"drains": (ESINKFAIL, ESINKFAIL), "shutdown": ESINKFAIL, "trailer": False, "final": False}),
+    ("commit-final", 4, 2, {"drains": (0, 0), "shutdown": ESINKFAIL, "trailer": False, "final": True}),
+]
+
+
+def build_lock(out, cc, src, name):
+    inc = out / "include" / "ps3dk"
+    inc.mkdir(parents=True, exist_ok=True)
+    for h in ("prof.h", "prof_counter.h"):
+        (inc / h).write_bytes((ROOT / "sdk/include/ps3dk" / h).read_bytes())
+    exe = out / name
+    flags = ["-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror", "-pthread", "-Wno-prio-ctor-dtor",
+             "-DPS3DK_PROF=1", "-DPS3DK_PROF_PAL_HOST", "-DPS3DK_PROF_WITH_COUNTERS=1", "-DPS3DK_PROF_TEST_HOOKS",
+             "-I", str(inc.parent), "-I", str(src / "core")]
+    if os.environ.get("SANITIZE"):
+        flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-ftls-model=local-exec"]
+    files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
+    files += sorted((src / "counters").glob("*.c"))
+    cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_lock_test.c")), "-o", str(exe)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    (out / (name + ".compile.txt")).write_text(" ".join(cmd) + "\n" + r.stdout + r.stderr)
+    if r.returncode:
+        sys.exit(f"FAIL: compile {name}: {r.stderr}")
+    return exe
+
+
+def counter_chunks(data):
+    """[(final, [name ids], [32-byte samples])] of every COUNTERS chunk, and whether a TRAILER was written."""
+    _, cs = chunks(data)
+    found = []
+    for ty, p in cs:
+        if ty != 39:
+            continue
+        final, nn, ns = struct.unpack_from("<HII", p, 2)
+        at, ids = 32, []
+        for _ in range(nn):
+            ident, ln = struct.unpack_from("<IH", p, at)
+            ids.append(ident)
+            at += 6 + ln
+        found.append((final, ids, [p[at + 32 * i:at + 32 * (i + 1)] for i in range(ns)]))
+    return found, any(ty == 6 for ty, _ in cs)
+
+
+def lock_cases(out, cc, src, tag):
+    """Run every lock case against the runtime in `src`; return the names of the cases that failed."""
+    exe = build_lock(out, cc, src, f"lock-{tag}")
+    failed = []
+    for name, site, skip, want in LOCK_CASES:
+        cap = out / f"lock-{tag}-{name}.prof"
+        r = subprocess.run([str(exe), str(site), str(skip), str(cap)], capture_output=True, text=True)
+        (out / f"lock-{tag}-{name}.run.txt").write_text(r.stdout + r.stderr)
+        problems = []
+        if r.returncode:
+            problems.append(f"driver rc={r.returncode}")
+        else:
+            got = dict(kv.split("=") for kv in r.stdout.split())
+            drains, shutdown = (int(got["drain1"]), int(got["drain2"])), int(got["shutdown"])
+            found, trailer = counter_chunks(cap.read_bytes())
+            ids = [i for _, n, _ in found for i in n]
+            samples = [s for _, _, ss in found for s in ss]
+            finals = sum(1 for f, _, _ in found if f)
+            if drains != want["drains"]:
+                problems.append(f"drains {drains} (want {want['drains']})")
+            if shutdown != want["shutdown"]:
+                problems.append(f"shutdown {shutdown} (want {want['shutdown']})")
+            if trailer != want["trailer"]:
+                problems.append(f"trailer {trailer} (want {want['trailer']})")
+            if finals != (1 if want["final"] else 0):
+                problems.append(f"{finals} FINAL chunk(s) (want {1 if want['final'] else 0})")
+            if len(ids) != len(set(ids)) or len(samples) != len(set(samples)):
+                problems.append(f"emitted twice: names {sorted(ids)}, {len(samples)} samples, "
+                                f"{len(set(samples))} distinct")
+            if name == "no-failure" and (len(set(ids)) != 3 or len(samples) != 6):
+                problems.append(f"no-failure capture: {len(set(ids))} names, {len(samples)} samples (want 3, 6)")
+        print(f"  lock {tag} {name}: " + ("ok" if not problems else "FAIL " + "; ".join(problems)))
+        if problems:
+            failed.append(name)
+    return failed
+
+
+def lock_suite(out, cc):
+    """The fixed runtime passes every lock case; a mutant whose drain discards the emission error must fail."""
+    ok = not lock_cases(out, cc, SRC, "runtime")
+    mut = out / "mutant-src"
+    shutil.copytree(SRC, mut)
+    drain = mut / "core/prof_drain.c"
+    text = drain.read_text()
+    edited = text.replace("if (p_counter_emit(p, 0) != 0)", "if ((void)p_counter_emit(p, 0), 0)")
+    if edited == text:
+        sys.exit("FAIL: the discard-emission mutant edit did not apply")
+    drain.write_text(edited)
+    failed = lock_cases(out, cc, mut, "mutant")
+    if "copy" not in failed:
+        print("  lock mutant: FAIL the discard-emission mutant passed the copy case")
+        ok = False
+    else:
+        print(f"  lock mutant: the discard-emission mutant fails {', '.join(failed)}")
+    print("counter lock failures:", "PASS" if ok else "FAIL")
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--reader", required=True)
+    ap.add_argument("--reader")
+    ap.add_argument("--lock-only", action="store_true", help="run only the counter-mutex lock-failure cases")
     a = ap.parse_args()
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     cc = os.environ.get("CC", "cc")
+    if a.lock_only:
+        return 0 if lock_suite(out, cc) else 1
+    if not a.reader:
+        ap.error("--reader is required unless --lock-only")
+    lock_ok = lock_suite(out, cc)
     caps = {}
     for counters in (False, True):
         exe = build(out, counters, cc)
@@ -157,7 +281,7 @@ def main():
     (out / "d4.json").write_text(json.dumps({"default": {"flags": f0, "zones": d0, "records": r0},
                                              "counters": {"flags": f1, "zones": d1, "records": r1}}, indent=1))
     print("D4 wait.*/drain.* zones and records unchanged:", "PASS" if not d4 else "FAIL " + "; ".join(d4))
-    ok = not problems and not d4
+    ok = not problems and not d4 and lock_ok
     print("counters-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

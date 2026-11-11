@@ -154,6 +154,14 @@ jobs:
           python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --exercise-failure --out "$RUNNER_TEMP/wait-sample-failure-release"
           python3 -B samples/profiling/wait-observations/host-tests/test_verify.py
 
+      # Named counters: end-to-end values against the reader, unchanged zone records, and the counter-mutex lock
+      # failures (each fails the capture closed, no FINAL after a failed freeze, nothing emitted twice), plain and
+      # ASan+UBSan, with a mutant that discards the emission error.
+      - name: Named counter runtime host test
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/counters-test.py --out "$RUNNER_TEMP/counters-plain" --reader tools/target/debug/ps3dk-prof
+          SANITIZE=1 python3 tests/host/ps3dk-prof-runtime/counters-test.py --out "$RUNNER_TEMP/counters-address" --reader tools/target/debug/ps3dk-prof
+
       # Automatic function paths (libps3dkprof_func runtime): the deterministic call-tree, stack-loss, capacity,
       # cut/ack and lifecycle controls, plain, ASan+UBSan and TSan, plus TSan mutants of the snapshot handoff.
       - name: Function-path runtime host test

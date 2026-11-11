@@ -568,7 +568,8 @@ int p_drain_once(prof *p)
     dr_start(p);
 #ifdef PS3DK_PROF_WITH_COUNTERS
     /* 0. The counter snapshot BEFORE the table snapshot: every sample below it was made by a thread step 2 declares. */
-    p_counter_snapshot(p);
+    if (p_counter_snapshot(p) != 0)
+        goto lockfail;
 #endif
 
     /* 1. Snapshot the table under the mutex, then (outside it) each ack word BEFORE its write index, so a RETIRED
@@ -622,7 +623,8 @@ int p_drain_once(prof *p)
     (void)p_wait_emit_ready(p);
 #endif
 #ifdef PS3DK_PROF_WITH_COUNTERS
-    (void)p_counter_emit(p, 0);
+    if (p_counter_emit(p, 0) != 0)
+        sink_fail(&p->snk, -3); /* a lock failure; a sink failure keeps its own first error */
 #endif
 #ifdef PS3DK_PROF_WITH_FUNC
     /* 3c. Function paths: published cuts, LAGGING rows and the FINAL of each retiring incarnation, before its slot is
@@ -781,7 +783,8 @@ int p_quiesce_freeze_seal(prof *p)
     p_wait_freeze(p);
 #endif
 #ifdef PS3DK_PROF_WITH_COUNTERS
-    p_counter_freeze(p); /* after the frontier's thread set is fixed: every sample's incarnation is in it */
+    if (p_counter_freeze(p) != 0) /* after the frontier's thread set is fixed: every sample's incarnation is in it */
+        sink_fail(&p->snk, -3);   /* no FINAL from an older snapshot */
 #endif
     ST_REL(&p->phase, 2u);            /* SEALING; self-instrumentation is off (the caller is in_drain) */
 
@@ -852,7 +855,8 @@ int p_quiesce_freeze_seal(prof *p)
         (void)p_wait_emit_status(p);
 #endif
 #ifdef PS3DK_PROF_WITH_COUNTERS
-        (void)p_counter_emit(p, 1); /* the FINAL COUNTERS chunk, after the frontier's THREADS, before the TRAILER */
+        if (p_counter_emit(p, 1) != 0) /* the FINAL COUNTERS chunk, after the frontier's THREADS, before the TRAILER */
+            sink_fail(&p->snk, -3);    /* no TRAILER after a failed FINAL */
 #endif
         /* The TRAILER: ACKED and NOT_QUIESCED entries (6). */
         anylim = d->any_retired_limit;

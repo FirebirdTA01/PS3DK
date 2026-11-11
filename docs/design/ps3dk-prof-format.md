@@ -861,6 +861,11 @@ Writer (normative for the counters runtime):
   - The final drain freezes the table at the frontier. Later calls are refused with ESTOPPED and are not counted.
   - The FINAL chunk follows the frontier's records and THREADS and precedes the TRAILER.
 - **Loss.** A sample that finds the 4096-sample buffer full is dropped and counted. Nothing waits on the sink.
+- **Lock failure.** A failed lock of the counter mutex by the drainer (the drain snapshot, the freeze, or either
+  lock of an emit) fails the capture closed: the drain and the shutdown return ESINKFAIL and no TRAILER is written.
+  - No FINAL follows a failed freeze: a FINAL is only written from the frozen table.
+  - A chunk the sink accepted is never written again, even when the lock that would release its samples fails;
+    after any failed lock the runtime emits no further COUNTERS chunk.
 
 Verified by:
 
@@ -869,3 +874,6 @@ Verified by:
   - It covers the end-to-end values, frames, refusals and totals on the host PAL.
   - It also checks that the zone names and records of a counters capture are identical to those of a
     default-runtime capture of the same program.
+  - It fails the counter-mutex lock once at each drainer site, ordinary and final, and checks the failed capture,
+    the absence of a FINAL after a failed freeze, and that nothing is emitted twice; a mutant whose drain discards
+    the emission error must fail.
