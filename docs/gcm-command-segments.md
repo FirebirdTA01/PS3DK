@@ -159,6 +159,18 @@ whole command at once: written whole or refused whole. A measuring context
 so a job can size its buffer exactly (`cellGcmSpuGetUsedBytes` + 4 for the
 RETURN).
 
+Refusals are sticky: the overflow count and the measured count saturate at
+0xffffffff instead of wrapping, so no later refusal can bring the overflow
+count back to zero, and `cellGcmSpuEnd` then returns
+`CELL_GCM_SPU_ERROR_OVERFLOW`. `cellGcmSpuGetUsedBytes` returns 0xffffffff
+when the byte count does not fit in 32 bits. A writing context over fewer
+than 4 bytes has no room for the RETURN: it starts with an overflow count of
+1, refuses every call, and End returns `CELL_GCM_SPU_ERROR_OVERFLOW` without
+writing anything. `ctx->ended` is one of `CELL_GCM_SPU_CONTEXT_OPEN`,
+`_ENDED` and `_NO_ROOM`. Host test: `gcm-spu-cmd-test.sh` (two refused
+0x80000000-word reservations, a 2^32-byte measurement, 0- to 3-byte
+contexts).
+
 | SPU call | PPU counterpart it matches |
 |---|---|
 | `cellGcmSetNopCommand`, `SetJumpCommand`, `SetCallCommand`, `SetReturnCommand` | same names |

@@ -27,6 +27,9 @@
  * added to the overflow count, so cellGcmSpuEnd reports OVERFLOW instead of
  * the buffer ever wrapping.  A measuring context (begin == NULL) writes
  * nothing and only counts, which gives the exact size of a command list.
+ * The counts saturate at 0xffffffff rather than wrap, so a refusal is
+ * never cancelled: once the overflow count is non-zero, End reports
+ * OVERFLOW.  A measured size of 0xffffffff bytes means "does not fit".
  *
  * The PSL1GHT spellings listed at the end are thin aliases of these calls.
  */
@@ -60,9 +63,14 @@ typedef struct CellGcmSpuContextData {
     uint32_t *end;            /* last word: kept for the RETURN cellGcmSpuEnd adds */
     uint32_t *current;
     uint32_t measuredWords;   /* measuring context: words the calls would write    */
-    uint32_t overflowWords;   /* words refused because they did not fit            */
-    uint32_t ended;
+    uint32_t overflowWords;   /* words refused because they did not fit (saturates) */
+    uint32_t ended;           /* CELL_GCM_SPU_CONTEXT_*                             */
 } CellGcmSpuContextData;
+
+/* CellGcmSpuContextData.ended */
+#define CELL_GCM_SPU_CONTEXT_OPEN    0u  /* calls are written                             */
+#define CELL_GCM_SPU_CONTEXT_ENDED   1u  /* cellGcmSpuEnd appended the RETURN              */
+#define CELL_GCM_SPU_CONTEXT_NO_ROOM 2u  /* buffer under 4 bytes: everything is refused   */
 
 /* Layout-identical to the PPU CellGcmTexture (24 bytes), so the PPU can
  * hand its texture records to the SPU unchanged. */
@@ -102,12 +110,15 @@ typedef CellGcmSpuTexture CellGcmTexture;
 
 /* Writing context over `sizeBytes` (a multiple of 4; of 16 for
  * cellGcmSpuPutSegment) of local store;
- * the last word is kept for the RETURN. */
+ * the last word is kept for the RETURN.  Under 4 bytes there is no room
+ * for it: every call is refused, the overflow count starts at 1 and End
+ * returns OVERFLOW without writing. */
 void CELL_GCM_SPU_FN(SpuSetupContextData)(CellGcmSpuContextData *ctx, uint32_t *buffer, uint32_t sizeBytes);
 /* Measuring context: calls only count. */
 void CELL_GCM_SPU_FN(SpuSetupMeasureContext)(CellGcmSpuContextData *ctx);
 /* Bytes written so far (measuring: bytes the calls would write), without
- * the RETURN.  Add 4 for the RETURN cellGcmSpuEnd appends. */
+ * the RETURN.  Add 4 for the RETURN cellGcmSpuEnd appends.  0xffffffff
+ * when the count does not fit in 32 bits. */
 uint32_t CELL_GCM_SPU_FN(SpuGetUsedBytes)(const CellGcmSpuContextData *ctx);
 uint32_t CELL_GCM_SPU_FN(SpuGetOverflowWords)(const CellGcmSpuContextData *ctx);
 /* Append the RETURN.  CELL_GCM_SPU_ERROR_OVERFLOW if any call was refused. */

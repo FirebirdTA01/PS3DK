@@ -270,6 +270,51 @@ PAIR(fp_pmat,  cellGcmSetFragmentProgramParameter(c, (CGprogram)blob_fp, (CGpara
 
 #define RUN(nm, arg) compare(#nm, nm##_p, nm##_s, arg)
 
+/* ---- accounting and refusal checks (not comparisons) ---- */
+
+static int checks, check_failures;
+#define EXPECT(nm, cond) do { ++checks; if (cond) printf("  ok   %s\n", nm); \
+    else { printf("  FAIL %s: %s (line %d)\n", nm, #cond, __LINE__); ++check_failures; } } while (0)
+
+/* Refusals are sticky and every count saturates instead of wrapping. */
+static void test_accounting(void)
+{
+    static uint32_t small[16], zero[4];
+    CellGcmSpuContextData c;
+
+    puts("accounting:");
+    spuw_SpuSetupContextData(&c, small, sizeof(small));
+    EXPECT("refuse 0x80000000 words", spuw_SpuReserve(&c, 0x80000000u) == NULL);
+    EXPECT("refuse 0x80000000 words again", spuw_SpuReserve(&c, 0x80000000u) == NULL);
+    EXPECT("two refusals saturate overflow", spuw_SpuGetOverflowWords(&c) == 0xffffffffu);
+    EXPECT("later fit still written", spuw_SpuReserve(&c, 2) == small);
+    EXPECT("end after two refusals", spuw_SpuEnd(&c) == CELL_GCM_SPU_ERROR_OVERFLOW);
+
+    spuw_SpuSetupMeasureContext(&c);
+    spuw_SpuReserve(&c, 0x80000000u);
+    spuw_SpuReserve(&c, 0x80000000u);
+    EXPECT("measured words saturate", c.measuredWords == 0xffffffffu);
+    EXPECT("measured bytes saturate", spuw_SpuGetUsedBytes(&c) == 0xffffffffu);
+    spuw_SpuSetupMeasureContext(&c);
+    spuw_SpuReserve(&c, 0x40000000u);       /* 2^32 bytes */
+    EXPECT("byte conversion saturates", spuw_SpuGetUsedBytes(&c) == 0xffffffffu);
+
+    /* A non-null buffer with no room even for the RETURN. */
+    for (uint32_t size = 0; size < 4u; ++size) {
+        memset(zero, 0xcd, sizeof(zero));
+        spuw_SpuSetupContextData(&c, zero, size);
+        spuw_SetNopCommand(&c, 1);
+        EXPECT("zero-byte context refuses commands", c.current == zero && spuw_SpuGetOverflowWords(&c) != 0);
+        EXPECT("zero-byte context refuses end", spuw_SpuEnd(&c) == CELL_GCM_SPU_ERROR_OVERFLOW);
+        EXPECT("zero-byte end writes no RETURN", zero[0] == 0xcdcdcdcdu && c.current == zero);
+        EXPECT("zero-byte used bytes", spuw_SpuGetUsedBytes(&c) == 0);
+        EXPECT("zero-byte second end", spuw_SpuEnd(&c) != CELL_OK && zero[0] == 0xcdcdcdcdu);
+    }
+    /* The smallest real buffer: one word, the RETURN. */
+    spuw_SpuSetupContextData(&c, zero, 4);
+    EXPECT("one-word context ends", spuw_SpuEnd(&c) == CELL_OK && zero[0] == 0x00020000u);
+}
+
 int main(void)
 {
     static const U4 draws[] = {
@@ -330,7 +375,13 @@ int main(void)
         if (fparam_vec.patchCount != 3 || fparam_mat.patchCount != 4) { puts("  FAIL patch counts"); ++failures; }
     }
 
-    if (failures) { printf("gcm-spu-cmd: %d of %d case(s) FAILED\n", failures, cases); return 1; }
-    printf("gcm-spu-cmd: all %d cases byte-identical\n", cases);
+    test_accounting();
+
+    if (failures || check_failures) {
+        printf("gcm-spu-cmd: %d of %d case(s) and %d of %d check(s) FAILED\n", failures, cases,
+               check_failures, checks);
+        return 1;
+    }
+    printf("gcm-spu-cmd: all %d cases byte-identical, all %d checks passed\n", cases, checks);
     return 0;
 }

@@ -59,13 +59,23 @@ static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
 /* ---- context ---------------------------------------------------------- */
 
+/* Counts saturate at 0xffffffff instead of wrapping, so a refusal can never
+ * be cancelled by a later one: once overflowWords is non-zero it stays so. */
+static uint32_t sat_add(uint32_t a, uint32_t b) { return a > UINT32_MAX - b ? UINT32_MAX : a + b; }
+
 void FN(SpuSetupContextData)(CellGcmSpuContextData *c, uint32_t *buffer, uint32_t sizeBytes)
 {
-    c->begin = c->current = buffer;
-    c->end = (buffer && sizeBytes >= 4u) ? buffer + (sizeBytes / 4u) - 1u : buffer;
+    c->begin = c->current = c->end = buffer;
     c->measuredWords = 0;
     c->overflowWords = 0;
-    c->ended = 0;
+    c->ended = CELL_GCM_SPU_CONTEXT_OPEN;
+    if (buffer && sizeBytes < 4u) {
+        /* No room even for the RETURN: every call and End are refused. */
+        c->overflowWords = 1u;
+        c->ended = CELL_GCM_SPU_CONTEXT_NO_ROOM;
+    } else if (buffer) {
+        c->end = buffer + (sizeBytes / 4u) - 1u;
+    }
 }
 
 void FN(SpuSetupMeasureContext)(CellGcmSpuContextData *c)
@@ -76,8 +86,11 @@ void FN(SpuSetupMeasureContext)(CellGcmSpuContextData *c)
 uint32_t *FN(SpuReserve)(CellGcmSpuContextData *c, uint32_t words)
 {
     uint32_t *p;
-    if (!c->begin) { c->measuredWords += words; return NULL; }
-    if (c->ended || words > (uint32_t)(c->end - c->current)) { c->overflowWords += words; return NULL; }
+    if (!c->begin) { c->measuredWords = sat_add(c->measuredWords, words); return NULL; }
+    if (c->ended != CELL_GCM_SPU_CONTEXT_OPEN || words > (uint32_t)(c->end - c->current)) {
+        c->overflowWords = sat_add(c->overflowWords, words);
+        return NULL;
+    }
     p = c->current;
     c->current += words;
     return p;
@@ -85,17 +98,20 @@ uint32_t *FN(SpuReserve)(CellGcmSpuContextData *c, uint32_t words)
 
 uint32_t FN(SpuGetUsedBytes)(const CellGcmSpuContextData *c)
 {
-    if (!c->begin) return c->measuredWords * 4u;
-    return (uint32_t)(c->current - c->begin) * 4u - (c->ended ? 4u : 0u);
+    uint64_t words;
+    if (!c->begin) words = c->measuredWords;
+    else words = (uint64_t)(c->current - c->begin) - (c->ended == CELL_GCM_SPU_CONTEXT_ENDED ? 1u : 0u);
+    return words > UINT32_MAX / 4u ? UINT32_MAX : (uint32_t)words * 4u;
 }
 
 uint32_t FN(SpuGetOverflowWords)(const CellGcmSpuContextData *c) { return c->overflowWords; }
 
 int32_t FN(SpuEnd)(CellGcmSpuContextData *c)
 {
-    if (!c->begin || c->ended) return CELL_GCM_SPU_ERROR_STATE;
+    if (!c->begin || c->ended == CELL_GCM_SPU_CONTEXT_ENDED) return CELL_GCM_SPU_ERROR_STATE;
+    if (c->ended == CELL_GCM_SPU_CONTEXT_NO_ROOM) return CELL_GCM_SPU_ERROR_OVERFLOW;   /* nothing written */
     *c->current++ = RETURN_WORD;     /* the reserved last word always fits */
-    c->ended = 1;
+    c->ended = CELL_GCM_SPU_CONTEXT_ENDED;
     return c->overflowWords ? CELL_GCM_SPU_ERROR_OVERFLOW : CELL_OK;
 }
 

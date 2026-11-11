@@ -9,7 +9,8 @@
 #
 # Then a mutant of the writer with one method address changed (scissor)
 # must fail exactly the two scissor cases, which shows the comparison sees
-# a one-word difference.
+# a one-word difference.  Further mutants each undo one review fix (refusal
+# accounting, size arithmetic) and must fail the checks covering it.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -71,5 +72,23 @@ failed=$(grep '^  FAIL' "$tmp/mutant.log" | awk '{print $2}' | sort -u | wc -l)
 [[ "$failed" -eq 2 ]] && grep -q 'FAIL scissor ' "$tmp/mutant.log" && grep -q 'FAIL rsx_scissor ' "$tmp/mutant.log" \
     || { cat "$tmp/mutant.log"; fail "scissor mutant: expected exactly the two scissor cases to fail, got $failed"; }
 echo "mutant: a changed scissor method fails exactly the two scissor cases (exit 1)"
+
+# review mutants NAME SED-EXPR CHECK... : the writer with one review fix
+# undone must exit 1 and fail each named check.
+review_mutant() {
+    local name=$1 expr=$2; shift 2
+    sed -e "$expr" "$repo_root/sdk/libgcm_spu_cmd/src/gcm_spu_cmd.c" > "$tmp/$name.c"
+    cmp -s "$tmp/$name.c" "$repo_root/sdk/libgcm_spu_cmd/src/gcm_spu_cmd.c" && fail "mutant $name: edit did not apply"
+    writer "$tmp/$name.c" "$tmp/$name"
+    rc=0; "$tmp/$name" > "$tmp/$name.log" 2>&1 || rc=$?
+    [[ "$rc" -eq 1 ]] || { cat "$tmp/$name.log"; fail "mutant $name: expected exit 1, got $rc"; }
+    for check in "$@"; do
+        grep -q "FAIL $check:" "$tmp/$name.log" || { cat "$tmp/$name.log"; fail "mutant $name: '$check' did not fail"; }
+    done
+    echo "mutant $name: fails $* (exit 1)"
+}
+
+# Overflow accounting that wraps again.
+review_mutant wrapping-overflow 's/c->overflowWords = sat_add(c->overflowWords, words);/c->overflowWords += words;/'     "two refusals saturate overflow" "end after two refusals"
 
 echo "gcm-spu-cmd-test: PASS"

@@ -13,7 +13,7 @@ int32_t cellGcmSpuPutSegment(const CellGcmSpuContextData *c, uint64_t ea, uint32
     uint32_t bytes, done = 0;
     uintptr_t ls;
 
-    if (!c || !c->begin || !c->ended) return CELL_GCM_SPU_ERROR_STATE;
+    if (!c || !c->begin || c->ended != CELL_GCM_SPU_CONTEXT_ENDED) return CELL_GCM_SPU_ERROR_STATE;
     if (c->overflowWords) return CELL_GCM_SPU_ERROR_OVERFLOW;
     ls = (uintptr_t)c->begin;
     if ((ea & 15u) || (ls & 15u) || tag > 31u) return CELL_GCM_SPU_ERROR_INVALID;
