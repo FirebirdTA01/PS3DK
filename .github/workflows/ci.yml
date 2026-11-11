@@ -303,6 +303,16 @@ jobs:
       - name: Test Cg resource enum consumers and runtime values
         run: bash tests/sdk/gcm-cg-resource-test.sh
 
+      # The shared NV40 state natives (logic-op, depth, blend, dither,
+      # stencil, raster) must stay byte-identical to the pre-patch rsx*
+      # bodies across both the safe and unsafe spellings.  The public
+      # cell* forwarders are exercised separately by the cellpath test.
+      - name: Test GCM state native emitters are byte-identical to the pre-patch rsx*
+        run: bash tests/sdk/gcm-state-native-test.sh
+
+      - name: Test public cellGcm* forwarders emit the shared native words
+        run: bash tests/sdk/gcm-state-cellpath-test.sh
+
       # Freestanding 32-bit compilation catches the original ILP32 shift
       # without requiring a PPU toolchain or host multilib runtime libraries.
       # Native host execution also verifies the wide-pointer debug trap.

@@ -50,6 +50,7 @@
  * sole command source.  The header pulls in gcm_cg_bridge.h transitively
  * (shared ps3tc_gcm_reserve + callback helper). */
 #include <cell/gcm/gcm_tex_bridge.h>
+#include <cell/gcm/gcm_state_native.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -165,43 +166,48 @@ static inline void cellGcmSetNopCommand(CellGcmContextData *thisContext, uint32_
 	rsxSetNopCommand(thisContext, count);
 }
 
-/* ==========================================================
- * Color / depth state
- * ========================================================== */
-
+/* Color / depth state */
+/* Raster-state group: NV40 native emitters in <cell/gcm/gcm_state_native.h>.
+ * Register names follow rsx/nv40.h; the mapping is unchanged from the
+ * pre-patch rsx* bodies.  All values are written verbatim — no clamping
+ * or translation in the pre-patch rsx* bodies. */
 static inline void cellGcmSetColorMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetColorMask(thisContext, mask);
+	ps3tc_gcm_state_color_mask(thisContext, mask);
 }
 
 static inline void cellGcmSetColorMaskMrt(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetColorMaskMrt(thisContext, mask);
+	ps3tc_gcm_state_color_mask_mrt(thisContext, mask);
 }
 
+/* Depth group — NV40 native emitters live in <cell/gcm/gcm_state_native.h>.
+ * Safe natives reserve via ps3tc_gcm_reserve (same path as logic-op and
+ * the tex/cg bridges); unsafe natives plain-write.  cellGcmSetDepthMask
+ * still forwards its mask value, same as before (no bool coercion). */
 static inline void cellGcmSetDepthFunc(CellGcmContextData *thisContext, uint32_t func)
 {
-	rsxSetDepthFunc(thisContext, func);
+	ps3tc_gcm_state_depth_func(thisContext, func);
 }
 
 static inline void cellGcmSetDepthTestEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetDepthTestEnable(thisContext, enable);
+	ps3tc_gcm_state_depth_test_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetDepthMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetDepthWriteEnable(thisContext, mask);
+	ps3tc_gcm_state_depth_write_enable(thisContext, mask);
 }
 
 static inline void cellGcmSetDepthBoundsTestEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetDepthBoundsTestEnable(thisContext, enable);
+	ps3tc_gcm_state_depth_bounds_test_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetDepthBounds(CellGcmContextData *thisContext, float zMin, float zMax)
 {
-	rsxSetDepthBounds(thisContext, zMin, zMax);
+	ps3tc_gcm_state_depth_bounds(thisContext, zMin, zMax);
 }
 
 static inline void cellGcmSetAntiAliasingControl(CellGcmContextData *thisContext,
@@ -211,54 +217,66 @@ static inline void cellGcmSetAntiAliasingControl(CellGcmContextData *thisContext
 	rsxSetAntialiasingControl(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
 }
 
+/* Blend / dither group — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
+ * BlendFunc packs (sfalpha<<16)|sfcolor then (dfalpha<<16)|dfcolor into
+ * one 3-word packet; BlendEquation packs (alpha<<16)|color; BlendColor
+ * is two method packets (BLEND_COLOR + BLEND_COLOR2). */
 static inline void cellGcmSetBlendEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetBlendEnable(thisContext, enable);
+	ps3tc_gcm_state_blend_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetBlendFunc(CellGcmContextData *thisContext,
                                        uint16_t sfcolor, uint16_t dfcolor,
                                        uint16_t sfalpha, uint16_t dfalpha)
 {
-	rsxSetBlendFunc(thisContext, sfcolor, dfcolor, sfalpha, dfalpha);
+	ps3tc_gcm_state_blend_func(thisContext, sfcolor, dfcolor, sfalpha, dfalpha);
 }
 
 static inline void cellGcmSetBlendEquation(CellGcmContextData *thisContext,
                                            uint16_t color, uint16_t alpha)
 {
-	rsxSetBlendEquation(thisContext, color, alpha);
+	ps3tc_gcm_state_blend_equation(thisContext, color, alpha);
 }
 
 static inline void cellGcmSetBlendColor(CellGcmContextData *thisContext,
                                         uint32_t color0, uint32_t color1)
 {
-	rsxSetBlendColor(thisContext, color0, color1);
+	ps3tc_gcm_state_blend_color(thisContext, color0, color1);
 }
 
 static inline void cellGcmSetDitherEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetDitherEnable(thisContext, enable);
+	ps3tc_gcm_state_dither_enable(thisContext, enable);
 }
 
+/* Logic OP pair — NV40 native emitters live in <cell/gcm/gcm_state_native.h>.
+ * ps3tc_gcm_state_logic_op{,_enable} (safe) are the single ring-full /
+ * callback path for this family; the PPU rsx* safe path and the
+ * unsafe rsx*-Unsafe variant in libgcm_cmd resolve to the same native.
+  * See tests/sdk/gcm-state-native-test.{c,sh}. */
 static inline void cellGcmSetLogicOp(CellGcmContextData *thisContext, uint32_t op)
 {
-	rsxSetLogicOp(thisContext, op);
+	ps3tc_gcm_state_logic_op(thisContext, op);
 }
 
 static inline void cellGcmSetLogicOpEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetLogicOpEnable(thisContext, enable);
+	ps3tc_gcm_state_logic_op_enable(thisContext, enable);
 }
 
+/* Shade model — the platform ABI exposes two spellings that both map to
+ * NV40TCL_SHADE_MODEL (0x00000368).  Values are written verbatim. */
 static inline void cellGcmSetShadeModel(CellGcmContextData *thisContext, uint32_t model)
 {
-	rsxSetShadeModel(thisContext, model);
+	ps3tc_gcm_state_shade_model(thisContext, model);
 }
 
-/* Platform ABI name (without trailing 'l'); aliased to SetShadeModel. */
+/* Platform ABI alias of cellGcmSetShadeModel (the platform name lacks
+ * the trailing 'l'; same register, same value). */
 static inline void cellGcmSetShadeMode(CellGcmContextData *thisContext, uint32_t mode)
 {
-	rsxSetShadeModel(thisContext, mode);
+	ps3tc_gcm_state_shade_model(thisContext, mode);
 }
 
 static inline void cellGcmSetFogMode(CellGcmContextData *thisContext, uint32_t mode)
@@ -390,27 +408,27 @@ static inline uint64_t cellGcmGetTimeStamp(uint32_t index)
 
 static inline void cellGcmSetFrontPolygonMode(CellGcmContextData *thisContext, uint32_t mode)
 {
-	rsxSetFrontPolygonMode(thisContext, mode);
+	ps3tc_gcm_state_front_polygon_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetBackPolygonMode(CellGcmContextData *thisContext, uint32_t mode)
 {
-	rsxSetBackPolygonMode(thisContext, mode);
+	ps3tc_gcm_state_back_polygon_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetCullFace(CellGcmContextData *thisContext, uint32_t cfm)
 {
-	rsxSetCullFace(thisContext, cfm);
+	ps3tc_gcm_state_cull_face(thisContext, cfm);
 }
 
 static inline void cellGcmSetFrontFace(CellGcmContextData *thisContext, uint32_t dir)
 {
-	rsxSetFrontFace(thisContext, dir);
+	ps3tc_gcm_state_front_face(thisContext, dir);
 }
 
 static inline void cellGcmSetCullFaceEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetCullFaceEnable(thisContext, enable);
+	ps3tc_gcm_state_cull_face_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetUserClipPlaneControl(CellGcmContextData *thisContext,
@@ -592,52 +610,55 @@ static inline void cellGcmSetTransferScaleSwizzle(CellGcmContextData *thisContex
 }
 
 /* ==========================================================
- * Stencil — front + two-sided.  Platform ABI names map 1:1
- * onto the rsx* low-level emitters.
+ * Stencil — front + two-sided.
+ * Native NV40 emitters live in <cell/gcm/gcm_state_native.h>.
+ * Register names follow rsx/nv40.h; the mapping is unchanged
+ * from the pre-patch rsx* bodies.  StencilFunc / StencilOp /
+ * BackStencilFunc / BackStencilOp each carry count=3 (three
+ * consecutive methods under one header).
  * ========================================================== */
-
 static inline void cellGcmSetStencilTestEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetStencilTestEnable(thisContext, enable);
+	ps3tc_gcm_state_stencil_test_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetTwoSidedStencilTestEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetTwoSidedStencilTestEnable(thisContext, enable);
+	ps3tc_gcm_state_two_sided_stencil_test_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetStencilFunc(CellGcmContextData *thisContext,
                                          uint32_t func, int32_t ref, uint32_t mask)
 {
-	rsxSetStencilFunc(thisContext, func, ref, mask);
+	ps3tc_gcm_state_stencil_func(thisContext, func, ref, mask);
 }
 
 static inline void cellGcmSetStencilOp(CellGcmContextData *thisContext,
                                        uint32_t fail, uint32_t zfail, uint32_t zpass)
 {
-	rsxSetStencilOp(thisContext, fail, zfail, zpass);
+	ps3tc_gcm_state_stencil_op(thisContext, fail, zfail, zpass);
 }
 
 static inline void cellGcmSetStencilMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetStencilMask(thisContext, mask);
+	ps3tc_gcm_state_stencil_mask(thisContext, mask);
 }
 
 static inline void cellGcmSetBackStencilFunc(CellGcmContextData *thisContext,
                                              uint32_t func, int32_t ref, uint32_t mask)
 {
-	rsxSetBackStencilFunc(thisContext, func, ref, mask);
+	ps3tc_gcm_state_back_stencil_func(thisContext, func, ref, mask);
 }
 
 static inline void cellGcmSetBackStencilOp(CellGcmContextData *thisContext,
                                            uint32_t fail, uint32_t zfail, uint32_t zpass)
 {
-	rsxSetBackStencilOp(thisContext, fail, zfail, zpass);
+	ps3tc_gcm_state_back_stencil_op(thisContext, fail, zfail, zpass);
 }
 
 static inline void cellGcmSetBackStencilMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetBackStencilMask(thisContext, mask);
+	ps3tc_gcm_state_back_stencil_mask(thisContext, mask);
 }
 
 /* ==========================================================
@@ -646,12 +667,12 @@ static inline void cellGcmSetBackStencilMask(CellGcmContextData *thisContext, ui
 
 static inline void cellGcmSetAlphaTestEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetAlphaTestEnable(thisContext, enable);
+	ps3tc_gcm_state_alpha_test_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetAlphaFunc(CellGcmContextData *thisContext, uint32_t func, uint32_t ref)
 {
-	rsxSetAlphaFunc(thisContext, func, ref);
+	ps3tc_gcm_state_alpha_func(thisContext, func, ref);
 }
 
 /* ==========================================================
@@ -660,18 +681,18 @@ static inline void cellGcmSetAlphaFunc(CellGcmContextData *thisContext, uint32_t
 
 static inline void cellGcmSetPolygonOffsetFillEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetPolygonOffsetFillEnable(thisContext, enable);
+	ps3tc_gcm_state_polygon_offset_fill_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetPolygonOffset(CellGcmContextData *thisContext,
                                            float factor, float units)
 {
-	rsxSetPolygonOffset(thisContext, factor, units);
+	ps3tc_gcm_state_polygon_offset(thisContext, factor, units);
 }
 
 static inline void cellGcmSetPolySmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetPolygonSmoothEnable(thisContext, enable);
+	ps3tc_gcm_state_polygon_smooth_enable(thisContext, enable);
 }
 
 /* Make sure `size` more command words fit in the buffer, calling the
@@ -684,7 +705,7 @@ static inline void cellGcmReserveMethodSize(CellGcmContextData *thisContext, uin
 
 static inline void cellGcmSetLineSmoothEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetLineSmoothEnable(thisContext, enable);
+	ps3tc_gcm_state_line_smooth_enable(thisContext, enable);
 }
 
 /* Draw `count` 32-bit words of vertex data taken from `data` (the vertex

@@ -5,6 +5,14 @@
 
 #include "rsx_internal.h"
 
+/* The Logic-OP pair (rsxSetLogicOp / rsxSetLogicOpEnable, and the
+ * corresponding *_Unsafe variants) is now a thin alias over the shared
+ * native emitters in <cell/gcm/gcm_state_native.h>.  Include <cell/gcm.h>
+ * here so those emitters pull in <cell/gcm/gcm_cg_bridge.h> (for the
+ * single ps3tc_gcm_reserve + ps3tc_gcm_invoke_callback path shared with
+ * the tex/cg bridges) and provide the CellGcmContextData alias. */
+#include <cell/gcm.h>
+
 #define RSX_INTERNAL	1
 
 #ifndef RSX_MEMCPY

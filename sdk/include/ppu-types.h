@@ -131,7 +131,12 @@ typedef union _ieee64
 #define SPU_ALIGNMENT				128
 #define SPU_ALIGNSIZE(x)			(((x) + 127)&~127)
 
+/* ATTRIBUTE_PRXPTR marks a 32-bit "mode(SI)" pointer (PowerPC PRX pointer).
+ * Guarded so a non-PowerPC host can opt out by pre-defining it empty
+ * (-DATTRIBUTE_PRXPTR=); field order/offsetof are unaffected either way. */
+#ifndef ATTRIBUTE_PRXPTR
 #define ATTRIBUTE_PRXPTR			__attribute__((mode(SI)))
+#endif
 
 // courtesy of Marcan
 #define STACK_ALIGN(type, name, cnt, alignment)		u8 _al__##name[((sizeof(type)*(cnt)) + (alignment) + (((sizeof(type)*(cnt))%(alignment)) > 0 ? ((alignment) - ((sizeof(type)*(cnt))%(alignment))) : 0))]; \
