@@ -1,6 +1,9 @@
 void RSX_FUNC(ResetCommandBuffer)(gcmContextData *context)
 {
 	u32 offset = 0x1000;			// init state offset;
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_context_reset(context);
+#endif
 	RSX_FUNC(SetJumpCommand)(context,offset);
 
 	__sync();
@@ -21,7 +24,14 @@ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
 
 	__sync();
 	gcmAddressToOffset(context->current,&offset);
+#ifdef PS3TC_PROF_AUTO
+	const uint32_t frontier = ps3dk_prof__auto_publish_before(context);
+#endif
 	ctrl->put = offset;
+#ifdef PS3TC_PROF_AUTO
+	__sync();
+	ps3dk_prof__auto_publish_after(context,frontier);
+#endif
 }
 
 void RSX_FUNC(Finish)(gcmContextData *context,u32 ref_value)

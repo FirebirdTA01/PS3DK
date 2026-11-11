@@ -5,6 +5,9 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#ifdef PS3DK_PROF_WITH_AUTO
+#include "../auto_rsx/auto_internal.h"
+#endif
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
 #endif
@@ -655,6 +658,9 @@ void p_observe_stop(prof *p)
     }
     t->depth = 0;         /* 3. clear the stack */
     t->refused_top = 0;
+#ifdef PS3DK_PROF_WITH_AUTO
+    p_auto_owner_retire();
+#endif
     t->acked = 1;         /* 4. the thread-local flag */
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_ack(p);
@@ -692,6 +698,9 @@ void ps3dk_prof_thread_end(void)
     cb->open_spans = t->depth;   /* 1. the snapshot; no END is synthesised */
     t->depth = 0;                /* 3. clear the stack */
     t->refused_top = 0;
+#ifdef PS3DK_PROF_WITH_AUTO
+    p_auto_owner_retire();
+#endif
     t->retired = 1;              /* 4. */
 #ifdef PS3DK_PROF_WITH_WAITS
     p_wait_ack(p);
@@ -879,6 +888,9 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
+#ifdef PS3DK_PROF_WITH_AUTO
+    p_auto_frame(fid,tb);
+#endif
 }
 
 ps3dk_prof_token ps3dk_prof_frame_token(void)
@@ -1424,6 +1436,9 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
     }
     publish_capture_record(&g_storage);
     g_prof = &g_storage;
+#ifdef PS3DK_PROF_WITH_AUTO
+    p_auto_init(&g_storage);
+#endif
     ST_REL(&g_gate, (uint32_t)G_READY);       /* step 8: publish, */
 #ifdef PS3DK_PROF_WITH_WAITS
     (void)thread_begin_impl(&g_storage,"init");

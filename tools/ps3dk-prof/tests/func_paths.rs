@@ -974,11 +974,17 @@ fn the_capability_is_bit_5_and_types_28_to_30_stay_unknown_without_it() {
         Rule::UnknownChunkType,
         "type 28",
     );
-    // an unknown file flag bit is still refused
+    // bit 7 (automatic RSX observation) is known and needs bit 0
+    refused(
+        &mutate("tree3", |s| s.flags(32 | 128)),
+        Rule::FileFlagsNonzero,
+        "file_flags 0xa0: bit 7 without bit 0",
+    );
+    // bit 6 (FIFO wrap events) is known since schema 1 of that extension, and needs bit 0
     refused(
         &mutate("tree3", |s| s.flags(32 | 64)),
         Rule::FileFlagsNonzero,
-        "file_flags 0x60",
+        "file_flags 0x60: bit 6 without bit 0",
     );
     // bit 5 alone is a valid prefix of a torn header, and declares the (empty) capability
     let b = capture("tree3");
@@ -987,8 +993,10 @@ fn the_capability_is_bit_5_and_types_28_to_30_stay_unknown_without_it() {
         assert!(c.func_paths.is_some(), "{n}");
     }
     let mut h = b[..13].to_vec();
+    h[12] = 32 | 128;
+    refused(&h, Rule::FileFlagsNonzero, "bits 6 and 7 need bit 0");
     h[12] = 32 | 64;
-    refused(&h, Rule::FileFlagsNonzero, "combination of bits 0-5");
+    refused(&h, Rule::FileFlagsNonzero, "bit 6 needs bit 0");
     // a capture with bit 5 and no function-path chunk is valid and visibly incomplete
     let c = reader::read(&mutate("tree3", |s| {
         s.chunks.retain(|c| !(28..=30).contains(&c.ty))

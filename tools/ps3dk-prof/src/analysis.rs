@@ -268,7 +268,8 @@ fn prefix_cut(bytes: &[u8]) -> Result<(usize, u64, u64), String> {
         let func_data = ty == crate::func_paths::CHUNK_FUNC_TREE && len >= 4
             && u16::from_le_bytes(bytes[pos + CHUNK_HEADER_LEN + 2..pos + CHUNK_HEADER_LEN + 4].try_into().unwrap())
                 & crate::func_paths::DATA != 0;
-        if matches!(ty, CHUNK_RECORDS | crate::ext::CHUNK_SPU_EVENTS | crate::ext::CHUNK_GPU_EVENTS) || wait_data || func_data {
+        if matches!(ty, CHUNK_RECORDS | crate::ext::CHUNK_SPU_EVENTS | crate::ext::CHUNK_GPU_EVENTS) || wait_data || func_data
+            || ty == crate::fifo::CHUNK_FIFO_EVENTS {
             data += 1;
         }
         pos += total;

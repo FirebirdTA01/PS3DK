@@ -445,8 +445,63 @@ static void test_local_refused(void)
     printf("  LOCAL init: INVALID_VALUE, segment and label untouched; MAIN accepted\n");
 }
 
+#ifdef TEST_AUTO_SEGMENT
+/* Observer seam: every PPU-written segment context is announced between
+ * cellGcmSegmentBegin and cellGcmSegmentEnd; external claims are not. */
+static gcmContextData *auto_open_ctx[8];
+static unsigned auto_opens, auto_closes, auto_calls, auto_checking;
+static gcmContextData *auto_call_ring, *auto_call_ctx;
+void ps3dk_prof__auto_segment_call(struct _gcmCtxData *r, struct _gcmCtxData *c)
+{
+    if (!auto_checking) return;
+    auto_call_ring = r; auto_call_ctx = c; ++auto_calls;
+}
+void ps3dk_prof__auto_segment_open(struct _gcmCtxData *c)
+{
+    if (!auto_checking) return;
+    if (auto_opens < 8) auto_open_ctx[auto_opens] = c;
+    ++auto_opens;
+}
+void ps3dk_prof__auto_segment_close(struct _gcmCtxData *c)
+{
+    if (!auto_checking) return;
+    CHECK("close matches open", auto_closes < auto_opens && auto_closes < 8 && auto_open_ctx[auto_closes] == c);
+    ++auto_closes;
+}
+static void test_auto_seam(void)
+{
+    CellGcmSegment s, e;
+    gcmContextData *c;
+
+    puts("auto seam:");
+    auto_opens = auto_closes = auto_calls = 0;
+    auto_checking = 1;
+    ring_reset();
+    CHECK("init", cellGcmSegmentInit(&s, &arena[12288], 256, GCM_LOCATION_CELL, 211) == CELL_OK);
+    c = cellGcmSegmentBegin(&s);
+    CHECK("auto open", c == &s.context && auto_opens == 1 && auto_open_ctx[0] == c && auto_closes == 0);
+    CHECK("end", cellGcmSegmentEnd(&s) == CELL_OK && auto_closes == 1);
+    CHECK("auto call", cellGcmSegmentCall(&ring, &s) == CELL_OK && auto_calls == 1 &&
+          auto_call_ring == &ring && auto_call_ctx == &s.context);
+    labels[211] = s.serial;   /* retired */
+    c = cellGcmSegmentBegin(&s);   /* a closed, uncalled segment may be rebuilt */
+    CHECK("auto reopen", c && auto_opens == 2);
+    for (unsigned i = 0; c && i < 1000 && cellGcmSegmentGetOverflowWords(&s) == 0; i++)
+        rsxSetWriteCommandLabel(c, 212, 1);
+    CHECK("overflow end closes", cellGcmSegmentEnd(&s) == CELL_GCM_SEGMENT_ERROR_OVERFLOW && auto_closes == 2);
+    CHECK("no second end", cellGcmSegmentEnd(&s) != CELL_OK && auto_closes == 2);
+    CHECK("init external", cellGcmSegmentInit(&e, &arena[12416], 256, GCM_LOCATION_CELL, 213) == CELL_OK);
+    CHECK("external claim", cellGcmSegmentBeginExternal(&e) != NULL && auto_opens == 2);
+    auto_checking = 0;
+    puts("  auto seam: open/close bracket every PPU-written segment, never an external claim");
+}
+#endif
+
 int main(void)
 {
+#ifdef TEST_AUTO_SEGMENT
+    test_auto_seam();
+#endif
     test_emitters();
     test_overflow();
     test_lifecycle();

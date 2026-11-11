@@ -62,6 +62,9 @@ void RSX_FUNC(SetReferenceCommand)(gcmContextData *context,u32 ref_value)
 
 void RSX_FUNC(SetWriteBackendLabel)(gcmContextData *context,u8 index,u32 value)
 {
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_resource_write(context,2u,index);
+#endif
 	u32 offset = 0x10*index;
 	u32 wvalue = (value&0xff00ff00) | ((value>>16)&0xff) | ((value&0xff)<<16);
 
@@ -75,6 +78,9 @@ void RSX_FUNC(SetWriteBackendLabel)(gcmContextData *context,u8 index,u32 value)
 
 void RSX_FUNC(SetWriteTextureLabel)(gcmContextData *context,u8 index,u32 value)
 {
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_resource_write(context,2u,index);
+#endif
 	u32 offset = 0x10*index;
 
 	RSX_CONTEXT_CURRENT_BEGIN(4);
@@ -99,6 +105,9 @@ void RSX_FUNC(SetWaitLabel)(gcmContextData *context,u8 index,u32 value)
 
 void RSX_FUNC(SetWriteCommandLabel)(gcmContextData *context,u8 index,u32 value)
 {
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_resource_write(context,2u,index);
+#endif
 	u32 offset = 0x10*index;
 
 	RSX_CONTEXT_CURRENT_BEGIN(4);
@@ -387,6 +396,10 @@ void RSX_FUNC(SetPolygonOffsetLineEnable)(gcmContextData *context,u32 enable)
 
 void RSX_FUNC(ClearSurface)(gcmContextData *context,u32 clear_mask)
 {
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	const ps3tc_auto_call call = {3u,0u,0u,0u,0u,0u,0u,clear_mask};
+	const uint32_t ticket = ps3dk_prof__auto_begin(context,&call,(uint64_t)(uintptr_t)__builtin_return_address(0));
+#endif
 	RSX_CONTEXT_CURRENT_BEGIN(6);
 
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CLEAR_BUFFERS,1);
@@ -397,6 +410,9 @@ void RSX_FUNC(ClearSurface)(gcmContextData *context,u32 clear_mask)
 	RSX_CONTEXT_CURRENTP[5] = 0;
 
 	RSX_CONTEXT_CURRENT_END(6);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	ps3dk_prof__auto_end(context,ticket);
+#endif
 }
 
 void RSX_FUNC(SetCylindricalWrap)(gcmContextData *context,u32 enable)
@@ -508,6 +524,9 @@ void RSX_FUNC(SetRenderEnable)(gcmContextData *context,u8 mode,u32 index)
 
 void RSX_FUNC(SetReport)(gcmContextData *context,u32 type,u32 index)
 {
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_resource_write(context,1u,index);
+#endif
 	u32 offset = 0x10*index;
 
 	RSX_CONTEXT_CURRENT_BEGIN(2);
@@ -1341,7 +1360,14 @@ static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(DrawVertexAr
 
 void RSX_FUNC(DrawVertexArray)(gcmContextData *context,u32 type,u32 start,u32 count)
 {
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	const ps3tc_auto_call call = {1u,type,start,count,0u,0u,0u,0u};
+	const uint32_t ticket = ps3dk_prof__auto_begin(context,&call,(uint64_t)(uintptr_t)__builtin_return_address(0));
+#endif
 	RSX_FUNC_INTERNAL(DrawVertexArray)(context,type,start,count);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	ps3dk_prof__auto_end(context,ticket);
+#endif
 }
 
 void RSX_FUNC(DrawInlineVertexArray)(gcmContextData *context,u8 type,u32 count,const void *data)
@@ -1480,7 +1506,14 @@ static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(DrawIndexArr
 
 void RSX_FUNC(DrawIndexArray)(gcmContextData *context,u8 type,u32 offset,u32 count,u8 data_type,u8 location)
 {
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	const ps3tc_auto_call call = {2u,type,0u,count,offset,data_type,location,0u};
+	const uint32_t ticket = ps3dk_prof__auto_begin(context,&call,(uint64_t)(uintptr_t)__builtin_return_address(0));
+#endif
 	RSX_FUNC_INTERNAL(DrawIndexArray)(context,type,offset,count,data_type,location);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	ps3dk_prof__auto_end(context,ticket);
+#endif
 }
 
 void RSX_FUNC(DrawInlineIndexArray16)(gcmContextData *context,u8 type,u32 start,u32 count,const u16 *data)
@@ -2284,6 +2317,9 @@ void RSX_FUNC(SetConvertSwizzleFormat)(gcmContextData *context,u32 dstOffset,u32
 
 void RSX_FUNC(SetTimeStamp)(gcmContextData *context,u32 index)
 {
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_resource_write(context,1u,index);
+#endif
 	RSX_CONTEXT_CURRENT_BEGIN(2);
 
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_QUERY_GET,1);

@@ -225,3 +225,20 @@ expected result is an unmatched exit counter, with no invented call duration,
 because its entry preceded registration. That expectation requires a separately
 approved console run; a build alone does not establish the result. This is a
 real application boundary to account for when instrumenting initialization.
+# FIFO wrap phase observation
+
+With a separately installed FIFO package, configure
+`-DSAMPLE_PROFILING=ON -DSAMPLE_PROF_EXT=ON -DSAMPLE_FIFO_EVENTS=ON`
+and `-DSAMPLE_PROF_SDK=<package-root>`. `SAMPLE_LIVE` remains optional.
+Select the matching ILP32 or LP64 toolchain and `SAMPLE_ABI`.
+This mode uses the background drainer and the observed extension/GCM
+archives; it refuses source/archive overrides and `SAMPLE_FUNC_PATHS`.
+The installed manifest and final link map must pass the selector checks.
+
+The owner attaches the observer after GPU attach and detaches it before
+GPU detach. Attach/detach failure fails the sample's final result. The
+recorded intervals are PPU FIFO wrap phases, including polling, scheduling
+and sleeps. They do not measure RSX busy time, GPU utilization or starvation.
+Console acceptance requires observed wraps, complete records, independent
+drain progress and the separately reviewed loss controls; building this
+sample alone establishes none of those conditions.

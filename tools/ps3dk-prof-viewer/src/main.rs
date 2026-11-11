@@ -39,6 +39,8 @@ fn main() -> eframe::Result<()> {
         Page::HotPaths
     } else if args.iter().any(|a| a == "--page=waits") {
         Page::Waits
+    } else if args.iter().any(|a| a == "--page=fifo") {
+        Page::Fifo
     } else {
         Page::Overview
     };
