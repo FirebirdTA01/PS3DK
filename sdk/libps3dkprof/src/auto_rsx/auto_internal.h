@@ -65,6 +65,9 @@ typedef struct auto_capture {
      * ignored (counted). Both kinds are reported in STATUS. */
     uint32_t in_flip_frame, explicit_seen;
     uint64_t frames_by_flip, frames_by_explicit, flips_ignored;
+    /* owner only: a flip-status wait in progress (first pending poll seen) */
+    uint32_t present_pending;
+    uint64_t present_since;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

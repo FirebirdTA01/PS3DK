@@ -739,6 +739,7 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
         if(auto_frames_open(&a->coverage,frame,tb)) {
+            a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT; /* this writer observes flip-status polls */
             if(flip) {a->coverage.live.flags|=AUTO_FRAME_ROW_FLIP;increment(a,&a->frames_by_flip);}
             else increment(a,&a->frames_by_explicit);
             frame_mark(a,AUTO_FRAME_BEGIN);
@@ -762,6 +763,36 @@ static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
  * events, clock anchors and coverage behave as for explicit frames. Before the
  * first flip nothing is associated; after an explicit ps3dk_prof_frame, flips
  * no longer delimit frames and are counted as ignored. */
+/* Flip-status polling on the owner thread (gcmGetFlipStatus in the selected
+ * build). A wait runs from the first poll that saw the flip pending (its
+ * return) to the call that saw it done (its entry): owner time spent polling
+ * for presentation, a lower bound of nothing else. It is charged to the frame
+ * active when the done poll is seen. No device access; no lock. */
+uint64_t ps3dk_prof__auto_flip_status_begin(void)
+{
+    if(!p_ready() || g_tls.in_gpu || !owner_capture(NULL,0)) return 0;
+    return observation_tb()|1u; /* never 0 for an observed call */
+}
+void ps3dk_prof__auto_flip_status_end(uint64_t before,uint32_t status)
+{
+    auto_capture *a;
+    uint64_t after;
+    if(!before || !(a=owner_capture(NULL,0))) return;
+    after=observation_tb();
+    if(status) {
+        if(!a->present_pending) {a->present_pending=1;a->present_since=after;}
+        return;
+    }
+    if(!a->present_pending) return;
+    a->present_pending=0;
+    if(!a->coverage.active || before<a->present_since) return;
+    {
+        uint64_t add=before-a->present_since,*w=&a->coverage.live.present_wait;
+        *w=UINT64_MAX-*w<add ? UINT64_MAX:*w+add;
+        if(a->coverage.live.present_waits!=UINT32_MAX) a->coverage.live.present_waits++;
+    }
+}
+
 void ps3dk_prof__auto_flip(struct _gcmCtxData *context,int32_t ok)
 {
     auto_capture *a;
@@ -793,6 +824,13 @@ uint64_t ps3dk_prof__auto_test_clock_backlog(void)
 {
     const auto_capture *a=capture;
     return a ? LD_ACQ(&a->clocks.write_idx)-LD_ACQ(&a->clocks.read_idx):0;
+}
+/* Owner thread only: frames by source and flips ignored after an explicit call. */
+void ps3dk_prof__auto_test_present(uint64_t out[2])
+{
+    const auto_capture *a=capture;
+    out[0]=a && a->coverage.active ? a->coverage.live.present_waits:0;
+    out[1]=a && a->coverage.active ? a->coverage.live.present_wait:0;
 }
 /* Owner thread only: frames by source and flips ignored after an explicit call. */
 void ps3dk_prof__auto_test_frames(uint64_t out[3])

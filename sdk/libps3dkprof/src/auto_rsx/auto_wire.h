@@ -21,7 +21,8 @@ enum { AUTO_FINAL=1, AUTO_LOWER_BOUND=2, AUTO_SATURATED=4, AUTO_OWNER_UNACK=8,
        AUTO_STATUS_FRAMES_FLIP=256 /* some frames were delimited by flips */,
        AUTO_STATUS_FRAMES_EXPLICIT=512 /* some frames were delimited by ps3dk_prof_frame */ };
 /* COVERAGE row flag: this frame was opened by a flip on the owner thread. */
-enum { AUTO_FRAME_ROW_FLIP=32 };
+enum { AUTO_FRAME_ROW_FLIP=32,
+       AUTO_FRAME_ROW_PRESENT=64 /* this writer observed flip-status polling in this row */ };
 /* CONFIG masks of this writer: ARRAY|INDEX|CLEAR|FRAME covered; unsafe, immediate
  * and direct/uninstrumented forms unsupported (CALL segments built through the
  * segment API are covered). A reader that requires the older 7/15 refuses. */
@@ -58,6 +59,8 @@ typedef struct auto_wire_frame {
     uint16_t flags;
     uint32_t instance, owner;
     uint64_t frame, tb_begin, tb_end, unsupported, lost;
+    uint32_t present_waits; /* u32@12: completed flip-status waits (PRESENT_OBSERVED rows) */
+    uint64_t present_wait;  /* u64@56: owner PPU ticks between the first pending and the done poll */
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
 } auto_wire_frame;
 

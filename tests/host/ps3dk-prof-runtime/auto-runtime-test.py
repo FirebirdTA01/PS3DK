@@ -19,13 +19,13 @@ ap.add_argument('--sanitize',choices=['address','thread'])
 ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','flips','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
-                                  'segment-silent','no-flip-frames','one-record-chunks'])
+                                  'segment-silent','no-flip-frames','one-record-chunks','no-present-wait'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments',
-                          'no-flip-frames':'flips','one-record-chunks':'segments'}[a.mutant] and not a.sanitize
+                          'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -59,7 +59,8 @@ def run(name,cmd,cwd=out):
                   'fifo-owner':b'p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==PS3DK_PROF_EPERM',
                   'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
                   'segment-silent':b'ticket && app==before+2',
-                  'no-flip-frames':b'counts[0]==20'}[a.mutant]
+                  'no-flip-frames':b'counts[0]==i+1',
+                  'no-present-wait':b'present[0]==1 && present[1]>0'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -126,6 +127,9 @@ for rel in sources:
     elif a.mutant=='no-flip-frames' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='    a->in_flip_frame=1;\n    ps3dk_prof_frame();\n';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    a->in_flip_frame=1;\n').encode())
+    elif a.mutant=='no-present-wait' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text();old='*w=UINT64_MAX-*w<add ? UINT64_MAX:*w+add;';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'(void)w;(void)add;').encode())
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
@@ -261,7 +265,7 @@ if a.case=='segments':
     assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
     for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
-        assert len(b)==352 and struct.unpack_from('<H',b,2)[0]==3
+        assert len(b)==352 and struct.unpack_from('<H',b,2)[0]==3|64
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
@@ -276,7 +280,9 @@ if a.case=='flips':
     assert struct.unpack_from('<2I',config,24)==(15,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
-    assert flags==[1|2|32]*19+[1|2|16|32,1|2|16,1|2],flags # flip rows; flip 19 closed OPEN by the explicit call
+    assert flags==[1|2|32|64]*19+[1|2|16|32|64,1|2|16|64,1|2|64],flags # flip rows; flip 19 closed OPEN by the explicit call
+    present=[struct.unpack_from('<IQ',b,12)[0:1]+struct.unpack_from('<Q',b,56) for b in rows]
+    assert all(w==1 and t>0 for w,t in present[:20]) and present[20:]==[(0,0),(0,0)],present
     assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(22))
     assert all(struct.unpack_from('<12Q',b,64+2*96)[:2]==(1,1) for b in rows),'one observed clear per frame'
     records=[]
@@ -317,7 +323,7 @@ if a.case in ('clocks','clockcap'):
         assert struct.unpack_from('<2I',b,64)==(i+1,i+1)
         assert struct.unpack_from('<QIIQ',b,72)==(schedule[i],owner,0,after-before)
     coverage=[b for k,b in auto if k==36];assert len(coverage)==frames
-    assert all(struct.unpack_from('<H',b,2)[0]==3 for b in coverage)
+    assert all(struct.unpack_from('<H',b,2)[0]==3|64 for b in coverage)
     assert all(not any(struct.unpack_from('<36Q',b,64)) for b in coverage)
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     marks=2*frames # a begin and an end FRAME mark per frame, each one serial pair
@@ -365,7 +371,7 @@ if operations:
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
         for i,b in enumerate(rows):
-            assert len(b)==352 and struct.unpack_from('<HHI',b)==(1,19 if i==1 else 3,1)
+            assert len(b)==352 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
             assert struct.unpack_from('<Q',b,16)[0]==i
             assert struct.unpack_from('<Q',b,24)[0]<=struct.unpack_from('<Q',b,32)[0]
             assert not any(struct.unpack_from('<24Q',b,64))

@@ -271,8 +271,9 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant segment-silent --out "$RUNNER_TEMP/auto-runtime-segment-silent-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant one-record-chunks --out "$RUNNER_TEMP/auto-runtime-one-record-chunks-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-flip-frames --out "$RUNNER_TEMP/auto-runtime-no-flip-frames-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-present-wait --out "$RUNNER_TEMP/auto-runtime-no-present-wait-mutant"
           python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam"
-          for mutant in no-flip-define drop-ok; do
+          for mutant in no-flip-define drop-ok no-status-define; do
             python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopost --mutant fifo-publish --out "$RUNNER_TEMP/auto-runtime-fifo-publish-mutant"

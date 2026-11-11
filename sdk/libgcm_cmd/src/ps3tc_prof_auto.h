@@ -30,4 +30,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData 
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),
  * after the flip was queued: ok is nonzero when it was accepted. */
 void ps3dk_prof__auto_flip(struct _gcmCtxData *, int32_t ok);
+/* gcmGetFlipStatus in a PS3TC_PROF_AUTO unit: begin returns an ordered PPU time
+ * (0 when not observed), end receives it with the status the firmware returned. */
+uint64_t ps3dk_prof__auto_flip_status_begin(void);
+void ps3dk_prof__auto_flip_status_end(uint64_t before, uint32_t status);
 #endif

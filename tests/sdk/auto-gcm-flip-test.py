@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PRELUDE = r'''
 #include <stdint.h>
 #include <stdio.h>
-typedef int32_t s32; typedef uint32_t u32; typedef uint8_t u8;
+typedef int32_t s32; typedef uint32_t u32; typedef uint8_t u8; typedef uint64_t u64;
 typedef struct _gcmCtxData { uint32_t *begin, *end, *current; uintptr_t callback; } gcmContextData;
 typedef gcmContextData CellGcmContextData;
 static gcmContextData context;
@@ -25,6 +25,10 @@ static gcmContextData *observed_context;
 s32 gcmSetFlip(gcmContextData *c, const u8 id) { (void)id; if (c != &context) failure++; flips++; return flip_rc; }
 u32 gcmSetPrepareFlip(gcmContextData *c, const u8 id) { (void)id; if (c != &context) failure++; prepares++; return prepare_rc; }
 void ps3dk_prof__auto_flip(gcmContextData *c, s32 ok) { observed++; observed_ok += ok != 0; observed_context = c; }
+static u32 status_rc; static int status_calls, begins, ends, order_bad; static u32 ended_status;
+u32 gcmGetFlipStatus(void) { if (begins != ends + 1) order_bad++; status_calls++; return status_rc; }
+u64 ps3dk_prof__auto_flip_status_begin(void) { begins++; return 77; }
+void ps3dk_prof__auto_flip_status_end(u64 before, u32 status) { if (before != 77) order_bad++; ends++; ended_status = status; }
 '''
 MAIN = r'''
 int main(void) {
@@ -44,6 +48,11 @@ int main(void) {
     if (observed != 5 * expect || observed_ok != 3 * expect) failure++;
     if (expect && observed_context != &context) failure++;
     if (flips != 3 || prepares != 2) failure++;
+    status_rc = 1; if (cellGcmGetFlipStatus() != 1) failure++;
+    status_rc = 0; if (gcmGetFlipStatus() != 0) failure++;
+    if (status_calls != 2) failure++;
+    if (expect && (begins != 2 || ends != 2 || ended_status != 0 || order_bad)) failure++;
+    if (!expect && (begins || ends)) failure++;
     printf("flips=%d prepares=%d observed=%d ok=%d failure=%d\n", flips, prepares, observed, observed_ok, failure);
     return failure ? 1 : 0;
 }
@@ -66,21 +75,27 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--cc', default='cc')
-    ap.add_argument('--mutant', choices=['no-flip-define', 'drop-ok'])
+    ap.add_argument('--mutant', choices=['no-flip-define', 'drop-ok', 'no-status-define'])
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=False)
     sys_h = (ROOT / 'sdk/include/rsx/gcm_sys.h').read_text()
     gcm_h = (ROOT / 'sdk/include/cell/gcm.h').read_text()
     seam = block(sys_h, '#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)', '#endif')
     seam = seam.replace('void ps3dk_prof__auto_flip(gcmContextData *context,s32 ok);\n', '')
+    seam = seam.replace('u64 ps3dk_prof__auto_flip_status_begin(void);\n', '')
+    seam = seam.replace('void ps3dk_prof__auto_flip_status_end(u64 before,u32 status);\n', '')
     if a.mutant == 'no-flip-define':
         old = '#define gcmSetFlip ps3tc_auto_gcmSetFlip\n'
+        assert seam.count(old) == 1; seam = seam.replace(old, '')
+    if a.mutant == 'no-status-define':
+        old = '#define gcmGetFlipStatus ps3tc_auto_gcmGetFlipStatus\n'
         assert seam.count(old) == 1; seam = seam.replace(old, '')
     if a.mutant == 'drop-ok':
         old = 'ps3dk_prof__auto_flip(context,rc==0);'
         assert seam.count(old) == 1; seam = seam.replace(old, 'ps3dk_prof__auto_flip(context,1);')
     wrappers = (wrapper(gcm_h, 'static inline int32_t cellGcmSetFlip(CellGcmContextData *context, uint8_t id)') +
-                wrapper(gcm_h, 'static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id)'))
+                wrapper(gcm_h, 'static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id)') +
+                wrapper(gcm_h, 'static inline uint32_t cellGcmGetFlipStatus(void)'))
     source = PRELUDE + seam + '\n' + wrappers + MAIN
     (a.out / 'flip.c').write_text(source)
     results = {}

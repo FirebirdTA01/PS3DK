@@ -36,6 +36,17 @@ static void flush(gpp_ctx *ctx) {assert(ctx==&context);complete(ctx,++anchors);}
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
 void ps3dk_prof__auto_test_frames(uint64_t out[3]);
+void ps3dk_prof__auto_test_present(uint64_t out[2]);
+/* The application's flip-status loop (gcmGetFlipStatus in a selected build):
+ * pending twice, then done. */
+static void wait_flip(void)
+{
+    for(unsigned i=0;i<3;i++) {
+        uint64_t before=ps3dk_prof__auto_flip_status_begin();
+        assert(before);
+        ps3dk_prof__auto_flip_status_end(before,i<2 ? 1u:0u);
+    }
+}
 static void clear(void)
 {
     ps3tc_auto_call call={3,0,0,0,0,0,0,0xf3};
@@ -51,7 +62,16 @@ int main(void) {
     ps3dk_prof_test_hooks.gpu_gpp_dev=&device;
     ps3dk_prof__auto_gcm_init_result(&context,sizeof words,sizeof words,words,0);
     clear(); /* before any flip: unassociated */
-    for(unsigned i=0;i<20;i++) {flip(1);clear();}
+    for(unsigned i=0;i<20;i++) {
+        uint64_t present[2];
+        flip(1);
+        ps3dk_prof__auto_test_frames(counts);
+        assert(counts[0]==i+1); /* each accepted flip opens a frame */
+        wait_flip();
+        ps3dk_prof__auto_test_present(present);
+        assert(present[0]==1 && present[1]>0); /* the wait is charged to the frame the flip opened */
+        clear();
+    }
     flip(0); /* a refused flip is no boundary */
     ps3dk_prof__auto_test_frames(counts);
     assert(counts[0]==20 && counts[1]==0 && counts[2]==0);

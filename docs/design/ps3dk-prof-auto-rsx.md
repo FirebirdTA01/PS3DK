@@ -156,7 +156,19 @@ visited, observed and ten disjoint exclusions in this order: room, report
 capacity, metadata capacity, reentry, unsupported arguments, shutdown, ownership
 uncertainty, observer disabled, resource lease unverified, epoch invalid.
 Flags are TOKEN=1, FINAL=2, SATURATED=4, LOSS=8, OPEN=16 and, with the 15/11
-CONFIG masks, FLIP=32 (the row was opened by a flip).
+CONFIG masks, FLIP=32 (the row was opened by a flip) and PRESENT=64 (the writer
+observed flip-status polling in this row). With PRESENT, u32@12 is the number
+of completed flip-status waits and u64@56 their owner PPU ticks; without it
+both are zero and there is no presentation evidence. A wait runs from the
+return of the first gcmGetFlipStatus call that saw the flip pending to the
+entry of the call that saw it done, and is charged to the frame active then.
+cellGcmGetFlipStatus reaches the same wrapper. Waits on presentation by other
+means (VBlank or flip handlers, wait-flip GPU commands, a sleep without
+polling) are not observed.
+
+The final frame of a capture normally has no closing flip: it is closed at
+shutdown as an OPEN row without an end mark, and FRAME_MARK_MISSED is not set
+for it. The reader names it "final frame closed at shutdown (no end mark)".
 
 Frames need no profiler call. In a PS3_PROF_AUTO build, rsx/gcm_sys.h routes
 gcmSetFlip and gcmSetPrepareFlip (and so cellGcmSetFlip and
@@ -350,9 +362,10 @@ RSX reached-marker span (first operation begin to last end) on the PPU clock:
 | Verdict | Condition |
 |---|---|
 | RSX-bound candidate (fetch) | W >= D/4 and S >= D/2 (lower bound of S) |
-| PPU-bound candidate | W = 0 and S < D/2 (upper bound of S); compute, scheduling, I/O and synchronization are not distinguished |
+| pacing | W = 0, S < D/2 (upper bound), and the row's observed presentation (flip-status) wait P >= D/4 |
+| UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 without such a P |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |
-| pacing | never from this family: it observes no presentation or vsync wait |
+| PPU-bound candidate | never from this family: it needs positive evidence that the owner was busy, not waiting |
 | UNKNOWN | anything else, named as unresolved |
 
 The two shares are provisional starting values, printed with every JSON

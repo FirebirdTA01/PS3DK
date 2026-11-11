@@ -44,7 +44,7 @@ int main(void) {
     if(auto_encode_ops(b,sizeof b,1,&op,UINT32_MAX)!=0 || memcmp(b,before,sizeof b)) return 7;
     n=auto_encode_ops(b,sizeof b,1,&op,1); if(n!=144 || put(n)) return 8;
     f.flags=3; f.instance=1; f.owner=7; f.frame=0; f.tb_begin=100; f.tb_end=200;
-    f.unsupported=3; f.lost=4;
+    f.unsupported=3; f.lost=4; f.present_waits=5; f.present_wait=6;
     for(i=0;i<3;i++) for(j=0;j<12;j++) f.counts[i][j]=1000+i*100+j;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_frame(b,351,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
@@ -119,7 +119,7 @@ def main():
     struct.pack_into('<QIHH6Q7I',op,16,0x0102030405060708,7,2,3,9,10,11,12,13,14,*range(20,27))
     struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2)
     struct.pack_into('<I',op,108,0x31); struct.pack_into('<I',op,132,0x32); chunks.append(bytes(op))
-    f=bytearray(352); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,0,0,100,200,3,4,0)
+    f=bytearray(352); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
     struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12))); chunks.append(bytes(f))
     chunks.append(struct.pack('<HHI15Q',1,49,1,*(0x1020304050607080+i for i in range(15))))
     chunks.append(struct.pack('<HH7I4Q2IQIIQ',1,1,1,1,3,0,1026,3,5,6,7,8,8,3,3,16,7,0,9))
