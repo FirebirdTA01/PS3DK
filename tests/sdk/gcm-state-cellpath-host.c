@@ -359,6 +359,89 @@ int main(void)
     ps3tc_gcm_state_invalidate_zcull(&r);
     check("cell==native invalidate_zcull", A, B, 2);
 
+    /* ---- texture-border / attrib-mask / zpass / clear-zcull / ref / caches / vertex-4f / report ---- */
+    /* texture_border_color (2, index + color) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetTextureBorderColor(&n, 0x05, 0xA5D1B2C3u);
+    ps3tc_gcm_state_texture_border_color(&r, 0x05, 0xA5D1B2C3u);
+    check("cell==native texture_border_color (idx 0x05)", A, B, 2);
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetTextureBorderColor(&n, 0x2A, 0x00C0FFB0u);
+    ps3tc_gcm_state_texture_border_color(&r, 0x2A, 0x00C0FFB0u);
+    check("cell==native texture_border_color (idx 0x2A)", A, B, 2);
+
+    /* vertex_attrib_output_mask (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetVertexAttribOutputMask(&n, 0x0C3A7751u);
+    ps3tc_gcm_state_vertex_attrib_output_mask(&r, 0x0C3A7751u);
+    check("cell==native vertex_attrib_output_mask", A, B, 2);
+
+    /* zpass_pixel_count_enable (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZpassPixelCountEnable(&n, 0x64B2E910u);
+    ps3tc_gcm_state_zpass_pixel_count_enable(&r, 0x64B2E910u);
+    check("cell==native zpass_pixel_count_enable", A, B, 2);
+
+    /* clear_zcull_surface (2, (stencil<<1)|depth) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetClearZcullSurface(&n, 0x5A, 0x27);
+    ps3tc_gcm_state_clear_zcull_surface(&r, 0x5A, 0x27);
+    check("cell==native clear_zcull_surface (0x5A/0x27)", A, B, 2);
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetClearZcullSurface(&n, 0x81, 0x08);
+    ps3tc_gcm_state_clear_zcull_surface(&r, 0x81, 0x08);
+    check("cell==native clear_zcull_surface (0x81/0x08)", A, B, 2);
+
+    /* reference_command (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetReferenceCommand(&n, 0x1B8F42A9u);
+    ps3tc_gcm_state_reference_command(&r, 0x1B8F42A9u);
+    check("cell==native reference_command", A, B, 2);
+
+    /* invalidate_vertex_cache (8) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetInvalidateVertexCache(&n);
+    ps3tc_gcm_state_invalidate_vertex_cache(&r);
+    check("cell==native invalidate_vertex_cache (8)", A, B, 8);
+
+    /* invalidate_texture_cache (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetInvalidateTextureCache(&n, 0x43CD8E02u);
+    ps3tc_gcm_state_invalidate_texture_cache(&r, 0x43CD8E02u);
+    check("cell==native invalidate_texture_cache", A, B, 2);
+
+    /* vertex_data_4f (5, v[4] IEEE-32) */
+    {
+        const float v[4] = { 0.25f, -1.5f, 3.0f, 1000.0f };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+        cellGcmSetVertexData4f(&n, 0x2A, v);
+        ps3tc_gcm_state_vertex_data_4f(&r, 0x2A, v);
+        check("cell==native vertex_data_4f (idx 0x2A)", A, B, 5);
+        const float w[4] = { -2.5f, 0.125f, 42.0f, -0.03125f };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+        cellGcmSetVertexData4f(&n, 0x07, w);
+        ps3tc_gcm_state_vertex_data_4f(&r, 0x07, w);
+        check("cell==native vertex_data_4f (idx 0x07)", A, B, 5);
+    }
+
+    /* clear_report (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetClearReport(&n, 0x3Du);
+    ps3tc_gcm_state_clear_report(&r, 0x3Du);
+    check("cell==native clear_report (0x3D)", A, B, 2);
+
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;
 }

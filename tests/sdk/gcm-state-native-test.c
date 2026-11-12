@@ -349,6 +349,142 @@ static void ref_unsafe_invalz(gcmContextData *ctx)
     ctx->current[1] = 0;
     ctx->current   += 2;
 }
+
+/* ---- texture-border / attrib-mask / zpass / clear-zcull / ref / caches / vertex-4f / report ---- */
+static void ref_safe_texborder(gcmContextData *ctx, uint8_t index, uint32_t color)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_TEX_BORDER_COLOR(index), 1);
+    ctx->current[1] = color;
+    ctx->current   += 2;
+}
+static void ref_unsafe_texborder(gcmContextData *ctx, uint8_t index, uint32_t color)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_TEX_BORDER_COLOR(index), 1);
+    ctx->current[1] = color;
+    ctx->current   += 2;
+}
+static void ref_safe_vattrmask(gcmContextData *ctx, uint32_t mask)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    ctx->current[1] = mask;
+    ctx->current   += 2;
+}
+static void ref_unsafe_vattrmask(gcmContextData *ctx, uint32_t mask)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    ctx->current[1] = mask;
+    ctx->current   += 2;
+}
+static void ref_safe_zpass(gcmContextData *ctx, uint32_t enable)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_ENABLE, 1);
+    ctx->current[1] = enable;
+    ctx->current   += 2;
+}
+static void ref_unsafe_zpass(gcmContextData *ctx, uint32_t enable)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_ENABLE, 1);
+    ctx->current[1] = enable;
+    ctx->current   += 2;
+}
+static void ref_safe_clearzcull(gcmContextData *ctx, uint32_t depth, uint32_t stencil)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_CLEAR_ZCULL_SURFACE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+static void ref_unsafe_clearzcull(gcmContextData *ctx, uint32_t depth, uint32_t stencil)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_CLEAR_ZCULL_SURFACE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+static void ref_safe_refcmd(gcmContextData *ctx, uint32_t ref_value)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV406ETCL_SET_REF, 1);
+    ctx->current[1] = ref_value;
+    ctx->current   += 2;
+}
+static void ref_unsafe_refcmd(gcmContextData *ctx, uint32_t ref_value)
+{
+    ctx->current[0] = REF_METHOD(NV406ETCL_SET_REF, 1);
+    ctx->current[1] = ref_value;
+    ctx->current   += 2;
+}
+static void ref_safe_invvert(gcmContextData *ctx)
+{
+    if (ctx->current + 8 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 8) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE2, 1);  ctx->current[1] = 0;
+    ctx->current[2] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[3] = 0;
+    ctx->current[4] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[5] = 0;
+    ctx->current[6] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[7] = 0;
+    ctx->current   += 8;
+}
+static void ref_unsafe_invvert(gcmContextData *ctx)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE2, 1);  ctx->current[1] = 0;
+    ctx->current[2] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[3] = 0;
+    ctx->current[4] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[5] = 0;
+    ctx->current[6] = REF_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);   ctx->current[7] = 0;
+    ctx->current   += 8;
+}
+static void ref_safe_invtex(gcmContextData *ctx, uint32_t type)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_TEX_CACHE_CTL, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
+static void ref_unsafe_invtex(gcmContextData *ctx, uint32_t type)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_TEX_CACHE_CTL, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
+static void ref_safe_vtx4f(gcmContextData *ctx, uint8_t index, const f32 v[4])
+{
+    ieee32 w0, w1, w2, w3;
+    w0.f = v[0]; w1.f = v[1]; w2.f = v[2]; w3.f = v[3];
+    if (ctx->current + 5 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 5) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_VTX_ATTR_4F_X(index), 4);
+    ctx->current[1] = w0.u; ctx->current[2] = w1.u; ctx->current[3] = w2.u; ctx->current[4] = w3.u;
+    ctx->current   += 5;
+}
+static void ref_unsafe_vtx4f(gcmContextData *ctx, uint8_t index, const f32 v[4])
+{
+    ieee32 w0, w1, w2, w3;
+    w0.f = v[0]; w1.f = v[1]; w2.f = v[2]; w3.f = v[3];
+    ctx->current[0] = REF_METHOD(NV40TCL_VTX_ATTR_4F_X(index), 4);
+    ctx->current[1] = w0.u; ctx->current[2] = w1.u; ctx->current[3] = w2.u; ctx->current[4] = w3.u;
+    ctx->current   += 5;
+}
+static void ref_safe_clearrep(gcmContextData *ctx, uint32_t type)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_RESET, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
+static void ref_unsafe_clearrep(gcmContextData *ctx, uint32_t type)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_RESET, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
 static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               f32 min, f32 max, const f32 scale[4], const f32 offset[4])
 {
@@ -1122,20 +1258,202 @@ int main(void)
         cmp("  scull_control (unsafe)", A, B, 2);
     }
 
-    /* invalidate_zcull (2 words, value 0; takes no value arg) */
+        /* invalidate_zcull (2 words, value 0; takes no value arg) */
+        {
+            static uint32_t A[4], B[4];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+            ps3tc_gcm_state_invalidate_zcull((CellGcmContextData *)&n);
+            ref_safe_invalz(&r);
+            cmp("  invalidate_zcull (safe)", A, B, 2);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_invalidate_zcull_unsafe((CellGcmContextData *)&n);
+            ref_unsafe_invalz(&r);
+            cmp("  invalidate_zcull (unsafe)", A, B, 2);
+        }
+
+    /* ---- texture-border / attrib-mask / zpass / clear-zcull / ref-cmd / caches / vertex-4f / report ---- */
+    printf("\n  Texture-border / attrib-mask / zpass / clear-zcull / ref / caches / vertex-4f / report\n");
+
+    /* texture_border_color (2 words, index + color) */
     {
         static uint32_t A[4], B[4];
         gcmContextData n, r;
         memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
         n.begin = n.current = A; n.end = A + 4; n.callback = 0;
         r.begin = r.current = B; r.end = B + 4; r.callback = 0;
-        ps3tc_gcm_state_invalidate_zcull((CellGcmContextData *)&n);
-        ref_safe_invalz(&r);
-        cmp("  invalidate_zcull (safe)", A, B, 2);
+        ps3tc_gcm_state_texture_border_color((CellGcmContextData *)&n, 0x05, 0xA5D1B2C3u);
+        ref_safe_texborder(&r, 0x05, 0xA5D1B2C3u);
+        cmp("  texture_border_color (safe, idx 0x05)", A, B, 2);
         n.begin = n.current = A; r.begin = r.current = B;
-        ps3tc_gcm_state_invalidate_zcull_unsafe((CellGcmContextData *)&n);
-        ref_unsafe_invalz(&r);
-        cmp("  invalidate_zcull (unsafe)", A, B, 2);
+        ps3tc_gcm_state_texture_border_color_unsafe((CellGcmContextData *)&n, 0x05, 0xA5D1B2C3u);
+        ref_unsafe_texborder(&r, 0x05, 0xA5D1B2C3u);
+        cmp("  texture_border_color (unsafe, idx 0x05)", A, B, 2);
+    }
+    /* texture_border_color — index=0x2A (different) to catch idx/color swap */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_texture_border_color((CellGcmContextData *)&n, 0x2A, 0x00C0FFB0u);
+        ref_safe_texborder(&r, 0x2A, 0x00C0FFB0u);
+        cmp("  texture_border_color (safe, idx 0x2A)", A, B, 2);
+    }
+
+    /* vertex_attrib_output_mask (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_vertex_attrib_output_mask((CellGcmContextData *)&n, 0x0C3A7751u);
+        ref_safe_vattrmask(&r, 0x0C3A7751u);
+        cmp("  vertex_attrib_output_mask (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_attrib_output_mask_unsafe((CellGcmContextData *)&n, 0x0C3A7751u);
+        ref_unsafe_vattrmask(&r, 0x0C3A7751u);
+        cmp("  vertex_attrib_output_mask (unsafe)", A, B, 2);
+    }
+
+    /* zpass_pixel_count_enable (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_zpass_pixel_count_enable((CellGcmContextData *)&n, 0x64B2E910u);
+        ref_safe_zpass(&r, 0x64B2E910u);
+        cmp("  zpass_pixel_count_enable (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zpass_pixel_count_enable_unsafe((CellGcmContextData *)&n, 0x64B2E910u);
+        ref_unsafe_zpass(&r, 0x64B2E910u);
+        cmp("  zpass_pixel_count_enable (unsafe)", A, B, 2);
+    }
+
+    /* clear_zcull_surface (2 words, (stencil<<1)|depth) — two distinct values */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_clear_zcull_surface((CellGcmContextData *)&n, 0x5A, 0x27);
+        ref_safe_clearzcull(&r, 0x5A, 0x27);
+        cmp("  clear_zcull_surface (safe, 0x5A/0x27)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_clear_zcull_surface_unsafe((CellGcmContextData *)&n, 0x5A, 0x27);
+        ref_unsafe_clearzcull(&r, 0x5A, 0x27);
+        cmp("  clear_zcull_surface (unsafe, 0x5A/0x27)", A, B, 2);
+    }
+    /* clear_zcull_surface — swappable values to catch a depth/stencil mix-up */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_clear_zcull_surface((CellGcmContextData *)&n, 0x81, 0x08);
+        ref_safe_clearzcull(&r, 0x81, 0x08);
+        cmp("  clear_zcull_surface (safe, 0x81/0x08)", A, B, 2);
+    }
+
+    /* reference_command (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_reference_command((CellGcmContextData *)&n, 0x1B8F42A9u);
+        ref_safe_refcmd(&r, 0x1B8F42A9u);
+        cmp("  reference_command (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_reference_command_unsafe((CellGcmContextData *)&n, 0x1B8F42A9u);
+        ref_unsafe_refcmd(&r, 0x1B8F42A9u);
+        cmp("  reference_command (unsafe)", A, B, 2);
+    }
+
+    /* invalidate_vertex_cache (8 words) */
+    {
+        static uint32_t A[12], B[12];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 12; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 12; r.callback = 0;
+        ps3tc_gcm_state_invalidate_vertex_cache((CellGcmContextData *)&n);
+        ref_safe_invvert(&r);
+        cmp("  invalidate_vertex_cache (safe)", A, B, 8);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_invalidate_vertex_cache_unsafe((CellGcmContextData *)&n);
+        ref_unsafe_invvert(&r);
+        cmp("  invalidate_vertex_cache (unsafe)", A, B, 8);
+    }
+
+    /* invalidate_texture_cache (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_invalidate_texture_cache((CellGcmContextData *)&n, 0x43CD8E02u);
+        ref_safe_invtex(&r, 0x43CD8E02u);
+        cmp("  invalidate_texture_cache (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_invalidate_texture_cache_unsafe((CellGcmContextData *)&n, 0x43CD8E02u);
+        ref_unsafe_invtex(&r, 0x43CD8E02u);
+        cmp("  invalidate_texture_cache (unsafe)", A, B, 2);
+    }
+
+    /* vertex_data_4f (5 words, v[4] IEEE-32) */
+    {
+        const f32 v[4] = { 0.25f, -1.5f, 3.0f, 1000.0f };
+        static uint32_t A[8], B[8];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+        ps3tc_gcm_state_vertex_data_4f((CellGcmContextData *)&n, 0x2A, v);
+        ref_safe_vtx4f(&r, 0x2A, v);
+        cmp("  vertex_data_4f (safe, idx 0x2A)", A, B, 5);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_data_4f_unsafe((CellGcmContextData *)&n, 0x2A, v);
+        ref_unsafe_vtx4f(&r, 0x2A, v);
+        cmp("  vertex_data_4f (unsafe, idx 0x2A)", A, B, 5);
+    }
+    /* vertex_data_4f — index=0x07 with a different value vector */
+    {
+        const f32 v[4] = { -2.5f, 0.125f, 42.0f, -0.03125f };
+        static uint32_t A[8], B[8];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+        ps3tc_gcm_state_vertex_data_4f((CellGcmContextData *)&n, 0x07, v);
+        ref_safe_vtx4f(&r, 0x07, v);
+        cmp("  vertex_data_4f (safe, idx 0x07)", A, B, 5);
+    }
+
+    /* clear_report (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_clear_report((CellGcmContextData *)&n, 0x88C42A3Du);
+        ref_safe_clearrep(&r, 0x88C42A3Du);
+        cmp("  clear_report (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_clear_report_unsafe((CellGcmContextData *)&n, 0x88C42A3Du);
+        ref_unsafe_clearrep(&r, 0x88C42A3Du);
+        cmp("  clear_report (unsafe)", A, B, 2);
     }
 
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
@@ -1300,6 +1618,36 @@ int main(void)
     RING_CHECK(ps3tc_gcm_state_invalidate_zcull,
                ps3tc_gcm_state_invalidate_zcull_unsafe,
                "invalidate_zcull", 2);
+    RING_CHECK(ps3tc_gcm_state_texture_border_color,
+               ps3tc_gcm_state_texture_border_color_unsafe,
+               "texture_border_color", 2, 0x05, 0xA5D1B2C3);
+    RING_CHECK(ps3tc_gcm_state_vertex_attrib_output_mask,
+               ps3tc_gcm_state_vertex_attrib_output_mask_unsafe,
+               "vertex_attrib_output_mask", 2, 0x0C3A7751);
+    RING_CHECK(ps3tc_gcm_state_zpass_pixel_count_enable,
+               ps3tc_gcm_state_zpass_pixel_count_enable_unsafe,
+               "zpass_pixel_count_enable", 2, 0x64B2E910);
+    RING_CHECK(ps3tc_gcm_state_clear_zcull_surface,
+               ps3tc_gcm_state_clear_zcull_surface_unsafe,
+               "clear_zcull_surface", 2, 0x5A, 0x27);
+    RING_CHECK(ps3tc_gcm_state_reference_command,
+               ps3tc_gcm_state_reference_command_unsafe,
+               "reference_command", 2, 0x1B8F42A9);
+    RING_CHECK(ps3tc_gcm_state_invalidate_vertex_cache,
+               ps3tc_gcm_state_invalidate_vertex_cache_unsafe,
+               "invalidate_vertex_cache", 8);
+    RING_CHECK(ps3tc_gcm_state_invalidate_texture_cache,
+               ps3tc_gcm_state_invalidate_texture_cache_unsafe,
+               "invalidate_texture_cache", 2, 0x43CD8E02);
+    {
+        const f32 v[4] = { 0.25f, -1.5f, 3.0f, 1000.0f };
+        RING_CHECK(ps3tc_gcm_state_vertex_data_4f,
+                   ps3tc_gcm_state_vertex_data_4f_unsafe,
+                   "vertex_data_4f", 5, 0x2A, v);
+    }
+    RING_CHECK(ps3tc_gcm_state_clear_report,
+               ps3tc_gcm_state_clear_report_unsafe,
+               "clear_report", 2, 0x88C42A3D);
 
 
     printf("\n");

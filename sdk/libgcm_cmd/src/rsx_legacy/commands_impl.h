@@ -56,10 +56,11 @@ void RSX_FUNC(SetClearDepthStencil)(gcmContextData *context,u32 value)
 
 void RSX_FUNC(SetReferenceCommand)(gcmContextData *context,u32 ref_value)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV406ETCL_SET_REF,1);
-	RSX_CONTEXT_CURRENTP[1] = ref_value;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_reference_command_unsafe(context, ref_value);
+#else
+	ps3tc_gcm_state_reference_command(context, ref_value);
+#endif
 }
 
 void RSX_FUNC(SetWriteBackendLabel)(gcmContextData *context,u8 index,u32 value)
@@ -476,18 +477,20 @@ void RSX_FUNC(SetReport)(gcmContextData *context,u32 type,u32 index)
 
 void RSX_FUNC(SetClearReport)(gcmContextData *context,u32 type)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_QUERY_RESET,1);
-	RSX_CONTEXT_CURRENTP[1] = type;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_clear_report_unsafe(context, type);
+#else
+	ps3tc_gcm_state_clear_report(context, type);
+#endif
 }
 
 void RSX_FUNC(SetZPixelCountEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_QUERY_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_zpass_pixel_count_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_zpass_pixel_count_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetSCullControl)(gcmContextData *context,u8 sFunc,u8 sRef,u8 sMask)
@@ -528,10 +531,11 @@ void RSX_FUNC(SetZCullControl)(gcmContextData *context,u8 zculldir,u8 zcullforma
 
 void RSX_FUNC(SetClearZCullSurface)(gcmContextData *context,u32 depth,u32 stencil)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CLEAR_ZCULL_SURFACE,1);
-	RSX_CONTEXT_CURRENTP[1] = ((stencil<<1) | depth);
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_clear_zcull_surface_unsafe(context, depth, stencil);
+#else
+	ps3tc_gcm_state_clear_zcull_surface(context, depth, stencil);
+#endif
 }
 
 void RSX_FUNC(SetZCullEnable)(gcmContextData *context,u32 depth,u32 stencil)
@@ -815,10 +819,11 @@ void RSX_FUNC(SetVertexProgramConstants)(gcmContextData *context,u32 start,u32 c
 
 void RSX_FUNC(SetVertexAttribOutputMask)(gcmContextData *context,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_VP_RESULT_EN,1);
-	RSX_CONTEXT_CURRENTP[1] = mask;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_vertex_attrib_output_mask_unsafe(context, mask);
+#else
+	ps3tc_gcm_state_vertex_attrib_output_mask(context, mask);
+#endif
 }
 
 static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetFragmentProgramParameter)(gcmContextData *context,const rsxFragmentProgram *program,const rsxProgramConst *param,const f32 *value,u32 offset,u32 location)
@@ -991,10 +996,11 @@ void RSX_FUNC(DrawVertex3f)(gcmContextData *context,u8 idx,const f32 v[3])
 
 void RSX_FUNC(DrawVertex4f)(gcmContextData *context,u8 idx,const f32 v[4])
 {
-	RSX_CONTEXT_CURRENT_BEGIN(5);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_VTX_ATTR_4F_X(idx),4);
-	RSX_MEMCPY(&RSX_CONTEXT_CURRENTP[1],v,sizeof(f32)*4);
-	RSX_CONTEXT_CURRENT_END(5);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_vertex_data_4f_unsafe(context, idx, v);
+#else
+	ps3tc_gcm_state_vertex_data_4f(context, idx, v);
+#endif
 }
 
 void RSX_FUNC(DrawVertex4s)(gcmContextData *context,u8 idx,const s16 v[4])
@@ -1042,24 +1048,20 @@ void RSX_FUNC(SetFrequencyDividerOperation)(gcmContextData *context,u16 operatio
 
 void RSX_FUNC(InvalidateVertexCache)(gcmContextData *context)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(8);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_VTX_CACHE_INVALIDATE2,1);
-	RSX_CONTEXT_CURRENTP[1] = 0;
-	RSX_CONTEXT_CURRENTP[2] = RSX_METHOD(NV40TCL_VTX_CACHE_INVALIDATE,1);
-	RSX_CONTEXT_CURRENTP[3] = 0;
-	RSX_CONTEXT_CURRENTP[4] = RSX_METHOD(NV40TCL_VTX_CACHE_INVALIDATE,1);
-	RSX_CONTEXT_CURRENTP[5] = 0;
-	RSX_CONTEXT_CURRENTP[6] = RSX_METHOD(NV40TCL_VTX_CACHE_INVALIDATE,1);
-	RSX_CONTEXT_CURRENTP[7] = 0;
-	RSX_CONTEXT_CURRENT_END(8);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_invalidate_vertex_cache_unsafe(context);
+#else
+	ps3tc_gcm_state_invalidate_vertex_cache(context);
+#endif
 }
 
 void RSX_FUNC(InvalidateTextureCache)(gcmContextData *context,u32 type)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_TEX_CACHE_CTL,1);
-	RSX_CONTEXT_CURRENTP[1] = type;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_invalidate_texture_cache_unsafe(context, type);
+#else
+	ps3tc_gcm_state_invalidate_texture_cache(context, type);
+#endif
 }
 
 void RSX_FUNC(LoadTexture)(gcmContextData *context,u8 index,const gcmTexture *texture)
@@ -1174,10 +1176,11 @@ void RSX_FUNC(VertexTextureWrapMode)(gcmContextData *context,u8 index,u8 wraps,u
 
 void RSX_FUNC(TextureBorderColor)(gcmContextData *context,u8 index,u32 color)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_TEX_BORDER_COLOR(index),1);
-	RSX_CONTEXT_CURRENTP[1] = color;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_texture_border_color_unsafe(context, index, color);
+#else
+	ps3tc_gcm_state_texture_border_color(context, index, color);
+#endif
 }
 
 void RSX_FUNC(VertexTextureBorderColor)(gcmContextData *context,u8 index,u32 color)

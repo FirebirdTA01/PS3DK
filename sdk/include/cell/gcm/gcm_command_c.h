@@ -87,7 +87,7 @@ static inline void cellGcmFinishUnsafe(CellGcmContextData *thisContext, uint32_t
 
 static inline void cellGcmSetReferenceCommand(CellGcmContextData *thisContext, uint32_t ref)
 {
-	rsxSetReferenceCommand(thisContext, ref);
+	ps3tc_gcm_state_reference_command(thisContext, ref);
 }
 
 /* ==========================================================
@@ -372,7 +372,7 @@ static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
 static inline void cellGcmSetTextureBorderColor(CellGcmContextData *thisContext,
                                                 uint8_t index, uint32_t color)
 {
-	rsxTextureBorderColor(thisContext, index, color);
+	ps3tc_gcm_state_texture_border_color(thisContext, index, color);
 }
 
 /* ==========================================================
@@ -489,7 +489,7 @@ static inline void cellGcmSetDrawEnd(CellGcmContextData *thisContext)
 static inline void cellGcmSetVertexData4f(CellGcmContextData *thisContext,
                                           uint8_t index, const float v[4])
 {
-	rsxDrawVertex4f(thisContext, index, v);
+	ps3tc_gcm_state_vertex_data_4f(thisContext, index, v);
 }
 
 static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
@@ -514,7 +514,7 @@ static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisConte
 
 static inline void cellGcmSetVertexAttribOutputMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetVertexAttribOutputMask(thisContext, mask);
+	ps3tc_gcm_state_vertex_attrib_output_mask(thisContext, mask);
 }
 
 /* --- Vertex program constants (no Cg handle needed) --- */
@@ -538,12 +538,12 @@ static inline void cellGcmSetFragmentProgramGammaEnable(CellGcmContextData *this
 
 static inline void cellGcmSetInvalidateVertexCache(CellGcmContextData *thisContext)
 {
-	rsxInvalidateVertexCache(thisContext);
+	ps3tc_gcm_state_invalidate_vertex_cache(thisContext);
 }
 
 static inline void cellGcmSetInvalidateTextureCache(CellGcmContextData *thisContext, uint32_t type)
 {
-	rsxInvalidateTextureCache(thisContext, type);
+	ps3tc_gcm_state_invalidate_texture_cache(thisContext, type);
 }
 
 /* --- 2D transfer engine (BLT path; no shaders required) --- */
@@ -811,7 +811,7 @@ static inline void cellGcmSetZcullLimit(CellGcmContextData *thisContext,
 static inline void cellGcmSetClearZcullSurface(CellGcmContextData *thisContext,
                                                uint32_t depth, uint32_t stencil)
 {
-	rsxSetClearZCullSurface(thisContext, depth, stencil);
+	ps3tc_gcm_state_clear_zcull_surface(thisContext, depth, stencil);
 }
 
 static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
@@ -845,7 +845,7 @@ static inline void cellGcmSetRenderEnable(CellGcmContextData *thisContext,
 
 static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetZPixelCountEnable(thisContext, enable);
+	ps3tc_gcm_state_zpass_pixel_count_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t type, uint32_t index)
@@ -855,7 +855,7 @@ static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t typ
 
 static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_t type)
 {
-	rsxSetClearReport(thisContext, type);
+	ps3tc_gcm_state_clear_report(thisContext, type);
 }
 
 static inline void cellGcmSetReportLocation(CellGcmContextData *thisContext, uint32_t location)

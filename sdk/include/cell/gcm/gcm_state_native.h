@@ -1143,6 +1143,203 @@ static inline void ps3tc_gcm_state_invalidate_zcull_unsafe(CellGcmContextData *c
     ctx->current   += 2;
 }
 
+/* ===================================================================
+ * Texture border color, vertex-attribute output mask, Z-pass pixel
+ * count, clear-zcull surface, reference command, cache invalidates,
+ * vertex-data 4-vector and report reset.  Each SAFE variant reserves
+ * via ps3tc_gcm_reserve; each UNSAFE variant plain-writes.
+ *
+ * Parameter widths match the pre-patch rsx* signatures exactly (none
+ * of these forwarders truncate a wider public argument, so no extra
+ * byte-case is required).
+ * =================================================================== */
+
+/* safe — texture_border_color (TEX_BORDER_COLOR(index) count=1, 2 words). */
+static inline void ps3tc_gcm_state_texture_border_color(CellGcmContextData *ctx,
+                                                        uint8_t index, uint32_t color)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_TEX_BORDER_COLOR(index), 1);
+    p[1] = color;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_texture_border_color_unsafe(CellGcmContextData *ctx,
+                                                               uint8_t index, uint32_t color)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_TEX_BORDER_COLOR(index), 1);
+    ctx->current[1] = color;
+    ctx->current   += 2;
+}
+
+/* safe — vertex_attrib_output_mask (VP_RESULT_EN count=1, 2 words). */
+static inline void ps3tc_gcm_state_vertex_attrib_output_mask(CellGcmContextData *ctx,
+                                                             uint32_t mask)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    p[1] = mask;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_vertex_attrib_output_mask_unsafe(CellGcmContextData *ctx,
+                                                                    uint32_t mask)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_VP_RESULT_EN, 1);
+    ctx->current[1] = mask;
+    ctx->current   += 2;
+}
+
+/* safe — zpass_pixel_count_enable (QUERY_ENABLE count=1, 2 words). */
+static inline void ps3tc_gcm_state_zpass_pixel_count_enable(CellGcmContextData *ctx,
+                                                            uint32_t enable)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_ENABLE, 1);
+    p[1] = enable;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zpass_pixel_count_enable_unsafe(CellGcmContextData *ctx,
+                                                                   uint32_t enable)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_ENABLE, 1);
+    ctx->current[1] = enable;
+    ctx->current   += 2;
+}
+
+/* safe — clear_zcull_surface (CLEAR_ZCULL_SURFACE count=1, 2 words, (stencil<<1)|depth). */
+static inline void ps3tc_gcm_state_clear_zcull_surface(CellGcmContextData *ctx,
+                                                       uint32_t depth, uint32_t stencil)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_ZCULL_SURFACE, 1);
+    p[1] = ((stencil << 1) | depth);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_clear_zcull_surface_unsafe(CellGcmContextData *ctx,
+                                                              uint32_t depth, uint32_t stencil)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_ZCULL_SURFACE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+
+/* safe — reference_command (NV406ETCL_SET_REF count=1, 2 words). */
+static inline void ps3tc_gcm_state_reference_command(CellGcmContextData *ctx, uint32_t ref_value)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV406ETCL_SET_REF, 1);
+    p[1] = ref_value;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_reference_command_unsafe(CellGcmContextData *ctx, uint32_t ref_value)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV406ETCL_SET_REF, 1);
+    ctx->current[1] = ref_value;
+    ctx->current   += 2;
+}
+
+/* safe — invalidate_vertex_cache (VTX_CACHE_INVALIDATE2 + 3x VTX_CACHE_INVALIDATE, 8 words). */
+static inline void ps3tc_gcm_state_invalidate_vertex_cache(CellGcmContextData *ctx)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 8);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE2, 1);
+    p[1] = 0;
+    p[2] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    p[3] = 0;
+    p[4] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    p[5] = 0;
+    p[6] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    p[7] = 0;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_invalidate_vertex_cache_unsafe(CellGcmContextData *ctx)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE2, 1);
+    ctx->current[1] = 0;
+    ctx->current[2] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    ctx->current[3] = 0;
+    ctx->current[4] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    ctx->current[5] = 0;
+    ctx->current[6] = PS3TC_GCM_METHOD(NV40TCL_VTX_CACHE_INVALIDATE, 1);
+    ctx->current[7] = 0;
+    ctx->current   += 8;
+}
+
+/* safe — invalidate_texture_cache (TEX_CACHE_CTL count=1, 2 words). */
+static inline void ps3tc_gcm_state_invalidate_texture_cache(CellGcmContextData *ctx, uint32_t type)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_TEX_CACHE_CTL, 1);
+    p[1] = type;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_invalidate_texture_cache_unsafe(CellGcmContextData *ctx, uint32_t type)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_TEX_CACHE_CTL, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
+
+/* safe — vertex_data_4f (VTX_ATTR_4F_X(index) count=4, 5 words, v[4] IEEE-32 bits). */
+static inline void ps3tc_gcm_state_vertex_data_4f(CellGcmContextData *ctx,
+                                                  uint8_t index, const f32 v[4])
+{
+    ieee32 w0, w1, w2, w3;
+    w0.f = v[0]; w1.f = v[1]; w2.f = v[2]; w3.f = v[3];
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 5);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_VTX_ATTR_4F_X(index), 4);
+    p[1] = w0.u;
+    p[2] = w1.u;
+    p[3] = w2.u;
+    p[4] = w3.u;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_vertex_data_4f_unsafe(CellGcmContextData *ctx,
+                                                         uint8_t index, const f32 v[4])
+{
+    ieee32 w0, w1, w2, w3;
+    w0.f = v[0]; w1.f = v[1]; w2.f = v[2]; w3.f = v[3];
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_VTX_ATTR_4F_X(index), 4);
+    ctx->current[1] = w0.u;
+    ctx->current[2] = w1.u;
+    ctx->current[3] = w2.u;
+    ctx->current[4] = w3.u;
+    ctx->current   += 5;
+}
+
+/* safe — clear_report (QUERY_RESET count=1, 2 words).  The pre-patch rsx took u32; the
+ * cellGcm forwarder passes a wider uint8_t, which widens losslessly, so the native keeps u32. */
+static inline void ps3tc_gcm_state_clear_report(CellGcmContextData *ctx, uint32_t type)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_RESET, 1);
+    p[1] = type;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_clear_report_unsafe(CellGcmContextData *ctx, uint32_t type)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_RESET, 1);
+    ctx->current[1] = type;
+    ctx->current   += 2;
+}
+
 #ifdef __cplusplus
 }
 #endif
