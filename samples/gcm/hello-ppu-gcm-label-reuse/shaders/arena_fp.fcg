@@ -1,0 +1,8 @@
+// Main-memory arena samples: emit the bound 2D texture's sample.
+void main(
+    float2 in_texcoord    : TEXCOORD0,
+    uniform sampler2D tex : TEXUNIT0,
+    out float4 out_color  : COLOR)
+{
+    out_color = tex2D(tex, in_texcoord);
+}

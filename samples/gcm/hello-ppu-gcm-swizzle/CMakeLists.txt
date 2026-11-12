@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-gcm-swizzle C)
+include(ps3-self)
+add_executable(hello-ppu-gcm-swizzle source/main.c)
+target_compile_features(hello-ppu-gcm-swizzle PRIVATE c_std_11)
+target_compile_options(hello-ppu-gcm-swizzle PRIVATE -Wall -Wextra)
+target_link_libraries(hello-ppu-gcm-swizzle PRIVATE gcm_cmd rt lv2)
+ps3_add_self(hello-ppu-gcm-swizzle)

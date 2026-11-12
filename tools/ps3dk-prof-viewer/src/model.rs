@@ -284,6 +284,38 @@ pub struct Overview {
     pub lanes: Vec<LaneRow>,
     /// (label, value) pairs from the trailer; empty when there is none.
     pub trailer: Vec<(String, String)>,
+    /// Named per-frame counters (file flag bit 8): a status line and one row per counter; None without the capability.
+    pub counters: Option<(String, Vec<CounterRow>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CounterRow {
+    pub name: String,
+    pub samples: u64,
+    pub frames: u64,
+    pub min: i64,
+    pub max: i64,
+    pub last: i64,
+}
+
+/// The Overview's counters section, from the reader's inventory.
+pub fn counter_rows(inv: &ps3dk_prof::counters::Inventory) -> (String, Vec<CounterRow>) {
+    let r = ps3dk_prof::counters::analyze(inv);
+    let status = format!(
+        "{} counters, {} samples over {} frames; dropped {}, refused {}{}",
+        inv.names.len(),
+        inv.samples.len(),
+        r.frames.len(),
+        inv.dropped,
+        inv.refused,
+        if inv.final_seen { "" } else { "; not final (no FINAL chunk: the capture was not sealed)" }
+    );
+    let rows = r
+        .summaries
+        .iter()
+        .map(|s| CounterRow { name: s.name.clone(), samples: s.samples, frames: s.frames, min: s.min, max: s.max, last: s.last })
+        .collect();
+    (status, rows)
 }
 
 pub fn overview(a: &Analysis) -> Overview {
@@ -363,6 +395,7 @@ pub fn overview(a: &Analysis) -> Overview {
         minor_warning: cap.minor_warning,
         lanes,
         trailer,
+        counters: cap.counters.as_ref().map(counter_rows),
     }
 }
 

@@ -45,7 +45,9 @@ fn all_flag_bytes_full_partial_and_high_bytes(){
   let r=reader::read(&bytes);
   if MASKS.contains(&flags){r.unwrap();}else{assert_eq!(r.unwrap_err().rule,Rule::FileFlagsNonzero);}
  }
- for flags in MASKS {for high in 13..16 {let mut b=headers(flags).bytes();b[high]=1;for n in high+1..=16{assert_eq!(reader::read(&b[..n]).unwrap_err().rule,Rule::FileFlagsNonzero);}}}
+ // byte 13 bit 0 is file_flags bit 8 (COUNTERS, tests/counters.rs); every other high bit is refused
+ for flags in MASKS {for high in 13..16 {let mut b=headers(flags).bytes();b[high]=if high==13{2}else{1};for n in high+1..=16{assert_eq!(reader::read(&b[..n]).unwrap_err().rule,Rule::FileFlagsNonzero);}}}
+ for flags in MASKS {let mut b=headers(flags).bytes();b[13]=1;for n in 14..16{assert!(reader::read(&b[..n]).unwrap().counters.is_some());}}
 }
 #[test]
 fn every_valid_mask_keeps_independent_feature_inventories(){

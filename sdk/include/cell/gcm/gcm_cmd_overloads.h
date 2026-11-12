@@ -324,6 +324,13 @@ static inline void cellGcmSetFrequencyDividerOperation(uint16_t op)
 static inline void cellGcmSetUpdateFragmentProgramParameter(uint32_t offset)
 { cellGcmSetUpdateFragmentProgramParameter(gCellGcmCurrentContext, offset); }
 
+static inline void cellGcmSetUpdateFragmentProgramParameterLocation(uint32_t offset, uint32_t location)
+{ cellGcmSetUpdateFragmentProgramParameterLocation(gCellGcmCurrentContext, offset, location); }
+
+/* The no-context cellGcmSetFragmentProgramControl(prog, controlTxp,
+ * reserved0, reserved1) overload lives in <cell/gcm/gcm_cg_bridge.h>
+ * with the rest of the Cg-program-handle fragment-program surface. */
+
 static inline void cellGcmSetInvalidateZcull(void)
 { cellGcmSetInvalidateZcull(gCellGcmCurrentContext); }
 

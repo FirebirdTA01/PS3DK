@@ -14,6 +14,7 @@ extern crate self as ps3dk_prof;
 
 pub mod analysis;
 pub mod clockmap;
+pub mod counters;
 pub mod checkpoints;
 pub mod source_checkpoints;
 pub mod dependencies;

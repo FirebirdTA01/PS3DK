@@ -711,10 +711,47 @@ static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisC
  * from the new offset/location, used when patching FP at runtime).
  * ========================================================== */
 
+/* Backed by rsxUpdateFragmentProgramLocation (NV40TCL_FP_ADDRESS).  Two
+ * forms:
+ *
+ *   cellGcmSetUpdateFragmentProgramParameter(ctx, offset)
+ *     Local-memory (RSX) update -- the original form; existing callers
+ *     (gcm_cmd_overloads.h and gcm_command_cpp_explicit.h) keep working.
+ *
+ *   cellGcmSetUpdateFragmentProgramParameterLocation(ctx, offset, location)
+ *     Explicit target: GCM_LOCATION_RSX (0) for local, GCM_LOCATION_CELL (1)
+ *     for main memory -- the "location" argument that was missing. */
+
 static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *thisContext, uint32_t offset)
 {
 	rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);
 }
+
+static inline void cellGcmSetUpdateFragmentProgramParameterUnsafe(CellGcmContextData *thisContext, uint32_t offset)
+{
+	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, GCM_LOCATION_RSX);
+}
+
+static inline void cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData *thisContext,
+                                                                     uint32_t offset, uint32_t location)
+{
+	rsxUpdateFragmentProgramLocation(thisContext, offset, location);
+}
+
+static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGcmContextData *thisContext,
+                                                                          uint32_t offset, uint32_t location)
+{
+	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);
+}
+
+/* cellGcmSetFragmentProgramControl (Safe + Unsafe) + the no-context
+ * C++ overload now live in <cell/gcm/gcm_cg_bridge.h>, which is the
+ * canonical home for the Cg-program-handle fragment-program surface
+ * (cellGcmSetFragmentProgram / Load / Parameter all live there).
+ * See gcm_cg_bridge.h for the parameter list and derivation.  This
+ * header (gcm_command_c.h) keeps the command-emitters that forward
+ * 1:1 to rsx* low-level writers; the FP_CONTROL word from a CGprogram
+ * is a different layer. */
 
 /* ==========================================================
  * Z-cull / S-cull surface controls + invalidate.

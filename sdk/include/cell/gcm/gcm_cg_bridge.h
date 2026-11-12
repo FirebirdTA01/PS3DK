@@ -768,6 +768,63 @@ static inline void cellGcmSetFragmentProgramParameter(CellGcmContextData *ctx,
     }
 }
 
+/* cellGcmSetFragmentProgramControl — the platform-ABI command emitter
+ * that sets the NV40TCL_FP_CONTROL word from a loaded Cg program.
+ *
+ * Derives the control word through the ONE builder
+ * ps3tc_fp_control_word() (outputFromH0 / depthReplace / pixelKill /
+ * registerCount).  The controlTxp bit (bit 15) matches the
+ * "allowTex" bit the rsx* emitter uses for the SAME command
+ * (commands_impl.h:718, rsxSetFragmentProgramControl).
+ * reserved0 / reserved1 are accepted to match the canonical parameter
+ * list; neither is used by the command itself.
+ *
+ * Safe:   ps3tc_gcm_reserve (callback on FIFO overflow)
+ * Unsafe: writes directly to ctx->current, assumes space pre-allocated */
+static inline void cellGcmSetFragmentProgramControl(CellGcmContextData *thisContext,
+                                                    CGprogram prog,
+                                                    uint8_t controlTxp,
+                                                    uint8_t reserved0,
+                                                    uint8_t reserved1)
+{
+    if (!thisContext || !prog) return;
+    (void)reserved0;
+    (void)reserved1;
+    const CgBinaryProgram *p = (const CgBinaryProgram *)prog;
+    const CgBinaryFragmentProgram *fp =
+        (const CgBinaryFragmentProgram *)((const uint8_t *)p + p->program);
+    const uint32_t fpcontrol = ps3tc_fp_control_word(
+        fp->outputFromH0, fp->depthReplace, fp->pixelKill,
+        fp->registerCount);
+    const uint32_t word = fpcontrol | ((uint32_t)controlTxp << 15u);
+    uint32_t *w = ps3tc_gcm_reserve(thisContext, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_CONTROL, 1);
+    *w++ = word;
+}
+
+static inline void cellGcmSetFragmentProgramControlUnsafe(CellGcmContextData *thisContext,
+                                                          CGprogram prog,
+                                                          uint8_t controlTxp,
+                                                          uint8_t reserved0,
+                                                          uint8_t reserved1)
+{
+    if (!thisContext || !prog) return;
+    (void)reserved0;
+    (void)reserved1;
+    const CgBinaryProgram *p = (const CgBinaryProgram *)prog;
+    const CgBinaryFragmentProgram *fp =
+        (const CgBinaryFragmentProgram *)((const uint8_t *)p + p->program);
+    const uint32_t fpcontrol = ps3tc_fp_control_word(
+        fp->outputFromH0, fp->depthReplace, fp->pixelKill,
+        fp->registerCount);
+    const uint32_t word = fpcontrol | ((uint32_t)controlTxp << 15u);
+    uint32_t *w = thisContext->current;
+    thisContext->current += 2;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_CONTROL, 1);
+    *w++ = word;
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -798,6 +855,13 @@ static inline void cellGcmSetFragmentProgramParameter(CGprogram prog,
                                                       uint32_t addrOffset)
 { cellGcmSetFragmentProgramParameter(gCellGcmCurrentContext, prog, param,
                                      values, addrOffset); }
+
+static inline void cellGcmSetFragmentProgramControl(CGprogram prog,
+                                                    uint8_t controlTxp,
+                                                    uint8_t reserved0,
+                                                    uint8_t reserved1)
+{ cellGcmSetFragmentProgramControl(gCellGcmCurrentContext, prog,
+                                   controlTxp, reserved0, reserved1); }
 
 static inline void cellGcmCgUploadInternalConsts(CGprogram prog)
 { cellGcmCgUploadInternalConsts(gCellGcmCurrentContext, prog); }
