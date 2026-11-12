@@ -24,8 +24,9 @@
 #     --self-test   Run the scanner on a bundle of synthetic trees that cover
 #                   every failure class (same-line new forwarder; MULTILINE new
 #                   forwarder, which a same-line-only scanner missed; pointer
-#                   return type; allowlisted-but-converted) plus one clean PASS
-#                   tree. Each rejecting case must exit 1 AND name the offending
+#                   return type; allowlisted-but-converted; attributes, comments
+#                   and braces in comments or strings around a definition) plus
+#                   clean trees. Each rejecting case must exit 1 AND name the offending
 #                   function; the clean tree must exit 0.
 
 set -eu
@@ -117,6 +118,29 @@ case("6 second new fwd beside a known one",
      "static inline void cellGcmSetAdded(CellGcmContextData *c) { rsxSetFogMode(c,1); }\n",
      "cellGcmSetKnown\n", 1, "+ cellGcmSetAdded")
 
+# 7-11. Valid definitions a syntax-matching scanner missed (review 2026-11-12): an attribute before the name,
+# a comment between the parameter list and the body, a closing brace inside a body comment or a string, and an
+# attribute after the parameter list. Each is a new forwarder and must be rejected by name.
+case("7 attribute before the name",
+     "static inline __attribute__((always_inline)) void cellGcmSetProbeA(void *c)\n{ rsxSetFogMode(c,1); }\n",
+     "cellGcmSetKnown\n", 1, "+ cellGcmSetProbeA")
+case("8 comment before the body",
+     "static inline void cellGcmSetProbeB(void *c) /* emit fog mode */\n{ rsxSetFogMode(c,1); }\n",
+     "cellGcmSetKnown\n", 1, "+ cellGcmSetProbeB")
+case("9 closing brace in a body comment",
+     "static inline void cellGcmSetProbeC(void *c)\n{ /* close } is a comment */ rsxSetFogMode(c,1); }\n",
+     "cellGcmSetKnown\n", 1, "+ cellGcmSetProbeC")
+case("10 closing brace in a string",
+     "static inline void cellGcmSetProbeD(void *c)\n{ const char *s = \"}\"; (void)s; rsxSetFogMode(c,1); }\n",
+     "cellGcmSetKnown\n", 1, "+ cellGcmSetProbeD")
+case("11 attribute after the parameters",
+     "static inline void cellGcmSetProbeE(void *c) __attribute__((always_inline))\n{ rsxSetFogMode(c,1); }\n",
+     "cellGcmSetKnown\n", 1, "+ cellGcmSetProbeE")
+# 12. A forwarder call that appears only in a comment is not a forward.
+case("12 rsx call only in a comment",
+     "static inline void cellGcmSetCommented(void *c) { /* rsxSetFogMode(c,1); */ (void)c; }\n",
+     "cellGcmSetKnown\n", 0)
+
 if failures:
     for f in failures:
         print(f"FAIL: {f}", file=sys.stderr)
@@ -138,38 +162,26 @@ import re, sys
 
 allow_path, ccmd_path, gcmh_path = sys.argv[1:4]
 
-# A `static inline` cellGcm* definition.
-#
-# Pattern:  static  inline  <type-word(s)>  cellGcm*  (
-#
-# The type portion is character-class-constrained to [\w\s*] (letters/digits/
-# underscores, spaces, stars) so the match can NEVER cross a semicolon, a
-# brace, or a bracket — which is what stops it from drifting from one
-# `static inline` definition into a later one (the bug that made the naive
-# `[^;{}]*?` version mis-associate zcull/scull forwarders with
-# cellGcmGetControlRegister's body).
-#
-# This allows:
-#   * same-line:          static inline void cellGcmSetKnown(...)
-#   * multiline:          static inline void\n                          cellGcmSetMultilineNew(...)
-#   * pointer return:     static inline uint32_t *cellGcmSetPtr(...)
-#   * multi-word pointer: static inline const CellGcmTileInfo *cellGcmGetTileInfo(...)
-#   * struct return:      static inline CellGcmSurface cellGcmSetSurface(...)
-#
-# For the multiline case the \s+ between words absorbs the newline.
-# The lazy (?:[\w\s*]+?) stops at the FIRST word that is immediately followed
-# by `(` — that is always the function name, because in C the name is always
-# the token right before `(`.  The type words are just `[\w\s*]` tokens.
-DEF_RE = re.compile(
-    r'static\s+inline'            # 'static  inline' (two or more ws OK)
-    r'\s+'                         # at least one space after 'inline'
-    r'(?:[\w\s*]+?)'             # lazy type portion (word chars / space / *)
-    r'\b(cellGcm[A-Z]\w*)'       # the cellGcm* function name
-    r'\s*\(',                     # its parameter list opener
-)
+# Definitions are found lexically, not by matching the declaration syntax:
+# comments, string and character literals are blanked first (newlines kept),
+# then every `cellGcm<Cap>...(` whose balanced parameter list is followed,
+# after any `__attribute__((...))` / `__asm__(...)` suffixes, by `{` is a
+# definition, whatever precedes the name (static inline, attributes, a
+# multiline or pointer return type). A call inside a body is followed by
+# `;`, `)` or an operator, never by `{`, so it is not taken for one. Bodies
+# are delimited on the blanked text, so a brace inside a comment or string
+# cannot end a body early.
+_LEX = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|' + r"'(?:\\.|[^'\\\n])*'", re.S)
+
+def _blank(text):
+    """text with comments and literals replaced by spaces (newlines kept)."""
+    return _LEX.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+
+NAME_RE = re.compile(r'\b(cellGcm[A-Z]\w*)\s*\(')
+SUFFIX_RE = re.compile(r'\s*(?:__attribute__|__asm__|asm)\s*\(')
 
 def _end(text, i, o, c):
-    """text[i]==o; return index just past the matching c."""
+    """text[i-1]==o; return index just past the matching c."""
     depth = 1
     while i < len(text) and depth:
         if text[i] == o: depth += 1
@@ -178,24 +190,25 @@ def _end(text, i, o, c):
     return i
 
 def body_and_name(path):
-    """Return [(cellGcmName, body)] for every cellGcm* static-inline function."""
-    text = open(path).read()
+    """Return [(cellGcmName, body)] for every cellGcm* function definition."""
+    text = _blank(open(path).read())
     out = []
     seen = set()
-    for m in DEF_RE.finditer(text):
+    for m in NAME_RE.finditer(text):
         name = m.group(1)
-        if name in seen:      # first match wins; ignore later repeats
+        if name in seen:
             continue
-        i = m.end()            # just past the opening '('
-        i = _end(text, i, '(', ')')      # end of parameter list
+        i = _end(text, m.end(), '(', ')')          # just past the parameter list
+        while True:                                # attribute / asm suffixes
+            s = SUFFIX_RE.match(text, i)
+            if not s: break
+            i = _end(text, s.end(), '(', ')')
         while i < len(text) and text[i] in ' \t\n\r': i += 1
         if i >= len(text) or text[i] != '{':
-            continue           # not a definition (declaration/other)
-        open_brace = i
-        i = _end(text, i + 1, '{', '}')  # end of body (i+1: past the opener);
-                                         # i now just past the matching '}'
+            continue                               # a call or a declaration
+        close = _end(text, i + 1, '{', '}')
         seen.add(name)
-        out.append((name, text[open_brace + 1 : i - 1]))
+        out.append((name, text[i + 1 : close - 1]))
     return out
 
 def is_forward(body):
