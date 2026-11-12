@@ -52,8 +52,11 @@ dependencies, not proven facts. Schema 1 reserves sixteen clock reports, so the
 report count is sixteen plus twice the pair capacity. The mechanism digest
 identifies command/report semantics, not a measured profile. The build binding
 comes from pinned pre-link inputs: every file the linker opens (found by running the
-driver's final linker command, from -###, once with --verbose first) and that final command; an external
-manifest binds it to the final ELF and SELF, avoiding a self-hash cycle.
+driver's final linker command, from -###, once with --verbose first) and that final command. It does not cover
+the linker's internal default script, toolchain contents beyond the files it opens, or files an LTO plugin
+reads itself. After the link, an external manifest (<map>.identity.json) records the final ELF's sha256 with
+packaged=false, avoiding a self-hash cycle; bind_self() can add the signed SELF, but the build does not call it
+yet, so no SELF binding is recorded automatically.
 
 A REFUSED CONFIG keeps only schema, flags, instance, frequency and both digest
 fields. Offset 24 is its refusal reason u32; offset 28 is the original GCM return
@@ -287,7 +290,7 @@ RESOURCE_CONFLICT=16, CONTEXT_RESET=32 and, when CONFIG covers CALL,
 SEGMENT_QUARANTINE=64, FRAME_MARK_MISSED=128, FRAMES_FLIP=256 and
 FRAMES_EXPLICIT=512 (both together: flips delimited frames until the first
 explicit call). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
-gauges and may decrease. Written counters equal accepted chunks. Exact admitted
+gauges and may decrease. operations_written counts accepted operation records, not chunks (a batched OPS chunk carries several). Exact admitted
 equals written plus dropped plus pending. Exact FINAL requires both gauges zero;
 an unacknowledged owner requires a lower bound. FINAL occurs once and forbids
 later records. A live conflict/reset stops admission and quarantines outstanding

@@ -58,9 +58,12 @@ cellGcmSegmentCall(ring, s);                      /* CALL + retirement label */
 * **Call** writes, into the ring, the CALL and then a back-end label
   (`cellGcmSetWriteBackEndLabel`) carrying the segment's next serial. The
   five words are one reservation: if the ring lacks room, its callback is
-  asked once for all five (it may wrap or flush). If it refuses, or returns
-  without making room, Call returns `CELL_GCM_SEGMENT_ERROR_BUSY`, emits no
-  CALL or label and leaves the segment unchanged, closed and callable. It
+  asked once for all five (it may wrap or flush). In the observed AUTO build
+  (`libgcm_cmd_prof_auto.a`) the reservation is nine words: the five plus
+  the automatic profiler's 4-word operation-label release, asked for at once.
+  If the callback refuses, or returns without making room, Call returns
+  `CELL_GCM_SEGMENT_ERROR_BUSY`, emits no CALL or label, does not call the
+  profiler's observer, and leaves the segment unchanged, closed and callable. It
   cannot undo anything the ring's own callback did to the ring before
   refusing (a flush or a wrap, say). Host test:
   `gcm-segment-test.sh` (1 to 4 free words with a refusing callback; a
