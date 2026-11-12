@@ -32,9 +32,13 @@ enum { AUTO_SEGMENTS_OPEN=8, AUTO_SEGMENT_OPS=32 };
  * INCOMPLETE record when the segment is rebuilt, never called or called
  * outside the attached ring). */
 typedef struct auto_segment_op { auto_wire_op op; uint32_t pair; } auto_segment_op;
+/* ctx is the segment's identity: its embedded context, which cellGcmSegmentCall passes. writer is the context
+ * that emits into it: ctx itself for Begin/End, or, for BeginExternal, the application's context bound by the
+ * first covered emitter whose current and end lie inside [lo, hi), the claimed buffer. */
 typedef struct auto_segment {
-    void *ctx;
-    uint32_t ordinal, open, count;
+    void *ctx, *writer;
+    uintptr_t lo, hi;
+    uint32_t ordinal, open, count, external;
     auto_segment_op ops[AUTO_SEGMENT_OPS];
 } auto_segment;
 

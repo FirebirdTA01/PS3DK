@@ -409,6 +409,7 @@ void ps3dk_prof__auto_segment_open(struct _gcmCtxData *context)
         s->ctx=context;s->ordinal=++a->segment_ordinal;s->count=0;
     }
     if(s->count) segment_drop(a,s);
+    s->writer=context;s->external=0;s->lo=s->hi=0;
     s->open=1;
 }
 void ps3dk_prof__auto_segment_close(struct _gcmCtxData *context)
@@ -417,6 +418,50 @@ void ps3dk_prof__auto_segment_close(struct _gcmCtxData *context)
     auto_segment *s;
     if(!context || !p_ready() || !(a=owner_capture(NULL,0)) || !(s=segment_find(a,context))) return;
     s->open=0;
+}
+
+/* cellGcmSegmentBeginExternal/EndExternal (observed build). The segment keeps its embedded context as its
+ * identity (key), so cellGcmSegmentCall finds the build as for Begin/End; the writer is not known yet: the
+ * application emits through a context of its own, bound at its first covered emitter (external_writer). A
+ * new BeginExternal on the same segment drops a build that was never called, like Begin. */
+void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key,const void *buffer,uint32_t size)
+{
+    auto_capture *a;
+    auto_segment *s;
+    if(!key || !buffer || size<8u || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!(s=segment_find(a,key))) {
+        if(a->segments_used==AUTO_SEGMENTS_OPEN || a->segment_ordinal==UINT32_MAX) {
+            increment(a,&a->segment_table_full);return;
+        }
+        s=&a->segments[a->segments_used++];
+        s->ctx=key;s->ordinal=++a->segment_ordinal;s->count=0;
+    }
+    if(s->count) segment_drop(a,s);
+    s->writer=NULL;s->external=1;
+    s->lo=(uintptr_t)buffer;s->hi=(uintptr_t)buffer+size;
+    s->open=1;
+}
+void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key)
+{
+    auto_capture *a;
+    auto_segment *s;
+    if(!key || !p_ready() || !(a=owner_capture(NULL,0)) || !(s=segment_find(a,key))) return;
+    s->open=0;s->writer=NULL;
+}
+
+/* The open external segment a context is writing: its current and end lie inside one claimed buffer. The
+ * context becomes that segment's writer; an application that reuses one context for every part is bound to
+ * whichever part is open where its cursor is. */
+static auto_segment *external_writer(auto_capture *a,gpp_ctx *ctx)
+{
+    uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    for(uint32_t i=0;i<a->segments_used;i++) {
+        auto_segment *s=&a->segments[i];
+        if(!s->open || !s->external || cur<s->lo || cur>=s->hi || end<s->lo || end>=s->hi) continue;
+        s->writer=ctx;
+        return s;
+    }
+    return NULL;
 }
 
 /* A covered emitter on the owner thread writing into a context other than the
@@ -608,7 +653,8 @@ static uint32_t foreign_begin(gpp_ctx *ctx,const ps3tc_auto_call *call,uint64_t 
     if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active ||
        a->segment_active) return 0;
     s=segment_find(a,ctx);
-    if(s && s->open) return segment_begin(a,s,ctx,call,caller);
+    if(s && s->open && !s->external) return segment_begin(a,s,ctx,call,caller);
+    if((s=external_writer(a,ctx))) return segment_begin(a,s,ctx,call,caller);
     foreign_visit(a);
     return 0;
 }
@@ -693,7 +739,7 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
     a=owner_capture((gpp_ctx *)(void *)context,0);
     if(!a) {
         a=owner_capture(NULL,0);
-        if(a && a->segment_active && a->segment_active->ctx==(void *)context) segment_end(a,(gpp_ctx *)(void *)context);
+        if(a && a->segment_active && a->segment_active->writer==(void *)context) segment_end(a,(gpp_ctx *)(void *)context);
         return;
     }
     if(!(e=a->active)) return;

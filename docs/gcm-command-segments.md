@@ -89,6 +89,11 @@ buffer; the PPU's Begin/End refuse it meanwhile.
 `usedBytes` is a multiple of 4 inside the buffer and that the last word is
 the RETURN.
 
+Under `PS3_PROF_AUTO`, a PPU writer using its own `CellGcmContextData` over the claimed buffer is timed like a
+`cellGcmSegmentBegin` writer: the profiler adds `PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS` (4) words around each covered
+draw while the context's cursor lies in the buffer, and those words count in `usedBytes`. It never calls that
+context's callback; a draw without the room is left untimed. SPU writers are not observed.
+
 ## Coherence recipe for SPU-built segments
 
 `hello-spu-gcm-segment` uses this order every frame:

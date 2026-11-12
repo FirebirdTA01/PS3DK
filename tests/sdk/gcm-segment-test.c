@@ -456,7 +456,9 @@ static void test_local_refused(void)
 
 #ifdef TEST_AUTO_SEGMENT
 /* Observer seam: every PPU-written segment context is announced between
- * cellGcmSegmentBegin and cellGcmSegmentEnd; external claims are not. */
+ * cellGcmSegmentBegin and cellGcmSegmentEnd; an external claim is announced
+ * by its own seam, with the segment's context as its key and its buffer, and
+ * closed only by an EndExternal that succeeds. */
 static gcmContextData *auto_open_ctx[8];
 static unsigned auto_opens, auto_closes, auto_calls, auto_checking;
 static gcmContextData *auto_call_ring, *auto_call_ctx;
@@ -472,6 +474,20 @@ void ps3dk_prof__auto_segment_open(struct _gcmCtxData *c)
     if (!auto_checking) return;
     if (auto_opens < 8) auto_open_ctx[auto_opens] = c;
     ++auto_opens;
+}
+static unsigned auto_ext_opens, auto_ext_closes;
+static struct _gcmCtxData *auto_ext_key, *auto_ext_closed;
+static const void *auto_ext_buffer;
+static uint32_t auto_ext_size;
+void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *k, const void *b, uint32_t n)
+{
+    if (!auto_checking) return;
+    auto_ext_key = k; auto_ext_buffer = b; auto_ext_size = n; ++auto_ext_opens;
+}
+void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *k)
+{
+    if (!auto_checking) return;
+    auto_ext_closed = k; ++auto_ext_closes;
 }
 void ps3dk_prof__auto_segment_close(struct _gcmCtxData *c)
 {
@@ -502,9 +518,16 @@ static void test_auto_seam(void)
     CHECK("overflow end closes", cellGcmSegmentEnd(&s) == CELL_GCM_SEGMENT_ERROR_OVERFLOW && auto_closes == 2);
     CHECK("no second end", cellGcmSegmentEnd(&s) != CELL_OK && auto_closes == 2);
     CHECK("init external", cellGcmSegmentInit(&e, &arena[12416], 256, GCM_LOCATION_CELL, 213) == CELL_OK);
-    CHECK("external claim", cellGcmSegmentBeginExternal(&e) != NULL && auto_opens == 2);
+    auto_ext_opens = auto_ext_closes = 0;
+    uint32_t *m = (uint32_t *)cellGcmSegmentBeginExternal(&e);
+    CHECK("external claim", m != NULL && auto_opens == 2 && auto_ext_opens == 1 && auto_ext_key == &e.context &&
+          auto_ext_buffer == (const void *)m && auto_ext_size == 256u && auto_ext_closes == 0);
+    m[0] = 0x00020000u;
+    CHECK("refused external end stays open", cellGcmSegmentEndExternal(&e, 8) != CELL_OK && auto_ext_closes == 0);
+    CHECK("external end closes", cellGcmSegmentEndExternal(&e, 4) == CELL_OK && auto_ext_closes == 1 &&
+          auto_ext_closed == &e.context);
     auto_checking = 0;
-    puts("  auto seam: open/close bracket every PPU-written segment, never an external claim");
+    puts("  auto seam: open/close bracket every PPU-written segment; an external claim has its own open/close");
 }
 
 /* The observed Call reserves the CALL, the retirement label and the observer's

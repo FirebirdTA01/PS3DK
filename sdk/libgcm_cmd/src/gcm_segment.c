@@ -30,10 +30,14 @@ typedef gcmTransferSwizzle CellGcmTransferSwizzle;
 #define SEGMENT_OBSERVE_OPEN(c) ps3dk_prof__auto_segment_open(c)
 #define SEGMENT_OBSERVE_CLOSE(c) ps3dk_prof__auto_segment_close(c)
 #define SEGMENT_OBSERVE_CALL(r, c) ps3dk_prof__auto_segment_call(r, c)
+#define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ps3dk_prof__auto_segment_external_open(c, b, n)
+#define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ps3dk_prof__auto_segment_external_close(c)
 #else
 #define SEGMENT_OBSERVE_OPEN(c) ((void)0)
 #define SEGMENT_OBSERVE_CLOSE(c) ((void)0)
 #define SEGMENT_OBSERVE_CALL(r, c) ((void)0)
+#define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ((void)0)
+#define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ((void)0)
 #endif
 
 #ifdef PS3TC_GCM_SEGMENT_HOST_TEST
@@ -185,6 +189,9 @@ void *cellGcmSegmentBeginExternal(CellGcmSegment *s)
     s->overflowWords = 0;
     s->usedBytes = 0;
     s->state = CELL_GCM_SEGMENT_STATE_OPEN;
+    /* The observed build times covered emitters through the application's own context while its cursor
+     * lies in this buffer; the segment's embedded context stays its identity for Call. */
+    SEGMENT_OBSERVE_EXTERNAL_OPEN(&s->context, s->buffer, s->sizeBytes);
     return s->buffer;
 }
 
@@ -198,6 +205,7 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
         return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     s->usedBytes = usedBytes;
     s->state = CELL_GCM_SEGMENT_STATE_CLOSED;
+    SEGMENT_OBSERVE_EXTERNAL_CLOSE(&s->context);   /* a refused End leaves it claimed and observed */
     return CELL_OK;
 }
 

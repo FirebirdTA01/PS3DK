@@ -29,6 +29,18 @@ typedef struct ps3dk_prof_auto_options {
  * application's labels (64, 69..239, 248..254) or reports (512..1023); the attach refuses defaults that would. */
 #define PS3DK_PROF_AUTO_OPTIONS_INIT {32u,1024u,1024u,247u,246u,1024u,256u,2097152u}
 
+/* Extra command words the automatic profiler writes inside a CALL segment around each covered draw or clear
+ * (one 2-word timestamp report before it, one after it), whether the segment is written through
+ * cellGcmSegmentBegin's context or, after cellGcmSegmentBeginExternal, through the application's own context.
+ * The profiler checks them against the context's end before the draw and never calls the context's callback:
+ * a draw without that room is emitted untimed and counted as excluded for room. A writer that admits its
+ * reservations without callbacks adds this to each covered draw's bound. Zero when PS3_PROF_AUTO is off. */
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+#define PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS 4u
+#else
+#define PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS 0u
+#endif
+
 /* Optional override, on the registered context owner before its first covered
  * operation, clock or frame observation. NULL options select the defaults.
  * The common SDK registry reserves the whole range and both labels; public
