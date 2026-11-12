@@ -138,6 +138,35 @@ project(consumer C)
         self.assertIn("of target 'engine'", message)
         self.assertIn("names target 'core'", message)
 
+    def test_directory_scoped_imported_target(self):
+        # Review 2026-11-12: a non-GLOBAL imported target declared in a subdirectory is invisible to the top-level
+        # walk, so its gcm_cmd linked as -lgcm_cmd beside libgcm_cmd_prof_auto.a. It is refused, naming the fix;
+        # the same target declared IMPORTED GLOBAL is walked and substituted.
+        imported = ('add_library(engine INTERFACE IMPORTED@G@)\n'
+                    'set_target_properties(engine PROPERTIES INTERFACE_LINK_LIBRARIES gcm_cmd)')
+        result, _ = self.configure('nested-import', libraries='engine', extra=imported.replace('@G@', ''),
+                                   nested=True)
+        self.assertNotEqual(result.returncode, 0, 'a hidden imported target was skipped')
+        message = ' '.join(result.stderr.split())  # CMake wraps long messages
+        self.assertIn("'engine' is an imported target that is not GLOBAL", message)
+        self.assertIn('IMPORTED GLOBAL', message)
+        result, _ = self.configure('nested-import-global', libraries='engine', extra=imported.replace('@G@', ' GLOBAL'),
+                                   nested=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        words = shlex.split((OUT/'nested-import-global/build/child/CMakeFiles/app.dir/link.txt').read_text(
+            encoding='utf-8'))
+        self.assertTrue(any(w.endswith('/libgcm_cmd_prof_auto.a') for w in words), words)
+        self.assertFalse([w for w in words if w in ('-lgcm_cmd', 'gcm_cmd') or w.endswith('/libgcm_cmd.a')], words)
+        # a namespaced ALIAS of the hidden imported target is refused the same way
+        result, _ = self.configure('nested-import-alias', libraries='Engine::engine',
+                                   extra=imported.replace('@G@', '')+'\nadd_library(Engine::engine ALIAS engine)',
+                                   nested=True)
+        self.assertNotEqual(result.returncode, 0, 'a hidden imported ALIAS was skipped')
+        self.assertIn("'Engine::engine' is an imported target that is not GLOBAL", ' '.join(result.stderr.split()))
+        # top-level non-GLOBAL imported targets were always visible to the walk and stay accepted
+        result, _ = self.configure('top-import', libraries='engine', extra=imported.replace('@G@', ''))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_conflicting_variants_and_launcher_refuse(self):
         for name, libs, extra in (
             ('waits', 'gcm_cmd ps3dkprof_ext_wait', ''),

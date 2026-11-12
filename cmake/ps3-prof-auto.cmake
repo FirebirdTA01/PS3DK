@@ -89,8 +89,34 @@ function(_ps3_auto_item_targets item owner out)
             set(name "${real}")
         endif()
         set(found "${name}")
+    else()
+        # A non-GLOBAL imported target is visible only in the directory that declares it and below; the walk
+        # runs from the top directory and cannot read its link interface, so it is refused rather than skipped.
+        # A name with '::' is never a plain library, so one the top directory cannot see is a hidden target too
+        # (for example an ALIAS of a directory-scoped imported target). A hidden ALIAS with a plain name cannot be
+        # told from a library name here; the link map check still refuses the mixed provider it would bring.
+        get_property(hidden GLOBAL PROPERTY PS3_AUTO_DIRECTORY_IMPORTS)
+        if("${name}" IN_LIST hidden OR name MATCHES "::")
+            message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': "
+                "'${name}' is an imported target that is not GLOBAL (or an ALIAS of one), so its link interface is "
+                "not visible where "
+                "the AUTO selection runs and a default gcm_cmd behind it could link beside "
+                "libgcm_cmd_prof_auto.a. Declare it with add_library(${name} ... IMPORTED GLOBAL), or link gcm_cmd "
+                "directly in '${owner}'.")
+        endif()
     endif()
     set(${out} "${found}" PARENT_SCOPE)
+endfunction()
+
+# The names of every directory's imported targets (IMPORTED_TARGETS, CMake 3.21), readable from the top
+# directory even where the targets themselves are not.
+function(_ps3_auto_directory_imports directory)
+    get_property(imports DIRECTORY "${directory}" PROPERTY IMPORTED_TARGETS)
+    set_property(GLOBAL APPEND PROPERTY PS3_AUTO_DIRECTORY_IMPORTS ${imports})
+    get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(child IN LISTS children)
+        _ps3_auto_directory_imports("${child}")
+    endforeach()
 endfunction()
 
 # The link closure of a selected executable: every library target it links,
@@ -243,4 +269,8 @@ function(_ps3_auto_targets directory)
         _ps3_auto_targets("${child}")
     endforeach()
 endfunction()
-cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _ps3_auto_targets "${CMAKE_SOURCE_DIR}")
+function(_ps3_auto_start directory)
+    _ps3_auto_directory_imports("${directory}")
+    _ps3_auto_targets("${directory}")
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _ps3_auto_start "${CMAKE_SOURCE_DIR}")
