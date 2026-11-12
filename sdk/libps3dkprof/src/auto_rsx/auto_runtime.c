@@ -413,7 +413,11 @@ static void segment_drop(auto_capture *a,auto_segment *s)
             e->op.flags=(uint16_t)((e->op.flags&(1u|AUTO_OP_SEGMENT))|4u);
             ST_REL(&a->admitted,id);
             auto_queue_commit(&a->operations);
-        } else auto_queue_quarantine_pair(&a->operations,b->pair);
+        } else {
+            /* a rebuild that cannot record its dropped build for lack of metadata latches the frame tail too */
+            if(a->operations.refusal==AUTO_QUEUE_METADATA) a->pool_tail_column=4;
+            auto_queue_quarantine_pair(&a->operations,b->pair);
+        }
         ST_REL(&a->segment_quarantine,1u);
     }
     segment_release(a,s);

@@ -77,6 +77,14 @@ int main(void) {
     assert(ps3dk_prof__auto_test_pool_tail()==4);
     ps3dk_prof_frame();                   /* the next frame clears the latch */
     assert(ps3dk_prof__auto_test_pool_tail()==0);
+    /* review 2026-11-12: a rebuild WITHOUT a CALL drops the old build against the full metadata too; it latches
+     * the tail, so the next draw of the frame is untimed */
+    part(0);assert(clear());
+    ps3dk_prof__auto_segment_external_close((void *)&keys[0]);
+    part(0);                               /* reopened without a call: the build is dropped */
+    assert(ps3dk_prof__auto_test_pool_tail()==4);
+    assert(!clear());
+    ps3dk_prof__auto_segment_external_close((void *)&keys[0]);
     puts("AUTO metadata exhaustion latches the frame tail PASS");
     return 0;
 }
