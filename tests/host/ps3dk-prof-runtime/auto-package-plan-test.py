@@ -5,7 +5,8 @@ from pathlib import Path
 
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
-ap.add_argument('--base',default='c7f9dea434d8013fccce83b512052ddc73de6f84')
+# The second PR's base: the default (non-AUTO) make plans must be unchanged from it.
+ap.add_argument('--base',default='1218c61d2a1c20770e6ee477c038530ab38d9156')
 ap.add_argument('--git',default='git',help='Git executable compatible with this worktree metadata')
 a=ap.parse_args();root=Path(__file__).resolve().parents[3]
 out=a.out.resolve();out.mkdir(parents=True,exist_ok=False)
@@ -39,8 +40,8 @@ for component in trees:
 
 gcm=plan(current,trees[0],'auto')
 compile_lines=[line for line in gcm.splitlines() if ' -c ' in line and '-DPS3TC_PROF_AUTO=1' in line]
-assert len(compile_lines)==6,'three observed GCM objects per ABI'
-for name in ('ps3tc_fifo_wrap.c','rsx_legacy/commands.c','rsx_legacy/buffer.c'):
+assert len(compile_lines)==8,'four observed GCM objects per ABI'
+for name in ('ps3tc_fifo_wrap.c','gcm_segment.c','rsx_legacy/commands.c','rsx_legacy/buffer.c'):
     lines=[line for line in compile_lines if name in line]
     assert len(lines)==2 and sum('-mlp64' in line for line in lines)==1,name
     assert all('-DPS3TC_FIFO_OBSERVE=1' in line for line in lines)
@@ -61,7 +62,8 @@ prof_install=plan(current,trees[1],'install-auto-package')
 for text in (gcm_install,prof_install):
     writes=[line for line in text.splitlines() if line.startswith('install -m')]
     assert not any('/libgcm_cmd.a' in line or '/libps3dkprof.a' in line or '/libps3prof.a' in line for line in writes)
-for item in ('prof_auto.h','prof_fifo.h','prof.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py'):
+for item in ('prof_auto.h','prof_fifo.h','prof.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py',
+             'ps3-prof-auto-identity.py'):
     assert item in prof_install,item
 assert '--seal' in prof_install and '--source-commit' in prof_install
 print('AUTO recipes: both ABIs, complete members, independent directories and explicit install PASS')
