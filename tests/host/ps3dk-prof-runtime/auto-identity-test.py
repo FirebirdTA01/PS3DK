@@ -208,6 +208,12 @@ class Identity(unittest.TestCase):
         argv=self.argv+['-Wl,-Map,'+str(self.map)]
         r=self.prepare(argv);subprocess.run(r['command'],check=True)
         I.finish(r,self.map,require_map=True)
+        # PowerPC64 ld names its own stub section 'linker stubs' in the map; it is not a file and not an input.
+        with self.map.open('a') as f:f.write('LOAD linker stubs\n')
+        I.finish(r,self.map,require_map=True)
+        with self.map.open('a') as f:f.write('LOAD linker stubs2\n')
+        with self.assertRaisesRegex(ValueError,'not in the binding'):I.finish(r,self.map,require_map=True)
+        r=self.prepare(argv);subprocess.run(r['command'],check=True)
         with self.map.open('a') as f:f.write('LOAD '+str(self.p/'unbound.o')+'\n')
         with self.assertRaisesRegex(ValueError,'not in the binding'):I.finish(r,self.map,require_map=True)
         self.map.unlink()

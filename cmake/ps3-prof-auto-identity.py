@@ -92,6 +92,8 @@ def _inputs(args):
 
 _OPENED = re.compile(r'^attempt to open (.+) succeeded$|^opened script file (.+)$')
 _LOAD = re.compile(r'^LOAD (.+)$')
+# Inputs ld creates itself and names in the map without a file (the PowerPC64 long-branch/plt stub section).
+_SYNTHETIC_LOADS = frozenset(('linker stubs',))
 
 
 def _unresolved(args):
@@ -224,7 +226,8 @@ def finish(prepared, mapfile, require_map=False):
             raise ValueError('link map missing: '+str(mapfile))
         bound = set(prepared['input_sha']) | {str(Path(prepared['identity_object']).resolve())}
         loads = [_resolve(m.group(1).strip(), prepared['cwd']) for m in
-                 map(_LOAD.match, mapfile.read_text(errors='replace').splitlines()) if m]
+                 map(_LOAD.match, mapfile.read_text(errors='replace').splitlines())
+                 if m and m.group(1).strip() not in _SYNTHETIC_LOADS]
         if not loads:
             raise ValueError('link map lists no LOAD inputs: '+str(mapfile))
         extra = sorted({str(p) for p in loads} - bound)
