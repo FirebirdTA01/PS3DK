@@ -739,6 +739,7 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
 }
 
+static void present_boundary(auto_capture *a);
 void p_auto_owner_retire(void)
 {
     auto_capture *a=owner_capture(NULL,1);
@@ -746,6 +747,7 @@ void p_auto_owner_retire(void)
         if(a->fifo_instance) (void)ps3dk_prof_fifo_detach(a->fifo_instance);
         for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].count) segment_drop(a,&a->segments[i]);
         if(a->coverage.active) {
+            present_boundary(a);
             frame_mark(a,AUTO_FRAME_END);
             (void)auto_frames_close(&a->coverage,a->owner_incarnation,a->coverage.live.frame,observation_tb(),1);
         }
@@ -759,6 +761,7 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
     if(a && !a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
         int flip=a->in_flip_frame!=0;
         if(!flip) a->explicit_seen=1; /* an explicit call takes precedence from here on */
+        present_boundary(a);
         if(a->coverage.active) frame_mark(a,AUTO_FRAME_END); /* implied closure of the previous frame */
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
@@ -775,8 +778,10 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
  * 64-frame block-end clock anchor. 0 when the token is not the active frame. */
 static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
 {
-    if(a->coverage.active && owner==a->coverage.owner && frame==a->coverage.live.frame)
+    if(a->coverage.active && owner==a->coverage.owner && frame==a->coverage.live.frame) {
+        present_boundary(a);
         frame_mark(a,AUTO_FRAME_END);
+    }
     if(!auto_frames_close(&a->coverage,owner,frame,observation_tb(),0)) return 0;
     if(frame%64u==63) sample_clock(a,frame);
     return 1;
@@ -809,7 +814,8 @@ static void cadence_close(auto_capture *a,int complete)
     auto_wire_frame *f=&a->coverage.live;
     a->cadence_open=0;
     if(!a->coverage.active) return;
-    if(!complete) add32(&f->cadence_broken);
+    if(a->cadence_spanning) add32(&f->cadence_spanning); /* charged to neither frame */
+    else if(!complete) add32(&f->cadence_broken);
     else {add32(&f->cadence_runs);add64(&f->cadence,a->cadence_ticks);}
 }
 /* The gap from the previous pending poll's return to this poll's entry: 1 and
@@ -820,6 +826,23 @@ static int cadence_gap(auto_capture *a,uint64_t before)
     if(before<a->cadence_last || (gap=before-a->cadence_last)>a->cadence_bound) return 0;
     add64(&a->cadence_ticks,gap);
     return 1;
+}
+/* A frame boundary (a frame opens, closes or is closed by its successor)
+ * while a cadence run or a flip-wait scope is open: the interval has no single
+ * owning frame. Each row it touches counts it as spanning, now for the row
+ * being closed and at its end for the row then active; no row is charged and
+ * nothing is clipped. Call before the row closes. */
+static void present_boundary(auto_capture *a)
+{
+    auto_wire_frame *f=&a->coverage.live;
+    if(a->cadence_open) {
+        a->cadence_spanning=1;
+        if(a->coverage.active) add32(&f->cadence_spanning);
+    }
+    if(a->flip_wait_open) {
+        a->flip_wait_spanning=1;
+        if(a->coverage.active) add32(&f->flip_wait_spanning);
+    }
 }
 uint64_t ps3dk_prof__auto_flip_status_begin(void)
 {
@@ -833,7 +856,7 @@ void ps3dk_prof__auto_flip_status_end(uint64_t before,uint32_t status)
     if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;
     if(status) {
         if(a->cadence_open && !cadence_gap(a,before)) cadence_close(a,0);
-        if(!a->cadence_open) {a->cadence_open=1;a->cadence_ticks=0;}
+        if(!a->cadence_open) {a->cadence_open=1;a->cadence_spanning=0;a->cadence_ticks=0;}
         a->cadence_last=observation_tb();
         return;
     }
@@ -845,7 +868,7 @@ uint64_t ps3dk_prof__auto_flip_wait_begin(void)
     auto_capture *a;
     if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;
     if(a->cadence_open) cadence_close(a,0); /* the scope takes over: the run never saw its done poll */
-    a->flip_wait_open=1;a->flip_wait_since=observation_tb();
+    a->flip_wait_open=1;a->flip_wait_spanning=0;a->flip_wait_since=observation_tb();
     return a->flip_wait_since|1u;
 }
 void ps3dk_prof__auto_flip_wait_end(uint64_t scope,int32_t rc)
@@ -855,7 +878,9 @@ void ps3dk_prof__auto_flip_wait_end(uint64_t scope,int32_t rc)
     if(!scope || !(a=owner_capture(NULL,0)) || !a->flip_wait_open) return;
     after=observation_tb();
     a->flip_wait_open=0;
-    if(!a->coverage.active || after<a->flip_wait_since) return;
+    if(!a->coverage.active) return;
+    if(a->flip_wait_spanning) {add32(&a->coverage.live.flip_wait_spanning);return;} /* charged to neither */
+    if(after<a->flip_wait_since) return;
     add32(&a->coverage.live.flip_waits);add64(&a->coverage.live.flip_wait,after-a->flip_wait_since);
     if(rc) add32(&a->coverage.live.flip_wait_timeouts);
 }

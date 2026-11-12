@@ -839,3 +839,28 @@ fn presentation_rows_refusals() {
     f.chunks.push(c.chunk());
     assert_eq!(rule(&f), Rule::AutoConfig);
 }
+
+#[test]
+fn boundary_spanning_presentation_is_charged_to_neither_frame() {
+    // Review finding 2: a wait that starts in frame A and ends in frame B belongs to neither.  The writer counts it as
+    // spanning in both rows and charges neither; the reader names the attribution unavailable unless the frame has
+    // complete flip-wait scopes of its own reaching the share.  Nothing is clipped into an invented per-frame wait.
+    let none = Blk::default();
+    let span = Blk { spanning: 1, ..none };
+    let scope_span = Blk { scope_spanning: 1, ..none };
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0); 4], [none, scope_span, none, none]).bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert!(r.frames[1].reason.ends_with("a flip-wait scope spans a frame boundary"), "{}", r.frames[1].reason);
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0); 4], [none, span, none, none]).bytes()).unwrap());
+    assert!(r.frames[1].reason.ends_with("flip-status polling spans a frame boundary"), "{}", r.frames[1].reason);
+    // spanning cadence next to complete cadence: still unavailable, cadence never establishes a wait anyway
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0); 4], [none, Blk { runs: 3, ticks: 90_000, ..span },
+        none, none]).bytes()).unwrap());
+    assert!(r.frames[1].reason.ends_with("flip-status polling spans a frame boundary"), "{}", r.frames[1].reason);
+    // a complete scope of its own that reaches the share keeps PACING beside a spanning one
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0), (1, 50_000), (0, 0), (0, 0)], [none, scope_span, none,
+        none]).bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Pacing, "{}", r.frames[1].reason);
+    let p = r.frames[1].presentation.as_ref().unwrap();
+    assert_eq!((p.flip_wait, p.flip_wait_spanning), (Some((50_000, 1)), 1));
+}

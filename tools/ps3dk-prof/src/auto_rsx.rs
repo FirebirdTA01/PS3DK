@@ -1088,6 +1088,10 @@ pub const PACING_SHARE: (u64, u64) = (1, 4);
 pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
 /// Flip-status polling was seen, but polling shows how often the owner looked at the flip, not that it waited.
 pub const POLLING_ONLY: &str = "presentation polling observed; waiting not established";
+/// A flip-wait scope crossed a boundary of this frame: its time belongs to no single frame and is charged to neither.
+pub const WAIT_SPANS: &str = "presentation attribution unavailable: a flip-wait scope spans a frame boundary";
+/// A polling-cadence run crossed a boundary of this frame (charged to neither frame).
+pub const POLLING_SPANS: &str = "presentation attribution unavailable: flip-status polling spans a frame boundary";
 pub const FINAL_FRAME: &str = "final frame closed at shutdown (no end mark)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1332,6 +1336,10 @@ pub fn analyze(cap: &Capture) -> Report {
                             scheduling and polling, >= {p} of {d} PPU ticks ({n} scope(s)); no FIFO wait; RSX \
                             reached-marker span <= {} ticks", span.1)));
                     }
+                    // Boundary-spanning evidence belongs to no frame: without a complete scope of its own that
+                    // reaches the share, the frame's presentation attribution is unavailable.
+                    Some(Presentation { flip_wait_spanning: s, .. }) if s > 0 => WAIT_SPANS.into(),
+                    Some(Presentation { cadence: Some(c), .. }) if c.spanning > 0 => POLLING_SPANS.into(),
                     Some(Presentation { legacy_polls: Some((n, _)), .. }) if n > 0 => {
                         format!("{POLLING_ONLY} (writer without flip-wait scopes)")
                     }

@@ -20,14 +20,15 @@ ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
-                                  'poll-wait','poll-scope-cadence'])
+                                  'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
-                          'poll-wait':'present','poll-scope-cadence':'present'}[a.mutant] and not a.sanitize
+                          'poll-wait':'present','poll-scope-cadence':'present',
+                          'boundary-cadence':'spanning','boundary-scope':'spanning'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -64,7 +65,9 @@ def run(name,cmd,cwd=out):
                   'no-flip-frames':b'counts[0]==i+1',
                   'no-present-wait':b'present[2]==1 && present[3]>0',
                   'poll-wait':b'p[0]==0 && p[1]==0',
-                  'poll-scope-cadence':b'p[2]==0 && p[4]==0'}[a.mutant]
+                  'poll-scope-cadence':b'p[2]==0 && p[4]==0',
+                  'boundary-cadence':b'p[2]==0 && p[3]==0 && p[5]==1',
+                  'boundary-scope':b'p[0]==0 && p[1]==0 && p[6]==1'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -143,6 +146,13 @@ for rel in sources:
         new=('    if(a->cadence_open && a->coverage.active) {add32(&a->coverage.live.flip_waits);'
              'add64(&a->coverage.live.flip_wait,before-a->cadence_last);}\n'+old[4:])
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    '+new).encode())
+    elif a.mutant in ('boundary-cadence','boundary-scope') and rel=='auto_rsx/auto_runtime.c':
+        # review finding 2 reintroduced: a boundary no longer takes ownership away from an open run or scope
+        code=source.read_text()
+        old={'boundary-cadence':'    if(a->cadence_open) {\n        a->cadence_spanning=1;',
+             'boundary-scope':'    if(a->flip_wait_open) {\n        a->flip_wait_spanning=1;'}[a.mutant]
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    if(0) {'+old.split('{',1)[1]).encode())
     elif a.mutant=='poll-scope-cadence' and rel=='auto_rsx/auto_runtime.c':
         # polls inside a flip-wait scope counted again as cadence
         code=source.read_text();old='if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;'

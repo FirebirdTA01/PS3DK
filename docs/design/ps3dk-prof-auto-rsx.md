@@ -201,6 +201,18 @@ not whether it was waiting: the owner may have done useful work between any two
 polls, and two nonblocking polls around work give the same numbers as a polling
 wait. Cadence therefore never establishes pacing; it is named evidence.
 
+Interval ownership. A cadence run or flip-wait scope belongs to the frame it
+started in only if it also ends there. When a frame boundary (a flip-derived or
+explicit frame opening, an explicit close, the implied closure by a successor, or
+owner retirement) falls while a run or scope is open, the interval is charged to
+neither frame: each row it touches counts it once at 360 (runs) or 364 (scopes),
+the row being closed at the boundary and the row active when the interval ends.
+Nothing is clipped or capped into a per-frame share. A frame whose presentation
+evidence includes a spanning scope or run reads UNKNOWN ("presentation attribution
+unavailable: ...") unless its own complete flip-wait scopes reach the pacing
+share. A 15/11 row has no interval ownership at all, which is another reason its
+poll interval never yields pacing.
+
 Sleeps and yields outside the helper (`usleep`, `sys_timer_usleep`,
 `sys_timer_sleep`, `sys_ppu_thread_yield`) are not recorded: a sleep may serve an
 unrelated timer, a yield may return at once, and the flip may have completed
@@ -410,6 +422,7 @@ RSX reached-marker span (first operation begin to last end) on the PPU clock:
 |---|---|
 | RSX-bound candidate (fetch) | W >= D/4 and S >= D/2 (lower bound of S) |
 | pacing | W = 0, S < D/2 (upper bound), and the row's flip-wait scope elapsed time P >= D/4 (31/11 rows only) |
+| UNKNOWN: "presentation attribution unavailable: a flip-wait scope spans a frame boundary" (or "... flip-status polling spans a frame boundary") | W = 0 and S < D/2 without such a P, and a spanning scope (or run) touched the row |
 | UNKNOWN: "presentation polling observed; waiting not established" | W = 0 and S < D/2 without such a P, with polling cadence (complete or broken runs) or 15/11 poll intervals |
 | UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 with no presentation evidence |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |

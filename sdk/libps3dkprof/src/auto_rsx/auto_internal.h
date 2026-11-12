@@ -70,6 +70,8 @@ typedef struct auto_capture {
      * cadence_bound ticks (polling cadence, never waiting evidence). A
      * flip-wait scope is one cellGcmWaitFlipComplete call (waiting evidence). */
     uint32_t cadence_open, flip_wait_open;
+    /* the open run or scope crossed a frame boundary: it belongs to no frame */
+    uint32_t cadence_spanning, flip_wait_spanning;
     uint64_t cadence_last, cadence_ticks, cadence_bound, flip_wait_since;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
