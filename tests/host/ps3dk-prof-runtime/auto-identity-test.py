@@ -236,10 +236,11 @@ class Identity(unittest.TestCase):
         # fixed specs file through an environment variable. Only driver-owned temp operands may be normalized.
         import tempfile
         tmp=Path(tempfile.gettempdir())
-        self.assertEqual(I._normalize(str(tmp/'ccAbC123.res')),'<driver-temp>')
         self.assertEqual(I._normalize('-plugin-opt=-fresolution='+str(tmp/'ccAbC123.res')),
                          '-plugin-opt=-fresolution=<driver-temp>')
-        for kept in ('--entry=ccABCDEF.entry','ccABCDEF.entry',str(self.p/'ccABCDEF.o'),
+        # Review 2026-11-12 (573): a whole argument in the temp dir may be a symbol (separate -e value), so it is kept.
+        for kept in (str(tmp/'ccAbC123.res'),str(tmp/'ccABCDEF.entry'),
+                     '--entry=ccABCDEF.entry','ccABCDEF.entry',str(self.p/'ccABCDEF.o'),
                      '-plugin-opt=-fresolution='+str(self.p/'ccABCDEF.res')):
             self.assertEqual(I._normalize(kept),kept)
         src=self.p/'two.c';src.write_text('int ccABCDEF_entry(void){return 1;}\nint ccUVWXYZ_entry(void){return 2;}\n'

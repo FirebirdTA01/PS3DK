@@ -153,9 +153,10 @@ def _compile_identity(driver, abi, source, obj, text):
         raise ValueError('identity object did not compile: '+r.stderr)
 
 
-# Driver temporary files differ on every run, so the binding records them as one name. Only operands the driver owns
-# are normalized: a whole argument, or the lto plugin's -fresolution= value, that is a file directly in the temp
-# directory named like gcc's temporaries (ccXXXXXX.<ext>). Anything else that merely looks similar is kept as is.
+# The lto plugin's resolution file is a driver temporary that differs on every run; its role is fixed by the option
+# that carries it, so the binding records it as one name when it is a gcc-style temporary (ccXXXXXX.<ext>) directly in
+# the temp directory. Nothing else is normalized: a bare argument's role is unknown (a separate -e value is a symbol
+# name), so any other temporary on the linker command simply makes the binding differ from run to run.
 _DRIVER_TEMP_NAME = re.compile(r'^cc[A-Za-z0-9]{6}\.[A-Za-z0-9_]+$')
 _RESOLUTION = '-plugin-opt=-fresolution='
 
@@ -174,7 +175,7 @@ def _driver_temp(value):
 def _normalize(arg):
     if arg.startswith(_RESOLUTION) and _driver_temp(arg[len(_RESOLUTION):]):
         return _RESOLUTION+'<driver-temp>'
-    return '<driver-temp>' if _driver_temp(arg) else arg
+    return arg
 
 
 def _linker_command(argv, placeholder, cwd):
