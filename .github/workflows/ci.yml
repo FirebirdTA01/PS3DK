@@ -271,7 +271,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity flips present spanning fifofail fifopre fifopost; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail flips present spanning fifofail fifopre fifopost; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"

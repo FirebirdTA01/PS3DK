@@ -16,7 +16,7 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
@@ -87,7 +87,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -248,6 +248,7 @@ if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-ope
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 if a.case=='extsegments':application=Path(__file__).with_name('auto-external-segment-test.c').read_text()
 if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
+if a.case=='segmetatail':application=Path(__file__).with_name('auto-segment-metadata-tail-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
@@ -258,6 +259,10 @@ if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
 result=run('run',cmd,capture_dir)
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
+    print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case=='segmetatail':
+    assert result.returncode==0 and result.stdout==b'AUTO metadata exhaustion latches the frame tail PASS\n',result.stdout
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
 if a.case=='segcapacity':

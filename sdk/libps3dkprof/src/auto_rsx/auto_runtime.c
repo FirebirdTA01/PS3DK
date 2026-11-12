@@ -603,15 +603,19 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
     const auto_wire_config *c;
     gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
     uint32_t share=0,call,i;
+    int meta_short;
     uintptr_t cur,end;
     if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
     if(!(s=segment_find(a,segment)) || !s->count) return;
     c=auto_config_read(&configuration);
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
+    meta_short=a->operations.capacity-(uint32_t)(a->operations.write_idx-LD_ACQ(&a->operations.read_idx))<s->count;
     if(ctx!=a->context || !c || c->reason || a->active || a->call_ordinal==UINT32_MAX ||
        LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
-       (cur&3u) || cur>end || end-cur<16 || a->operations.capacity-(uint32_t)(a->operations.write_idx-
-       LD_ACQ(&a->operations.read_idx))<s->count) {
+       (cur&3u) || cur>end || end-cur<16 || meta_short) {
+        /* Metadata exhaustion latches the frame tail like a refused admission does: later covered draws of this
+         * frame are not timed either. */
+        if(meta_short) a->pool_tail_column=4;
         segment_drop(a,s);return;
     }
     call=++a->call_ordinal;
@@ -1030,6 +1034,12 @@ void ps3dk_prof__auto_test_segment_counts(uint64_t out[4])
     const auto_capture *a=capture;
     out[0]=a ? a->segment_visits:0;out[1]=a ? a->foreign_visits:0;
     out[2]=a ? a->segment_table_full:0;out[3]=a ? a->segments_used:0;
+}
+/* Owner thread only: the frame's capacity-exhaustion latch (0, or the exclusion column it applies). */
+uint32_t ps3dk_prof__auto_test_pool_tail(void)
+{
+    const auto_capture *a=capture;
+    return a ? a->pool_tail_column:0;
 }
 #endif
 
