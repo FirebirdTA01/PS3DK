@@ -334,6 +334,14 @@ jobs:
       - name: Test GCM safe reserve refuses writes past a full ring
         run: bash tests/sdk/gcm-reserve-null-callback-test.sh
 
+      # API-rule ratchet: as cellGcm* forwarders are converted to natives in
+      # <cell/gcm/gcm_state_native.h>, the PSL1GHT forwarder surface must
+      # SHRINK. Fails if a new forwarder appears (regressed shim) or an
+      # allowlisted name no longer forwards (converted but not removed from
+      # the allowlist). The list is the baseline for "already-converted".
+      - name: Test GCM forwarder surface does not grow (ratchet)
+        run: bash tests/sdk/gcm-forwarder-ratchet-test.sh
+
       # Freestanding 32-bit compilation catches the original ILP32 shift
       # without requiring a PPU toolchain or host multilib runtime libraries.
       # Native host execution also verifies the wide-pointer debug trap.
