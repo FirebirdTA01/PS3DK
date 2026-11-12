@@ -74,10 +74,13 @@ extern "C" {
  * current, callback}).  In C++ the cell headers expose a real struct tag so
  * both `CellGcmContextData *` and `struct CellGcmContextData *` spellings
  * compile, while still converting to the underlying RSX context type. */
+#ifndef PS3TC_CELL_GCM_CONTEXT_DATA /* normally defined by <cell/gcm/ps3tc_gcm_flip.h> */
+#define PS3TC_CELL_GCM_CONTEXT_DATA
 #ifdef __cplusplus
 struct CellGcmContextData : public gcmContextData {};
 #else
 typedef gcmContextData       CellGcmContextData;
+#endif
 #endif
 typedef gcmContextCallback   CellGcmContextCallback;
 

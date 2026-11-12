@@ -90,6 +90,10 @@ if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
     shutil.copyfile(root/'sdk/include/cell/gcm/ps3tc_gcm_flip.h',inc.parent/'cell/gcm/ps3tc_gcm_flip.h')
+    sys_h=(root/'sdk/include/rsx/gcm_sys.h').read_text()
+    start=sys_h.index('#ifndef PS3TC_GCM_LEGACY_SHIM_TU\n#include <cell/gcm/ps3tc_gcm_flip.h>')
+    end=sys_h.index('}\n#endif\n#endif\n',start)+len('}\n#endif\n#endif\n')
+    (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]

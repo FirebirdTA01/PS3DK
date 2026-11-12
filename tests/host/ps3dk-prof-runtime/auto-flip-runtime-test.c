@@ -16,10 +16,10 @@
 /* The application's flip calls go through the cellGcm entry points (and their
  * gcm* aliases) as an application build sees them; the firmware stubs are
  * fakes in the test bridge. */
+typedef int32_t s32; typedef uint32_t u32; typedef uint8_t u8;
+typedef struct _gcmCtxData gcmContextData; /* used through pointers only */
 #include <cell/gcm/ps3tc_gcm_flip.h>
-#define gcmSetFlip cellGcmSetFlip
-#define gcmSetPrepareFlip cellGcmSetPrepareFlip
-#define gcmGetFlipStatus cellGcmGetFlipStatus
+#include "gcm_flip_aliases.h" /* the gcm* alias block of rsx/gcm_sys.h, extracted by the driver */
 extern int auto_test_fw_flip_rc,auto_test_fw_flips,auto_test_fw_prepares,auto_test_fw_polls,auto_test_fw_pending;
 static uint64_t reports[2048][2];
 static uint32_t labels[256],words[4096];

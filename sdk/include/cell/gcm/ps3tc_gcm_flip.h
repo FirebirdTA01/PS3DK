@@ -4,23 +4,24 @@
  * cellGcmSetFlip, cellGcmSetPrepareFlip, cellGcmGetFlipStatus,
  * cellGcmResetFlipStatus, cellGcmSetWaitFlip and cellGcmSetFlipMode are the
  * primary entry points over the libgcm_sys firmware calls (the NID stubs of
- * the same names). The PSL1GHT spellings gcmSetFlip, gcmSetPrepareFlip,
- * gcmGetFlipStatus, gcmResetFlipStatus, gcmSetWaitFlip and gcmSetFlipMode are
- * aliases onto these (rsx/gcm_sys.h), never the other way round.
+ * the same names), with their Cell-style signatures (CellGcmContextData *).
+ * The PSL1GHT spellings gcmSetFlip, gcmSetPrepareFlip, gcmGetFlipStatus,
+ * gcmResetFlipStatus, gcmSetWaitFlip and gcmSetFlipMode (rsx/gcm_sys.h) are
+ * typed aliases onto the same implementation, with their PSL1GHT signatures
+ * (gcmContextData *), never the other way round.
  *
  * Included by <rsx/gcm_sys.h> after its declarations, so both <cell/gcm.h>
  * and PSL1GHT code that includes only <rsx/gcm_sys.h> see one definition.
  *
- * Each entry point is a static inline over its stub, reached through an
- * assembler-name declaration, so the generated call is the same stub call
- * with the same arguments the gcm* library shims make. The inline's own
- * assembler name is distinct, so it can never bind to itself.
+ * Each call reaches its stub through an assembler-name declaration, so the
+ * generated call is the same stub call with the same arguments the gcm*
+ * library shims make. The cellGcm inlines carry distinct assembler names, so
+ * none can bind to the stub it calls.
  *
- * In a PS3_PROF_AUTO translation unit the observation hooks sit here, inside
- * the cellGcm entry points: an accepted cellGcmSetFlip or cellGcmSetPrepareFlip
- * is reported once as a frame boundary, and cellGcmGetFlipStatus is reported
- * as a flip-status poll. A gcm* spelling expands to the cellGcm entry point,
- * so each flip is observed exactly once whichever spelling the code uses.
+ * In a PS3_PROF_AUTO translation unit the observation hooks sit in the shared
+ * implementation (ps3tc_gcm_flip_*): an accepted flip or prepared flip is
+ * reported once as a frame boundary and each flip-status read is reported as
+ * a poll, whichever spelling the code uses.
  */
 #ifndef PS3TC_CELL_GCM_FLIP_H
 #define PS3TC_CELL_GCM_FLIP_H
@@ -31,7 +32,18 @@
 extern "C" {
 #endif
 
-struct _gcmCtxData;
+/* CellGcmContextData == gcmContextData (byte-identical: {begin, end,
+ * current, callback}). In C++ the cell headers expose a real struct tag so
+ * both `CellGcmContextData *` and `struct CellGcmContextData *` spellings
+ * compile, while still converting to the underlying RSX context type. */
+#ifndef PS3TC_CELL_GCM_CONTEXT_DATA
+#define PS3TC_CELL_GCM_CONTEXT_DATA
+#ifdef __cplusplus
+struct CellGcmContextData : public gcmContextData {};
+#else
+typedef gcmContextData CellGcmContextData;
+#endif
+#endif
 
 /* The firmware calls (libgcm_sys NID stubs). */
 int32_t  ps3tc_gcm_sys_SetFlip(struct _gcmCtxData *context, uint8_t id) __asm__("cellGcmSetFlip");
@@ -51,8 +63,8 @@ void     ps3dk_prof__auto_flip_wait_end(uint64_t scope, int32_t rc);
 #define PS3TC_GCM_FLIP_OBSERVED 1
 #endif
 
-static inline int32_t cellGcmSetFlip(struct _gcmCtxData *context, uint8_t id) __asm__("ps3tc_inline_cellGcmSetFlip");
-static inline int32_t cellGcmSetFlip(struct _gcmCtxData *context, uint8_t id)
+/* The shared implementation: one firmware call, and the observation, once. */
+static inline int32_t ps3tc_gcm_flip_SetFlip(struct _gcmCtxData *context, uint8_t id)
 {
 	int32_t rc = ps3tc_gcm_sys_SetFlip(context, id);
 #ifdef PS3TC_GCM_FLIP_OBSERVED
@@ -61,8 +73,7 @@ static inline int32_t cellGcmSetFlip(struct _gcmCtxData *context, uint8_t id)
 	return rc;
 }
 
-static inline uint32_t cellGcmSetPrepareFlip(struct _gcmCtxData *context, uint8_t id) __asm__("ps3tc_inline_cellGcmSetPrepareFlip");
-static inline uint32_t cellGcmSetPrepareFlip(struct _gcmCtxData *context, uint8_t id)
+static inline uint32_t ps3tc_gcm_flip_SetPrepareFlip(struct _gcmCtxData *context, uint8_t id)
 {
 	uint32_t queue = ps3tc_gcm_sys_SetPrepareFlip(context, id);
 #ifdef PS3TC_GCM_FLIP_OBSERVED
@@ -71,8 +82,7 @@ static inline uint32_t cellGcmSetPrepareFlip(struct _gcmCtxData *context, uint8_
 	return queue;
 }
 
-static inline uint32_t cellGcmGetFlipStatus(void) __asm__("ps3tc_inline_cellGcmGetFlipStatus");
-static inline uint32_t cellGcmGetFlipStatus(void)
+static inline uint32_t ps3tc_gcm_flip_GetFlipStatus(void)
 {
 #ifdef PS3TC_GCM_FLIP_OBSERVED
 	uint64_t before = ps3dk_prof__auto_flip_status_begin();
@@ -84,6 +94,25 @@ static inline uint32_t cellGcmGetFlipStatus(void)
 #endif
 }
 
+/* The cellGcm entry points (Cell-style signatures). */
+static inline int32_t cellGcmSetFlip(CellGcmContextData *context, uint8_t id) __asm__("ps3tc_inline_cellGcmSetFlip");
+static inline int32_t cellGcmSetFlip(CellGcmContextData *context, uint8_t id)
+{
+	return ps3tc_gcm_flip_SetFlip(context, id);
+}
+
+static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id) __asm__("ps3tc_inline_cellGcmSetPrepareFlip");
+static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id)
+{
+	return ps3tc_gcm_flip_SetPrepareFlip(context, id);
+}
+
+static inline uint32_t cellGcmGetFlipStatus(void) __asm__("ps3tc_inline_cellGcmGetFlipStatus");
+static inline uint32_t cellGcmGetFlipStatus(void)
+{
+	return ps3tc_gcm_flip_GetFlipStatus();
+}
+
 static inline void cellGcmResetFlipStatus(void) __asm__("ps3tc_inline_cellGcmResetFlipStatus");
 static inline void cellGcmResetFlipStatus(void)
 {
@@ -91,8 +120,8 @@ static inline void cellGcmResetFlipStatus(void)
 }
 
 /* Not a frame boundary: the wait is a GPU command, not an owner wait. */
-static inline void cellGcmSetWaitFlip(struct _gcmCtxData *context) __asm__("ps3tc_inline_cellGcmSetWaitFlip");
-static inline void cellGcmSetWaitFlip(struct _gcmCtxData *context)
+static inline void cellGcmSetWaitFlip(CellGcmContextData *context) __asm__("ps3tc_inline_cellGcmSetWaitFlip");
+static inline void cellGcmSetWaitFlip(CellGcmContextData *context)
 {
 	ps3tc_gcm_sys_SetWaitFlip(context);
 }
