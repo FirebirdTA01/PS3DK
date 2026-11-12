@@ -8,8 +8,8 @@ pub const CAPTION: &str = "PPU timebase wall time of the GCM context owner insid
 scheduling and observer cost. Not GPU busy or idle time; frame tokens are owner association, not GPU execution frames.";
 pub const RSX_STATUS: &str = "RSX execution busy/idle: UNKNOWN (no mechanism in this capture measures it).";
 pub const NOT_ENABLED: &str = "Not recorded by the FIFO wrap observer (not zero): register samples, prepared/published \
-bytes, supply-gap views. RSX-reached markers come from AUTO RSX records, shown on the AUTO page when the capture has \
-them.";
+bytes, supply-gap views. RSX-reached markers come from AUTO RSX records when the capture has them; this viewer does \
+not show those records ('ps3dk-prof auto' does).";
 pub const PAINT_BARS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

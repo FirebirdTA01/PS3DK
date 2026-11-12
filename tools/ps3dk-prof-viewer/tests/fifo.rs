@@ -56,9 +56,10 @@ fn paint_cap_is_announced() {
 #[test]
 fn not_enabled_names_only_the_fifo_observer() {
     // Review 2026-11-12: the fixed sentence said RSX-reached markers were not enabled, also in captures with AUTO
-    // RSX records; it now speaks for the FIFO wrap observer and points to the AUTO page for those markers.
+    // RSX records; it now speaks for the FIFO wrap observer and names where those markers are shown ('ps3dk-prof auto').
     let s = ps3dk_prof_viewer::fifo::NOT_ENABLED;
-    assert!(s.starts_with("Not recorded by the FIFO wrap observer") && s.contains("AUTO page"), "{s}");
+    assert!(s.starts_with("Not recorded by the FIFO wrap observer") && s.contains("ps3dk-prof auto"), "{s}");
+    assert!(!s.contains("AUTO page"), "the viewer has no AUTO page: {s}");
     assert!(!s.contains("Not enabled in this capture"), "{s}");
 }
 
