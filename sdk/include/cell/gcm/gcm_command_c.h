@@ -101,12 +101,12 @@ static inline void cellGcmSetSurface(CellGcmContextData *thisContext, const Cell
 
 static inline void cellGcmSetClearColor(CellGcmContextData *thisContext, uint32_t color)
 {
-	rsxSetClearColor(thisContext, color);
+	ps3tc_gcm_state_clear_color(thisContext, color);
 }
 
 static inline void cellGcmSetClearDepthStencil(CellGcmContextData *thisContext, uint32_t value)
 {
-	rsxSetClearDepthStencil(thisContext, value);
+	ps3tc_gcm_state_clear_depth_stencil(thisContext, value);
 }
 
 static inline void cellGcmSetClearSurface(CellGcmContextData *thisContext, uint32_t mask)
@@ -301,13 +301,13 @@ static inline void cellGcmSetViewport(CellGcmContextData *thisContext,
                                       float min_z, float max_z,
                                       const float scale[4], const float offset[4])
 {
-	rsxSetViewport(thisContext, x, y, w, h, min_z, max_z, scale, offset);
+	ps3tc_gcm_state_viewport(thisContext, x, y, w, h, min_z, max_z, scale, offset);
 }
 
 static inline void cellGcmSetScissor(CellGcmContextData *thisContext,
                                      uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-	rsxSetScissor(thisContext, x, y, w, h);
+	ps3tc_gcm_state_scissor(thisContext, x, y, w, h);
 }
 
 /* ==========================================================
@@ -783,29 +783,29 @@ static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGc
 
 static inline void cellGcmSetInvalidateZcull(CellGcmContextData *thisContext)
 {
-	rsxSetZCullInvalidate(thisContext);
+	ps3tc_gcm_state_invalidate_zcull(thisContext);
 }
 
 static inline void cellGcmSetZcullControl(CellGcmContextData *thisContext, uint8_t cullDir, uint8_t cullFmt)
 {
-	rsxSetZCullControl(thisContext, cullDir, cullFmt);
+	ps3tc_gcm_state_zcull_control(thisContext, cullDir, cullFmt);
 }
 
 static inline void cellGcmSetZcullEnable(CellGcmContextData *thisContext,
                                          uint32_t depth, uint32_t stencil)
 {
-	rsxSetZCullEnable(thisContext, depth, stencil);
+	ps3tc_gcm_state_zcull_enable(thisContext, depth, stencil);
 }
 
 static inline void cellGcmSetZcullStatsEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetZCullStatsEnable(thisContext, enable);
+	ps3tc_gcm_state_zcull_stats_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetZcullLimit(CellGcmContextData *thisContext,
                                         uint16_t moveForwardLimit, uint16_t pushBackLimit)
 {
-	rsxSetZCullLimit(thisContext, moveForwardLimit, pushBackLimit);
+	ps3tc_gcm_state_zcull_limit(thisContext, moveForwardLimit, pushBackLimit);
 }
 
 static inline void cellGcmSetClearZcullSurface(CellGcmContextData *thisContext,
@@ -817,7 +817,7 @@ static inline void cellGcmSetClearZcullSurface(CellGcmContextData *thisContext,
 static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
                                           uint16_t func, uint8_t ref, uint8_t mask)
 {
-	rsxSetSCullControl(thisContext, func, ref, mask);
+	ps3tc_gcm_state_scull_control(thisContext, func, ref, mask);
 }
 
 static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,

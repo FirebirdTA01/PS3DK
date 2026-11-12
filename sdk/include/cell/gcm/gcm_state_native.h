@@ -909,6 +909,239 @@ static inline void ps3tc_gcm_state_polygon_offset_unsafe(CellGcmContextData *ctx
     ctx->current[2] = b.u;
     ctx->current   += 3;
 }
+/* ================================================================== *
+ * Viewport / scissor / clear-value / zcull / scull group.
+ * ================================================================== */
+
+/* safe — viewport (24 words, 3 methods; copied verbatim from the pre-patch
+ * rsxSetViewport body, including the two identical VIEWPORT_OFFSET
+ * packets, which is the wire contract).
+ *   VIEWPORT_HORIZ (count=2) : (width<<16)|x, (height<<16)|y
+ *   DEPTH_RANGE    (count=2) : min, max          (IEEE-32)
+ *   VIEWPORT_OFFSET (count=8): offset[4], scale[4]  (IEEE-32)   x2 */
+static inline void ps3tc_gcm_state_viewport(CellGcmContextData *ctx,
+    uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+    f32 min, f32 max, const f32 scale[4], const f32 offset[4])
+{
+    ieee32 _min, _max;
+    ieee32 _offset[4], _scale[4];
+    _min.f = min; _max.f = max;
+    _scale[0].f = scale[0]; _scale[1].f = scale[1];
+    _scale[2].f = scale[2]; _scale[3].f = scale[3];
+    _offset[0].f = offset[0]; _offset[1].f = offset[1];
+    _offset[2].f = offset[2]; _offset[3].f = offset[3];
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 24);
+    if (!p) return;
+    p[0]  = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_HORIZ, 2);
+    p[1]  = ((uint32_t)w << 16) | x;
+    p[2]  = ((uint32_t)h << 16) | y;
+    p[3]  = PS3TC_GCM_METHOD(NV40TCL_DEPTH_RANGE, 2);
+    p[4]  = _min.u;
+    p[5]  = _max.u;
+    p[6]  = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    p[7]  = _offset[0].u; p[8]  = _offset[1].u; p[9]  = _offset[2].u; p[10] = _offset[3].u;
+    p[11] = _scale[0].u;  p[12] = _scale[1].u;  p[13] = _scale[2].u;  p[14] = _scale[3].u;
+    p[15] = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    p[16] = _offset[0].u; p[17] = _offset[1].u; p[18] = _offset[2].u; p[19] = _offset[3].u;
+    p[20] = _scale[0].u;  p[21] = _scale[1].u;  p[22] = _scale[2].u;  p[23] = _scale[3].u;
+}
+
+/* unsafe — 24 words, plain write, no reservation. */
+static inline void ps3tc_gcm_state_viewport_unsafe(CellGcmContextData *ctx,
+    uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+    f32 min, f32 max, const f32 scale[4], const f32 offset[4])
+{
+    ieee32 _min, _max;
+    ieee32 _offset[4], _scale[4];
+    _min.f = min; _max.f = max;
+    _scale[0].f = scale[0]; _scale[1].f = scale[1];
+    _scale[2].f = scale[2]; _scale[3].f = scale[3];
+    _offset[0].f = offset[0]; _offset[1].f = offset[1];
+    _offset[2].f = offset[2]; _offset[3].f = offset[3];
+    ctx->current[0]  = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_HORIZ, 2);
+    ctx->current[1]  = ((uint32_t)w << 16) | x;
+    ctx->current[2]  = ((uint32_t)h << 16) | y;
+    ctx->current[3]  = PS3TC_GCM_METHOD(NV40TCL_DEPTH_RANGE, 2);
+    ctx->current[4]  = _min.u;
+    ctx->current[5]  = _max.u;
+    ctx->current[6]  = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[7]  = _offset[0].u; ctx->current[8]  = _offset[1].u;
+    ctx->current[9]  = _offset[2].u; ctx->current[10] = _offset[3].u;
+    ctx->current[11] = _scale[0].u;  ctx->current[12] = _scale[1].u;
+    ctx->current[13] = _scale[2].u;  ctx->current[14] = _scale[3].u;
+    ctx->current[15] = PS3TC_GCM_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[16] = _offset[0].u; ctx->current[17] = _offset[1].u;
+    ctx->current[18] = _offset[2].u; ctx->current[19] = _offset[3].u;
+    ctx->current[20] = _scale[0].u;  ctx->current[21] = _scale[1].u;
+    ctx->current[22] = _scale[2].u;  ctx->current[23] = _scale[3].u;
+    ctx->current   += 24;
+}
+
+/* safe — scissor (SCISSOR_HORIZ count=2, 3 words). */
+static inline void ps3tc_gcm_state_scissor(CellGcmContextData *ctx,
+                                           uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 3);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_SCISSOR_HORIZ, 2);
+    p[1] = ((uint32_t)w << 16) | x;
+    p[2] = ((uint32_t)h << 16) | y;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_scissor_unsafe(CellGcmContextData *ctx,
+    uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_SCISSOR_HORIZ, 2);
+    ctx->current[1] = ((uint32_t)w << 16) | x;
+    ctx->current[2] = ((uint32_t)h << 16) | y;
+    ctx->current   += 3;
+}
+
+/* safe — clear_color (CLEAR_VALUE_COLOR count=1, 2 words). */
+static inline void ps3tc_gcm_state_clear_color(CellGcmContextData *ctx, uint32_t color)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_VALUE_COLOR, 1);
+    p[1] = color;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_clear_color_unsafe(CellGcmContextData *ctx, uint32_t color)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_VALUE_COLOR, 1);
+    ctx->current[1] = color;
+    ctx->current   += 2;
+}
+
+/* safe — clear_depth_stencil (CLEAR_VALUE_DEPTH count=1, 2 words). */
+static inline void ps3tc_gcm_state_clear_depth_stencil(CellGcmContextData *ctx, uint32_t value)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_VALUE_DEPTH, 1);
+    p[1] = value;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_clear_depth_stencil_unsafe(CellGcmContextData *ctx, uint32_t value)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_CLEAR_VALUE_DEPTH, 1);
+    ctx->current[1] = value;
+    ctx->current   += 2;
+}
+
+/* safe — zcull_control (ZCULL_CONTROL0 count=1, 2 words): (fmt<<4)|dir. */
+static inline void ps3tc_gcm_state_zcull_control(CellGcmContextData *ctx,
+                                                 uint32_t zcull_dir, uint32_t zcull_fmt)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_CONTROL0, 1);
+    p[1] = ((zcull_fmt << 4) | zcull_dir);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zcull_control_unsafe(CellGcmContextData *ctx,
+    uint32_t zcull_dir, uint32_t zcull_fmt)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_CONTROL0, 1);
+    ctx->current[1] = ((zcull_fmt << 4) | zcull_dir);
+    ctx->current   += 2;
+}
+
+/* safe — zcull_enable (ZCULL_ENABLE count=1, 2 words): (stencil<<1)|depth. */
+static inline void ps3tc_gcm_state_zcull_enable(CellGcmContextData *ctx,
+                                                uint32_t depth, uint32_t stencil)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_ENABLE, 1);
+    p[1] = ((stencil << 1) | depth);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zcull_enable_unsafe(CellGcmContextData *ctx,
+    uint32_t depth, uint32_t stencil)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_ENABLE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+
+/* safe — zcull_limit (ZCULL_CONTROL1 count=1, 2 words): (mfl<<16)|pb. */
+static inline void ps3tc_gcm_state_zcull_limit(CellGcmContextData *ctx,
+                                               uint16_t move_forward_limit, uint16_t push_back_limit)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_CONTROL1, 1);
+    p[1] = ((uint32_t)move_forward_limit << 16) | push_back_limit;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zcull_limit_unsafe(CellGcmContextData *ctx,
+    uint16_t move_forward_limit, uint16_t push_back_limit)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_CONTROL1, 1);
+    ctx->current[1] = ((uint32_t)move_forward_limit << 16) | push_back_limit;
+    ctx->current   += 2;
+}
+
+/* safe — zcull_stats_enable (ZCULL_STATS_ENABLE count=1, 2 words). */
+static inline void ps3tc_gcm_state_zcull_stats_enable(CellGcmContextData *ctx, uint32_t enable)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_STATS_ENABLE, 1);
+    p[1] = enable;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zcull_stats_enable_unsafe(CellGcmContextData *ctx, uint32_t enable)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_ZCULL_STATS_ENABLE, 1);
+    ctx->current[1] = enable;
+    ctx->current   += 2;
+}
+
+/* safe — scull_control (SCULL_CONTROL count=1, 2 words):
+ * (mask<<24)|(ref<<16)|func.  func is a u8 in the wire word. */
+static inline void ps3tc_gcm_state_scull_control(CellGcmContextData *ctx,
+                                                 uint8_t s_func, uint8_t s_ref, uint8_t s_mask)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_SCULL_CONTROL, 1);
+    p[1] = ((s_mask << 24) | (s_ref << 16) | s_func);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_scull_control_unsafe(CellGcmContextData *ctx,
+    uint8_t s_func, uint8_t s_ref, uint8_t s_mask)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_SCULL_CONTROL, 1);
+    ctx->current[1] = ((s_mask << 24) | (s_ref << 16) | s_func);
+    ctx->current   += 2;
+}
+
+/* safe — invalidate_zcull (INVALIDATE_ZCULL count=1, 2 words, value 0). */
+static inline void ps3tc_gcm_state_invalidate_zcull(CellGcmContextData *ctx)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_INVALIDATE_ZCULL, 1);
+    p[1] = 0;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_invalidate_zcull_unsafe(CellGcmContextData *ctx)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_INVALIDATE_ZCULL, 1);
+    ctx->current[1] = 0;
+    ctx->current   += 2;
+}
 
 #ifdef __cplusplus
 }

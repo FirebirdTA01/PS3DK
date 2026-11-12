@@ -262,6 +262,138 @@ static void ref_unsafe_render(gcmContextData *ctx, u32 mode, u32 index)
     }
 }
 
+/* ---- viewport / scissor / clear / zcull / scull references ---- */
+static void ref_safe_scissor(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_SCISSOR_HORIZ, 2);
+    ctx->current[1] = ((uint32_t)w << 16) | x;
+    ctx->current[2] = ((uint32_t)h << 16) | y;
+    ctx->current   += 3;
+}
+static void ref_unsafe_scissor(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_SCISSOR_HORIZ, 2);
+    ctx->current[1] = ((uint32_t)w << 16) | x;
+    ctx->current[2] = ((uint32_t)h << 16) | y;
+    ctx->current   += 3;
+}
+static void ref_safe_zcull_ctrl(gcmContextData *ctx, uint32_t dir, uint32_t fmt)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_CONTROL0, 1);
+    ctx->current[1] = ((fmt << 4) | dir);
+    ctx->current   += 2;
+}
+static void ref_unsafe_zcull_ctrl(gcmContextData *ctx, uint32_t dir, uint32_t fmt)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_CONTROL0, 1);
+    ctx->current[1] = ((fmt << 4) | dir);
+    ctx->current   += 2;
+}
+static void ref_safe_zcull_en(gcmContextData *ctx, uint32_t depth, uint32_t stencil)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_ENABLE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+static void ref_unsafe_zcull_en(gcmContextData *ctx, uint32_t depth, uint32_t stencil)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_ENABLE, 1);
+    ctx->current[1] = ((stencil << 1) | depth);
+    ctx->current   += 2;
+}
+static void ref_safe_zcull_lim(gcmContextData *ctx, uint16_t mfl, uint16_t pb)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_CONTROL1, 1);
+    ctx->current[1] = ((uint32_t)mfl << 16) | pb;
+    ctx->current   += 2;
+}
+static void ref_unsafe_zcull_lim(gcmContextData *ctx, uint16_t mfl, uint16_t pb)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_ZCULL_CONTROL1, 1);
+    ctx->current[1] = ((uint32_t)mfl << 16) | pb;
+    ctx->current   += 2;
+}
+static void ref_safe_scull(gcmContextData *ctx, uint8_t func, uint8_t ref, uint8_t mask)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_SCULL_CONTROL, 1);
+    ctx->current[1] = ((mask << 24) | (ref << 16) | func);
+    ctx->current   += 2;
+}
+static void ref_unsafe_scull(gcmContextData *ctx, uint8_t func, uint8_t ref, uint8_t mask)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_SCULL_CONTROL, 1);
+    ctx->current[1] = ((mask << 24) | (ref << 16) | func);
+    ctx->current   += 2;
+}
+static void ref_safe_invalz(gcmContextData *ctx)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_INVALIDATE_ZCULL, 1);
+    ctx->current[1] = 0;
+    ctx->current   += 2;
+}
+static void ref_unsafe_invalz(gcmContextData *ctx)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_INVALIDATE_ZCULL, 1);
+    ctx->current[1] = 0;
+    ctx->current   += 2;
+}
+static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                              f32 min, f32 max, const f32 scale[4], const f32 offset[4])
+{
+    ieee32 _min, _max; ieee32 _offset[4], _scale[4];
+    _min.f = min; _max.f = max;
+    _scale[0].f = scale[0]; _scale[1].f = scale[1]; _scale[2].f = scale[2]; _scale[3].f = scale[3];
+    _offset[0].f = offset[0]; _offset[1].f = offset[1]; _offset[2].f = offset[2]; _offset[3].f = offset[3];
+    if (ctx->current + 24 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 24) != 0) return;
+    ctx->current[0]  = REF_METHOD(NV40TCL_VIEWPORT_HORIZ, 2);
+    ctx->current[1]  = ((uint32_t)w << 16) | x;
+    ctx->current[2]  = ((uint32_t)h << 16) | y;
+    ctx->current[3]  = REF_METHOD(NV40TCL_DEPTH_RANGE, 2);
+    ctx->current[4]  = _min.u;
+    ctx->current[5]  = _max.u;
+    ctx->current[6]  = REF_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[7]  = _offset[0].u; ctx->current[8]  = _offset[1].u; ctx->current[9]  = _offset[2].u; ctx->current[10] = _offset[3].u;
+    ctx->current[11] = _scale[0].u;  ctx->current[12] = _scale[1].u;  ctx->current[13] = _scale[2].u;  ctx->current[14] = _scale[3].u;
+    ctx->current[15] = REF_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[16] = _offset[0].u; ctx->current[17] = _offset[1].u; ctx->current[18] = _offset[2].u; ctx->current[19] = _offset[3].u;
+    ctx->current[20] = _scale[0].u;  ctx->current[21] = _scale[1].u;  ctx->current[22] = _scale[2].u;  ctx->current[23] = _scale[3].u;
+    ctx->current   += 24;
+}
+static void ref_unsafe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                                f32 min, f32 max, const f32 scale[4], const f32 offset[4])
+{
+    ieee32 _min, _max; ieee32 _offset[4], _scale[4];
+    _min.f = min; _max.f = max;
+    _scale[0].f = scale[0]; _scale[1].f = scale[1]; _scale[2].f = scale[2]; _scale[3].f = scale[3];
+    _offset[0].f = offset[0]; _offset[1].f = offset[1]; _offset[2].f = offset[2]; _offset[3].f = offset[3];
+    ctx->current[0]  = REF_METHOD(NV40TCL_VIEWPORT_HORIZ, 2);
+    ctx->current[1]  = ((uint32_t)w << 16) | x;
+    ctx->current[2]  = ((uint32_t)h << 16) | y;
+    ctx->current[3]  = REF_METHOD(NV40TCL_DEPTH_RANGE, 2);
+    ctx->current[4]  = _min.u;
+    ctx->current[5]  = _max.u;
+    ctx->current[6]  = REF_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[7]  = _offset[0].u; ctx->current[8]  = _offset[1].u; ctx->current[9]  = _offset[2].u; ctx->current[10] = _offset[3].u;
+    ctx->current[11] = _scale[0].u;  ctx->current[12] = _scale[1].u;  ctx->current[13] = _scale[2].u;  ctx->current[14] = _scale[3].u;
+    ctx->current[15] = REF_METHOD(NV40TCL_VIEWPORT_OFFSET, 8);
+    ctx->current[16] = _offset[0].u; ctx->current[17] = _offset[1].u; ctx->current[18] = _offset[2].u; ctx->current[19] = _offset[3].u;
+    ctx->current[20] = _scale[0].u;  ctx->current[21] = _scale[1].u;  ctx->current[22] = _scale[2].u;  ctx->current[23] = _scale[3].u;
+    ctx->current   += 24;
+}
+
 /* -------------------------------------------------------------------- *
  */
 static int failures = 0;
@@ -341,13 +473,13 @@ static void report_ring(const char *label, char kind, uint32_t expected_count)
 #define RING_CHECK(SAFE_N, UNSAFE_N, LABEL, EXPECTED, ...) do { \
         g_spy_calls = 0; g_spy_count = 0; \
         { gcmContextData rf; memset(&rf, 0, sizeof rf); \
-          uint32_t _rb[8]; \
+          uint32_t _rb[32]; \
           rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
           SAFE_N(&rf, ##__VA_ARGS__); \
           report_ring(LABEL, 's', EXPECTED); } \
         g_spy_calls = 0; g_spy_count = 0; \
         { gcmContextData rf; memset(&rf, 0, sizeof rf); \
-          uint32_t _rb[8]; \
+          uint32_t _rb[32]; \
           rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
           UNSAFE_N(&rf, ##__VA_ARGS__); \
           report_ring(LABEL, 'u', 0); } \
@@ -863,6 +995,149 @@ int main(void)
         cmp(lab, A, B, 2);
     }
 
+    /* ---- viewport / scissor / clear / zcull / scull group ---- */
+    printf("\n  Viewport / scissor / clear / zcull / scull\n");
+
+    /* viewport (24 words, 3 methods) */
+    {
+        const f32 vp_scale[4]  = { 1.5f, 2.5f, 3.5f, 4.5f };
+        const f32 vp_offset[4] = { -1.0f, -2.0f, -3.0f, -4.0f };
+        static uint32_t A[32], B[32];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 32; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 32; r.callback = 0;
+        ps3tc_gcm_state_viewport((CellGcmContextData *)&n, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        ref_safe_viewport(&r, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        cmp("  viewport (safe)", A, B, 24);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_viewport_unsafe((CellGcmContextData *)&n, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        ref_unsafe_viewport(&r, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        cmp("  viewport (unsafe)", A, B, 24);
+    }
+
+    /* scissor (3 words) */
+    {
+        static uint32_t A[8], B[8];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+        ps3tc_gcm_state_scissor((CellGcmContextData *)&n, 32, 48, 320, 240);
+        ref_safe_scissor(&r, 32, 48, 320, 240);
+        cmp("  scissor (safe)", A, B, 3);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_scissor_unsafe((CellGcmContextData *)&n, 32, 48, 320, 240);
+        ref_unsafe_scissor(&r, 32, 48, 320, 240);
+        cmp("  scissor (unsafe)", A, B, 3);
+    }
+
+    /* clear_color (2 words, single u32) */
+    drive_uint("  clear_color",
+               ps3tc_gcm_state_clear_color,
+               ps3tc_gcm_state_clear_color_unsafe,
+               NV40TCL_CLEAR_VALUE_COLOR, 0xFF00FF00u);
+
+    /* clear_depth_stencil (2 words, single u32) */
+    drive_uint("  clear_depth_stencil",
+               ps3tc_gcm_state_clear_depth_stencil,
+               ps3tc_gcm_state_clear_depth_stencil_unsafe,
+               NV40TCL_CLEAR_VALUE_DEPTH, 0x3F800000u);
+
+    /* zcull_control (2 words, (fmt<<4)|dir) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_zcull_control((CellGcmContextData *)&n, 3, 2);
+        ref_safe_zcull_ctrl(&r, 3, 2);
+        cmp("  zcull_control (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zcull_control_unsafe((CellGcmContextData *)&n, 3, 2);
+        ref_unsafe_zcull_ctrl(&r, 3, 2);
+        cmp("  zcull_control (unsafe)", A, B, 2);
+    }
+
+    /* zcull_enable (2 words, (stencil<<1)|depth) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_zcull_enable((CellGcmContextData *)&n, 1, 0);
+        ref_safe_zcull_en(&r, 1, 0);
+        cmp("  zcull_enable (safe 1,0)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zcull_enable_unsafe((CellGcmContextData *)&n, 1, 0);
+        ref_unsafe_zcull_en(&r, 1, 0);
+        cmp("  zcull_enable (unsafe 1,0)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zcull_enable((CellGcmContextData *)&n, 0, 1);
+        ref_safe_zcull_en(&r, 0, 1);
+        cmp("  zcull_enable (safe 0,1)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zcull_enable_unsafe((CellGcmContextData *)&n, 0, 1);
+        ref_unsafe_zcull_en(&r, 0, 1);
+        cmp("  zcull_enable (unsafe 0,1)", A, B, 2);
+    }
+
+    /* zcull_limit (2 words, (mfl<<16)|pb) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_zcull_limit((CellGcmContextData *)&n, 0x1111, 0x2222);
+        ref_safe_zcull_lim(&r, 0x1111, 0x2222);
+        cmp("  zcull_limit (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_zcull_limit_unsafe((CellGcmContextData *)&n, 0x1111, 0x2222);
+        ref_unsafe_zcull_lim(&r, 0x1111, 0x2222);
+        cmp("  zcull_limit (unsafe)", A, B, 2);
+    }
+
+    /* zcull_stats_enable (2 words, single u32) */
+    drive_uint("  zcull_stats_enable",
+               ps3tc_gcm_state_zcull_stats_enable,
+               ps3tc_gcm_state_zcull_stats_enable_unsafe,
+               NV40TCL_ZCULL_STATS_ENABLE, 1);
+
+    /* scull_control (2 words, (mask<<24)|(ref<<16)|func) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_scull_control((CellGcmContextData *)&n, 0x21, 0x80, 0x03);
+        ref_safe_scull(&r, 0x21, 0x80, 0x03);
+        cmp("  scull_control (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_scull_control_unsafe((CellGcmContextData *)&n, 0x21, 0x80, 0x03);
+        ref_unsafe_scull(&r, 0x21, 0x80, 0x03);
+        cmp("  scull_control (unsafe)", A, B, 2);
+    }
+
+    /* invalidate_zcull (2 words, value 0; takes no value arg) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_invalidate_zcull((CellGcmContextData *)&n);
+        ref_safe_invalz(&r);
+        cmp("  invalidate_zcull (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_invalidate_zcull_unsafe((CellGcmContextData *)&n);
+        ref_unsafe_invalz(&r);
+        cmp("  invalidate_zcull (unsafe)", A, B, 2);
+    }
+
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
     printf("\n  Ring-full / callback (end==current, recording callback)\n");
     RING_CHECK(ps3tc_gcm_state_logic_op,
@@ -994,6 +1269,37 @@ int main(void)
     RING_CHECK(ps3tc_gcm_state_frequency_divider_operation,
                ps3tc_gcm_state_frequency_divider_operation_unsafe,
                "freq_divider", 2, 0x1234);
+    const f32 vp_rs[4] = {1.5f,2.5f,3.5f,4.5f}, vp_os[4] = {-1.0f,-2.0f,-3.0f,-4.0f};
+    RING_CHECK(ps3tc_gcm_state_viewport,
+               ps3tc_gcm_state_viewport_unsafe,
+               "viewport", 24, 8,12,256,144, 0.5f,8.25f, vp_rs, vp_os);
+    RING_CHECK(ps3tc_gcm_state_scissor,
+               ps3tc_gcm_state_scissor_unsafe,
+               "scissor", 3, 32,48,320,240);
+    RING_CHECK(ps3tc_gcm_state_clear_color,
+               ps3tc_gcm_state_clear_color_unsafe,
+               "clear_color", 2, 0xFF00FF00);
+    RING_CHECK(ps3tc_gcm_state_clear_depth_stencil,
+               ps3tc_gcm_state_clear_depth_stencil_unsafe,
+               "clear_depth_stencil", 2, 0x3F800000);
+    RING_CHECK(ps3tc_gcm_state_zcull_control,
+               ps3tc_gcm_state_zcull_control_unsafe,
+               "zcull_control", 2, 3, 2);
+    RING_CHECK(ps3tc_gcm_state_zcull_enable,
+               ps3tc_gcm_state_zcull_enable_unsafe,
+               "zcull_enable", 2, 1, 0);
+    RING_CHECK(ps3tc_gcm_state_zcull_limit,
+               ps3tc_gcm_state_zcull_limit_unsafe,
+               "zcull_limit", 2, 0x1111, 0x2222);
+    RING_CHECK(ps3tc_gcm_state_zcull_stats_enable,
+               ps3tc_gcm_state_zcull_stats_enable_unsafe,
+               "zcull_stats_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_scull_control,
+               ps3tc_gcm_state_scull_control_unsafe,
+               "scull_control", 2, 0x21, 0x80, 0x03);
+    RING_CHECK(ps3tc_gcm_state_invalidate_zcull,
+               ps3tc_gcm_state_invalidate_zcull_unsafe,
+               "invalidate_zcull", 2);
 
 
     printf("\n");

@@ -30,8 +30,6 @@ cellGcmMapLocalMemory
 cellGcmMapMainMemory
 cellGcmResetFlipStatus
 cellGcmSetCallCommand
-cellGcmSetClearColor
-cellGcmSetClearDepthStencil
 cellGcmSetClearReport
 cellGcmSetClearSurface
 cellGcmSetClearZcullSurface
@@ -56,7 +54,6 @@ cellGcmSetFlipStatus
 cellGcmSetGraphicsHandler
 cellGcmSetInvalidateTextureCache
 cellGcmSetInvalidateVertexCache
-cellGcmSetInvalidateZcull
 cellGcmSetJumpCommand
 cellGcmSetNopCommand
 cellGcmSetPrepareFlip
@@ -65,8 +62,6 @@ cellGcmSetReferenceCommand
 cellGcmSetReport
 cellGcmSetReportLocation
 cellGcmSetReturnCommand
-cellGcmSetScissor
-cellGcmSetScullControl
 cellGcmSetSecondVHandler
 cellGcmSetSurface
 cellGcmSetTextureBorderColor
@@ -86,16 +81,11 @@ cellGcmSetVertexAttribOutputMask
 cellGcmSetVertexData4f
 cellGcmSetVertexDataArray
 cellGcmSetVertexProgramConstants
-cellGcmSetViewport
 cellGcmSetWaitFlip
 cellGcmSetWaitLabel
 cellGcmSetWriteBackEndLabel
 cellGcmSetWriteCommandLabel
 cellGcmSetWriteTextureLabel
-cellGcmSetZcullControl
-cellGcmSetZcullEnable
-cellGcmSetZcullLimit
-cellGcmSetZcullStatsEnable
 cellGcmSetZpassPixelCountEnable
 cellGcmUnbindTile
 cellGcmUnbindZcull

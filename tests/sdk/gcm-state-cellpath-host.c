@@ -238,6 +238,98 @@ int main(void)
     ps3tc_gcm_state_frequency_divider_operation(&r, 0x1234);
     check("cell==native freq_divider", A, B, 2);
 
+    /* ---- viewport (24 words, 3 methods) ---- */
+    {
+        const float vp_scale[4]  = { 1.5f, 2.5f, 3.5f, 4.5f };
+        const float vp_offset[4] = { -1.0f, -2.0f, -3.0f, -4.0f };
+        static uint32_t VA[32], VB[32];
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=VA; n.end=VA+32;
+        r.begin=r.current=VB; r.end=VB+32;
+        cellGcmSetViewport(&n, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        ps3tc_gcm_state_viewport(&r, 8, 12, 256, 144, 0.5f, 8.25f, vp_scale, vp_offset);
+        check("cell==native viewport", VA, VB, 24);
+    }
+
+    /* scissor (3 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetScissor(&n, 32, 48, 320, 240);
+    ps3tc_gcm_state_scissor(&r, 32, 48, 320, 240);
+    check("cell==native scissor", A, B, 3);
+
+    /* clear_color (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetClearColor(&n, 0xFF00FF00u);
+    ps3tc_gcm_state_clear_color(&r, 0xFF00FF00u);
+    check("cell==native clear_color", A, B, 2);
+
+    /* clear_depth_stencil (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetClearDepthStencil(&n, 0x3F800000u);
+    ps3tc_gcm_state_clear_depth_stencil(&r, 0x3F800000u);
+    check("cell==native clear_depth_stencil", A, B, 2);
+
+    /* zcull_control (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZcullControl(&n, 3, 2);
+    ps3tc_gcm_state_zcull_control(&r, 3, 2);
+    check("cell==native zcull_control", A, B, 2);
+
+    /* zcull_enable (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZcullEnable(&n, 1, 0);
+    ps3tc_gcm_state_zcull_enable(&r, 1, 0);
+    check("cell==native zcull_enable (1,0)", A, B, 2);
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZcullEnable(&n, 0, 1);
+    ps3tc_gcm_state_zcull_enable(&r, 0, 1);
+    check("cell==native zcull_enable (0,1)", A, B, 2);
+
+    /* zcull_limit (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZcullLimit(&n, 0x1111, 0x2222);
+    ps3tc_gcm_state_zcull_limit(&r, 0x1111, 0x2222);
+    check("cell==native zcull_limit", A, B, 2);
+
+    /* zcull_stats_enable (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZcullStatsEnable(&n, 1);
+    ps3tc_gcm_state_zcull_stats_enable(&r, 1);
+    check("cell==native zcull_stats_enable", A, B, 2);
+
+    /* scull_control (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetScullControl(&n, 0x21, 0x80, 0x03);
+    ps3tc_gcm_state_scull_control(&r, 0x21, 0x80, 0x03);
+    check("cell==native scull_control", A, B, 2);
+
+    /* scull_control byte case: cell path func=0x1FF (uint16_t) is cut to 0xFF
+       by the forwarder (uint8_t native), exactly as the pre-patch rsx path
+       (rsxSetSCullControl(u8 sFunc)) did.  Compare against native 0xFF. */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetScullControl(&n, 0x1FF, 0x80, 0x03);
+    ps3tc_gcm_state_scull_control(&r, 0xFF, 0x80, 0x03);
+    check("cell==native scull_control (0x1FF->0xFF)", A, B, 2);
+    if (A[1] != ((0x03u<<24)|(0x80u<<16)|0xFFu)) { printf("MISMATCH scull byte word\n"); exit(1); }
+    printf("ok   scull byte word = 0x%08x (func cut to 0xFF)\n", A[1]);
+
+    /* invalidate_zcull (2) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetInvalidateZcull(&n);
+    ps3tc_gcm_state_invalidate_zcull(&r);
+    check("cell==native invalidate_zcull", A, B, 2);
+
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;
 }
