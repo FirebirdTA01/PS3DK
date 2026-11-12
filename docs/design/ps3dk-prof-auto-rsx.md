@@ -51,8 +51,9 @@ Premise bits name report-before-label=1 and coherent stable read=2; these declar
 dependencies, not proven facts. Schema 1 reserves sixteen clock reports, so the
 report count is sixteen plus twice the pair capacity. The mechanism digest
 identifies command/report semantics, not a measured profile. The build binding
-comes from pinned pre-link inputs; an external manifest binds it to the final
-ELF and SELF, avoiding a self-hash cycle.
+comes from pinned pre-link inputs: every file the linker opens (found by running the
+driver's final linker command, from -###, once with --verbose first) and that final command; an external
+manifest binds it to the final ELF and SELF, avoiding a self-hash cycle.
 
 A REFUSED CONFIG keeps only schema, flags, instance, frequency and both digest
 fields. Offset 24 is its refusal reason u32; offset 28 is the original GCM return
@@ -418,9 +419,11 @@ and the map is qualified. Every aggregate over a row is checked: the rows are re
 wire, but totals across kinds (observed, excluded) may still not fit in u64, and
 such a row reads UNKNOWN "coverage totals overflow" rather than wrapping. The
 retained operation records of the frame are reconciled kind by kind (ARRAY,
-INDEX, CLEAR records against each kind's observed count; segment records count
-under their own kind), never only by their total: equal totals over different
-kinds are not the population the row describes. With D the row's PPU interval, W the owner's
+INDEX, CLEAR records against each kind's observed count), never only by their total: equal totals over different
+kinds are not the population the row describes. A frame with CALL-segment records reads UNKNOWN before this
+reconciliation: a segment's operations are counted in the row of the frame that built it and recorded under the
+frame that called it, and a record does not carry its building frame, so equal counts can describe different
+segments (one built in the frame, another called in it) and an exclusion in the building frame would be lost. With D the row's PPU interval, W the owner's
 complete FIFO wrap wait tagged with the frame (lower bound) and S the frame's
 RSX reached-marker span (first operation begin to last end) on the PPU clock:
 
