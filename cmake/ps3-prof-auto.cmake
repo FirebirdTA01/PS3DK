@@ -203,7 +203,8 @@ function(ps3_target_prof_auto target)
     # The observed CALL-segment member and its runtime seams, checked in the map like every provider above.
     target_link_options("${target}" PRIVATE "-Wl,-u,cellGcmSegmentBegin,-u,cellGcmSegmentEnd,-u,cellGcmSegmentCall,-u,ps3dk_prof__auto_segment_open,-u,ps3dk_prof__auto_segment_close,-u,ps3dk_prof__auto_segment_call")
     set(map "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto.map")
-    target_link_options("${target}" PRIVATE "-Wl,-Map,${map},--cref")
+    # One option: the cross-reference table must stay mangled, so --no-demangle cannot be separated from --cref.
+    target_link_options("${target}" PRIVATE "-Wl,--no-demangle,-Map,${map},--cref")
     foreach(lang C CXX)
         get_target_property(old "${target}" "${lang}_LINKER_LAUNCHER")
         if(old)

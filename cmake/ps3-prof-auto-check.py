@@ -106,6 +106,33 @@ def seal(root, abi, readelf, source):
     tmp.replace(lib/MANIFEST)
 
 
+# GNU ld --cref: the symbol starts in column 0 and its defining file starts at column FILECOL (ld/ldcref.c). A
+# symbol of FILECOL or more characters is printed alone and the file follows on the next, indented, line.
+FILECOL = 50
+
+
+def cross_references(table):
+    """[(symbol, defining file)] from the text after 'Cross Reference Table', in ld's column layout."""
+    out, pending = [], None
+    for line in table.splitlines():
+        if not line.strip():
+            pending = None
+            continue
+        if line[0].isspace():
+            if pending is not None:
+                out.append((pending, line.strip()))
+            pending = None
+            continue
+        if line.startswith('Symbol') and line[FILECOL:].strip() == 'File':
+            continue
+        if len(line) > FILECOL and line[FILECOL-1] == ' ' and not line[FILECOL].isspace():
+            out.append((line[:FILECOL].rstrip(), line[FILECOL:].strip()))
+            pending = None
+        else:
+            pending = line.rstrip()
+    return out
+
+
 def check(root, abi, mapfile=None):
     lib, inc = locations(root.resolve(), abi)
     manifest = json.loads((lib/MANIFEST).read_text())
@@ -131,12 +158,13 @@ def check(root, abi, mapfile=None):
         if name not in ARCHIVES or path != norm(str(lib/name)):
             raise ValueError('default or mixed AUTO provider: '+m[1])
     providers = {}
-    for line in text.split('Cross Reference Table', 1)[1].splitlines():
-        if not line or line[0].isspace(): continue
-        fields = line.split(None, 1)
-        if len(fields) != 2 or fields[0] == 'Symbol': continue
-        if fields[0] in providers: raise ValueError('repeated cross-reference symbol '+fields[0])
-        providers[fields[0]] = fields[1].strip()
+    for symbol, provider in cross_references(text.split('Cross Reference Table', 1)[1]):
+        # Each symbol is listed once. A repeat means the table was demangled: C++ constructor and destructor
+        # variants (C1/C2, D1/D2) and overloads share one demangled name, so providers cannot be told apart.
+        if symbol in providers:
+            raise ValueError('repeated cross-reference symbol '+symbol+': the link map looks demangled (C++ '
+                             'symbol variants share one demangled name); the AUTO link needs -Wl,--no-demangle')
+        providers[symbol] = provider
     for symbol, (archive, member) in REQUIRED.items():
         expected = norm(str(lib/archive)+'('+member+')')
         if norm(providers.get(symbol, '')) != expected:

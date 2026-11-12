@@ -38,9 +38,16 @@ class Checks(unittest.TestCase):
     def save(self):
         (self.lib/C.MANIFEST).write_text(json.dumps(self.manifest))
 
-    def write_map(self, extra=''):
-        self.map.write_text(extra+'\nCross Reference Table\nSymbol File\n'+
-            '\n'.join(k+' '+v for k,v in self.providers.items())+'\n')
+    @staticmethod
+    def row(symbol, provider):
+        """One --cref row in ld's layout: the file at column FILECOL, or on the next line for a long symbol."""
+        if len(symbol) >= C.FILECOL:
+            return symbol+'\n'+' '*C.FILECOL+provider
+        return symbol.ljust(C.FILECOL)+provider
+
+    def write_map(self, extra='', rows=()):
+        self.map.write_text(extra+'\nCross Reference Table\n\n'+'Symbol'.ljust(C.FILECOL)+'File\n'+
+            '\n'.join(self.row(k,v) for k,v in [*self.providers.items(), *rows])+'\n')
 
     def check(self):
         return C.check(self.root, 'ilp32', self.map)
@@ -67,9 +74,29 @@ class Checks(unittest.TestCase):
     def test_default_and_duplicate_provider(self):
         self.write_map('/sdk/libgcm_cmd.a(ps3tc_fifo_wrap.o)')
         with self.assertRaisesRegex(ValueError, 'default|mixed'): self.check()
-        self.write_map()
-        with self.map.open('a') as f:f.write('ps3dk_prof_init duplicate.o\n')
+        self.write_map(rows=[('ps3dk_prof_init', 'duplicate.o')])
         with self.assertRaisesRegex(ValueError, 'repeated'): self.check()
+
+    def test_demangled_map_is_refused_by_name(self):
+        # ld prints a demangled table without --no-demangle: D1/D2 (and C1/C2) collapse to one name
+        names = ['AlphaUIAnimation::~AlphaUIAnimation()', 'AlphaUIAnimation::~AlphaUIAnimation()']
+        self.write_map(rows=[(n, '/app/ui.o') for n in names])
+        with self.assertRaisesRegex(ValueError, "repeated cross-reference symbol AlphaUIAnimation::~AlphaUIAnimation"
+                                    r"\(\): the link map looks demangled .*-Wl,--no-demangle"):
+            self.check()
+
+    def test_symbols_with_spaces_and_long_names_parse_whole(self):
+        # ld's column layout, not the first space, delimits the symbol: a demangled name keeps its spaces and a
+        # name of FILECOL characters or more has its file on the next line
+        rows = [('operator new(unsigned int)', '/app/new.o'),
+                ('void Pool<Widget, 16u>::release(Widget*)', '/app/pool.o'),
+                ('_ZN4PoolI6WidgetLj16EE7releaseEPS0_Lj16EE_this_name_is_long_enough_to_wrap', '/app/pool.o')]
+        self.write_map(rows=rows)
+        table = self.map.read_text().split('Cross Reference Table', 1)[1]
+        got = dict(C.cross_references(table))
+        for symbol, provider in rows:
+            self.assertEqual(got.get(symbol), provider)
+        self.check()
 
     def test_mixed_composition_and_header_hash(self):
         self.write_map('/sdk/libps3dkprof_ext_func.a(func_hooks.o)')
