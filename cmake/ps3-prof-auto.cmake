@@ -58,25 +58,38 @@ function(_ps3_auto_map item lib owner out kind)
     set(${kind} "${k}" PARENT_SCOPE)
 endfunction()
 
-# The library targets a link item can bring into a link: the item itself, the
-# target inside $<LINK_ONLY:...>, or any target named in another generator
-# expression, ALIAS targets resolved.
-function(_ps3_auto_item_targets item out)
-    set(found "")
-    if(item MATCHES "\\$<")
-        string(REGEX MATCHALL "[A-Za-z0-9_.+:-]+" names "${item}")
-    else()
-        set(names "${item}")
-    endif()
-    foreach(name IN LISTS names)
-        if(TARGET "${name}")
-            get_target_property(real "${name}" ALIASED_TARGET)
-            if(real)
-                set(name "${real}")
+# The library targets a link item brings into a link: the item itself, or
+# the target wrapped in $<LINK_ONLY:...> (how a static library's private
+# dependency appears in INTERFACE_LINK_LIBRARIES), parsed structurally
+# before any target lookup; ALIAS targets resolved. Any other generator
+# expression that names a target cannot be walked at configure time, so it
+# is refused, naming <owner>, rather than skipped.
+function(_ps3_auto_item_targets item owner out)
+    set(name "${item}")
+    if(item MATCHES "^\\$<LINK_ONLY:([^<>]+)>$")
+        set(name "${CMAKE_MATCH_1}")
+    elseif(item MATCHES "\\$<")
+        string(REGEX MATCHALL "[A-Za-z0-9_.+-]+(::[A-Za-z0-9_.+-]+)*" tokens "${item}")
+        foreach(token IN LISTS tokens)
+            if(TARGET "${token}")
+                message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': it "
+                    "names target '${token}' inside a generator expression other than $<LINK_ONLY:...>, which "
+                    "cannot be resolved at configure time, so a default gcm_cmd behind it could link beside "
+                    "libgcm_cmd_prof_auto.a. Link '${token}' without a conditional generator expression in "
+                    "'${owner}'.")
             endif()
-            list(APPEND found "${name}")
+        endforeach()
+        set(${out} "" PARENT_SCOPE)
+        return()
+    endif()
+    set(found "")
+    if(TARGET "${name}")
+        get_target_property(real "${name}" ALIASED_TARGET)
+        if(real)
+            set(name "${real}")
         endif()
-    endforeach()
+        set(found "${name}")
+    endif()
     set(${out} "${found}" PARENT_SCOPE)
 endfunction()
 
@@ -110,7 +123,7 @@ function(_ps3_auto_closure target lib)
             if(k)
                 set(changed TRUE)
             else()
-                _ps3_auto_item_targets("${item}" t)
+                _ps3_auto_item_targets("${item}" "${target}" t)
                 list(APPEND children ${t})
             endif()
             list(APPEND mapped "${m}")
@@ -173,7 +186,7 @@ function(ps3_target_prof_auto target)
         elseif(k STREQUAL prof)
             set(prof_seen TRUE)
         elseif(NOT k)
-            _ps3_auto_item_targets("${item}" t)
+            _ps3_auto_item_targets("${item}" "${target}" t)
             list(APPEND children ${t})
         endif()
         list(APPEND selected "${m}")

@@ -100,6 +100,16 @@ project(consumer C)
             'engine-two-levels': lib.replace('@N@', 'engine')+lib.replace('@N@', 'core')+
                 'target_link_libraries(engine PUBLIC core)\ntarget_link_libraries(core INTERFACE gcm_cmd)\n'
                 'add_library(Engine::engine ALIAS engine)',
+            # Review: an INTERFACE chain whose link to the gcm_cmd library is wrapped in $<LINK_ONLY:...>
+            'interface-link-only': 'add_library(core INTERFACE)\ntarget_link_libraries(core INTERFACE gcm_cmd)\n'
+                'add_library(engine INTERFACE)\ntarget_link_libraries(engine INTERFACE "$<LINK_ONLY:core>")',
+            'imported-link-only': 'add_library(core STATIC IMPORTED)\n'
+                'set_target_properties(core PROPERTIES IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/libcore.a"\n'
+                '    INTERFACE_LINK_LIBRARIES gcm_cmd)\n'
+                'add_library(engine INTERFACE)\ntarget_link_libraries(engine INTERFACE "$<LINK_ONLY:core>")',
+            'alias-link-only': 'add_library(core INTERFACE)\ntarget_link_libraries(core INTERFACE gcm_cmd)\n'
+                'add_library(Engine::core ALIAS core)\n'
+                'add_library(engine INTERFACE)\ntarget_link_libraries(engine INTERFACE "$<LINK_ONLY:Engine::core>")',
         }
         for name, extra in cases.items():
             result, _ = self.configure(name, libraries='Engine::engine' if 'two' in name else 'engine', extra=extra)
@@ -116,8 +126,17 @@ project(consumer C)
                  'target_link_libraries(engine PUBLIC "$<$<BOOL:1>:gcm_cmd>")')
         result, _ = self.configure('engine-genex', libraries='engine', extra=extra)
         self.assertNotEqual(result.returncode, 0, 'a generator expression around gcm_cmd unexpectedly selected')
-        self.assertIn("for target 'engine'", result.stderr)
-        self.assertIn('generator expression', result.stderr)
+        message = ' '.join(result.stderr.split())  # CMake wraps long messages
+        self.assertIn("for target 'engine'", message)
+        self.assertIn('generator expression', message)
+        # a conditional generator expression around a library target is refused by name, never skipped
+        extra = ('add_library(core INTERFACE)\ntarget_link_libraries(core INTERFACE gcm_cmd)\n'
+                 'add_library(engine INTERFACE)\ntarget_link_libraries(engine INTERFACE "$<$<BOOL:1>:core>")')
+        result, _ = self.configure('engine-genex-target', libraries='engine', extra=extra)
+        self.assertNotEqual(result.returncode, 0, 'a conditional target reference was skipped')
+        message = ' '.join(result.stderr.split())  # CMake wraps long messages
+        self.assertIn("of target 'engine'", message)
+        self.assertIn("names target 'core'", message)
 
     def test_conflicting_variants_and_launcher_refuse(self):
         for name, libs, extra in (
