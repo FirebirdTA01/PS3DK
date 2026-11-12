@@ -13,8 +13,8 @@
 #include "gpu_port_gcm.h"
 #include "ps3tc_prof_auto.h"
 static uint64_t reports[2048][2];
-static uint32_t labels[256],words[1024],seg_a[256],seg_b[256],flushes;
-static gpp_ctx context,key_a,key_b,port;
+static uint32_t labels[256],words[1024],seg_a[256],seg_b[256],seg_c[256],seg_d[256],flushes;
+static gpp_ctx context,key_a,key_b,key_c,key_d,port;
 static void *report(uint32_t n) {return reports[n];}
 static void *label(uint32_t n) {return &labels[n];}
 static uint64_t ld64(volatile uint64_t *a) {return __atomic_load_n(a,__ATOMIC_SEQ_CST);}
@@ -84,9 +84,31 @@ int main(void) {
     ps3dk_prof__auto_segment_external_open((void *)&key_a,seg_a,sizeof seg_a);
     draw(&port,1,0);
     ps3dk_prof__auto_segment_external_close((void *)&key_a);
+    /* Review 2026-11-12: a part switch in the middle of a timed draw (the writer's overflow callback closes part C
+     * and opens part D on the same context). The bracket ends quarantined, the profiler's in-draw state is clear,
+     * part D was opened during the draw and times its draws, and a later draw outside every part is foreign. */
+    ps3dk_prof__auto_segment_external_open((void *)&key_c,seg_c,sizeof seg_c);
+    port=(gpp_ctx){seg_c,seg_c+255,seg_c,NULL};
+    {
+        ps3tc_auto_call cc={3,5,0,3,0,0,0,0xf3u};
+        uint32_t t=ps3dk_prof__auto_begin((void *)&port,&cc,0x1234);
+        assert(t && port.current==seg_c+2);
+        for(unsigned n=0;n<3;n++) *port.current++=0xab000000u+n;
+        ps3dk_prof__auto_segment_external_close((void *)&key_c);
+        ps3dk_prof__auto_segment_external_open((void *)&key_d,seg_d,sizeof seg_d);
+        port=(gpp_ctx){seg_d,seg_d+255,seg_d,NULL};
+        for(unsigned n=3;n<6;n++) *port.current++=0xab000000u+n;
+        ps3dk_prof__auto_end((void *)&port,t);
+        assert(port.current==seg_d+3);   /* no end report was written into the new part */
+    }
+    draw(&port,3,1);
+    ps3dk_prof__auto_segment_external_close((void *)&key_d);
+    call(&key_d);
+    draw(&port,2,0);
     ps3dk_prof__auto_test_segment_counts(counts);
-    /* segment visits: 3 timed + 1 without room; foreign: 2; table full: 0; segments: 2 */
-    assert(counts[0]==4 && counts[1]==2 && !counts[2] && counts[3]==2);
+    /* segment visits: 3 timed + 1 without room + 1 switched + 1 in part D; foreign: 3; table full: 0;
+     * segments: 4 */
+    assert(counts[0]==6 && counts[1]==3 && !counts[2] && counts[3]==4);
     assert(ps3dk_prof_auto_frame_end(1,ps3dk_prof_frame_token())==0);
     uint32_t frontier=ps3dk_prof__auto_publish_before((void *)&context);
     ps3dk_prof__auto_publish_after((void *)&context,frontier);

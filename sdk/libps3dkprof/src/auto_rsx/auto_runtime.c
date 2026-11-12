@@ -140,6 +140,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     }
     (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
                           o->metadata_records,(o->report_count-16)/2);
+    for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
+    next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
     gpp_bind(&next->operations_device,&next->operations_port);
     gpp_bind(&next->clock_device,&next->clock_port);
     if(p_ext_lock_at(p)!=0) {reason=AUTO_STOPPED;rc=PS3DK_PROF_ESTOPPED;goto fail;}
@@ -375,10 +377,35 @@ static auto_segment *segment_find(auto_capture *a,const void *ctx)
  * an INCOMPLETE record (so accounting stays exact) whose pair the drainer then
  * quarantines; with no metadata room, quarantine the pair directly. Their
  * reports may still be written if the buffer is ever executed. */
+/* The segment pool: one free list; a build's operations are a list in emission order. */
+static uint32_t pool_take(auto_capture *a)
+{
+    uint32_t i=a->segment_free;
+    if(i!=AUTO_SEGMENT_NONE) {a->segment_free=a->segment_pool[i].next;a->segment_pool[i].next=AUTO_SEGMENT_NONE;}
+    return i;
+}
+static void pool_give(auto_capture *a,uint32_t i)
+{
+    a->segment_pool[i].next=a->segment_free;a->segment_free=i;
+}
+static void segment_append(auto_capture *a,auto_segment *s,uint32_t i)
+{
+    a->segment_pool[i].next=AUTO_SEGMENT_NONE;
+    if(s->count) a->segment_pool[s->tail].next=i; else s->head=i;
+    s->tail=i;s->count++;
+}
+/* Return a build's operations to the pool. */
+static void segment_release(auto_capture *a,auto_segment *s)
+{
+    uint32_t i=s->count ? s->head:AUTO_SEGMENT_NONE;
+    while(i!=AUTO_SEGMENT_NONE) {uint32_t next=a->segment_pool[i].next;pool_give(a,i);i=next;}
+    s->count=0;
+}
+
 static void segment_drop(auto_capture *a,auto_segment *s)
 {
-    for(uint32_t i=0;i<s->count;i++) {
-        auto_segment_op *b=&s->ops[i];
+    for(uint32_t i=s->count ? s->head:AUTO_SEGMENT_NONE;i!=AUTO_SEGMENT_NONE;i=a->segment_pool[i].next) {
+        auto_segment_op *b=&a->segment_pool[i];
         auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,0);
         if(e) {
             uint64_t id=e->op.id;uint32_t sb=e->op.serial_begin,se=e->op.serial_end;
@@ -389,7 +416,7 @@ static void segment_drop(auto_capture *a,auto_segment *s)
         } else auto_queue_quarantine_pair(&a->operations,b->pair);
         ST_REL(&a->segment_quarantine,1u);
     }
-    s->count=0;
+    segment_release(a,s);
 }
 
 /* cellGcmSegmentBegin/End (observed build). Owner only: another thread's
@@ -428,7 +455,9 @@ void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key,const void *
 {
     auto_capture *a;
     auto_segment *s;
-    if(!key || !buffer || size<8u || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    /* in_gpu is allowed here: an application's overflow callback may close one part and open the next in the
+     * middle of an emitter that this profiler is bracketing (the bracket then ends as quarantined). */
+    if(!key || !buffer || size<8u || !p_ready() || !(a=owner_capture(NULL,1))) return;
     if(!(s=segment_find(a,key))) {
         if(a->segments_used==AUTO_SEGMENTS_OPEN || a->segment_ordinal==UINT32_MAX) {
             increment(a,&a->segment_table_full);return;
@@ -502,20 +531,25 @@ static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
     if(!auto_config_can_admit(&configuration) || LD_ACQ(&g_prof->stop_latch)) {
         (void)auto_frames_count(&a->coverage,call->kind,LD_ACQ(&g_prof->stop_latch) ? 7:9);return 0;
     }
+    if(a->pool_tail_column) {(void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0;}
     words=auto_command_words(call);
     if(!words) {(void)auto_frames_count(&a->coverage,call->kind,6);return 0;}
     if(!cur || (cur&3u) || cur>end || words>UINT32_MAX-4u || words+4u>(uint64_t)(end-cur)/4u) {
         (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
     }
-    if(s->count==AUTO_SEGMENT_OPS) {(void)auto_frames_count(&a->coverage,call->kind,4);return 0;}
+    if(a->segment_free==AUTO_SEGMENT_NONE) {
+        a->pool_tail_column=4;(void)auto_frames_count(&a->coverage,call->kind,4);return 0;
+    }
     if(!initialize_device(a)) {(void)auto_frames_count(&a->coverage,call->kind,10);return 0;}
     pair=auto_queue_take_pair(&a->operations);
     if(pair<0) {
-        (void)auto_frames_count(&a->coverage,call->kind,
-                               a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:3);
+        uint32_t column=a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:3;
+        if(column==3) a->pool_tail_column=3;
+        (void)auto_frames_count(&a->coverage,call->kind,column);
         return 0;
     }
-    b=&s->ops[s->count];memset(b,0,sizeof *b);b->pair=(uint32_t)pair;
+    a->segment_pending=pool_take(a);
+    b=&a->segment_pool[a->segment_pending];memset(b,0,sizeof *b);b->pair=(uint32_t)pair;b->next=AUTO_SEGMENT_NONE;
     b->op.kind=(uint16_t)call->kind;b->op.caller=caller;b->op.generation=c->generation;
     b->op.flags=AUTO_OP_SEGMENT;b->op.segment=s->ordinal;
     b->op.args[0]=(uint32_t)words;
@@ -530,29 +564,31 @@ static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
     b->op.tb_before=observation_tb();
     segment_report(ctx,b->op.report_begin);
     a->expected_end=(uintptr_t)(void *)ctx->current+words*4;
-    a->segment_active=s;g_tls.in_gpu=1;
+    a->segment_active=s;a->segment_active_writer=ctx;g_tls.in_gpu=1;
     return 1;
 }
 
 static void segment_end(auto_capture *a,gpp_ctx *ctx)
 {
     auto_segment *s=a->segment_active;
-    auto_segment_op *b=&s->ops[s->count];
+    uint32_t slot=a->segment_pending;
+    auto_segment_op *b=&a->segment_pool[slot];
     uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
-    a->segment_active=NULL;g_tls.in_gpu=0;
+    a->segment_active=NULL;a->segment_active_writer=NULL;g_tls.in_gpu=0;a->segment_pending=AUTO_SEGMENT_NONE;
     if(cur!=a->expected_end || cur>end || end-cur<8) {
         /* The application did not advance as admitted (or a segment overflow
          * refused it): the begin report may run; no end report is written. */
         auto_queue_quarantine_pair(&a->operations,b->pair);
         ST_REL(&a->segment_quarantine,1u);
         (void)auto_frames_count(&a->coverage,b->op.kind,11);
+        pool_give(a,slot);
         return;
     }
     segment_report(ctx,b->op.report_end);
     b->op.tb_after=observation_tb();
     if(b->op.tb_after<b->op.tb_before) b->op.flags|=8;
     (void)auto_frames_count(&a->coverage,b->op.kind,1);
-    s->count++;
+    segment_append(a,s,slot);
 }
 
 /* cellGcmSegmentCall (observed build), after its CALL and retirement label.
@@ -579,8 +615,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         segment_drop(a,s);return;
     }
     call=++a->call_ordinal;
-    for(i=0;i<s->count;i++) {
-        auto_segment_op *b=&s->ops[i];
+    for(i=s->head;i!=AUTO_SEGMENT_NONE;i=a->segment_pool[i].next) {
+        auto_segment_op *b=&a->segment_pool[i];
         auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,share);
         uint64_t id;
         uint32_t sb,se;
@@ -592,7 +628,7 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         auto_queue_commit(&a->operations);
         share=se;
     }
-    s->count=0;
+    segment_release(a,s);
     if(share) {
         uint32_t *w=(uint32_t *)(void *)ctx->current;
         w[0]=(1u<<18)|0x1d6cu;w[1]=c->op_label*16u;   /* SEMAPHORE_OFFSET */
@@ -685,6 +721,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
         (void)auto_frames_count(&a->coverage,call->kind,11);
         return 0;
     }
+    if(a->pool_tail_column) { (void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0; }
     words=auto_command_words(call);
     if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
     if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
@@ -701,6 +738,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
                         a->operations.refusal==AUTO_QUEUE_REPORTS ? 3:
                         a->operations.refusal==AUTO_QUEUE_REENTRY ? 5:
                         a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;
+        if(column==3 || column==4) a->pool_tail_column=column;
         (void)auto_frames_count(&a->coverage,call->kind,column);return 0;
     }
     ST_REL(&a->admitted,e->op.id);
@@ -739,7 +777,7 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
     a=owner_capture((gpp_ctx *)(void *)context,0);
     if(!a) {
         a=owner_capture(NULL,0);
-        if(a && a->segment_active && a->segment_active->writer==(void *)context) segment_end(a,(gpp_ctx *)(void *)context);
+        if(a && a->segment_active && a->segment_active_writer==(void *)context) segment_end(a,(gpp_ctx *)(void *)context);
         return;
     }
     if(!(e=a->active)) return;
@@ -811,6 +849,7 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
         if(a->coverage.active) frame_mark(a,AUTO_FRAME_END); /* implied closure of the previous frame */
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
+        a->pool_tail_column=0; /* each frame starts admitting again; its own exhaustion makes its own tail */
         if(auto_frames_open(&a->coverage,frame,tb)) {
             a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT; /* this writer observes presentation (block at 352) */
             if(flip) {a->coverage.live.flags|=AUTO_FRAME_ROW_FLIP;increment(a,&a->frames_by_flip);}

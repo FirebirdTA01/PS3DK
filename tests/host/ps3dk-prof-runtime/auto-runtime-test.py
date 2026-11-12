@@ -16,16 +16,16 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
-                                  'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent'])
+                                  'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
-                          'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments',
+                          'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
                           'boundary-cadence':'spanning','boundary-scope':'spanning'}[a.mutant] and not a.sanitize
@@ -63,6 +63,7 @@ def run(name,cmd,cwd=out):
                   'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
                   'segment-silent':b'ticket && app==before+2',
                   'external-silent':b'ticket && app==before+2',
+                  'writer-on-segment':b'ticket && app==before+2',
                   'no-flip-frames':b'counts[0]==i+1',
                   'no-present-wait':b'present[2]==1 && present[3]>0',
                   'poll-wait':b'p[0]==0 && p[1]==0',
@@ -86,7 +87,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -178,6 +179,10 @@ for rel in sources:
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
+    elif a.mutant=='writer-on-segment' and rel=='auto_rsx/auto_runtime.c':
+        # review finding reintroduced: the in-flight emitter is matched by the segment's writer, which a part close clears
+        code=source.read_text();old='a->segment_active_writer==(void *)context';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'a->segment_active->writer==(void *)context').encode())
     elif a.mutant=='external-silent' and rel=='auto_rsx/auto_runtime.c':
         # no writer inference: an application context writing an external segment stays a foreign visit
         code=source.read_text();old='    if((s=external_writer(a,ctx))) return segment_begin(a,s,ctx,call,caller);\n';assert code.count(old)==1
@@ -242,6 +247,7 @@ if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-cl
 if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 if a.case=='extsegments':application=Path(__file__).with_name('auto-external-segment-test.c').read_text()
+if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
@@ -252,6 +258,10 @@ if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
 result=run('run',cmd,capture_dir)
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
+    print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case=='segcapacity':
+    assert result.returncode==0 and result.stdout.startswith(b'AUTO segment capacity: 24 segments, 100 draws per build') and result.stdout.endswith(b'untimed PASS\n'),result.stdout
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
 assert result.stdout==(b'AUTO initial attach and override without device writes PASS\n' if a.case=='init'
@@ -309,7 +319,8 @@ if a.case=='extsegments':
     # kind, flags, segment ordinal, call ordinal: FRAME begin mark, part 1 (array, indexed) completed by call 1,
     # part 2 (clear) by call 2, FRAME end mark; the untimed and foreign draws leave no record
     seg=[r for r in records if r[1]&64]
-    assert [(r[0],r[2],r[3]) for r in seg]==[(1,1,1),(2,1,1),(3,2,2)],records
+    # the mid-draw switch leaves no record (its pair is quarantined); part D's draw is completed by call 3
+    assert [(r[0],r[2],r[3]) for r in seg]==[(1,1,1),(2,1,1),(3,2,2),(3,4,3)],records
     assert all((r[1]&3)==3 for r in seg),records
     assert [r[0] for r in records if not r[1]&64]==[4,4],records
     print('AUTO external CALL segments: two parts through one writer context, records exact PASS')

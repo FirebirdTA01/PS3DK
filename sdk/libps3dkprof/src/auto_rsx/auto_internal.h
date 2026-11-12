@@ -26,12 +26,15 @@ extern const uint8_t ps3dk_prof__auto_build_binding[32];
 extern const char ps3dk_prof__auto_build_id[];
 extern const char ps3dk_prof__auto_app[];
 
-enum { AUTO_SEGMENTS_OPEN=8, AUTO_SEGMENT_OPS=32 };
+/* Up to 32 distinct segments per capture; their built operations share one pool at least as large as the report-
+ * pair pool (report_count <= 1024, 16 for clocks: at most 504 pairs), so report pairs, not the pool, bound how many
+ * segment draws can be timed in flight. */
+enum { AUTO_SEGMENTS_OPEN=32, AUTO_SEGMENT_POOL=512, AUTO_SEGMENT_NONE=0xffffffffu };
 /* One covered operation built inside a CALL segment: its report pair is owned
  * from the build; its record is committed at cellGcmSegmentCall (or as an
  * INCOMPLETE record when the segment is rebuilt, never called or called
  * outside the attached ring). */
-typedef struct auto_segment_op { auto_wire_op op; uint32_t pair; } auto_segment_op;
+typedef struct auto_segment_op { auto_wire_op op; uint32_t pair, next; } auto_segment_op;
 /* ctx is the segment's identity: its embedded context, which cellGcmSegmentCall passes. writer is the context
  * that emits into it: ctx itself for Begin/End, or, for BeginExternal, the application's context bound by the
  * first covered emitter whose current and end lie inside [lo, hi), the claimed buffer. */
@@ -39,7 +42,7 @@ typedef struct auto_segment {
     void *ctx, *writer;
     uintptr_t lo, hi;
     uint32_t ordinal, open, count, external;
-    auto_segment_op ops[AUTO_SEGMENT_OPS];
+    uint32_t head, tail;   /* this build's operations in the pool, in emission order */
 } auto_segment;
 
 /* One allocation before observation; variable queues follow this control block
@@ -61,8 +64,14 @@ typedef struct auto_capture {
     /* owner only: open segment contexts (cellGcmSegmentBegin..End) and the
      * covered visits on contexts other than the attached ring */
     auto_segment segments[AUTO_SEGMENTS_OPEN];
+    auto_segment_op segment_pool[AUTO_SEGMENT_POOL];
+    uint32_t segment_free, segment_pending; /* free list head; the operation between a segment begin and end */
+    /* owner only: once report pairs or metadata run out in a coverage frame, every later covered draw of that
+     * frame is excluded with that column too, so the untimed draws are exactly the frame's tail */
+    uint32_t pool_tail_column;
     uint32_t segments_used, segment_ordinal, call_ordinal, segment_quarantine;
     auto_segment *segment_active; /* between a segment emitter's begin and end */
+    void *segment_active_writer;  /* that emitter's context: kept here, not on the segment, which a part close clears */
     uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;
     /* owner only: frame source. A flip opens frames until an explicit
      * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
