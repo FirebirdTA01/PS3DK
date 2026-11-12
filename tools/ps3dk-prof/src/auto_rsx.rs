@@ -1094,6 +1094,9 @@ pub const PACING_SHARE: (u64, u64) = (1, 4);
 pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
 /// Flip-status polling was seen, but polling shows how often the owner looked at the flip, not that it waited.
 pub const POLLING_ONLY: &str = "presentation polling observed; waiting not established";
+/// A frame with CALL-segment records: no per-frame verdict (the records do not carry the building frame).
+pub const SEGMENT_POPULATION: &str = "from CALL segments: a segment is counted where it was built and recorded where \
+    it was called, so this frame's records and coverage are not one population";
 /// A flip-wait scope crossed a boundary of this frame: its time belongs to no single frame and is charged to neither.
 pub const WAIT_SPANS: &str = "presentation attribution unavailable: a flip-wait scope spans a frame boundary";
 /// A polling-cadence run crossed a boundary of this frame (charged to neither frame).
@@ -1317,6 +1320,13 @@ pub fn analyze(cap: &Capture) -> Report {
             if f.unsupported != 0 {
                 return Err(format!("{} visit(s) outside the observed population (segment or private buffer)",
                     f.unsupported));
+            }
+            // A segment's operations are counted in the row of the frame that BUILT it, but recorded under the frame
+            // that CALLED it, and a record does not say where it was built. A frame with segment records therefore
+            // cannot be reconciled against its row: equal counts may describe different segments (one built here,
+            // another called here), and an exclusion in the building frame would be lost.
+            if v.segment_ops != 0 {
+                return Err(format!("{} operation record(s) {SEGMENT_POPULATION}", v.segment_ops));
             }
             // Reconcile retained records with the row kind by kind: equal totals over different kinds are not the
             // population the row describes.

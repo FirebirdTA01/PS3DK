@@ -569,6 +569,35 @@ fn seg_op(id: u64, frame: u64, raw: (u64, u64), segment: u32, call: u32, serials
 }
 
 #[test]
+fn cross_frame_segments_get_no_verdict() {
+    // Review 2026-11-12: segment A built in frame 0 (one observed CLEAR, one excluded for room), called in frame 1
+    // while B is built there (one observed CLEAR), B called in frame 2. Frame 1's one CLEAR record (A) and its one
+    // observed CLEAR (B) are different operations; with qualified clocks and FIFO waits that matched as RSX-bound
+    // and lost frame 0's exclusion. Every frame with segment records is UNKNOWN.
+    let list = vec![mark(1, 1, 1, 5000), seg_op(2, 1, (6000, 36_000), 1, 1, (3, 4)), mark(3, 1, 2, 90_000),
+        seg_op(4, 2, (100_000, 101_000), 2, 1, (7, 8))];
+    let mut f0 = row(0, (0, 10_000), 1);
+    f0.rows[2][0] = 2;
+    f0.rows[2][2] = 1;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 1)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops(&list)];
+    rest.push(coverage(&f0));
+    rest.push(coverage(&row(1, (10_000, 110_000), 1)));
+    rest.push(coverage(&row(2, (110_000, 120_000), 0)));
+    rest.extend(anchors().iter().map(clock));
+    rest.push(status(1, status_for(4, 3, 9, 8)));
+    let r = analyze(&reader::read(&seg_file(rest).bytes()).expect("reads"));
+    let f1 = r.frames.iter().find(|f| f.frame == 1).expect("frame 1");
+    assert_eq!((f1.records[2], f1.observed[2], f1.segment_ops), (1, 1, 1));
+    assert_ne!(f1.verdict, Verdict::RsxBound, "{}", f1.reason);
+    assert_eq!(f1.verdict, Verdict::Unknown);
+    assert!(f1.reason.ends_with(ps3dk_prof::auto_rsx::SEGMENT_POPULATION), "{}", f1.reason);
+    let f2 = r.frames.iter().find(|f| f.frame == 2).expect("frame 2");
+    assert_eq!(f2.verdict, Verdict::Unknown);
+    assert!(r.frames.iter().find(|f| f.frame == 0).unwrap().reason.contains("excluded"));
+}
+
+#[test]
 fn segment_and_frame_records() {
     // frame 0: begin mark, two segment draws of one call (shared serial pair), end mark
     let mut list = vec![mark(1, 0, 1, 5000), seg_op(2, 0, (6000, 20_000), 1, 1, (3, 4)),
@@ -586,7 +615,9 @@ fn segment_and_frame_records() {
     assert_eq!(f.rsx_frame_raw, (Some(5000), Some(90_001)));
     let (lo, hi) = f.rsx_frame_ppu.expect("mapped");
     assert!(lo <= 170_002 && 170_002 <= hi, "{lo}..{hi}");
-    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // Even when built and called in one frame, segment records cannot prove that: no per-frame verdict.
+    assert_eq!(f.verdict, Verdict::Unknown, "{}", f.reason);
+    assert!(f.reason.ends_with(ps3dk_prof::auto_rsx::SEGMENT_POPULATION), "{}", f.reason);
     let c = reader::read(&seg_file(vec![ops(&list)]).bytes()).unwrap();
     let ops_read = &c.auto.as_ref().unwrap().ops;
     assert_eq!((ops_read[1].segment, ops_read[1].call), (1, 1));
@@ -708,7 +739,8 @@ fn second_console_capture() {
     assert!(matches!(&r.map, Some(MapState::Qualified(m)) if m.anchors == 16));
     assert_eq!(r.frames.len(), 120);
     assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.presentation.is_none()));
-    assert_eq!(r.frames.iter().filter(|f| f.reason == ps3dk_prof::auto_rsx::NOT_DISTINGUISHED).count(), 112);
+    // every frame of the call-return sample but the final one calls a segment, so it is refused before reconciliation
+    assert_eq!(r.frames.iter().filter(|f| f.reason.ends_with(ps3dk_prof::auto_rsx::SEGMENT_POPULATION)).count(), 119);
     assert_eq!(r.frames[119].reason, ps3dk_prof::auto_rsx::FINAL_FRAME);
     assert!(r.frames[..112].iter().all(|f| f.rsx_frame_ppu.is_some()));
 }
