@@ -290,7 +290,7 @@ jobs:
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case spanning --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
           python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam"
-          for mutant in no-flip-define drop-ok no-status-define no-wait-scope; do
+          for mutant in no-flip-define drop-ok no-status-define no-wait-scope double-hook self-bind; do
             python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopost --mutant fifo-publish --out "$RUNNER_TEMP/auto-runtime-fifo-publish-mutant"

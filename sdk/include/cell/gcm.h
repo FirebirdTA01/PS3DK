@@ -484,21 +484,6 @@ static inline int32_t cellGcmSetDisplayBuffer(uint8_t id, uint32_t offset, uint3
 	return (int32_t)gcmSetDisplayBuffer(id, offset, pitch, width, height);
 }
 
-static inline void cellGcmSetFlipMode(uint32_t mode)
-{
-	gcmSetFlipMode(mode);
-}
-
-static inline uint32_t cellGcmGetFlipStatus(void)
-{
-	return (uint32_t)gcmGetFlipStatus();
-}
-
-static inline void cellGcmResetFlipStatus(void)
-{
-	gcmResetFlipStatus();
-}
-
 static inline void cellGcmSetFlipStatus(void)
 {
 	gcmSetFlipStatus();
@@ -575,20 +560,10 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *     it from anywhere else races against in-flight GPU work and
  *     will glitch the display.
  * ---------------------------------------------------------------- */
-static inline int32_t cellGcmSetFlip(CellGcmContextData *context, uint8_t id)
-{
-	return (int32_t)gcmSetFlip(context, id);
-}
-
-static inline void cellGcmSetWaitFlip(CellGcmContextData *context)
-{
-	gcmSetWaitFlip(context);
-}
-
-static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id)
-{
-	return (uint32_t)gcmSetPrepareFlip(context, id);
-}
+/* cellGcmSetFlip, cellGcmSetPrepareFlip and cellGcmSetWaitFlip (with
+ * cellGcmGetFlipStatus, cellGcmResetFlipStatus and cellGcmSetFlipMode) are
+ * defined over the firmware calls in <cell/gcm/ps3tc_gcm_flip.h>, included
+ * through <rsx/gcm_sys.h>; the gcm* spellings are aliases onto them. */
 
 static inline int32_t cellGcmSetFlipImmediate(uint8_t id)
 {

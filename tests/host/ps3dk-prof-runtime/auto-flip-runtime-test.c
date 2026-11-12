@@ -13,6 +13,14 @@
 #include "prof_test_hooks.h"
 #include "gpu_port_gcm.h"
 #include "ps3tc_prof_auto.h"
+/* The application's flip calls go through the cellGcm entry points (and their
+ * gcm* aliases) as an application build sees them; the firmware stubs are
+ * fakes in the test bridge. */
+#include <cell/gcm/ps3tc_gcm_flip.h>
+#define gcmSetFlip cellGcmSetFlip
+#define gcmSetPrepareFlip cellGcmSetPrepareFlip
+#define gcmGetFlipStatus cellGcmGetFlipStatus
+extern int auto_test_fw_flip_rc,auto_test_fw_flips,auto_test_fw_prepares,auto_test_fw_polls,auto_test_fw_pending;
 static uint64_t reports[2048][2];
 static uint32_t labels[256],words[4096];
 static gpp_ctx context;
@@ -37,16 +45,16 @@ static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
 void ps3dk_prof__auto_test_frames(uint64_t out[3]);
 void ps3dk_prof__auto_test_present(uint64_t out[8]);
-/* The application's flip-status loop (gcmGetFlipStatus in a selected build):
- * pending twice, then done, back to back: one complete polling-cadence run,
- * which is never a flip-wait scope. */
-static void wait_flip(void)
+/* The application's flip-status loop: pending twice, then done, back to
+ * back, through either spelling: one complete polling-cadence run, which is
+ * never a flip-wait scope. */
+static void wait_flip(unsigned spelling)
 {
-    for(unsigned i=0;i<3;i++) {
-        uint64_t before=ps3dk_prof__auto_flip_status_begin();
-        assert(before);
-        ps3dk_prof__auto_flip_status_end(before,i<2 ? 1u:0u);
-    }
+    int polls=auto_test_fw_polls;
+    auto_test_fw_pending=2;
+    if(spelling&1) while(cellGcmGetFlipStatus()!=0) {}
+    else while(gcmGetFlipStatus()!=0) {}
+    assert(auto_test_fw_polls==polls+3);
 }
 static void clear(void)
 {
@@ -56,7 +64,20 @@ static void clear(void)
     for(unsigned n=0;n<6;n++) *context.current++=0xc1ea0000u+n;
     ps3dk_prof__auto_end((void *)&context,ticket);
 }
-static void flip(int32_t ok) {ps3dk_prof__auto_flip((void *)&context,ok);}
+/* One flip through one of the four spellings; the firmware result decides acceptance. */
+static void flip_as(unsigned spelling,int32_t ok)
+{
+    int calls=auto_test_fw_flips+auto_test_fw_prepares;
+    auto_test_fw_flip_rc=ok ? 0:-1;
+    switch(spelling%4) {
+    case 0: assert((gcmSetFlip((void *)&context,1)==0)==(ok!=0));break;
+    case 1: assert((cellGcmSetFlip((void *)&context,1)==0)==(ok!=0));break;
+    case 2: assert(((int32_t)gcmSetPrepareFlip((void *)&context,1)>=0)==(ok!=0));break;
+    default: assert(((int32_t)cellGcmSetPrepareFlip((void *)&context,1)>=0)==(ok!=0));break;
+    }
+    assert(auto_test_fw_flips+auto_test_fw_prepares==calls+1); /* one firmware call per flip */
+}
+static void flip(int32_t ok) {static unsigned n;flip_as(n++,ok);}
 int main(void) {
     uint64_t counts[3];
     context=(gpp_ctx){words,words+4096,words,NULL};
@@ -67,8 +88,8 @@ int main(void) {
         uint64_t present[8];
         flip(1);
         ps3dk_prof__auto_test_frames(counts);
-        assert(counts[0]==i+1); /* each accepted flip opens a frame */
-        wait_flip();
+        assert(counts[0]==i+1); /* each accepted flip opens exactly one frame, whichever spelling */
+        wait_flip(i);
         ps3dk_prof__auto_test_present(present);
         assert(present[0]==0 && present[1]==0); /* polls are not a flip-wait scope */
         assert(present[2]==1 && present[3]>0); /* one cadence run in the frame the flip opened */

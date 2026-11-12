@@ -86,6 +86,11 @@ if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
 if a.case in ('segments','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case=='flips':
+    # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
+    (inc.parent/'cell/gcm').mkdir(parents=True)
+    shutil.copyfile(root/'sdk/include/cell/gcm/ps3tc_gcm_flip.h',inc.parent/'cell/gcm/ps3tc_gcm_flip.h')
+    flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
@@ -205,6 +210,15 @@ const unsigned char ps3dk_prof__auto_mechanism[32]={42};
 const unsigned char ps3dk_prof__auto_build_binding[32]={99};
 const char ps3dk_prof__auto_build_id[]="host-no-gcm-init";
 const char ps3dk_prof__auto_app[]="auto-noinit";
+/* Firmware flip calls (libgcm_sys NID stub names) for the flips case, which reaches them through the
+ * cellGcm entry points of <cell/gcm/ps3tc_gcm_flip.h> under both spellings. */
+int auto_test_fw_flip_rc,auto_test_fw_flips,auto_test_fw_prepares,auto_test_fw_polls,auto_test_fw_pending;
+int test_fw_flip(void *c,unsigned char i) __asm__("cellGcmSetFlip");
+int test_fw_flip(void *c,unsigned char i) {(void)c;(void)i;++auto_test_fw_flips;return auto_test_fw_flip_rc;}
+unsigned test_fw_prepare(void *c,unsigned char i) __asm__("cellGcmSetPrepareFlip");
+unsigned test_fw_prepare(void *c,unsigned char i) {(void)c;(void)i;++auto_test_fw_prepares;return auto_test_fw_flip_rc ? 0xffffffffu:3u;}
+unsigned test_fw_status(void) __asm__("cellGcmGetFlipStatus");
+unsigned test_fw_status(void) {++auto_test_fw_polls;if(auto_test_fw_pending>0) {--auto_test_fw_pending;return 1;}return 0;}
 ''',encoding='utf-8')
 application='#include <stdio.h>\nint main(void) { puts("application complete"); return 0; }\n'
 assert 'prof' not in application

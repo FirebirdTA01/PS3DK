@@ -1366,47 +1366,25 @@ s32 gcmDumpGraphicsError();
 
 void gcmSetUserCommand(void (*handler)(const u32 cause));
 
-/* PS3_PROF_AUTO: a flip queued on the owner thread is the automatic frame
- * boundary. Only translation units built with PS3TC_PROF_AUTO (the selected
- * application build) see these wrappers; the flip itself is unchanged and its
- * result is returned as is. cellGcmSetFlip and cellGcmSetPrepareFlip reach the
- * same wrappers, so each flip is observed once. */
-#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
-void ps3dk_prof__auto_flip(gcmContextData *context,s32 ok);
-static inline s32 ps3tc_auto_gcmSetFlip(gcmContextData *context,const u8 bufferId)
-{
-	s32 rc=(gcmSetFlip)(context,bufferId);
-	ps3dk_prof__auto_flip(context,rc==0);
-	return rc;
-}
-static inline u32 ps3tc_auto_gcmSetPrepareFlip(gcmContextData *context,const u8 id)
-{
-	u32 q=(gcmSetPrepareFlip)(context,id);
-	ps3dk_prof__auto_flip(context,(s32)q>=0);
-	return q;
-}
-/* Flip-status polling: the observer records polling cadence (runs of pending
- * polls with short gaps), which shows how often the owner looked, not that it
- * waited. Waiting is recorded only for cellGcmWaitFlipComplete (cell/gcm.h),
- * a flip-wait scope with these two hooks. */
-u64 ps3dk_prof__auto_flip_status_begin(void);
-void ps3dk_prof__auto_flip_status_end(u64 before,u32 status);
-u64 ps3dk_prof__auto_flip_wait_begin(void);
-void ps3dk_prof__auto_flip_wait_end(u64 scope,s32 rc);
-static inline u32 ps3tc_auto_gcmGetFlipStatus(void)
-{
-	u64 before=ps3dk_prof__auto_flip_status_begin();
-	u32 status=(gcmGetFlipStatus)();
-	ps3dk_prof__auto_flip_status_end(before,status);
-	return status;
-}
-#define gcmSetFlip ps3tc_auto_gcmSetFlip
-#define gcmSetPrepareFlip ps3tc_auto_gcmSetPrepareFlip
-#define gcmGetFlipStatus ps3tc_auto_gcmGetFlipStatus
-#endif
 
 #ifdef __cplusplus
 	}
+#endif
+
+/* The flip entry points are the cellGcm ones (<cell/gcm/ps3tc_gcm_flip.h>);
+ * the PSL1GHT spellings declared above are aliases onto them, so PSL1GHT code
+ * makes the same firmware calls and, in a PS3_PROF_AUTO build, each flip is
+ * observed once whichever spelling it uses. The out-of-line gcm* functions in
+ * libgcm_sys.a stay for code compiled against older headers; their own
+ * translation unit defines PS3TC_GCM_LEGACY_SHIM_TU and sees no aliases. */
+#ifndef PS3TC_GCM_LEGACY_SHIM_TU
+#include <cell/gcm/ps3tc_gcm_flip.h>
+#define gcmSetFlip cellGcmSetFlip
+#define gcmSetPrepareFlip cellGcmSetPrepareFlip
+#define gcmGetFlipStatus cellGcmGetFlipStatus
+#define gcmResetFlipStatus cellGcmResetFlipStatus
+#define gcmSetWaitFlip cellGcmSetWaitFlip
+#define gcmSetFlipMode cellGcmSetFlipMode
 #endif
 
 #endif
