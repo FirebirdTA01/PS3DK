@@ -277,8 +277,14 @@ pub struct Cadence {
     pub ticks: u64,
 }
 impl Coverage {
+    /// The kind's ten exclusions for display, saturating; verdicts use `excluded_checked`.
     pub fn excluded(&self, kind: usize) -> u64 {
         self.rows[kind][2..].iter().fold(0u64, |a, &b| a.saturating_add(b))
+    }
+    /// The kind's ten exclusions, or None when their sum does not fit in u64 (possible only in a SATURATED row,
+    /// whose accounting the wire does not reconcile).
+    pub fn excluded_checked(&self, kind: usize) -> Option<u64> {
+        self.rows[kind][2..].iter().try_fold(0u64, |a, &b| a.checked_add(b))
     }
 }
 
@@ -1093,6 +1099,8 @@ pub const WAIT_SPANS: &str = "presentation attribution unavailable: a flip-wait 
 /// A polling-cadence run crossed a boundary of this frame (charged to neither frame).
 pub const POLLING_SPANS: &str = "presentation attribution unavailable: flip-status polling spans a frame boundary";
 pub const FINAL_FRAME: &str = "final frame closed at shutdown (no end mark)";
+/// A frame's counts summed across kinds (observed or excluded operations) do not fit in u64: no verdict is formed.
+pub const TOTALS_OVERFLOW: &str = "coverage totals overflow";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -1133,6 +1141,8 @@ pub struct FrameView {
     pub visited: [u64; 3],
     pub observed: [u64; 3],
     pub excluded: [u64; 3],
+    /// Retained operation records of this frame by kind (ARRAY, INDEX, CLEAR).
+    pub records: [u64; 3],
     pub unsupported: u64,
     pub ops_valid: u64,
     pub ops_incomplete: u64,
@@ -1240,6 +1250,7 @@ pub fn analyze(cap: &Capture) -> Report {
             observed: [f.rows[0][1], f.rows[1][1], f.rows[2][1]],
             excluded: [f.excluded(0), f.excluded(1), f.excluded(2)],
             unsupported: f.unsupported,
+            records: [KIND_ARRAY, KIND_INDEX, KIND_CLEAR].map(|k| ops.iter().filter(|o| o.kind == k).count() as u64),
             ops_valid: ops.iter().filter(|o| o.raw_valid()).count() as u64,
             ops_incomplete: ops.iter().filter(|o| !o.raw_valid()).count() as u64,
             rsx_span_raw: None,
@@ -1258,7 +1269,9 @@ pub fn analyze(cap: &Capture) -> Report {
             verdict: Verdict::Unknown,
             reason: String::new(),
         };
-        let observed: u64 = v.observed.iter().sum();
+        // Checked aggregation: per-kind rows are each valid on the wire, but their cross-kind totals may not fit.
+        let observed: Option<u64> = v.observed.iter().try_fold(0u64, |a, &b| a.checked_add(b));
+        let excluded: Option<u64> = (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?));
         if !ops.is_empty() && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
             let lo = ops.iter().map(|o| o.raw_begin).min().unwrap();
             let hi = ops.iter().map(|o| o.raw_end).max().unwrap();
@@ -1295,15 +1308,21 @@ pub fn analyze(cap: &Capture) -> Report {
             if f.flags & (FR_OPEN | FR_SATURATED | FR_LOSS) != 0 {
                 return Err("coverage row OPEN, SATURATED or after coverage loss".into());
             }
-            if v.excluded.iter().any(|&x| x != 0) {
-                return Err(format!("{} covered operation(s) excluded", v.excluded.iter().sum::<u64>()));
+            let (Some(observed), Some(excluded)) = (observed, excluded) else {
+                return Err(TOTALS_OVERFLOW.into());
+            };
+            if excluded != 0 {
+                return Err(format!("{excluded} covered operation(s) excluded"));
             }
             if f.unsupported != 0 {
                 return Err(format!("{} visit(s) outside the observed population (segment or private buffer)",
                     f.unsupported));
             }
-            if ops.len() as u64 != observed {
-                return Err(format!("{} operation record(s) for {observed} observed", ops.len()));
+            // Reconcile retained records with the row kind by kind: equal totals over different kinds are not the
+            // population the row describes.
+            if let Some(k) = (0..3).find(|&k| v.records[k] != v.observed[k]) {
+                return Err(format!("{} {} operation record(s) for {} observed", v.records[k], KINDS[k],
+                    v.observed[k]));
             }
             if v.ops_incomplete != 0 {
                 return Err(format!("{} operation(s) without raw-valid timestamps", v.ops_incomplete));
@@ -1509,7 +1528,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     };
     let frames: Vec<serde_json::Value> = r.frames.iter().map(|f| json!({
         "owner":f.owner,"frame":f.frame,"flags":f.flags,"tb_begin":f.tb_begin,"tb_end":f.tb_end,
-        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"unsupported":f.unsupported,
+        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"records":f.records,"unsupported":f.unsupported,
         "ops_valid":f.ops_valid,"ops_incomplete":f.ops_incomplete,"rsx_span_raw":f.rsx_span_raw,
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,

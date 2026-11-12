@@ -864,3 +864,29 @@ fn boundary_spanning_presentation_is_charged_to_neither_frame() {
     let p = r.frames[1].presentation.as_ref().unwrap();
     assert_eq!((p.flip_wait, p.flip_wait_spanning), (Some((50_000, 1)), 1));
 }
+
+#[test]
+fn coverage_totals_are_checked_and_reconciled_by_kind() {
+    // Review finding 3: each kind's row is valid on its own (visited = observed + exclusions), but the observed counts
+    // summed across kinds overflow u64.  Unchecked, debug panics and release wraps to 1, so one record passed the
+    // count gate.  Checked: a named UNKNOWN.
+    let mut f = four_frames();
+    let at = f.chunks.iter().enumerate().filter(|(_, c)| c.ty == 36).nth(1).map(|(i, _)| i).unwrap();
+    let mut x = row(1, (110_000, 210_000), 3);
+    x.rows[0][0] = u64::MAX - 1;
+    x.rows[0][1] = u64::MAX - 1;
+    f.chunks[at] = coverage(&x);
+    let r = analyze(&reader::read(&f.bytes()).expect("each kind reconciles on its own"));
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[1].reason, "coverage totals overflow");
+    // equal totals, wrong kind: the row observed one ARRAY, the retained record is a CLEAR
+    let mut f = four_frames();
+    let mut x = row(1, (110_000, 210_000), 0);
+    x.rows[0][0] = 1;
+    x.rows[0][1] = 1;
+    f.chunks[at] = coverage(&x);
+    let r = analyze(&reader::read(&f.bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[1].reason, "0 ARRAY operation record(s) for 1 observed");
+    assert_eq!(r.frames[1].observed, [1, 0, 0]);
+}

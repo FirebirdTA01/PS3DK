@@ -414,7 +414,13 @@ or context reset; the row is associated, FINAL, not OPEN, SATURATED or after
 loss; no covered operation was excluded and no visit fell outside the observed
 population; every observed operation has a RAW_VALID record; the FIFO family
 is present and FINAL exact and every wrap tagged with the frame is complete;
-and the map is qualified. With D the row's PPU interval, W the owner's
+and the map is qualified. Every aggregate over a row is checked: the rows are reconciled per kind on the
+wire, but totals across kinds (observed, excluded) may still not fit in u64, and
+such a row reads UNKNOWN "coverage totals overflow" rather than wrapping. The
+retained operation records of the frame are reconciled kind by kind (ARRAY,
+INDEX, CLEAR records against each kind's observed count; segment records count
+under their own kind), never only by their total: equal totals over different
+kinds are not the population the row describes. With D the row's PPU interval, W the owner's
 complete FIFO wrap wait tagged with the frame (lower bound) and S the frame's
 RSX reached-marker span (first operation begin to last end) on the PPU clock:
 
