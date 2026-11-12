@@ -26,6 +26,8 @@ pub const CHUNK_AUTO_CLOCK: u32 = 38;
 pub const CONFIG_BYTES: usize = 160;
 pub const OP_BYTES: u32 = 128;
 pub const FRAME_BYTES: usize = 352;
+/// COVERAGE rows of the presentation writer (CONFIG masks 31/11): the 352-byte row plus a presentation block.
+pub const FRAME_BYTES_PRESENT: usize = 384;
 pub const STATUS_BYTES: usize = 128;
 pub const CLOCK_BYTES: usize = 96;
 /// Schema 1: the first sixteen reports of the lease are clock anchors.
@@ -45,6 +47,9 @@ pub const FRAME_END: u32 = 2;
 /// CONFIG masks: the first writer (no FRAME, CALL unsupported) and the D1/D2 writer (FRAME, CALL segments).
 pub const MASKS_V1: (u32, u32) = (7, 15);
 pub const MASKS_SEGMENTS: (u32, u32) = (15, 11);
+/// The presentation writer: kind mask bit 4 (16) PRESENT names flip-wait scopes and polling cadence in 384-byte
+/// COVERAGE rows.  It is not an OPS kind.  Readers that know only 7/15 or 15/11 refuse it at CONFIG.
+pub const MASKS_PRESENT: (u32, u32) = (31, 11);
 pub const OP_TOKEN: u16 = 1;
 pub const OP_RAW_VALID: u16 = 2;
 pub const OP_INCOMPLETE: u16 = 4;
@@ -60,8 +65,10 @@ pub const FR_LOSS: u16 = 8;
 pub const FR_OPEN: u16 = 16;
 /// The frame was opened by a flip queued on the owner thread (15/11 CONFIG masks only).
 pub const FR_FLIP: u16 = 32;
-/// The writer observed flip-status polling in this frame: u32@12 completed waits, u64@56 owner PPU ticks between
-/// the first pending poll and the done poll (15/11 CONFIG masks only).  Without it there is no presentation evidence.
+/// The writer observed presentation in this frame.  With the 15/11 CONFIG masks: u32@12 flip-status poll intervals
+/// and u64@56 the owner PPU ticks between the first pending poll and the done poll (an observation interval, never
+/// waiting evidence).  With 31/11: u32@12 flip-wait scopes and u64@56 their elapsed ticks, plus the presentation block
+/// at 352 (polling cadence).  Without it there is no presentation evidence.
 pub const FR_PRESENT: u16 = 64;
 pub const ST_FINAL: u16 = 1;
 pub const ST_LOWER_BOUND: u16 = 2;
@@ -177,6 +184,10 @@ impl Attached {
     pub fn segments_covered(&self) -> bool {
         self.form_mask & 4 == 0
     }
+    /// The writer records flip-wait scopes and polling cadence (CONFIG kind mask bit 16, 384-byte rows).
+    pub fn presentation_scopes(&self) -> bool {
+        self.kind_mask & 16 != 0
+    }
 }
 impl Config {
     pub fn instance(&self) -> u32 {
@@ -245,9 +256,25 @@ pub struct Coverage {
     pub lost: u64,
     /// ARRAY, INDEX, CLEAR: visited, observed, ten exclusions.
     pub rows: [[u64; 12]; 3],
-    /// FR_PRESENT rows: completed flip-status waits and their owner PPU ticks.
-    pub present_waits: u32,
-    pub present_wait: u64,
+    /// FR_PRESENT rows of the presentation writer (31/11): flip-wait scopes completed inside the frame and their
+    /// elapsed owner PPU ticks (including scheduling and polling), and the polling cadence block.
+    pub flip_waits: u32,
+    pub flip_wait: u64,
+    pub flip_wait_spanning: u32,
+    pub flip_wait_timeouts: u32,
+    pub cadence: Cadence,
+    /// FR_PRESENT rows of the 15/11 writer: flip-status poll intervals and their ticks (observation only).
+    pub legacy_polls: Option<(u32, u64)>,
+}
+
+/// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
+/// how often the owner looked at the flip, never that it waited.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Cadence {
+    pub runs: u32,
+    pub broken: u32,
+    pub spanning: u32,
+    pub ticks: u64,
 }
 impl Coverage {
     pub fn excluded(&self, kind: usize) -> u64 {
@@ -459,7 +486,7 @@ impl Reader {
                 if domain == 0 || epoch == 0 || owner == 0 || generation == 0 {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
-                if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS {
+                if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
                 if pairs == 0 || pairs > PAIRS_MAX || u64::from(count) != 16 + 2 * u64::from(pairs) {
@@ -678,8 +705,9 @@ impl Reader {
     fn coverage(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::AutoCoverage;
         let cfg = self.attached().clone();
-        if payload.len() != FRAME_BYTES {
-            return bad(r, format!("AUTO_COVERAGE is {} bytes, not {FRAME_BYTES}", payload.len()));
+        let width = if cfg.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        if payload.len() != width {
+            return bad(r, format!("AUTO_COVERAGE is {} bytes, not {width}", payload.len()));
         }
         let mut c = Cursor::new(payload, "AUTO_COVERAGE");
         let schema = c.u16()?;
@@ -699,9 +727,29 @@ impl Reader {
                 *v = c.u64()?;
             }
         }
+        let mut cadence = Cadence::default();
+        let (mut scope_spanning, mut timeouts, mut r2) = (0u32, 0u32, 0u32);
+        if cfg.presentation_scopes() {
+            cadence.runs = c.u32()?;
+            cadence.broken = c.u32()?;
+            cadence.spanning = c.u32()?;
+            scope_spanning = c.u32()?;
+            cadence.ticks = c.u64()?;
+            timeouts = c.u32()?;
+            r2 = c.u32()?;
+        }
         c.done()?;
         let at = format!("AUTO coverage frame {owner}/{frame}");
         let present = flags & FR_PRESENT != 0;
+        if r2 != 0 || (!present && (cadence != Cadence::default() || scope_spanning != 0 || timeouts != 0)) {
+            return bad(r, format!("{at}: presentation block without PRESENT or a reserved field"));
+        }
+        if cadence.runs == 0 && cadence.ticks != 0 {
+            return bad(r, format!("{at}: polling cadence {} ticks without a complete run", cadence.ticks));
+        }
+        if timeouts > r0 {
+            return bad(r, format!("{at}: {timeouts} timed-out flip-wait scope(s) of {r0}"));
+        }
         if schema != 1 || instance != cfg.instance || (!present && (r0 != 0 || r1 != 0)) {
             return bad(r, format!("{at}: schema {schema} instance {instance} or a reserved field"));
         }
@@ -725,7 +773,7 @@ impl Reader {
             }
         }
         if present && r0 == 0 && r1 != 0 {
-            return bad(r, format!("{at}: presentation waits {r0} with {r1} ticks"));
+            return bad(r, format!("{at}: presentation count {r0} with {r1} ticks"));
         }
         if lost < self.last_lost || (lost != 0) != (flags & FR_LOSS != 0) {
             return bad(r, format!("{at}: lost count {lost} against LOSS / earlier {}", self.last_lost));
@@ -748,8 +796,11 @@ impl Reader {
             self.result.refusal.get_or_insert("AUTO coverage retention ceiling");
             return Ok(());
         }
+        let scopes = cfg.presentation_scopes();
         self.result.frames.push(Coverage { flags, owner, frame, tb_begin, tb_end, unsupported, lost, rows,
-            present_waits: r0, present_wait: r1 });
+            flip_waits: if scopes { r0 } else { 0 }, flip_wait: if scopes { r1 } else { 0 },
+            flip_wait_spanning: scope_spanning, flip_wait_timeouts: timeouts, cadence,
+            legacy_polls: (present && !scopes).then_some((r0, r1)) });
         Ok(())
     }
 
@@ -1035,6 +1086,8 @@ pub const RSX_SPAN_SHARE: (u64, u64) = (1, 2);
 /// Presentation (flip-status) wait share of the PPU frame interval that, with the RSX not limiting, reads as pacing.
 pub const PACING_SHARE: (u64, u64) = (1, 4);
 pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
+/// Flip-status polling was seen, but polling shows how often the owner looked at the flip, not that it waited.
+pub const POLLING_ONLY: &str = "presentation polling observed; waiting not established";
 pub const FINAL_FRAME: &str = "final frame closed at shutdown (no end mark)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1091,10 +1144,23 @@ pub struct FrameView {
     pub rsx_frame_ppu: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
-    /// Owner PPU ticks polling flip status in this frame (FR_PRESENT rows), with the number of completed waits.
-    pub present_wait: Option<(u64, u32)>,
+    /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
+    pub presentation: Option<Presentation>,
     pub verdict: Verdict,
     pub reason: String,
+}
+
+/// Presentation evidence of one frame.  Only `flip_wait` (flip-wait scope elapsed time, including scheduling and
+/// polling) is waiting evidence; cadence and the 15/11 poll intervals are observations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Presentation {
+    /// Flip-wait scope ticks and scope count, with timed-out and boundary-spanning scopes (31/11 writer only).
+    pub flip_wait: Option<(u64, u32)>,
+    pub flip_wait_timeouts: u32,
+    pub flip_wait_spanning: u32,
+    pub cadence: Option<Cadence>,
+    /// 15/11 writer: poll intervals (first pending to done poll) and their ticks; never waiting evidence.
+    pub legacy_polls: Option<(u32, u64)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1178,7 +1244,13 @@ pub fn analyze(cap: &Capture) -> Report {
             rsx_frame_raw,
             rsx_frame_ppu: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
-            present_wait: (f.flags & FR_PRESENT != 0).then_some((f.present_wait, f.present_waits)),
+            presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
+                flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
+                flip_wait_timeouts: f.flip_wait_timeouts,
+                flip_wait_spanning: f.flip_wait_spanning,
+                cadence: f.legacy_polls.is_none().then_some(f.cadence),
+                legacy_polls: f.legacy_polls,
+            }),
             verdict: Verdict::Unknown,
             reason: String::new(),
         };
@@ -1202,7 +1274,7 @@ pub fn analyze(cap: &Capture) -> Report {
         v.fifo_wait = wait.as_ref().ok().copied();
         let d = f.tb_end.saturating_sub(f.tb_begin);
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
-        let present = v.present_wait;
+        let present = v.presentation.clone();
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
                 return Err(format!("capture not final ({})", inv.state()));
@@ -1248,17 +1320,24 @@ pub fn analyze(cap: &Capture) -> Report {
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
             let waited = share(w, d, WAIT_SHARE);
             // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
-            // where the RSX is not limiting is PACING only with observed presentation waits, otherwise UNKNOWN.
+            // where the RSX is not limiting is PACING only with flip-wait scope evidence (cellGcmWaitFlipComplete),
+            // otherwise UNKNOWN.  Polling cadence and 15/11 poll intervals are named observations, never waiting.
             if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
             } else if w == 0 && rsx_short {
-                match present {
-                    Some((p, n)) if share(p, d, PACING_SHARE) => Ok((Verdict::Pacing, format!("presentation: owner \
-                        polled flip status for >= {p} of {d} PPU ticks ({n} wait(s)); no FIFO wait; RSX reached-marker \
-                        span <= {} ticks", span.1))),
-                    _ => Err(NOT_DISTINGUISHED.into()),
-                }
+                Err(match present {
+                    Some(Presentation { flip_wait: Some((p, n)), .. }) if share(p, d, PACING_SHARE) => {
+                        return Ok((Verdict::Pacing, format!("presentation: flip-wait scope elapsed time, including \
+                            scheduling and polling, >= {p} of {d} PPU ticks ({n} scope(s)); no FIFO wait; RSX \
+                            reached-marker span <= {} ticks", span.1)));
+                    }
+                    Some(Presentation { legacy_polls: Some((n, _)), .. }) if n > 0 => {
+                        format!("{POLLING_ONLY} (writer without flip-wait scopes)")
+                    }
+                    Some(Presentation { cadence: Some(c), .. }) if c.runs > 0 || c.broken > 0 => POLLING_ONLY.into(),
+                    _ => NOT_DISTINGUISHED.into(),
+                })
             } else if w > 0 && !waited && rsx_long {
                 Ok((Verdict::Mixed, format!("owner waited >= {w} of {d} PPU ticks; RSX reached-marker span >= {} \
                     ticks", span.0)))
@@ -1350,7 +1429,7 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     for f in &r.frames {
         writeln!(out, "frame {}/{}: {} - {}; ppu {} ticks; visited {:?} observed {:?} excluded {:?} unsupported {}; \
             ops {} valid {} incomplete ({} in segments); rsx span raw {} ppu {}; rsx frame marks {}..{} ppu {}; \
-            presentation wait {}; fifo wait {}",
+            presentation {}; fifo wait {}",
             f.owner, f.frame, f.verdict.label(), f.reason, f.tb_end.saturating_sub(f.tb_begin), f.visited, f.observed,
             f.excluded, f.unsupported, f.ops_valid, f.ops_incomplete, f.segment_ops,
             f.rsx_span_raw.map_or("UNKNOWN".into(), |x| x.to_string()),
@@ -1358,10 +1437,38 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.rsx_frame_raw.0.map_or("UNKNOWN".into(), |x| x.to_string()),
             f.rsx_frame_raw.1.map_or("UNKNOWN".into(), |x| x.to_string()),
             f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
-            f.present_wait.map_or("not observed".into(), |(p, n)| format!("{p} ticks in {n} wait(s)")),
+            f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
     }
     Ok(())
+}
+
+fn presentation_text(p: &Presentation) -> String {
+    let mut parts = Vec::new();
+    if let Some((t, n)) = p.flip_wait {
+        parts.push(format!("flip-wait scopes {n} ({t} ticks elapsed, including scheduling and polling; {} timed out, \
+            {} across a frame boundary)", p.flip_wait_timeouts, p.flip_wait_spanning));
+    }
+    if let Some(c) = p.cadence {
+        parts.push(format!("polling cadence {} run(s) ({} ticks of bounded gaps), {} broken, {} across a frame \
+            boundary", c.runs, c.ticks, c.broken, c.spanning));
+    }
+    if let Some((n, t)) = p.legacy_polls {
+        parts.push(format!("flip-status poll intervals {n} ({t} ticks; observation only)"));
+    }
+    parts.join("; ")
+}
+
+fn presentation_json(p: &Presentation) -> serde_json::Value {
+    use serde_json::json;
+    json!({
+        "flip_wait": p.flip_wait.map(|(t, n)| json!({"ticks":t,"scopes":n,"timeouts":p.flip_wait_timeouts,
+            "spanning":p.flip_wait_spanning,
+            "scope":"flip-wait scope elapsed time, including scheduling and polling"})),
+        "polling_cadence": p.cadence.map(|c| json!({"runs":c.runs,"ticks":c.ticks,"broken":c.broken,
+            "spanning":c.spanning})),
+        "poll_intervals": p.legacy_polls.map(|(n, t)| json!({"count":n,"ticks":t})),
+    })
 }
 
 pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result<()> {
@@ -1399,7 +1506,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,
         "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
-        "presentation_wait":f.present_wait.map(|(p, n)| json!({"ticks":p,"waits":n})),
+        "presentation":f.presentation.as_ref().map(presentation_json),
         "verdict":f.verdict.key(),"reason":f.reason})).collect();
     let clocks: Vec<serde_json::Value> = r.clocks.iter().map(|a| json!({"id":a.id,"slot":a.slot,
         "outcome":a.outcome(),"frame":a.frame,"tb_before":a.tb_before,"tb_after":a.tb_after,"raw":a.raw,

@@ -17,7 +17,7 @@ import subprocess
 
 SCHEMA = 1
 # The command/report semantics the binding is bound to: the AUTO wire with segment and frame-mark records.
-MECHANISM_TAG = 'ps3dk-prof AUTO RSX schema 1; CONFIG masks 15/11; SEGMENT and FRAME records'
+MECHANISM_TAG = 'ps3dk-prof AUTO RSX schema 1; CONFIG masks 31/11; SEGMENT and FRAME records; PRESENT rows'
 ABIS = ('ilp32', 'lp64')
 
 

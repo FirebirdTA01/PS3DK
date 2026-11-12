@@ -36,9 +36,10 @@ static void flush(gpp_ctx *ctx) {assert(ctx==&context);complete(ctx,++anchors);}
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
 void ps3dk_prof__auto_test_frames(uint64_t out[3]);
-void ps3dk_prof__auto_test_present(uint64_t out[2]);
+void ps3dk_prof__auto_test_present(uint64_t out[8]);
 /* The application's flip-status loop (gcmGetFlipStatus in a selected build):
- * pending twice, then done. */
+ * pending twice, then done, back to back: one complete polling-cadence run,
+ * which is never a flip-wait scope. */
 static void wait_flip(void)
 {
     for(unsigned i=0;i<3;i++) {
@@ -63,13 +64,14 @@ int main(void) {
     ps3dk_prof__auto_gcm_init_result(&context,sizeof words,sizeof words,words,0);
     clear(); /* before any flip: unassociated */
     for(unsigned i=0;i<20;i++) {
-        uint64_t present[2];
+        uint64_t present[8];
         flip(1);
         ps3dk_prof__auto_test_frames(counts);
         assert(counts[0]==i+1); /* each accepted flip opens a frame */
         wait_flip();
         ps3dk_prof__auto_test_present(present);
-        assert(present[0]==1 && present[1]>0); /* the wait is charged to the frame the flip opened */
+        assert(present[0]==0 && present[1]==0); /* polls are not a flip-wait scope */
+        assert(present[2]==1 && present[3]>0); /* one cadence run in the frame the flip opened */
         clear();
     }
     flip(0); /* a refused flip is no boundary */

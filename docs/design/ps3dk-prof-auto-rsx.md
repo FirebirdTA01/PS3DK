@@ -29,7 +29,7 @@ preceding owner, domain and epoch declarations.
 | Offset | Type | Attached value |
 |---|---|---|
 | 8, 12, 16, 20 | u32 each | domain, epoch, owner incarnation, context generation |
-| 24, 28 | u32 each | covered kind mask, unsupported form mask: 7/15 (first writer) or 15/11 (segment and frame-mark writer) |
+| 24, 28 | u32 each | covered kind mask, unsupported form mask: 7/15 (first writer), 15/11 (segment and frame-mark writer) or 31/11 (presentation writer) |
 | 32, 36 | u32 each | report first, report count |
 | 40, 44 | u32 each | operation label, clock label |
 | 48, 52, 56, 60 | u32 each | pair capacity, metadata capacity, frame capacity, record width 128 |
@@ -40,10 +40,13 @@ preceding owner, domain and epoch declarations.
 | 128 | 32 bytes | build binding |
 
 Unsupported-form bits name unsafe=1, immediate=2, CALL=4 and direct/uninstrumented=8.
-Kind bits name ARRAY=1, INDEX=2, CLEAR=4 and FRAME=8. Exactly two pairs are
-valid: 7/15 for the first writer, and 15/11 for the writer that records FRAME
-marks and covers CALL segments built through the segment API. A reader that
-knows only 7/15 refuses the newer CONFIG, so it never misreads its records.
+Kind bits name ARRAY=1, INDEX=2, CLEAR=4, FRAME=8 and PRESENT=16. PRESENT is not
+an OPS kind: it names flip-wait scopes and polling cadence in 384-byte COVERAGE
+rows (below). Exactly three pairs are valid: 7/15 for the first writer, 15/11 for
+the writer that records FRAME marks and covers CALL segments built through the
+segment API, and 31/11 for the presentation writer. A reader that knows only
+7/15, or only 7/15 and 15/11, refuses the newer CONFIG, so it never misreads the
+longer rows or reads the older poll interval as a wait.
 Premise bits name report-before-label=1 and coherent stable read=2; these declare
 dependencies, not proven facts. Schema 1 reserves sixteen clock reports, so the
 report count is sixteen plus twice the pair capacity. The mechanism digest
@@ -148,7 +151,7 @@ not physical label reuse proof.
 
 ## COVERAGE, type 36
 
-Fixed 352 bytes: schema u16 at 0, flags u16 at 2, instance u32 at 4, owner u32 at
+Fixed 352 bytes (384 with the 31/11 masks): schema u16 at 0, flags u16 at 2, instance u32 at 4, owner u32 at
 8, reserved u32 at 12; frame id, PPU begin, PPU end, unsupported count and lost
 coverage count are u64 at 16, 24, 32, 40 and 48. Bytes 56..63 are reserved. Three
 96-byte rows from 64 describe ARRAY, INDEX and CLEAR, each twelve u64 counters:
@@ -157,14 +160,58 @@ capacity, metadata capacity, reentry, unsupported arguments, shutdown, ownership
 uncertainty, observer disabled, resource lease unverified, epoch invalid.
 Flags are TOKEN=1, FINAL=2, SATURATED=4, LOSS=8, OPEN=16 and, with the 15/11
 CONFIG masks, FLIP=32 (the row was opened by a flip) and PRESENT=64 (the writer
-observed flip-status polling in this row). With PRESENT, u32@12 is the number
-of completed flip-status waits and u64@56 their owner PPU ticks; without it
-both are zero and there is no presentation evidence. A wait runs from the
-return of the first gcmGetFlipStatus call that saw the flip pending to the
-entry of the call that saw it done, and is charged to the frame active then.
-cellGcmGetFlipStatus reaches the same wrapper. Waits on presentation by other
-means (VBlank or flip handlers, wait-flip GPU commands, a sleep without
-polling) are not observed.
+observed presentation in this row). Without PRESENT every presentation field is
+zero and there is no presentation evidence.
+
+Presentation with the 31/11 masks. Only a flip-wait scope is waiting evidence:
+
+| Offset | Type | Field |
+|---|---|---|
+| 12 | u32 | flip-wait scopes completed inside this frame |
+| 56 | u64 | their elapsed owner PPU ticks: flip-wait scope elapsed time, including scheduling and polling |
+| 352 | u32 | polling-cadence runs closed by a done poll, every gap within the bound |
+| 356 | u32 | broken cadence runs (a gap over the bound, or a flip-wait scope began) |
+| 360 | u32 | boundary-spanning cadence runs (rule in the next section) |
+| 364 | u32 | boundary-spanning flip-wait scopes |
+| 368 | u64 | polling cadence: summed bounded gaps of the complete runs |
+| 376 | u32 | flip-wait scopes that returned the timeout error (included at 12) |
+| 380 | u32 | reserved, zero |
+
+A flip-wait scope is one `cellGcmWaitFlipComplete(max_us)` call (cell/gcm.h). The
+helper polls `cellGcmGetFlipStatus`, sleeps between pending polls
+(`sys_timer_usleep`, at most `PS3TC_GCM_WAIT_FLIP_POLL_US` = 100 us each) until the
+flip is done or `max_us` of sleep was requested, and returns `CELL_OK` or
+`CELL_GCM_ERROR_FAILURE` (the flip is still pending; nothing is cancelled). Its
+semantics are waiting for flip completion, so in a PS3_PROF_AUTO build its outer
+elapsed time is counted once, in the frame it ran in. That is scope elapsed time
+including scheduling and polling, never exact RSX wait or device completion time.
+Polls and sleeps inside a scope are part of it and are not counted again.
+
+Polling cadence is every other observed `gcmGetFlipStatus` call
+(`cellGcmGetFlipStatus` reaches the same wrapper). A run is a sequence of
+consecutive polls that saw the flip pending; its evidence is the sum of the gaps
+between consecutive polls (previous return to next entry), counted only while
+every gap is at most 1 ms, and the done poll closes the run only when its own gap
+is within the bound. A larger gap ends the run as broken (the next pending poll
+starts a new one); a flip-wait scope that begins also ends an open run as broken.
+The 1 ms bound is below a sixteenth of the shortest display period (16.68 ms at
+59.94 Hz), so it is far below any frame a verdict could judge and above the cost of
+a poll and a short sleep. Cadence bounds how often the owner looked at the flip,
+not whether it was waiting: the owner may have done useful work between any two
+polls, and two nonblocking polls around work give the same numbers as a polling
+wait. Cadence therefore never establishes pacing; it is named evidence.
+
+Sleeps and yields outside the helper (`usleep`, `sys_timer_usleep`,
+`sys_timer_sleep`, `sys_ppu_thread_yield`) are not recorded: a sleep may serve an
+unrelated timer, a yield may return at once, and the flip may have completed
+before either, so they could never be waiting evidence. VBlank and flip handlers
+and wait-flip GPU commands are not observed either.
+
+With the 15/11 masks, PRESENT rows carry u32@12, the number of flip-status poll
+intervals, and u64@56, their owner PPU ticks from the return of the first poll
+that saw the flip pending to the entry of the poll that saw it done, charged to
+the frame active at the done poll. That interval is an observation, not a wait:
+the reader shows it and never derives pacing from it.
 
 The final frame of a capture normally has no closing flip: it is closed at
 shutdown as an OPEN row without an end mark, and FRAME_MARK_MISSED is not set
@@ -362,8 +409,9 @@ RSX reached-marker span (first operation begin to last end) on the PPU clock:
 | Verdict | Condition |
 |---|---|
 | RSX-bound candidate (fetch) | W >= D/4 and S >= D/2 (lower bound of S) |
-| pacing | W = 0, S < D/2 (upper bound), and the row's observed presentation (flip-status) wait P >= D/4 |
-| UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 without such a P |
+| pacing | W = 0, S < D/2 (upper bound), and the row's flip-wait scope elapsed time P >= D/4 (31/11 rows only) |
+| UNKNOWN: "presentation polling observed; waiting not established" | W = 0 and S < D/2 without such a P, with polling cadence (complete or broken runs) or 15/11 poll intervals |
+| UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 with no presentation evidence |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |
 | PPU-bound candidate | never from this family: it needs positive evidence that the owner was busy, not waiting |
 | UNKNOWN | anything else, named as unresolved |

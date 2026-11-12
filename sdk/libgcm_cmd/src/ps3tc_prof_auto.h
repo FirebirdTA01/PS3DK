@@ -36,4 +36,8 @@ void ps3dk_prof__auto_flip(struct _gcmCtxData *, int32_t ok);
  * (0 when not observed), end receives it with the status the firmware returned. */
 uint64_t ps3dk_prof__auto_flip_status_begin(void);
 void ps3dk_prof__auto_flip_status_end(uint64_t before, uint32_t status);
+/* cellGcmWaitFlipComplete in a PS3TC_PROF_AUTO unit: one flip-wait scope. begin returns
+ * a nonzero token when observed; end receives it with the helper's return code. */
+uint64_t ps3dk_prof__auto_flip_wait_begin(void);
+void ps3dk_prof__auto_flip_wait_end(uint64_t scope, int32_t rc);
 #endif

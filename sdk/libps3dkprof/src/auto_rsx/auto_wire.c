@@ -59,10 +59,12 @@ size_t auto_encode_frame(uint8_t *b, size_t cap, const auto_wire_frame *f)
     unsigned i,j;
     if(!b || !f || cap<AUTO_FRAME_BYTES) return 0;
     memset(b,0,AUTO_FRAME_BYTES);
-    le16(b,1); le16(b+2,f->flags); le32(b+4,f->instance); le32(b+8,f->owner); le32(b+12,f->present_waits);
+    le16(b,1); le16(b+2,f->flags); le32(b+4,f->instance); le32(b+8,f->owner); le32(b+12,f->flip_waits);
     le64(b+16,f->frame); le64(b+24,f->tb_begin); le64(b+32,f->tb_end);
-    le64(b+40,f->unsupported); le64(b+48,f->lost); le64(b+56,f->present_wait);
+    le64(b+40,f->unsupported); le64(b+48,f->lost); le64(b+56,f->flip_wait);
     for(i=0;i<3;i++) for(j=0;j<12;j++) le64(b+64+i*96+j*8,f->counts[i][j]);
+    le32(b+352,f->cadence_runs); le32(b+356,f->cadence_broken); le32(b+360,f->cadence_spanning);
+    le32(b+364,f->flip_wait_spanning); le64(b+368,f->cadence); le32(b+376,f->flip_wait_timeouts);
     return AUTO_FRAME_BYTES;
 }
 

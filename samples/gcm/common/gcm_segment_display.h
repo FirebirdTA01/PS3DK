@@ -86,19 +86,16 @@ static inline void seg_rect(CellGcmContextData *ctx, uint32_t x, uint32_t y,
     cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
 }
 
-/* Flip the current buffer and poll the flip status at most max_polls times
- * (200 us apart).  An iteration count, not a timer, bounds the wait. */
+/* Flip the current buffer and wait for the flip with cellGcmWaitFlipComplete,
+ * bounded by max_polls x 200 us of sleep (the helper sleeps between polls).
+ * Under PS3_PROF_AUTO the helper is the frame's flip-wait scope. */
 #define SEG_FLIP_POLLS 10000u
 static inline int seg_display_flip(CellGcmContextData *ctx, SegDisplay *d, uint32_t max_polls)
 {
-    uint32_t polls = 0;
     cellGcmResetFlipStatus();
     if (cellGcmSetFlip(ctx, (uint8_t)d->buffer_id)) return 0;
     cellGcmFlush(ctx);
-    while (cellGcmGetFlipStatus() != 0) {
-        if (polls++ == max_polls) return 0;
-        usleep(200);
-    }
+    if (cellGcmWaitFlipComplete(max_polls * 200u) != CELL_OK) return 0;
     d->buffer_id ^= 1u;
     return 1;
 }

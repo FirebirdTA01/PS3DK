@@ -257,15 +257,24 @@ fn four_frames_present(present: [(u32, u64); 4]) -> File {
 }
 
 #[test]
-fn pacing_needs_presentation_waits() {
-    // frame 1 (RSX not limiting) polled flip status for 60% of its interval: PACING; with a short poll: UNKNOWN
+fn poll_intervals_never_establish_pacing() {
+    // Review finding 1: a 15/11 PRESENT row records the time from the first pending poll to the done poll.  Two
+    // nonblocking polls around application work give the same number as a polling wait, so 60% of the frame between
+    // polls is an observation interval, not a waiting lower bound: UNKNOWN, never PACING.
     let r = analyze(&reader::read(&four_frames_present([(0, 0), (1, 60_000), (0, 0), (0, 0)]).bytes()).expect("reads"));
     let v: Vec<Verdict> = r.frames.iter().map(|f| f.verdict).collect();
-    assert_eq!(v, [Verdict::RsxBound, Verdict::Pacing, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
-    assert!(r.frames[1].reason.starts_with("presentation: owner polled flip status for >= 60000 of 100000"),
+    assert_eq!(v, [Verdict::RsxBound, Verdict::Unknown, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
+    assert!(r.frames[1].reason.starts_with("presentation polling observed; waiting not established"),
         "{}", r.frames[1].reason);
-    assert_eq!(r.frames[1].present_wait, Some((60_000, 1)));
-    let r = analyze(&reader::read(&four_frames_present([(0, 0), (1, 1_000), (0, 0), (0, 0)]).bytes()).unwrap());
+}
+
+#[test]
+fn pacing_needs_presentation_waits() {
+    let r = analyze(&reader::read(&four_frames_present([(0, 0), (1, 60_000), (0, 0), (0, 0)]).bytes()).expect("reads"));
+    assert_eq!(r.frames[1].reason, format!("{} (writer without flip-wait scopes)", ps3dk_prof::auto_rsx::POLLING_ONLY));
+    let p = r.frames[1].presentation.as_ref().unwrap();
+    assert_eq!((p.legacy_polls, p.flip_wait, p.cadence), (Some((1, 60_000)), None, None));
+    let r = analyze(&reader::read(&four_frames_present([(0, 0), (0, 0), (0, 0), (0, 0)]).bytes()).unwrap());
     assert_eq!(r.frames[1].verdict, Verdict::Unknown);
     assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::NOT_DISTINGUISHED);
     // presentation fields need FR_PRESENT, ticks need a wait, and a first-writer capture knows none of it
@@ -698,7 +707,7 @@ fn second_console_capture() {
     assert_eq!(ps3dk_prof::auto_rsx::frame_source(&r), "FLIP");
     assert!(matches!(&r.map, Some(MapState::Qualified(m)) if m.anchors == 16));
     assert_eq!(r.frames.len(), 120);
-    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.present_wait.is_none()));
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.presentation.is_none()));
     assert_eq!(r.frames.iter().filter(|f| f.reason == ps3dk_prof::auto_rsx::NOT_DISTINGUISHED).count(), 112);
     assert_eq!(r.frames[119].reason, ps3dk_prof::auto_rsx::FINAL_FRAME);
     assert!(r.frames[..112].iter().all(|f| f.rsx_frame_ppu.is_some()));
@@ -719,4 +728,114 @@ fn batched_ops_chunk_and_console_fixture() {
     assert_eq!((r.ops_parsed, r.ops_valid), (600, 600));
     assert!(r.frames.is_empty() && r.clocks.is_empty());
     assert!(ps3dk_prof::auto_rsx::frame_source(&r).starts_with("NONE"));
+}
+
+// ---- presentation writer (CONFIG masks 31/11): flip-wait scopes and polling cadence --------------------------------
+
+/// The presentation block at 352: cadence runs, broken, spanning; spanning scopes; cadence ticks; timed-out scopes.
+#[derive(Clone, Copy, Default)]
+struct Blk {
+    runs: u32,
+    broken: u32,
+    spanning: u32,
+    scope_spanning: u32,
+    ticks: u64,
+    timeouts: u32,
+    reserved: u32,
+}
+fn pres_cfg() -> ACfg {
+    let mut c = seg_cfg();
+    c.words[4] = 31;
+    c
+}
+fn pres_file(rest: Vec<Chunk>) -> File {
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(pres_cfg().chunk());
+    f.chunks.extend(rest);
+    f
+}
+fn coverage_p(r: &ARow, k: &Blk) -> Chunk {
+    let mut c = coverage(r);
+    let mut b = Buf::default();
+    b.u32(k.runs).u32(k.broken).u32(k.spanning).u32(k.scope_spanning).u64(k.ticks).u32(k.timeouts).u32(k.reserved);
+    c.payload.extend_from_slice(&b.0);
+    c
+}
+/// four_frames with the 31/11 masks; row i carries PRESENT, `scopes[i]` (scopes, ticks) at 12/56 and `blk[i]`.
+fn four_frames_scopes(scopes: [(u32, u64); 4], blk: [Blk; 4]) -> File {
+    let mut f = four_frames();
+    let at = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+    f.chunks[at] = pres_cfg().chunk();
+    let rows: Vec<usize> = f.chunks.iter().enumerate().filter(|(_, c)| c.ty == 36).map(|(i, _)| i).collect();
+    for (k, (&i, t)) in rows.iter().zip([10_000u64, 110_000, 210_000, 310_000]).enumerate() {
+        let mut x = row(k as u64, (t, t + 100_000), 1);
+        x.flags |= 64;
+        x.present = scopes[k];
+        f.chunks[i] = coverage_p(&x, &blk[k]);
+    }
+    f
+}
+
+#[test]
+fn pacing_needs_flip_wait_scopes() {
+    let none = Blk::default();
+    // frame 1 (RSX not limiting) spent 60% of its interval inside cellGcmWaitFlipComplete: PACING
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0), (2, 60_000), (0, 0), (0, 0)], [none; 4]).bytes())
+        .expect("reads"));
+    let v: Vec<Verdict> = r.frames.iter().map(|f| f.verdict).collect();
+    assert_eq!(v, [Verdict::RsxBound, Verdict::Pacing, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
+    assert!(r.frames[1].reason.starts_with("presentation: flip-wait scope elapsed time, including scheduling and \
+        polling, >= 60000 of 100000 PPU ticks (2 scope(s))"), "{}", r.frames[1].reason);
+    // useful CPU work between every poll, every gap within the bound: cadence 60% of the frame, still UNKNOWN
+    let cadence = Blk { runs: 1, ticks: 60_000, ..none };
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0); 4], [none, cadence, none, none]).bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::POLLING_ONLY);
+    // a poll, application work (a gap over the bound), a done poll: a broken run, UNKNOWN
+    let broken = Blk { broken: 1, ..none };
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0); 4], [none, broken, none, none]).bytes()).unwrap());
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::POLLING_ONLY);
+    // a short scope plus long cadence: still not a quarter of the frame inside scopes
+    let r = analyze(&reader::read(&four_frames_scopes([(0, 0), (1, 20_000), (0, 0), (0, 0)], [none, cadence, none,
+        none]).bytes()).unwrap());
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    let p = r.frames[1].presentation.as_ref().unwrap();
+    assert_eq!((p.flip_wait, p.cadence.map(|c| c.ticks), p.legacy_polls), (Some((20_000, 1)), Some(60_000), None));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut out, &r).unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(j["frames"][1]["presentation"]["flip_wait"]["ticks"], 20_000);
+    assert_eq!(j["frames"][1]["presentation"]["polling_cadence"]["ticks"], 60_000);
+}
+
+#[test]
+fn presentation_rows_refusals() {
+    let mut x = row(0, (10, 20), 0);
+    x.flags |= 64;
+    let ok = Blk::default();
+    assert!(reader::read(&pres_file(vec![coverage_p(&x, &ok)]).bytes()).is_ok());
+    // a 31/11 row is 384 bytes; a 352-byte row is refused, and a 15/11 capture refuses the 384-byte row
+    assert_eq!(rule(&pres_file(vec![coverage(&x)])), Rule::AutoCoverage);
+    assert_eq!(rule(&seg_file(vec![coverage_p(&x, &ok)])), Rule::AutoCoverage);
+    let cases: Vec<(Blk, (u32, u64), u16, &str)> = vec![
+        (Blk { reserved: 1, ..ok }, (0, 0), 64, "reserved"),
+        (Blk { runs: 1, ..ok }, (0, 0), 0, "without PRESENT"),
+        (Blk { ticks: 5, ..ok }, (0, 0), 64, "without a complete run"),
+        (Blk { timeouts: 2, ..ok }, (1, 5), 64, "timed-out"),
+        (ok, (0, 5), 64, "presentation count"),
+    ];
+    for (k, present, flags, want) in cases {
+        let mut y = row(0, (10, 20), 0);
+        y.flags |= flags;
+        y.present = present;
+        let e = reader::read(&pres_file(vec![coverage_p(&y, &k)]).bytes()).expect_err(want);
+        assert_eq!(e.rule, Rule::AutoCoverage, "{want}");
+        assert!(e.detail.contains(want), "{want}: {}", e.detail);
+    }
+    // this reader accepts exactly the three defined mask pairs
+    let mut c = pres_cfg();
+    c.words[4] = 23;
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(c.chunk());
+    assert_eq!(rule(&f), Rule::AutoConfig);
 }

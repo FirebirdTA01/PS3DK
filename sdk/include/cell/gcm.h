@@ -704,6 +704,45 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
  * next to the GCM_* originals our runtime layer exposes. */
 #include <cell/gcm/gcm_enum.h>
 
+/* Wait for the flip queued last to complete: poll cellGcmGetFlipStatus and
+ * sleep between polls (sys_timer_usleep, at most
+ * PS3TC_GCM_WAIT_FLIP_POLL_US each) until the status reads done.  max_us
+ * bounds the total requested sleep.  CELL_OK when the flip completed,
+ * CELL_GCM_ERROR_FAILURE when max_us of sleep passed first (the flip is still
+ * pending; nothing is cancelled).  Reset the status with
+ * cellGcmResetFlipStatus before queueing the flip, as for a hand-written
+ * poll loop.
+ *
+ * In a PS3_PROF_AUTO build the call is a flip-wait scope: the profiler
+ * records its outer elapsed time, including scheduling and polling, as the
+ * frame's presentation wait.  That is the evidence a frame needs to read as
+ * presentation pacing; a hand-written loop around cellGcmGetFlipStatus is
+ * recorded only as polling cadence. */
+#ifndef PS3TC_GCM_WAIT_FLIP_POLL_US
+#define PS3TC_GCM_WAIT_FLIP_POLL_US 100u
+#endif
+static inline int32_t cellGcmWaitFlipComplete(uint32_t max_us)
+{
+	uint32_t slept = 0;
+	int32_t rc = 0;
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
+	uint64_t scope = ps3dk_prof__auto_flip_wait_begin();
+#endif
+	while (cellGcmGetFlipStatus() != 0) {
+		uint32_t step = max_us - slept < PS3TC_GCM_WAIT_FLIP_POLL_US ? max_us - slept : PS3TC_GCM_WAIT_FLIP_POLL_US;
+		if (slept >= max_us) {
+			rc = (int32_t)CELL_GCM_ERROR_FAILURE;
+			break;
+		}
+		sys_timer_usleep(step);
+		slept += step;
+	}
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
+	ps3dk_prof__auto_flip_wait_end(scope, rc);
+#endif
+	return rc;
+}
+
 /* cellGcmCg* struct-walker API (libgcm_cmd.a in the installed SDK).  Cell OS
  * samples include <cell/gcm.h> and call cellGcmCgInitProgram /
  * cellGcmCgGetUCode / cellGcmCgGetNamedParameter / etc. without a

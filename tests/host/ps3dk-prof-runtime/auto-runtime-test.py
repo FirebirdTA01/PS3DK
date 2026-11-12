@@ -16,16 +16,18 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','flips','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
-                                  'segment-silent','no-flip-frames','one-record-chunks','no-present-wait'])
+                                  'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
+                                  'poll-wait','poll-scope-cadence'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments',
-                          'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips'}[a.mutant] and not a.sanitize
+                          'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
+                          'poll-wait':'present','poll-scope-cadence':'present'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -60,7 +62,9 @@ def run(name,cmd,cwd=out):
                   'fifo-freeze':b'ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_ESTOPPED',
                   'segment-silent':b'ticket && app==before+2',
                   'no-flip-frames':b'counts[0]==i+1',
-                  'no-present-wait':b'present[0]==1 && present[1]>0'}[a.mutant]
+                  'no-present-wait':b'present[2]==1 && present[3]>0',
+                  'poll-wait':b'p[0]==0 && p[1]==0',
+                  'poll-scope-cadence':b'p[2]==0 && p[4]==0'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -78,7 +82,8 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','flips'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
 if a.sanitize=='address':
@@ -128,8 +133,26 @@ for rel in sources:
         code=source.read_text();old='    a->in_flip_frame=1;\n    ps3dk_prof_frame();\n';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    a->in_flip_frame=1;\n').encode())
     elif a.mutant=='no-present-wait' and rel=='auto_rsx/auto_runtime.c':
-        code=source.read_text();old='*w=UINT64_MAX-*w<add ? UINT64_MAX:*w+add;';assert code.count(old)==1
-        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'(void)w;(void)add;').encode())
+        code=source.read_text();old='else {add32(&f->cadence_runs);add64(&f->cadence,a->cadence_ticks);}'
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'else (void)f;').encode())
+    elif a.mutant=='poll-wait' and rel=='auto_rsx/auto_runtime.c':
+        # review finding 1 reintroduced: the interval between a pending and a done poll counts as a wait
+        code=source.read_text();old='    if(a->cadence_open) cadence_close(a,cadence_gap(a,before));\n}'
+        assert code.count(old)==1
+        new=('    if(a->cadence_open && a->coverage.active) {add32(&a->coverage.live.flip_waits);'
+             'add64(&a->coverage.live.flip_wait,before-a->cadence_last);}\n'+old[4:])
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    '+new).encode())
+    elif a.mutant=='poll-scope-cadence' and rel=='auto_rsx/auto_runtime.c':
+        # polls inside a flip-wait scope counted again as cadence
+        code=source.read_text();old='if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;'
+        assert code.count(old)==1
+        new='if(!before || !(a=owner_capture(NULL,0))) return;'
+        code=code.replace(old,new)
+        old2='if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;\n    return observation_tb()|1u;'
+        assert code.count(old2)==1
+        code=code.replace(old2,'if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;\n    return observation_tb()|1u;')
+        source=out/'auto_runtime.c';source.write_bytes(code.encode())
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
@@ -184,6 +207,7 @@ if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-cl
 if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
+if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 run('link',[cc,*flags,out/'main.c',out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
@@ -201,6 +225,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
+                       else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
                        else b'AUTO FIFO refusal and unpublished cleanup PASS\n' if a.case in ('fifofail','fifopre','fifopost')
                        else b'application complete\n'),result.stdout
@@ -237,7 +262,7 @@ if a.case=='fifopost':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(15,11),'CONFIG kind/form masks of the D1/D2 writer'
+    assert struct.unpack_from('<2I',config,24)==(31,11),'CONFIG kind/form masks of the presentation writer'
     records=[]
     for k,b in auto:
         if k!=35:continue
@@ -265,7 +290,7 @@ if a.case=='segments':
     assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
     for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
-        assert len(b)==352 and struct.unpack_from('<H',b,2)[0]==3|64
+        assert len(b)==384 and struct.unpack_from('<H',b,2)[0]==3|64
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
@@ -277,12 +302,16 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(15,11)
+    assert struct.unpack_from('<2I',config,24)==(31,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
+    assert all(len(b)==384 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
     assert flags==[1|2|32|64]*19+[1|2|16|32|64,1|2|16|64,1|2|64],flags # flip rows; flip 19 closed OPEN by the explicit call
-    present=[struct.unpack_from('<IQ',b,12)[0:1]+struct.unpack_from('<Q',b,56) for b in rows]
-    assert all(w==1 and t>0 for w,t in present[:20]) and present[20:]==[(0,0),(0,0)],present
+    # hand-written polls are polling cadence, never flip-wait scopes: one complete run per flip frame
+    scopes=[struct.unpack_from('<I',b,12)+struct.unpack_from('<Q',b,56) for b in rows]
+    cadence=[struct.unpack_from('<3I',b,352)+struct.unpack_from('<Q',b,368) for b in rows]
+    assert all(x==(0,0) for x in scopes),scopes
+    assert all(c[:3]==(1,0,0) and c[3]>0 for c in cadence[:20]) and cadence[20:]==[(0,0,0,0)]*2,cadence
     assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(22))
     assert all(struct.unpack_from('<12Q',b,64+2*96)[:2]==(1,1) for b in rows),'one observed clear per frame'
     records=[]
@@ -301,6 +330,41 @@ if a.case=='flips':
     assert fields[1]==1|256|512,('FINAL with FRAMES_FLIP and FRAMES_EXPLICIT',fields[1])
     assert fields[4]==67 and fields[5]==67 and fields[10]==1 and fields[17]==0,fields
     print('real capture: frames from flips, explicit precedence, unassociated before the first flip PASS')
+    raise SystemExit(0)
+if a.case in ('present','spanning'):
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(31,11)
+    rows=[b for k,b in auto if k==36]
+    n=3 if a.case=='present' else 5
+    assert len(rows)==n and all(len(b)==384 for b in rows),[len(b) for b in rows]
+    assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(n))
+    MS=1000000
+    def present(b):
+        scopes,ticks=struct.unpack_from('<I',b,12)[0],struct.unpack_from('<Q',b,56)[0]
+        runs,broken,spanning,scope_spanning=struct.unpack_from('<4I',b,352)
+        cadence,timeouts,reserved=struct.unpack_from('<QII',b,368)
+        assert reserved==0
+        return dict(scopes=scopes,ticks=ticks,runs=runs,broken=broken,spanning=spanning,
+                    scope_spanning=scope_spanning,cadence=cadence,timeouts=timeouts)
+    r=[present(b) for b in rows]
+    assert all(struct.unpack_from('<H',b,2)[0]&64 for b in rows)
+    if a.case=='present':
+        assert (r[0]['scopes'],r[0]['ticks'],r[0]['runs'],r[0]['broken'])==(0,0,0,1),r[0]
+        assert r[1]['scopes']==0 and r[1]['runs']==1 and 20*MS<=r[1]['cadence']<21*MS,r[1]
+        assert (r[2]['scopes'],r[2]['timeouts'],r[2]['runs'],r[2]['broken'])==(2,1,0,1) and 23*MS<=r[2]['ticks']<25*MS,r[2]
+        assert all(x['spanning']==0 and x['scope_spanning']==0 for x in r),r
+        fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+        assert fields[1]==1|256,fields
+        print('real capture: flip-wait scopes counted once, polling cadence and two-poll intervals never a wait PASS')
+    else:
+        # boundary-spanning runs and scopes: counted in both frames, charged to neither
+        assert (r[0]['runs'],r[0]['spanning'],r[0]['scopes'])==(0,1,0),r[0]
+        assert (r[1]['runs'],r[1]['spanning'],r[1]['scopes'],r[1]['scope_spanning'])==(0,1,0,1),r[1]
+        assert r[2]['scopes']==1 and 2*MS<=r[2]['ticks']<3*MS and r[2]['scope_spanning']==1,r[2]
+        assert (r[3]['runs'],r[3]['spanning'])==(0,1) and (r[4]['runs'],r[4]['spanning'])==(0,2),(r[3],r[4])
+        fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+        assert fields[1]==1|256|512,fields
+        print('real capture: runs and scopes across flip-derived and explicit boundaries charged to neither frame PASS')
     raise SystemExit(0)
 if a.case in ('clocks','clockcap'):
     frames=256 if a.case=='clockcap' else 64
@@ -371,7 +435,7 @@ if operations:
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
         for i,b in enumerate(rows):
-            assert len(b)==352 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
+            assert len(b)==384 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
             assert struct.unpack_from('<Q',b,16)[0]==i
             assert struct.unpack_from('<Q',b,24)[0]<=struct.unpack_from('<Q',b,32)[0]
             assert not any(struct.unpack_from('<24Q',b,64))
@@ -397,7 +461,7 @@ config,status=auto[0][1],auto[1][1]
 assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,15,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,31,11)
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
     domains=[b for k,b in chunks if k==8];assert len(domains)==1

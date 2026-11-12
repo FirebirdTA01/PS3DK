@@ -132,6 +132,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     next->context=gc;next->owner_slot=g_tls.slot1-1;
     next->owner_incarnation=g_tls.incarnation;next->owner_generation=g_tls.generation;
     next->allocated=bytes;next->frame_capacity=o->frame_records;
+    next->cadence_bound=p->tb_freq/(1000000u/AUTO_CADENCE_BOUND_US);
     next->frames=(auto_wire_frame *)((uint8_t *)next+frames);
     (void)auto_frames_init(&next->coverage,next->frames,o->frame_records,1,g_tls.incarnation);
     if(!auto_clock_init(&next->clocks,1,1,o->report_first,p->tb_freq)) {
@@ -762,7 +763,7 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
         if(frame%8u==0) sample_clock(a,frame);
         if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
         if(auto_frames_open(&a->coverage,frame,tb)) {
-            a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT; /* this writer observes flip-status polls */
+            a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT; /* this writer observes presentation (block at 352) */
             if(flip) {a->coverage.live.flags|=AUTO_FRAME_ROW_FLIP;increment(a,&a->frames_by_flip);}
             else increment(a,&a->frames_by_explicit);
             frame_mark(a,AUTO_FRAME_BEGIN);
@@ -781,41 +782,89 @@ static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
     return 1;
 }
 
-/* A flip queued on the owner thread through the GCM layer: it closes the
- * active frame and opens the next one through the core frame call, so FRAME
- * events, clock anchors and coverage behave as for explicit frames. Before the
- * first flip nothing is associated; after an explicit ps3dk_prof_frame, flips
- * no longer delimit frames and are counted as ignored. */
-/* Flip-status polling on the owner thread (gcmGetFlipStatus in the selected
- * build). A wait runs from the first poll that saw the flip pending (its
- * return) to the call that saw it done (its entry): owner time spent polling
- * for presentation, a lower bound of nothing else. It is charged to the frame
- * active when the done poll is seen. No device access; no lock. */
+/* Presentation observation on the owner thread. No device access; no lock.
+ *
+ * Polling cadence (gcmGetFlipStatus in the selected build): a run is a
+ * sequence of consecutive polls that saw the flip pending, closed by a poll
+ * that saw it done. Its evidence is the sum of the gaps between consecutive
+ * polls (previous return to next entry), counted only while every gap is at
+ * most cadence_bound (1 ms). A larger gap ends the run as broken; the next
+ * pending poll starts a new one. Cadence bounds how often the owner looked at
+ * the flip, not whether it was waiting: the owner may have done useful work
+ * between any two polls, so cadence never establishes presentation pacing.
+ * 1 ms is below a sixteenth of the shortest display period (16.68 ms at
+ * 59.94 Hz), far below any frame the verdict could judge, and above the cost
+ * of a poll and a short sleep, so a loop that only polls and sleeps briefly
+ * stays inside it while a loop doing visible work between polls does not.
+ *
+ * Flip-wait scope (cellGcmWaitFlipComplete): the helper's semantics are
+ * waiting for flip completion, so its outer elapsed time is waiting
+ * evidence: flip-wait scope elapsed time, including scheduling and polling,
+ * never exact RSX wait or device completion time. Polls inside a scope are
+ * part of it and are not counted again as cadence. */
+static void add32(uint32_t *v) {if(*v!=UINT32_MAX) ++*v;}
+static void add64(uint64_t *v,uint64_t n) {*v=UINT64_MAX-*v<n ? UINT64_MAX:*v+n;}
+static void cadence_close(auto_capture *a,int complete)
+{
+    auto_wire_frame *f=&a->coverage.live;
+    a->cadence_open=0;
+    if(!a->coverage.active) return;
+    if(!complete) add32(&f->cadence_broken);
+    else {add32(&f->cadence_runs);add64(&f->cadence,a->cadence_ticks);}
+}
+/* The gap from the previous pending poll's return to this poll's entry: 1 and
+ * counted when within the bound, 0 when it breaks the run. */
+static int cadence_gap(auto_capture *a,uint64_t before)
+{
+    uint64_t gap;
+    if(before<a->cadence_last || (gap=before-a->cadence_last)>a->cadence_bound) return 0;
+    add64(&a->cadence_ticks,gap);
+    return 1;
+}
 uint64_t ps3dk_prof__auto_flip_status_begin(void)
 {
-    if(!p_ready() || g_tls.in_gpu || !owner_capture(NULL,0)) return 0;
+    auto_capture *a;
+    if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;
     return observation_tb()|1u; /* never 0 for an observed call */
 }
 void ps3dk_prof__auto_flip_status_end(uint64_t before,uint32_t status)
 {
     auto_capture *a;
-    uint64_t after;
-    if(!before || !(a=owner_capture(NULL,0))) return;
-    after=observation_tb();
+    if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;
     if(status) {
-        if(!a->present_pending) {a->present_pending=1;a->present_since=after;}
+        if(a->cadence_open && !cadence_gap(a,before)) cadence_close(a,0);
+        if(!a->cadence_open) {a->cadence_open=1;a->cadence_ticks=0;}
+        a->cadence_last=observation_tb();
         return;
     }
-    if(!a->present_pending) return;
-    a->present_pending=0;
-    if(!a->coverage.active || before<a->present_since) return;
-    {
-        uint64_t add=before-a->present_since,*w=&a->coverage.live.present_wait;
-        *w=UINT64_MAX-*w<add ? UINT64_MAX:*w+add;
-        if(a->coverage.live.present_waits!=UINT32_MAX) a->coverage.live.present_waits++;
-    }
+    if(a->cadence_open) cadence_close(a,cadence_gap(a,before));
 }
 
+uint64_t ps3dk_prof__auto_flip_wait_begin(void)
+{
+    auto_capture *a;
+    if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;
+    if(a->cadence_open) cadence_close(a,0); /* the scope takes over: the run never saw its done poll */
+    a->flip_wait_open=1;a->flip_wait_since=observation_tb();
+    return a->flip_wait_since|1u;
+}
+void ps3dk_prof__auto_flip_wait_end(uint64_t scope,int32_t rc)
+{
+    auto_capture *a;
+    uint64_t after;
+    if(!scope || !(a=owner_capture(NULL,0)) || !a->flip_wait_open) return;
+    after=observation_tb();
+    a->flip_wait_open=0;
+    if(!a->coverage.active || after<a->flip_wait_since) return;
+    add32(&a->coverage.live.flip_waits);add64(&a->coverage.live.flip_wait,after-a->flip_wait_since);
+    if(rc) add32(&a->coverage.live.flip_wait_timeouts);
+}
+
+/* A flip queued on the owner thread through the GCM layer: it closes the
+ * active frame and opens the next one through the core frame call, so FRAME
+ * events, clock anchors and coverage behave as for explicit frames. Before the
+ * first flip nothing is associated; after an explicit ps3dk_prof_frame, flips
+ * no longer delimit frames and are counted as ignored. */
 void ps3dk_prof__auto_flip(struct _gcmCtxData *context,int32_t ok)
 {
     auto_capture *a;
@@ -848,12 +897,16 @@ uint64_t ps3dk_prof__auto_test_clock_backlog(void)
     const auto_capture *a=capture;
     return a ? LD_ACQ(&a->clocks.write_idx)-LD_ACQ(&a->clocks.read_idx):0;
 }
-/* Owner thread only: frames by source and flips ignored after an explicit call. */
-void ps3dk_prof__auto_test_present(uint64_t out[2])
+/* Owner thread only: the active row's presentation fields: flip-wait scopes,
+ * their ticks, cadence runs, cadence ticks, broken runs, spanning runs,
+ * spanning scopes, timed-out scopes. */
+void ps3dk_prof__auto_test_present(uint64_t out[8])
 {
     const auto_capture *a=capture;
-    out[0]=a && a->coverage.active ? a->coverage.live.present_waits:0;
-    out[1]=a && a->coverage.active ? a->coverage.live.present_wait:0;
+    const auto_wire_frame *f=a && a->coverage.active ? &a->coverage.live:NULL;
+    out[0]=f ? f->flip_waits:0;out[1]=f ? f->flip_wait:0;out[2]=f ? f->cadence_runs:0;out[3]=f ? f->cadence:0;
+    out[4]=f ? f->cadence_broken:0;out[5]=f ? f->cadence_spanning:0;out[6]=f ? f->flip_wait_spanning:0;
+    out[7]=f ? f->flip_wait_timeouts:0;
 }
 /* Owner thread only: frames by source and flips ignored after an explicit call. */
 void ps3dk_prof__auto_test_frames(uint64_t out[3])

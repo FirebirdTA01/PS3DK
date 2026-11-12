@@ -1385,11 +1385,14 @@ static inline u32 ps3tc_auto_gcmSetPrepareFlip(gcmContextData *context,const u8 
 	ps3dk_prof__auto_flip(context,(s32)q>=0);
 	return q;
 }
-/* Flip-status polling is the presentation wait the SDK sees: the observer
- * accumulates, per frame, the owner's time from the first pending poll to the
- * poll that sees the flip done. */
+/* Flip-status polling: the observer records polling cadence (runs of pending
+ * polls with short gaps), which shows how often the owner looked, not that it
+ * waited. Waiting is recorded only for cellGcmWaitFlipComplete (cell/gcm.h),
+ * a flip-wait scope with these two hooks. */
 u64 ps3dk_prof__auto_flip_status_begin(void);
 void ps3dk_prof__auto_flip_status_end(u64 before,u32 status);
+u64 ps3dk_prof__auto_flip_wait_begin(void);
+void ps3dk_prof__auto_flip_wait_end(u64 scope,s32 rc);
 static inline u32 ps3tc_auto_gcmGetFlipStatus(void)
 {
 	u64 before=ps3dk_prof__auto_flip_status_begin();
