@@ -1,0 +1,699 @@
+/*
+ * gcm-state-native-test.c — byte-identical guard (aarch64 / x86 host).
+ *
+ * Covers the native emitters in <cell/gcm/gcm_state_native.h> across five
+ * groups (logic-op, depth, blend, dither, stencil, raster-state), each
+ * with an _unsafe twin.
+ *
+ * Two checks per native:
+ *   1. byte-identity vs the pre-patch commands_impl.h body
+ *      (safe == old RSX_UNSAFE=0 body; unsafe == old RSX_UNSAFE=1 body),
+ *      across a small argument sweep;
+ *   2. RING-FULL: with end==current (zero room) and a recording callback,
+ *      the SAFE native must invoke the callback ONCE with the correct
+ *      count; the UNSAFE native must never invoke it (plain write).
+ *
+ * No expected hex is hard-coded: the reference uses the real <rsx/nv40.h>
+ * method IDs and the same (count<<18)|method layout.
+ *
+ * Float-carrying natives (SetDepthBounds, SetPolygonOffset) are compared
+ * on the IEEE-32 BIT PATTERNS (d.u), not float values.
+ *
+ * Host note:
+ *   - Runs on a non-PowerPC host via `-DATTRIBUTE_PRXPTR=` (ppu-types.h is
+ *     wrapped in #ifndef) — no per-SDK-header shim copies.
+ *   - <cell/gcm.h> host-compiles under that setup, so the SAFE path drives
+ *     the REAL ps3tc_gcm_reserve (the single ring-full + callback path
+ *     shared with the tex/cg bridges).
+ *   - The PPU-side rsx* / rsx*-Unsafe are the same inline natives (one
+ *     writer); old-vs-new rsx object word comparison is done under the PPU
+ *     cross toolchain, not on this host.
+ *   - The public cell* forwarders are verified separately by
+ *     gcm-state-cellpath-host.c (byte-for-byte == the shared native).
+ */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
+
+#include <ppu-types.h>                 /* u32/f32/ieee32 + guarded ATTRIBUTE_PRXPTR */
+#include <cell/gcm.h>                  /* CellGcmContextData + ps3tc_gcm_reserve */
+#include <cell/gcm/gcm_state_native.h> /* the natives under test */
+
+/* (count<<18)|method — identical to RSX_METHOD() and PS3TC_GCM_METHOD(). */
+#define REF_METHOD(m, count) ((((uint32_t)(count)) << 18) | (uint32_t)(m))
+
+/* -------------------------------------------------------------------- *
+ * Reference (pre-patch commands_impl.h bodies), in-test.
+ * -------------------------------------------------------------------- */
+static void ref_safe1(gcmContextData *ctx, uint32_t method, uint32_t val)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(method, 1);
+    ctx->current[1] = val;
+    ctx->current   += 2;
+}
+static void ref_unsafe1(gcmContextData *ctx, uint32_t method, uint32_t val)
+{
+    ctx->current[0] = REF_METHOD(method, 1);
+    ctx->current[1] = val;
+    ctx->current   += 2;
+}
+static void ref_safe_floats(gcmContextData *ctx, f32 a, f32 b)
+{
+    ieee32 d0, d1; d0.f = a; d1.f = b;
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_DEPTH_BOUNDS_MIN, 2);
+    ctx->current[1] = d0.u;
+    ctx->current[2] = d1.u;
+    ctx->current   += 3;
+}
+static void ref_unsafe_floats(gcmContextData *ctx, f32 a, f32 b)
+{
+    ieee32 d0, d1; d0.f = a; d1.f = b;
+    ctx->current[0] = REF_METHOD(NV40TCL_DEPTH_BOUNDS_MIN, 2);
+    ctx->current[1] = d0.u;
+    ctx->current[2] = d1.u;
+    ctx->current   += 3;
+}
+/* ---- blend / dither references (pre-patch rsx* bodies), in-test ---- */
+static void ref_blend_func(gcmContextData *ctx, uint16_t sf,uint16_t df,uint16_t sa,uint16_t da)
+{
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_FUNC_SRC, 2);
+    ctx->current[1] = ((uint32_t)sa << 16) | sf;
+    ctx->current[2] = ((uint32_t)da << 16) | df;
+    ctx->current   += 3;
+}
+static void ref_blend_equation(gcmContextData *ctx, uint16_t color, uint16_t alpha)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_EQUATION, 1);
+    ctx->current[1] = ((uint32_t)alpha << 16) | color;
+    ctx->current   += 2;
+}
+static void ref_blend_color(gcmContextData *ctx, uint32_t c0, uint32_t c1)
+{
+    if (ctx->current + 4 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 4) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_COLOR, 1);
+    ctx->current[1] = c0;
+    ctx->current[2] = REF_METHOD(NV40TCL_BLEND_COLOR2, 1);
+    ctx->current[3] = c1;
+    ctx->current   += 4;
+}
+/* unsafe (plain-write) twins */
+static void ref_unsafe_blend_func(gcmContextData *ctx, uint16_t sf,uint16_t df,uint16_t sa,uint16_t da)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_FUNC_SRC, 2);
+    ctx->current[1] = ((uint32_t)sa << 16) | sf;
+    ctx->current[2] = ((uint32_t)da << 16) | df;
+    ctx->current   += 3;
+}
+static void ref_unsafe_blend_equation(gcmContextData *ctx, uint16_t color, uint16_t alpha)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_EQUATION, 1);
+    ctx->current[1] = ((uint32_t)alpha << 16) | color;
+    ctx->current   += 2;
+}
+static void ref_unsafe_blend_color(gcmContextData *ctx, uint32_t c0, uint32_t c1)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_BLEND_COLOR, 1);
+    ctx->current[1] = c0;
+    ctx->current[2] = REF_METHOD(NV40TCL_BLEND_COLOR2, 1);
+    ctx->current[3] = c1;
+    ctx->current   += 4;
+}
+/* ---- stencil references: one header (count=3) + 3 data words (4 words) ---- */
+static void ref_safe_triple(gcmContextData *ctx, uint32_t method, uint32_t a, uint32_t b, uint32_t c)
+{
+    if (ctx->current + 4 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 4) != 0) return;
+    ctx->current[0] = REF_METHOD(method, 3);
+    ctx->current[1] = a;
+    ctx->current[2] = b;
+    ctx->current[3] = c;
+    ctx->current   += 4;
+}
+static void ref_unsafe_triple(gcmContextData *ctx, uint32_t method, uint32_t a, uint32_t b, uint32_t c)
+{
+    ctx->current[0] = REF_METHOD(method, 3);
+    ctx->current[1] = a;
+    ctx->current[2] = b;
+    ctx->current[3] = c;
+    ctx->current   += 4;
+}
+/* ---- raster-state extra references (3 words, header + 2 data) ---- */
+static void ref_safe_pair3(gcmContextData *ctx, uint32_t method, uint32_t a, uint32_t b)
+{
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_METHOD(method, 2);
+    ctx->current[1] = a;
+    ctx->current[2] = b;
+    ctx->current   += 3;
+}
+static void ref_unsafe_pair3(gcmContextData *ctx, uint32_t method, uint32_t a, uint32_t b)
+{
+    ctx->current[0] = REF_METHOD(method, 2);
+    ctx->current[1] = a;
+    ctx->current[2] = b;
+    ctx->current   += 3;
+}
+
+/* -------------------------------------------------------------------- *
+ */
+static int failures = 0;
+static void cmp(const char *label, const uint32_t *nw, const uint32_t *rf, size_t nwords)
+{
+    printf("  %-34s [", label);
+    for (size_t i = 0; i < nwords; i++) printf("0x%08x ", nw[i]);
+    printf("]");
+    printf("   pre=[");
+    for (size_t i = 0; i < nwords; i++) printf("0x%08x ", rf[i]);
+    printf("]");
+    if (memcmp(nw, rf, nwords * sizeof(*nw)) == 0) printf("  ok\n");
+    else { printf("  MISMATCH\n"); failures++; }
+}
+
+/* safe/unsafe driver for the 2-word families. */
+static void drive_uint(const char *name,
+                       void (*s)(CellGcmContextData *, uint32_t),
+                       void (*u)(CellGcmContextData *, uint32_t),
+                       uint32_t method, uint32_t val)
+{
+    static uint32_t A[4], B[4];
+    gcmContextData n, r;
+    memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+    n.begin = n.current = A;  n.end = A + 4; n.callback = 0;
+    r.begin = r.current = B;  r.end = B + 4; r.callback = 0;
+    s((CellGcmContextData *)&n, val); ref_safe1(&r, method, val);
+    cmp(name, A, B, 2);
+
+    n.begin = n.current = A; r.begin = r.current = B;
+    u((CellGcmContextData *)&n, val); ref_unsafe1(&r, method, val);
+    cmp(name, A, B, 2);
+}
+
+/* -------------------------------------------------------------------- *
+ * Ring-full / callback semantics (point 3 of the depth-group review):
+ *   with end == current (zero room) and a recording callback,
+ *   - SAFE   natives must invoke the callback exactly ONCE with the
+ *            emitter's reserved count, then proceed to write;
+ *   - UNSAFE natives must never invoke the callback (they write plainly).
+ *
+ * One callback recorder is shared between the safe and unsafe sub-tasks
+ * for one native so we get a clean per-native report.
+ * -------------------------------------------------------------------- */
+static int g_spy_calls;
+static uint32_t g_spy_count;
+static int32_t spy_cb(gcmContextData *ctx, uint32_t count)
+{
+    g_spy_calls++;
+    g_spy_count = count;
+    ctx->end += count;          /* "compact": make room so the safe write proceeds */
+    return 0;
+}
+
+static void report_ring(const char *label, char kind, uint32_t expected_count)
+{
+    char tag[128];
+    if (kind == 's')
+        snprintf(tag, sizeof tag,
+                 "  ring-full %-28s safe   (calls=%d count=0x%08x, expect exactly 1 call of %u)",
+                 label, g_spy_calls, g_spy_count, expected_count);
+    else
+        snprintf(tag, sizeof tag,
+                 "  ring-full %-28s unsafe (calls=%d, expect 0)",
+                 label, g_spy_calls);
+    int pass = (kind == 's')
+        ? (g_spy_calls == 1 && g_spy_count == expected_count)
+        : (g_spy_calls == 0);
+    printf("%s  %s\n", tag, pass ? "ok" : "MISMATCH");
+    if (!pass) failures++;
+}
+
+/* Invoke `SAFE_N` once against a full ring, then `UNSAFE_N` once with
+ * the given variadic args; check safe called the callback exactly once
+ * with EXPECTED, unsafe called it zero times.  Real function pointers,
+ * no void* casts — works the same for uint-pair and float-pair natives. */
+#define RING_CHECK(SAFE_N, UNSAFE_N, LABEL, EXPECTED, ...) do { \
+        g_spy_calls = 0; g_spy_count = 0; \
+        { gcmContextData rf; memset(&rf, 0, sizeof rf); \
+          uint32_t _rb[8]; \
+          rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
+          SAFE_N(&rf, ##__VA_ARGS__); \
+          report_ring(LABEL, 's', EXPECTED); } \
+        g_spy_calls = 0; g_spy_count = 0; \
+        { gcmContextData rf; memset(&rf, 0, sizeof rf); \
+          uint32_t _rb[8]; \
+          rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
+          UNSAFE_N(&rf, ##__VA_ARGS__); \
+          report_ring(LABEL, 'u', 0); } \
+    } while (0)
+
+int main(void)
+{
+    printf("  [aarch64 host]  natives (safe+unsafe) vs pre-patch rsx* body\n\n");
+
+    /* ---- logic-op family ---- */
+    printf("  Logic-OP\n");
+    for (uint32_t v = 0x1500; v <= 0x150f; ++v)
+        drive_uint("  logic_op",
+                   ps3tc_gcm_state_logic_op,
+                   ps3tc_gcm_state_logic_op_unsafe,
+                   NV40TCL_COLOR_LOGIC_OP, v);
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  logic_op_enable",
+                   ps3tc_gcm_state_logic_op_enable,
+                   ps3tc_gcm_state_logic_op_enable_unsafe,
+                   NV40TCL_COLOR_LOGIC_OP_ENABLE, v);
+
+    /* ---- depth family (2-word) ---- */
+    printf("\n  Depth (2-word)\n");
+    for (uint32_t v = 0; v <= 3; ++v)
+        drive_uint("  depth_test_enable",
+                   ps3tc_gcm_state_depth_test_enable,
+                   ps3tc_gcm_state_depth_test_enable_unsafe,
+                   NV40TCL_DEPTH_TEST_ENABLE, v);
+    for (uint32_t v = 0; v <= 4; ++v)
+        drive_uint("  depth_func",
+                   ps3tc_gcm_state_depth_func,
+                   ps3tc_gcm_state_depth_func_unsafe,
+                   NV40TCL_DEPTH_FUNC, v);
+    for (uint32_t v = 0; v <= 3; ++v)
+        drive_uint("  depth_mask (write_enable)",
+                   ps3tc_gcm_state_depth_write_enable,
+                   ps3tc_gcm_state_depth_write_enable_unsafe,
+                   NV40TCL_DEPTH_WRITE_ENABLE, v);
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  depth_bounds_test_enable",
+                   ps3tc_gcm_state_depth_bounds_test_enable,
+                   ps3tc_gcm_state_depth_bounds_test_enable_unsafe,
+                   NV40TCL_DEPTH_BOUNDS_TEST_ENABLE, v);
+
+    /* ---- depth_bounds (floats): compare Bit Patterns, not values ---- */
+    printf("\n  Depth bounds (float bit-patterns)\n");
+    /* depth_bounds (floats): compare the IEEE-32 bit patterns, not values.
+       Use explicit bit patterns for NaN / inf / -0.0 / arbitrary. */
+    struct { uint32_t mn; uint32_t mx; } raws[] = {
+        { 0x3F800000u, 0x3F800000u },   /* (1.0, 1.0) */
+        { 0x00000000u, 0x7F800000u },   /* (0.0, +inf) */
+        { 0x80000000u, 0xBF800000u },   /* (-0.0, -1.0) */
+        { 0x7FC00000u, 0x7D260000u },   /* (NaN, 2.0)        — distinct bit patterns */
+        { 0x7FC00000u, 0x7FFFFFFFu },   /* (NaN, most-positive-NaN) */
+        { 0x3DCCCCCDu, 0x40490FDBu },   /* (0.1, pi)         — 0x40490FDB == 3.14159265 */
+    };
+    static uint32_t A[8], B[8];
+    gcmContextData n, r;
+    f32 a, b;
+    for (size_t i = 0; i < sizeof raws / sizeof raws[0]; ++i) {
+        memcpy(&a, &raws[i].mn, 4); memcpy(&b, &raws[i].mx, 4);
+
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_depth_bounds((CellGcmContextData *)&n, a, b);
+        ref_safe_floats(&r, a, b);
+        char lab[48]; snprintf(lab, sizeof lab, "  depth_bounds raw %u", (unsigned)i);
+        cmp(lab, A, B, 3);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_depth_bounds_unsafe((CellGcmContextData *)&n, a, b);
+        ref_unsafe_floats(&r, a, b);
+        snprintf(lab, sizeof lab, "  depth_bounds raw %u", (unsigned)i);
+        cmp(lab, A, B, 3);
+    }
+
+    /* ---- blend / dither family ---- */
+    /* blend_enable + dither_enable: 2-word, same shape as depth enables. */
+    printf("\n  Blend / dither (enable, 2-word)\n");
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  dither_enable",
+                   ps3tc_gcm_state_dither_enable,
+                   ps3tc_gcm_state_dither_enable_unsafe,
+                   NV40TCL_DITHER_ENABLE, v);
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  blend_enable",
+                   ps3tc_gcm_state_blend_enable,
+                   ps3tc_gcm_state_blend_enable_unsafe,
+                   NV40TCL_BLEND_ENABLE, v);
+
+    /* blend_equation: 2 words, word1 = (alpha<<16)|color. */
+    printf("\n  Blend equation (2-word, packed 16x2)\n");
+    {
+        const struct { uint16_t c, a; } eqs[] = {
+            { 0x0000, 0x0000 }, { 0x0102, 0x0304 },
+            { 0xFFFF, 0xFFFF }, { 0x1234, 0x5678 }, { 0x00FF, 0xFF00 },
+        };
+        for (size_t i = 0; i < sizeof eqs / sizeof eqs[0]; ++i) {
+            uint16_t c = eqs[i].c, a = eqs[i].a;
+            static uint32_t A[4], B[4];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+            ps3tc_gcm_state_blend_equation((CellGcmContextData *)&n, c, a);
+            ref_blend_equation(&r, c, a);
+            char lab[48]; snprintf(lab, sizeof lab, "  blend_equation %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_blend_equation_unsafe((CellGcmContextData *)&n, c, a);
+            ref_unsafe_blend_equation(&r, c, a);
+            snprintf(lab, sizeof lab, "  blend_equation %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+        }
+    }
+
+    /* blend_func: 3 words, word1=(sa<<16)|sc, word2=(da<<16)|dc. */
+    printf("\n  Blend func (3-word, packed 16x4)\n");
+    {
+        const struct { uint16_t sc, dc, sa, da; } fcs[] = {
+            { 0x0000, 0x0000, 0x0000, 0x0000 },
+            { 0x0102, 0x0304, 0x0607, 0x0809 },
+            { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF },
+            { 0x1234, 0x5678, 0x9ABC, 0xDE00 },
+        };
+        for (size_t i = 0; i < sizeof fcs / sizeof fcs[0]; ++i) {
+            uint16_t sc=fcs[i].sc, dc=fcs[i].dc, sa=fcs[i].sa, da=fcs[i].da;
+            static uint32_t A[8], B[8];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+            ps3tc_gcm_state_blend_func((CellGcmContextData *)&n, sc, dc, sa, da);
+            ref_blend_func(&r, sc, dc, sa, da);
+            char lab[48]; snprintf(lab, sizeof lab, "  blend_func %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_blend_func_unsafe((CellGcmContextData *)&n, sc, dc, sa, da);
+            ref_unsafe_blend_func(&r, sc, dc, sa, da);
+            snprintf(lab, sizeof lab, "  blend_func %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+        }
+    }
+
+    /* blend_color: 4 words — TWO method packets. */
+    printf("\n  Blend color (4-word, two method packets)\n");
+    {
+        const uint32_t c0s[] = { 0x11111111u, 0x00000000u, 0xFFFFFFFFu, 0x80000000u };
+        const uint32_t c1s[] = { 0x22222222u, 0xDEADBEEFu, 0x000000FFu, 0x7F800000u };
+        for (size_t i = 0; i < sizeof c0s / sizeof c0s[0]; ++i) {
+            uint32_t c0 = c0s[i], c1 = c1s[i];
+            static uint32_t A[8], B[8];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+            ps3tc_gcm_state_blend_color((CellGcmContextData *)&n, c0, c1);
+            ref_blend_color(&r, c0, c1);
+            char lab[48]; snprintf(lab, sizeof lab, "  blend_color %u", (unsigned)i);
+            cmp(lab, A, B, 4);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_blend_color_unsafe((CellGcmContextData *)&n, c0, c1);
+            ref_unsafe_blend_color(&r, c0, c1);
+            snprintf(lab, sizeof lab, "  blend_color %u", (unsigned)i);
+            cmp(lab, A, B, 4);
+        }
+    }
+
+    /* ---- stencil group ----
+     * 2-word (count=1) and 4-word (count=3 under one header) families.
+     * Register names follow rsx/nv40.h; the mapping is unchanged from the
+     * pre-patch rsx* bodies. */
+    printf("\n  Stencil (2-word enables/mask)\n");
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  stencil_test_enable",
+                   ps3tc_gcm_state_stencil_test_enable,
+                   ps3tc_gcm_state_stencil_test_enable_unsafe,
+                   NV40TCL_STENCIL_BACK_ENABLE, v);
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  two_sided_stencil_enable",
+                   ps3tc_gcm_state_two_sided_stencil_test_enable,
+                   ps3tc_gcm_state_two_sided_stencil_test_enable_unsafe,
+                   NV40TCL_STENCIL_FRONT_ENABLE, v);
+    for (uint32_t v = 0x00u; v <= 0x06u; ++v)
+        drive_uint("  stencil_mask",
+                   ps3tc_gcm_state_stencil_mask,
+                   ps3tc_gcm_state_stencil_mask_unsafe,
+                   NV40TCL_STENCIL_BACK_MASK, (v ^ 0x55) * 0x11111111u);
+    for (uint32_t v = 0x00u; v <= 0x06u; ++v)
+        drive_uint("  back_stencil_mask",
+                   ps3tc_gcm_state_back_stencil_mask,
+                   ps3tc_gcm_state_back_stencil_mask_unsafe,
+                   NV40TCL_STENCIL_FRONT_MASK, (v ^ 0x55) * 0x11111111u);
+
+    /* stencil_func / stencil_op / back_stencil_*: 4 words, count=3 header. */
+    printf("\n  Stencil func/op (4-word, count=3 under one header)\n");
+    {
+        const struct { uint32_t x, y, z; } tris[] = {
+            { 0x0000, 0x0000, 0x0000 },
+            { 0x0001, 0x0002, 0x0003 },
+            { 0x150a, 0x1e01, 0x1e02 },   /* INVERT / REPLACE / INCR — realistic op values */
+            { 0x1234, 0x5678, 0xABCD },
+            { 0xFFFF, 0xFFFF, 0xFFFF },
+        };
+        for (size_t i = 0; i < sizeof tris / sizeof tris[0]; ++i) {
+            uint32_t a = tris[i].x, b = tris[i].y, c = tris[i].z;
+            static uint32_t A[8], B[8];
+            gcmContextData n, r; char lab[48];
+            /* stencil_func (BACK_FUNC_FUNC) */
+            memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+            n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+            ps3tc_gcm_state_stencil_func((CellGcmContextData *)&n, a, b, c);
+            ref_safe_triple(&r, NV40TCL_STENCIL_BACK_FUNC_FUNC, a, b, c);
+            snprintf(lab,sizeof lab,"  stencil_func %u",(unsigned)i); cmp(lab,A,B,4);
+            n.begin=n.current=A; r.begin=r.current=B;
+            ps3tc_gcm_state_stencil_func_unsafe((CellGcmContextData *)&n, a, b, c);
+            ref_unsafe_triple(&r, NV40TCL_STENCIL_BACK_FUNC_FUNC, a, b, c);
+            cmp(lab,A,B,4);
+            /* stencil_op (BACK_OP_FAIL) */
+            memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+            n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+            ps3tc_gcm_state_stencil_op((CellGcmContextData *)&n, a, b, c);
+            ref_safe_triple(&r, NV40TCL_STENCIL_BACK_OP_FAIL, a, b, c);
+            snprintf(lab,sizeof lab,"  stencil_op %u",(unsigned)i); cmp(lab,A,B,4);
+            n.begin=n.current=A; r.begin=r.current=B;
+            ps3tc_gcm_state_stencil_op_unsafe((CellGcmContextData *)&n, a, b, c);
+            ref_unsafe_triple(&r, NV40TCL_STENCIL_BACK_OP_FAIL, a, b, c);
+            cmp(lab,A,B,4);
+            /* back_stencil_func (FRONT_FUNC_FUNC) */
+            memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+            n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+            ps3tc_gcm_state_back_stencil_func((CellGcmContextData *)&n, a, b, c);
+            ref_safe_triple(&r, NV40TCL_STENCIL_FRONT_FUNC_FUNC, a, b, c);
+            snprintf(lab,sizeof lab,"  back_stencil_func %u",(unsigned)i); cmp(lab,A,B,4);
+            n.begin=n.current=A; r.begin=r.current=B;
+            ps3tc_gcm_state_back_stencil_func_unsafe((CellGcmContextData *)&n, a, b, c);
+            ref_unsafe_triple(&r, NV40TCL_STENCIL_FRONT_FUNC_FUNC, a, b, c);
+            cmp(lab,A,B,4);
+            /* back_stencil_op (FRONT_OP_FAIL) */
+            memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+            n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+            ps3tc_gcm_state_back_stencil_op((CellGcmContextData *)&n, a, b, c);
+            ref_safe_triple(&r, NV40TCL_STENCIL_FRONT_OP_FAIL, a, b, c);
+            snprintf(lab,sizeof lab,"  back_stencil_op %u",(unsigned)i); cmp(lab,A,B,4);
+            n.begin=n.current=A; r.begin=r.current=B;
+             ps3tc_gcm_state_back_stencil_op_unsafe((CellGcmContextData *)&n, a, b, c);
+             ref_unsafe_triple(&r, NV40TCL_STENCIL_FRONT_OP_FAIL, a, b, c);
+             cmp(lab,A,B,4);
+         }
+     }
+
+    /* ---- raster state — 2-word natives (12 of 14) ---- */
+    printf("\n  Raster state (2-word, 32-bit value)\n");
+    {
+        const uint32_t vals[] = { 0x00u, 0x01u, 0x5Fu, 0xFFu, 0x1234u, 0xABC5u, 0xFFFEu, 0xFFFFu };
+        for (size_t vi = 0; vi < sizeof vals / sizeof vals[0]; ++vi) {
+            uint32_t v = vals[vi];
+            drive_uint("color_mask",  ps3tc_gcm_state_color_mask,  ps3tc_gcm_state_color_mask_unsafe,  NV40TCL_COLOR_MASK,  v);
+            drive_uint("color_mask_mrt", ps3tc_gcm_state_color_mask_mrt, ps3tc_gcm_state_color_mask_mrt_unsafe, NV40TCL_MRT_COLOR_MASK, v);
+            drive_uint("shade_model", ps3tc_gcm_state_shade_model,  ps3tc_gcm_state_shade_model_unsafe,  NV40TCL_SHADE_MODEL, v);
+            drive_uint("cull_face_enable", ps3tc_gcm_state_cull_face_enable, ps3tc_gcm_state_cull_face_enable_unsafe, NV40TCL_CULL_FACE_ENABLE, v);
+            drive_uint("cull_face", ps3tc_gcm_state_cull_face,          ps3tc_gcm_state_cull_face_unsafe,          NV40TCL_CULL_FACE,      v);
+            drive_uint("front_face",ps3tc_gcm_state_front_face,         ps3tc_gcm_state_front_face_unsafe,         NV40TCL_FRONT_FACE,     v);
+            drive_uint("front_polygon_mode", ps3tc_gcm_state_front_polygon_mode, ps3tc_gcm_state_front_polygon_mode_unsafe, NV40TCL_POLYGON_MODE_FRONT, v);
+            drive_uint("back_polygon_mode",  ps3tc_gcm_state_back_polygon_mode,  ps3tc_gcm_state_back_polygon_mode_unsafe,  NV40TCL_POLYGON_MODE_BACK, v);
+            drive_uint("polygon_offset_fill_enable", ps3tc_gcm_state_polygon_offset_fill_enable, ps3tc_gcm_state_polygon_offset_fill_enable_unsafe, NV40TCL_POLYGON_OFFSET_FILL_ENABLE, v);
+            drive_uint("line_smooth_enable", ps3tc_gcm_state_line_smooth_enable, ps3tc_gcm_state_line_smooth_enable_unsafe, NV40TCL_LINE_SMOOTH_ENABLE, v);
+            drive_uint("polygon_smooth_enable", ps3tc_gcm_state_polygon_smooth_enable, ps3tc_gcm_state_polygon_smooth_enable_unsafe, NV40TCL_POLYGON_SMOOTH_ENABLE, v);
+            drive_uint("alpha_test_enable", ps3tc_gcm_state_alpha_test_enable, ps3tc_gcm_state_alpha_test_enable_unsafe, NV40TCL_ALPHA_TEST_ENABLE, v);
+        }
+    }
+
+    /* alpha_func (2-word, 3 values) */
+    printf("\n  Alpha func (3 words, header + 2 data)\n");
+    {
+        const struct { uint32_t f, r; } afs[] = {
+            { 0x0000, 0x0000 }, { 0x0001, 0x80u }, { 0x0210, 0xFFu },
+            { 0x0300, 0x1234u }, { 0x0700, 0xFFFFu },
+        };
+        for (size_t i = 0; i < sizeof afs / sizeof afs[0]; ++i) {
+            uint32_t f = afs[i].f, r = afs[i].r;
+            static uint32_t A[4], B[4];
+            gcmContextData n, ctx;
+            memset(&n,0,sizeof n); memset(&ctx,0,sizeof ctx);
+            n.begin=n.current=A; n.end=A+4; n.callback=0;
+            ctx.begin=ctx.current=B; ctx.end=B+4; ctx.callback=0;
+            ps3tc_gcm_state_alpha_func((CellGcmContextData *)&n, f, r);
+            ref_safe_pair3(&ctx, NV40TCL_ALPHA_TEST_FUNC, f, r);
+            char lab[48]; snprintf(lab, sizeof lab, "  alpha_func %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+            n.begin=n.current=A; ctx.begin=ctx.current=B;
+            ps3tc_gcm_state_alpha_func_unsafe((CellGcmContextData *)&n, f, r);
+            ref_unsafe_pair3(&ctx, NV40TCL_ALPHA_TEST_FUNC, f, r);
+            cmp(lab, A, B, 3);
+        }
+    }
+
+    /* polygon_offset (3 words, floats as bit patterns) */
+    printf("\n  Polygon offset (3 words, float bit patterns)\n");
+    {
+        const uint32_t foats[] = {
+            0x3F800000u, /* 1.0   */
+            0x00000000u, /* 0.0   */
+            0x7F800000u, /* +inf  */
+            0x7FC00000u, /* NaN   */
+            0x40490FDBu, /* ~ pi  */
+            0x3DCCCCCDu, /* ~0.1  */
+        };
+        for (size_t i = 0; i < sizeof foats / sizeof foats[0]; ++i) {
+            f32 fa, fb;
+            memcpy(&fa, &foats[i], 4);
+            memcpy(&fb, &foats[(i+1) % (sizeof foats / sizeof foats[0])], 4);
+            static uint32_t A[4], B[4];
+            gcmContextData n, rf;
+            ieee32 a, b;
+            a.f = fa; b.f = fb;
+            memset(&n, 0, sizeof n); memset(&rf, 0, sizeof rf);
+            n.begin=n.current=A; n.end=A+4; n.callback=0;
+            rf.begin=rf.current=B; rf.end=B+4; rf.callback=0;
+            ps3tc_gcm_state_polygon_offset((CellGcmContextData *)&n, fa, fb);
+            ref_safe_pair3(&rf, NV40TCL_POLYGON_OFFSET_FACTOR, a.u, b.u);
+            char lab[48]; snprintf(lab, sizeof lab, "  polygon_offset %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+            n.begin=n.current=A; rf.begin=rf.current=B;
+            ps3tc_gcm_state_polygon_offset_unsafe((CellGcmContextData *)&n, fa, fb);
+            ref_unsafe_pair3(&rf, NV40TCL_POLYGON_OFFSET_FACTOR, a.u, b.u);
+            cmp(lab, A, B, 3);
+        }
+    }
+
+    /* ---- Ring-full / callback: one case per native (point 3) ---- */
+    printf("\n  Ring-full / callback (end==current, recording callback)\n");
+    RING_CHECK(ps3tc_gcm_state_logic_op,
+               ps3tc_gcm_state_logic_op_unsafe,
+               "logic_op", 2, 0x1504);
+    RING_CHECK(ps3tc_gcm_state_logic_op_enable,
+               ps3tc_gcm_state_logic_op_enable_unsafe,
+               "logic_op_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_depth_func,
+               ps3tc_gcm_state_depth_func_unsafe,
+               "depth_func", 2, 3);
+    RING_CHECK(ps3tc_gcm_state_depth_test_enable,
+               ps3tc_gcm_state_depth_test_enable_unsafe,
+               "depth_test_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_depth_write_enable,
+               ps3tc_gcm_state_depth_write_enable_unsafe,
+               "depth_mask", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_depth_bounds_test_enable,
+               ps3tc_gcm_state_depth_bounds_test_enable_unsafe,
+               "depth_bounds_test_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_depth_bounds,
+               ps3tc_gcm_state_depth_bounds_unsafe,
+               "depth_bounds(floats)", 3, 1.0f, 2.0f);
+    RING_CHECK(ps3tc_gcm_state_blend_enable,
+               ps3tc_gcm_state_blend_enable_unsafe,
+               "blend_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_blend_func,
+               ps3tc_gcm_state_blend_func_unsafe,
+               "blend_func (4x16)", 3, 0x01, 0x02, 0x03, 0x04);
+    RING_CHECK(ps3tc_gcm_state_blend_equation,
+               ps3tc_gcm_state_blend_equation_unsafe,
+               "blend_equation", 2, 0x02, 0x04);
+    RING_CHECK(ps3tc_gcm_state_blend_color,
+               ps3tc_gcm_state_blend_color_unsafe,
+               "blend_color (2 pkts)", 4, 0xA, 0xB);
+    RING_CHECK(ps3tc_gcm_state_dither_enable,
+               ps3tc_gcm_state_dither_enable_unsafe,
+               "dither_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_stencil_test_enable,
+               ps3tc_gcm_state_stencil_test_enable_unsafe,
+               "stencil_test_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_two_sided_stencil_test_enable,
+               ps3tc_gcm_state_two_sided_stencil_test_enable_unsafe,
+               "two_sided_stencil_enable", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_stencil_mask,
+               ps3tc_gcm_state_stencil_mask_unsafe,
+               "stencil_mask", 2, 0xFF);
+    RING_CHECK(ps3tc_gcm_state_back_stencil_mask,
+               ps3tc_gcm_state_back_stencil_mask_unsafe,
+               "back_stencil_mask", 2, 0xFF);
+    RING_CHECK(ps3tc_gcm_state_stencil_func,
+               ps3tc_gcm_state_stencil_func_unsafe,
+               "stencil_func (c3)", 4, 0x03, 0x05, 0xFF);
+    RING_CHECK(ps3tc_gcm_state_stencil_op,
+               ps3tc_gcm_state_stencil_op_unsafe,
+               "stencil_op (c3)", 4, 0x150a, 0x1e01, 0x1e02);
+    RING_CHECK(ps3tc_gcm_state_back_stencil_func,
+               ps3tc_gcm_state_back_stencil_func_unsafe,
+               "back_stencil_func (c3)", 4, 0x03, 0x05, 0xFF);
+     RING_CHECK(ps3tc_gcm_state_back_stencil_op,
+               ps3tc_gcm_state_back_stencil_op_unsafe,
+               "back_stencil_op (c3)", 4, 0x150a, 0x1e01, 0x1e02);
+     RING_CHECK(ps3tc_gcm_state_color_mask,
+               ps3tc_gcm_state_color_mask_unsafe,
+               "color_mask", 2, 0x0F);
+     RING_CHECK(ps3tc_gcm_state_color_mask_mrt,
+               ps3tc_gcm_state_color_mask_mrt_unsafe,
+               "color_mask_mrt", 2, 0x0F);
+     RING_CHECK(ps3tc_gcm_state_shade_model,
+               ps3tc_gcm_state_shade_model_unsafe,
+               "shade_model", 2, 0x1d00);
+     RING_CHECK(ps3tc_gcm_state_cull_face_enable,
+               ps3tc_gcm_state_cull_face_enable_unsafe,
+               "cull_face_enable", 2, 1);
+     RING_CHECK(ps3tc_gcm_state_cull_face,
+               ps3tc_gcm_state_cull_face_unsafe,
+               "cull_face", 2, 0x03);
+     RING_CHECK(ps3tc_gcm_state_front_face,
+               ps3tc_gcm_state_front_face_unsafe,
+               "front_face", 2, 0x01);
+     RING_CHECK(ps3tc_gcm_state_front_polygon_mode,
+               ps3tc_gcm_state_front_polygon_mode_unsafe,
+               "front_polygon_mode", 2, 0x02);
+     RING_CHECK(ps3tc_gcm_state_back_polygon_mode,
+               ps3tc_gcm_state_back_polygon_mode_unsafe,
+               "back_polygon_mode", 2, 0x02);
+     RING_CHECK(ps3tc_gcm_state_polygon_offset_fill_enable,
+               ps3tc_gcm_state_polygon_offset_fill_enable_unsafe,
+               "polygon_offset_fill_enable", 2, 1);
+     RING_CHECK(ps3tc_gcm_state_line_smooth_enable,
+               ps3tc_gcm_state_line_smooth_enable_unsafe,
+               "line_smooth_enable", 2, 1);
+     RING_CHECK(ps3tc_gcm_state_polygon_smooth_enable,
+               ps3tc_gcm_state_polygon_smooth_enable_unsafe,
+               "polygon_smooth_enable", 2, 1);
+     RING_CHECK(ps3tc_gcm_state_alpha_test_enable,
+               ps3tc_gcm_state_alpha_test_enable_unsafe,
+               "alpha_test_enable", 2, 1);
+     RING_CHECK(ps3tc_gcm_state_alpha_func,
+               ps3tc_gcm_state_alpha_func_unsafe,
+               "alpha_func (2 data)", 3, 0x0210, 0x80);
+     RING_CHECK(ps3tc_gcm_state_polygon_offset,
+               ps3tc_gcm_state_polygon_offset_unsafe,
+               "polygon_offset (floats)", 3, 1.0f, 2.0f);
+
+
+    printf("\n");
+    if (failures == 0)
+        printf("  PASS (all natives safe+unsafe == pre-patch rsx*, byte-for-byte; "
+               "ring-full: safe=1 call with correct count, unsafe=0 calls)\n");
+    else
+        printf("  FAIL (%d mismatches)\n", failures);
+    return failures ? 1 : 0;
+}
