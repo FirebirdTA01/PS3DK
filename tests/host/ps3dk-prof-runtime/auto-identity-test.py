@@ -1,14 +1,40 @@
 #!/usr/bin/env python3
-"""Prelink identity controls with real host objects; no PPU or SELF execution."""
-import argparse,importlib.util,json,subprocess,unittest
+"""Prelink identity controls with real host objects; no PPU or SELF execution.
+
+--mutant compile-as-driver drops the explicit '-x c' from the identity compile; --mutant internal-definitions drops
+the extern declarations from the generated source. Each must fail the C++-driver controls.
+"""
+import argparse,importlib.util,json,os,shutil,subprocess,sys,unittest
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[3]
 MODULE=ROOT/'cmake/ps3-prof-auto-identity.py'
 assert MODULE.is_file(),'AUTO_PRELINK_IDENTITY_IMPLEMENTATION'
-spec=importlib.util.spec_from_file_location('auto_identity',MODULE)
-I=importlib.util.module_from_spec(spec);spec.loader.exec_module(I)
 OUT=None
+MUTANT=None
+SYMBOLS=('ps3dk_prof__auto_mechanism','ps3dk_prof__auto_build_binding','ps3dk_prof__auto_build_id',
+         'ps3dk_prof__auto_app')
+
+
+def load(mutant):
+    code=MODULE.read_text()
+    if mutant=='compile-as-driver':
+        old="'-x', 'c', '-c', str(source)";assert code.count(old)==1;code=code.replace(old,"'-c', str(source)")
+    elif mutant=='internal-definitions':
+        old="decls+'\\n'+";assert code.count(old)==1;code=code.replace(old,'')
+    module=type(sys)('auto_identity');module.__file__=str(MODULE)
+    exec(compile(code,str(MODULE),'exec'),module.__dict__)
+    return module
+
+
+def globals_of(nm,obj):
+    """{symbol: nm type letter} for the four identity symbols, demangled names included."""
+    out=subprocess.run([nm,'-C',str(obj)],capture_output=True,text=True,check=True).stdout
+    found={}
+    for line in out.splitlines():
+        parts=line.split()
+        if len(parts)>=3 and parts[2].split('[')[0] in SYMBOLS:found[parts[2].split('[')[0]]=parts[1]
+    return found
 
 class Identity(unittest.TestCase):
     def setUp(self):
@@ -72,6 +98,48 @@ class Identity(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'one output'):self.prepare(['cc',str(self.obj)])
         with self.assertRaisesRegex(ValueError,'ABI'):I.prepare('ilp32',self.install,self.map,self.argv+['-mlp64'])
 
+    def cxx_driver(self):
+        """A g++-style driver name that records each command line and runs the host g++."""
+        log=self.p/'driver.log';d=self.p/'bin';d.mkdir()
+        wrapper=d/'g++'
+        wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "'+str(log)+'"\nexec '+shutil.which('g++')+' "$@"\n')
+        wrapper.chmod(0o755)
+        return wrapper,log
+
+    def test_cxx_driver_compiles_identity_as_c(self):
+        # Review: a project that links with g++ compiled the generated .c as C++, where namespace-scope const arrays
+        # have internal linkage; the C-declared references then stayed undefined at the link.
+        wrapper,log=self.cxx_driver()
+        r=self.prepare([str(wrapper),str(self.obj),'-o',str(self.elf)])
+        compile_line=[l for l in log.read_text().splitlines() if '.identity.c' in l]
+        self.assertEqual(len(compile_line),1,log.read_text())
+        words=compile_line[0].split()
+        src=words.index(str(self.map)+'.identity.c')
+        self.assertEqual(words[src-3:src],['-x','c','-c'],compile_line[0])
+        types=globals_of('nm',r['identity_object'])
+        self.assertEqual(sorted(types),sorted(SYMBOLS),types)
+        self.assertTrue(all(t in 'RD' for t in types.values()),types)
+        subprocess.run(r['command'],check=True)
+        subprocess.run([str(self.elf)],check=True)
+
+    def test_generated_source_is_external_as_cxx(self):
+        # The object must be right even if a driver compiles the source as C++ regardless.
+        self.prepare()
+        cxx=self.p/'as-cxx.o'
+        subprocess.run(['g++','-x','c++','-c',str(self.map)+'.identity.c','-o',str(cxx)],check=True)
+        types=globals_of('nm',cxx)
+        self.assertEqual(sorted(types),sorted(SYMBOLS),types)
+        self.assertTrue(all(t in 'RD' for t in types.values()),types)
+        # with a PPU C++ compiler on hand, the same for the target
+        ppu=shutil.which('powerpc64-ps3-elf-g++') or (os.environ.get('PS3DEV') and
+            shutil.which('powerpc64-ps3-elf-g++',path=os.environ['PS3DEV']+'/ppu/bin'))
+        if ppu:
+            obj=self.p/'ppu-as-cxx.o'
+            subprocess.run([ppu,'-x','c++','-c',str(self.map)+'.identity.c','-o',str(obj)],check=True)
+            types=globals_of(ppu[:-3]+'nm' if ppu.endswith('g++') else 'nm',obj)
+            self.assertTrue(len(types)==4 and all(t in 'RD' for t in types.values()),types)
+            print('PPU nm:',types,file=sys.stderr)
+
     def test_package_binds_exact_elf(self):
         r=self.prepare();subprocess.run(r['command'],check=True);I.finish(r,self.map)
         signed=self.p/'app.self';signed.write_bytes(b'signed fixture')
@@ -83,5 +151,13 @@ class Identity(unittest.TestCase):
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True)
+    ap.add_argument('--mutant',choices=['compile-as-driver','internal-definitions'])
     args,rest=ap.parse_known_args();OUT=args.out.resolve();OUT.mkdir(parents=True,exist_ok=False)
+    MUTANT=args.mutant;I=load(MUTANT)
+    if MUTANT:
+        cases=['Identity.test_cxx_driver_compiles_identity_as_c','Identity.test_generated_source_is_external_as_cxx']
+        result=unittest.main(argv=[__file__,*cases],exit=False).result
+        killed=bool(result.failures or result.errors)
+        print(MUTANT,'KILLED' if killed else 'SURVIVED',file=sys.stderr)
+        sys.exit(0 if killed else 1)
     unittest.main(argv=[__file__,*rest])
