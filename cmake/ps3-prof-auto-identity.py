@@ -153,8 +153,28 @@ def _compile_identity(driver, abi, source, obj, text):
         raise ValueError('identity object did not compile: '+r.stderr)
 
 
-# Driver temporary files (gcc's ccXXXXXX.<ext>) differ on every run; the binding records them as one name.
-_DRIVER_TEMP = re.compile(r'[^\s"=]*cc[A-Za-z0-9]{6}\.[A-Za-z0-9_.]+')
+# Driver temporary files differ on every run, so the binding records them as one name. Only operands the driver owns
+# are normalized: a whole argument, or the lto plugin's -fresolution= value, that is a file directly in the temp
+# directory named like gcc's temporaries (ccXXXXXX.<ext>). Anything else that merely looks similar is kept as is.
+_DRIVER_TEMP_NAME = re.compile(r'^cc[A-Za-z0-9]{6}\.[A-Za-z0-9_]+$')
+_RESOLUTION = '-plugin-opt=-fresolution='
+
+
+def _driver_temp(value):
+    import tempfile
+    p = Path(value)
+    if not p.is_absolute() or not _DRIVER_TEMP_NAME.match(p.name):
+        return False
+    try:
+        return p.parent.resolve() == Path(tempfile.gettempdir()).resolve()
+    except OSError:
+        return False
+
+
+def _normalize(arg):
+    if arg.startswith(_RESOLUTION) and _driver_temp(arg[len(_RESOLUTION):]):
+        return _RESOLUTION+'<driver-temp>'
+    return '<driver-temp>' if _driver_temp(arg) else arg
 
 
 def _linker_command(argv, placeholder, cwd):
@@ -197,7 +217,7 @@ def _traced_inputs(argv, placeholder, cwd):
             opened.add(_resolve(m.group(1) or m.group(2), cwd))
     if not opened:
         raise ValueError('trial link printed no input trace (a linker without GNU ld --verbose output?)')
-    normalized = [_DRIVER_TEMP.sub('<driver-temp>', a) for a in command[1:]]
+    normalized = [_normalize(a) for a in command[1:]]
     return opened, normalized
 
 

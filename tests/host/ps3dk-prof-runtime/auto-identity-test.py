@@ -231,6 +231,31 @@ class Identity(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'response file in the final linker command'):
             self.prepare(self.argv+['-specs='+str(inject)])
 
+    def test_only_driver_temporaries_are_normalized(self):
+        # Review 2026-11-12: normalizing every ccXXXXXX.ext substring merged two real --entry symbols chosen by a
+        # fixed specs file through an environment variable. Only driver-owned temp operands may be normalized.
+        import tempfile
+        tmp=Path(tempfile.gettempdir())
+        self.assertEqual(I._normalize(str(tmp/'ccAbC123.res')),'<driver-temp>')
+        self.assertEqual(I._normalize('-plugin-opt=-fresolution='+str(tmp/'ccAbC123.res')),
+                         '-plugin-opt=-fresolution=<driver-temp>')
+        for kept in ('--entry=ccABCDEF.entry','ccABCDEF.entry',str(self.p/'ccABCDEF.o'),
+                     '-plugin-opt=-fresolution='+str(self.p/'ccABCDEF.res')):
+            self.assertEqual(I._normalize(kept),kept)
+        src=self.p/'two.c';src.write_text('int ccABCDEF_entry(void){return 1;}\nint ccUVWXYZ_entry(void){return 2;}\n'
+                                         'int main(void){return 0;}\n')
+        specs=self.p/'entry.specs';specs.write_text('*link:\n+ --defsym=chosen=%:getenv(PS3TC_TEST_ENTRY _entry)\n\n')
+        obj=self.p/'two.o';subprocess.run(['cc','-c',str(src),'-o',str(obj)],check=True)
+        argv=['cc',str(obj),'-specs='+str(specs),'-o',str(self.elf)]
+        old=os.environ.get('PS3TC_TEST_ENTRY')
+        try:
+            os.environ['PS3TC_TEST_ENTRY']='ccABCDEF';a=self.prepare(argv)
+            os.environ['PS3TC_TEST_ENTRY']='ccUVWXYZ';b=self.prepare(argv)
+        finally:
+            if old is None:os.environ.pop('PS3TC_TEST_ENTRY',None)
+            else:os.environ['PS3TC_TEST_ENTRY']=old
+        self.assertNotEqual(a['binding'],b['binding'])
+
     def test_map_loads_must_be_bound(self):
         argv=self.argv+['-Wl,-Map,'+str(self.map)]
         r=self.prepare(argv);subprocess.run(r['command'],check=True)
