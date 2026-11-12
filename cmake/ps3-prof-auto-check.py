@@ -204,7 +204,7 @@ def main():
         if r.returncode: return r.returncode
     providers = check(a.root, a.abi, a.map)
     if prepared is not None:
-        identity().finish(prepared, a.map)
+        identity().finish(prepared, a.map, require_map=True)
     if a.map:
         a.map.with_name(a.map.name+'.auto.json').write_bytes((json.dumps(providers, indent=2)+'\n').encode())
     print('AUTO installed identity'+(' and providers' if a.map else '')+' PASS')

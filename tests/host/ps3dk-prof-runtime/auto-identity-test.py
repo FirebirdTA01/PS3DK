@@ -2,7 +2,9 @@
 """Prelink identity controls with real host objects; no PPU or SELF execution.
 
 --mutant compile-as-driver drops the explicit '-x c' from the identity compile; --mutant internal-definitions drops
-the extern declarations from the generated source. Each must fail the C++-driver controls.
+the extern declarations from the generated source. Each must fail the C++-driver controls. --mutant
+positional-inputs binds only the positional files named on the command line (the reviewed defect: a changed -l
+library kept the binding); it must fail the traced-input controls.
 """
 import argparse,importlib.util,json,os,shutil,subprocess,sys,unittest
 from pathlib import Path
@@ -21,7 +23,10 @@ def load(mutant):
     if mutant=='compile-as-driver':
         old="'-x', 'c', '-c', str(source)";assert code.count(old)==1;code=code.replace(old,"'-c', str(source)")
     elif mutant=='internal-definitions':
-        old="decls+'\\n'+";assert code.count(old)==1;code=code.replace(old,'')
+        old="decls+'\\n'+";assert code.count(old)==2;code=code.replace(old,'')
+    elif mutant=='positional-inputs':
+        old="traced = _traced_inputs(argv, trial_obj, cwd)";assert code.count(old)==1
+        code=code.replace(old,"_traced_inputs(argv, trial_obj, cwd); traced = set(files)")
     module=type(sys)('auto_identity');module.__file__=str(MODULE)
     exec(compile(code,str(MODULE),'exec'),module.__dict__)
     return module
@@ -140,6 +145,74 @@ class Identity(unittest.TestCase):
             self.assertTrue(len(types)==4 and all(t in 'RD' for t in types.values()),types)
             print('PPU nm:',types,file=sys.stderr)
 
+    def answer_lib(self,value):
+        """libanswer.a in its own directory, answer() returning value."""
+        d=self.p/'lib';d.mkdir(exist_ok=True)
+        (d/'a.c').write_text('int answer(void){return '+str(value)+';}\n')
+        subprocess.run(['cc','-c',str(d/'a.c'),'-o',str(d/'a.o')],check=True)
+        lib=d/'libanswer.a'
+        if lib.exists():lib.unlink()
+        subprocess.run(['ar','rcs',str(lib),str(d/'a.o')],check=True)
+        return d
+
+    def answer_main(self):
+        src=self.p/'amain.c';src.write_text('int answer(void);\nint main(void){return answer();}\n')
+        obj=self.p/'amain.o';subprocess.run(['cc','-c',str(src),'-o',str(obj)],check=True)
+        return obj
+
+    def test_library_change_changes_binding(self):
+        # Review 2026-11-12: a different -l archive with the same main.o and argv kept the binding and build_id.
+        d=self.answer_lib(1);obj=self.answer_main()
+        argv=['cc',str(obj),'-L',str(d),'-lanswer','-o',str(self.elf)]
+        a=self.prepare(argv)
+        self.assertIn(str((d/'libanswer.a').resolve()),a['inputs'])
+        subprocess.run(a['command'],check=True)
+        self.assertEqual(subprocess.run([str(self.elf)]).returncode,1)
+        self.answer_lib(2)
+        b=self.prepare(argv)
+        self.assertNotEqual(a['binding'],b['binding'])
+        subprocess.run(b['command'],check=True)
+        self.assertEqual(subprocess.run([str(self.elf)]).returncode,2)
+        # a library swapped between prepare and finish is refused as a changed input
+        self.answer_lib(3)
+        with self.assertRaisesRegex(ValueError,'input changed'):I.finish(b,self.map)
+
+    def test_linker_script_inputs_are_bound(self):
+        # A script given to the linker, and the object its INPUT() names, are both inputs.
+        extra_c=self.p/'extra.c';extra_c.write_text('int extra_sym = 1;\n')
+        extra=self.p/'extra.o';subprocess.run(['cc','-c',str(extra_c),'-o',str(extra)],check=True)
+        script=self.p/'extra.ld';script.write_text('INPUT('+str(extra)+')\n')
+        argv=['cc',str(self.obj),'-Wl,'+str(script),'-o',str(self.elf)]
+        a=self.prepare(argv)
+        self.assertIn(str(script.resolve()),a['inputs']);self.assertIn(str(extra.resolve()),a['inputs'])
+        extra_c.write_text('int extra_sym = 2;\n');subprocess.run(['cc','-c',str(extra_c),'-o',str(extra)],check=True)
+        self.assertNotEqual(a['binding'],self.prepare(argv)['binding'])
+
+    def test_driver_default_inputs_are_bound(self):
+        # The driver's own startup objects and libraries never appear on the command line; they are still inputs.
+        names=[Path(p).name for p in self.prepare()['inputs']]
+        self.assertTrue(any(n.startswith(('crt','Scrt')) and n.endswith('.o') for n in names),names)
+        self.assertTrue(any(n.startswith('libc') or n.startswith('libgcc') for n in names),names)
+        self.assertNotIn(Path(str(self.map)+'.identity-trial.o').name,names)
+
+    def test_unresolved_forms_refuse(self):
+        rsp=self.p/'ld.rsp';rsp.write_text(str(self.obj))
+        for extra in (['-Wl,@'+str(rsp)],['-Xlinker','@'+str(rsp)],['-specs='+str(self.p/'missing.specs')]):
+            with self.assertRaisesRegex(ValueError,'unresolved link input'):self.prepare(self.argv+extra)
+        with self.assertRaisesRegex(ValueError,'trial link failed'):
+            self.prepare(['cc',str(self.obj),'-lno-such-library-here','-o',str(self.elf)])
+        specs=self.p/'empty.specs';specs.write_text('\n')
+        self.assertIn(str(specs.resolve()),self.prepare(self.argv+['-specs='+str(specs)])['inputs'])
+
+    def test_map_loads_must_be_bound(self):
+        argv=self.argv+['-Wl,-Map,'+str(self.map)]
+        r=self.prepare(argv);subprocess.run(r['command'],check=True)
+        I.finish(r,self.map,require_map=True)
+        with self.map.open('a') as f:f.write('LOAD '+str(self.p/'unbound.o')+'\n')
+        with self.assertRaisesRegex(ValueError,'not in the binding'):I.finish(r,self.map,require_map=True)
+        self.map.unlink()
+        with self.assertRaisesRegex(ValueError,'link map missing'):I.finish(r,self.map,require_map=True)
+
     def test_package_binds_exact_elf(self):
         r=self.prepare();subprocess.run(r['command'],check=True);I.finish(r,self.map)
         signed=self.p/'app.self';signed.write_bytes(b'signed fixture')
@@ -151,11 +224,14 @@ class Identity(unittest.TestCase):
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True)
-    ap.add_argument('--mutant',choices=['compile-as-driver','internal-definitions'])
+    ap.add_argument('--mutant',choices=['compile-as-driver','internal-definitions','positional-inputs'])
     args,rest=ap.parse_known_args();OUT=args.out.resolve();OUT.mkdir(parents=True,exist_ok=False)
     MUTANT=args.mutant;I=load(MUTANT)
     if MUTANT:
         cases=['Identity.test_cxx_driver_compiles_identity_as_c','Identity.test_generated_source_is_external_as_cxx']
+        if MUTANT=='positional-inputs':
+            cases=['Identity.test_library_change_changes_binding','Identity.test_linker_script_inputs_are_bound',
+                   'Identity.test_driver_default_inputs_are_bound']
         result=unittest.main(argv=[__file__,*cases],exit=False).result
         killed=bool(result.failures or result.errors)
         print(MUTANT,'KILLED' if killed else 'SURVIVED',file=sys.stderr)

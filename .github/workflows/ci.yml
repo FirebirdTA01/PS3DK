@@ -256,7 +256,7 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-link-check-test.py
           python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
           python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
-          for mutant in compile-as-driver internal-definitions; do
+          for mutant in compile-as-driver internal-definitions positional-inputs; do
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-selector-test.py --out "$RUNNER_TEMP/auto-selector"
