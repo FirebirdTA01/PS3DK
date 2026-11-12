@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Pre-link identities for PS3_PROF_AUTO executables, and their external manifest.
 
-prepare() runs before the link. It finds every file the linker reads, by a trial link of the same command with a
-placeholder identity object and -Wl,--verbose: positional objects, -l libraries, the driver's default startup
-files and libraries, and linker scripts with the files they name. It hashes those, the response files and any
--specs files (the output excluded) into the build binding, hashes the installed provider manifest into the
-mechanism digest, writes and compiles one identity object that defines ps3dk_prof__auto_mechanism,
-ps3dk_prof__auto_build_binding, ps3dk_prof__auto_build_id and ps3dk_prof__auto_app, and returns the link command
-with that object appended. Inputs the linker reads without tracing them (a response file passed through to the
-linker) are refused. finish() runs after the link: it refuses if any input or the identity object changed, or if
+prepare() runs before the link. It asks the driver for the final linker command of the same link with a placeholder
+identity object (-###, so every specs file has been applied), runs that exact linker command with --verbose first,
+and takes every file the linker opens: positional objects, -l libraries, the driver's startup files and default
+libraries, -T and other linker scripts with the files they name. It hashes those, the response and specs files,
+the final linker command (driver temporary names normalized) and the argv into the build binding (the output
+excluded), hashes the installed provider manifest into the mechanism digest, writes and compiles one identity
+object that defines ps3dk_prof__auto_mechanism, ps3dk_prof__auto_build_binding, ps3dk_prof__auto_build_id and
+ps3dk_prof__auto_app, and returns the link command with that object appended. Inputs the linker would read
+untraced are refused: a response file anywhere in the final linker command (from the argv or from a specs file)
+and a specs file that %include-s another. finish() runs after the link: it refuses if any input or the identity object changed, or if
 the link map loads a file that is not in the binding, then records the linked ELF's sha256 next to the map.
 bind_self() records the signed SELF made from that exact ELF. The capture carries the binding; the manifest ties
 the binding to the ELF and SELF, so nothing hashes itself.
@@ -105,8 +107,18 @@ def _unresolved(args):
             raise ValueError('unresolved link input (linker response file): -Xlinker '+args[i + 1])
 
 
+_SPECS_INCLUDE = re.compile(r'^\s*%include(_noerr)?\b', re.M)
+
+
+def _specs_file(p, what):
+    """A specs file the driver reads; refused if it includes other specs files (that closure is not resolved)."""
+    if _SPECS_INCLUDE.search(p.read_text(errors='replace')):
+        raise ValueError('unresolved link input (specs file with %include): '+what)
+    return p.resolve()
+
+
 def _specs(args):
-    """Driver specs files named on the command line; each must exist."""
+    """Specs files the driver reads: each -specs file, and the 'specs' file gcc reads from a -B directory."""
     out = []
     for i, a in enumerate(args):
         name = None
@@ -118,7 +130,12 @@ def _specs(args):
             p = Path(name)
             if not p.is_file():
                 raise ValueError('unresolved link input (specs file): '+name)
-            out.append(p.resolve())
+            out.append(_specs_file(p, name))
+        prefix = a[2:] if a.startswith('-B') and len(a) > 2 else (args[i + 1] if a == '-B' and i + 1 < len(args) else None)
+        if prefix is not None:
+            implicit = Path(prefix) / 'specs'
+            if implicit.is_file():
+                out.append(_specs_file(implicit, str(implicit)))
     return out
 
 
@@ -136,9 +153,40 @@ def _compile_identity(driver, abi, source, obj, text):
         raise ValueError('identity object did not compile: '+r.stderr)
 
 
+# Driver temporary files (gcc's ccXXXXXX.<ext>) differ on every run; the binding records them as one name.
+_DRIVER_TEMP = re.compile(r'[^\s"=]*cc[A-Za-z0-9]{6}\.[A-Za-z0-9_.]+')
+
+
+def _linker_command(argv, placeholder, cwd):
+    """The final linker command the driver runs for this link (all specs applied), from 'driver ... -###'."""
+    r = subprocess.run([*argv, str(placeholder), '-###'], capture_output=True, text=True, timeout=300, cwd=cwd)
+    if r.returncode:
+        raise ValueError('driver could not plan the link (-###): '+(r.stderr or r.stdout)[-2000:])
+    lines = [l for l in r.stderr.splitlines() if l.startswith(' ') and not l.lstrip().startswith('COLLECT_')]
+    if not lines:
+        raise ValueError('driver printed no linker command for -###')
+    # gcc quotes -### arguments shell-style and doubles backslashes inside quotes, so POSIX splitting is exact.
+    final = shlex.split(lines[-1])
+    for a in final:
+        if a.startswith('@'):
+            raise ValueError('unresolved link input (linker response file in the final linker command): '+a)
+    prog = final[0]
+    if prog.startswith('-'):
+        raise ValueError('driver -### output has no linker program: '+lines[-1][:200])
+    if not Path(prog).is_absolute():
+        found = subprocess.run([argv[0], '-print-prog-name='+prog], capture_output=True, text=True, timeout=60,
+                               cwd=cwd).stdout.strip()
+        if not found or not Path(found).is_file():
+            raise ValueError('cannot resolve the linker program '+prog)
+        prog = found
+    return [prog, *final[1:]]
+
+
 def _traced_inputs(argv, placeholder, cwd):
-    """Every file the linker opens for this command, from a trial link with the placeholder identity object."""
-    r = subprocess.run([*argv, str(placeholder), '-Wl,--verbose'], capture_output=True, text=True, timeout=1800,
+    """(Every file the linker opens, normalized final linker command), by running the driver's own final linker
+    command with --verbose FIRST, so that options the linker handles while parsing (-T) are traced too."""
+    command = _linker_command(argv, placeholder, cwd)
+    r = subprocess.run([command[0], '--verbose', *command[1:]], capture_output=True, text=True, timeout=1800,
                        cwd=cwd)
     if r.returncode:
         raise ValueError('trial link failed, so its inputs cannot be resolved: '+(r.stderr or r.stdout)[-2000:])
@@ -149,7 +197,8 @@ def _traced_inputs(argv, placeholder, cwd):
             opened.add(_resolve(m.group(1) or m.group(2), cwd))
     if not opened:
         raise ValueError('trial link printed no input trace (a linker without GNU ld --verbose output?)')
-    return opened
+    normalized = [_DRIVER_TEMP.sub('<driver-temp>', a) for a in command[1:]]
+    return opened, normalized
 
 
 def _manifest_path(mapfile):
@@ -193,7 +242,9 @@ def prepare(abi, install_manifest, mapfile, argv):
                       'const unsigned char ps3dk_prof__auto_build_binding[32]={'+_c_bytes(zero)+'};\n'
                       'const char ps3dk_prof__auto_build_id[65]="'+zero+'";\n'
                       'const char ps3dk_prof__auto_app[]="trial";\n')
-    traced = _traced_inputs(argv, trial_obj, cwd)
+    # Plan and trace with the driver response files already expanded: given an @file, the driver hands the linker a
+    # temporary response file of its own, which -### does not write.
+    traced, linker_command = _traced_inputs([argv[0], *args], trial_obj, cwd)
     untraced = sorted(str(f) for f in files if f not in traced)
     if untraced:
         raise ValueError('trial link did not open named inputs: '+', '.join(untraced))
@@ -201,8 +252,10 @@ def prepare(abi, install_manifest, mapfile, argv):
     digests = {p: sha(p) for p in inputs}
     mechanism = hashlib.sha256(json.dumps(dict(tag=MECHANISM_TAG, abi=abi, archives=install['archives']),
                                           sort_keys=True).encode()).hexdigest()
+    # The final linker command carries everything specs files (included ones too) add to the link.
     binding = hashlib.sha256(json.dumps(dict(schema=SCHEMA, abi=abi, mechanism=mechanism, argv=argv,
-                                             inputs=digests), sort_keys=True).encode()).hexdigest()
+                                             inputs=digests, linker_command=linker_command),
+                                        sort_keys=True).encode()).hexdigest()
     app = output.name.split('.')[0][:32] or 'app'
     defs = ('const unsigned char ps3dk_prof__auto_mechanism[32]={'+_c_bytes(mechanism)+'};\n'
             'const unsigned char ps3dk_prof__auto_build_binding[32]={'+_c_bytes(binding)+'};\n'

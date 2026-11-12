@@ -25,8 +25,8 @@ def load(mutant):
     elif mutant=='internal-definitions':
         old="decls+'\\n'+";assert code.count(old)==2;code=code.replace(old,'')
     elif mutant=='positional-inputs':
-        old="traced = _traced_inputs(argv, trial_obj, cwd)";assert code.count(old)==1
-        code=code.replace(old,"_traced_inputs(argv, trial_obj, cwd); traced = set(files)")
+        old="traced, linker_command = _traced_inputs([argv[0], *args], trial_obj, cwd)";assert code.count(old)==1
+        code=code.replace(old,"_, linker_command = _traced_inputs([argv[0], *args], trial_obj, cwd); traced = set(files)")
     module=type(sys)('auto_identity');module.__file__=str(MODULE)
     exec(compile(code,str(MODULE),'exec'),module.__dict__)
     return module
@@ -203,6 +203,33 @@ class Identity(unittest.TestCase):
             self.prepare(['cc',str(self.obj),'-lno-such-library-here','-o',str(self.elf)])
         specs=self.p/'empty.specs';specs.write_text('\n')
         self.assertIn(str(specs.resolve()),self.prepare(self.argv+['-specs='+str(specs)])['inputs'])
+
+    def test_specs_closure(self):
+        # Review 2026-11-12: an outer -specs file that %include-s an inner one hashed the outer only; a changed inner
+        # *link (--defsym answer=1 vs 2) kept the binding. Includes are refused; the specs a -B directory supplies
+        # implicitly are bound; a changed specs file changes the binding.
+        inner=self.p/'inner.specs';inner.write_text('*link:\n+ --defsym=answer_sym=1\n\n')
+        for directive in ('%include','%include_noerr'):
+            outer=self.p/('outer'+directive[1:]+'.specs');outer.write_text(directive+' <'+str(inner)+'>\n')
+            with self.assertRaisesRegex(ValueError,'specs file with %include'):
+                self.prepare(self.argv+['-specs='+str(outer)])
+        plain=self.p/'plain.specs';plain.write_text('*link:\n+ --defsym=answer_sym=1\n\n')
+        a=self.prepare(self.argv+['-specs='+str(plain)])
+        plain.write_text('*link:\n+ --defsym=answer_sym=2\n\n')
+        self.assertNotEqual(a['binding'],self.prepare(self.argv+['-specs='+str(plain)])['binding'])
+        bdir=self.p/'bprefix';bdir.mkdir()
+        (bdir/'specs').write_text('%include <'+str(inner)+'>\n')
+        with self.assertRaisesRegex(ValueError,'specs file with %include'):self.prepare(self.argv+['-B',str(bdir)])
+        with self.assertRaisesRegex(ValueError,'specs file with %include'):self.prepare(self.argv+['-B'+str(bdir)])
+        # A -B specs file replaces the built-in specs, so give it a complete copy of them.
+        (bdir/'specs').write_bytes(subprocess.run(['cc','-dumpspecs'],capture_output=True,check=True).stdout)
+        self.assertIn(str((bdir/'specs').resolve()),self.prepare(self.argv+['-B'+str(bdir)])['inputs'])
+        # Review 2026-11-12: one top-level specs file can add a linker response file to the final linker command
+        # (*link: + @hidden.rsp); the linker reads it untraced, so it is refused wherever it comes from.
+        hidden=self.p/'hidden.rsp';hidden.write_text('--defsym=answer_sym=1\n')
+        inject=self.p/'inject.specs';inject.write_text('*link:\n+ @'+str(hidden)+'\n\n')
+        with self.assertRaisesRegex(ValueError,'response file in the final linker command'):
+            self.prepare(self.argv+['-specs='+str(inject)])
 
     def test_map_loads_must_be_bound(self):
         argv=self.argv+['-Wl,-Map,'+str(self.map)]
