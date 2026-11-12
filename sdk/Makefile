@@ -189,6 +189,7 @@ HEADERS := \
     include/cell/gcm/gcm_enum.h \
     include/cell/gcm/gcm_cmd_overloads.h \
     include/cell/gcm/gcm_cg_bridge.h \
+    include/cell/gcm/gcm_state_native.h \
     include/cell/gcm/gcm_fp_control.h \
     include/cell/gcm/gcm_tex_bridge.h \
     include/cell/gcm/gcm_command_c.h \

@@ -176,34 +176,36 @@ void RSX_FUNC(SetSurface)(gcmContextData *context,const gcmSurface *surface)
 	RSX_CONTEXT_CURRENT_END(32);
 }
 
+/* Raster-state group: rsx* aliases over the shared natives in
+ * <cell/gcm/gcm_state_native.h>.  Register names follow rsx/nv40.h;
+ * the mapping is unchanged from the pre-patch rsx* bodies.
+ * No clamping or argument translation — values written verbatim.
+ * SAFE reserves via ps3tc_gcm_reserve; UNSAFE plain-writes. */
 void RSX_FUNC(SetColorMask)(gcmContextData *context,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_COLOR_MASK,1);
-	RSX_CONTEXT_CURRENTP[1] = mask;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_color_mask_unsafe(context, mask);
+#else
+	ps3tc_gcm_state_color_mask(context, mask);
+#endif
 }
 
 void RSX_FUNC(SetColorMaskMrt)(gcmContextData *context,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_MRT_COLOR_MASK,1);
-	RSX_CONTEXT_CURRENTP[1] = mask;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_color_mask_mrt_unsafe(context, mask);
+#else
+	ps3tc_gcm_state_color_mask_mrt(context, mask);
+#endif
 }
 
 void RSX_FUNC(SetShadeModel)(gcmContextData *context,u32 shadeModel)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_SHADE_MODEL,1);
-	RSX_CONTEXT_CURRENTP[1] = shadeModel;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_shade_model_unsafe(context, shadeModel);
+#else
+	ps3tc_gcm_state_shade_model(context, shadeModel);
+#endif
 }
 
 void RSX_FUNC(SetViewport)(gcmContextData *context,u16 x,u16 y,u16 width,u16 height,f32 min,f32 max,const f32 scale[4],const f32 offset[4])
@@ -278,34 +280,35 @@ void RSX_FUNC(SetUserClipPlaneControl)(gcmContextData *context,u32 plane0,u32 pl
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
+/* Depth group: rsx* is a thin alias over the shared natives in
+ * <cell/gcm/gcm_state_native.h>.  SAFE reserves via ps3tc_gcm_reserve;
+ * UNSAFE plain-writes (same as pre-patch RSX_UNSAFE=1 body).
+ * SetDepthWriteEnable backs cellGcmSetDepthMask. */
 void RSX_FUNC(SetDepthTestEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_TEST_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_depth_test_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_depth_test_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetDepthFunc)(gcmContextData *context,u32 func)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_FUNC,1);
-	RSX_CONTEXT_CURRENTP[1] = func;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_depth_func_unsafe(context, func);
+#else
+	ps3tc_gcm_state_depth_func(context, func);
+#endif
 }
 
 void RSX_FUNC(SetDepthWriteEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_WRITE_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_depth_write_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_depth_write_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetDepthFormat)(gcmContextData *context,u32 format)
@@ -320,70 +323,65 @@ void RSX_FUNC(SetDepthFormat)(gcmContextData *context,u32 format)
 
 void RSX_FUNC(SetCullFaceEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CULL_FACE_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_cull_face_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_cull_face_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetCullFace)(gcmContextData *context,u32 cull)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CULL_FACE,1);
-	RSX_CONTEXT_CURRENTP[1] = cull;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_cull_face_unsafe(context, cull);
+#else
+	ps3tc_gcm_state_cull_face(context, cull);
+#endif
 }
 
 void RSX_FUNC(SetFrontFace)(gcmContextData *context,u32 dir)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FRONT_FACE,1);
-	RSX_CONTEXT_CURRENTP[1] = dir;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_front_face_unsafe(context, dir);
+#else
+	ps3tc_gcm_state_front_face(context, dir);
+#endif
 }
 
 void RSX_FUNC(SetFrontPolygonMode)(gcmContextData *context,u32 mode)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_POLYGON_MODE_FRONT,1);
-	RSX_CONTEXT_CURRENTP[1] = mode;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_front_polygon_mode_unsafe(context, mode);
+#else
+	ps3tc_gcm_state_front_polygon_mode(context, mode);
+#endif
 }
 
 void RSX_FUNC(SetBackPolygonMode)(gcmContextData *context,u32 mode)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_POLYGON_MODE_BACK,1);
-	RSX_CONTEXT_CURRENTP[1] = mode;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_back_polygon_mode_unsafe(context, mode);
+#else
+	ps3tc_gcm_state_back_polygon_mode(context, mode);
+#endif
 }
 
 void RSX_FUNC(SetPolygonOffsetFillEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_POLYGON_OFFSET_FILL_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_polygon_offset_fill_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_polygon_offset_fill_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetPolygonOffset)(gcmContextData *context,f32 factor,f32 units)
 {
-	ieee32 d0,d1;
-
-	d0.f = factor;
-	d1.f = units;
-
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_POLYGON_OFFSET_FACTOR,2);
-	RSX_CONTEXT_CURRENTP[1] = d0.u;
-	RSX_CONTEXT_CURRENTP[2] = d1.u;
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_polygon_offset_unsafe(context, factor, units);
+#else
+	ps3tc_gcm_state_polygon_offset(context, factor, units);
+#endif
 }
 
 void RSX_FUNC(SetPolygonOffsetLineEnable)(gcmContextData *context,u32 enable)
@@ -431,76 +429,81 @@ void RSX_FUNC(SetTwoSideLightEnable)(gcmContextData *context,u32 enable)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
+/* Stencil group: rsx* aliases over the shared natives in
+ * <cell/gcm/gcm_state_native.h>.  Register names follow rsx/nv40.h; the
+ * mapping is unchanged from the pre-patch rsx* bodies.
+ * SAFE reserves via ps3tc_gcm_reserve (StencilFunc/Op reserve 4 words,
+ * count=3 header); UNSAFE plain-writes. */
 void RSX_FUNC(SetStencilFunc)(gcmContextData *context,u32 func,u32 ref,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_BACK_FUNC_FUNC,3);
-	RSX_CONTEXT_CURRENTP[1] = func;
-	RSX_CONTEXT_CURRENTP[2] = ref;
-	RSX_CONTEXT_CURRENTP[3] = mask;
-	RSX_CONTEXT_CURRENT_END(4);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_stencil_func_unsafe(context, func, ref, mask);
+#else
+	ps3tc_gcm_state_stencil_func(context, func, ref, mask);
+#endif
 }
 
 void RSX_FUNC(SetStencilMask)(gcmContextData *context,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_BACK_MASK,1);
-	RSX_CONTEXT_CURRENTP[1] = mask;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_stencil_mask_unsafe(context, mask);
+#else
+	ps3tc_gcm_state_stencil_mask(context, mask);
+#endif
 }
 
 void RSX_FUNC(SetStencilOp)(gcmContextData *context,u32 fail,u32 depthFail,u32 depthPass)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_BACK_OP_FAIL,3);
-	RSX_CONTEXT_CURRENTP[1] = fail;
-	RSX_CONTEXT_CURRENTP[2] = depthFail;
-	RSX_CONTEXT_CURRENTP[3] = depthPass;
-	RSX_CONTEXT_CURRENT_END(4);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_stencil_op_unsafe(context, fail, depthFail, depthPass);
+#else
+	ps3tc_gcm_state_stencil_op(context, fail, depthFail, depthPass);
+#endif
 }
 
 void RSX_FUNC(SetStencilTestEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_BACK_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_stencil_test_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_stencil_test_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetBackStencilFunc)(gcmContextData *context,u32 func,u32 ref,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_FRONT_FUNC_FUNC,3);
-	RSX_CONTEXT_CURRENTP[1] = func;
-	RSX_CONTEXT_CURRENTP[2] = ref;
-	RSX_CONTEXT_CURRENTP[3] = mask;
-	RSX_CONTEXT_CURRENT_END(4);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_back_stencil_func_unsafe(context, func, ref, mask);
+#else
+	ps3tc_gcm_state_back_stencil_func(context, func, ref, mask);
+#endif
 }
 
 void RSX_FUNC(SetBackStencilMask)(gcmContextData *context,u32 mask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_FRONT_MASK,1);
-	RSX_CONTEXT_CURRENTP[1] = mask;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_back_stencil_mask_unsafe(context, mask);
+#else
+	ps3tc_gcm_state_back_stencil_mask(context, mask);
+#endif
 }
 
 void RSX_FUNC(SetBackStencilOp)(gcmContextData *context,u32 fail,u32 depthFail,u32 depthPass)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_FRONT_OP_FAIL,3);
-	RSX_CONTEXT_CURRENTP[1] = fail;
-	RSX_CONTEXT_CURRENTP[2] = depthFail;
-	RSX_CONTEXT_CURRENTP[3] = depthPass;
-	RSX_CONTEXT_CURRENT_END(4);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_back_stencil_op_unsafe(context, fail, depthFail, depthPass);
+#else
+	ps3tc_gcm_state_back_stencil_op(context, fail, depthFail, depthPass);
+#endif
 }
 
 void RSX_FUNC(SetTwoSidedStencilTestEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_STENCIL_FRONT_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_two_sided_stencil_test_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_two_sided_stencil_test_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetRenderEnable)(gcmContextData *context,u8 mode,u32 index)
@@ -609,26 +612,30 @@ void RSX_FUNC(SetZCullInvalidate)(gcmContextData *context)
 
 void RSX_FUNC(SetPolygonSmoothEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_POLYGON_SMOOTH_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_polygon_smooth_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_polygon_smooth_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetLineSmoothEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_LINE_SMOOTH_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_line_smooth_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_line_smooth_enable(context, enable);
+#endif
 }
 
+/* Dither enable: rsx* alias over the shared native. */
 void RSX_FUNC(SetDitherEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DITHER_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_dither_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_dither_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(LoadVertexProgramBlock)(gcmContextData *context,const rsxVertexProgram *program,const void *ucode)
@@ -1267,23 +1274,20 @@ void RSX_FUNC(SetZMinMaxControl)(gcmContextData *context,u8 cullNearFar,u8 zClam
 
 void RSX_FUNC(SetDepthBoundsTestEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_BOUNDS_TEST_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_depth_bounds_test_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_depth_bounds_test_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetDepthBounds)(gcmContextData *context,f32 zMin,f32 zMax)
 {
-	ieee32 d0,d1;
-
-	d0.f = zMin;
-	d1.f = zMax;
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_BOUNDS_MIN,2);
-	RSX_CONTEXT_CURRENTP[1] = d0.u;
-	RSX_CONTEXT_CURRENTP[2] = d1.u;
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_depth_bounds_unsafe(context, zMin, zMax);
+#else
+	ps3tc_gcm_state_depth_bounds(context, zMin, zMax);
+#endif
 }
 
 void RSX_FUNC(BindVertexArrayAttrib)(gcmContextData *context,u8 attr,u16 frequency,u32 offset,u8 stride,u8 elems,u8 dtype,u8 location)
@@ -1729,63 +1733,60 @@ void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *
 
 void RSX_FUNC(SetAlphaFunc)(gcmContextData *context,u32 alphaFunc,u32 ref)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_ALPHA_TEST_FUNC,2);
-	RSX_CONTEXT_CURRENTP[1] = alphaFunc;
-	RSX_CONTEXT_CURRENTP[2] = ref;
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_alpha_func_unsafe(context, alphaFunc, ref);
+#else
+	ps3tc_gcm_state_alpha_func(context, alphaFunc, ref);
+#endif
 }
 
 void RSX_FUNC(SetAlphaTestEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_ALPHA_TEST_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_alpha_test_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_alpha_test_enable(context, enable);
+#endif
 }
 
+/* Blend / dither group: rsx* aliases over the shared natives in
+ * <cell/gcm/gcm_state_native.h>.  SAFE reserves via ps3tc_gcm_reserve;
+ * UNSAFE plain-writes.  BlendFunc = 3 words; BlendEquation = 2;
+ * BlendColor = 4 (two method packets). */
 void RSX_FUNC(SetBlendFunc)(gcmContextData *context,u16 sfcolor,u16 dfcolor,u16 sfalpha,u16 dfalpha)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BLEND_FUNC_SRC,2);
-	RSX_CONTEXT_CURRENTP[1] = ((sfalpha<<16) | sfcolor);
-	RSX_CONTEXT_CURRENTP[2] = ((dfalpha<<16) | dfcolor);
-
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_blend_func_unsafe(context, sfcolor, dfcolor, sfalpha, dfalpha);
+#else
+	ps3tc_gcm_state_blend_func(context, sfcolor, dfcolor, sfalpha, dfalpha);
+#endif
 }
 
 void RSX_FUNC(SetBlendEquation)(gcmContextData *context,u16 color,u16 alpha)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BLEND_EQUATION,1);
-	RSX_CONTEXT_CURRENTP[1] = ((alpha<<16) | color);
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_blend_equation_unsafe(context, color, alpha);
+#else
+	ps3tc_gcm_state_blend_equation(context, color, alpha);
+#endif
 }
 
 void RSX_FUNC(SetBlendColor)(gcmContextData *context,u32 color0,u32 color1)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(4);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BLEND_COLOR,1);
-	RSX_CONTEXT_CURRENTP[1] = color0;
-
-	RSX_CONTEXT_CURRENTP[2] = RSX_METHOD(NV40TCL_BLEND_COLOR2,1);
-	RSX_CONTEXT_CURRENTP[3] = color1;
-
-	RSX_CONTEXT_CURRENT_END(4);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_blend_color_unsafe(context, color0, color1);
+#else
+	ps3tc_gcm_state_blend_color(context, color0, color1);
+#endif
 }
 
 void RSX_FUNC(SetBlendEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BLEND_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_blend_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_blend_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetBlendOptimization)(gcmContextData *context,u32 enable)
@@ -1804,20 +1805,25 @@ void RSX_FUNC(SetBlendEnableMrt)(gcmContextData *context, u32 mrt1, u32 mrt2, u3
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
+/* Logic-OP pair: rsx* is a thin alias over the shared natives in
+ * <cell/gcm/gcm_state_native.h>.  SAFE reserves via ps3tc_gcm_reserve;
+ * UNSAFE writes plainly (no buffer check) — same as pre-patch. */
 void RSX_FUNC(SetLogicOp)(gcmContextData *context,u32 op)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_COLOR_LOGIC_OP,1);
-	RSX_CONTEXT_CURRENTP[1] = op;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_logic_op_unsafe(context, op);
+#else
+	ps3tc_gcm_state_logic_op(context, op);
+#endif
 }
 
 void RSX_FUNC(SetLogicOpEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_COLOR_LOGIC_OP_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_logic_op_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_logic_op_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(SetFogMode)(gcmContextData *context,u32 mode)
