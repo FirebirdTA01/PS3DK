@@ -151,8 +151,16 @@ def check(root, abi, mapfile=None):
     if mapfile.stat().st_size > 128*1024*1024: raise ValueError('AUTO link map exceeds 128 MiB')
     text = mapfile.read_text()
     if text.count('Cross Reference Table') != 1: raise ValueError('one cross-reference table required (--cref)')
+    # A GCM or profiler archive the link LOADs must be an installed AUTO provider, whether or not a member is taken
+    # from it: the configure-time substitution cannot see every target (a non-GLOBAL imported target or a plain-name
+    # ALIAS of one in a subdirectory, a target inside a conditional generator expression), so a default gcm_cmd that
+    # reaches the link through one is refused here even when no member was selected yet.
+    for m in re.finditer(r'^LOAD (.*lib(?:gcm_cmd|ps3dkprof|ps3prof)[^()/\\]*\.a)\s*$', text, re.M):
+        path = norm(m[1]);name = path.rsplit('/', 1)[-1]
+        if name not in ARCHIVES or path != norm(str(lib/name)):
+            raise ValueError('default or mixed AUTO provider linked (LOAD): '+m[1])
     # Any selected conflicting member fails, even when the required symbols
-    # happen to come from the right archives. LOAD alone is not selection.
+    # happen to come from the right archives.
     for m in re.finditer(r'((?:(?:[A-Za-z]:[/\\]|/)[^()\r\n]*?)?lib(?:gcm_cmd|ps3dkprof|ps3prof)[^()/\\]*\.a)\([^()\n]+\)', text):
         path = norm(m[1]);name = path.rsplit('/', 1)[-1]
         if name not in ARCHIVES or path != norm(str(lib/name)):

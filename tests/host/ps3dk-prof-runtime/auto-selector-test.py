@@ -163,6 +163,11 @@ project(consumer C)
                                    nested=True)
         self.assertNotEqual(result.returncode, 0, 'a hidden imported ALIAS was skipped')
         self.assertIn("'Engine::engine' is an imported target that is not GLOBAL", ' '.join(result.stderr.split()))
+        # the hidden imported target named inside a conditional generator expression is refused too
+        result, _ = self.configure('nested-import-genex', libraries='"$<$<BOOL:1>:engine>"',
+                                   extra=imported.replace('@G@', ''), nested=True)
+        self.assertNotEqual(result.returncode, 0, 'a hidden imported target inside a generator expression was skipped')
+        self.assertIn("names 'engine', an imported target that is not GLOBAL", ' '.join(result.stderr.split()))
         # top-level non-GLOBAL imported targets were always visible to the walk and stay accepted
         result, _ = self.configure('top-import', libraries='engine', extra=imported.replace('@G@', ''))
         self.assertEqual(result.returncode, 0, result.stderr)

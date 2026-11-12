@@ -70,7 +70,15 @@ function(_ps3_auto_item_targets item owner out)
         set(name "${CMAKE_MATCH_1}")
     elseif(item MATCHES "\\$<")
         string(REGEX MATCHALL "[A-Za-z0-9_.+-]+(::[A-Za-z0-9_.+-]+)*" tokens "${item}")
+        get_property(hidden GLOBAL PROPERTY PS3_AUTO_DIRECTORY_IMPORTS)
         foreach(token IN LISTS tokens)
+            if(NOT TARGET "${token}" AND ("${token}" IN_LIST hidden OR token MATCHES "::"))
+                message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': it "
+                    "names '${token}', an imported target that is not GLOBAL (or an ALIAS of one), inside a "
+                    "generator expression, so a default gcm_cmd behind it could link beside "
+                    "libgcm_cmd_prof_auto.a. Declare it IMPORTED GLOBAL and link it without a conditional "
+                    "generator expression in '${owner}'.")
+            endif()
             if(TARGET "${token}")
                 message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': it "
                     "names target '${token}' inside a generator expression other than $<LINK_ONLY:...>, which "

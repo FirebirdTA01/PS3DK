@@ -77,6 +77,21 @@ class Checks(unittest.TestCase):
         self.write_map(rows=[('ps3dk_prof_init', 'duplicate.o')])
         with self.assertRaisesRegex(ValueError, 'repeated'): self.check()
 
+    def test_default_archive_loaded_without_members_refuses(self):
+        # Review 2026-11-12: a default gcm_cmd that reached the link through a target the configure walk cannot see
+        # (a hidden imported target or plain-name ALIAS, a conditional generator expression) was LOADed with no
+        # member selected and the link was accepted. Any LOAD of a GCM/profiler archive outside the installed AUTO
+        # providers is refused.
+        auto_loads = ''.join('LOAD '+str(self.lib/a)+'\n' for a in C.ARCHIVES)
+        self.write_map(auto_loads)
+        self.check()
+        for default in ('/sdk/ppu/lib/libgcm_cmd.a', '/sdk/ppu/lib/libps3dkprof_ext.a', str(self.root/'other/libgcm_cmd_prof_auto.a')):
+            self.write_map(auto_loads+'LOAD '+default+'\n')
+            with self.assertRaisesRegex(ValueError, r'default or mixed AUTO provider linked \(LOAD\)'): self.check()
+        # an unrelated archive whose name merely contains gcm is not a provider
+        self.write_map(auto_loads+'LOAD /sdk/ppu/lib/libgcm_sys.a\n')
+        self.check()
+
     def test_demangled_map_is_refused_by_name(self):
         # ld prints a demangled table without --no-demangle: D1/D2 (and C1/C2) collapse to one name
         names = ['AlphaUIAnimation::~AlphaUIAnimation()', 'AlphaUIAnimation::~AlphaUIAnimation()']
