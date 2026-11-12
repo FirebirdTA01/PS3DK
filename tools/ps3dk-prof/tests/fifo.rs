@@ -83,7 +83,8 @@ fn long_phase1_and_long_phase2_are_separate() {
     assert!(text.contains("wrap 1 token 1/7 tail 0x1fa0 requested 64 words: phase1 COMPLETE 79800000..79800002 ticks; \
         phase2 COMPLETE 10..12 ticks; outer COMPLETE 79800017..79800017 ticks"), "{text}");
     assert!(text.contains("not GPU busy or idle time"), "{text}");
-    assert!(text.contains("Not enabled in this capture: register samples"), "{text}");
+    assert!(text.contains("Not recorded by the FIFO wrap observer: register samples"), "{text}");
+    assert!(!text.contains("Not enabled in this capture"), "{text}");
 }
 
 #[test]

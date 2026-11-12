@@ -37,6 +37,32 @@ fn draw(v: &FifoView, hover: Option<Pos2>) -> Drawn {
 }
 
 #[test]
+fn paint_cap_is_announced() {
+    // Review 2026-11-12: 2049 wraps (4098 bars) painted 4096 silently while the status and axis described all.
+    // one EVENTS chunk per wrap keeps every chunk under the reader's length cap
+    let chunks = (1..=2049u64).map(|id| events(&wrap(1 + 6 * (id - 1), id, 1000 + id * 1_000_000, 100, 100))).collect();
+    let v = view(&with(chunks));
+    assert_eq!(v.bars.len(), 4098);
+    let d = draw(&v, None);
+    assert_eq!((d.bars, d.omitted), (ps3dk_prof_viewer::fifo::PAINT_BARS, 2));
+    let notice = d.notice.expect("a capped picture says so");
+    assert!(notice.contains("first 4096 of 4098") && notice.contains("2 later bar(s) are not painted"), "{notice}");
+    // under the cap: no notice
+    let small = view(&with(vec![events(&wrap(1, 1, 1000, 100, 100))]));
+    let d = draw(&small, None);
+    assert!(d.notice.is_none() && d.omitted == 0);
+}
+
+#[test]
+fn not_enabled_names_only_the_fifo_observer() {
+    // Review 2026-11-12: the fixed sentence said RSX-reached markers were not enabled, also in captures with AUTO
+    // RSX records; it now speaks for the FIFO wrap observer and points to the AUTO page for those markers.
+    let s = ps3dk_prof_viewer::fifo::NOT_ENABLED;
+    assert!(s.starts_with("Not recorded by the FIFO wrap observer") && s.contains("AUTO page"), "{s}");
+    assert!(!s.contains("Not enabled in this capture"), "{s}");
+}
+
+#[test]
 fn long_phases_and_an_open_end() {
     let mut evs = wrap(1, 1, 1000, 79_800_000, 10);
     evs.extend(wrap(7, 2, 80_000_000, 5, 39_900_000));

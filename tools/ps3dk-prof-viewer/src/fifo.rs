@@ -7,8 +7,9 @@ pub const TITLE: &str = "FIFO wrap waits (PPU clock)";
 pub const CAPTION: &str = "PPU timebase wall time of the GCM context owner inside the two-phase FIFO wrap, including \
 scheduling and observer cost. Not GPU busy or idle time; frame tokens are owner association, not GPU execution frames.";
 pub const RSX_STATUS: &str = "RSX execution busy/idle: UNKNOWN (no mechanism in this capture measures it).";
-pub const NOT_ENABLED: &str = "Not enabled in this capture (not zero): register samples, prepared/published bytes, \
-RSX-reached markers, supply-gap views.";
+pub const NOT_ENABLED: &str = "Not recorded by the FIFO wrap observer (not zero): register samples, prepared/published \
+bytes, supply-gap views. RSX-reached markers come from AUTO RSX records, shown on the AUTO page when the capture has \
+them.";
 pub const PAINT_BARS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

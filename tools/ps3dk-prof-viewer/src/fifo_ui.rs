@@ -8,6 +8,9 @@ pub struct Drawn {
     pub status: String,
     pub bars: usize,
     pub open_ends: usize,
+    /// Phase bars retained but not painted (beyond PAINT_BARS), and the notice saying so.
+    pub omitted: usize,
+    pub notice: Option<String>,
     pub unknown_rows: usize,
     pub rows: usize,
     pub lane_rect: Option<Rect>,
@@ -32,6 +35,13 @@ pub fn page(p: &mut egui::Ui, v: &FifoView, d: &mut Drawn) {
     }
     p.label(NOT_ENABLED);
     ui::section_label(p, "PHASE BARS (PPU timebase)");
+    if v.bars.len() > PAINT_BARS {
+        d.omitted = v.bars.len() - PAINT_BARS;
+        let notice = format!("Showing the first {PAINT_BARS} of {} phase bars in capture order; {} later bar(s) are \
+            not painted. The status, the axis and the wrap list below cover all of them.", v.bars.len(), d.omitted);
+        ui::field_message(p, ui::Tone::Neutral, &notice);
+        d.notice = Some(notice);
+    }
     let h = 64.0;
     let (rect, _) = p.allocate_exact_size(Vec2::new(p.available_width().max(200.0), h), Sense::hover());
     d.lane_rect = Some(rect);

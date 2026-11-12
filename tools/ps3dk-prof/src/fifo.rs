@@ -696,8 +696,9 @@ pub fn analyze(cap: &Capture) -> Report {
 
 pub const SCOPE: &str = "PPU timebase wall time of the GCM context owner between wrap-protocol boundaries, including \
 scheduling and observer cost; not GPU busy or idle time. Frame tokens are owner association, not GPU execution frames.";
-pub const NOT_ENABLED: &str = "Not enabled in this capture: register samples, prepared/published bytes, RSX-reached \
-markers, supply-gap views (not zero: not recorded).";
+pub const NOT_ENABLED: &str = "Not recorded by the FIFO wrap observer: register samples, prepared/published bytes, \
+supply-gap views (not zero: not recorded). RSX-reached markers come from AUTO RSX records ('ps3dk-prof auto') when \
+the capture has them.";
 
 pub fn summary_line(inv: &Inventory) -> String {
     format!(
