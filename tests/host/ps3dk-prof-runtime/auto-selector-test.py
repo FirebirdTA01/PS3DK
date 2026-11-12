@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import shlex
 from pathlib import Path
 import subprocess
 import unittest
@@ -85,6 +86,38 @@ project(consumer C)
         self.assertIn('libps3dkprof_ext_live.a', libs)
         self.assertNotIn(';gcm_cmd;', ';'+libs+';')
         self.assertNotIn(';ps3dkprof_ext;', ';'+libs+';')
+
+    def link_line(self, name):
+        return (OUT/name/'build/CMakeFiles/app.dir/link.txt').read_text(encoding='utf-8')
+
+    def test_library_closure_gets_the_auto_provider(self):
+        # gcm_cmd reaching the link through a library target (an engine static library linking gcm_cmd) must be
+        # the observed provider too; the default libgcm_cmd.a beside libgcm_cmd_prof_auto.a is a mixed link.
+        lib = 'add_library(@N@ STATIC "${CMAKE_SOURCE_DIR}/main.c")\n'
+        cases = {
+            'engine-public': lib.replace('@N@', 'engine')+'target_link_libraries(engine PUBLIC gcm_cmd)',
+            'engine-private': lib.replace('@N@', 'engine')+'target_link_libraries(engine PRIVATE gcm_cmd ps3dkprof_ext)',
+            'engine-two-levels': lib.replace('@N@', 'engine')+lib.replace('@N@', 'core')+
+                'target_link_libraries(engine PUBLIC core)\ntarget_link_libraries(core INTERFACE gcm_cmd)\n'
+                'add_library(Engine::engine ALIAS engine)',
+        }
+        for name, extra in cases.items():
+            result, _ = self.configure(name, libraries='Engine::engine' if 'two' in name else 'engine', extra=extra)
+            self.assertEqual(result.returncode, 0, name+': '+result.stderr)
+            words = shlex.split(self.link_line(name))
+            self.assertTrue(any(w.endswith('/libgcm_cmd_prof_auto.a') for w in words), (name, words))
+            self.assertFalse([w for w in words if w in ('-lgcm_cmd', 'gcm_cmd') or w.endswith('/libgcm_cmd.a')],
+                             (name, words))
+            self.assertFalse([w for w in words if w in ('-lps3dkprof_ext',) or w.endswith('/libps3dkprof_ext.a')],
+                             (name, words))
+
+    def test_library_closure_generator_expression_refuses(self):
+        extra = ('add_library(engine STATIC "${CMAKE_SOURCE_DIR}/main.c")\n'
+                 'target_link_libraries(engine PUBLIC "$<$<BOOL:1>:gcm_cmd>")')
+        result, _ = self.configure('engine-genex', libraries='engine', extra=extra)
+        self.assertNotEqual(result.returncode, 0, 'a generator expression around gcm_cmd unexpectedly selected')
+        self.assertIn("for target 'engine'", result.stderr)
+        self.assertIn('generator expression', result.stderr)
 
     def test_conflicting_variants_and_launcher_refuse(self):
         for name, libs, extra in (
