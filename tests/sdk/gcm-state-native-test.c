@@ -227,7 +227,7 @@ static void ref_unsafe_zminmax(gcmContextData *ctx, u32 cnf, u32 zc, u32 ciw)
     ctx->current[1] = (cnf | (zc<<4) | (ciw<<8));
     ctx->current   += 2;
 }
-static void ref_safe_render(gcmContextData *ctx, u32 mode, u32 index)
+static void ref_safe_render(gcmContextData *ctx, u8 mode, u32 index)
 {
     u32 offset = 0x10u*index;
     if (mode == 2 /* GCM_CONDITIONAL */) {
@@ -246,7 +246,7 @@ static void ref_safe_render(gcmContextData *ctx, u32 mode, u32 index)
         ctx->current   += 2;
     }
 }
-static void ref_unsafe_render(gcmContextData *ctx, u32 mode, u32 index)
+static void ref_unsafe_render(gcmContextData *ctx, u8 mode, u32 index)
 {
     u32 offset = 0x10u*index;
     if (mode == 2) {

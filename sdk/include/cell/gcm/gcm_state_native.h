@@ -310,7 +310,7 @@ static inline void ps3tc_gcm_state_zminmax_control_unsafe(CellGcmContextData *ct
 #  define PS3TC_GCM_RENDER_CONDITIONAL 2u /* == GCM_CONDITIONAL, rsx/gcm_sys.h */
 #endif
 static inline void ps3tc_gcm_state_render_enable(CellGcmContextData *ctx,
-                                                  uint32_t mode, uint32_t index)
+                                                  uint8_t mode, uint32_t index)
 {
     uint32_t offset = 0x10u * index;
     if (mode == PS3TC_GCM_RENDER_CONDITIONAL)
@@ -333,7 +333,7 @@ static inline void ps3tc_gcm_state_render_enable(CellGcmContextData *ctx,
 
 /* unsafe — both branches written plainly. */
 static inline void ps3tc_gcm_state_render_enable_unsafe(CellGcmContextData *ctx,
-                                                         uint32_t mode, uint32_t index)
+                                                         uint8_t mode, uint32_t index)
 {
     uint32_t offset = 0x10u * index;
     if (mode == PS3TC_GCM_RENDER_CONDITIONAL)

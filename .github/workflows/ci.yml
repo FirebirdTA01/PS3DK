@@ -340,7 +340,9 @@ jobs:
       # allowlisted name no longer forwards (converted but not removed from
       # the allowlist). The list is the baseline for "already-converted".
       - name: Test GCM forwarder surface does not grow (ratchet)
-        run: bash tests/sdk/gcm-forwarder-ratchet-test.sh
+        run: |
+          bash tests/sdk/gcm-forwarder-ratchet-test.sh --self-test
+          bash tests/sdk/gcm-forwarder-ratchet-test.sh
 
       # Freestanding 32-bit compilation catches the original ILP32 shift
       # without requiring a PPU toolchain or host multilib runtime libraries.

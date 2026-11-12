@@ -219,6 +219,15 @@ int main(void)
     ps3tc_gcm_state_zminmax_control(&r, 1, 2, 3);
     check("cell==native zminmax_control", A, B, 2);
 
+    /* zminmax_control boundary: public 0x101/0x110/0x1FF are cut to 0x01/0x10/0xFF
+       by the forwarder (uint8_t cast, same as the old rsx u8 path).  Guard only —
+       the forwarder already narrows, so this passes even before the render_enable fix. */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetZMinMaxControl(&n, 0x101, 0x110, 0x1FF);
+    ps3tc_gcm_state_zminmax_control(&r, 0x01, 0x10, 0xFF);
+    check("cell==native zminmax_control (0x101/0x110/0x1FF -> u8)", A, B, 2);
+
     /* render_enable (2, unconditional) */
     memset(&n,0,sizeof n); memset(&r,0,sizeof r);
     n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
@@ -230,6 +239,26 @@ int main(void)
     n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
     cellGcmSetRenderEnable(&n, 2, 3); ps3tc_gcm_state_render_enable(&r, 2, 3);
     check("cell==native render_enable (cond)", A, B, 4);
+
+    /* render_enable boundary: public mode 0x102 / 0xff02 must be cut to 0x02
+       (= GCM_CONDITIONAL) and therefore emit the CONDITIONAL 4-word form,
+       byte-for-byte equal to native(0x02).  On e5070a543 the native took a
+       uint32_t mode, so cellGcmSetRenderEnable(0x102,3) emitted the
+       unconditional 2-word form and this check went red; the uint8_t native
+       truncates 0x102/0xff02 -> 0x02 and it goes green. */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetRenderEnable(&n, 0x102, 3);
+    ps3tc_gcm_state_render_enable(&r, 0x02, 3);
+    check("cell==native render_enable (0x102->0x02 cond, 4w)", A, B, 4);
+    if (A[0] != (((1u)<<18) | (uint32_t)NV40TCL_NOP)) { printf("MISMATCH render_enable(0x102) not conditional\n"); exit(1); }
+
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+8; r.begin=r.current=B; r.end=B+8;
+    cellGcmSetRenderEnable(&n, 0xff02, 3);
+    ps3tc_gcm_state_render_enable(&r, 0x02, 3);
+    check("cell==native render_enable (0xff02->0x02 cond, 4w)", A, B, 4);
+    if (A[0] != (((1u)<<18) | (uint32_t)NV40TCL_NOP)) { printf("MISMATCH render_enable(0xff02) not conditional\n"); exit(1); }
 
     /* frequency_divider_operation (2) */
     memset(&n,0,sizeof n); memset(&r,0,sizeof r);
