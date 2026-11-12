@@ -158,6 +158,221 @@ static inline void ps3tc_gcm_state_depth_bounds_unsafe(CellGcmContextData *ctx, 
 }
 
 /* ================================================================== *
+ * Fog group: single-value mode + float pair.
+ * ================================================================== */
+
+/* safe — fog_mode (FOG_MODE 0x8cc, count=1, 2 words). */
+static inline void ps3tc_gcm_state_fog_mode(CellGcmContextData *ctx, uint32_t mode)
+{
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FOG_MODE, 1);
+    *w    = mode;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_fog_mode_unsafe(CellGcmContextData *ctx, uint32_t mode)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_FOG_MODE, 1);
+    ctx->current[1] = mode;
+    ctx->current   += 2;
+}
+
+/* safe — fog_params (FOG_EQUATION_CONSTANT 0x8d0, count=2, 3 words).
+ * p0/p1 are written as IEEE-32 bit patterns (same pattern as depth_bounds). */
+static inline void ps3tc_gcm_state_fog_params(CellGcmContextData *ctx, f32 p0, f32 p1)
+{
+    ieee32 a, b;
+    a.f = p0; b.f = p1;
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 3);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FOG_EQUATION_CONSTANT, 2);
+    *w++ = a.u;
+    *w   = b.u;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_fog_params_unsafe(CellGcmContextData *ctx, f32 p0, f32 p1)
+{
+    ieee32 a, b;
+    a.f = p0; b.f = p1;
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_FOG_EQUATION_CONSTANT, 2);
+    ctx->current[1] = a.u;
+    ctx->current[2] = b.u;
+    ctx->current   += 3;
+}
+
+/* ================================================================== *
+ * Anti-aliasing / clip / FP / zminmax / freq-divider group.
+ * ================================================================== */
+
+/* safe — anti_aliasing_control (ANTI_ALIASING_CONTROL 0x1d7c, count=1, 2 words).
+ * Packing: enable bits 0-3, alphaToCoverage bits 4-7, alphaToOne bits 8-15,
+ * sampleMask bits 16-31 (identical to the pre-patch rsx* body). */
+static inline void ps3tc_gcm_state_anti_aliasing_control(CellGcmContextData *ctx,
+    uint32_t enable, uint32_t alpha_to_coverage, uint32_t alpha_to_one, uint32_t sample_mask)
+{
+    uint32_t val = ((sample_mask << 16) | (alpha_to_one << 8) | (alpha_to_coverage << 4) | enable);
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_ANTI_ALIASING_CONTROL, 1);
+    *w    = val;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_anti_aliasing_control_unsafe(CellGcmContextData *ctx,
+    uint32_t enable, uint32_t alpha_to_coverage, uint32_t alpha_to_one, uint32_t sample_mask)
+{
+    uint32_t val = ((sample_mask << 16) | (alpha_to_one << 8) | (alpha_to_coverage << 4) | enable);
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_ANTI_ALIASING_CONTROL, 1);
+    ctx->current[1] = val;
+    ctx->current   += 2;
+}
+
+/* safe — user_clip_plane_control (CLIP_PLANE_ENABLE 0x1478, count=1, 2 words).
+ * Each plane is a 4-bit enable, packed: plane0 bits 0-3 ... plane5 bits 20-23. */
+static inline void ps3tc_gcm_state_user_clip_plane_control(CellGcmContextData *ctx,
+    uint32_t p0, uint32_t p1, uint32_t p2, uint32_t p3, uint32_t p4, uint32_t p5)
+{
+    uint32_t val = ((p5 << 20) | (p4 << 16) | (p3 << 12) | (p2 << 8) | (p1 << 4) | p0);
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_CLIP_PLANE_ENABLE, 1);
+    *w    = val;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_user_clip_plane_control_unsafe(CellGcmContextData *ctx,
+    uint32_t p0, uint32_t p1, uint32_t p2, uint32_t p3, uint32_t p4, uint32_t p5)
+{
+    uint32_t val = ((p5 << 20) | (p4 << 16) | (p3 << 12) | (p2 << 8) | (p1 << 4) | p0);
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_CLIP_PLANE_ENABLE, 1);
+    ctx->current[1] = val;
+    ctx->current   += 2;
+}
+
+/* safe — fragment_program_gamma_enable (FP_PACKER 0x1fec, count=1, 2 words). */
+static inline void ps3tc_gcm_state_fragment_program_gamma_enable(CellGcmContextData *ctx,
+                                                                  uint32_t enable)
+{
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_PACKER, 1);
+    *w    = enable;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_fragment_program_gamma_enable_unsafe(CellGcmContextData *ctx,
+                                                                         uint32_t enable)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_FP_PACKER, 1);
+    ctx->current[1] = enable;
+    ctx->current   += 2;
+}
+
+/* safe — zminmax_control (DEPTH_CONTROL 0x1d78, count=1, 2 words).
+ * Packing: cullNearFar bits 0-3, zClampEnable bits 4-7, cullIgnoreW bits 8-11. */
+static inline void ps3tc_gcm_state_zminmax_control(CellGcmContextData *ctx,
+                                                   uint32_t cull_near_far,
+                                                   uint32_t zclamp_enable,
+                                                   uint32_t cull_ignore_w)
+{
+    uint32_t val = (cull_near_far | (zclamp_enable << 4) | (cull_ignore_w << 8));
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_DEPTH_CONTROL, 1);
+    *w    = val;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_zminmax_control_unsafe(CellGcmContextData *ctx,
+                                                           uint32_t cull_near_far,
+                                                           uint32_t zclamp_enable,
+                                                           uint32_t cull_ignore_w)
+{
+    uint32_t val = (cull_near_far | (zclamp_enable << 4) | (cull_ignore_w << 8));
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_DEPTH_CONTROL, 1);
+    ctx->current[1] = val;
+    ctx->current   += 2;
+}
+
+/* safe — render_enable (RENDER_ENABLE 0x1e98).
+ * Two shapes inherited from the pre-patch rsx* body (commands_impl.h:493-510):
+ *   mode == GCM_CONDITIONAL: 4 words  [NOP, 0, RENDER_ENABLE, 0x2000000|offset]
+ *   otherwise:                 2 words [RENDER_ENABLE, 0x1000000]
+ * offset = 0x10 * index.  The reservation count differs (4 vs 2) per branch —
+ * the safe native must reserve for the shape it takes.
+ *
+ * GCM_CONDITIONAL is the PPU enum (value 2, rsx/gcm_sys.h:681). We include
+ * it here so the native stays self-contained; the forwarder's caller-facing
+ * name is `enable` but the wire semantics is the `mode` selector. */
+#ifndef PS3TC_GCM_RENDER_CONDITIONAL
+#  define PS3TC_GCM_RENDER_CONDITIONAL 2u /* == GCM_CONDITIONAL, rsx/gcm_sys.h */
+#endif
+static inline void ps3tc_gcm_state_render_enable(CellGcmContextData *ctx,
+                                                  uint32_t mode, uint32_t index)
+{
+    uint32_t offset = 0x10u * index;
+    if (mode == PS3TC_GCM_RENDER_CONDITIONAL)
+    {
+        uint32_t *w = ps3tc_gcm_reserve(ctx, 4);
+        if (!w) return;
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_NOP, 1);
+        *w++ = 0;
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        *w   = (0x2000000u | offset);
+    }
+    else
+    {
+        uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+        if (!w) return;
+        *w++ = PS3TC_GCM_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        *w   = 0x1000000u;
+    }
+}
+
+/* unsafe — both branches written plainly. */
+static inline void ps3tc_gcm_state_render_enable_unsafe(CellGcmContextData *ctx,
+                                                         uint32_t mode, uint32_t index)
+{
+    uint32_t offset = 0x10u * index;
+    if (mode == PS3TC_GCM_RENDER_CONDITIONAL)
+    {
+        ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_NOP, 1);
+        ctx->current[1] = 0;
+        ctx->current[2] = PS3TC_GCM_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[3] = (0x2000000u | offset);
+        ctx->current   += 4;
+    }
+    else
+    {
+        ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[1] = 0x1000000u;
+        ctx->current   += 2;
+    }
+}
+
+/* safe — frequency_divider_operation (DIVIDER_FREQUENCY_OP 0x1fc0, count=1, 2 words).
+ * op is a u16; the wire word is the value in the low 16 bits. */
+static inline void ps3tc_gcm_state_frequency_divider_operation(CellGcmContextData *ctx,
+                                                                uint16_t op)
+{
+    uint32_t *w = ps3tc_gcm_reserve(ctx, 2);
+    if (!w) return;
+    *w++ = PS3TC_GCM_METHOD(NV40TCL_DIVIDER_FREQUENCY_OP, 1);
+    *w   = (uint32_t)op;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_frequency_divider_operation_unsafe(CellGcmContextData *ctx,
+                                                                       uint16_t op)
+{
+    ctx->current[0] = PS3TC_GCM_METHOD(NV40TCL_DIVIDER_FREQUENCY_OP, 1);
+    ctx->current[1] = (uint32_t)op;
+    ctx->current   += 2;
+}
+
+/* ================================================================== *
  * Blend / dither group — NV40TCL_BLEND_* and NV40TCL_DITHER_ENABLE.
  *   blend_func      (0x314) 3 words: (sfalpha<<16) | sfcolor, (dfalpha<<16) | dfcolor
  *   blend_equation  (0x320) 2 words: (alpha<<16) | color

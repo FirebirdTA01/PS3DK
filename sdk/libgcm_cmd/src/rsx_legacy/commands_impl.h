@@ -261,14 +261,16 @@ void RSX_FUNC(SetViewportClip)(gcmContextData *context,u8 sel,u16 width,u16 heig
 	RSX_CONTEXT_CURRENT_END(3);
 }
 
+/* clip_plane family — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
+ * rsx* safe and rsx*-Unsafe both resolve to the native.  See
+ * tests/sdk/gcm-state-native-test. */
 void RSX_FUNC(SetUserClipPlaneControl)(gcmContextData *context,u32 plane0,u32 plane1,u32 plane2,u32 plane3,u32 plane4,u32 plane5)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_CLIP_PLANE_ENABLE,1);
-	RSX_CONTEXT_CURRENTP[1] = ((plane5 << 20) | (plane4 << 16) | (plane3 << 12) | (plane2 << 8) | (plane1 << 4) | plane0);
-	
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_user_clip_plane_control_unsafe(context, plane0, plane1, plane2, plane3, plane4, plane5);
+#else
+	ps3tc_gcm_state_user_clip_plane_control(context, plane0, plane1, plane2, plane3, plane4, plane5);
+#endif
 }
 
 /* Depth group: rsx* is a thin alias over the shared natives in
@@ -490,23 +492,16 @@ void RSX_FUNC(SetTwoSidedStencilTestEnable)(gcmContextData *context,u32 enable)
 #endif
 }
 
+/* render_enable — branching native owned by the shared state-native header.
+ * Two shapes inherited from the pre-patch body: GCM_CONDITIONAL emits a
+ * 4-word packet with a leading NOP, other modes emit 2 words. */
 void RSX_FUNC(SetRenderEnable)(gcmContextData *context,u8 mode,u32 index)
 {
-	u32 offset = 0x10*index;
-	
-	if(mode == GCM_CONDITIONAL) {
-		RSX_CONTEXT_CURRENT_BEGIN(4);
-		RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_NOP,1);
-		RSX_CONTEXT_CURRENTP[1] = 0;
-		RSX_CONTEXT_CURRENTP[2] = RSX_METHOD(NV40TCL_RENDER_ENABLE,1);
-		RSX_CONTEXT_CURRENTP[3] = (0x2000000 | offset);
-		RSX_CONTEXT_CURRENT_END(4);
-	} else {
-		RSX_CONTEXT_CURRENT_BEGIN(2);
-		RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_RENDER_ENABLE,1);
-		RSX_CONTEXT_CURRENTP[1] = 0x1000000;
-		RSX_CONTEXT_CURRENT_END(2);
-	}
+#if RSX_UNSAFE
+	ps3tc_gcm_state_render_enable_unsafe(context, mode, index);
+#else
+	ps3tc_gcm_state_render_enable(context, mode, index);
+#endif
 }
 
 void RSX_FUNC(SetReport)(gcmContextData *context,u32 type,u32 index)
@@ -978,10 +973,11 @@ void RSX_FUNC(SetFragmentProgramParameter)(gcmContextData *context,const rsxFrag
 
 void RSX_FUNC(SetFragmentProgramGammaEnable)(gcmContextData *context,u32 enable)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FP_PACKER,1);
-	RSX_CONTEXT_CURRENTP[1] = enable;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_fragment_program_gamma_enable_unsafe(context, enable);
+#else
+	ps3tc_gcm_state_fragment_program_gamma_enable(context, enable);
+#endif
 }
 
 void RSX_FUNC(DrawVertexBegin)(gcmContextData *context,u32 type)
@@ -1071,10 +1067,11 @@ void RSX_FUNC(DrawVertex4ub)(gcmContextData *context,u8 idx,const u8 v[4])
 
 void RSX_FUNC(SetFrequencyDividerOperation)(gcmContextData *context,u16 operation)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DIVIDER_FREQUENCY_OP,1);
-	RSX_CONTEXT_CURRENTP[1] = operation;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_frequency_divider_operation_unsafe(context, operation);
+#else
+	ps3tc_gcm_state_frequency_divider_operation(context, operation);
+#endif
 }
 
 void RSX_FUNC(InvalidateVertexCache)(gcmContextData *context)
@@ -1247,10 +1244,11 @@ void RSX_FUNC(TextureAnisoSpread)(gcmContextData *context,u8 index,u8 reduceSamp
 
 void RSX_FUNC(SetZMinMaxControl)(gcmContextData *context,u8 cullNearFar,u8 zClampEnable,u8 cullIgnoreW)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_DEPTH_CONTROL,1);
-	RSX_CONTEXT_CURRENTP[1] = (cullNearFar | (zClampEnable<<4) | (cullIgnoreW<<8));
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_zminmax_control_unsafe(context, cullNearFar, zClampEnable, cullIgnoreW);
+#else
+	ps3tc_gcm_state_zminmax_control(context, cullNearFar, zClampEnable, cullIgnoreW);
+#endif
 }
 
 void RSX_FUNC(SetDepthBoundsTestEnable)(gcmContextData *context,u32 enable)
@@ -1640,10 +1638,11 @@ void RSX_FUNC(SetScissor)(gcmContextData *context,u16 x,u16 y,u16 w,u16 h)
 
 void RSX_FUNC(SetAntialiasingControl)(gcmContextData *context,u32 enable,u32 alphaToCoverage,u32 alphaToOne,u32 sampleMask)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_ANTI_ALIASING_CONTROL,1);
-	RSX_CONTEXT_CURRENTP[1] = ((sampleMask<<16) | (alphaToOne<<8) | (alphaToCoverage<<4) | enable);
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_anti_aliasing_control_unsafe(context, enable, alphaToCoverage, alphaToOne, sampleMask);
+#else
+	ps3tc_gcm_state_anti_aliasing_control(context, enable, alphaToCoverage, alphaToOne, sampleMask);
+#endif
 }
 
 void RSX_FUNC(InlineTransfer)(gcmContextData *context,u32 dstOffset,const void *srcAddress,u32 sizeInWords,u8 location)
@@ -1795,23 +1794,20 @@ void RSX_FUNC(SetLogicOpEnable)(gcmContextData *context,u32 enable)
 
 void RSX_FUNC(SetFogMode)(gcmContextData *context,u32 mode)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FOG_MODE,1);
-	RSX_CONTEXT_CURRENTP[1] = mode;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_fog_mode_unsafe(context, mode);
+#else
+	ps3tc_gcm_state_fog_mode(context, mode);
+#endif
 }
 
 void RSX_FUNC(SetFogParams)(gcmContextData *context,f32 p0,f32 p1)
 {
-	ieee32 d0,d1;
-	d0.f = p0;
-	d1.f = p1;
-
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FOG_EQUATION_CONSTANT,2);
-	RSX_CONTEXT_CURRENTP[1] = d0.u;
-	RSX_CONTEXT_CURRENTP[2] = d1.u;
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_fog_params_unsafe(context, p0, p1);
+#else
+	ps3tc_gcm_state_fog_params(context, p0, p1);
+#endif
 }
 
 void RSX_FUNC(SetTransformBranchBits)(gcmContextData *context,u32 branchBits)

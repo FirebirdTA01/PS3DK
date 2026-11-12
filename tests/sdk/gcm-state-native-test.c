@@ -165,6 +165,103 @@ static void ref_unsafe_pair3(gcmContextData *ctx, uint32_t method, uint32_t a, u
     ctx->current   += 3;
 }
 
+/* ---- fog / antialias / clip / fp / zminmax / render-enable / freq-divider ----
+ * references: the pre-patch commands_impl.h bodies, in-test (byte-for-byte). */
+static void ref_safe_fog_params(gcmContextData *ctx, f32 p0, f32 p1)
+{
+    ieee32 d0, d1; d0.f = p0; d1.f = p1;
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_FOG_EQUATION_CONSTANT, 2);
+    ctx->current[1] = d0.u;
+    ctx->current[2] = d1.u;
+    ctx->current   += 3;
+}
+static void ref_unsafe_fog_params(gcmContextData *ctx, f32 p0, f32 p1)
+{
+    ieee32 d0, d1; d0.f = p0; d1.f = p1;
+    ctx->current[0] = REF_METHOD(NV40TCL_FOG_EQUATION_CONSTANT, 2);
+    ctx->current[1] = d0.u;
+    ctx->current[2] = d1.u;
+    ctx->current   += 3;
+}
+static void ref_safe_aa(gcmContextData *ctx, u32 en, u32 a2c, u32 a2o, u32 sm)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_ANTI_ALIASING_CONTROL, 1);
+    ctx->current[1] = ((sm<<16) | (a2o<<8) | (a2c<<4) | en);
+    ctx->current   += 2;
+}
+static void ref_unsafe_aa(gcmContextData *ctx, u32 en, u32 a2c, u32 a2o, u32 sm)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_ANTI_ALIASING_CONTROL, 1);
+    ctx->current[1] = ((sm<<16) | (a2o<<8) | (a2c<<4) | en);
+    ctx->current   += 2;
+}
+static void ref_safe_clip(gcmContextData *ctx, u32 p0,u32 p1,u32 p2,u32 p3,u32 p4,u32 p5)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_CLIP_PLANE_ENABLE, 1);
+    ctx->current[1] = ((p5<<20)|(p4<<16)|(p3<<12)|(p2<<8)|(p1<<4)|p0);
+    ctx->current   += 2;
+}
+static void ref_unsafe_clip(gcmContextData *ctx, u32 p0,u32 p1,u32 p2,u32 p3,u32 p4,u32 p5)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_CLIP_PLANE_ENABLE, 1);
+    ctx->current[1] = ((p5<<20)|(p4<<16)|(p3<<12)|(p2<<8)|(p1<<4)|p0);
+    ctx->current   += 2;
+}
+static void ref_safe_zminmax(gcmContextData *ctx, u32 cnf, u32 zc, u32 ciw)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_DEPTH_CONTROL, 1);
+    ctx->current[1] = (cnf | (zc<<4) | (ciw<<8));
+    ctx->current   += 2;
+}
+static void ref_unsafe_zminmax(gcmContextData *ctx, u32 cnf, u32 zc, u32 ciw)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_DEPTH_CONTROL, 1);
+    ctx->current[1] = (cnf | (zc<<4) | (ciw<<8));
+    ctx->current   += 2;
+}
+static void ref_safe_render(gcmContextData *ctx, u32 mode, u32 index)
+{
+    u32 offset = 0x10u*index;
+    if (mode == 2 /* GCM_CONDITIONAL */) {
+        if (ctx->current + 4 > ctx->end)
+            if (ctx->callback && ctx->callback(ctx, 4) != 0) return;
+        ctx->current[0] = REF_METHOD(NV40TCL_NOP, 1);
+        ctx->current[1] = 0;
+        ctx->current[2] = REF_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[3] = (0x2000000 | offset);
+        ctx->current   += 4;
+    } else {
+        if (ctx->current + 2 > ctx->end)
+            if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+        ctx->current[0] = REF_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[1] = 0x1000000;
+        ctx->current   += 2;
+    }
+}
+static void ref_unsafe_render(gcmContextData *ctx, u32 mode, u32 index)
+{
+    u32 offset = 0x10u*index;
+    if (mode == 2) {
+        ctx->current[0] = REF_METHOD(NV40TCL_NOP, 1);
+        ctx->current[1] = 0;
+        ctx->current[2] = REF_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[3] = (0x2000000 | offset);
+        ctx->current   += 4;
+    } else {
+        ctx->current[0] = REF_METHOD(NV40TCL_RENDER_ENABLE, 1);
+        ctx->current[1] = 0x1000000;
+        ctx->current   += 2;
+    }
+}
+
 /* -------------------------------------------------------------------- *
  */
 static int failures = 0;
@@ -583,6 +680,189 @@ int main(void)
         }
     }
 
+    /* ---- fog mode (2-word, raw value) ---- */
+    printf("\n  Fog mode (2-word, raw value)\n");
+    for (uint32_t v = 0; v <= 3; ++v)
+        drive_uint("  fog_mode",
+                   ps3tc_gcm_state_fog_mode,
+                   ps3tc_gcm_state_fog_mode_unsafe,
+                   NV40TCL_FOG_MODE, v);
+
+    /* ---- fog params (3-word, two floats, IEEE-32 bit-pattern sweep) ---- */
+    printf("\n  Fog params (3-word, float bit patterns)\n");
+    {
+        const struct { uint32_t p0, p1; } raws[] = {
+            { 0x00000000u, 0x00000000u },   /* (0.0, 0.0) */
+            { 0x3F800000u, 0x3F800000u },   /* (1.0, 1.0) */
+            { 0x40490FDBu, 0x40490FDBu },   /* (~ pi, ~ pi) */
+            { 0x80000000u, 0x00000000u },   /* (-0.0, 0.0) */
+            { 0xDEADBEEFu, 0xDEADBEEFu },   /* (arbitrary, arbitrary) */
+        };
+        for (size_t i = 0; i < sizeof raws / sizeof raws[0]; ++i) {
+            f32 a, b;
+            memcpy(&a, &raws[i].p0, 4); memcpy(&b, &raws[i].p1, 4);
+            static uint32_t A[8], B[8];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+            ps3tc_gcm_state_fog_params((CellGcmContextData *)&n, a, b);
+            ref_safe_fog_params(&r, a, b);
+            char lab[48]; snprintf(lab, sizeof lab, "  fog_params %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_fog_params_unsafe((CellGcmContextData *)&n, a, b);
+            ref_unsafe_fog_params(&r, a, b);
+            snprintf(lab, sizeof lab, "  fog_params %u", (unsigned)i);
+            cmp(lab, A, B, 3);
+        }
+    }
+
+    /* ---- anti-aliasing control (2-word, bit-packed 4 values) ---- */
+    printf("\n  Anti-aliasing control (2-word, packed 4 values)\n");
+    {
+        const struct { uint32_t en, a2c, a2o, sm; } aas[] = {
+            { 0,   0,   0,   0x00   },
+            { 1,   2,   3,   0xFF   },
+            { 0xF, 0xF, 0xF, 0xFFFF },
+            { 1,   0,   1,   0x100  },
+        };
+        for (size_t i = 0; i < sizeof aas / sizeof aas[0]; ++i) {
+            uint32_t en = aas[i].en, a2c = aas[i].a2c, a2o = aas[i].a2o, sm = aas[i].sm;
+            static uint32_t A[4], B[4];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+            ps3tc_gcm_state_anti_aliasing_control((CellGcmContextData *)&n, en, a2c, a2o, sm);
+            ref_safe_aa(&r, en, a2c, a2o, sm);
+            char lab[48]; snprintf(lab, sizeof lab, "  anti_aliasing %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_anti_aliasing_control_unsafe((CellGcmContextData *)&n, en, a2c, a2o, sm);
+            ref_unsafe_aa(&r, en, a2c, a2o, sm);
+            snprintf(lab, sizeof lab, "  anti_aliasing %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+        }
+    }
+
+    /* ---- user clip plane control (2-word, 6 planes x 4 bits) ---- */
+    printf("\n  User clip plane (2-word, 6 planes x 4 bits)\n");
+    {
+        const struct { uint32_t p0,p1,p2,p3,p4,p5; } cps[] = {
+            { 0,   0,   0,   0,   0,   0   },
+            { 1,   0,   1,   0,   1,   0   },
+            { 1,   1,   1,   1,   1,   1   },
+            { 0xF, 0x0, 0xF, 0x0, 0xF, 0xF },
+        };
+        for (size_t i = 0; i < sizeof cps / sizeof cps[0]; ++i) {
+            uint32_t p0=cps[i].p0,p1=cps[i].p1,p2=cps[i].p2,p3=cps[i].p3,p4=cps[i].p4,p5=cps[i].p5;
+            static uint32_t A[4], B[4];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+            ps3tc_gcm_state_user_clip_plane_control((CellGcmContextData *)&n, p0,p1,p2,p3,p4,p5);
+            ref_safe_clip(&r, p0,p1,p2,p3,p4,p5);
+            char lab[48]; snprintf(lab, sizeof lab, "  user_clip %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_user_clip_plane_control_unsafe((CellGcmContextData *)&n, p0,p1,p2,p3,p4,p5);
+            ref_unsafe_clip(&r, p0,p1,p2,p3,p4,p5);
+            snprintf(lab, sizeof lab, "  user_clip %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+        }
+    }
+
+    /* ---- fragment program gamma enable (2-word, raw value) ---- */
+    printf("\n  FP gamma enable (2-word, raw value)\n");
+    for (uint32_t v = 0; v <= 2; ++v)
+        drive_uint("  fp_gamma_enable",
+                   ps3tc_gcm_state_fragment_program_gamma_enable,
+                   ps3tc_gcm_state_fragment_program_gamma_enable_unsafe,
+                   NV40TCL_FP_PACKER, v);
+
+    /* ---- zminmax control (2-word, bit-packed 3 values) ---- */
+    printf("\n  Z-minmax control (2-word, packed 3 values)\n");
+    {
+        const struct { uint32_t cnf, zc, ciw; } zms[] = {
+            { 0,    0,    0    },
+            { 1,    1,    1    },
+            { 0x0F, 0x0F, 0x0F },
+            { 1,    0,    1    },
+        };
+        for (size_t i = 0; i < sizeof zms / sizeof zms[0]; ++i) {
+            uint32_t cnf = zms[i].cnf, zc = zms[i].zc, ciw = zms[i].ciw;
+            static uint32_t A[4], B[4];
+            gcmContextData n, r;
+            memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+            n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+            r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+            ps3tc_gcm_state_zminmax_control((CellGcmContextData *)&n, cnf, zc, ciw);
+            ref_safe_zminmax(&r, cnf, zc, ciw);
+            char lab[48]; snprintf(lab, sizeof lab, "  zminmax %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+            n.begin = n.current = A; r.begin = r.current = B;
+            ps3tc_gcm_state_zminmax_control_unsafe((CellGcmContextData *)&n, cnf, zc, ciw);
+            ref_unsafe_zminmax(&r, cnf, zc, ciw);
+            snprintf(lab, sizeof lab, "  zminmax %u", (unsigned)i);
+            cmp(lab, A, B, 2);
+        }
+    }
+
+    /* ---- render_enable: TWO shapes (unconditional 2-word, conditional 4-word) ---- */
+    printf("  render_enable (unconditional, 2-word)\n");
+    for (uint32_t index = 0; index <= 3; ++index) {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_render_enable((CellGcmContextData *)&n, 0, index);
+        ref_safe_render(&r, 0, index);
+        char lab[48]; snprintf(lab, sizeof lab, "  render_enable (uncond) idx %u", (unsigned)index);
+        cmp(lab, A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_render_enable_unsafe((CellGcmContextData *)&n, 0, index);
+        ref_unsafe_render(&r, 0, index);
+        cmp(lab, A, B, 2);
+    }
+    printf("  render_enable (conditional, 4-word)\n");
+    for (uint32_t index = 0; index <= 3; ++index) {
+        static uint32_t A[8], B[8];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+        ps3tc_gcm_state_render_enable((CellGcmContextData *)&n, 2, index);
+        ref_safe_render(&r, 2, index);
+        char lab[48]; snprintf(lab, sizeof lab, "  render_enable (cond) idx %u", (unsigned)index);
+        cmp(lab, A, B, 4);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_render_enable_unsafe((CellGcmContextData *)&n, 2, index);
+        ref_unsafe_render(&r, 2, index);
+        cmp(lab, A, B, 4);
+    }
+
+    /* ---- frequency divider (2-word, u16 value) ---- */
+    printf("\n  Frequency divider (2-word, u16 value)\n");
+    for (uint32_t v = 0; v <= 0xFFFF; v += 0x5555) {
+        uint16_t op = (uint16_t)v;
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_frequency_divider_operation((CellGcmContextData *)&n, op);
+        ref_safe1(&r, NV40TCL_DIVIDER_FREQUENCY_OP, op);
+        char lab[48]; snprintf(lab, sizeof lab, "  freq_divider 0x%04x", (unsigned)op);
+        cmp(lab, A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_frequency_divider_operation_unsafe((CellGcmContextData *)&n, op);
+        ref_unsafe1(&r, NV40TCL_DIVIDER_FREQUENCY_OP, op);
+        cmp(lab, A, B, 2);
+    }
+
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
     printf("\n  Ring-full / callback (end==current, recording callback)\n");
     RING_CHECK(ps3tc_gcm_state_logic_op,
@@ -684,9 +964,36 @@ int main(void)
      RING_CHECK(ps3tc_gcm_state_alpha_func,
                ps3tc_gcm_state_alpha_func_unsafe,
                "alpha_func (2 data)", 3, 0x0210, 0x80);
-     RING_CHECK(ps3tc_gcm_state_polygon_offset,
-               ps3tc_gcm_state_polygon_offset_unsafe,
-               "polygon_offset (floats)", 3, 1.0f, 2.0f);
+      RING_CHECK(ps3tc_gcm_state_polygon_offset,
+                ps3tc_gcm_state_polygon_offset_unsafe,
+                "polygon_offset (floats)", 3, 1.0f, 2.0f);
+    RING_CHECK(ps3tc_gcm_state_fog_mode,
+               ps3tc_gcm_state_fog_mode_unsafe,
+               "fog_mode", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_fog_params,
+               ps3tc_gcm_state_fog_params_unsafe,
+               "fog_params (2 floats)", 3, 1.0f, 2.0f);
+    RING_CHECK(ps3tc_gcm_state_anti_aliasing_control,
+               ps3tc_gcm_state_anti_aliasing_control_unsafe,
+               "anti_aliasing", 2, 1, 1, 1, 0xFF);
+    RING_CHECK(ps3tc_gcm_state_user_clip_plane_control,
+               ps3tc_gcm_state_user_clip_plane_control_unsafe,
+               "user_clip", 2, 1,1,1,1,1,1);
+    RING_CHECK(ps3tc_gcm_state_fragment_program_gamma_enable,
+               ps3tc_gcm_state_fragment_program_gamma_enable_unsafe,
+               "fp_gamma", 2, 1);
+    RING_CHECK(ps3tc_gcm_state_zminmax_control,
+               ps3tc_gcm_state_zminmax_control_unsafe,
+               "zminmax", 2, 1,1,1);
+    RING_CHECK(ps3tc_gcm_state_render_enable,
+               ps3tc_gcm_state_render_enable_unsafe,
+               "render_enable (uncond)", 2, 0, 3);
+    RING_CHECK(ps3tc_gcm_state_render_enable,
+               ps3tc_gcm_state_render_enable_unsafe,
+               "render_enable (cond)", 4, 2, 3);
+    RING_CHECK(ps3tc_gcm_state_frequency_divider_operation,
+               ps3tc_gcm_state_frequency_divider_operation_unsafe,
+               "freq_divider", 2, 0x1234);
 
 
     printf("\n");

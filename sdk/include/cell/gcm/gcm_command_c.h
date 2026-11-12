@@ -214,7 +214,7 @@ static inline void cellGcmSetAntiAliasingControl(CellGcmContextData *thisContext
                                                  uint32_t enable, uint32_t alphaToCoverage,
                                                  uint32_t alphaToOne, uint32_t sampleMask)
 {
-	rsxSetAntialiasingControl(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
+	ps3tc_gcm_state_anti_aliasing_control(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
 }
 
 /* Blend / dither group — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
@@ -279,14 +279,17 @@ static inline void cellGcmSetShadeMode(CellGcmContextData *thisContext, uint32_t
 	ps3tc_gcm_state_shade_model(thisContext, mode);
 }
 
+/* Fog group — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
+ * Safe/unsafe pair lives in the shared header; rsx* safe and rsx*-Unsafe
+ * both resolve to the native.  See tests/sdk/gcm-state-native-test. */
 static inline void cellGcmSetFogMode(CellGcmContextData *thisContext, uint32_t mode)
 {
-	rsxSetFogMode(thisContext, mode);
+	ps3tc_gcm_state_fog_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetFogParams(CellGcmContextData *thisContext, float p0, float p1)
 {
-	rsxSetFogParams(thisContext, p0, p1);
+	ps3tc_gcm_state_fog_params(thisContext, p0, p1);
 }
 
 /* ==========================================================
@@ -436,7 +439,7 @@ static inline void cellGcmSetUserClipPlaneControl(CellGcmContextData *thisContex
                                                   uint32_t plane2, uint32_t plane3,
                                                   uint32_t plane4, uint32_t plane5)
 {
-	rsxSetUserClipPlaneControl(thisContext, plane0, plane1, plane2, plane3, plane4, plane5);
+	ps3tc_gcm_state_user_clip_plane_control(thisContext, plane0, plane1, plane2, plane3, plane4, plane5);
 }
 
 /* ==========================================================
@@ -528,7 +531,7 @@ static inline void cellGcmSetVertexProgramConstants(CellGcmContextData *thisCont
 static inline void cellGcmSetFragmentProgramGammaEnable(CellGcmContextData *thisContext,
                                                         uint32_t enable)
 {
-	rsxSetFragmentProgramGammaEnable(thisContext, enable);
+	ps3tc_gcm_state_fragment_program_gamma_enable(thisContext, enable);
 }
 
 /* --- Texture cache invalidation --- */
@@ -724,7 +727,7 @@ static inline void cellGcmSetDrawInlineArray(CellGcmContextData *thisContext, ui
 
 static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisContext, uint16_t op)
 {
-	rsxSetFrequencyDividerOperation(thisContext, op);
+	ps3tc_gcm_state_frequency_divider_operation(thisContext, op);
 }
 
 /* ==========================================================
@@ -822,8 +825,8 @@ static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
                                             uint32_t zclampEnable,
                                             uint32_t cullIgnoreW)
 {
-	rsxSetZMinMaxControl(thisContext, (uint8_t)cullNearFarEnable,
-	                     (uint8_t)zclampEnable, (uint8_t)cullIgnoreW);
+	ps3tc_gcm_state_zminmax_control(thisContext, (uint8_t)cullNearFarEnable,
+	                                (uint8_t)zclampEnable, (uint8_t)cullIgnoreW);
 }
 
 /* ==========================================================
@@ -831,10 +834,13 @@ static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
  * via the report register.
  * ========================================================== */
 
+/* Render-enable family — branching native (conditional 4 words vs
+   unconditional 2 words).  The wire-level shape is owned by
+   ps3tc_gcm_state_render_enable{,_unsafe}; see <cell/gcm/gcm_state_native.h>. */
 static inline void cellGcmSetRenderEnable(CellGcmContextData *thisContext,
                                           uint32_t enable, uint32_t offset)
 {
-	rsxSetRenderEnable(thisContext, enable, offset);
+	ps3tc_gcm_state_render_enable(thisContext, enable, offset);
 }
 
 static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisContext, uint32_t enable)
