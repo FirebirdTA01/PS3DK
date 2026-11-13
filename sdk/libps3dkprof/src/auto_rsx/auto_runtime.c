@@ -667,9 +667,20 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
     int meta_short;
     uintptr_t cur,end;
     uint32_t lost=0;
-    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!ring || !segment || !p_ready() || !(a=owner_capture(NULL,1))) return;
     /* CALL completeness (COVERAGE segment_unrepresented): each case below adds, once, the covered draws this CALL
      * executes that will have no committed record carrying its token. */
+    if(g_tls.in_gpu) {
+        /* A CALL emitted inside an open draw bracket (from the writer's own callback): the pending operation is not
+         * touched and nothing is committed, but the CALL has executed its build, so it is accounted conservatively.
+         * Its report writes may land on pairs no record of this call owns, so any build with report writes sets
+         * the capture-wide replay bit, first CALL or not; a later CALL of the same build is a replay. */
+        if(!(s=segment_find(a,segment))) {(void)auto_frames_unrepresented(&a->coverage,1);return;}
+        if(s->reports!=0) ST_REL(&a->segment_replay,1u);
+        (void)auto_frames_unrepresented(&a->coverage,s->visits);
+        s->called=1;
+        return;
+    }
     if(!(s=segment_find(a,segment))) {
         /* untracked (never seen, or refused at the table): its draws are unknown, so at least one */
         (void)auto_frames_unrepresented(&a->coverage,1);return;

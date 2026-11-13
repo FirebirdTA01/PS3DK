@@ -16,12 +16,12 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
-                                  'replay-silent','recall-silent','moved-draw-silent'])
+                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -30,7 +30,7 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
                           'boundary-cadence':'spanning','boundary-scope':'spanning',
-                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild'}[a.mutant] and not a.sanitize
+                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -74,7 +74,8 @@ def run(name,cmd,cwd=out):
                   'boundary-scope':b'p[0]==0 && p[1]==0 && p[6]==1',
                   'replay-silent':b're-CALL of a timed build sets the replay latch',
                   'recall-silent':b"a re-CALL counts the build's visits",
-                  'moved-draw-silent':b'the part a moved draw ends in counts it'}[a.mutant]
+                  'moved-draw-silent':b'the part a moved draw ends in counts it',
+                  'nested-silent':b'a CALL inside a draw bracket sets the replay latch'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -92,7 +93,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -103,7 +104,7 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('extsegments','segbuild'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('extsegments','segbuild','segnested'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
@@ -184,6 +185,10 @@ for rel in sources:
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
+    elif a.mutant=='nested-silent' and rel=='auto_rsx/auto_runtime.c':
+        # review finding reintroduced: a CALL inside an open draw bracket returns before any accounting
+        code=source.read_text();old='    if(g_tls.in_gpu) {\n';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    if(g_tls.in_gpu) {return;\n').encode())
     elif a.mutant in ('replay-silent','recall-silent','moved-draw-silent') and rel=='auto_rsx/auto_runtime.c':
         # CALL completeness reintroduced as silent: a replay, a re-CALL's draws, or a moved draw's destination
         old,new={'replay-silent':('if(s->reports) ST_REL(&a->segment_replay,1u);','(void)0;'),
@@ -262,6 +267,7 @@ if a.case=='extsegments':application=Path(__file__).with_name('auto-external-seg
 if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
 if a.case=='segmetatail':application=Path(__file__).with_name('auto-segment-metadata-tail-test.c').read_text()
 if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-frame-test.c').read_text()
+if a.case=='segnested':application=Path(__file__).with_name('auto-segment-call-in-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
@@ -290,6 +296,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO external segment timing PASS\n' if a.case=='extsegments'
                        else b'AUTO segment build frames and CALL completeness PASS\n' if a.case=='segbuild'
+                       else b'AUTO segment CALL inside a draw bracket PASS\n' if a.case=='segnested'
                        else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
                        else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
@@ -359,6 +366,16 @@ if a.case=='segbuild':
     assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
     assert fields[1]&(1|2|4|64)==1|2|4|64,('FINAL, LOWER_BOUND, SATURATED, SEGMENT_QUARANTINE',fields[1])
     print('real capture: segment build frames per draw, CALL completeness counted, replay and saturation PASS')
+    raise SystemExit(0)
+if a.case=='segnested':
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(63,11)
+    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==384 for b in rows)
+    unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
+    assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
+    fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+    assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
+    print('real capture: CALLs inside a draw bracket counted and the replay latch set PASS')
     raise SystemExit(0)
 if a.case=='extsegments':
     records=[]

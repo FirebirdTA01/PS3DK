@@ -271,7 +271,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild flips present spanning fifofail fifopre fifopost; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested flips present spanning fifofail fifopre fifopost; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -286,6 +286,7 @@ jobs:
           for mutant in replay-silent recall-silent moved-draw-silent; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segbuild --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segnested --mutant nested-silent --out "$RUNNER_TEMP/auto-runtime-nested-silent-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant one-record-chunks --out "$RUNNER_TEMP/auto-runtime-one-record-chunks-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-flip-frames --out "$RUNNER_TEMP/auto-runtime-no-flip-frames-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-present-wait --out "$RUNNER_TEMP/auto-runtime-no-present-wait-mutant"
