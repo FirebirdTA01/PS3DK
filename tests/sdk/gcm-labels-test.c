@@ -75,7 +75,7 @@ int main(int argc, char **argv)
     check(n == 5 && disjoint_sorted(r, n, 256), "label ranges: 5, ascending, disjoint, in 0..255");
     check(cellGcmGetReservedLabelRanges(NULL) == r, "label table: NULL count allowed, same table");
     r = cellGcmGetReservedReportRanges(&n);
-    check(n == 1 && disjoint_sorted(r, n, 2048), "report ranges: 1, in 0..2047");
+    check(n == 2 && disjoint_sorted(r, n, 2048), "report ranges: 2, ascending, disjoint, in 0..2047");
     {
         uint32_t sys = 0, psgl = 0, prof = 0, app = 0;
         for (uint32_t i = 0; i < 256; i++) {
@@ -107,8 +107,18 @@ int main(int argc, char **argv)
     }
     check(cellGcmGetReportOwner(0) == CELL_GCM_INDEX_OWNER_PROFILER &&
               cellGcmGetReportOwner(511) == CELL_GCM_INDEX_OWNER_PROFILER && cellGcmGetReportOwner(512) == 0 &&
-              cellGcmGetReportOwner(2047) == 0,
-          "reports: 0..511 profiler, 512..2047 app");
+              cellGcmGetReportOwner(1023) == 0 && cellGcmGetReportOwner(1024) == CELL_GCM_INDEX_OWNER_PROFILER &&
+              cellGcmGetReportOwner(2047) == CELL_GCM_INDEX_OWNER_PROFILER,
+          "reports: 0..511 profiler, 512..1023 app, 1024..2047 profiler");
+    {
+        uint32_t prof = 0, app = 0;
+        for (uint32_t i = 0; i < 2048; i++) {
+            prof += cellGcmGetReportOwner(i) == CELL_GCM_INDEX_OWNER_PROFILER;
+            app += cellGcmGetReportOwner(i) == 0;
+        }
+        check(prof == 1536 && app == 512 && CELL_GCM_REPORT_APP_FIRST == 512u && CELL_GCM_REPORT_APP_LAST == 1023u,
+              "report owners: 1536 profiler, 512 app (CELL_GCM_REPORT_APP_FIRST..LAST = 512..1023)");
+    }
 
     /* ---- A4: serial arithmetic, including the wrap boundary ---- */
     check(REACHED(5u, 5u) && REACHED(6u, 5u) && !REACHED(4u, 5u), "plain: equal and later reached, earlier not");

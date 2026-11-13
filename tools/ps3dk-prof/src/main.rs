@@ -19,6 +19,14 @@ const USAGE: &str = "usage:
   ps3dk-prof report <file>   print the verdict and the full report
   ps3dk-prof waits [--json] <file>   API-call observations and explicit unknown dependencies
   ps3dk-prof counters [--json] <file>   named per-frame counters (exit status as check)
+  ps3dk-prof auto [--json] <file>    automatic RSX observation (file_flags bit 7): coverage, reached-marker
+                             intervals, the capture's own clock map and a per-frame verdict (PPU-bound,
+                             RSX-bound, mixed, pacing or UNKNOWN with the missing input); exit status as
+                             check, 1 when automatic observation is absent, unavailable or refused
+  ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
+                             phase 1 / phase 2 / outer elapsed bounds, OPEN and lost endpoints, entered
+                             and completed counts; never GPU busy or idle time (exit status as check,
+                             1 when the FIFO evidence is refused)
   ps3dk-prof clockmap [--premise spu-nowrap] <file>   print the verdict and the conditional
                                                       affine bounds (exit status as check)
   ps3dk-prof paths <file>    print the verdict and the PPU hot paths (exit status as check)
@@ -383,6 +391,54 @@ fn counters(args: &[String]) -> ExitCode {
     }
 }
 
+fn auto(args: &[String]) -> ExitCode {
+    let (json, path) = match args {
+        [path] if !path.starts_with('-') => (false, path),
+        [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
+        _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            let r = ps3dk_prof::auto_rsx::analyze(&a.capture);
+            let mut out = std::io::stdout().lock();
+            let result = if json { ps3dk_prof::auto_rsx::write_json(&mut out, &r) }
+                else { ps3dk_prof::auto_rsx::write_text(&mut out, &r) };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            let unavailable = !r.capability || r.refusal.is_some()
+                || !matches!(r.config, Some(ps3dk_prof::auto_rsx::Config::Attached(_)));
+            if unavailable { ExitCode::from(1) } else { verdict_code(&a) }
+        }
+    }
+}
+
+fn fifo(args: &[String]) -> ExitCode {
+    let (json, path) = match args {
+        [path] if !path.starts_with('-') => (false, path),
+        [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
+        _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            let r = ps3dk_prof::fifo::analyze(&a.capture);
+            let mut out = std::io::stdout().lock();
+            let result = if json { ps3dk_prof::fifo::write_json(&mut out, &r) }
+                else { ps3dk_prof::fifo::write_text(&mut out, &r) };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            if r.refusal.is_some() { ExitCode::from(1) } else { verdict_code(&a) }
+        }
+    }
+}
+
 /// `paths --functions [options] <file>`: each option at most once, `--interval` and `--all` exclusive.
 fn func_paths(rest: &[String]) -> ExitCode {
     use ps3dk_prof::elf_symbols::ElfSymbols;
@@ -495,6 +551,12 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|c| c == "counters") {
         return counters(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "fifo") {
+        return fifo(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "auto") {
+        return auto(&args[1..]);
     }
     if args.first().is_some_and(|c| c == "spu-ticks") {
         return spu_ticks(&args[1..]);

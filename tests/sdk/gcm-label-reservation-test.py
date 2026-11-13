@@ -11,12 +11,13 @@ Scanned, with the owners each tree may use:
 Every call of a label or report API is found; its index argument is evaluated from the object-like #defines of its
 own tree.  A constant index is checked against the policy.  A non-constant index is accepted only in a FORWARDER
 file (an API layer that passes a caller's index through) or when SITES declares the values it can take (each value
-is evaluated from the code's own macros and checked).  Anything else fails closed.  Two drift checks pin the code
-that hard-codes the rule: libPSGL's label macros and the profiler GCM port's reserved-label test.
+is evaluated from the code's own macros and checked).  Anything else fails closed.  Three drift checks pin the code
+that hard-codes the rule: libPSGL's label macros, the profiler GCM port's reserved-label test, and the automatic
+profiler's default labels and report pool (PS3DK_PROF_AUTO_OPTIONS_INIT), which must be PROFILER-owned.
 
 --self-test proves the scanner refuses: an SDK file using an application label, an unresolvable SDK index, a
-profiler sample using a PSGL label, an application sample using a reserved label, and a header without the PSGL
-ranges (the real tree must then fail).
+profiler sample using a PSGL label, an application sample using a reserved label, a header without the PSGL
+ranges and a header without the automatic profiler's report range (the real tree must then fail).
 """
 import argparse
 import json
@@ -315,6 +316,21 @@ def drift(root, ranges):
         system_last = max(r["last"] for r in ranges["label"] if r["owner"] == SYSTEM)
         if first != system_last + 1:
             problems.append(f"profiler port's first lendable label {first} is not the first after SYSTEM ({system_last + 1})")
+    # The automatic profiler's defaults (size, report_first, report_count, operation_label, clock_label, ...).
+    text = strip_comments((root / "sdk/include/ps3dk/prof_auto.h").read_text())
+    m = re.search(r"#\s*define\s+PS3DK_PROF_AUTO_OPTIONS_INIT\s*\{([^}]*)\}", text)
+    if not m:
+        problems.append("prof_auto.h: PS3DK_PROF_AUTO_OPTIONS_INIT not found")
+    else:
+        vals = [int(v.strip().rstrip("uU")) for v in m.group(1).split(",")]
+        first, count, op, clock = vals[1:5]
+        for name, label in (("operation", op), ("clock", clock)):
+            if owner(ranges, "label", label) != PROFILER:
+                problems.append(f"prof_auto.h: default {name} label {label} is not PROFILER-owned")
+        bad = [i for i in range(first, first + count) if owner(ranges, "report", i) != PROFILER]
+        if bad:
+            problems.append(f"prof_auto.h: default report pool {first}..{first + count - 1} includes "
+                            f"{len(bad)} non-PROFILER reports (first {bad[0]})")
     return problems
 
 
@@ -356,6 +372,8 @@ def self_test(root, ranges):
          [("samples/gcm/fake/main.c", "app", "void f(void*c){cellGcmSetTimeStamp(c, 7);}\n")], ranges),
         ("a header without the PSGL ranges", [],
          dict(ranges, label=[r for r in ranges["label"] if r["owner"] != PSGL])),
+        ("a header without the automatic profiler's report range", [],
+         dict(ranges, report=[r for r in ranges["report"] if r["first"] != 1024])),
     ]
     ok = True
     _, baseline = run(root, ranges, quiet=True)

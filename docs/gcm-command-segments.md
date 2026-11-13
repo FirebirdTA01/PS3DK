@@ -58,9 +58,14 @@ cellGcmSegmentCall(ring, s);                      /* CALL + retirement label */
 * **Call** writes, into the ring, the CALL and then a back-end label
   (`cellGcmSetWriteBackEndLabel`) carrying the segment's next serial. The
   five words are one reservation: if the ring lacks room, its callback is
-  asked once for all five (it may wrap or flush). If it refuses, or returns
-  without making room, Call returns `CELL_GCM_SEGMENT_ERROR_BUSY`, writes
-  nothing and leaves the segment closed and callable. Host test:
+  asked once for all five (it may wrap or flush). In the observed AUTO build
+  (`libgcm_cmd_prof_auto.a`) the reservation is nine words: the five plus
+  the automatic profiler's 4-word operation-label release, asked for at once.
+  If the callback refuses, or returns without making room, Call returns
+  `CELL_GCM_SEGMENT_ERROR_BUSY`, emits no CALL or label, does not call the
+  profiler's observer, and leaves the segment unchanged, closed and callable. It
+  cannot undo anything the ring's own callback did to the ring before
+  refusing (a flush or a wrap, say). Host test:
   `gcm-segment-test.sh` (1 to 4 free words with a refusing callback; a
   wrapping callback puts all five words after the wrap).
 * **WaitRetired** polls that label at most `maxPolls` times, sleeping between
@@ -83,6 +88,11 @@ buffer; the PPU's Begin/End refuse it meanwhile.
 `cellGcmSegmentEndExternal(seg, usedBytes)` closes it after checking that
 `usedBytes` is a multiple of 4 inside the buffer and that the last word is
 the RETURN.
+
+Under `PS3_PROF_AUTO`, a PPU writer using its own `CellGcmContextData` over the claimed buffer is timed like a
+`cellGcmSegmentBegin` writer: the profiler adds `PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS` (4) words around each covered
+draw while the context's cursor lies in the buffer, and those words count in `usedBytes`. It never calls that
+context's callback; a draw without the room is left untimed. SPU writers are not observed.
 
 ## Coherence recipe for SPU-built segments
 
@@ -147,8 +157,10 @@ Rules, all measured on a PS3 unless marked:
 
 The samples use labels 200-215, named in
 `samples/gcm/common/gcm_segment_labels.h`. They avoid the indices the SDK
-itself uses: libPSGL (65-68, 255) and the profiler (labels 240-242; reports
-32-63 and 512-528). The helper takes the label index from the caller.
+itself uses: libPSGL (65-68, 255) and the profiler (labels 240-247, of which
+the samples use 240-243 and the automatic profiler 246-247; reports 0-511 and
+1024-2047). Applications use reports 512-1023. The helper takes the label
+index from the caller.
 
 ## SPU writer calls
 
@@ -162,8 +174,9 @@ RETURN).
 Refusals are sticky: the overflow count and the measured count saturate at
 0xffffffff instead of wrapping, so no later refusal can bring the overflow
 count back to zero, and `cellGcmSpuEnd` then returns
-`CELL_GCM_SPU_ERROR_OVERFLOW`. `cellGcmSpuGetUsedBytes` returns 0xffffffff
-when the byte count does not fit in 32 bits. A writing context over fewer
+`CELL_GCM_SPU_ERROR_OVERFLOW`. `cellGcmSpuGetUsedBytes` still returns a
+`uint32_t`: it computes the byte count with 64-bit arithmetic and saturates
+at 0xffffffff when the count does not fit in 32 bits. A writing context over fewer
 than 4 bytes has no room for the RETURN: it starts with an overflow count of
 1, refuses every call, and End returns `CELL_GCM_SPU_ERROR_OVERFLOW` without
 writing anything. `ctx->ended` is one of `CELL_GCM_SPU_CONTEXT_OPEN`,

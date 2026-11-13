@@ -22,6 +22,23 @@ typedef gcmTransferSurface CellGcmTransferSurface;
 typedef gcmTransferSwizzle CellGcmTransferSwizzle;
 #include <cell/gcm/gcm_command_link.h>
 #include <cell/gcm/gcm_segment.h>
+#ifdef PS3TC_PROF_AUTO
+/* Observed build only (libgcm_cmd_prof_auto.a): the automatic observer learns
+ * which contexts are segment contexts, so covered emitters writing into a
+ * segment are counted as CALL-form visits instead of disappearing. */
+#include "ps3tc_prof_auto.h"
+#define SEGMENT_OBSERVE_OPEN(c) ps3dk_prof__auto_segment_open(c)
+#define SEGMENT_OBSERVE_CLOSE(c) ps3dk_prof__auto_segment_close(c)
+#define SEGMENT_OBSERVE_CALL(r, c) ps3dk_prof__auto_segment_call(r, c)
+#define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ps3dk_prof__auto_segment_external_open(c, b, n)
+#define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ps3dk_prof__auto_segment_external_close(c)
+#else
+#define SEGMENT_OBSERVE_OPEN(c) ((void)0)
+#define SEGMENT_OBSERVE_CLOSE(c) ((void)0)
+#define SEGMENT_OBSERVE_CALL(r, c) ((void)0)
+#define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ((void)0)
+#define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ((void)0)
+#endif
 
 #ifdef PS3TC_GCM_SEGMENT_HOST_TEST
 void ps3tc_gcm_segment_test_sleep(uint32_t microseconds);
@@ -139,6 +156,7 @@ CellGcmSegmentContext *cellGcmSegmentBegin(CellGcmSegment *s)
     /* end = buffer + size - 4 bytes: the last word is kept for the RETURN. */
     cellGcmSetupContextData(&s->context, s->buffer, s->sizeBytes, segment_overflow);
     s->state = CELL_GCM_SEGMENT_STATE_OPEN;
+    SEGMENT_OBSERVE_OPEN(&s->context);
     return &s->context;
 }
 
@@ -146,6 +164,7 @@ int32_t cellGcmSegmentEnd(CellGcmSegment *s)
 {
     if (!s || s->state != CELL_GCM_SEGMENT_STATE_OPEN || !s->context.begin)
         return CELL_GCM_SEGMENT_ERROR_STATE;     /* not open, or claimed externally */
+    SEGMENT_OBSERVE_CLOSE(&s->context);
     /* An emitter can only have advanced current up to end, which leaves the
      * reserved last word; anything else means the context was rewritten. */
     if (s->context.current < s->buffer || s->context.current > s->context.end ||
@@ -170,6 +189,9 @@ void *cellGcmSegmentBeginExternal(CellGcmSegment *s)
     s->overflowWords = 0;
     s->usedBytes = 0;
     s->state = CELL_GCM_SEGMENT_STATE_OPEN;
+    /* The observed build times covered emitters through the application's own context while its cursor
+     * lies in this buffer; the segment's embedded context stays its identity for Call. */
+    SEGMENT_OBSERVE_EXTERNAL_OPEN(&s->context, s->buffer, s->sizeBytes);
     return s->buffer;
 }
 
@@ -183,11 +205,22 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
         return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     s->usedBytes = usedBytes;
     s->state = CELL_GCM_SEGMENT_STATE_CLOSED;
+    SEGMENT_OBSERVE_EXTERNAL_CLOSE(&s->context);   /* a refused End leaves it claimed and observed */
     return CELL_OK;
 }
 
 /* CALL (1 word) and the back-end retirement label (4 words). */
 #define SEGMENT_CALL_WORDS 5u
+/* The observed build also reserves, in the same request, the 4 words of the
+ * observer's operation-label release that follows the retirement label
+ * (ps3dk_prof__auto_segment_call), so a refused Call emits nothing at all and
+ * an accepted one always leaves the observer its room. */
+#ifdef PS3TC_PROF_AUTO
+#define SEGMENT_OBSERVE_WORDS 4u
+#else
+#define SEGMENT_OBSERVE_WORDS 0u
+#endif
+#define SEGMENT_CALL_RESERVE (SEGMENT_CALL_WORDS + SEGMENT_OBSERVE_WORDS)
 
 /* 1 when the ring has `words` free words before end (the emitters' test). */
 static int ring_has_room(const CellGcmSegmentContext *ring, uint32_t words)
@@ -201,19 +234,22 @@ int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)
     if (!ring || !s) return CELL_GCM_SEGMENT_ERROR_INVALID_VALUE;
     if (s->state != CELL_GCM_SEGMENT_STATE_CLOSED) return CELL_GCM_SEGMENT_ERROR_STATE;
     if (s->overflowWords) return CELL_GCM_SEGMENT_ERROR_OVERFLOW;
-    /* One reservation for both commands: the ring's callback is asked once
-     * for all five words (it may wrap or flush), and if it refuses, or
-     * returns without making room, nothing is written and the segment is
-     * left as it was.  With the room there, neither emitter calls it. */
-    if (!ring_has_room(ring, SEGMENT_CALL_WORDS) &&
-        (!ring->callback || ring->callback(ring, SEGMENT_CALL_WORDS) != 0 ||
-         !ring_has_room(ring, SEGMENT_CALL_WORDS)))
+    /* One reservation for both commands (and, in the observed build, the
+     * observer's release after them): the ring's callback is asked once for
+     * all the words (it may wrap or flush), and if it refuses, or returns
+     * without making room, nothing is written, the observer is not called and
+     * the segment is left as it was.  With the room there, neither emitter
+     * calls it. */
+    if (!ring_has_room(ring, SEGMENT_CALL_RESERVE) &&
+        (!ring->callback || ring->callback(ring, SEGMENT_CALL_RESERVE) != 0 ||
+         !ring_has_room(ring, SEGMENT_CALL_RESERVE)))
         return CELL_GCM_SEGMENT_ERROR_BUSY;
     rsxSetCallCommand(ring, s->offset);
     rsxSetWriteBackendLabel(ring, s->labelIndex, s->serial + 1u);
     s->serial += 1u;
     s->calls += 1u;
     s->state = CELL_GCM_SEGMENT_STATE_SUBMITTED;
+    SEGMENT_OBSERVE_CALL(ring, &s->context);
     return CELL_OK;
 }
 

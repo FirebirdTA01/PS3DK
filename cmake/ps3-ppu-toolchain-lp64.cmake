@@ -122,3 +122,13 @@ if(NOT PS3_PROF_WAITS STREQUAL "OFF" AND NOT PS3_PROF_WAITS STREQUAL "")
         list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_wait_include}")
     endif()
 endif()
+
+# Automatic RSX observation selects its own providers and init seam. Default
+# builds do not include the selector and keep the existing library selection.
+option(PS3_PROF_AUTO "Automatic RSX observation" OFF)
+if(PS3_PROF_AUTO)
+    set(_ps3_auto_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-auto.cmake")
+    if(NOT _ps3_auto_include IN_LIST CMAKE_PROJECT_INCLUDE)
+        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_auto_include}")
+    endif()
+endif()

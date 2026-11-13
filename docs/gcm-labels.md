@@ -16,14 +16,18 @@ available wherever the GCM headers are. These are canonical cell-style names. PS
 | 0..63 | SYSTEM | firmware and GCM system use; never used by application code (`CELL_GCM_INDEX_RANGE_LABEL_MIN` is 64) |
 | 65 | PSGL | libPSGL prepared-buffer label |
 | 66..68 | PSGL | libPSGL buffer-status labels, one per PSGL frame buffer (`PSGL_MAX_FRAME_BUFFERS` = 3) |
-| 240..247 | PROFILER | the block profiler samples lend to `ps3dk_prof_gpu_attach` and use for their fences |
+| 240..247 | PROFILER | the block profiler samples lend to `ps3dk_prof_gpu_attach` and use for their fences; the automatic profiler's default labels (246 clock anchor, 247 operation) |
 | 255 | PSGL | libPSGL idle/finish token |
 | 64, 69..239, 248..254 | APPLICATION | yours. Use `CELL_GCM_LABEL_APP_FIRST..CELL_GCM_LABEL_APP_LAST` (69..239) for per-slot frame labels |
 
 | Local reports (0..2047) | Owner |
 |---|---|
 | 0..511 | PROFILER: profiler samples' timestamp reports and the GPU-domain report ranges they lend |
-| 512..2047 | APPLICATION |
+| 512..1023 | APPLICATION (`CELL_GCM_REPORT_APP_FIRST..CELL_GCM_REPORT_APP_LAST`) |
+| 1024..2047 | PROFILER: the automatic profiler's default report pool (`PS3_PROF_AUTO`) |
+
+Reports 1024..2047 were the application's before beta 4; they are now reserved for the profiler, and applications use
+512..1023.
 
 The main-memory report area belongs to the application.
 
@@ -31,13 +35,17 @@ What the SDK and profiler use today (inventory of `origin/main` c22cb7ab, rechec
 
 - **SDK libraries.** Only libPSGL uses fixed labels: 65, 66..68 and 255. libgcm_cmd, librsx, libgcm_sys_legacy and
   the profiler library hard-code no label or report index. The GCM headers only forward a caller's index.
-- **libps3dkprof.** It owns no fixed index. `ps3dk_prof_gpu_attach(ctx, report_first, report_count, label, ...)`
-  borrows an application-lent report range and one label, exclusively. It accepts labels in 64..255 and refuses
+- **libps3dkprof.** The manual library owns no fixed index. `ps3dk_prof_gpu_attach(ctx, report_first, report_count,
+  label, ...)` borrows an application-lent report range and one label, exclusively. It accepts labels in 64..255 and refuses
   libPSGL's 65..68 and 255 (`gpu_port_gcm.c`).
 - **Profiler samples.** heterogeneous-workload uses label 240 (scene fence), 241 (GPU domain), 242 (application
   fence), timestamp reports 0..1 and domain reports 32..63. overhead-bench uses label 241 (domain), 243 (bench),
   reports 2..3 (bench) and 32..287 (domain). clock-calibration and clock-calibration-w use label 241 and report 0.
   ext-probe uses reports 0..15 and label 64. Label 64 is an application label, recorded as a named exception.
+- **Automatic profiler (`PS3_PROF_AUTO`).** By default it takes reports 1024..2047, operation label 247 and clock
+  label 246 (`PS3DK_PROF_AUTO_OPTIONS_INIT` in `<ps3dk/prof_auto.h>`), all PROFILER-owned. The attach refuses
+  defaults that would take an application index. An application override (`ps3dk_prof_auto_attach` with options)
+  chooses its own indices and must reserve them itself.
 - **Not found:** no code in this repository uses reports 512..528. If a design document lists them, they are free
   under this rule: they lie in the application range.
 
@@ -62,7 +70,8 @@ Verified by `tests/sdk/gcm-labels-test.sh`, a host test that CI runs:
   - the application samples may use application indices only.
 - **Non-constant indices.** An index that is not a constant fails unless its file is an API forwarder, or the test
   declares the values it can take.
-- **Drift checks.** Two checks pin libPSGL's label macros and the profiler port's refused set to the header.
+- **Drift checks.** Three checks pin libPSGL's label macros, the profiler port's refused set and the automatic
+  profiler's default labels and report pool to the header.
 - **Self-test.** `--self-test` shows that the scan refuses each kind of violation.
 
 ## 2. Non-blocking completion query (A4)

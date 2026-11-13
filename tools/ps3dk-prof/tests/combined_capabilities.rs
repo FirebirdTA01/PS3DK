@@ -4,7 +4,13 @@ mod spu_support;
 use common::*;
 use ps3dk_prof::{reader,Rule};
 // Bit 5 (function paths) is independent of every other capability.
-const MASKS:[u32;32]=[0,1,3,7,8,9,11,15,16,17,19,23,24,25,27,31,32,33,35,39,40,41,43,47,48,49,51,55,56,57,59,63];
+const OLD_MASKS:[u32;32]=[0,1,3,7,8,9,11,15,16,17,19,23,24,25,27,31,32,33,35,39,40,41,43,47,48,49,51,55,56,57,59,63];
+// Bit 6 (FIFO wrap events) needs bit 0 and nothing else; every earlier mask keeps its meaning.
+const FIFO_MASKS:[u32;56]={let mut m=[0u32;56];let mut i=0;let mut k=0;while i<32{m[k]=OLD_MASKS[i];k+=1;i+=1;}
+ i=0;while i<32{if OLD_MASKS[i]&1!=0{m[k]=OLD_MASKS[i]|64;k+=1;}i+=1;} m};
+// Bit 7 (automatic RSX observation) also needs bit 0 and nothing else.
+const MASKS:[u32;104]={let mut m=[0u32;104];let mut i=0;let mut k=0;while i<56{m[k]=FIFO_MASKS[i];k+=1;i+=1;}
+ i=0;while i<56{if FIFO_MASKS[i]&1!=0{m[k]=FIFO_MASKS[i]|128;k+=1;}i+=1;} m};
 fn headers(flags:u32)->File{
  let mut f=File::new(vec![chunk(1,Hdr{max_threads:64,..Default::default()}.payload()),chunk(2,clocks_payload(1,1,0,79_800_000,0))]);
  f.flags=flags;
@@ -39,7 +45,7 @@ fn all_flag_bytes_full_partial_and_high_bytes(){
   let f=headers(flags);let bytes=f.bytes();
   for n in 13..=16 {
    let r=reader::read(&bytes[..n]);
-   if MASKS.contains(&flags){let c=r.unwrap();assert_eq!(c.waits.is_some(),flags&16!=0);assert!(c.checkpoints.is_none()||n==16);}
+   if MASKS.contains(&flags){let c=r.unwrap();assert_eq!(c.waits.is_some(),flags&16!=0);assert_eq!(c.fifo.is_some(),flags&64!=0);assert_eq!(c.auto.is_some(),flags&128!=0);assert!(c.checkpoints.is_none()||n==16);}
    else {assert_eq!(r.unwrap_err().rule,Rule::FileFlagsNonzero,"flags={flags} n={n}");}
   }
   let r=reader::read(&bytes);
@@ -60,9 +66,9 @@ fn every_valid_mask_keeps_independent_feature_inventories(){
 }
 #[test]
 fn capability_dispatch_crc_sequence_and_profile_precedence(){
- for flags in MASKS {for ty in [19,20,21,22,23,24,25,26] {
+ for flags in MASKS {for ty in [19,20,21,22,23,24,25,26,31,32,33,34,35,36,37,38] {
   let mut f=headers(flags);let i=f.chunks.len();f.chunks.push(chunk(ty,vec![0;4]));
-  let enabled=if [22,23,24].contains(&ty){flags&16!=0}else{flags&8!=0};
+  let enabled=if [22,23,24].contains(&ty){flags&16!=0}else if [31,32,33].contains(&ty){flags&64!=0}else if (34..=38).contains(&ty){flags&128!=0}else{flags&8!=0};
   let e=reader::read(&f.bytes()).unwrap_err();if !enabled{assert_eq!(e.rule,Rule::UnknownChunkType);}else{assert_ne!(e.rule,Rule::UnknownChunkType);}
   f.bad_crc=Some(i);f.seq_override=Some((i,99));assert_eq!(reader::read(&f.bytes()).unwrap_err().rule,Rule::ChunkCrc);
   f.bad_crc=None;assert_eq!(reader::read(&f.bytes()).unwrap_err().rule,Rule::ChunkSeqOrder);
