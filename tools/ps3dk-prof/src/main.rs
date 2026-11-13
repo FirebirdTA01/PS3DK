@@ -23,6 +23,10 @@ const USAGE: &str = "usage:
                              intervals, the capture's own clock map and a per-frame verdict (PPU-bound,
                              RSX-bound, mixed, pacing or UNKNOWN with the missing input); exit status as
                              check, 1 when automatic observation is absent, unavailable or refused
+  ps3dk-prof auto --ops [--frame N] [--json] <file>
+                             every retained AUTO operation record in emission order: kind, flags,
+                             reached-marker interval and gap (raw RSX ticks), args; per-kind sums with
+                             --frame; 1 when the capture has no automatic observation
   ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
                              phase 1 / phase 2 / outer elapsed bounds, OPEN and lost endpoints, entered
                              and completed counts; never GPU busy or idle time (exit status as check,
@@ -392,6 +396,7 @@ fn counters(args: &[String]) -> ExitCode {
 }
 
 fn auto(args: &[String]) -> ExitCode {
+    if args.iter().any(|a| a == "--ops") { return auto_ops(args); }
     let (json, path) = match args {
         [path] if !path.starts_with('-') => (false, path),
         [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
@@ -412,6 +417,43 @@ fn auto(args: &[String]) -> ExitCode {
             let unavailable = !r.capability || r.refusal.is_some()
                 || !matches!(r.config, Some(ps3dk_prof::auto_rsx::Config::Attached(_)));
             if unavailable { ExitCode::from(1) } else { verdict_code(&a) }
+        }
+    }
+}
+
+/// `auto --ops [--frame N] [--json] <file>`: every retained OPS record in emission order. Exit 1 when the capture
+/// has no automatic observation, 0 otherwise (a listing is not a verdict).
+fn auto_ops(args: &[String]) -> ExitCode {
+    let (mut json, mut ops, mut frame, mut path) = (false, false, None, None);
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" if !json => json = true,
+            "--ops" if !ops => ops = true,
+            "--frame" if frame.is_none() => match args.get(i + 1).and_then(|v| v.parse::<u64>().ok()) {
+                Some(v) => { frame = Some(v); i += 1; }
+                None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+            },
+            a if !a.starts_with('-') && path.is_none() => path = Some(a.to_string()),
+            _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+        }
+        i += 1;
+    }
+    let Some(path) = path else { eprintln!("{USAGE}"); return ExitCode::from(3) };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            if a.capture.auto.is_none() { eprintln!("ps3dk-prof: no automatic RSX observation in {path}"); return ExitCode::from(1); }
+            let rows = ps3dk_prof::auto_rsx::op_rows(&a.capture, frame);
+            let mut out = std::io::stdout().lock();
+            let result = if json { ps3dk_prof::auto_rsx::write_ops_json(&mut out, &rows, frame) }
+                else { ps3dk_prof::auto_rsx::write_ops_text(&mut out, &rows, frame) };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            ExitCode::SUCCESS
         }
     }
 }
