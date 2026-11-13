@@ -84,6 +84,8 @@ struct AOp {
     r0: u32,
     r1: u32,
     published: u64,
+    /// the 63/11 build tail: build frame, build owner, build flags, reserved
+    tail: (u64, u32, u16, u16),
 }
 fn op(id: u64, frame: u64, raw: (u64, u64)) -> AOp {
     let s = 2 * id as u32 - 1;
@@ -102,11 +104,12 @@ fn op(id: u64, frame: u64, raw: (u64, u64)) -> AOp {
         r0: 0,
         r1: 0,
         published: u64::from(s + 1),
+        tail: (0, 0, 0, 0),
     }
 }
-fn ops(list: &[AOp]) -> Chunk {
+fn ops_w(list: &[AOp], width: u32) -> Chunk {
     let mut b = Buf::default();
-    b.u16(1).u16(0).u32(1).u32(list.len() as u32).u32(128);
+    b.u16(1).u16(0).u32(1).u32(list.len() as u32).u32(width);
     for o in list {
         b.u64(o.id).u32(o.owner).u16(o.kind).u16(o.flags).u64(o.frame).u64(o.tb.0).u64(o.tb.1).u64(o.raw.0)
             .u64(o.raw.1).u64(0x1234);
@@ -115,8 +118,14 @@ fn ops(list: &[AOp]) -> Chunk {
         }
         b.u32(o.r0).u32(o.reports.0).u32(o.reports.1).u32(o.serials.0).u32(o.serials.1).u32(o.generation).u32(o.r1)
             .u64(o.published);
+        if width == 144 {
+            b.u64(o.tail.0).u32(o.tail.1).u16(o.tail.2).u16(o.tail.3);
+        }
     }
     chunk(35, b.0)
+}
+fn ops(list: &[AOp]) -> Chunk {
+    ops_w(list, 128)
 }
 
 #[derive(Clone, Copy)]
@@ -921,4 +930,265 @@ fn coverage_totals_are_checked_and_reconciled_by_kind() {
     assert_eq!(r.frames[1].verdict, Verdict::Unknown);
     assert_eq!(r.frames[1].reason, "0 ARRAY operation record(s) for 1 observed");
     assert_eq!(r.frames[1].observed, [1, 0, 0]);
+}
+
+// ---- build-frame writer (CONFIG masks 63/11): segment records name their building frame -----------------------------
+
+fn bld_cfg() -> ACfg {
+    let mut c = pres_cfg();
+    c.words[4] = 63;
+    c.words[13] = 144;
+    c
+}
+fn bld_file(rest: Vec<Chunk>) -> File {
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(bld_cfg().chunk());
+    f.chunks.extend(rest);
+    f
+}
+fn ops_b(list: &[AOp]) -> Chunk {
+    ops_w(list, 144)
+}
+/// A 384-byte 63/11 row with `unrepresented` at u32@380.
+fn coverage_b(r: &ARow, unrepresented: u32) -> Chunk {
+    coverage_p(r, &Blk { reserved: unrepresented, ..Blk::default() })
+}
+/// A segment record recorded under `frame` (call ordinal `call`), built in `built`.
+fn built_op(id: u64, frame: u64, raw: (u64, u64), segment: u32, call: u32, built: u64) -> AOp {
+    let s = 2 * id as u32 - 1;
+    let mut o = seg_op(id, frame, raw, segment, call, (s, s + 1));
+    o.tail = (built, OWNER, 1, 0);
+    o
+}
+/// A dropped build (never called, or its CALL refused): INCOMPLETE, no CALL token, call ordinal 0.
+fn dropped_op(id: u64, segment: u32, built: u64) -> AOp {
+    let mut o = built_op(id, 0, (0, 0), segment, 0, built);
+    o.flags = 64 | 4 | 16;
+    o.owner = 0;
+    o.frame = 0;
+    o.published = 0;
+    o
+}
+/// four_frames re-encoded for 63/11: the given OPS records and rows (frame i at tb 10000 + 100000 i, `clears[i]`
+/// observed clears, `unrepresented[i]`); FIFO waits and anchors unchanged.
+fn four_frames_built(list: &[AOp], clears: [u64; 4], unrepresented: [u32; 4], status_flags: u16) -> File {
+    let mut f = four_frames();
+    let at = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+    f.chunks[at] = bld_cfg().chunk();
+    let at = f.chunks.iter().position(|c| c.ty == 35).unwrap();
+    f.chunks[at] = ops_b(list);
+    let rows: Vec<usize> = f.chunks.iter().enumerate().filter(|(_, c)| c.ty == 36).map(|(i, _)| i).collect();
+    for (k, (&i, t)) in rows.iter().zip([10_000u64, 110_000, 210_000, 310_000]).enumerate() {
+        f.chunks[i] = coverage_b(&row(k as u64, (t, t + 100_000), clears[k]), unrepresented[k]);
+    }
+    let published = list.iter().map(|o| o.published).max().unwrap_or(0);
+    let last = f.chunks.len() - 1;
+    let mut n = status_for(list.len() as u64, 4, 9, published);
+    n[0] = list.iter().map(|o| o.id).max().unwrap_or(0);
+    let held = list.iter().filter(|o| o.flags & 16 != 0).count() as u64;
+    n[14] = held;
+    f.chunks[last] = status(status_flags | if held != 0 { 2 | 64 } else { 0 }, n);
+    f
+}
+fn verdicts(r: &Report) -> Vec<Verdict> {
+    r.frames.iter().map(|f| f.verdict).collect()
+}
+
+#[test]
+fn build_frames_cross_frame_fixture() {
+    // The review's cross-frame fixture on the build-frame writer: A built in frame 0 (one observed clear, one excluded for room) and
+    // called in frame 1 while B is built there; B called in frame 2.  Frame 1 imports A from an unclean build row:
+    // UNKNOWN naming frame 0.  Frame 2 imports B, whose build row (1) is clean and reconciled, so it qualifies even
+    // though frame 1's own verdict is UNKNOWN: the source predicate does not recurse through verdicts.
+    let list = [built_op(1, 1, (60_000, 61_000), 1, 1, 0), built_op(2, 2, (110_000, 140_000), 2, 2, 1)];
+    let mut f0 = row(0, (10_000, 110_000), 1);
+    f0.rows[2][0] = 2;
+    f0.rows[2][2] = 1;
+    let rest = vec![events(&frame_wrap(1, 1, 220_000, 20_000, 10_000, 2)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops_b(&list), coverage_b(&f0, 0), coverage_b(&row(1, (110_000, 210_000), 1), 0),
+        coverage_b(&row(2, (210_000, 310_000), 0), 0)];
+    let mut rest = rest;
+    rest.extend(anchors().iter().map(clock));
+    rest.push(status(1, status_for(2, 3, 9, 4)));
+    let r = analyze(&reader::read(&bld_file(rest).bytes()).expect("reads"));
+    assert!(r.build_frames);
+    let (f0, f1, f2) = (&r.frames[0], &r.frames[1], &r.frames[2]);
+    assert!(f0.reason.contains("excluded"), "{}", f0.reason);
+    assert_eq!(f1.verdict, Verdict::Unknown);
+    assert_eq!(f1.reason, format!("segment draw(s) built in frame {OWNER}/0: 1 covered operation(s) excluded"));
+    assert_eq!((f1.records, f1.recorded, f1.segment_imports), ([0, 0, 1], 1, 1));
+    assert_eq!(f2.verdict, Verdict::RsxBound, "{}", f2.reason);
+    assert_eq!((f2.records, f2.recorded, f2.segment_imports, f2.observed), ([0; 3], 1, 1, [0; 3]));
+    // the CALL-only frame (observed 0) is timed by what it executed, not forced to an empty span
+    let (lo, _) = f2.rsx_span_ppu.expect("mapped span");
+    assert!(lo >= 50_000, "{lo}");
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut out, &r).unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!((j["frames"][2]["built"].as_u64(), j["frames"][2]["recorded"].as_u64()), (Some(0), Some(1)));
+    assert_eq!(j["frames"][1]["segment_imports"], 1);
+    assert_eq!(j["segment_replay"], false);
+}
+
+#[test]
+fn clean_double_buffer_gets_verdicts() {
+    // Frame N builds part N and calls part N-1 (frame 0 draws in the ring; frame 3 only calls).  Every build row is
+    // clean, so every frame keeps the verdict its own evidence gives (the four_frames verdicts).
+    let mut ring = op(1, 0, (6000, 36_000));
+    ring.serials = (1, 2);
+    ring.published = 2;
+    let list = [ring, built_op(2, 1, (60_000, 61_000), 1, 1, 0), built_op(3, 2, (110_000, 150_000), 2, 2, 1),
+        built_op(4, 3, (160_000, 200_000), 3, 3, 2)];
+    let r = analyze(&reader::read(&four_frames_built(&list, [2, 1, 1, 0], [0; 4], 1).bytes()).expect("reads"));
+    assert_eq!(verdicts(&r), [Verdict::RsxBound, Verdict::Unknown, Verdict::Mixed, Verdict::Unknown], "{:#?}", r.frames);
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::NOT_DISTINGUISHED);
+    assert!(r.frames[3].reason.starts_with("unresolved"), "{}", r.frames[3].reason);
+    assert_eq!(r.frames.iter().map(|f| f.segment_imports).collect::<Vec<_>>(), [0, 1, 1, 1]);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &r).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("segments: built records [0, 0, 2] recorded here 1; imports 0"), "{text}");
+}
+
+#[test]
+fn build_only_frame_is_an_empty_execution() {
+    // Frame 1 builds part 1 and executes nothing (its CALL is in frame 2): its span is the empty-execution case, not
+    // a mismatch between its one observed clear and zero records under it.
+    let mut ring = op(1, 0, (6000, 36_000));
+    ring.serials = (1, 2);
+    ring.published = 2;
+    let list = [ring, built_op(2, 2, (110_000, 150_000), 1, 1, 1)];
+    let r = analyze(&reader::read(&four_frames_built(&list, [1, 1, 0, 0], [0; 4], 1).bytes()).expect("reads"));
+    let f1 = &r.frames[1];
+    assert_eq!((f1.recorded, f1.records, f1.observed), (0, [0, 0, 1], [0, 0, 1]));
+    assert_eq!(f1.rsx_span_raw, None);
+    assert_eq!(f1.reason, ps3dk_prof::auto_rsx::NOT_DISTINGUISHED);
+    assert_eq!(r.frames[2].verdict, Verdict::Mixed, "{}", r.frames[2].reason);
+}
+
+#[test]
+fn unrepresented_calls_refuse_an_otherwise_clean_frame() {
+    // A re-CALL, an all-excluded build, an untracked part or a refused CALL leave no record but count in the row;
+    // frame 0 also has a valid ring draw, so an empty timing population cannot be what refuses it.
+    let mut ring = op(1, 0, (6000, 36_000));
+    ring.serials = (1, 2);
+    ring.published = 2;
+    for (n, want) in [(1u32, "at least 1 segment draw(s)"), (u32::MAX, "at least 4294967295 segment draw(s)")] {
+        let r = analyze(&reader::read(&four_frames_built(&[ring], [1, 0, 0, 0], [n, 0, 0, 0], 1).bytes()).unwrap());
+        assert_eq!(r.frames[0].verdict, Verdict::Unknown);
+        assert!(r.frames[0].reason.starts_with(want), "{}", r.frames[0].reason);
+        assert_eq!(r.frames[0].segment_unrepresented, n);
+    }
+    let r = analyze(&reader::read(&four_frames_built(&[ring], [1, 0, 0, 0], [0; 4], 1).bytes()).unwrap());
+    assert_eq!(r.frames[0].verdict, Verdict::RsxBound, "{}", r.frames[0].reason);
+}
+
+#[test]
+fn dropped_builds_and_lost_records() {
+    // Frame 1 builds S (dropped: never called) and T (called in frame 2).  S's INCOMPLETE record keeps frame 1's
+    // population whole: frame 1 is UNKNOWN (never called), frame 2's import of T from frame 1 is unaffected.
+    let mut ring = op(1, 0, (6000, 36_000));
+    ring.serials = (1, 2);
+    ring.published = 2;
+    let list = [ring, dropped_op(2, 1, 1), built_op(3, 2, (110_000, 150_000), 2, 1, 1)];
+    let r = analyze(&reader::read(&four_frames_built(&list, [1, 2, 0, 0], [0; 4], 1).bytes()).expect("reads"));
+    assert_eq!(r.frames[1].segment_abandoned, 1);
+    assert_eq!(r.frames[1].reason, "1 segment draw(s) built in this frame were dropped (never called, or their CALL \
+        refused)");
+    assert_eq!(r.frames[2].verdict, Verdict::Mixed, "{}", r.frames[2].reason);
+    // the same with S's record lost (metadata full): frame 1's population is short, and so is every import from it
+    let list = [ring, built_op(3, 2, (110_000, 150_000), 2, 1, 1)];
+    let r = analyze(&reader::read(&four_frames_built(&list, [1, 2, 0, 0], [0; 4], 1).bytes()).expect("reads"));
+    assert_eq!(r.frames[1].reason, "1 CLEAR operation record(s) for 2 observed");
+    assert_eq!(r.frames[2].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[2].reason, format!("segment draw(s) built in frame {OWNER}/1: 1 CLEAR operation record(s) for \
+        2 observed"));
+    // a segment record built while no frame was open has no build source
+    let mut o = built_op(3, 2, (110_000, 150_000), 2, 1, 0);
+    o.tail = (0, 0, 0, 0);
+    let r = analyze(&reader::read(&four_frames_built(&[ring, o], [1, 0, 0, 0], [0; 4], 1).bytes()).expect("reads"));
+    assert_eq!(r.frames[2].reason, "segment record(s) built while no coverage frame was open");
+}
+
+#[test]
+fn segment_replay_makes_every_frame_unknown() {
+    let mut ring = op(1, 0, (6000, 36_000));
+    ring.serials = (1, 2);
+    ring.published = 2;
+    let r = analyze(&reader::read(&four_frames_built(&[ring], [1, 0, 0, 0], [0; 4], 1 | 1024).bytes()).unwrap());
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.reason == ps3dk_prof::auto_rsx::SEGMENT_REPLAY),
+        "{:#?}", r.frames);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &r).unwrap();
+    assert!(String::from_utf8(out).unwrap().contains("SEGMENT REPLAY:"));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut out, &r).unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(j["segment_replay"], true);
+    // sticky across statuses, and unknown to every older mask pair
+    let e = reader::read(&bld_file(vec![status(1024, [0; 15]), status(1, [0; 15])]).bytes()).unwrap_err();
+    assert_eq!(e.rule, Rule::AutoStatus);
+    assert!(e.detail.contains("sticky"), "{}", e.detail);
+    assert!(reader::read(&bld_file(vec![status(1 | 1024, [0; 15])]).bytes()).is_ok());
+    assert_eq!(rule(&pres_file(vec![status(1 | 1024, [0; 15])])), Rule::AutoStatus);
+    assert_eq!(rule(&seg_file(vec![status(1 | 1024, [0; 15])])), Rule::AutoStatus);
+}
+
+#[test]
+fn build_tail_and_width_refusals() {
+    let ok = built_op(1, 0, (1, 2), 1, 1, 0);
+    // known build frame 0 is valid; a dropped record carries a build token without a CALL token
+    assert!(reader::read(&bld_file(vec![ops_b(&[ok])]).bytes()).is_ok());
+    assert!(reader::read(&bld_file(vec![ops_b(&[dropped_op(1, 1, 5)])]).bytes()).is_ok());
+    let cases: Vec<(AOp, &str)> = vec![
+        ({ let mut o = ok; o.tail.2 = 3; o }, "build tail flags"),
+        ({ let mut o = ok; o.tail.3 = 1; o }, "build tail flags"),
+        ({ let mut o = ok; o.tail.1 = OWNER + 1; o }, "build owner"),
+        ({ let mut o = ok; o.tail = (0, OWNER, 0, 0); o }, "without BUILD_KNOWN"),
+        ({ let mut o = ok; o.tail = (4, 0, 0, 0); o }, "without BUILD_KNOWN"),
+        ({ let mut o = op(1, 0, (1, 2)); o.tail = (0, OWNER, 1, 0); o }, "not built in a segment"),
+        ({ let mut o = op(1, 0, (1, 2)); o.tail = (3, 0, 0, 0); o }, "not built in a segment"),
+        (built_op(1, 2, (1, 2), 1, 1, 3), "after its CALL frame"),
+    ];
+    for (o, want) in cases {
+        let e = reader::read(&bld_file(vec![ops_b(&[o])]).bytes()).expect_err(want);
+        assert_eq!(e.rule, Rule::AutoOps, "{want}");
+        assert!(e.detail.contains(want), "{want}: {}", e.detail);
+    }
+    // the width is negotiated with the masks: 144 only with 63/11, on CONFIG and on every OPS chunk
+    assert_eq!(rule(&bld_file(vec![ops(&[op(1, 0, (1, 2))])])), Rule::AutoOps);
+    assert_eq!(rule(&pres_file(vec![ops_b(&[op(1, 0, (1, 2))])])), Rule::AutoOps);
+    let mut c = bld_cfg();
+    c.words[13] = 128;
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(c.chunk());
+    assert_eq!(rule(&f), Rule::AutoConfig);
+    let mut c = pres_cfg();
+    c.words[13] = 144;
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(c.chunk());
+    assert_eq!(rule(&f), Rule::AutoConfig);
+    // u32@380 carries the unrepresented count only with 63/11; older rows keep it reserved zero
+    let mut x = row(0, (10, 20), 0);
+    x.flags |= 64;
+    assert!(reader::read(&bld_file(vec![coverage_b(&x, 7)]).bytes()).is_ok());
+    let e = reader::read(&pres_file(vec![coverage_b(&x, 7)]).bytes()).unwrap_err();
+    assert!(e.detail.contains("reserved"), "{}", e.detail);
+}
+
+#[test]
+fn build_frame_fixture_from_the_host_runtime() {
+    // The segbuild host control (auto-segment-build-frame-test.c): the writer's 63/11 bytes read back by this reader.
+    let r = read_fixture("segbuild");
+    let Some(Config::Attached(a)) = &r.config else { panic!("attached") };
+    assert_eq!((a.kind_mask, a.form_mask), (63, 11));
+    assert!(r.build_frames);
+    assert!(r.status.as_ref().is_some_and(|s| s.flags & ps3dk_prof::auto_rsx::ST_SEGMENT_REPLAY != 0));
+    assert_eq!(r.frames.iter().map(|f| f.segment_unrepresented).collect::<Vec<_>>(), [0, 3, u32::MAX]);
+    // frame 1 executed A (built in 0) and E (one draw built in 0, one in 1); frame 2 built R, whose CALL was refused
+    assert_eq!((r.frames[1].recorded, r.frames[1].segment_imports), (3, 2));
+    assert_eq!(r.frames[2].segment_abandoned, 1);
+    // a segment was replayed: no frame of this capture has a verdict
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.reason == ps3dk_prof::auto_rsx::SEGMENT_REPLAY),
+        "{:#?}", r.frames);
 }
