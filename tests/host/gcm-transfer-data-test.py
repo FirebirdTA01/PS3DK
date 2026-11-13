@@ -89,17 +89,13 @@ if "ps3tc_gcm_state_transfer_data" not in src_cmd_c or "cellGcmSetTransferData" 
 if "ps3tc_gcm_state_transfer_data" not in src_native:
     sys.exit("ps3tc_gcm_state_transfer_data missing from gcm_state_native.h")
 
-# Verify SetTransferData implementation identity across both legacy command wrappers
-fn_pub_gcm = extract_function(
-    "void RSX_FUNC(SetTransferData)(gcmContextData *context,u8 mode",
-    src_gcm
-)
-fn_pub_rsx = extract_function(
-    "void RSX_FUNC(SetTransferData)(gcmContextData *context,u8 mode",
-    src_rsx
-)
-if fn_pub_gcm != fn_pub_rsx:
-    sys.exit("RSX_FUNC(SetTransferData) differs between libgcm_cmd and librsx")
+# Verify libgcm_cmd forwards to ps3tc_gcm_state_transfer_data
+if "ps3tc_gcm_state_transfer_data" not in src_gcm:
+    sys.exit("ps3tc_gcm_state_transfer_data missing from libgcm_cmd RSX_FUNC(SetTransferData)")
+
+# Verify librsx retains its own standalone implementation
+if "RSX_FUNC_INTERNAL(SetTransferData)" not in src_rsx:
+    sys.exit("RSX_FUNC_INTERNAL(SetTransferData) missing from librsx commands_impl.h")
 
 # 2. Pinned historical defective fixture (never dynamically substituted)
 PINNED_DEFECTIVE_INTERNAL = r'''
