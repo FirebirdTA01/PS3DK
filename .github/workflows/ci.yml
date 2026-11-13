@@ -449,6 +449,9 @@ jobs:
       - name: Test public cellGcm* forwarders emit the shared native words
         run: bash tests/sdk/gcm-state-cellpath-test.sh
 
+      - name: Test the PS3_PROF_AUTO report hook in the inline report writers
+        run: bash tests/sdk/gcm-auto-report-hook-test.sh
+
       # GCM safe-path reservation contract on the SHARED reserve helper
       # (ps3tc_gcm_reserve in gcm_cg_bridge.h): full ring + NULL callback
       # must not write past end; refused callback must not write; a

@@ -45,6 +45,7 @@
 #include <rsx/commands.h>
 #include <cell/gcm/gcm_enum.h>
 
+
 /* Native NV40 emitters for the texture-family cellGcmSet* functions —
  * replaces the rsx* forwarders we shipped while librsx was still the
  * sole command source.  The header pulls in gcm_cg_bridge.h transitively
@@ -54,6 +55,17 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if defined(PS3TC_PROF_AUTO)
+/* PS3_PROF_AUTO observation (libps3dkprof_auto.a): an application report write that
+ * reaches the profiler's report indices is a resource conflict. The inline report
+ * calls below never go through the rsx library bodies that carry this hook, so they
+ * call it themselves (kind 1 = report index); it never changes the write. */
+void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
+#define PS3TC_GCM_REPORT_OBSERVED(ctx, index) ps3dk_prof__auto_resource_write((struct _gcmCtxData *)(ctx), 1u, (index))
+#else
+#define PS3TC_GCM_REPORT_OBSERVED(ctx, index) ((void)0)
 #endif
 
 /* CellGcmContextData / CellGcmConfig come from <cell/gcm.h>; this
@@ -398,6 +410,7 @@ static inline void cellGcmSetTextureBorderColor(CellGcmContextData *thisContext,
 static inline void cellGcmSetTimeStamp(CellGcmContextData *thisContext, uint32_t index)
 {
 	if (!thisContext) return;
+	PS3TC_GCM_REPORT_OBSERVED(thisContext, index);
 	uint32_t *w = ps3tc_gcm_reserve(thisContext, 2);
 	if (!w) return;
 	w[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_GET, 1);
@@ -847,6 +860,7 @@ static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisConte
 
 static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t type, uint32_t index)
 {
+	PS3TC_GCM_REPORT_OBSERVED(thisContext, index);
 	ps3tc_gcm_state_report(thisContext, type, index);
 }
 
