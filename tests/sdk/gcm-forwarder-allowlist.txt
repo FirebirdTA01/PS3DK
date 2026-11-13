@@ -57,9 +57,6 @@ cellGcmSetReturnCommand
 cellGcmSetSecondVHandler
 cellGcmSetTileInfo
 cellGcmSetTransferData
-cellGcmSetTransferDataFormat
-cellGcmSetTransferDataMode
-cellGcmSetTransferDataOffset
 cellGcmSetTransferImage
 cellGcmSetTransferScaleMode
 cellGcmSetTransferScaleSurface

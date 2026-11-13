@@ -1932,44 +1932,29 @@ void RSX_FUNC(SetTransferData)(gcmContextData *context,u8 mode,u32 dst,u32 outpi
 
 void RSX_FUNC(SetTransferDataMode)(gcmContextData *context,u8 mode)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN,2);
-	RSX_CONTEXT_CURRENTP[1] = (mode&0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-	RSX_CONTEXT_CURRENTP[2] = (mode&0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-
-	RSX_CONTEXT_CURRENT_END(3);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_data_mode_unsafe(context, mode);
+#else
+	ps3tc_gcm_state_transfer_data_mode(context, mode);
+#endif
 }
 
 void RSX_FUNC(SetTransferDataOffset)(gcmContextData *context,u32 dst,u32 src)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(6);
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN,1);
-	RSX_CONTEXT_CURRENTP[1] = src;
-	RSX_CONTEXT_CURRENTP[2] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT,1);
-	RSX_CONTEXT_CURRENTP[3] = dst;
-	RSX_CONTEXT_CURRENTP[4] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_BUF_NOTIFY,1);
-	RSX_CONTEXT_CURRENTP[5] = 0;
-	RSX_CONTEXT_CURRENT_END(6);
-
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT,1);
-	RSX_CONTEXT_CURRENTP[1] = 0;
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_data_offset_unsafe(context, dst, src);
+#else
+	ps3tc_gcm_state_transfer_data_offset(context, dst, src);
+#endif
 }
 
 void RSX_FUNC(SetTransferDataFormat)(gcmContextData *context,s32 inpitch,s32 outpitch,u32 linelength,u32 linecount,u8 inbytes,u8 outbytes)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(6);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN,5);
-	RSX_CONTEXT_CURRENTP[1] = inpitch;
-	RSX_CONTEXT_CURRENTP[2] = outpitch;
-	RSX_CONTEXT_CURRENTP[3] = linelength;
-	RSX_CONTEXT_CURRENTP[4] = linecount;
-	RSX_CONTEXT_CURRENTP[5] = (((u32)outbytes<<8) | inbytes);
-
-	RSX_CONTEXT_CURRENT_END(6);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_data_format_unsafe(context, inpitch, outpitch, linelength, linecount, inbytes, outbytes);
+#else
+	ps3tc_gcm_state_transfer_data_format(context, inpitch, outpitch, linelength, linecount, inbytes, outbytes);
+#endif
 }
 
 void RSX_FUNC(SetTransferImage)(gcmContextData *context,u8 mode,u32 dstOffset,u32 dstPitch,u32 dstX,u32 dstY,u32 srcOffset,u32 srcPitch,u32 srcX,u32 srcY,u32 width,u32 height,u32 bytesPerPixel)

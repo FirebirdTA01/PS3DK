@@ -48,6 +48,8 @@
 
 /* (count<<18)|method — identical to RSX_METHOD() and PS3TC_GCM_METHOD(). */
 #define REF_METHOD(m, count) ((((uint32_t)(count)) << 18) | (uint32_t)(m))
+#define REF_SUBCHANNEL_METHOD(ch, m, count) \
+    ((((uint32_t)(count)) << 18) | (((uint32_t)(ch)) << 13) | (uint32_t)(m))
 
 /* -------------------------------------------------------------------- *
  * Reference (pre-patch commands_impl.h bodies), in-test.
@@ -721,6 +723,80 @@ static void ref_unsafe_report(gcmContextData *ctx, uint32_t type, uint32_t index
     ctx->current[0] = REF_METHOD(NV40TCL_QUERY_GET, 1);
     ctx->current[1] = ((type << 24) | offset);
     ctx->current   += 2;
+}
+
+/* transfer_data_mode */
+static void ref_safe_transfer_data_mode(gcmContextData *ctx, uint8_t mode)
+{
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current   += 3;
+}
+static void ref_unsafe_transfer_data_mode(gcmContextData *ctx, uint8_t mode)
+{
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current   += 3;
+}
+
+/* transfer_data_offset */
+static void ref_safe_transfer_data_offset(gcmContextData *ctx, uint32_t dst, uint32_t src)
+{
+    if (ctx->current + 8 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 8) != 0) return;
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 1);
+    ctx->current[1] = src;
+    ctx->current[2] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    ctx->current[3] = dst;
+    ctx->current[4] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_BUF_NOTIFY, 1);
+    ctx->current[5] = 0;
+    ctx->current[6] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    ctx->current[7] = 0;
+    ctx->current   += 8;
+}
+static void ref_unsafe_transfer_data_offset(gcmContextData *ctx, uint32_t dst, uint32_t src)
+{
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 1);
+    ctx->current[1] = src;
+    ctx->current[2] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    ctx->current[3] = dst;
+    ctx->current[4] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_BUF_NOTIFY, 1);
+    ctx->current[5] = 0;
+    ctx->current[6] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    ctx->current[7] = 0;
+    ctx->current   += 8;
+}
+
+/* transfer_data_format */
+static void ref_safe_transfer_data_format(gcmContextData *ctx, int32_t inpitch, int32_t outpitch,
+                                          uint32_t linelength, uint32_t linecount,
+                                          uint8_t inbytes, uint8_t outbytes)
+{
+    if (ctx->current + 6 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 6) != 0) return;
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN, 5);
+    ctx->current[1] = (uint32_t)inpitch;
+    ctx->current[2] = (uint32_t)outpitch;
+    ctx->current[3] = linelength;
+    ctx->current[4] = linecount;
+    ctx->current[5] = (((uint32_t)outbytes << 8) | inbytes);
+    ctx->current   += 6;
+}
+static void ref_unsafe_transfer_data_format(gcmContextData *ctx, int32_t inpitch, int32_t outpitch,
+                                            uint32_t linelength, uint32_t linecount,
+                                            uint8_t inbytes, uint8_t outbytes)
+{
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN, 5);
+    ctx->current[1] = (uint32_t)inpitch;
+    ctx->current[2] = (uint32_t)outpitch;
+    ctx->current[3] = linelength;
+    ctx->current[4] = linecount;
+    ctx->current[5] = (((uint32_t)outbytes << 8) | inbytes);
+    ctx->current   += 6;
 }
 static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               f32 min, f32 max, const f32 scale[4], const f32 offset[4])
@@ -1945,6 +2021,80 @@ int main(void)
         cmp_mutant("  report (swap mutant)", A, B, 2);
     }
 
+    /* transfer_data_mode (3 words, sweep modes 0..3) */
+    printf("\n  Transfer data mode (3-word, modes 0..3)\n");
+    for (uint8_t m = 0; m <= 3; ++m) {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_transfer_data_mode((CellGcmContextData *)&n, m);
+        ref_safe_transfer_data_mode(&r, m);
+        char lab[48]; snprintf(lab, sizeof lab, "  transfer_data_mode m=%u (safe)", m);
+        cmp(lab, A, B, 3);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data_mode_unsafe((CellGcmContextData *)&n, m);
+        ref_unsafe_transfer_data_mode(&r, m);
+        snprintf(lab, sizeof lab, "  transfer_data_mode m=%u (unsafe)", m);
+        cmp(lab, A, B, 3);
+    }
+    {
+        /* Mode mutant: compare mode 1 against mode 2 */
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_transfer_data_mode((CellGcmContextData *)&n, 1);
+        ref_safe_transfer_data_mode(&r, 2);
+        cmp_mutant("  transfer_data_mode (mode mutant)", A, B, 3);
+    }
+
+    /* transfer_data_offset (8 words) */
+    printf("\n  Transfer data offset (8-word)\n");
+    {
+        static uint32_t A[16], B[16];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 16; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 16; r.callback = 0;
+        ps3tc_gcm_state_transfer_data_offset((CellGcmContextData *)&n, 0x12345678, 0x87654321);
+        ref_safe_transfer_data_offset(&r, 0x12345678, 0x87654321);
+        cmp("  transfer_data_offset (safe)", A, B, 8);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data_offset_unsafe((CellGcmContextData *)&n, 0x12345678, 0x87654321);
+        ref_unsafe_transfer_data_offset(&r, 0x12345678, 0x87654321);
+        cmp("  transfer_data_offset (unsafe)", A, B, 8);
+
+        /* Swap mutant: dst and src swapped */
+        r.begin = r.current = B;
+        ref_safe_transfer_data_offset(&r, 0x87654321, 0x12345678);
+        cmp_mutant("  transfer_data_offset (swap mutant)", A, B, 8);
+    }
+
+    /* transfer_data_format (6 words) */
+    printf("\n  Transfer data format (6-word)\n");
+    {
+        static uint32_t A[16], B[16];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 16; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 16; r.callback = 0;
+        ps3tc_gcm_state_transfer_data_format((CellGcmContextData *)&n, 1000, 2000, 100, 50, 2, 4);
+        ref_safe_transfer_data_format(&r, 1000, 2000, 100, 50, 2, 4);
+        cmp("  transfer_data_format (safe)", A, B, 6);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data_format_unsafe((CellGcmContextData *)&n, 1000, 2000, 100, 50, 2, 4);
+        ref_unsafe_transfer_data_format(&r, 1000, 2000, 100, 50, 2, 4);
+        cmp("  transfer_data_format (unsafe)", A, B, 6);
+
+        /* Swap mutant: inpitch and outpitch swapped */
+        r.begin = r.current = B;
+        ref_safe_transfer_data_format(&r, 2000, 1000, 100, 50, 2, 4);
+        cmp_mutant("  transfer_data_format (swap mutant)", A, B, 6);
+    }
+
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
     printf("\n  Ring-full / callback (end==current, recording callback)\n");
     RING_CHECK(ps3tc_gcm_state_logic_op,
@@ -2181,6 +2331,15 @@ int main(void)
     RING_CHECK(ps3tc_gcm_state_report,
                ps3tc_gcm_state_report_unsafe,
                "report", 2, 0x5A, 0x00001234u);
+    RING_CHECK(ps3tc_gcm_state_transfer_data_mode,
+               ps3tc_gcm_state_transfer_data_mode_unsafe,
+               "transfer_data_mode", 3, 3);
+    RING_CHECK(ps3tc_gcm_state_transfer_data_offset,
+               ps3tc_gcm_state_transfer_data_offset_unsafe,
+               "transfer_data_offset", 8, 0x12345678, 0x87654321);
+    RING_CHECK(ps3tc_gcm_state_transfer_data_format,
+               ps3tc_gcm_state_transfer_data_format_unsafe,
+               "transfer_data_format", 6, 1000, 2000, 100, 50, 2, 4);
 
 
     printf("\n");

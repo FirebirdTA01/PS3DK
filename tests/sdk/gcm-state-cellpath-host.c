@@ -15,7 +15,7 @@ static void check(const char *lab, const uint32_t *a, const uint32_t *b, int n)
 
 int main(void)
 {
-    static uint32_t A[64], B[64];
+    static uint32_t A[1024], B[1024];
     CellGcmContextData n, r;
 
     /* blend_func (3 words) */
@@ -566,6 +566,27 @@ int main(void)
     cellGcmSetReport(&n, 0x12, 0x00000034);
     ps3tc_gcm_state_report(&r, 0x12, 0x00000034);
     check("cell==native report", A, B, 2);
+
+    /* transfer_data_mode (3 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetTransferDataMode(&n, 0x03);
+    ps3tc_gcm_state_transfer_data_mode(&r, 0x03);
+    check("cell==native transfer_data_mode", A, B, 3);
+
+    /* transfer_data_offset (8 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetTransferDataOffset(&n, 0x12340000, 0x56780000);
+    ps3tc_gcm_state_transfer_data_offset(&r, 0x12340000, 0x56780000);
+    check("cell==native transfer_data_offset", A, B, 8);
+
+    /* transfer_data_format (6 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetTransferDataFormat(&n, 1024, 2048, 512, 256, 2, 4);
+    ps3tc_gcm_state_transfer_data_format(&r, 1024, 2048, 512, 256, 2, 4);
+    check("cell==native transfer_data_format", A, B, 6);
 
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;

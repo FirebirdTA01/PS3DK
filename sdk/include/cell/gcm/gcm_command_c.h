@@ -547,13 +547,13 @@ static inline void cellGcmSetInvalidateTextureCache(CellGcmContextData *thisCont
 
 static inline void cellGcmSetTransferDataMode(CellGcmContextData *thisContext, uint8_t mode)
 {
-	rsxSetTransferDataMode(thisContext, mode);
+	ps3tc_gcm_state_transfer_data_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetTransferDataOffset(CellGcmContextData *thisContext,
                                                 uint32_t dst, uint32_t src)
 {
-	rsxSetTransferDataOffset(thisContext, dst, src);
+	ps3tc_gcm_state_transfer_data_offset(thisContext, dst, src);
 }
 
 static inline void cellGcmSetTransferDataFormat(CellGcmContextData *thisContext,
@@ -561,8 +561,8 @@ static inline void cellGcmSetTransferDataFormat(CellGcmContextData *thisContext,
                                                 uint32_t linelength, uint32_t linecount,
                                                 uint8_t inbytes, uint8_t outbytes)
 {
-	rsxSetTransferDataFormat(thisContext, inpitch, outpitch,
-	                         linelength, linecount, inbytes, outbytes);
+	ps3tc_gcm_state_transfer_data_format(thisContext, inpitch, outpitch,
+	                                     linelength, linecount, inbytes, outbytes);
 }
 
 static inline void cellGcmSetTransferData(CellGcmContextData *thisContext,

@@ -1626,6 +1626,88 @@ static inline void ps3tc_gcm_state_report_unsafe(CellGcmContextData *ctx, uint32
     ctx->current = p + 2;
 }
 
+/* safe — transfer_data_mode (NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN count=2 on subchannel 1, 3 words). */
+static inline void ps3tc_gcm_state_transfer_data_mode(CellGcmContextData *ctx, uint8_t mode)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 3);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_data_mode_unsafe(CellGcmContextData *ctx, uint8_t mode)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current = p + 3;
+}
+
+/* safe — transfer_data_offset (NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN/OUT/BUF_NOTIFY on subchannel 1, 8 words). */
+static inline void ps3tc_gcm_state_transfer_data_offset(CellGcmContextData *ctx, uint32_t dst, uint32_t src)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 8);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 1);
+    p[1] = src;
+    p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    p[3] = dst;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_BUF_NOTIFY, 1);
+    p[5] = 0;
+    p[6] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    p[7] = 0;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_data_offset_unsafe(CellGcmContextData *ctx, uint32_t dst, uint32_t src)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 1);
+    p[1] = src;
+    p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    p[3] = dst;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_BUF_NOTIFY, 1);
+    p[5] = 0;
+    p[6] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_OUT, 1);
+    p[7] = 0;
+    ctx->current = p + 8;
+}
+
+/* safe — transfer_data_format (NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN count=5 on subchannel 1, 6 words). */
+static inline void ps3tc_gcm_state_transfer_data_format(CellGcmContextData *ctx,
+                                                        int32_t inpitch, int32_t outpitch,
+                                                        uint32_t linelength, uint32_t linecount,
+                                                        uint8_t inbytes, uint8_t outbytes)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 6);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN, 5);
+    p[1] = (uint32_t)inpitch;
+    p[2] = (uint32_t)outpitch;
+    p[3] = linelength;
+    p[4] = linecount;
+    p[5] = (((uint32_t)outbytes << 8) | (uint32_t)inbytes);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_data_format_unsafe(CellGcmContextData *ctx,
+                                                               int32_t inpitch, int32_t outpitch,
+                                                               uint32_t linelength, uint32_t linecount,
+                                                               uint8_t inbytes, uint8_t outbytes)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_PITCH_IN, 5);
+    p[1] = (uint32_t)inpitch;
+    p[2] = (uint32_t)outpitch;
+    p[3] = linelength;
+    p[4] = linecount;
+    p[5] = (((uint32_t)outbytes << 8) | (uint32_t)inbytes);
+    ctx->current = p + 6;
+}
+
 #ifdef __cplusplus
 }
 #endif
