@@ -649,6 +649,32 @@ int main(void)
         check("cell==native transfer_scale_swizzle", A, B, 18);
     }
 
+    /* transfer_data (single packet: 12 words, multi-packet: 21 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+256; r.begin=r.current=B; r.end=B+256;
+    cellGcmSetTransferData(&n, 0x03, 0x1000, 256, 0x2000, 256, 256, 1);
+    ps3tc_gcm_state_transfer_data(&r, 0x03, 0x1000, 256, 0x2000, 256, 256, 1);
+    check("cell==native transfer_data (single packet)", A, B, 12);
+
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+256; r.begin=r.current=B; r.end=B+256;
+    cellGcmSetTransferData(&n, 0x01, 0x1000, 50000, 0x2000, 50000, 100, 2);
+    ps3tc_gcm_state_transfer_data(&r, 0x01, 0x1000, 50000, 0x2000, 50000, 100, 2);
+    check("cell==native transfer_data (multi packet)", A, B, 21);
+
+    /* transfer_image (single block: 26 words, multi block: 46 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+256; r.begin=r.current=B; r.end=B+256;
+    cellGcmSetTransferImage(&n, 0x03, 0x1000, 256, 10, 20, 0x2000, 256, 10, 20, 32, 16, 4);
+    ps3tc_gcm_state_transfer_image(&r, 0x03, 0x1000, 256, 10, 20, 0x2000, 256, 10, 20, 32, 16, 4);
+    check("cell==native transfer_image (single block)", A, B, 26);
+
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+256; r.begin=r.current=B; r.end=B+256;
+    cellGcmSetTransferImage(&n, 0x02, 0x1000, 1024, 1020, 0, 0x2000, 1024, 0, 0, 8, 16, 4);
+    ps3tc_gcm_state_transfer_image(&r, 0x02, 0x1000, 1024, 1020, 0, 0x2000, 1024, 0, 0, 8, 16, 4);
+    check("cell==native transfer_image (multi block)", A, B, 46);
+
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;
 }

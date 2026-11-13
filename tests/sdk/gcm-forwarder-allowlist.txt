@@ -56,8 +56,6 @@ cellGcmSetQueueHandler
 cellGcmSetReturnCommand
 cellGcmSetSecondVHandler
 cellGcmSetTileInfo
-cellGcmSetTransferData
-cellGcmSetTransferImage
 cellGcmSetUserHandler
 cellGcmSetVBlankHandler
 cellGcmSetWaitFlip

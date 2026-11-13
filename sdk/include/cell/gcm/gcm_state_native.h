@@ -1858,6 +1858,285 @@ static inline void ps3tc_gcm_state_transfer_scale_swizzle_unsafe(CellGcmContextD
     ctx->current = p + 18;
 }
 
+/* safe — transfer_data (3-word setup + 9-word packets). */
+static inline void ps3tc_gcm_state_transfer_data(CellGcmContextData *ctx,
+                                                 uint8_t mode,
+                                                 uint32_t dstOffset, int32_t dstPitch,
+                                                 uint32_t srcOffset, int32_t srcPitch,
+                                                 uint32_t bytesPerRow, uint32_t rowCount)
+{
+    const int32_t MIN_PITCH = -32768;
+    const int32_t MAX_PITCH =  32767;
+    const uint32_t MAX_ROWS = 0x7ff;
+    const uint32_t MAX_LINES = 0x3fffff;
+    uint32_t colCount, rows, cols, row;
+
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 3);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+
+    if ((uint32_t)srcPitch == bytesPerRow && (uint32_t)dstPitch == bytesPerRow) {
+        bytesPerRow *= rowCount;
+        rowCount = 1;
+        srcPitch = 0;
+        dstPitch = 0;
+    }
+
+    if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
+        for (row = 0; row < rowCount; row++) {
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                p = ps3tc_gcm_reserve(ctx, 9);
+                if (!p) return;
+                p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                p[1] = srcOffset + (bytesPerRow - colCount);
+                p[2] = dstOffset + (bytesPerRow - colCount);
+                p[3] = 0;
+                p[4] = 0;
+                p[5] = cols;
+                p[6] = 1;
+                p[7] = (((uint32_t)1 << 8) | 1);
+                p[8] = 0;
+            }
+            srcOffset += (uint32_t)srcPitch;
+            dstOffset += (uint32_t)dstPitch;
+        }
+    } else {
+        for (; rowCount > 0; rowCount -= rows) {
+            rows = (rowCount > MAX_ROWS) ? MAX_ROWS : rowCount;
+
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                p = ps3tc_gcm_reserve(ctx, 9);
+                if (!p) return;
+                p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                p[1] = srcOffset + (bytesPerRow - colCount);
+                p[2] = dstOffset + (bytesPerRow - colCount);
+                p[3] = (uint32_t)srcPitch;
+                p[4] = (uint32_t)dstPitch;
+                p[5] = cols;
+                p[6] = rows;
+                p[7] = (((uint32_t)1 << 8) | 1);
+                p[8] = 0;
+            }
+
+            srcOffset += rows * (uint32_t)srcPitch;
+            dstOffset += rows * (uint32_t)dstPitch;
+        }
+    }
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_data_unsafe(CellGcmContextData *ctx,
+                                                        uint8_t mode,
+                                                        uint32_t dstOffset, int32_t dstPitch,
+                                                        uint32_t srcOffset, int32_t srcPitch,
+                                                        uint32_t bytesPerRow, uint32_t rowCount)
+{
+    const int32_t MIN_PITCH = -32768;
+    const int32_t MAX_PITCH =  32767;
+    const uint32_t MAX_ROWS = 0x7ff;
+    const uint32_t MAX_LINES = 0x3fffff;
+    uint32_t colCount, rows, cols, row;
+
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p += 3;
+
+    if ((uint32_t)srcPitch == bytesPerRow && (uint32_t)dstPitch == bytesPerRow) {
+        bytesPerRow *= rowCount;
+        rowCount = 1;
+        srcPitch = 0;
+        dstPitch = 0;
+    }
+
+    if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
+        for (row = 0; row < rowCount; row++) {
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                p[1] = srcOffset + (bytesPerRow - colCount);
+                p[2] = dstOffset + (bytesPerRow - colCount);
+                p[3] = 0;
+                p[4] = 0;
+                p[5] = cols;
+                p[6] = 1;
+                p[7] = (((uint32_t)1 << 8) | 1);
+                p[8] = 0;
+                p += 9;
+            }
+            srcOffset += (uint32_t)srcPitch;
+            dstOffset += (uint32_t)dstPitch;
+        }
+    } else {
+        for (; rowCount > 0; rowCount -= rows) {
+            rows = (rowCount > MAX_ROWS) ? MAX_ROWS : rowCount;
+
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                p[1] = srcOffset + (bytesPerRow - colCount);
+                p[2] = dstOffset + (bytesPerRow - colCount);
+                p[3] = (uint32_t)srcPitch;
+                p[4] = (uint32_t)dstPitch;
+                p[5] = cols;
+                p[6] = rows;
+                p[7] = (((uint32_t)1 << 8) | 1);
+                p[8] = 0;
+                p += 9;
+            }
+
+            srcOffset += rows * (uint32_t)srcPitch;
+            dstOffset += rows * (uint32_t)dstPitch;
+        }
+    }
+    ctx->current = p;
+}
+
+/* safe — transfer_image (6-word setup + 20-word packets). */
+static inline void ps3tc_gcm_state_transfer_image(CellGcmContextData *ctx,
+                                                  uint8_t mode,
+                                                  uint32_t dstOffset, uint32_t dstPitch,
+                                                  uint32_t dstX, uint32_t dstY,
+                                                  uint32_t srcOffset, uint32_t srcPitch,
+                                                  uint32_t srcX, uint32_t srcY,
+                                                  uint32_t width, uint32_t height,
+                                                  uint32_t bytesPerPixel)
+{
+    const uint32_t SURFACE_MAX_DIM = 10;
+    const uint32_t BLOCK_SIZE = 1 << SURFACE_MAX_DIM;
+    uint32_t finalDstX, finalDstY, x, y;
+
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 6);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    p[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    p[5] = GCM_CONTEXT_SURFACE2D;
+
+    finalDstX = dstX + width;
+    finalDstY = dstY + height;
+    for (y = dstY; y < finalDstY;) {
+        uint32_t dstTop = y & ~(BLOCK_SIZE - 1);
+        uint32_t dstBot = dstTop + BLOCK_SIZE;
+        uint32_t dstBltHeight = ((dstBot < finalDstY) ? dstBot : finalDstY) - y;
+
+        for (x = dstX; x < finalDstX;) {
+            uint32_t dstLeft = x & ~(BLOCK_SIZE - 1);
+            uint32_t dstRight = dstLeft + BLOCK_SIZE;
+            uint32_t dstBltWidth = ((dstRight < finalDstX) ? dstRight : finalDstX) - x;
+            uint32_t dstBlockOffset = bytesPerPixel * (dstLeft & ~(BLOCK_SIZE - 1)) + dstPitch * dstTop;
+            uint32_t srcBlockOffset = bytesPerPixel * (srcX + x - dstX) + srcPitch * (srcY + y - dstY);
+            uint32_t safeDstBltWidth = (dstBltWidth < 16) ? 16 : (dstBltWidth + 1) & ~1;
+            uint32_t destinOffset = dstOffset + dstBlockOffset;
+
+            p = ps3tc_gcm_reserve(ctx, 20);
+            if (!p) return;
+            p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN, 1);
+            p[1] = destinOffset;
+            p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 2);
+            p[3] = (bytesPerPixel == 4) ? NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV04_CONTEXT_SURFACES_2D_FORMAT_X1R5G5B5_X1R5G5B5 : 0);
+            p[4] = ((dstPitch << 16) | dstPitch);
+            p[5] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_OPERATION, 9);
+            p[6] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+            p[7] = (bytesPerPixel == 4) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A1R5G5B5 : 0);
+            p[8] = GCM_TRANSFER_OPERATION_SRCCOPY;
+            p[9] = (((y - dstTop) << 16) | (x - dstLeft));
+            p[10] = ((dstBltHeight << 16) | dstBltWidth);
+            p[11] = (((y - dstTop) << 16) | (x - dstLeft));
+            p[12] = ((dstBltHeight << 16) | dstBltWidth);
+            p[13] = (1 << 20);
+            p[14] = (1 << 20);
+            p[15] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+            p[16] = ((dstBltHeight << 16) | safeDstBltWidth);
+            p[17] = (srcPitch | (GCM_TRANSFER_ORIGIN_CORNER << 16) | (GCM_TRANSFER_INTERPOLATOR_NEAREST << 24));
+            p[18] = srcOffset + srcBlockOffset;
+            p[19] = 0;
+
+            x += dstBltWidth;
+        }
+        y += dstBltHeight;
+    }
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_image_unsafe(CellGcmContextData *ctx,
+                                                        uint8_t mode,
+                                                        uint32_t dstOffset, uint32_t dstPitch,
+                                                        uint32_t dstX, uint32_t dstY,
+                                                        uint32_t srcOffset, uint32_t srcPitch,
+                                                        uint32_t srcX, uint32_t srcY,
+                                                        uint32_t width, uint32_t height,
+                                                        uint32_t bytesPerPixel)
+{
+    const uint32_t SURFACE_MAX_DIM = 10;
+    const uint32_t BLOCK_SIZE = 1 << SURFACE_MAX_DIM;
+    uint32_t finalDstX, finalDstY, x, y;
+
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    p[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    p[5] = GCM_CONTEXT_SURFACE2D;
+    p += 6;
+
+    finalDstX = dstX + width;
+    finalDstY = dstY + height;
+    for (y = dstY; y < finalDstY;) {
+        uint32_t dstTop = y & ~(BLOCK_SIZE - 1);
+        uint32_t dstBot = dstTop + BLOCK_SIZE;
+        uint32_t dstBltHeight = ((dstBot < finalDstY) ? dstBot : finalDstY) - y;
+
+        for (x = dstX; x < finalDstX;) {
+            uint32_t dstLeft = x & ~(BLOCK_SIZE - 1);
+            uint32_t dstRight = dstLeft + BLOCK_SIZE;
+            uint32_t dstBltWidth = ((dstRight < finalDstX) ? dstRight : finalDstX) - x;
+            uint32_t dstBlockOffset = bytesPerPixel * (dstLeft & ~(BLOCK_SIZE - 1)) + dstPitch * dstTop;
+            uint32_t srcBlockOffset = bytesPerPixel * (srcX + x - dstX) + srcPitch * (srcY + y - dstY);
+            uint32_t safeDstBltWidth = (dstBltWidth < 16) ? 16 : (dstBltWidth + 1) & ~1;
+            uint32_t destinOffset = dstOffset + dstBlockOffset;
+
+            p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN, 1);
+            p[1] = destinOffset;
+            p[2] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 2);
+            p[3] = (bytesPerPixel == 4) ? NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV04_CONTEXT_SURFACES_2D_FORMAT_X1R5G5B5_X1R5G5B5 : 0);
+            p[4] = ((dstPitch << 16) | dstPitch);
+            p[5] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_OPERATION, 9);
+            p[6] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+            p[7] = (bytesPerPixel == 4) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A1R5G5B5 : 0);
+            p[8] = GCM_TRANSFER_OPERATION_SRCCOPY;
+            p[9] = (((y - dstTop) << 16) | (x - dstLeft));
+            p[10] = ((dstBltHeight << 16) | dstBltWidth);
+            p[11] = (((y - dstTop) << 16) | (x - dstLeft));
+            p[12] = ((dstBltHeight << 16) | dstBltWidth);
+            p[13] = (1 << 20);
+            p[14] = (1 << 20);
+            p[15] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+            p[16] = ((dstBltHeight << 16) | safeDstBltWidth);
+            p[17] = (srcPitch | (GCM_TRANSFER_ORIGIN_CORNER << 16) | (GCM_TRANSFER_INTERPOLATOR_NEAREST << 24));
+            p[18] = srcOffset + srcBlockOffset;
+            p[19] = 0;
+            p += 20;
+
+            x += dstBltWidth;
+        }
+        y += dstBltHeight;
+    }
+    ctx->current = p;
+}
+
 #ifdef __cplusplus
 }
 #endif

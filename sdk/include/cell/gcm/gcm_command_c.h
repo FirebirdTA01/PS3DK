@@ -570,8 +570,8 @@ static inline void cellGcmSetTransferData(CellGcmContextData *thisContext,
                                           uint32_t src, uint32_t inpitch,
                                           uint32_t linelength, uint32_t linecount)
 {
-	rsxSetTransferData(thisContext, mode, dst, outpitch, src,
-	                   inpitch, linelength, linecount);
+	ps3tc_gcm_state_transfer_data(thisContext, mode, dst, (int32_t)outpitch,
+	                              src, (int32_t)inpitch, linelength, linecount);
 }
 
 static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
@@ -583,10 +583,10 @@ static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
                                            uint32_t width, uint32_t height,
                                            uint32_t bytesPerPixel)
 {
-	rsxSetTransferImage(thisContext, mode,
-	                    dstOffset, dstPitch, dstX, dstY,
-	                    srcOffset, srcPitch, srcX, srcY,
-	                    width, height, bytesPerPixel);
+	ps3tc_gcm_state_transfer_image(thisContext, mode,
+	                               dstOffset, dstPitch, dstX, dstY,
+	                               srcOffset, srcPitch, srcX, srcY,
+	                               width, height, bytesPerPixel);
 }
 
 static inline void cellGcmSetTransferScaleMode(CellGcmContextData *thisContext,

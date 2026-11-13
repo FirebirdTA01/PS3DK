@@ -1743,85 +1743,13 @@ void RSX_FUNC(SetPointSize)(gcmContextData *context,f32 size)
 	RSX_CONTEXT_CURRENT_END(2);
 }
 
-/* The pitches are SIGNED (a negative pitch walks rows upward) and the
- * hardware's pitch fields hold -32768..32767.  They used to be u32 compared
- * against s32 bounds, which converted -32768 to 0xFFFF8000 and sent every
- * ordinary pitch down the row-by-row path; that path then counted rows with
- * `while (--rowCount >= 0)` on a u32, which never ends, and never moved to
- * the next row.  A pitch the fields cannot hold is copied one row per
- * command, advancing both offsets by their pitch. */
-static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetTransferData)(gcmContextData *context,u32 dstOffset,s32 dstPitch,u32 srcOffset,s32 srcPitch,u32 bytesPerRow,u32 rowCount)
-{
-	const s32 MIN_PITCH = -32768;
-	const s32 MAX_PITCH =  32767;
-	const u32 MAX_ROWS = 0x7ff;
-	const u32 MAX_LINES = 0x3fffff;
-	u32 colCount, rows, cols, row;
-
-	if ((u32)srcPitch == bytesPerRow && (u32)dstPitch == bytesPerRow) {
-		bytesPerRow *= rowCount;
-		rowCount = 1;
-		srcPitch = 0;
-		dstPitch = 0;
-	}
-
-	if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
-		for (row = 0; row < rowCount; row++) {
-			for (colCount=bytesPerRow;colCount > 0;colCount-=cols) {
-				cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
-
-				RSX_CONTEXT_CURRENT_BEGIN(9);
-				RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN,8);
-				RSX_CONTEXT_CURRENTP[1] = srcOffset + (bytesPerRow - colCount);
-				RSX_CONTEXT_CURRENTP[2] = dstOffset + (bytesPerRow - colCount);
-				RSX_CONTEXT_CURRENTP[3] = 0;
-				RSX_CONTEXT_CURRENTP[4] = 0;
-				RSX_CONTEXT_CURRENTP[5] = cols;
-				RSX_CONTEXT_CURRENTP[6] = 1;
-				RSX_CONTEXT_CURRENTP[7] = (((u32)1<<8) | 1);
-				RSX_CONTEXT_CURRENTP[8] = 0;
-				RSX_CONTEXT_CURRENT_END(9);
-			}
-			srcOffset += (u32)srcPitch;
-			dstOffset += (u32)dstPitch;
-		}
-	} else {
-		for (;rowCount > 0;rowCount-=rows) {
-			rows = (rowCount > MAX_ROWS) ? MAX_ROWS : rowCount;
-
-			for (colCount=bytesPerRow;colCount > 0;colCount-=cols) {
-				cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
-
-				RSX_CONTEXT_CURRENT_BEGIN(9);
-				RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN,8);
-				RSX_CONTEXT_CURRENTP[1] = srcOffset + (bytesPerRow - colCount);
-				RSX_CONTEXT_CURRENTP[2] = dstOffset + (bytesPerRow - colCount);
-				RSX_CONTEXT_CURRENTP[3] = srcPitch;
-				RSX_CONTEXT_CURRENTP[4] = dstPitch;
-				RSX_CONTEXT_CURRENTP[5] = cols;
-				RSX_CONTEXT_CURRENTP[6] = rows;
-				RSX_CONTEXT_CURRENTP[7] = (((u32)1<<8) | 1);
-				RSX_CONTEXT_CURRENTP[8] = 0;
-				RSX_CONTEXT_CURRENT_END(9);
-			}
-
-			srcOffset += rows*(u32)srcPitch;
-			dstOffset += rows*(u32)dstPitch;
-		}
-	}
-
-
-}
-
 void RSX_FUNC(SetTransferData)(gcmContextData *context,u8 mode,u32 dst,u32 outpitch,u32 src,u32 inpitch,u32 linelength,u32 linecount)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(3);
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(1,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN,2);
-	RSX_CONTEXT_CURRENTP[1] = (mode&0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-	RSX_CONTEXT_CURRENTP[2] = (mode&0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-	RSX_CONTEXT_CURRENT_END(3);
-
-	RSX_FUNC_INTERNAL(SetTransferData)(context, dst, (s32)outpitch, src, (s32)inpitch, linelength, linecount);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_data_unsafe(context, mode, dst, (s32)outpitch, src, (s32)inpitch, linelength, linecount);
+#else
+	ps3tc_gcm_state_transfer_data(context, mode, dst, (s32)outpitch, src, (s32)inpitch, linelength, linecount);
+#endif
 }
 
 void RSX_FUNC(SetTransferDataMode)(gcmContextData *context,u8 mode)
@@ -1853,62 +1781,11 @@ void RSX_FUNC(SetTransferDataFormat)(gcmContextData *context,s32 inpitch,s32 out
 
 void RSX_FUNC(SetTransferImage)(gcmContextData *context,u8 mode,u32 dstOffset,u32 dstPitch,u32 dstX,u32 dstY,u32 srcOffset,u32 srcPitch,u32 srcX,u32 srcY,u32 width,u32 height,u32 bytesPerPixel)
 {
-	const u32 SURFACE_MAX_DIM = 10;
-	const u32 BLOCK_SIZE = 1<<SURFACE_MAX_DIM;
-	u32 finalDstX, finalDstY, x, y;
-
-	RSX_CONTEXT_CURRENT_BEGIN(6);
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(6,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN,1);
-	RSX_CONTEXT_CURRENTP[1] = (mode&0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-	RSX_CONTEXT_CURRENTP[2] = RSX_SUBCHANNEL_METHOD(3,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT,1);
-	RSX_CONTEXT_CURRENTP[3] = (mode&0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-	RSX_CONTEXT_CURRENTP[4] = RSX_SUBCHANNEL_METHOD(6,NV01_IMAGE_FROM_CPU_SURFACE,1);
-	RSX_CONTEXT_CURRENTP[5] = GCM_CONTEXT_SURFACE2D;
-	RSX_CONTEXT_CURRENT_END(6);
-
-	finalDstX = dstX + width;
-	finalDstY = dstY + height;
-	for (y=dstY;y < finalDstY;) {
-		u32 dstTop = y&~(BLOCK_SIZE - 1);
-		u32 dstBot = dstTop + BLOCK_SIZE;
-		u32 dstBltHeight = ((dstBot < finalDstY) ? dstBot : finalDstY) - y;
-
-		for (x=dstX;x < finalDstX;) {
-			u32 dstLeft = x&~(BLOCK_SIZE - 1);
-			u32 dstRight = dstLeft + BLOCK_SIZE;
-			u32 dstBltWidth = ((dstRight < finalDstX) ? dstRight : finalDstX) - x;
-			u32 dstBlockOffset = bytesPerPixel*(dstLeft&~(BLOCK_SIZE - 1)) + dstPitch*dstTop;
-			u32 srcBlockOffset = bytesPerPixel*(srcX + x - dstX) + srcPitch*(srcY + y - dstY);
-			u32 safeDstBltWidth = (dstBltWidth < 16) ? 16 : (dstBltWidth + 1)&~1;
-			u32 destinOffset = dstOffset + dstBlockOffset;
-
-			RSX_CONTEXT_CURRENT_BEGIN(20);
-			RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN,1);
-			RSX_CONTEXT_CURRENTP[1] = destinOffset;
-			RSX_CONTEXT_CURRENTP[2] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_FORMAT,2);
-			RSX_CONTEXT_CURRENTP[3] = (bytesPerPixel==4) ? NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8 : ((bytesPerPixel==2) ? NV04_CONTEXT_SURFACES_2D_FORMAT_X1R5G5B5_X1R5G5B5 : 0);
-			RSX_CONTEXT_CURRENTP[4] = ((dstPitch << 16) | dstPitch);
-			RSX_CONTEXT_CURRENTP[5] = RSX_SUBCHANNEL_METHOD(6,NV01_IMAGE_FROM_CPU_OPERATION,9);
-			RSX_CONTEXT_CURRENTP[6] = GCM_TRANSFER_CONVERSION_TRUNCATE;
-			RSX_CONTEXT_CURRENTP[7] = (bytesPerPixel==4) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A8R8G8B8 : ((bytesPerPixel==2) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A1R5G5B5 : 0);
-			RSX_CONTEXT_CURRENTP[8] = GCM_TRANSFER_OPERATION_SRCCOPY;
-			RSX_CONTEXT_CURRENTP[9] = (((y - dstTop) << 16) | (x - dstLeft));
-			RSX_CONTEXT_CURRENTP[10] = ((dstBltHeight << 16) | dstBltWidth);
-			RSX_CONTEXT_CURRENTP[11] = (((y - dstTop) << 16) | (x - dstLeft));
-			RSX_CONTEXT_CURRENTP[12] = ((dstBltHeight << 16) | dstBltWidth);
-			RSX_CONTEXT_CURRENTP[13] = (1 << 20);
-			RSX_CONTEXT_CURRENTP[14] = (1 << 20);
-			RSX_CONTEXT_CURRENTP[15] = RSX_SUBCHANNEL_METHOD(6,NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE,4);
-			RSX_CONTEXT_CURRENTP[16] = ((dstBltHeight << 16) | safeDstBltWidth);
-			RSX_CONTEXT_CURRENTP[17] = (srcPitch | (GCM_TRANSFER_ORIGIN_CORNER << 16) | (GCM_TRANSFER_INTERPOLATOR_NEAREST << 24));
-			RSX_CONTEXT_CURRENTP[18] = srcOffset + srcBlockOffset;
-			RSX_CONTEXT_CURRENTP[19] = 0;
-			RSX_CONTEXT_CURRENT_END(20);
-
-			x += dstBltWidth;
-		}
-		y += dstBltHeight;
-	}
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_image_unsafe(context, mode, dstOffset, dstPitch, dstX, dstY, srcOffset, srcPitch, srcX, srcY, width, height, bytesPerPixel);
+#else
+	ps3tc_gcm_state_transfer_image(context, mode, dstOffset, dstPitch, dstX, dstY, srcOffset, srcPitch, srcX, srcY, width, height, bytesPerPixel);
+#endif
 }
 
 void RSX_FUNC(SetTransferScaleMode)(gcmContextData *context,u8 mode,u8 surface)

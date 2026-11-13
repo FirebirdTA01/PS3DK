@@ -916,6 +916,7 @@ static void ref_safe_transfer_scale_swizzle(gcmContextData *ctx,
     ctx->current[17] = (((uint32_t)scale->inY << 16) | scale->inX);
     ctx->current    += 18;
 }
+
 static void ref_unsafe_transfer_scale_swizzle(gcmContextData *ctx,
                                               const gcmTransferScale *scale,
                                               const gcmTransferSwizzle *swizzle)
@@ -941,6 +942,282 @@ static void ref_unsafe_transfer_scale_swizzle(gcmContextData *ctx,
     ctx->current[16] = scale->offset;
     ctx->current[17] = (((uint32_t)scale->inY << 16) | scale->inX);
     ctx->current    += 18;
+}
+
+/* transfer_data */
+static void ref_safe_transfer_data(gcmContextData *ctx, uint8_t mode,
+                                   uint32_t dstOffset, int32_t dstPitch,
+                                   uint32_t srcOffset, int32_t srcPitch,
+                                   uint32_t bytesPerRow, uint32_t rowCount)
+{
+    const int32_t MIN_PITCH = -32768;
+    const int32_t MAX_PITCH =  32767;
+    const uint32_t MAX_ROWS = 0x7ff;
+    const uint32_t MAX_LINES = 0x3fffff;
+    uint32_t colCount, rows, cols, row;
+
+    if (ctx->current + 3 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 3) != 0) return;
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current   += 3;
+
+    if ((uint32_t)srcPitch == bytesPerRow && (uint32_t)dstPitch == bytesPerRow) {
+        bytesPerRow *= rowCount;
+        rowCount = 1;
+        srcPitch = 0;
+        dstPitch = 0;
+    }
+
+    if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
+        for (row = 0; row < rowCount; row++) {
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                if (ctx->current + 9 > ctx->end)
+                    if (ctx->callback && ctx->callback(ctx, 9) != 0) return;
+                ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                ctx->current[1] = srcOffset + (bytesPerRow - colCount);
+                ctx->current[2] = dstOffset + (bytesPerRow - colCount);
+                ctx->current[3] = 0;
+                ctx->current[4] = 0;
+                ctx->current[5] = cols;
+                ctx->current[6] = 1;
+                ctx->current[7] = (((uint32_t)1 << 8) | 1);
+                ctx->current[8] = 0;
+                ctx->current   += 9;
+            }
+            srcOffset += (uint32_t)srcPitch;
+            dstOffset += (uint32_t)dstPitch;
+        }
+    } else {
+        for (; rowCount > 0; rowCount -= rows) {
+            rows = (rowCount > MAX_ROWS) ? MAX_ROWS : rowCount;
+
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                if (ctx->current + 9 > ctx->end)
+                    if (ctx->callback && ctx->callback(ctx, 9) != 0) return;
+                ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                ctx->current[1] = srcOffset + (bytesPerRow - colCount);
+                ctx->current[2] = dstOffset + (bytesPerRow - colCount);
+                ctx->current[3] = (uint32_t)srcPitch;
+                ctx->current[4] = (uint32_t)dstPitch;
+                ctx->current[5] = cols;
+                ctx->current[6] = rows;
+                ctx->current[7] = (((uint32_t)1 << 8) | 1);
+                ctx->current[8] = 0;
+                ctx->current   += 9;
+            }
+
+            srcOffset += rows * (uint32_t)srcPitch;
+            dstOffset += rows * (uint32_t)dstPitch;
+        }
+    }
+}
+
+static void ref_unsafe_transfer_data(gcmContextData *ctx, uint8_t mode,
+                                     uint32_t dstOffset, int32_t dstPitch,
+                                     uint32_t srcOffset, int32_t srcPitch,
+                                     uint32_t bytesPerRow, uint32_t rowCount)
+{
+    const int32_t MIN_PITCH = -32768;
+    const int32_t MAX_PITCH =  32767;
+    const uint32_t MAX_ROWS = 0x7ff;
+    const uint32_t MAX_LINES = 0x3fffff;
+    uint32_t colCount, rows, cols, row;
+
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current   += 3;
+
+    if ((uint32_t)srcPitch == bytesPerRow && (uint32_t)dstPitch == bytesPerRow) {
+        bytesPerRow *= rowCount;
+        rowCount = 1;
+        srcPitch = 0;
+        dstPitch = 0;
+    }
+
+    if (srcPitch < MIN_PITCH || srcPitch > MAX_PITCH || dstPitch < MIN_PITCH || dstPitch > MAX_PITCH) {
+        for (row = 0; row < rowCount; row++) {
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                ctx->current[1] = srcOffset + (bytesPerRow - colCount);
+                ctx->current[2] = dstOffset + (bytesPerRow - colCount);
+                ctx->current[3] = 0;
+                ctx->current[4] = 0;
+                ctx->current[5] = cols;
+                ctx->current[6] = 1;
+                ctx->current[7] = (((uint32_t)1 << 8) | 1);
+                ctx->current[8] = 0;
+                ctx->current   += 9;
+            }
+            srcOffset += (uint32_t)srcPitch;
+            dstOffset += (uint32_t)dstPitch;
+        }
+    } else {
+        for (; rowCount > 0; rowCount -= rows) {
+            rows = (rowCount > MAX_ROWS) ? MAX_ROWS : rowCount;
+
+            for (colCount = bytesPerRow; colCount > 0; colCount -= cols) {
+                cols = (colCount > MAX_LINES) ? MAX_LINES : colCount;
+
+                ctx->current[0] = REF_SUBCHANNEL_METHOD(1, NV_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
+                ctx->current[1] = srcOffset + (bytesPerRow - colCount);
+                ctx->current[2] = dstOffset + (bytesPerRow - colCount);
+                ctx->current[3] = (uint32_t)srcPitch;
+                ctx->current[4] = (uint32_t)dstPitch;
+                ctx->current[5] = cols;
+                ctx->current[6] = rows;
+                ctx->current[7] = (((uint32_t)1 << 8) | 1);
+                ctx->current[8] = 0;
+                ctx->current   += 9;
+            }
+
+            srcOffset += rows * (uint32_t)srcPitch;
+            dstOffset += rows * (uint32_t)dstPitch;
+        }
+    }
+}
+
+/* transfer_image */
+static void ref_safe_transfer_image(gcmContextData *ctx,
+                                    uint8_t mode,
+                                    uint32_t dstOffset, uint32_t dstPitch,
+                                    uint32_t dstX, uint32_t dstY,
+                                    uint32_t srcOffset, uint32_t srcPitch,
+                                    uint32_t srcX, uint32_t srcY,
+                                    uint32_t width, uint32_t height,
+                                    uint32_t bytesPerPixel)
+{
+    const uint32_t SURFACE_MAX_DIM = 10;
+    const uint32_t BLOCK_SIZE = 1 << SURFACE_MAX_DIM;
+    uint32_t finalDstX, finalDstY, x, y;
+
+    if (ctx->current + 6 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 6) != 0) return;
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = REF_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    ctx->current[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[4] = REF_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    ctx->current[5] = GCM_CONTEXT_SURFACE2D;
+    ctx->current   += 6;
+
+    finalDstX = dstX + width;
+    finalDstY = dstY + height;
+    for (y = dstY; y < finalDstY;) {
+        uint32_t dstTop = y & ~(BLOCK_SIZE - 1);
+        uint32_t dstBot = dstTop + BLOCK_SIZE;
+        uint32_t dstBltHeight = ((dstBot < finalDstY) ? dstBot : finalDstY) - y;
+
+        for (x = dstX; x < finalDstX;) {
+            uint32_t dstLeft = x & ~(BLOCK_SIZE - 1);
+            uint32_t dstRight = dstLeft + BLOCK_SIZE;
+            uint32_t dstBltWidth = ((dstRight < finalDstX) ? dstRight : finalDstX) - x;
+            uint32_t dstBlockOffset = bytesPerPixel * (dstLeft & ~(BLOCK_SIZE - 1)) + dstPitch * dstTop;
+            uint32_t srcBlockOffset = bytesPerPixel * (srcX + x - dstX) + srcPitch * (srcY + y - dstY);
+            uint32_t safeDstBltWidth = (dstBltWidth < 16) ? 16 : (dstBltWidth + 1) & ~1;
+            uint32_t destinOffset = dstOffset + dstBlockOffset;
+
+            if (ctx->current + 20 > ctx->end)
+                if (ctx->callback && ctx->callback(ctx, 20) != 0) return;
+            ctx->current[0] = REF_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN, 1);
+            ctx->current[1] = destinOffset;
+            ctx->current[2] = REF_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 2);
+            ctx->current[3] = (bytesPerPixel == 4) ? NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV04_CONTEXT_SURFACES_2D_FORMAT_X1R5G5B5_X1R5G5B5 : 0);
+            ctx->current[4] = ((dstPitch << 16) | dstPitch);
+            ctx->current[5] = REF_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_OPERATION, 9);
+            ctx->current[6] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+            ctx->current[7] = (bytesPerPixel == 4) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A1R5G5B5 : 0);
+            ctx->current[8] = GCM_TRANSFER_OPERATION_SRCCOPY;
+            ctx->current[9] = (((y - dstTop) << 16) | (x - dstLeft));
+            ctx->current[10] = ((dstBltHeight << 16) | dstBltWidth);
+            ctx->current[11] = (((y - dstTop) << 16) | (x - dstLeft));
+            ctx->current[12] = ((dstBltHeight << 16) | dstBltWidth);
+            ctx->current[13] = (1 << 20);
+            ctx->current[14] = (1 << 20);
+            ctx->current[15] = REF_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+            ctx->current[16] = ((dstBltHeight << 16) | safeDstBltWidth);
+            ctx->current[17] = (srcPitch | (GCM_TRANSFER_ORIGIN_CORNER << 16) | (GCM_TRANSFER_INTERPOLATOR_NEAREST << 24));
+            ctx->current[18] = srcOffset + srcBlockOffset;
+            ctx->current[19] = 0;
+            ctx->current    += 20;
+
+            x += dstBltWidth;
+        }
+        y += dstBltHeight;
+    }
+}
+
+static void ref_unsafe_transfer_image(gcmContextData *ctx,
+                                      uint8_t mode,
+                                      uint32_t dstOffset, uint32_t dstPitch,
+                                      uint32_t dstX, uint32_t dstY,
+                                      uint32_t srcOffset, uint32_t srcPitch,
+                                      uint32_t srcX, uint32_t srcY,
+                                      uint32_t width, uint32_t height,
+                                      uint32_t bytesPerPixel)
+{
+    const uint32_t SURFACE_MAX_DIM = 10;
+    const uint32_t BLOCK_SIZE = 1 << SURFACE_MAX_DIM;
+    uint32_t finalDstX, finalDstY, x, y;
+
+    ctx->current[0] = REF_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    ctx->current[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[2] = REF_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    ctx->current[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    ctx->current[4] = REF_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    ctx->current[5] = GCM_CONTEXT_SURFACE2D;
+    ctx->current   += 6;
+
+    finalDstX = dstX + width;
+    finalDstY = dstY + height;
+    for (y = dstY; y < finalDstY;) {
+        uint32_t dstTop = y & ~(BLOCK_SIZE - 1);
+        uint32_t dstBot = dstTop + BLOCK_SIZE;
+        uint32_t dstBltHeight = ((dstBot < finalDstY) ? dstBot : finalDstY) - y;
+
+        for (x = dstX; x < finalDstX;) {
+            uint32_t dstLeft = x & ~(BLOCK_SIZE - 1);
+            uint32_t dstRight = dstLeft + BLOCK_SIZE;
+            uint32_t dstBltWidth = ((dstRight < finalDstX) ? dstRight : finalDstX) - x;
+            uint32_t dstBlockOffset = bytesPerPixel * (dstLeft & ~(BLOCK_SIZE - 1)) + dstPitch * dstTop;
+            uint32_t srcBlockOffset = bytesPerPixel * (srcX + x - dstX) + srcPitch * (srcY + y - dstY);
+            uint32_t safeDstBltWidth = (dstBltWidth < 16) ? 16 : (dstBltWidth + 1) & ~1;
+            uint32_t destinOffset = dstOffset + dstBlockOffset;
+
+            ctx->current[0] = REF_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_OFFSET_DESTIN, 1);
+            ctx->current[1] = destinOffset;
+            ctx->current[2] = REF_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 2);
+            ctx->current[3] = (bytesPerPixel == 4) ? NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV04_CONTEXT_SURFACES_2D_FORMAT_X1R5G5B5_X1R5G5B5 : 0);
+            ctx->current[4] = ((dstPitch << 16) | dstPitch);
+            ctx->current[5] = REF_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_OPERATION, 9);
+            ctx->current[6] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+            ctx->current[7] = (bytesPerPixel == 4) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A8R8G8B8 : ((bytesPerPixel == 2) ? NV01_IMAGE_FROM_CPU_COLOR_FORMAT_A1R5G5B5 : 0);
+            ctx->current[8] = GCM_TRANSFER_OPERATION_SRCCOPY;
+            ctx->current[9] = (((y - dstTop) << 16) | (x - dstLeft));
+            ctx->current[10] = ((dstBltHeight << 16) | dstBltWidth);
+            ctx->current[11] = (((y - dstTop) << 16) | (x - dstLeft));
+            ctx->current[12] = ((dstBltHeight << 16) | dstBltWidth);
+            ctx->current[13] = (1 << 20);
+            ctx->current[14] = (1 << 20);
+            ctx->current[15] = REF_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+            ctx->current[16] = ((dstBltHeight << 16) | safeDstBltWidth);
+            ctx->current[17] = (srcPitch | (GCM_TRANSFER_ORIGIN_CORNER << 16) | (GCM_TRANSFER_INTERPOLATOR_NEAREST << 24));
+            ctx->current[18] = srcOffset + srcBlockOffset;
+            ctx->current[19] = 0;
+            ctx->current    += 20;
+
+            x += dstBltWidth;
+        }
+        y += dstBltHeight;
+    }
 }
 static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               f32 min, f32 max, const f32 scale[4], const f32 offset[4])
@@ -2353,6 +2630,105 @@ int main(void)
         r.begin = r.current = B;
         ref_safe_transfer_scale_swizzle(&r, &scale, &swiz_mut);
         cmp_mutant("  transfer_scale_swizzle (dim swap mutant)", A, B, 18);
+    }
+
+    /* transfer_data (12-word single-packet and 21-word multi-packet) */
+    printf("\n  Transfer data (12-word single-packet and 21-word multi-packet)\n");
+    {
+        static uint32_t A[64], B[64];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 64; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 64; r.callback = 0;
+
+        /* Single-packet case (12 words) */
+        ps3tc_gcm_state_transfer_data((CellGcmContextData *)&n, 1, 0x1000, 256, 0x2000, 256, 128, 2);
+        ref_safe_transfer_data(&r, 1, 0x1000, 256, 0x2000, 256, 128, 2);
+        cmp("  transfer_data single (safe)", A, B, 12);
+
+        /* Swap mutant: dstOffset and srcOffset swapped */
+        r.begin = r.current = B;
+        ref_safe_transfer_data(&r, 1, 0x2000, 256, 0x1000, 256, 128, 2);
+        cmp_mutant("  transfer_data (offset swap mutant)", A, B, 12);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data_unsafe((CellGcmContextData *)&n, 1, 0x1000, 256, 0x2000, 256, 128, 2);
+        ref_unsafe_transfer_data(&r, 1, 0x1000, 256, 0x2000, 256, 128, 2);
+        cmp("  transfer_data single (unsafe)", A, B, 12);
+
+        /* Multi-packet pitch fallback case (21 words) */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data((CellGcmContextData *)&n, 3, 0x4000, 50000, 0x8000, 50000, 100, 2);
+        ref_safe_transfer_data(&r, 3, 0x4000, 50000, 0x8000, 50000, 100, 2);
+        cmp("  transfer_data multi-pitch (safe)", A, B, 21);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_data_unsafe((CellGcmContextData *)&n, 3, 0x4000, 50000, 0x8000, 50000, 100, 2);
+        ref_unsafe_transfer_data(&r, 3, 0x4000, 50000, 0x8000, 50000, 100, 2);
+        cmp("  transfer_data multi-pitch (unsafe)", A, B, 21);
+    }
+
+    /* transfer_image (26-word single-block and 46-word multi-block) */
+    printf("\n  Transfer image (26-word single-block and 46-word multi-block)\n");
+    {
+        static uint32_t A[64], B[64];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 64; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 64; r.callback = 0;
+
+        /* Single-block case (26 words) */
+        ps3tc_gcm_state_transfer_image((CellGcmContextData *)&n, 2,
+                                       0x10000, 1024, 10, 20,
+                                       0x20000, 1024, 30, 40,
+                                       100, 50, 4);
+        ref_safe_transfer_image(&r, 2,
+                                0x10000, 1024, 10, 20,
+                                0x20000, 1024, 30, 40,
+                                100, 50, 4);
+        cmp("  transfer_image single (safe)", A, B, 26);
+
+        /* Swap mutant: dstX and srcX swapped */
+        r.begin = r.current = B;
+        ref_safe_transfer_image(&r, 2,
+                                0x10000, 1024, 30, 20,
+                                0x20000, 1024, 10, 40,
+                                100, 50, 4);
+        cmp_mutant("  transfer_image (coord swap mutant)", A, B, 26);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_image_unsafe((CellGcmContextData *)&n, 2,
+                                              0x10000, 1024, 10, 20,
+                                              0x20000, 1024, 30, 40,
+                                              100, 50, 4);
+        ref_unsafe_transfer_image(&r, 2,
+                                  0x10000, 1024, 10, 20,
+                                  0x20000, 1024, 30, 40,
+                                  100, 50, 4);
+        cmp("  transfer_image single (unsafe)", A, B, 26);
+
+        /* Multi-block boundary-crossing case (46 words) */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_image((CellGcmContextData *)&n, 1,
+                                       0x30000, 2048, 1020, 10,
+                                       0x40000, 2048, 0, 0,
+                                       8, 4, 4);
+        ref_safe_transfer_image(&r, 1,
+                                0x30000, 2048, 1020, 10,
+                                0x40000, 2048, 0, 0,
+                                8, 4, 4);
+        cmp("  transfer_image multi-block (safe)", A, B, 46);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_transfer_image_unsafe((CellGcmContextData *)&n, 1,
+                                              0x30000, 2048, 1020, 10,
+                                              0x40000, 2048, 0, 0,
+                                              8, 4, 4);
+        ref_unsafe_transfer_image(&r, 1,
+                                  0x30000, 2048, 1020, 10,
+                                  0x40000, 2048, 0, 0,
+                                  8, 4, 4);
+        cmp("  transfer_image multi-block (unsafe)", A, B, 46);
     }
 
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
