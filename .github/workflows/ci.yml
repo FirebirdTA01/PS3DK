@@ -1103,6 +1103,11 @@ jobs:
       - name: Test the link-time GCM command surface
         run: bash tests/sdk/gcm-link-surface-test.sh
 
+      # Skips without PS3DEV; verifies librsx has no undefined ps3tc_gcm_state_*
+      # symbols and a consumer calling rsxSetReport / rsxSetTransferData links cleanly.
+      - name: Test librsx symbol isolation and legacy consumer link
+        run: bash tests/sdk/librsx-link-test.sh
+
       # Always executes the real header's value assertions in C11 and C++17.
       - name: Test the sysmodule ids on the host
         run: bash tests/sdk/sysmodule-ids-test.sh --host
