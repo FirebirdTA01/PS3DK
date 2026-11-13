@@ -844,10 +844,10 @@ static void ref_safe_transfer_scale_surface(gcmContextData *ctx,
     ctx->current[6] = scale->conversion;
     ctx->current[7] = scale->format;
     ctx->current[8] = scale->operation;
-    ctx->current[9] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
-    ctx->current[10] = (((uint32_t)scale->clipH << 16) | scale->clipW);
-    ctx->current[11] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
-    ctx->current[12] = (((uint32_t)scale->outH << 16) | scale->outW);
+    ctx->current[9] = ((scale->clipY << 16) | scale->clipX);
+    ctx->current[10] = ((scale->clipH << 16) | scale->clipW);
+    ctx->current[11] = ((scale->outY << 16) | scale->outX);
+    ctx->current[12] = ((scale->outH << 16) | scale->outW);
     ctx->current[13] = (uint32_t)scale->ratioX;
     ctx->current[14] = (uint32_t)scale->ratioY;
 
@@ -872,10 +872,10 @@ static void ref_unsafe_transfer_scale_surface(gcmContextData *ctx,
     ctx->current[6] = scale->conversion;
     ctx->current[7] = scale->format;
     ctx->current[8] = scale->operation;
-    ctx->current[9] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
-    ctx->current[10] = (((uint32_t)scale->clipH << 16) | scale->clipW);
-    ctx->current[11] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
-    ctx->current[12] = (((uint32_t)scale->outH << 16) | scale->outW);
+    ctx->current[9] = ((scale->clipY << 16) | scale->clipX);
+    ctx->current[10] = ((scale->clipH << 16) | scale->clipW);
+    ctx->current[11] = ((scale->outY << 16) | scale->outX);
+    ctx->current[12] = ((scale->outH << 16) | scale->outW);
     ctx->current[13] = (uint32_t)scale->ratioX;
     ctx->current[14] = (uint32_t)scale->ratioY;
 
@@ -902,9 +902,9 @@ static void ref_safe_transfer_scale_swizzle(gcmContextData *ctx,
     ctx->current[4] = GCM_TRANSFER_CONVERSION_TRUNCATE;
     ctx->current[5] = scale->format;
     ctx->current[6] = GCM_TRANSFER_OPERATION_SRCCOPY;
-    ctx->current[7] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    ctx->current[7] = ((scale->clipY << 16) | scale->clipX);
     ctx->current[8] = (((uint32_t)scale->clipH << 16) | scale->clipW);
-    ctx->current[9] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    ctx->current[9] = ((scale->outY << 16) | scale->outX);
     ctx->current[10] = (((uint32_t)scale->outH << 16) | scale->outW);
     ctx->current[11] = (uint32_t)scale->ratioX;
     ctx->current[12] = (uint32_t)scale->ratioY;
@@ -929,9 +929,9 @@ static void ref_unsafe_transfer_scale_swizzle(gcmContextData *ctx,
     ctx->current[4] = GCM_TRANSFER_CONVERSION_TRUNCATE;
     ctx->current[5] = scale->format;
     ctx->current[6] = GCM_TRANSFER_OPERATION_SRCCOPY;
-    ctx->current[7] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    ctx->current[7] = ((scale->clipY << 16) | scale->clipX);
     ctx->current[8] = (((uint32_t)scale->clipH << 16) | scale->clipW);
-    ctx->current[9] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    ctx->current[9] = ((scale->outY << 16) | scale->outX);
     ctx->current[10] = (((uint32_t)scale->outH << 16) | scale->outW);
     ctx->current[11] = (uint32_t)scale->ratioX;
     ctx->current[12] = (uint32_t)scale->ratioY;
@@ -2588,6 +2588,62 @@ int main(void)
         r.begin = r.current = B;
         ref_safe_transfer_scale_surface(&r, &scale_mut, &surf);
         cmp_mutant("  transfer_scale_surface (clip swap mutant)", A, B, 20);
+
+        /* Negative coordinates: verify 16-bit clip/out packing avoids sign-extension smearing.
+         * Checked against independently hand-computed expected words (not a duplicate cast):
+         * Case 1: clipX=-1, clipY=2 -> (uint16_t)-1 = 0xffff, (uint16_t)2 = 0x0002 -> word 9 = 0x0002ffff
+         *         outX=-3,  outY=4  -> (uint16_t)-3 = 0xfffd, (uint16_t)4 = 0x0004 -> word 11 = 0x0004fffd
+         *         (The buggy unmasked code sign-extended into Y, writing 0xffffffff and 0xfffffffd)
+         * Case 2: clipX=-100, clipY=-200 -> (uint16_t)-100 = 0xff9c, (uint16_t)-200 = 0xff38 -> word 9 = 0xff38ff9c
+         *         outX=500,   outY=-50   -> (uint16_t)500  = 0x01f4, (uint16_t)-50   = 0xffce -> word 11 = 0xffce01f4
+         */
+        {
+            gcmTransferScale neg1 = scale;
+            neg1.clipX = -1; neg1.clipY = 2;
+            neg1.outX = -3; neg1.outY = 4;
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_surface((CellGcmContextData *)&n, &neg1, &surf);
+            if (A[9] != 0x0002ffffu || A[11] != 0x0004fffdu) {
+                printf("FAIL: transfer_scale_surface negative case 1 (safe): clip=0x%08x (exp 0x0002ffff), out=0x%08x (exp 0x0004fffd)\n",
+                       A[9], A[11]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_surface negative case 1 (safe: 0x0002ffff, 0x0004fffd)\n");
+            }
+
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_surface_unsafe((CellGcmContextData *)&n, &neg1, &surf);
+            if (A[9] != 0x0002ffffu || A[11] != 0x0004fffdu) {
+                printf("FAIL: transfer_scale_surface negative case 1 (unsafe): clip=0x%08x (exp 0x0002ffff), out=0x%08x (exp 0x0004fffd)\n",
+                       A[9], A[11]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_surface negative case 1 (unsafe: 0x0002ffff, 0x0004fffd)\n");
+            }
+
+            gcmTransferScale neg2 = scale;
+            neg2.clipX = -100; neg2.clipY = -200;
+            neg2.outX = 500; neg2.outY = -50;
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_surface((CellGcmContextData *)&n, &neg2, &surf);
+            if (A[9] != 0xff38ff9cu || A[11] != 0xffce01f4u) {
+                printf("FAIL: transfer_scale_surface negative case 2 (safe): clip=0x%08x (exp 0xff38ff9c), out=0x%08x (exp 0xffce01f4)\n",
+                       A[9], A[11]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_surface negative case 2 (safe: 0xff38ff9c, 0xffce01f4)\n");
+            }
+
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_surface_unsafe((CellGcmContextData *)&n, &neg2, &surf);
+            if (A[9] != 0xff38ff9cu || A[11] != 0xffce01f4u) {
+                printf("FAIL: transfer_scale_surface negative case 2 (unsafe): clip=0x%08x (exp 0xff38ff9c), out=0x%08x (exp 0xffce01f4)\n",
+                       A[9], A[11]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_surface negative case 2 (unsafe: 0xff38ff9c, 0xffce01f4)\n");
+            }
+        }
     }
 
     /* transfer_scale_swizzle (18 words) */
@@ -2630,6 +2686,62 @@ int main(void)
         r.begin = r.current = B;
         ref_safe_transfer_scale_swizzle(&r, &scale, &swiz_mut);
         cmp_mutant("  transfer_scale_swizzle (dim swap mutant)", A, B, 18);
+
+        /* Negative coordinates: verify 16-bit clip/out packing avoids sign-extension smearing.
+         * Checked against independently hand-computed expected words (not a duplicate cast):
+         * Case 1: clipX=-1, clipY=2 -> (uint16_t)-1 = 0xffff, (uint16_t)2 = 0x0002 -> word 7 = 0x0002ffff
+         *         outX=-3,  outY=4  -> (uint16_t)-3 = 0xfffd, (uint16_t)4 = 0x0004 -> word 9 = 0x0004fffd
+         *         (The buggy unmasked code sign-extended into Y, writing 0xffffffff and 0xfffffffd)
+         * Case 2: clipX=-100, clipY=-200 -> (uint16_t)-100 = 0xff9c, (uint16_t)-200 = 0xff38 -> word 7 = 0xff38ff9c
+         *         outX=500,   outY=-50   -> (uint16_t)500  = 0x01f4, (uint16_t)-50   = 0xffce -> word 9 = 0xffce01f4
+         */
+        {
+            gcmTransferScale neg1 = scale;
+            neg1.clipX = -1; neg1.clipY = 2;
+            neg1.outX = -3; neg1.outY = 4;
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_swizzle((CellGcmContextData *)&n, &neg1, &swiz);
+            if (A[7] != 0x0002ffffu || A[9] != 0x0004fffdu) {
+                printf("FAIL: transfer_scale_swizzle negative case 1 (safe): clip=0x%08x (exp 0x0002ffff), out=0x%08x (exp 0x0004fffd)\n",
+                       A[7], A[9]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_swizzle negative case 1 (safe: 0x0002ffff, 0x0004fffd)\n");
+            }
+
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_swizzle_unsafe((CellGcmContextData *)&n, &neg1, &swiz);
+            if (A[7] != 0x0002ffffu || A[9] != 0x0004fffdu) {
+                printf("FAIL: transfer_scale_swizzle negative case 1 (unsafe): clip=0x%08x (exp 0x0002ffff), out=0x%08x (exp 0x0004fffd)\n",
+                       A[7], A[9]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_swizzle negative case 1 (unsafe: 0x0002ffff, 0x0004fffd)\n");
+            }
+
+            gcmTransferScale neg2 = scale;
+            neg2.clipX = -100; neg2.clipY = -200;
+            neg2.outX = 500; neg2.outY = -50;
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_swizzle((CellGcmContextData *)&n, &neg2, &swiz);
+            if (A[7] != 0xff38ff9cu || A[9] != 0xffce01f4u) {
+                printf("FAIL: transfer_scale_swizzle negative case 2 (safe): clip=0x%08x (exp 0xff38ff9c), out=0x%08x (exp 0xffce01f4)\n",
+                       A[7], A[9]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_swizzle negative case 2 (safe: 0xff38ff9c, 0xffce01f4)\n");
+            }
+
+            n.begin = n.current = A;
+            ps3tc_gcm_state_transfer_scale_swizzle_unsafe((CellGcmContextData *)&n, &neg2, &swiz);
+            if (A[7] != 0xff38ff9cu || A[9] != 0xffce01f4u) {
+                printf("FAIL: transfer_scale_swizzle negative case 2 (unsafe): clip=0x%08x (exp 0xff38ff9c), out=0x%08x (exp 0xffce01f4)\n",
+                       A[7], A[9]);
+                failures++;
+            } else {
+                printf("  PASS: transfer_scale_swizzle negative case 2 (unsafe: 0xff38ff9c, 0xffce01f4)\n");
+            }
+        }
     }
 
     /* transfer_data (12-word single-packet and 21-word multi-packet) */
