@@ -592,21 +592,21 @@ static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
 static inline void cellGcmSetTransferScaleMode(CellGcmContextData *thisContext,
                                                uint8_t mode, uint8_t surface)
 {
-	rsxSetTransferScaleMode(thisContext, mode, surface);
+	ps3tc_gcm_state_transfer_scale_mode(thisContext, mode, surface);
 }
 
 static inline void cellGcmSetTransferScaleSurface(CellGcmContextData *thisContext,
                                                   const gcmTransferScale *scale,
                                                   const gcmTransferSurface *surface)
 {
-	rsxSetTransferScaleSurface(thisContext, scale, surface);
+	ps3tc_gcm_state_transfer_scale_surface(thisContext, scale, surface);
 }
 
 static inline void cellGcmSetTransferScaleSwizzle(CellGcmContextData *thisContext,
                                                   const gcmTransferScale *scale,
                                                   const gcmTransferSwizzle *swizzle)
 {
-	rsxSetTransferScaleSwizzle(thisContext, scale, swizzle);
+	ps3tc_gcm_state_transfer_scale_swizzle(thisContext, scale, swizzle);
 }
 
 /* ==========================================================

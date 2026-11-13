@@ -1913,76 +1913,29 @@ void RSX_FUNC(SetTransferImage)(gcmContextData *context,u8 mode,u32 dstOffset,u3
 
 void RSX_FUNC(SetTransferScaleMode)(gcmContextData *context,u8 mode,u8 surface)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(6);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(6,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN,1);
-	RSX_CONTEXT_CURRENTP[1] = (mode&0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-
-	RSX_CONTEXT_CURRENTP[2] = (surface==GCM_TRANSFER_SWIZZLE) ? RSX_SUBCHANNEL_METHOD(4,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN,1) : RSX_SUBCHANNEL_METHOD(3,NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT,1);
-	RSX_CONTEXT_CURRENTP[3] = (mode&0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
-
-	RSX_CONTEXT_CURRENTP[4] = RSX_SUBCHANNEL_METHOD(6,NV01_IMAGE_FROM_CPU_SURFACE,1);
-	RSX_CONTEXT_CURRENTP[5] = (surface==GCM_TRANSFER_SWIZZLE) ? GCM_CONTEXT_SWIZZLE2D : GCM_CONTEXT_SURFACE2D;
-
-	RSX_CONTEXT_CURRENT_END(6);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_scale_mode_unsafe(context, mode, surface);
+#else
+	ps3tc_gcm_state_transfer_scale_mode(context, mode, surface);
+#endif
 }
 
 void RSX_FUNC(SetTransferScaleSurface)(gcmContextData *context,const gcmTransferScale *scale,const gcmTransferSurface *surface)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(20);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(3,NV04_CONTEXT_SURFACES_2D_FORMAT,4);
-	RSX_CONTEXT_CURRENTP[1] = surface->format;
-	RSX_CONTEXT_CURRENTP[2] = ((surface->pitch << 16) | 0x40);	// or'ing with 64 - why?
-	RSX_CONTEXT_CURRENTP[3] = 0;
-	RSX_CONTEXT_CURRENTP[4] = surface->offset;
-
-	RSX_CONTEXT_CURRENTP[5] = RSX_SUBCHANNEL_METHOD(6,NV03_STRETCHED_IMAGE_FROM_CPU_OPERATION,9);
-	RSX_CONTEXT_CURRENTP[6] = scale->conversion;
-	RSX_CONTEXT_CURRENTP[7] = scale->format;
-	RSX_CONTEXT_CURRENTP[8] = scale->operation;
-	RSX_CONTEXT_CURRENTP[9] = ((scale->clipY << 16) | scale->clipX);
-	RSX_CONTEXT_CURRENTP[10] = ((scale->clipH << 16) | scale->clipW);
-	RSX_CONTEXT_CURRENTP[11] = ((scale->outY << 16) | scale->outX);
-	RSX_CONTEXT_CURRENTP[12] = ((scale->outH << 16) | scale->outW);
-	RSX_CONTEXT_CURRENTP[13] = scale->ratioX;
-	RSX_CONTEXT_CURRENTP[14] = scale->ratioY;
-
-	RSX_CONTEXT_CURRENTP[15] = RSX_SUBCHANNEL_METHOD(6,NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE,4);
-	RSX_CONTEXT_CURRENTP[16] = ((scale->inH << 16) | scale->inW);
-	RSX_CONTEXT_CURRENTP[17] = ((scale->pitch) | (scale->origin << 16) | (scale->interp << 24));
-	RSX_CONTEXT_CURRENTP[18] = scale->offset;
-	RSX_CONTEXT_CURRENTP[19] = ((scale->inY << 16) | scale->inX);
-
-	RSX_CONTEXT_CURRENT_END(20);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_scale_surface_unsafe(context, scale, surface);
+#else
+	ps3tc_gcm_state_transfer_scale_surface(context, scale, surface);
+#endif
 }
 
 void RSX_FUNC(SetTransferScaleSwizzle)(gcmContextData *context,const gcmTransferScale *scale,const gcmTransferSwizzle *swizzle)
 {
-	RSX_CONTEXT_CURRENT_BEGIN(18);
-
-	RSX_CONTEXT_CURRENTP[0] = RSX_SUBCHANNEL_METHOD(4,NV04_SWIZZLED_SURFACE_FORMAT,2);
-	RSX_CONTEXT_CURRENTP[1] = ((swizzle->height << 24) | (swizzle->width << 16) | swizzle->format);
-	RSX_CONTEXT_CURRENTP[2] = swizzle->offset;
-
-	RSX_CONTEXT_CURRENTP[3] = RSX_SUBCHANNEL_METHOD(6,NV04_SCALED_IMAGE_FROM_MEMORY_COLOR_CONVERSION,9);;
-	RSX_CONTEXT_CURRENTP[4] = GCM_TRANSFER_CONVERSION_TRUNCATE;
-	RSX_CONTEXT_CURRENTP[5] = scale->format;
-	RSX_CONTEXT_CURRENTP[6] = GCM_TRANSFER_OPERATION_SRCCOPY;
-	RSX_CONTEXT_CURRENTP[7] = ((scale->clipY << 16) | scale->clipX);
-	RSX_CONTEXT_CURRENTP[8] = ((scale->clipH << 16) | scale->clipW);
-	RSX_CONTEXT_CURRENTP[9] = ((scale->outY << 16) | scale->outX);
-	RSX_CONTEXT_CURRENTP[10] = ((scale->outH << 16) | scale->outW);
-	RSX_CONTEXT_CURRENTP[11] = scale->ratioX;
-	RSX_CONTEXT_CURRENTP[12] = scale->ratioY;
-
-	RSX_CONTEXT_CURRENTP[13] = RSX_SUBCHANNEL_METHOD(6,NV04_SCALED_IMAGE_FROM_MEMORY_SIZE,4);
-	RSX_CONTEXT_CURRENTP[14] = ((scale->inH << 16) | scale->inW);
-	RSX_CONTEXT_CURRENTP[15] = ((scale->interp << 24) | (scale->origin << 16) | (scale->pitch));
-	RSX_CONTEXT_CURRENTP[16] = scale->offset;
-	RSX_CONTEXT_CURRENTP[17] = ((scale->inY << 16) | scale->inX);
-
-	RSX_CONTEXT_CURRENT_END(18);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_transfer_scale_swizzle_unsafe(context, scale, swizzle);
+#else
+	ps3tc_gcm_state_transfer_scale_swizzle(context, scale, swizzle);
+#endif
 }
 
 static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(SetConvertSwizzleFormat)(gcmContextData *context,u32 dstOffset,u32 dstWidth,u32 dstHeight,u32 dstX,u32 dstY,u32 srcOffset,u32 srcPitch,u32 srcX,u32 srcY,u32 width,u32 height,u32 bytesPerPixel,u32 mode)

@@ -58,9 +58,6 @@ cellGcmSetSecondVHandler
 cellGcmSetTileInfo
 cellGcmSetTransferData
 cellGcmSetTransferImage
-cellGcmSetTransferScaleMode
-cellGcmSetTransferScaleSurface
-cellGcmSetTransferScaleSwizzle
 cellGcmSetUserHandler
 cellGcmSetVBlankHandler
 cellGcmSetWaitFlip

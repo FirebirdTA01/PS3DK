@@ -588,6 +588,67 @@ int main(void)
     ps3tc_gcm_state_transfer_data_format(&r, 1024, 2048, 512, 256, 2, 4);
     check("cell==native transfer_data_format", A, B, 6);
 
+    /* transfer_scale_mode (6 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetTransferScaleMode(&n, 0x03, GCM_TRANSFER_SWIZZLE);
+    ps3tc_gcm_state_transfer_scale_mode(&r, 0x03, GCM_TRANSFER_SWIZZLE);
+    check("cell==native transfer_scale_mode", A, B, 6);
+
+    /* transfer_scale_surface (20 words) */
+    {
+        const gcmTransferScale scale = {
+            .conversion = 1,
+            .format = 2,
+            .operation = 3,
+            .clipX = 10, .clipY = 20, .clipW = 100, .clipH = 200,
+            .outX = 30, .outY = 40, .outW = 300, .outH = 400,
+            .ratioX = 0x10000, .ratioY = 0x20000,
+            .inW = 50, .inH = 60, .pitch = 512,
+            .origin = 1, .interp = 2,
+            .offset = 0x1000000,
+            .inX = 5, .inY = 15
+        };
+        const gcmTransferSurface surf = {
+            .format = 4,
+            .pitch = 1024,
+            ._pad0 = {0, 0},
+            .offset = 0x2000000
+        };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+        cellGcmSetTransferScaleSurface(&n, &scale, &surf);
+        ps3tc_gcm_state_transfer_scale_surface(&r, &scale, &surf);
+        check("cell==native transfer_scale_surface", A, B, 20);
+    }
+
+    /* transfer_scale_swizzle (18 words) */
+    {
+        const gcmTransferScale scale = {
+            .conversion = 1,
+            .format = 2,
+            .operation = 3,
+            .clipX = 10, .clipY = 20, .clipW = 100, .clipH = 200,
+            .outX = 30, .outY = 40, .outW = 300, .outH = 400,
+            .ratioX = 0x10000, .ratioY = 0x20000,
+            .inW = 50, .inH = 60, .pitch = 512,
+            .origin = 1, .interp = 2,
+            .offset = 0x1000000,
+            .inX = 5, .inY = 15
+        };
+        const gcmTransferSwizzle swiz = {
+            .format = 5,
+            .width = 6,
+            .height = 7,
+            .offset = 0x3000000
+        };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+        cellGcmSetTransferScaleSwizzle(&n, &scale, &swiz);
+        ps3tc_gcm_state_transfer_scale_swizzle(&r, &scale, &swiz);
+        check("cell==native transfer_scale_swizzle", A, B, 18);
+    }
+
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;
 }

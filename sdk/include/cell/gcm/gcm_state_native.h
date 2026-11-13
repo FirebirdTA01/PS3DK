@@ -1708,6 +1708,156 @@ static inline void ps3tc_gcm_state_transfer_data_format_unsafe(CellGcmContextDat
     ctx->current = p + 6;
 }
 
+/* safe — transfer_scale_mode (6 words on subchannels 6, 3/4). */
+static inline void ps3tc_gcm_state_transfer_scale_mode(CellGcmContextData *ctx, uint8_t mode, uint8_t surface)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 6);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (surface == GCM_TRANSFER_SWIZZLE)
+        ? PS3TC_GCM_SUBCHANNEL_METHOD(4, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1)
+        : PS3TC_GCM_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    p[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    p[5] = (surface == GCM_TRANSFER_SWIZZLE) ? GCM_CONTEXT_SWIZZLE2D : GCM_CONTEXT_SURFACE2D;
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_scale_mode_unsafe(CellGcmContextData *ctx, uint8_t mode, uint8_t surface)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1);
+    p[1] = (mode & 0x01) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[2] = (surface == GCM_TRANSFER_SWIZZLE)
+        ? PS3TC_GCM_SUBCHANNEL_METHOD(4, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 1)
+        : PS3TC_GCM_SUBCHANNEL_METHOD(3, NV_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_OUT, 1);
+    p[3] = (mode & 0x02) ? GCM_DMA_MEMORY_HOST_BUFFER : GCM_DMA_MEMORY_FRAME_BUFFER;
+    p[4] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV01_IMAGE_FROM_CPU_SURFACE, 1);
+    p[5] = (surface == GCM_TRANSFER_SWIZZLE) ? GCM_CONTEXT_SWIZZLE2D : GCM_CONTEXT_SURFACE2D;
+    ctx->current = p + 6;
+}
+
+/* safe — transfer_scale_surface (20 words). */
+static inline void ps3tc_gcm_state_transfer_scale_surface(CellGcmContextData *ctx,
+                                                          const gcmTransferScale *scale,
+                                                          const gcmTransferSurface *surface)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 20);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 4);
+    p[1] = surface->format;
+    p[2] = ((uint32_t)surface->pitch << 16) | 0x40;
+    p[3] = 0;
+    p[4] = surface->offset;
+
+    p[5] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_STRETCHED_IMAGE_FROM_CPU_OPERATION, 9);
+    p[6] = scale->conversion;
+    p[7] = scale->format;
+    p[8] = scale->operation;
+    p[9] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    p[10] = (((uint32_t)scale->clipH << 16) | scale->clipW);
+    p[11] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    p[12] = (((uint32_t)scale->outH << 16) | scale->outW);
+    p[13] = (uint32_t)scale->ratioX;
+    p[14] = (uint32_t)scale->ratioY;
+
+    p[15] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+    p[16] = (((uint32_t)scale->inH << 16) | scale->inW);
+    p[17] = ((uint32_t)scale->pitch | ((uint32_t)scale->origin << 16) | ((uint32_t)scale->interp << 24));
+    p[18] = scale->offset;
+    p[19] = (((uint32_t)scale->inY << 16) | scale->inX);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_scale_surface_unsafe(CellGcmContextData *ctx,
+                                                                 const gcmTransferScale *scale,
+                                                                 const gcmTransferSurface *surface)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(3, NV04_CONTEXT_SURFACES_2D_FORMAT, 4);
+    p[1] = surface->format;
+    p[2] = ((uint32_t)surface->pitch << 16) | 0x40;
+    p[3] = 0;
+    p[4] = surface->offset;
+
+    p[5] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_STRETCHED_IMAGE_FROM_CPU_OPERATION, 9);
+    p[6] = scale->conversion;
+    p[7] = scale->format;
+    p[8] = scale->operation;
+    p[9] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    p[10] = (((uint32_t)scale->clipH << 16) | scale->clipW);
+    p[11] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    p[12] = (((uint32_t)scale->outH << 16) | scale->outW);
+    p[13] = (uint32_t)scale->ratioX;
+    p[14] = (uint32_t)scale->ratioY;
+
+    p[15] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV03_SCALED_IMAGE_FROM_MEMORY_IMAGE_IN_SIZE, 4);
+    p[16] = (((uint32_t)scale->inH << 16) | scale->inW);
+    p[17] = ((uint32_t)scale->pitch | ((uint32_t)scale->origin << 16) | ((uint32_t)scale->interp << 24));
+    p[18] = scale->offset;
+    p[19] = (((uint32_t)scale->inY << 16) | scale->inX);
+    ctx->current = p + 20;
+}
+
+/* safe — transfer_scale_swizzle (18 words). */
+static inline void ps3tc_gcm_state_transfer_scale_swizzle(CellGcmContextData *ctx,
+                                                          const gcmTransferScale *scale,
+                                                          const gcmTransferSwizzle *swizzle)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 18);
+    if (!p) return;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(4, NV04_SWIZZLED_SURFACE_FORMAT, 2);
+    p[1] = (((uint32_t)swizzle->height << 24) | ((uint32_t)swizzle->width << 16) | swizzle->format);
+    p[2] = swizzle->offset;
+
+    p[3] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV04_SCALED_IMAGE_FROM_MEMORY_COLOR_CONVERSION, 9);
+    p[4] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+    p[5] = scale->format;
+    p[6] = GCM_TRANSFER_OPERATION_SRCCOPY;
+    p[7] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    p[8] = (((uint32_t)scale->clipH << 16) | scale->clipW);
+    p[9] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    p[10] = (((uint32_t)scale->outH << 16) | scale->outW);
+    p[11] = (uint32_t)scale->ratioX;
+    p[12] = (uint32_t)scale->ratioY;
+
+    p[13] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV04_SCALED_IMAGE_FROM_MEMORY_SIZE, 4);
+    p[14] = (((uint32_t)scale->inH << 16) | scale->inW);
+    p[15] = (((uint32_t)scale->interp << 24) | ((uint32_t)scale->origin << 16) | (uint32_t)scale->pitch);
+    p[16] = scale->offset;
+    p[17] = (((uint32_t)scale->inY << 16) | scale->inX);
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_transfer_scale_swizzle_unsafe(CellGcmContextData *ctx,
+                                                                 const gcmTransferScale *scale,
+                                                                 const gcmTransferSwizzle *swizzle)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_SUBCHANNEL_METHOD(4, NV04_SWIZZLED_SURFACE_FORMAT, 2);
+    p[1] = (((uint32_t)swizzle->height << 24) | ((uint32_t)swizzle->width << 16) | swizzle->format);
+    p[2] = swizzle->offset;
+
+    p[3] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV04_SCALED_IMAGE_FROM_MEMORY_COLOR_CONVERSION, 9);
+    p[4] = GCM_TRANSFER_CONVERSION_TRUNCATE;
+    p[5] = scale->format;
+    p[6] = GCM_TRANSFER_OPERATION_SRCCOPY;
+    p[7] = (((uint32_t)(uint16_t)scale->clipY << 16) | (uint16_t)scale->clipX);
+    p[8] = (((uint32_t)scale->clipH << 16) | scale->clipW);
+    p[9] = (((uint32_t)(uint16_t)scale->outY << 16) | (uint16_t)scale->outX);
+    p[10] = (((uint32_t)scale->outH << 16) | scale->outW);
+    p[11] = (uint32_t)scale->ratioX;
+    p[12] = (uint32_t)scale->ratioY;
+
+    p[13] = PS3TC_GCM_SUBCHANNEL_METHOD(6, NV04_SCALED_IMAGE_FROM_MEMORY_SIZE, 4);
+    p[14] = (((uint32_t)scale->inH << 16) | scale->inW);
+    p[15] = (((uint32_t)scale->interp << 24) | ((uint32_t)scale->origin << 16) | (uint32_t)scale->pitch);
+    p[16] = scale->offset;
+    p[17] = (((uint32_t)scale->inY << 16) | scale->inX);
+    ctx->current = p + 18;
+}
+
 #ifdef __cplusplus
 }
 #endif
