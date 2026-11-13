@@ -43,6 +43,12 @@ typedef struct auto_segment {
     uintptr_t lo, hi;
     uint32_t ordinal, open, count, external;
     uint32_t head, tail;   /* this build's operations in the pool, in emission order */
+    /* This build's history, kept apart from count (which a CALL or a drop clears) and reset only when a new build
+     * of the part starts (Begin/BeginExternal): visits are its covered emitters (timed, refused, or moved here
+     * from another part), refused those that are not in the pool; both saturate. called: the build was CALLed
+     * (or its CALL refused) at least once; reports: a timestamp report was written into its buffer, so a later
+     * CALL replays report writes. */
+    uint32_t visits, refused, called, reports;
 } auto_segment;
 
 /* One allocation before observation; variable queues follow this control block
@@ -70,6 +76,7 @@ typedef struct auto_capture {
      * frame is excluded with that column too, so the untimed draws are exactly the frame's tail */
     uint32_t pool_tail_column;
     uint32_t segments_used, segment_ordinal, call_ordinal, segment_quarantine;
+    uint32_t segment_replay; /* sticky: a build with report writes was CALLed again (STATUS SEGMENT_REPLAY) */
     auto_segment *segment_active; /* between a segment emitter's begin and end */
     void *segment_active_writer;  /* that emitter's context: kept here, not on the segment, which a part close clears */
     uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;

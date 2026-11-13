@@ -119,12 +119,21 @@ static void status_refusals(void) {
     memset(counters,0,sizeof counters); counters[14]=505;
     assert(!auto_writer_status(&writer,AUTO_LOWER_BOUND,counters));
     counters[14]=0;
-    assert(!auto_writer_status(&writer,1024,counters)); /* 64..512 are defined (segments, frame marks, frame sources); 1024 is unknown */
+    assert(!auto_writer_status(&writer,2048,counters)); /* 64..1024 are defined (segments, frame marks, frame sources, replay); 2048 is unknown */
     assert(!auto_writer_status(&writer,AUTO_OWNER_UNACK,counters));
     assert(!auto_writer_status(&writer,AUTO_SATURATED,counters));
 }
+/* SEGMENT_REPLAY is defined and sticky: a later status without it still carries it. */
+static void replay_sticky(void) {
+    uint64_t counters[15]={0};
+    setup(1); assert(auto_config_freeze(&config)); assert(auto_writer_begin(&writer));
+    assert(auto_writer_status(&writer,AUTO_STATUS_SEGMENT_REPLAY,counters));
+    assert(auto_writer_status(&writer,AUTO_FINAL,counters));
+    assert(output.accepted==3 && output.type[2]==C_AUTO_STATUS);
+    assert((output.data[2][2]|output.data[2][3]<<8)==(AUTO_FINAL|AUTO_STATUS_SEGMENT_REPLAY));
+}
 int main(void) {
-    refused();accepted();failed_sink();status_refusals();
+    refused();accepted();failed_sink();status_refusals();replay_sticky();
     puts("AUTO writer config-first/refusal/final/whole-sink accounting PASS");
     return 0;
 }
