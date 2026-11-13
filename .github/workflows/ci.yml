@@ -621,6 +621,9 @@ jobs:
       - name: PSGL cube storage lifetime and allocation faults
         run: bash tests/host/psgl-cube-storage-test.sh
 
+      - name: Test GCM transfer data emitter words and negative controls
+        run: bash tests/host/gcm-transfer-data-test.sh
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
