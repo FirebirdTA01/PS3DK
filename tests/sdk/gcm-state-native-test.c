@@ -40,6 +40,12 @@
 #include <cell/gcm.h>                  /* CellGcmContextData + ps3tc_gcm_reserve */
 #include <cell/gcm/gcm_state_native.h> /* the natives under test */
 
+/* The reference copies below keep the original bodies' __cntlzw; on a non-PowerPC
+ * host it is supplied here (the public headers no longer use it). */
+#ifndef __cntlzw
+#define __cntlzw(x) ((x) ? (uint32_t)__builtin_clz(x) : 32u)
+#endif
+
 /* (count<<18)|method — identical to RSX_METHOD() and PS3TC_GCM_METHOD(). */
 #define REF_METHOD(m, count) ((((uint32_t)(count)) << 18) | (uint32_t)(m))
 

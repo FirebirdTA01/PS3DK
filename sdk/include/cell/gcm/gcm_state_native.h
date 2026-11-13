@@ -1340,12 +1340,6 @@ static inline void ps3tc_gcm_state_clear_report_unsafe(CellGcmContextData *ctx, 
     ctx->current   += 2;
 }
 
-#if !defined(__powerpc__) && !defined(__ppc__) && !defined(__PPC__)
-#  ifndef __cntlzw
-#    define __cntlzw(x) ((x) ? (uint32_t)__builtin_clz(x) : 32u)
-#  endif
-#endif
-
 /* ===================================================================
  * Surface, vertex data array, vertex program constants, update FP
  * parameter, nop command, and report location.
@@ -1353,13 +1347,21 @@ static inline void ps3tc_gcm_state_clear_report_unsafe(CellGcmContextData *ctx, 
  * variant plain-writes.
  * =================================================================== */
 
+/* floor(log2(x)) as 31 - __cntlzw(x) computes it (0xffffffff for x == 0), without
+ * needing <ppu_intrinsics.h>: this header is included by applications that never
+ * include it, and builds on non-PowerPC hosts too. */
+static inline uint32_t ps3tc_gcm_log2_floor(uint32_t x)
+{
+    return x ? 31u - (uint32_t)__builtin_clz(x) : 0xffffffffu;
+}
+
 /* safe — surface (multi-method framebuffer configuration, 32 words).
  * Emits DMA color/zeta binds, RT format/pitch/offsets, RT enable,
  * window offset, RT horizontal/vertical dimensions, and shader window. */
 static inline void ps3tc_gcm_state_surface(CellGcmContextData *ctx, const CellGcmSurface *surface)
 {
-    uint32_t log2Width = 31 - __cntlzw(surface->width);
-    uint32_t log2Height = 31 - __cntlzw(surface->height);
+    uint32_t log2Width = ps3tc_gcm_log2_floor(surface->width);
+    uint32_t log2Height = ps3tc_gcm_log2_floor(surface->height);
 
     uint32_t *p = ps3tc_gcm_reserve(ctx, 32);
     if (!p) return;
@@ -1406,8 +1408,8 @@ static inline void ps3tc_gcm_state_surface(CellGcmContextData *ctx, const CellGc
 /* unsafe */
 static inline void ps3tc_gcm_state_surface_unsafe(CellGcmContextData *ctx, const CellGcmSurface *surface)
 {
-    uint32_t log2Width = 31 - __cntlzw(surface->width);
-    uint32_t log2Height = 31 - __cntlzw(surface->height);
+    uint32_t log2Width = ps3tc_gcm_log2_floor(surface->width);
+    uint32_t log2Height = ps3tc_gcm_log2_floor(surface->height);
 
     ctx->current[0]  = PS3TC_GCM_METHOD(NV40TCL_DMA_COLOR0, 1);
     ctx->current[1]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[0];
