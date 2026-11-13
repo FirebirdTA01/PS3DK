@@ -40,6 +40,14 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *c,uint32_t kind,uint32_
 #define RSX_CONTEXT_CURRENT_END(n) context->current+=(n)
 #define RSX_METHOD(m,n) (((uint32_t)(n)<<18)|(m))
 #define RSX_FUNC(n) original_##n
+/* the rsx SetReport body now calls the shared native; stand-ins with the native's words (pinned by
+ * gcm-state-native-test) emit through this probe's reserve so the hook ordering stays observable */
+__attribute__((unused)) static void ps3tc_gcm_state_report(gcmContextData *context,u32 type,u32 index) {
+ reserve(context,2);context->current[0]=RSX_METHOD(NV40TCL_QUERY_GET,1);context->current[1]=(type<<24)|(index*0x10u);context->current+=2;
+}
+__attribute__((unused)) static void ps3tc_gcm_state_report_unsafe(gcmContextData *context,u32 type,u32 index) {
+ reserve(context,2);context->current[0]=RSX_METHOD(NV40TCL_QUERY_GET,1);context->current[1]=(type<<24)|(index*0x10u);context->current+=2;
+}
 '''
 middle='\n#undef RSX_FUNC\n#define RSX_FUNC(n) actual_##n\n'
 suffix=r'''
