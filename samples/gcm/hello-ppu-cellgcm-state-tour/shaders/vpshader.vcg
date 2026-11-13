@@ -1,9 +1,16 @@
 /* hello-ppu-cellgcm-state-tour — vertex program.
  *
- * Passes 2D NDC position and per-vertex colour through to the
- * fragment stage. The PPU writes vertex positions in NDC directly
- * (like the reference zcull / chain samples), so no matrix
- * is applied here.
+ * Passes NDC position, per-vertex colour, UV and a per-vertex user
+ * clip distance (CLP0) through. NDC positions are supplied directly
+ * (no matrix). UV feeds the fragment program's texture sample;
+ * colour is multiplied by the sampled texel there.
+ *
+ * CLP0 (user clip-plane 0 distance) is a real hardware output on this
+ * platform, not a generic TEX/COLOR varying (see tests/shader-compiler/
+ * vp-attr-clp-test.sh + the CLP0 fixture).  It is the input that
+ * cellGcmSetUserClipPlaneControl consumes to decide whether a vertex
+ * passes clip plane 0.  Here the distance is the vertex's NDC x, so a
+ * full-tile quad is negative on its left half and positive on its right.
  */
 void main(
     float2 in_position : POSITION,
@@ -11,9 +18,11 @@ void main(
     float4 in_color    : COLOR,
     out float4 out_position : POSITION,
     out float2 out_uv      : TEXCOORD0,
-    out float4 out_color   : COLOR)
+    out float4 out_color   : COLOR,
+    out float  out_clip0   : CLP0)
 {
     out_position = float4(in_position.x, in_position.y, 0.0f, 1.0f);
     out_uv       = in_uv;
     out_color    = in_color;
+    out_clip0    = in_position.x;   /* < 0 on the left half of the tile, > 0 on the right */
 }
