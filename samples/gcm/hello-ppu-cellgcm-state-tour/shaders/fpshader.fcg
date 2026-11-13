@@ -1,0 +1,15 @@
+/* hello-ppu-cellgcm-state-tour — fragment program.
+ *
+ * Colour passthrough: RSX pipelines the interpolated per-vertex
+ * colour attribute to fragment colour without an explicit shader
+ * write. The fixed-function stages (logic op, fog, dither, blend)
+ * apply on top of the emitted colour, so this program just needs to
+ * declare the inputs/outputs the pipeline expects.
+ */
+void main(
+    float2 in_uv     : TEXCOORD0,
+    float4 in_color  : COLOR,
+    out float4 out_color : COLOR)
+{
+    out_color = in_color;
+}

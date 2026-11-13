@@ -1,0 +1,19 @@
+/* hello-ppu-cellgcm-state-tour — vertex program.
+ *
+ * Passes 2D NDC position and per-vertex colour through to the
+ * fragment stage. The PPU writes vertex positions in NDC directly
+ * (like the reference zcull / chain samples), so no matrix
+ * is applied here.
+ */
+void main(
+    float2 in_position : POSITION,
+    float2 in_uv       : TEXCOORD0,
+    float4 in_color    : COLOR,
+    out float4 out_position : POSITION,
+    out float2 out_uv      : TEXCOORD0,
+    out float4 out_color   : COLOR)
+{
+    out_position = float4(in_position.x, in_position.y, 0.0f, 1.0f);
+    out_uv       = in_uv;
+    out_color    = in_color;
+}
