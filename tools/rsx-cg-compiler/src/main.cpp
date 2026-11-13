@@ -29,6 +29,7 @@
 #include "matrix_select.h"
 #include "builtin_shader_header_api.h"
 #include "nv40/nv40_emit.h"
+#include "nv40/nvfx_shader.h"
 #include "nv40/nv40_discard_guards.h"
 #include "nv40/nv40_if_convert.h"
 #include "compile_options.h"
@@ -88,6 +89,8 @@ void usage()
         "  --general-lowering     Accepted and ignored: the general path is\n"
         "                         the default (removed after one release)\n"
         "  --dump-ast             Print the parsed AST to stdout\n"
+        "  --stats                Print program statistics to stderr (instructions,\n"
+        "                         inline constant blocks, uniform patch slots, registers)\n"
         "  --dump-ir              Print the generated IR module to stdout\n"
         "  --dump-preprocess     Emit the preprocessed (macro-expanded) text\n"
         "                         to stdout and stop (like C -E); tests use\n"
@@ -167,9 +170,51 @@ struct DriverFlags
 {
     bool dumpAst = false;
     bool dumpIr = false;
+    bool stats = false;   // --stats: one line of program statistics on stderr
     bool dumpPreprocess = false;
     bool quiet = false;   // no Entry point / Stage / IR functions lines
 };
+
+// --stats: what the emitted program costs, on stderr so container and dump output stay byte-identical.
+// Fragment: 16-byte instruction slots, the inline constant blocks that follow an instruction reading a
+// constant (literals and uniforms; there are no FP constant registers), the uniform slots the runtime patches
+// each time a parameter is set, and the register count. Vertex: 16-byte instructions (constants live in
+// registers).
+static void printProgramStats(bool fragment, const std::vector<uint32_t>& words, const nv40::FpAttributes& fp)
+{
+    if (!fragment)
+    {
+        std::fprintf(stderr, "rsx-cg-compiler stats: vp instructions=%zu ucode_bytes=%zu\n",
+                     words.size() / 4, words.size() * 4);
+        return;
+    }
+    size_t insns = 0, constBlocks = 0, kills = 0;
+    for (size_t i = 0; i + 3 < words.size();)
+    {
+        ++insns;
+        {
+            const uint32_t op = (words[i] >> 16) | (words[i] << 16);   // on-disk halfword swap
+            const uint32_t src1 = (words[i + 2] >> 16) | (words[i + 2] << 16);
+            if (!(src1 & NV40_FP_OP_OPCODE_IS_BRANCH) &&   // the flow-control flag lives in SRC1, bit 31
+                ((op & NVFX_FP_OP_OPCODE_MASK) >> NVFX_FP_OP_OPCODE_SHIFT) == NVFX_FP_OP_OPCODE_KIL)
+                ++kills;   // counted from the ucode: the container field is 8 bits wide
+        }
+        bool readsConst = false;
+        for (int pos = 1; pos <= 3; ++pos)
+        {
+            const uint32_t w = (words[i + pos] >> 16) | (words[i + pos] << 16);   // on-disk halfword swap
+            if (((w & NVFX_FP_REG_TYPE_MASK) >> NVFX_FP_REG_TYPE_SHIFT) == NVFX_FP_REG_TYPE_CONST) readsConst = true;
+        }
+        i += 4;
+        if (readsConst && i + 3 < words.size()) { ++constBlocks; i += 4; }
+    }
+    size_t patched = 0;
+    for (const auto& u : fp.embeddedUniforms) patched += u.ucodeByteOffsets.size();
+    std::fprintf(stderr, "rsx-cg-compiler stats: fp instructions=%zu inline_const_blocks=%zu "
+                 "uniform_patch_slots=%zu uniforms_embedded=%zu registers=%u kil=%zu ucode_bytes=%zu\n",
+                 insns, constBlocks, patched, fp.embeddedUniforms.size(), unsigned(fp.registerCount),
+                 kills, words.size() * 4);
+}
 
 // The whole compile, from source text to a container (or the ucode dump).
 // main() drives it for one file; --psgl-ffp-library calls it once per
@@ -509,6 +554,8 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
         std::fprintf(stderr, "NV40 emit failed: bailing out.\n");
         return 1;
     }
+    if (flags.stats)
+        printProgramStats(stage == ShaderStage::Fragment, ucode.words, fpAttrs);
 
     if (!ctx.containerOutPath.empty() && !ctx.cgbContainerOutPath.empty())
     {
@@ -831,6 +878,10 @@ int main(int argc, char** argv)
         else if (arg == "--dump-ast")
         {
             flags.dumpAst = true;
+        }
+        else if (arg == "--stats")
+        {
+            flags.stats = true;
         }
         else if (arg == "--dump-ir")
         {

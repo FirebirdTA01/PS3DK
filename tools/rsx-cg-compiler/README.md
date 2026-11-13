@@ -26,6 +26,13 @@ containers. A malformed line, an unsupported mask or a failed compile exits
 1 and writes nothing; a bad command line exits 2. The option must come
 first.
 
+`--stats` prints one line on stderr describing the program the compile produced: for a fragment program its
+instruction slots, the inline constant blocks that follow instructions reading a constant (fragment programs have
+no constant registers, so every literal and every use of a uniform is inlined), the uniform slots the runtime
+patches each time a parameter is set, the embedded uniforms, registers and KIL count; for a vertex program its
+instructions. The ucode size is 16 bytes per instruction slot and per constant block. Output files are unchanged,
+so the line can be collected in a normal build to measure what each shader feature costs.
+
 `psgl-shader-builder`, which did the same by running this compiler twice
 per mask, is now a deprecated wrapper around this mode and will be removed
 after one release.
