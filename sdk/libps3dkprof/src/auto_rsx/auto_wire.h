@@ -10,7 +10,7 @@
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=128, AUTO_FRAME_BYTES=384,
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=144, AUTO_FRAME_BYTES=384,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
@@ -19,22 +19,34 @@ enum { AUTO_FINAL=1, AUTO_LOWER_BOUND=2, AUTO_SATURATED=4, AUTO_OWNER_UNACK=8,
        AUTO_STATUS_CONFLICT=16, AUTO_STATUS_RESET=32, AUTO_STATUS_SEGMENT_QUARANTINE=64,
        AUTO_STATUS_FRAME_MARK_MISSED=128 /* at least one FRAME mark was refused */,
        AUTO_STATUS_FRAMES_FLIP=256 /* some frames were delimited by flips */,
-       AUTO_STATUS_FRAMES_EXPLICIT=512 /* some frames were delimited by ps3dk_prof_frame */ };
+       AUTO_STATUS_FRAMES_EXPLICIT=512 /* some frames were delimited by ps3dk_prof_frame */,
+       /* a CALL segment whose build carried timed draws was called again without a rebuild: its embedded
+        * report writes ran again and may have overwritten other records' timestamps (sticky; every per-frame
+        * verdict is UNKNOWN) */
+       AUTO_STATUS_SEGMENT_REPLAY=1024 };
 /* COVERAGE row flag: this frame was opened by a flip on the owner thread. */
 enum { AUTO_FRAME_ROW_FLIP=32,
        AUTO_FRAME_ROW_PRESENT=64 /* this writer observed presentation in this row (block at 352) */ };
 /* CONFIG masks of this writer: ARRAY|INDEX|CLEAR|FRAME covered, plus PRESENT=16
  * (flip-wait scopes and polling cadence, 384-byte COVERAGE rows; not an OPS
- * kind); unsafe, immediate and direct/uninstrumented forms unsupported (CALL
- * segments built through the segment API are covered). A reader that knows
- * only 7/15 or 15/11 refuses 31/11 at CONFIG. */
-enum { AUTO_KIND_MASK=31, AUTO_FORM_MASK=11 };
+ * kind) and SEGMENT_BUILD=32 (segment records name their building frame in a
+ * 144-byte OPS record; COVERAGE u32@380 counts segment draws a CALL executed
+ * without a record; not an OPS kind); unsafe, immediate and
+ * direct/uninstrumented forms unsupported (CALL segments built through the
+ * segment API are covered). A reader that knows only 7/15, 15/11 or 31/11
+ * refuses 63/11 at CONFIG. */
+enum { AUTO_KIND_MASK=63, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
  * SEGMENT marks an operation built inside a CALL segment (u32@92 segment
  * ordinal, u32@116 call ordinal, both nonzero). */
 enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=64 };
+/* OPS build tail (SEGMENT records only, zero otherwise): u64@128 build frame,
+ * u32@136 build owner, u16@140 build flags (BUILD_KNOWN=1: the draw was
+ * admitted while a coverage frame was open; without it owner and frame are
+ * zero), u16@142 zero. */
+enum { AUTO_OP_BUILD_KNOWN=1 };
 
 /* Native writer inputs. No native struct is copied to the wire. Semantic
  * validation and immutable snapshot ownership belong to the runtime/reader;
@@ -57,6 +69,9 @@ typedef struct auto_wire_op {
     uint32_t report_begin, report_end, serial_begin, serial_end, generation;
     uint64_t published;
     uint32_t segment, call; /* SEGMENT only; zero otherwise */
+    uint64_t build_frame;   /* SEGMENT only: the coverage frame that admitted this draw */
+    uint32_t build_owner;
+    uint16_t build_flags;   /* AUTO_OP_BUILD_KNOWN */
 } auto_wire_op;
 
 typedef struct auto_wire_frame {
@@ -73,6 +88,10 @@ typedef struct auto_wire_frame {
     uint32_t flip_wait_spanning;/* u32@364: flip-wait scopes that crossed a boundary of this frame */
     uint64_t cadence;           /* u64@368: summed bounded gaps of the complete runs */
     uint32_t flip_wait_timeouts;/* u32@376: flip-wait scopes that returned the timeout error */
+    /* u32@380: covered segment draws that CALLs in this frame executed without a committed record carrying
+     * the CALL's token (re-CALL, untracked segment, draws refused or quarantined while building, a refused CALL,
+     * a pair lost at commit). A lower bound: an untracked segment counts 1. Saturates (row SATURATED). */
+    uint32_t segment_unrepresented;
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
 } auto_wire_frame;
 

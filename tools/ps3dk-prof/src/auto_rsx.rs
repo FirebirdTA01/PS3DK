@@ -6,7 +6,7 @@
 //! map this capture qualified itself (its own CLOCK anchors, an exact affine feasible set and both H-SPLIT hold-out
 //! parities); there is no nominal rate.  A frame verdict needs complete covered population, raw-valid operations, a
 //! qualified map and wait evidence; anything missing is UNKNOWN with the missing input named.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -25,6 +25,8 @@ pub const CHUNK_AUTO_CLOCK: u32 = 38;
 
 pub const CONFIG_BYTES: usize = 160;
 pub const OP_BYTES: u32 = 128;
+/// OPS record width of the build-frame writer (CONFIG masks 63/11): the 128-byte record plus the build tail.
+pub const OP_BYTES_BUILD: u32 = 144;
 pub const FRAME_BYTES: usize = 352;
 /// COVERAGE rows of the presentation writer (CONFIG masks 31/11): the 352-byte row plus a presentation block.
 pub const FRAME_BYTES_PRESENT: usize = 384;
@@ -50,6 +52,13 @@ pub const MASKS_SEGMENTS: (u32, u32) = (15, 11);
 /// The presentation writer: kind mask bit 4 (16) PRESENT names flip-wait scopes and polling cadence in 384-byte
 /// COVERAGE rows.  It is not an OPS kind.  Readers that know only 7/15 or 15/11 refuse it at CONFIG.
 pub const MASKS_PRESENT: (u32, u32) = (31, 11);
+/// The build-frame writer: kind mask bit 5 (32) SEGMENT_BUILD.  SEGMENT records carry the frame that built them in a
+/// 144-byte OPS record (u64@128 build frame, u32@136 build owner, u16@140 build flags, u16@142 zero) and COVERAGE
+/// u32@380 counts segment draws a CALL executed without a record.  Not an OPS kind.  Readers that know only the older
+/// pairs refuse it at CONFIG.
+pub const MASKS_BUILD: (u32, u32) = (63, 11);
+/// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
+pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
 pub const OP_RAW_VALID: u16 = 2;
 pub const OP_INCOMPLETE: u16 = 4;
@@ -84,6 +93,9 @@ pub const ST_FRAME_MARK_MISSED: u16 = 128;
 pub const ST_FRAMES_FLIP: u16 = 256;
 /// Some frames were delimited by explicit ps3dk_prof_frame calls (which then take precedence over flips).
 pub const ST_FRAMES_EXPLICIT: u16 = 512;
+/// 63/11: a CALL segment whose build carried timed draws was called again without a rebuild.  Its embedded report
+/// writes ran again and may have overwritten other records' timestamps, so no frame of the capture has a verdict.
+pub const ST_SEGMENT_REPLAY: u16 = 1024;
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -188,6 +200,14 @@ impl Attached {
     pub fn presentation_scopes(&self) -> bool {
         self.kind_mask & 16 != 0
     }
+    /// SEGMENT records name their building frame and rows count unrepresented CALL draws (CONFIG 63/11).
+    pub fn build_frames(&self) -> bool {
+        self.kind_mask & 32 != 0
+    }
+    /// The OPS record width this CONFIG negotiated.
+    pub fn op_width(&self) -> u32 {
+        if self.build_frames() { OP_BYTES_BUILD } else { OP_BYTES }
+    }
 }
 impl Config {
     pub fn instance(&self) -> u32 {
@@ -231,6 +251,9 @@ pub struct Op {
     /// SEGMENT only: segment ordinal and call ordinal (0 for a build that was never called).
     pub segment: u32,
     pub call: u32,
+    /// SEGMENT records of a 63/11 capture: the (owner, frame) whose coverage row counted this draw when it was built,
+    /// None when no frame was open then (and always None for other records and older captures).
+    pub build: Option<(u32, u64)>,
 }
 impl Op {
     pub fn raw_valid(&self) -> bool {
@@ -265,6 +288,9 @@ pub struct Coverage {
     pub cadence: Cadence,
     /// FR_PRESENT rows of the 15/11 writer: flip-status poll intervals and their ticks (observation only).
     pub legacy_polls: Option<(u32, u64)>,
+    /// 63/11 rows (u32@380): covered segment draws that CALLs in this frame executed without a committed record
+    /// carrying the CALL's token.  A lower bound (an untracked segment counts 1); zero in older captures.
+    pub segment_unrepresented: u32,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -492,7 +518,9 @@ impl Reader {
                 if domain == 0 || epoch == 0 || owner == 0 || generation == 0 {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
-                if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT {
+                if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
+                    && (kinds, forms) != MASKS_BUILD
+                {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
                 if pairs == 0 || pairs > PAIRS_MAX || u64::from(count) != 16 + 2 * u64::from(pairs) {
@@ -507,8 +535,10 @@ impl Reader {
                 if !(1..=1024).contains(&metadata) || !(1..=256).contains(&frame_capacity) {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
-                if width != OP_BYTES {
-                    return bad(r, format!("AUTO_CONFIG record width {width}"));
+                // the record width is negotiated with the masks: 144 with 63/11 and only there
+                let negotiated = if (kinds, forms) == MASKS_BUILD { OP_BYTES_BUILD } else { OP_BYTES };
+                if width != negotiated {
+                    return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 if ceiling == 0 || ceiling > MAX_ALLOCATION || allocated == 0 || allocated > ceiling {
                     return bad(r, format!("AUTO_CONFIG allocated {allocated} / ceiling {ceiling}"));
@@ -561,11 +591,12 @@ impl Reader {
         let instance = c.u32()?;
         let count = c.u32()?;
         let width = c.u32()?;
-        if schema != 1 || reserved != 0 || instance != cfg.instance || width != OP_BYTES || count == 0 {
+        let stride = cfg.op_width();
+        if schema != 1 || reserved != 0 || instance != cfg.instance || width != stride || count == 0 {
             return bad(r, format!("AUTO_OPS prefix schema {schema} reserved {reserved} instance {instance} \
                 count {count} width {width}"));
         }
-        if payload.len() as u64 != 16 + u64::from(count) * u64::from(OP_BYTES) {
+        if payload.len() as u64 != 16 + u64::from(count) * u64::from(stride) {
             return bad(r, format!("AUTO_OPS is {} bytes for {count} records", payload.len()));
         }
         let op_first = cfg.report_first + CLOCK_SLOTS;
@@ -593,6 +624,11 @@ impl Reader {
             let generation = c.u32()?;
             let r1 = c.u32()?;
             let published = c.u64()?;
+            let (build_frame, build_owner, build_flags, build_reserved) = if stride == OP_BYTES_BUILD {
+                (c.u64()?, c.u32()?, c.u16()?, c.u16()?)
+            } else {
+                (0, 0, 0, 0)
+            };
             let at = format!("AUTO operation {id}");
             if id <= self.last_op {
                 return bad(r, format!("{at}: id not above {}", self.last_op));
@@ -609,6 +645,25 @@ impl Reader {
                 }
             } else if r0 != 0 || r1 != 0 {
                 return bad(r, format!("{at}: reserved field nonzero"));
+            }
+            // the build tail (63/11): flags mask 1, reserved zero; known names the CONFIG owner (frame 0 is valid);
+            // unknown carries neither owner nor frame; a non-SEGMENT record carries no tail at all
+            if build_flags & !OP_BUILD_KNOWN != 0 || build_reserved != 0 {
+                return bad(r, format!("{at}: build tail flags {build_flags:#x} reserved {build_reserved}"));
+            }
+            let build_known = build_flags & OP_BUILD_KNOWN != 0;
+            if !segment_op && (build_known || build_owner != 0 || build_frame != 0) {
+                return bad(r, format!("{at}: build tail on a record not built in a segment"));
+            }
+            if build_known && build_owner != cfg.owner {
+                return bad(r, format!("{at}: build owner {build_owner} is not the CONFIG owner"));
+            }
+            if !build_known && (build_owner != 0 || build_frame != 0) {
+                return bad(r, format!("{at}: build owner/frame without BUILD_KNOWN"));
+            }
+            // a draw is built no later than the CALL that records it; a dropped build has no CALL token to compare
+            if build_known && flags & OP_TOKEN != 0 && frame_owner == build_owner && build_frame > frame {
+                return bad(r, format!("{at}: build frame {build_frame} after its CALL frame {frame}"));
             }
             let frame_kind = kind == KIND_FRAME && cfg.frames_marked();
             if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind {
@@ -703,6 +758,7 @@ impl Reader {
                 published,
                 segment: if segment_op { r0 } else { 0 },
                 call: if segment_op { r1 } else { 0 },
+                build: build_known.then_some((build_owner, build_frame)),
             });
         }
         c.done()
@@ -747,7 +803,10 @@ impl Reader {
         c.done()?;
         let at = format!("AUTO coverage frame {owner}/{frame}");
         let present = flags & FR_PRESENT != 0;
-        if r2 != 0 || (!present && (cadence != Cadence::default() || scope_spanning != 0 || timeouts != 0)) {
+        // u32@380 is the 63/11 unrepresented-CALL count; reserved zero under every older pair
+        if (r2 != 0 && !cfg.build_frames())
+            || (!present && (cadence != Cadence::default() || scope_spanning != 0 || timeouts != 0))
+        {
             return bad(r, format!("{at}: presentation block without PRESENT or a reserved field"));
         }
         if cadence.runs == 0 && cadence.ticks != 0 {
@@ -806,7 +865,8 @@ impl Reader {
         self.result.frames.push(Coverage { flags, owner, frame, tb_begin, tb_end, unsupported, lost, rows,
             flip_waits: if scopes { r0 } else { 0 }, flip_wait: if scopes { r1 } else { 0 },
             flip_wait_spanning: scope_spanning, flip_wait_timeouts: timeouts, cadence,
-            legacy_polls: (present && !scopes).then_some((r0, r1)) });
+            legacy_polls: (present && !scopes).then_some((r0, r1)),
+            segment_unrepresented: if cfg.build_frames() { r2 } else { 0 } });
         Ok(())
     }
 
@@ -825,7 +885,11 @@ impl Reader {
         }
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
-        let known = if cfg.attached().is_some_and(Attached::segments_covered) { 1023 } else { 63 };
+        let known = match cfg.attached() {
+            Some(a) if a.build_frames() => 2047,
+            Some(a) if a.segments_covered() => 1023,
+            _ => 63,
+        };
         if schema != 1 || instance != cfg.instance() || flags & !known != 0 {
             return bad(r, format!("AUTO_STATUS schema {schema} instance {instance} flags {flags:#x}"));
         }
@@ -846,7 +910,7 @@ impl Reader {
                 }
             }
             for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED,
-                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT] {
+                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -1097,6 +1161,9 @@ pub const POLLING_ONLY: &str = "presentation polling observed; waiting not estab
 /// A frame with CALL-segment records: no per-frame verdict (the records do not carry the building frame).
 pub const SEGMENT_POPULATION: &str = "from CALL segments: a segment is counted where it was built and recorded where \
     it was called, so this frame's records and coverage are not one population";
+/// 63/11 STATUS SEGMENT_REPLAY: no frame of the capture has a verdict.
+pub const SEGMENT_REPLAY: &str = "a CALL segment was replayed without a rebuild: its report writes may have overwritten \
+    other records' timestamps";
 /// A flip-wait scope crossed a boundary of this frame: its time belongs to no single frame and is charged to neither.
 pub const WAIT_SPANS: &str = "presentation attribution unavailable: a flip-wait scope spans a frame boundary";
 /// A polling-cadence run crossed a boundary of this frame (charged to neither frame).
@@ -1161,6 +1228,15 @@ pub struct FrameView {
     pub rsx_frame_ppu: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
+    /// 63/11 only (else zero): `records` is then the frame's BUILD population (records not built in a segment
+    /// recorded here, plus segment records built here wherever recorded), reconciled with `observed`; `recorded` is
+    /// the EXECUTION population (covered records recorded here, which timing uses); `segment_imports` the segment
+    /// records recorded here but built in another frame; `segment_unrepresented` the row's u32@380;
+    /// `segment_abandoned` segment draws built here whose records were dropped without a CALL.
+    pub recorded: u64,
+    pub segment_imports: u64,
+    pub segment_unrepresented: u32,
+    pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
     pub verdict: Verdict,
@@ -1183,6 +1259,8 @@ pub struct Presentation {
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     pub capability: bool,
+    /// The capture's CONFIG is 63/11 (segment records carry their build frame).
+    pub build_frames: bool,
     pub state: String,
     pub config: Option<Config>,
     pub status: Option<Status>,
@@ -1217,6 +1295,48 @@ fn share(part: u64, whole: u64, (num, den): (u64, u64)) -> bool {
     u128::from(part) * u128::from(den) >= u128::from(whole) * u128::from(num)
 }
 
+/// The BUILD population of every frame of a 63/11 capture by kind: records not built in a segment under their own
+/// token, plus segment records under their build frame wherever (and whether) they were recorded.  Also the dropped
+/// segment draws (call ordinal 0) per build frame.
+fn build_populations(inv: &Inventory) -> (BTreeMap<(u32, u64), [u64; 3]>, BTreeMap<(u32, u64), u64>) {
+    let (mut built, mut abandoned) = (BTreeMap::new(), BTreeMap::new());
+    for o in inv.ops.iter().filter(|o| o.covered()) {
+        let key = if o.flags & OP_SEGMENT != 0 { o.build } else { o.token() };
+        let Some(key) = key else { continue };
+        let row: &mut [u64; 3] = built.entry(key).or_default();
+        row[usize::from(o.kind - KIND_ARRAY)] += 1;
+        if o.flags & OP_SEGMENT != 0 && o.call == 0 {
+            *abandoned.entry(key).or_default() += 1;
+        }
+    }
+    (built, abandoned)
+}
+
+/// A frame row is a clean BUILD source for segment draws recorded elsewhere: present, associated, closed exactly,
+/// nothing excluded or outside the observed population, and its build population reconciles kind by kind.  This does
+/// not depend on that frame's own verdict (its own imports, timing or presentation).
+fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>) -> Result<(), String> {
+    if f.flags & FR_TOKEN == 0 {
+        return Err("unassociated coverage row".into());
+    }
+    if f.flags & (FR_OPEN | FR_SATURATED | FR_LOSS) != 0 {
+        return Err("coverage row OPEN, SATURATED or after coverage loss".into());
+    }
+    match (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?)) {
+        None => return Err(TOTALS_OVERFLOW.into()),
+        Some(0) => {}
+        Some(n) => return Err(format!("{n} covered operation(s) excluded")),
+    }
+    if f.unsupported != 0 {
+        return Err(format!("{} visit(s) outside the observed population (segment or private buffer)", f.unsupported));
+    }
+    let records = built.get(&(f.owner, f.frame)).copied().unwrap_or_default();
+    if let Some(k) = (0..3).find(|&k| records[k] != f.rows[k][1]) {
+        return Err(format!("{} {} operation record(s) for {} observed", records[k], KINDS[k], f.rows[k][1]));
+    }
+    Ok(())
+}
+
 pub fn analyze(cap: &Capture) -> Report {
     let Some(inv) = cap.auto.as_ref() else {
         return Report { state: "UNSUPPORTED".into(), ..Report::default() };
@@ -1232,7 +1352,11 @@ pub fn analyze(cap: &Capture) -> Report {
         refusal: inv.refusal,
         ..Report::default()
     };
-    let Some(Config::Attached(_)) = &inv.config else { return rep };
+    let Some(Config::Attached(attached)) = &inv.config else { return rep };
+    let build = attached.build_frames();
+    rep.build_frames = build;
+    let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
+    let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
     let map = qualify(inv);
     let fifo = crate::fifo::analyze(cap);
     let status_ok = inv.final_seen && inv.refusal.is_none();
@@ -1253,7 +1377,11 @@ pub fn analyze(cap: &Capture) -> Report {
             observed: [f.rows[0][1], f.rows[1][1], f.rows[2][1]],
             excluded: [f.excluded(0), f.excluded(1), f.excluded(2)],
             unsupported: f.unsupported,
-            records: [KIND_ARRAY, KIND_INDEX, KIND_CLEAR].map(|k| ops.iter().filter(|o| o.kind == k).count() as u64),
+            records: if build {
+                built.get(&(f.owner, f.frame)).copied().unwrap_or_default()
+            } else {
+                [KIND_ARRAY, KIND_INDEX, KIND_CLEAR].map(|k| ops.iter().filter(|o| o.kind == k).count() as u64)
+            },
             ops_valid: ops.iter().filter(|o| o.raw_valid()).count() as u64,
             ops_incomplete: ops.iter().filter(|o| !o.raw_valid()).count() as u64,
             rsx_span_raw: None,
@@ -1262,6 +1390,14 @@ pub fn analyze(cap: &Capture) -> Report {
             rsx_frame_raw,
             rsx_frame_ppu: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
+            recorded: if build { ops.len() as u64 } else { 0 },
+            segment_imports: if build {
+                ops.iter().filter(|o| o.flags & OP_SEGMENT != 0 && o.build != Some((f.owner, f.frame))).count() as u64
+            } else {
+                0
+            },
+            segment_unrepresented: f.segment_unrepresented,
+            segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
                 flip_wait_timeouts: f.flip_wait_timeouts,
@@ -1302,6 +1438,9 @@ pub fn analyze(cap: &Capture) -> Report {
             if status_flags & (ST_RESOURCE_CONFLICT | ST_CONTEXT_RESET) != 0 {
                 return Err("timing invalidated by a resource conflict or context reset".into());
             }
+            if status_flags & ST_SEGMENT_REPLAY != 0 {
+                return Err(SEGMENT_REPLAY.into());
+            }
             if f.flags & FR_TOKEN == 0 {
                 return Err("unassociated coverage row".into());
             }
@@ -1311,7 +1450,7 @@ pub fn analyze(cap: &Capture) -> Report {
             if f.flags & (FR_OPEN | FR_SATURATED | FR_LOSS) != 0 {
                 return Err("coverage row OPEN, SATURATED or after coverage loss".into());
             }
-            let (Some(observed), Some(excluded)) = (observed, excluded) else {
+            let (Some(_), Some(excluded)) = (observed, excluded) else {
                 return Err(TOTALS_OVERFLOW.into());
             };
             if excluded != 0 {
@@ -1322,17 +1461,46 @@ pub fn analyze(cap: &Capture) -> Report {
                     f.unsupported));
             }
             // A segment's operations are counted in the row of the frame that BUILT it, but recorded under the frame
-            // that CALLED it, and a record does not say where it was built. A frame with segment records therefore
+            // that CALLED it.  Before 63/11 a record does not say where it was built, so a frame with segment records
             // cannot be reconciled against its row: equal counts may describe different segments (one built here,
             // another called here), and an exclusion in the building frame would be lost.
-            if v.segment_ops != 0 {
+            if !build && v.segment_ops != 0 {
                 return Err(format!("{} operation record(s) {SEGMENT_POPULATION}", v.segment_ops));
             }
-            // Reconcile retained records with the row kind by kind: equal totals over different kinds are not the
-            // population the row describes.
+            // 63/11: every segment draw a CALL executed here has a record carrying this frame's token.
+            if v.segment_unrepresented != 0 {
+                return Err(format!("at least {} segment draw(s) executed in this frame have no record (a CALL of an \
+                    untracked, replayed, refused or partly untimed segment)", v.segment_unrepresented));
+            }
+            // Reconcile the row's population with its records kind by kind: equal totals over different kinds are
+            // not the population the row describes.  With 63/11 that population is what this frame BUILT.
             if let Some(k) = (0..3).find(|&k| v.records[k] != v.observed[k]) {
                 return Err(format!("{} {} operation record(s) for {} observed", v.records[k], KINDS[k],
                     v.observed[k]));
+            }
+            if v.segment_abandoned != 0 {
+                return Err(format!("{} segment draw(s) built in this frame were dropped (never called, or their \
+                    CALL refused)", v.segment_abandoned));
+            }
+            // Segment draws executed here but built elsewhere: each build frame must be a clean, reconciled build
+            // source (its row, not its own verdict).
+            if build {
+                let mut sources = BTreeSet::new();
+                for o in ops.iter().filter(|o| o.flags & OP_SEGMENT != 0) {
+                    match o.build {
+                        None => return Err("segment record(s) built while no coverage frame was open".into()),
+                        Some(g) if g != (f.owner, f.frame) => {
+                            sources.insert(g);
+                        }
+                        Some(_) => {}
+                    }
+                }
+                for (o, g) in sources {
+                    let Some(row) = rows.get(&(o, g)) else {
+                        return Err(format!("segment draw(s) built in frame {o}/{g}, which has no coverage row"));
+                    };
+                    build_clean(row, &built).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
+                }
             }
             if v.ops_incomplete != 0 {
                 return Err(format!("{} operation(s) without raw-valid timestamps", v.ops_incomplete));
@@ -1344,10 +1512,12 @@ pub fn analyze(cap: &Capture) -> Report {
             if d == 0 {
                 return Err("zero-length PPU frame interval".into());
             }
-            let span = match (observed, v.rsx_span_ppu) {
-                (0, _) => (0, 0),
-                (_, Some(s)) => s,
-                (_, None) => return Err("RSX span outside the map's interpolation support".into()),
+            // The EXECUTION population (records recorded here) decides emptiness and span; with 63/11 the row's
+            // observed counts are what this frame built, which a CALL-only or build-only frame does not match.
+            let span = match (ops.is_empty(), v.rsx_span_ppu) {
+                (true, _) => (0, 0),
+                (false, Some(s)) => s,
+                (false, None) => return Err("RSX span outside the map's interpolation support".into()),
             };
             let rsx_long = share(span.0, d, RSX_SPAN_SHARE);
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
@@ -1451,6 +1621,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
         writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
     }
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0) {
+        writeln!(out, "SEGMENT REPLAY: {SEGMENT_REPLAY}; every frame is UNKNOWN")?;
+    }
     writeln!(out, "frames delimited by: {}", frame_source(r))?;
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
     writeln!(out, "note: {INTERVAL_NOTE}")?;
@@ -1476,6 +1649,10 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
             f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
+        if r.build_frames {
+            writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
+                builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
+        }
     }
     Ok(())
 }
@@ -1536,7 +1713,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         Some(MapState::Unqualified(why)) => json!({"state":"UNQUALIFIED","reason":why}),
         None => serde_json::Value::Null,
     };
-    let frames: Vec<serde_json::Value> = r.frames.iter().map(|f| json!({
+    let frames: Vec<serde_json::Value> = r.frames.iter().map(|f| (f, json!({
         "owner":f.owner,"frame":f.frame,"flags":f.flags,"tb_begin":f.tb_begin,"tb_end":f.tb_end,
         "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"records":f.records,"unsupported":f.unsupported,
         "ops_valid":f.ops_valid,"ops_incomplete":f.ops_incomplete,"rsx_span_raw":f.rsx_span_raw,
@@ -1544,11 +1721,22 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,
         "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
         "presentation":f.presentation.as_ref().map(presentation_json),
-        "verdict":f.verdict.key(),"reason":f.reason})).collect();
+        "verdict":f.verdict.key(),"reason":f.reason}))).map(|(f, mut v)| {
+        if r.build_frames {
+            // 63/11: the build count (observed, reconciled with `records`) and the execution count are distinct
+            let built: u64 = f.observed.iter().fold(0u64, |a, &b| a.saturating_add(b));
+            v["built"] = json!(built);
+            v["recorded"] = json!(f.recorded);
+            v["segment_imports"] = json!(f.segment_imports);
+            v["segment_unrepresented"] = json!(f.segment_unrepresented);
+            v["segment_abandoned"] = json!(f.segment_abandoned);
+        }
+        v
+    }).collect();
     let clocks: Vec<serde_json::Value> = r.clocks.iter().map(|a| json!({"id":a.id,"slot":a.slot,
         "outcome":a.outcome(),"frame":a.frame,"tb_before":a.tb_before,"tb_after":a.tb_after,"raw":a.raw,
         "polls":a.polls})).collect();
-    let v = json!({
+    let mut v = json!({
         "schema": 1,
         "capability": r.capability,
         "state": r.state,
@@ -1566,6 +1754,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "thresholds": {"wait_share": [WAIT_SHARE.0, WAIT_SHARE.1], "rsx_span_share": [RSX_SPAN_SHARE.0, RSX_SPAN_SHARE.1],
             "pacing_share": [PACING_SHARE.0, PACING_SHARE.1]},
     });
+    if r.build_frames {
+        // 63/11 only: older captures keep their exact JSON
+        v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }

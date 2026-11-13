@@ -30,6 +30,15 @@ int auto_frames_unsupported(auto_frames *q)
     return 1;
 }
 
+int auto_frames_unrepresented(auto_frames *q,uint32_t n)
+{
+    if(!q->active) return 0;
+    if(n>UINT32_MAX-q->live.segment_unrepresented) {
+        q->live.segment_unrepresented=UINT32_MAX;q->live.flags|=4;REL(&q->saturated,1u);
+    } else q->live.segment_unrepresented+=n;
+    return 1;
+}
+
 int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,int open)
 {
     uint64_t w,r;

@@ -6,6 +6,7 @@
 #define auto_frames_count ps3dk_prof__auto_frames_count
 #define auto_frames_unsupported ps3dk_prof__auto_frames_unsupported
 #define auto_frames_close ps3dk_prof__auto_frames_close
+#define auto_frames_unrepresented ps3dk_prof__auto_frames_unrepresented
 #define auto_frames_peek ps3dk_prof__auto_frames_peek
 #define auto_frames_ack ps3dk_prof__auto_frames_ack
 typedef struct auto_frames {
@@ -30,6 +31,10 @@ int auto_frames_count(auto_frames *,uint32_t kind,uint32_t column);
  * foreign context): COVERAGE unsupported_form_visits. False without an active
  * frame, as for auto_frames_count. */
 int auto_frames_unsupported(auto_frames *);
+/* n covered segment draws a CALL executed in this frame without a committed
+ * record carrying the CALL's token (COVERAGE u32@380). Saturates at UINT32_MAX
+ * and then marks the row SATURATED. False without an active frame. */
+int auto_frames_unrepresented(auto_frames *,uint32_t n);
 /* 0: refused identity/accounting, unchanged; 1: queued; 2: queue loss recorded.
  * An implied closure or reversed clock is OPEN. Actual TB observations survive
  * a reversed clock; no replacement timestamp is invented. lost is cumulative. */
