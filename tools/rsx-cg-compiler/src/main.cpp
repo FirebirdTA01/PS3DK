@@ -188,10 +188,16 @@ static void printProgramStats(bool fragment, const std::vector<uint32_t>& words,
                      words.size() / 4, words.size() * 4);
         return;
     }
-    size_t insns = 0, constBlocks = 0;
+    size_t insns = 0, constBlocks = 0, kills = 0;
     for (size_t i = 0; i + 3 < words.size();)
     {
         ++insns;
+        {
+            const uint32_t op = (words[i] >> 16) | (words[i] << 16);   // on-disk halfword swap
+            if (!(op & NV40_FP_OP_OPCODE_IS_BRANCH) &&
+                ((op & NVFX_FP_OP_OPCODE_MASK) >> NVFX_FP_OP_OPCODE_SHIFT) == NVFX_FP_OP_OPCODE_KIL)
+                ++kills;   // counted from the ucode: the container field is 8 bits wide
+        }
         bool readsConst = false;
         for (int pos = 1; pos <= 3; ++pos)
         {
@@ -204,9 +210,9 @@ static void printProgramStats(bool fragment, const std::vector<uint32_t>& words,
     size_t patched = 0;
     for (const auto& u : fp.embeddedUniforms) patched += u.ucodeByteOffsets.size();
     std::fprintf(stderr, "rsx-cg-compiler stats: fp instructions=%zu inline_const_blocks=%zu "
-                 "uniform_patch_slots=%zu uniforms_embedded=%zu registers=%u kil=%u ucode_bytes=%zu\n",
+                 "uniform_patch_slots=%zu uniforms_embedded=%zu registers=%u kil=%zu ucode_bytes=%zu\n",
                  insns, constBlocks, patched, fp.embeddedUniforms.size(), unsigned(fp.registerCount),
-                 unsigned(fp.pixelKillCount), words.size() * 4);
+                 kills, words.size() * 4);
 }
 
 // The whole compile, from source text to a container (or the ucode dump).
