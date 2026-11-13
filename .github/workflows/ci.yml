@@ -242,6 +242,10 @@ jobs:
               --rsxcg tools/rsx-cg-compiler/build/rsx-cg-compiler \
               --builder tools/psgl-shader-builder/psgl-shader-builder
 
+      - name: Test rsx-cg-compiler --stats leaves its output unchanged
+        run: |
+          python3 tests/host/rsx-cg-stats-test.py --rsxcg tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       # A second rsx-cg-compiler on a DIFFERENT compiler and standard library
       # (clang + libc++).  Output that depends on unordered_* iteration order,
       # on undefined behaviour, or on a compiler's miscompile shows up as a
