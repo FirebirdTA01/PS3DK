@@ -1607,6 +1607,25 @@ static inline void ps3tc_gcm_state_report_location_unsafe(CellGcmContextData *ct
     ctx->current   += 2;
 }
 
+/* safe — report (NV40TCL_QUERY_GET count=1, 2 words).
+ * Bits 0-23 = byte offset (0x10 * index); bits 24-31 = report type. */
+static inline void ps3tc_gcm_state_report(CellGcmContextData *ctx, uint32_t type, uint32_t index)
+{
+    uint32_t *p = ps3tc_gcm_reserve(ctx, 2);
+    if (!p) return;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_GET, 1);
+    p[1] = ((type << 24) | (index * 0x10u));
+}
+
+/* unsafe */
+static inline void ps3tc_gcm_state_report_unsafe(CellGcmContextData *ctx, uint32_t type, uint32_t index)
+{
+    uint32_t *p = ctx->current;
+    p[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_GET, 1);
+    p[1] = ((type << 24) | (index * 0x10u));
+    ctx->current = p + 2;
+}
+
 #ifdef __cplusplus
 }
 #endif

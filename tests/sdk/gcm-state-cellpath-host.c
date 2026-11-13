@@ -560,6 +560,13 @@ int main(void)
     ps3tc_gcm_state_report_location(&r, GCM_LOCATION_RSX);
     check("cell==native report_location (RSX)", A, B, 2);
 
+    /* report (2 words, type and index) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetReport(&n, 0x12, 0x00000034);
+    ps3tc_gcm_state_report(&r, 0x12, 0x00000034);
+    check("cell==native report", A, B, 2);
+
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;
 }

@@ -704,6 +704,24 @@ static void ref_unsafe_report_loc(gcmContextData *ctx, uint32_t location)
     ctx->current[1] = handle;
     ctx->current   += 2;
 }
+
+/* report */
+static void ref_safe_report(gcmContextData *ctx, uint32_t type, uint32_t index)
+{
+    uint32_t offset = 0x10 * index;
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_GET, 1);
+    ctx->current[1] = ((type << 24) | offset);
+    ctx->current   += 2;
+}
+static void ref_unsafe_report(gcmContextData *ctx, uint32_t type, uint32_t index)
+{
+    uint32_t offset = 0x10 * index;
+    ctx->current[0] = REF_METHOD(NV40TCL_QUERY_GET, 1);
+    ctx->current[1] = ((type << 24) | offset);
+    ctx->current   += 2;
+}
 static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               f32 min, f32 max, const f32 scale[4], const f32 offset[4])
 {
@@ -1906,6 +1924,27 @@ int main(void)
         cmp("  report_location (RSX, unsafe)", A, B, 2);
     }
 
+    /* report (type and index) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_report((CellGcmContextData *)&n, 0x5A, 0x00001234u);
+        ref_safe_report(&r, 0x5A, 0x00001234u);
+        cmp("  report (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_report_unsafe((CellGcmContextData *)&n, 0x5A, 0x00001234u);
+        ref_unsafe_report(&r, 0x5A, 0x00001234u);
+        cmp("  report (unsafe)", A, B, 2);
+
+        /* Swap mutant: type and index swapped must go red */
+        r.begin = r.current = B;
+        ref_safe_report(&r, 0x34, 0x0000005Au);
+        cmp_mutant("  report (swap mutant)", A, B, 2);
+    }
+
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
     printf("\n  Ring-full / callback (end==current, recording callback)\n");
     RING_CHECK(ps3tc_gcm_state_logic_op,
@@ -2139,6 +2178,9 @@ int main(void)
     RING_CHECK(ps3tc_gcm_state_report_location,
                ps3tc_gcm_state_report_location_unsafe,
                "report_location", 2, GCM_LOCATION_CELL);
+    RING_CHECK(ps3tc_gcm_state_report,
+               ps3tc_gcm_state_report_unsafe,
+               "report", 2, 0x5A, 0x00001234u);
 
 
     printf("\n");

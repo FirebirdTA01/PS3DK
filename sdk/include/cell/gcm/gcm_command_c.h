@@ -847,7 +847,7 @@ static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisConte
 
 static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t type, uint32_t index)
 {
-	rsxSetReport(thisContext, type, index);
+	ps3tc_gcm_state_report(thisContext, type, index);
 }
 
 static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_t type)

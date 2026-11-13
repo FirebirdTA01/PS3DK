@@ -508,12 +508,11 @@ void RSX_FUNC(SetRenderEnable)(gcmContextData *context,u8 mode,u32 index)
 
 void RSX_FUNC(SetReport)(gcmContextData *context,u32 type,u32 index)
 {
-	u32 offset = 0x10*index;
-
-	RSX_CONTEXT_CURRENT_BEGIN(2);
-	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_QUERY_GET,1);
-	RSX_CONTEXT_CURRENTP[1] = ((type<<24) | offset);
-	RSX_CONTEXT_CURRENT_END(2);
+#if RSX_UNSAFE
+	ps3tc_gcm_state_report_unsafe(context, type, index);
+#else
+	ps3tc_gcm_state_report(context, type, index);
+#endif
 }
 
 void RSX_FUNC(SetClearReport)(gcmContextData *context,u32 type)
