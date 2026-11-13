@@ -62,6 +62,17 @@ int main(void) {
     assert(auto_frames_close(&frames,42,4,80,0)==1);
     f=auto_frames_peek(&frames);assert(f->flags&4);assert(frames.saturated);
     assert(auto_frames_ack(&frames,42,4,1));
+    /* the unrepresented-CALL counter adds, saturates at UINT32_MAX and then marks the row SATURATED */
+    assert(!auto_frames_unrepresented(&frames,1));     /* no open frame */
+    assert(auto_frames_open(&frames,5,90));
+    assert(auto_frames_unrepresented(&frames,2) && frames.live.segment_unrepresented==2 && !(frames.live.flags&4));
+    assert(auto_frames_unrepresented(&frames,UINT32_MAX-2u) && frames.live.segment_unrepresented==UINT32_MAX);
+    assert(!(frames.live.flags&4));                     /* reached exactly, not exceeded */
+    assert(auto_frames_unrepresented(&frames,1) && frames.live.segment_unrepresented==UINT32_MAX);
+    assert(frames.live.flags&4);
+    assert(auto_frames_close(&frames,42,5,95,0)==1);
+    f=auto_frames_peek(&frames);assert(f->segment_unrepresented==UINT32_MAX && (f->flags&4));
+    assert(auto_frames_ack(&frames,42,5,1));
     assert(!auto_frames_open(&frames,UINT64_MAX,90));
     assert(auto_frames_init(&frames,rows,64,1,42));
     pthread_t a,b;assert(!pthread_create(&a,NULL,producer,NULL));assert(!pthread_create(&b,NULL,consumer,NULL));

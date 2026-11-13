@@ -16,11 +16,12 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
-                                  'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment'])
+                                  'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
+                                  'replay-silent','recall-silent','moved-draw-silent'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -28,7 +29,8 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
-                          'boundary-cadence':'spanning','boundary-scope':'spanning'}[a.mutant] and not a.sanitize
+                          'boundary-cadence':'spanning','boundary-scope':'spanning',
+                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -69,7 +71,10 @@ def run(name,cmd,cwd=out):
                   'poll-wait':b'p[0]==0 && p[1]==0',
                   'poll-scope-cadence':b'p[2]==0 && p[4]==0',
                   'boundary-cadence':b'p[2]==0 && p[3]==0 && p[5]==1',
-                  'boundary-scope':b'p[0]==0 && p[1]==0 && p[6]==1'}[a.mutant]
+                  'boundary-scope':b'p[0]==0 && p[1]==0 && p[6]==1',
+                  'replay-silent':b're-CALL of a timed build sets the replay latch',
+                  'recall-silent':b"a re-CALL counts the build's visits",
+                  'moved-draw-silent':b'the part a moved draw ends in counts it'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -87,7 +92,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -98,7 +103,7 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case=='extsegments':flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('extsegments','segbuild'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
@@ -179,6 +184,13 @@ for rel in sources:
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'enum { AUTO_OPS_BATCH=1 };').encode())
+    elif a.mutant in ('replay-silent','recall-silent','moved-draw-silent') and rel=='auto_rsx/auto_runtime.c':
+        # CALL completeness reintroduced as silent: a replay, a re-CALL's draws, or a moved draw's destination
+        old,new={'replay-silent':('if(s->reports) ST_REL(&a->segment_replay,1u);','(void)0;'),
+                 'recall-silent':('(void)auto_frames_unrepresented(&a->coverage,s->visits);return;','return;'),
+                 'moved-draw-silent':('if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);}','(void)d;')}[a.mutant]
+        code=source.read_text();assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,new).encode())
     elif a.mutant=='writer-on-segment' and rel=='auto_rsx/auto_runtime.c':
         # review finding reintroduced: the in-flight emitter is matched by the segment's writer, which a part close clears
         code=source.read_text();old='a->segment_active_writer==(void *)context';assert code.count(old)==1
@@ -249,6 +261,7 @@ if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime
 if a.case=='extsegments':application=Path(__file__).with_name('auto-external-segment-test.c').read_text()
 if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
 if a.case=='segmetatail':application=Path(__file__).with_name('auto-segment-metadata-tail-test.c').read_text()
+if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-frame-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
@@ -276,6 +289,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO external segment timing PASS\n' if a.case=='extsegments'
+                       else b'AUTO segment build frames and CALL completeness PASS\n' if a.case=='segbuild'
                        else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
                        else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
@@ -304,6 +318,10 @@ if a.case in ('race','fifopre'):
     print('real capture attach/seal race: incomplete file, no resurrected reservation PASS')
     raise SystemExit(0)
 auto=[(k,b) for k,b in chunks if 34<=k<=38]
+OP=144 # OPS record width of this writer (CONFIG 63/11): 128 bytes plus the build tail
+def build_tail(q):
+    # build frame, build owner, build flags, reserved
+    return struct.unpack_from('<QIHH',q,128)
 if a.case=='fifopost':
     assert [k for k,b in auto]==[34,37]
     assert struct.unpack_from('<HHI',auto[-1][1])==(1,11,1),'unacknowledged AUTO owner'
@@ -312,18 +330,56 @@ if a.case=='fifopost':
     assert struct.unpack_from('<I',chunks[-1][1])[0]&1,'owner did not acknowledge shutdown'
     print('AUTO accepted before seal, unpublished FIFO cancelled, owner remains UNKNOWN PASS')
     raise SystemExit(0)
+if a.case=='segbuild':
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(63,11) and struct.unpack_from('<I',config,60)[0]==OP
+    owner=struct.unpack_from('<I',config,16)[0]
+    records=[]
+    for k,b in auto:
+        if k!=35:continue
+        assert struct.unpack_from('<I',b,12)[0]==OP
+        for i in range(struct.unpack_from('<I',b,8)[0]):
+            q=b[16+OP*i:16+OP*(i+1)]
+            records.append(dict(kind=struct.unpack_from('<H',q,12)[0],flags=struct.unpack_from('<H',q,14)[0],
+                frame=struct.unpack_from('<Q',q,16)[0],segment=struct.unpack_from('<I',q,92)[0],
+                call=struct.unpack_from('<I',q,116)[0],tail=build_tail(q)))
+    seg=[(r['flags'],r['frame'],r['segment'],r['call'],r['tail']) for r in records if r['flags']&64]
+    # part ordinals in open order: A 1, S 2, X 3, C 4, D 5, E 6, R 7, P 8 (U is never tracked).
+    # A: built in 0, recorded under its CALL in 1; E: one draw built in each of 0 and 1, both recorded in 1;
+    # R: built in 2, its CALL refused: an INCOMPLETE drop without a CALL token or call ordinal.
+    assert seg==[(67,1,1,1,(0,owner,1,0)),(67,1,6,2,(0,owner,1,0)),(67,1,6,2,(1,owner,1,0)),
+                 (64|4|16,0,7,0,(2,owner,1,0))],seg
+    assert all(r['tail']==(0,0,0,0) for r in records if not r['flags']&64)
+    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==384 for b in rows)
+    unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
+    assert unrep==[0,3,0xffffffff],unrep
+    rflags=[struct.unpack_from('<H',b,2)[0] for b in rows]
+    assert not rflags[0]&4 and not rflags[1]&4 and rflags[2]&4,rflags # the saturated row is SATURATED
+    fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+    assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
+    assert fields[1]&(1|2|4|64)==1|2|4|64,('FINAL, LOWER_BOUND, SATURATED, SEGMENT_QUARANTINE',fields[1])
+    print('real capture: segment build frames per draw, CALL completeness counted, replay and saturation PASS')
+    raise SystemExit(0)
 if a.case=='extsegments':
     records=[]
     for k,b in auto:
         if k!=35:continue
         n=struct.unpack_from('<I',b,8)[0]
         for i in range(n):
-            q=b[16+128*i:16+128*(i+1)]
+            q=b[16+OP*i:16+OP*(i+1)]
             records.append((struct.unpack_from('<H',q,12)[0],struct.unpack_from('<H',q,14)[0],
                             struct.unpack_from('<I',q,92)[0],struct.unpack_from('<I',q,116)[0]))
     # kind, flags, segment ordinal, call ordinal: FRAME begin mark, part 1 (array, indexed) completed by call 1,
     # part 2 (clear) by call 2, FRAME end mark; the untimed and foreign draws leave no record
+    tails=[]
+    for k,b in auto:
+        if k!=35:continue
+        for i in range(struct.unpack_from('<I',b,8)[0]):tails.append(build_tail(b[16+OP*i:16+OP*(i+1)]))
     seg=[r for r in records if r[1]&64]
+    owner=struct.unpack_from('<I',[b for k,b in auto if k==34][0],16)[0]
+    # every segment draw was built in frame 0; nothing else carries a tail
+    assert [t for r,t in zip(records,tails) if r[1]&64]==[(0,owner,1,0)]*4,tails
+    assert all(t==(0,0,0,0) for r,t in zip(records,tails) if not r[1]&64),tails
     # the mid-draw switch leaves no record (its pair is quarantined); part D's draw is completed by call 3
     assert [(r[0],r[2],r[3]) for r in seg]==[(1,1,1),(2,1,1),(3,2,2),(3,4,3)],records
     assert all((r[1]&3)==3 for r in seg),records
@@ -332,18 +388,24 @@ if a.case=='extsegments':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(31,11),'CONFIG kind/form masks of the presentation writer'
+    assert struct.unpack_from('<2I',config,24)==(63,11),'CONFIG kind/form masks of the build-frame writer'
+    assert struct.unpack_from('<I',config,60)[0]==OP,'CONFIG record width'
     records=[]
     for k,b in auto:
         if k!=35:continue
         n=struct.unpack_from('<I',b,8)[0]
         for i in range(n):
-            q=b[16+128*i:16+128*(i+1)]
+            q=b[16+OP*i:16+OP*(i+1)]
             records.append(dict(id=struct.unpack_from('<Q',q,0)[0],kind=struct.unpack_from('<H',q,12)[0],
                 flags=struct.unpack_from('<H',q,14)[0],frame=struct.unpack_from('<Q',q,16)[0],
                 raw=struct.unpack_from('<2Q',q,40),args=struct.unpack_from('<7I',q,64),
                 segment=struct.unpack_from('<I',q,92)[0],call=struct.unpack_from('<I',q,116)[0],
-                serials=struct.unpack_from('<2I',q,104),published=struct.unpack_from('<Q',q,120)[0]))
+                serials=struct.unpack_from('<2I',q,104),published=struct.unpack_from('<Q',q,120)[0],
+                tail=build_tail(q)))
+    owner=struct.unpack_from('<I',config,16)[0]
+    # segment draws name the frame that built them: part A's and the dropped part B's in frame 0, A's rebuild in 1
+    assert [r['tail'] for r in records]==[(0,0,0,0)]*2+[(0,owner,1,0)]*3+[(0,0,0,0)]*2+[(1,owner,1,0),(0,0,0,0)],\
+        [r['tail'] for r in records]
     shape=[(r['kind'],r['flags'],r['frame'],r['segment'],r['call'],r['serials']) for r in records]
     expected=[(4,3,0,0,0,(1,2)),(3,3,0,0,0,(3,4)),(1,67,0,1,1,(5,6)),(2,67,0,1,1,(5,6)),(2 if False else 3,64|4|16,0,2,0,(7,8)),
               (4,3,0,0,0,(9,10)),(4,3,1,0,0,(11,12)),(1,67,1,1,2,(13,14)),(4,3,1,0,0,(15,16))]
@@ -365,6 +427,7 @@ if a.case=='segments':
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
         assert [r[:2] for r in rows]==rows_expected and all(not any(r[2:]) for r in rows),rows
+        assert struct.unpack_from('<I',b,380)[0]==0,'every CALL of this capture is represented'
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     assert fields[1]==1|2|64|512,('FINAL, LOWER_BOUND (a held quarantined pair), SEGMENT_QUARANTINE, FRAMES_EXPLICIT',fields[1])
     assert fields[3:6]==(9,9,9) and fields[17]==1,fields # nine records; one quarantined pair held
@@ -372,7 +435,7 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(31,11)
+    assert struct.unpack_from('<2I',config,24)==(63,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
     assert all(len(b)==384 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -388,7 +451,7 @@ if a.case=='flips':
     for k,b in auto:
         if k!=35:continue
         for i in range(struct.unpack_from('<I',b,8)[0]):
-            q=b[16+128*i:16+128*(i+1)]
+            q=b[16+OP*i:16+OP*(i+1)]
             records.append((struct.unpack_from('<H',q,12)[0],struct.unpack_from('<H',q,14)[0],struct.unpack_from('<Q',q,16)[0]))
     assert len(records)==67,len(records)
     assert sum(1 for r in records if r[0]==4)==44 and sum(1 for r in records if r[0]==3)==23
@@ -403,7 +466,7 @@ if a.case=='flips':
     raise SystemExit(0)
 if a.case in ('present','spanning'):
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(31,11)
+    assert struct.unpack_from('<2I',config,24)==(63,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
     assert len(rows)==n and all(len(b)==384 for b in rows),[len(b) for b in rows]
@@ -463,7 +526,7 @@ if a.case in ('clocks','clockcap'):
     marks=2*frames # a begin and an end FRAME mark per frame, each one serial pair
     assert fields[:3]==(1,1|512,1) and fields[3:]==(marks,marks,marks,0,0,frames,0,0,0,len(schedule),len(rows),
         len(schedule)-len(rows),0,2*marks,0),fields
-    kinds=[struct.unpack_from('<HH',b,16+128*i+12) for k,b in auto if k==35 for i in range(struct.unpack_from('<I',b,8)[0])]
+    kinds=[struct.unpack_from('<HH',b,16+OP*i+12) for k,b in auto if k==35 for i in range(struct.unpack_from('<I',b,8)[0])]
     assert len(kinds)==marks and all(k==(4,3) for k in kinds),'every FRAME mark raw-valid'
     assert chunks[-1][0]==6
     print('real capture: '+str(len(rows))+' CLOCK facts, '+str(frames)+' closed frames, '+str(len(schedule)-len(rows))+' lost anchors and FINAL accounting PASS')
@@ -483,8 +546,8 @@ if operations:
     for k,b in auto:
         if k!=35:continue
         assert struct.unpack_from('<HHI',b)==(1,0,1)
-        n=struct.unpack_from('<I',b,8)[0];assert len(b)==16+n*128
-        ops += [b[16+i*128:16+(i+1)*128] for i in range(n)]
+        n=struct.unpack_from('<I',b,8)[0];assert len(b)==16+n*OP
+        ops += [b[16+i*OP:16+(i+1)*OP] for i in range(n)]
     marks=[b for b in ops if struct.unpack_from('<H',b,12)[0]==4]
     if a.case=='frames':
         # one begin FRAME mark (frame 0); every later mark found no free report pair
@@ -531,7 +594,8 @@ config,status=auto[0][1],auto[1][1]
 assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,31,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,63,11)
+    assert struct.unpack_from('<I',config,60)[0]==OP
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
     domains=[b for k,b in chunks if k==8];assert len(domains)==1

@@ -373,6 +373,17 @@ static auto_segment *segment_find(auto_capture *a,const void *ctx)
     return NULL;
 }
 
+/* Saturating per-build counters: a positive count never wraps back to zero. */
+static void history_add(uint32_t *v,uint32_t n)
+{
+    *v=n>UINT32_MAX-*v ? UINT32_MAX:*v+n;
+}
+/* A new build of a part starts: its CALL and report history starts again too. */
+static void segment_new_build(auto_segment *s)
+{
+    s->visits=s->refused=s->called=s->reports=0;
+}
+
 /* Built operations that will never complete through our label: commit each as
  * an INCOMPLETE record (so accounting stays exact) whose pair the drainer then
  * quarantines; with no metadata room, quarantine the pair directly. Their
@@ -440,6 +451,7 @@ void ps3dk_prof__auto_segment_open(struct _gcmCtxData *context)
         s->ctx=context;s->ordinal=++a->segment_ordinal;s->count=0;
     }
     if(s->count) segment_drop(a,s);
+    segment_new_build(s);
     s->writer=context;s->external=0;s->lo=s->hi=0;
     s->open=1;
 }
@@ -470,6 +482,7 @@ void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key,const void *
         s->ctx=key;s->ordinal=++a->segment_ordinal;s->count=0;
     }
     if(s->count) segment_drop(a,s);
+    segment_new_build(s);
     s->writer=NULL;s->external=1;
     s->lo=(uintptr_t)buffer;s->hi=(uintptr_t)buffer+size;
     s->open=1;
@@ -522,7 +535,7 @@ static void segment_report(gpp_ctx *ctx,uint32_t report)
  * two reports in the segment (four words, current room only, no callback). The
  * operation-label release that completes it comes after the CALL, in ring
  * order. Returns the ticket (nonzero) or 0 after counting the exclusion. */
-static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const ps3tc_auto_call *call,
+static uint32_t segment_admit(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const ps3tc_auto_call *call,
                               uint64_t caller)
 {
     const auto_wire_config *c=auto_config_read(&configuration);
@@ -556,6 +569,12 @@ static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
     b=&a->segment_pool[a->segment_pending];memset(b,0,sizeof *b);b->pair=(uint32_t)pair;b->next=AUTO_SEGMENT_NONE;
     b->op.kind=(uint16_t)call->kind;b->op.caller=caller;b->op.generation=c->generation;
     b->op.flags=AUTO_OP_SEGMENT;b->op.segment=s->ordinal;
+    /* the build token: the coverage frame that counted this draw (sampled per draw, so a build that spans a
+     * frame boundary names both frames) */
+    if(a->coverage.active) {
+        b->op.build_flags=AUTO_OP_BUILD_KNOWN;b->op.build_owner=a->owner_incarnation;
+        b->op.build_frame=a->coverage.live.frame;
+    }
     b->op.args[0]=(uint32_t)words;
     if(call->kind==1) {b->op.args[1]=call->start;b->op.args[2]=call->count;b->op.args[5]=call->mode;}
     if(call->kind==2) {b->op.args[2]=call->count;b->op.args[3]=call->offset;
@@ -567,9 +586,39 @@ static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
     a->operations_device.sync(a->operations_device.ctx);
     b->op.tb_before=observation_tb();
     segment_report(ctx,b->op.report_begin);
+    s->reports=1; /* a report write now lives in this build's buffer: a second CALL would replay it */
     a->expected_end=(uintptr_t)(void *)ctx->current+words*4;
     a->segment_active=s;a->segment_active_writer=ctx;g_tls.in_gpu=1;
     return 1;
+}
+/* Every covered emitter of a build is a visit of that build; one it does not time is also refused, so a CALL
+ * that executes it knows the build is not fully represented by its records. */
+static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const ps3tc_auto_call *call,
+                              uint64_t caller)
+{
+    uint32_t ticket;
+    history_add(&s->visits,1);
+    ticket=segment_admit(a,s,ctx,call,caller);
+    if(!ticket) history_add(&s->refused,1);
+    return ticket;
+}
+
+/* The tracked part a writer context is in at the end of an emitter, open or already closed: a Begin/End part
+ * whose embedded context is the writer, else an external part whose claimed buffer holds the cursor (a part
+ * switch in an overflow callback leaves the cursor in the new part; a closed part is still the buffer its CALL
+ * will execute). NULL when the cursor is in no tracked part. */
+static auto_segment *segment_at(auto_capture *a,gpp_ctx *ctx)
+{
+    uintptr_t cur=(uintptr_t)(void *)ctx->current;
+    auto_segment *edge=NULL,*s=segment_find(a,ctx);
+    if(s && !s->external) return s;
+    for(uint32_t i=0;i<a->segments_used;i++) {
+        s=&a->segments[i];
+        if(!s->external) continue;
+        if(cur>=s->lo && cur<s->hi) return s;
+        if(cur==s->hi && !edge) edge=s;   /* a full buffer: the cursor rests on its end */
+    }
+    return edge;
 }
 
 static void segment_end(auto_capture *a,gpp_ctx *ctx)
@@ -581,11 +630,19 @@ static void segment_end(auto_capture *a,gpp_ctx *ctx)
     a->segment_active=NULL;a->segment_active_writer=NULL;g_tls.in_gpu=0;a->segment_pending=AUTO_SEGMENT_NONE;
     if(cur!=a->expected_end || cur>end || end-cur<8) {
         /* The application did not advance as admitted (or a segment overflow
-         * refused it): the begin report may run; no end report is written. */
+         * refused it): the begin report may run; no end report is written.
+         * The draw is in no build's pool: the part it began in and, after a
+         * part switch, the part the writer is in now both count it as
+         * refused (the destination as a visit too), so a CALL of either is
+         * not taken as fully recorded. A cursor in no tracked part leaves
+         * the words in an untracked buffer, whose CALL counts as untracked. */
+        auto_segment *d=segment_at(a,ctx);
         auto_queue_quarantine_pair(&a->operations,b->pair);
         ST_REL(&a->segment_quarantine,1u);
         (void)auto_frames_count(&a->coverage,b->op.kind,11);
         pool_give(a,slot);
+        history_add(&s->refused,1);
+        if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);}
         return;
     }
     segment_report(ctx,b->op.report_end);
@@ -609,8 +666,21 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
     uint32_t share=0,call,i;
     int meta_short;
     uintptr_t cur,end;
+    uint32_t lost=0;
     if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
-    if(!(s=segment_find(a,segment)) || !s->count) return;
+    /* CALL completeness (COVERAGE segment_unrepresented): each case below adds, once, the covered draws this CALL
+     * executes that will have no committed record carrying its token. */
+    if(!(s=segment_find(a,segment))) {
+        /* untracked (never seen, or refused at the table): its draws are unknown, so at least one */
+        (void)auto_frames_unrepresented(&a->coverage,1);return;
+    }
+    if(s->called) {
+        /* this build was already executed: the CALL replays it, report writes included */
+        if(s->reports) ST_REL(&a->segment_replay,1u);
+        (void)auto_frames_unrepresented(&a->coverage,s->visits);return;
+    }
+    s->called=1;
+    if(!s->count) {(void)auto_frames_unrepresented(&a->coverage,s->refused);return;}
     c=auto_config_read(&configuration);
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
     meta_short=a->operations.capacity-(uint32_t)(a->operations.write_idx-LD_ACQ(&a->operations.read_idx))<s->count;
@@ -620,6 +690,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         /* Metadata exhaustion latches the frame tail like a refused admission does: later covered draws of this
          * frame are not timed either. */
         if(meta_short) a->pool_tail_column=4;
+        lost=s->count;history_add(&lost,s->refused);
+        (void)auto_frames_unrepresented(&a->coverage,lost);
         segment_drop(a,s);return;
     }
     call=++a->call_ordinal;
@@ -628,7 +700,10 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,share);
         uint64_t id;
         uint32_t sb,se;
-        if(!e) {auto_queue_quarantine_pair(&a->operations,b->pair);ST_REL(&a->segment_quarantine,1u);continue;}
+        if(!e) {
+            auto_queue_quarantine_pair(&a->operations,b->pair);ST_REL(&a->segment_quarantine,1u);
+            history_add(&lost,1);continue;
+        }
         id=e->op.id;sb=e->op.serial_begin;se=e->op.serial_end;
         e->op=b->op;e->op.id=id;e->op.serial_begin=sb;e->op.serial_end=se;e->op.call=call;
         if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
@@ -637,6 +712,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         share=se;
     }
     segment_release(a,s);
+    history_add(&lost,s->refused);
+    (void)auto_frames_unrepresented(&a->coverage,lost);
     if(share) {
         uint32_t *w=(uint32_t *)(void *)ctx->current;
         w[0]=(1u<<18)|0x1d6cu;w[1]=c->op_label*16u;   /* SEMAPHORE_OFFSET */
@@ -1039,6 +1116,31 @@ void ps3dk_prof__auto_test_segment_counts(uint64_t out[4])
     out[0]=a ? a->segment_visits:0;out[1]=a ? a->foreign_visits:0;
     out[2]=a ? a->segment_table_full:0;out[3]=a ? a->segments_used:0;
 }
+/* Owner thread only: a part's build history (visits, refused, called, reports), all zero when untracked. */
+void ps3dk_prof__auto_test_segment_history(const void *key,uint32_t out[4])
+{
+    auto_segment *s=capture ? segment_find(capture,key):NULL;
+    out[0]=s ? s->visits:0;out[1]=s ? s->refused:0;out[2]=s ? s->called:0;out[3]=s ? s->reports:0;
+}
+/* Owner thread only: preset a part's visits/refused counters (saturation tests). */
+void ps3dk_prof__auto_test_segment_preset(const void *key,uint32_t visits,uint32_t refused)
+{
+    auto_segment *s=capture ? segment_find(capture,key):NULL;
+    if(s) {s->visits=visits;s->refused=refused;}
+}
+/* Owner thread only: the open row's segment_unrepresented and flags, and the sticky replay latch. */
+void ps3dk_prof__auto_test_unrepresented(uint32_t out[3])
+{
+    const auto_capture *a=capture;
+    out[0]=a && a->coverage.active ? a->coverage.live.segment_unrepresented:0;
+    out[1]=a && a->coverage.active ? a->coverage.live.flags:0;
+    out[2]=a ? LD_ACQ(&a->segment_replay):0;
+}
+/* Owner thread only: preset the open row's segment_unrepresented (saturation tests). */
+void ps3dk_prof__auto_test_unrepresented_preset(uint32_t v)
+{
+    if(capture && capture->coverage.active) capture->coverage.live.segment_unrepresented=v;
+}
 /* Owner thread only: the frame's capacity-exhaustion latch (0, or the exclusion column it applies). */
 uint32_t ps3dk_prof__auto_test_pool_tail(void)
 {
@@ -1191,6 +1293,7 @@ void p_auto_drain(prof *p, int seal)
         if(totals[9]<totals[10] || totals[9]-totals[10]!=totals[11]) flags|=AUTO_LOWER_BOUND;
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
         if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
+        if(LD_ACQ(&capture->segment_replay)) flags|=AUTO_STATUS_SEGMENT_REPLAY;
         if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
         if(LD_ACQ(&capture->frames_by_flip)) flags|=AUTO_STATUS_FRAMES_FLIP;
         if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;

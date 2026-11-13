@@ -50,6 +50,7 @@ size_t auto_encode_ops(uint8_t *b, size_t cap, uint32_t instance, const auto_wir
         le32(q+96,o->report_begin); le32(q+100,o->report_end);
         le32(q+104,o->serial_begin); le32(q+108,o->serial_end); le32(q+112,o->generation);
         le64(q+120,o->published);
+        le64(q+128,o->build_frame); le32(q+136,o->build_owner); le16(q+140,o->build_flags);
     }
     return bytes;
 }
@@ -65,6 +66,7 @@ size_t auto_encode_frame(uint8_t *b, size_t cap, const auto_wire_frame *f)
     for(i=0;i<3;i++) for(j=0;j<12;j++) le64(b+64+i*96+j*8,f->counts[i][j]);
     le32(b+352,f->cadence_runs); le32(b+356,f->cadence_broken); le32(b+360,f->cadence_spanning);
     le32(b+364,f->flip_wait_spanning); le64(b+368,f->cadence); le32(b+376,f->flip_wait_timeouts);
+    le32(b+380,f->segment_unrepresented);
     return AUTO_FRAME_BYTES;
 }
 
