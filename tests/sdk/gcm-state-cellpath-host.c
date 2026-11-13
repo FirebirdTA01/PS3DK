@@ -504,6 +504,27 @@ int main(void)
     ps3tc_gcm_state_update_fragment_program_parameter(&r, 0x01ABCDEFu);
     check("cell==native update_fragment_program_parameter", A, B, 2);
 
+    /* the Unsafe and Location forms of the same update (2 words each); the Location form
+     * also checked word for word: FP_ADDRESS, then (location + 1) | 29-bit offset */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetUpdateFragmentProgramParameterUnsafe(&n, 0x01ABCDEFu);
+    ps3tc_gcm_state_update_fragment_program_parameter_unsafe(&r, 0x01ABCDEFu);
+    check("cell==native update_fragment_program_parameter (unsafe)", A, B, 2);
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetUpdateFragmentProgramParameterLocation(&n, 0xE1ABCDEFu, 1);
+    ps3tc_gcm_state_update_fragment_program_location(&r, 0xE1ABCDEFu, 1);
+    check("cell==native update_fragment_program_parameter_location", A, B, 2);
+    if (A[0] != PS3TC_GCM_METHOD(NV40TCL_FP_ADDRESS, 1) || A[1] != (2u | 0x01ABCDEFu)) {
+        printf("MISMATCH update_fragment_program_parameter_location words %08x %08x\n", A[0], A[1]); exit(1);
+    }
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(&n, 0x00000100u, 0);
+    ps3tc_gcm_state_update_fragment_program_location_unsafe(&r, 0x00000100u, 0);
+    check("cell==native update_fragment_program_parameter_location (unsafe)", A, B, 2);
+
     /* nop_command (0, 1 and large count) */
     {
         static uint32_t nopA[64], nopB[64];

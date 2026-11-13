@@ -750,19 +750,19 @@ static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *
 
 static inline void cellGcmSetUpdateFragmentProgramParameterUnsafe(CellGcmContextData *thisContext, uint32_t offset)
 {
-	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, GCM_LOCATION_RSX);
+	ps3tc_gcm_state_update_fragment_program_parameter_unsafe(thisContext, offset);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData *thisContext,
                                                                      uint32_t offset, uint32_t location)
 {
-	rsxUpdateFragmentProgramLocation(thisContext, offset, location);
+	ps3tc_gcm_state_update_fragment_program_location(thisContext, offset, location);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGcmContextData *thisContext,
                                                                           uint32_t offset, uint32_t location)
 {
-	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);
+	ps3tc_gcm_state_update_fragment_program_location_unsafe(thisContext, offset, location);
 }
 
 /* cellGcmSetFragmentProgramControl (Safe + Unsafe) + the no-context
