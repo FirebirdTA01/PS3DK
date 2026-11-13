@@ -8,7 +8,6 @@ cellGcmFlushUnsafe
 cellGcmGetControlRegister
 cellGcmGetFixedSint32
 cellGcmGetFixedUint16
-cellGcmGetFlipStatus
 cellGcmGetLabelAddress
 cellGcmGetLastFlipTime
 cellGcmGetMaxIoMapSize
@@ -28,7 +27,6 @@ cellGcmMapEaIoAddress
 cellGcmMapEaIoAddressWithFlags
 cellGcmMapLocalMemory
 cellGcmMapMainMemory
-cellGcmResetFlipStatus
 cellGcmSetCallCommand
 cellGcmSetClearSurface
 cellGcmSetCurrentBuffer
@@ -44,21 +42,17 @@ cellGcmSetDrawBegin
 cellGcmSetDrawEnd
 cellGcmSetDrawIndexArray
 cellGcmSetDrawInlineArray
-cellGcmSetFlip
 cellGcmSetFlipHandler
 cellGcmSetFlipImmediate
-cellGcmSetFlipMode
 cellGcmSetFlipStatus
 cellGcmSetGraphicsHandler
 cellGcmSetJumpCommand
-cellGcmSetPrepareFlip
 cellGcmSetQueueHandler
 cellGcmSetReturnCommand
 cellGcmSetSecondVHandler
 cellGcmSetTileInfo
 cellGcmSetUserHandler
 cellGcmSetVBlankHandler
-cellGcmSetWaitFlip
 cellGcmSetWaitLabel
 cellGcmSetWriteBackEndLabel
 cellGcmSetWriteCommandLabel
