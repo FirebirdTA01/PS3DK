@@ -49,9 +49,12 @@ ok "2-arg cellGcmSetUpdateFragmentProgramParameter(ctx, offset) preserved"
 # The 2-arg form still pins the location to local memory and delegates.
 # The call lives on the line(s) right after the 2-arg signature.
 grep -A2 'cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData \*thisContext, uint32_t offset)' "$hdr" \
-    | grep -q 'rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);' \
-    || fail "the 2-arg form no longer forwards to rsxUpdateFragmentProgramLocation pinned to GCM_LOCATION_RSX - the old behaviour moved"
-ok "2-arg form still delegates to rsxUpdateFragmentProgramLocation(ctx, offset, GCM_LOCATION_RSX)"
+    | grep -q 'ps3tc_gcm_state_update_fragment_program_parameter(thisContext, offset);' \
+    || fail "the 2-arg form no longer calls the native pinned to local memory - the old behaviour moved"
+grep -A3 'static inline void ps3tc_gcm_state_update_fragment_program_parameter(' "$root/sdk/include/cell/gcm/gcm_state_native.h" \
+    | grep -q 'ps3tc_gcm_state_update_fragment_program_location(ctx, offset, GCM_LOCATION_RSX);' \
+    || fail "the 2-arg native no longer pins GCM_LOCATION_RSX"
+ok "2-arg form still pins the location to GCM_LOCATION_RSX (through the native)"
 
 # --- 2. new location-argument form -------------------------------------
 grep -Eq 'static inline void +cellGcmSetUpdateFragmentProgramParameterLocation\(CellGcmContextData \*thisContext,' "$hdr" \
@@ -62,16 +65,16 @@ grep -A3 'cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData \*
     || fail "the new location-argument form does not take (offset, location)"
 # the `location` argument is actually forwarded (not dropped)
 grep -A6 'cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData \*thisContext,' "$hdr" \
-    | grep -q 'rsxUpdateFragmentProgramLocation(thisContext, offset, location);' \
-    || fail "the new form does not pass `location` through to rsxUpdateFragmentProgramLocation - the location arg is being dropped"
-ok "cellGcmSetUpdateFragmentProgramParameterLocation(ctx, offset, location) forwards location to rsx"
+    | grep -q 'ps3tc_gcm_state_update_fragment_program_location(thisContext, offset, location);' \
+    || fail "the new form does not pass `location` through to the native - the location arg is being dropped"
+ok "cellGcmSetUpdateFragmentProgramParameterLocation(ctx, offset, location) passes location to the native"
 
 grep -Eq 'static inline void +cellGcmSetUpdateFragmentProgramParameterLocationUnsafe\(CellGcmContextData \*thisContext,' "$hdr" \
     || fail "cellGcmSetUpdateFragmentProgramParameterLocationUnsafe - the new form's Unsafe twin - is missing"
 grep -A6 'cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGcmContextData \*thisContext,' "$hdr" \
-    | grep -q 'rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);' \
-    || fail "the Unsafe location form does not pass `location` through to rsxUpdateFragmentProgramLocationUnsafe"
-ok "cellGcmSetUpdateFragmentProgramParameterLocationUnsafe forwards location to rsx"
+    | grep -q 'ps3tc_gcm_state_update_fragment_program_location_unsafe(thisContext, offset, location);' \
+    || fail "the Unsafe location form does not pass `location` through to the native"
+ok "cellGcmSetUpdateFragmentProgramParameterLocationUnsafe passes location to the native"
 
 # --- 3. new fragment-program-control wrapper (CGprogram form) ----------
 # The canonical API takes a Cg program handle (not an rsx struct); it
