@@ -178,6 +178,131 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-address" --ext --sanitize address
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-ext-thread" --ext --sanitize thread
 
+      # FIFO wrap phase events (libps3dkprof_ext_fifo + the GCM host model): independent drain while the owner is
+      # parked (also inside a GPU zone) and blocked-sink controls, STOP inside a phase, refusals, plain, ASan+UBSan and
+      # TSan, the reader on every capture, and the four mutants the controls must catch.
+      - name: FIFO wrap events runtime host test
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-plain" --reader tools/target/debug/ps3dk-prof
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-address" --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-thread" --sanitize thread
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-pub" --sanitize thread --mutant relaxed-pub
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-reuse" --sanitize thread --mutant early-reuse
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-ack" --mutant ack-early
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-owner" --mutant owner-drain
+
+      - name: Automatic RSX host models
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-plain" --mutants
+          python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-address" --sanitize
+
+      - name: Automatic RSX initialization, wire and queue controls
+        run: |
+          python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
+          python3 tests/sdk/auto-command-size-test.py --out "$RUNNER_TEMP/auto-command-size"
+          python3 tests/sdk/auto-command-size-test.py --out "$RUNNER_TEMP/auto-command-size-address" --sanitize
+          python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication"
+          python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-address" --sanitize
+          for mutant in flush-before-put wrap-phase2-missing reset-missing; do
+            python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion"
+          python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion-address" --sanitize address
+          python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion-thread" --sanitize thread
+          for mutant in early-publication future-label unstable-report label-regression; do
+            python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion-relaxed" --sanitize thread --mutant relaxed-publication
+          python3 tests/sdk/auto-frames-test.py --out "$RUNNER_TEMP/auto-frames"
+          python3 tests/sdk/auto-frames-test.py --out "$RUNNER_TEMP/auto-frames-address" --sanitize address
+          python3 tests/sdk/auto-frames-test.py --out "$RUNNER_TEMP/auto-frames-thread" --sanitize thread
+          for mutant in accounting partial-ack implicit-close lost; do
+            python3 tests/sdk/auto-frames-test.py --out "$RUNNER_TEMP/auto-frames-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-frames-test.py --out "$RUNNER_TEMP/auto-frames-publication" --sanitize thread --mutant publication
+          python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock"
+          python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-address" --sanitize address
+          python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-thread" --sanitize thread
+          for mutant in deadline put unstable label-regression partial-ack; do
+            python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-clock-test.py --out "$RUNNER_TEMP/auto-clock-handoff" --sanitize thread --mutant handoff
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse"
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-address" --sanitize address
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-thread" --sanitize thread
+          for mutant in release-failed partial-ack owner-release slot-serial serial-wrap skip-cursor; do
+            python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-clock-reuse-test.py --out "$RUNNER_TEMP/auto-clock-reuse-handoff" --sanitize thread --mutant handoff
+          python3 tests/sdk/auto-gcm-command-test.py --out "$RUNNER_TEMP/auto-commands"
+          python3 tests/sdk/auto-gcm-command-test.py --out "$RUNNER_TEMP/auto-commands-address" --sanitize
+          python3 tests/sdk/auto-resource-command-test.py --out "$RUNNER_TEMP/auto-resource-commands"
+          python3 tests/sdk/auto-resource-command-test.py --out "$RUNNER_TEMP/auto-resource-commands-address" --sanitize
+          for mutant in missing-end unsafe-hook changed-argument skip-delegate; do
+            python3 tests/sdk/auto-gcm-command-test.py --out "$RUNNER_TEMP/auto-commands-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-wire-test.py --out "$RUNNER_TEMP/auto-wire"
+          python3 tests/sdk/auto-wire-test.py --out "$RUNNER_TEMP/auto-wire-address" --sanitize
+          for mutant in little-endian refused-owner short-config publication-offset; do
+            python3 tests/sdk/auto-wire-test.py --out "$RUNNER_TEMP/auto-wire-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue"
+          python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-address" --sanitize address
+          python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-thread" --sanitize thread
+          for mutant in short-ack foreign-ack free-incomplete; do
+            python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-relaxed" --sanitize thread --mutant relaxed-publication
+          python3 tests/host/ps3dk-prof-runtime/auto-link-check-test.py
+          python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
+          python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
+          for mutant in compile-as-driver internal-definitions positional-inputs; do
+            python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-selector-test.py --out "$RUNNER_TEMP/auto-selector"
+          python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config"
+          python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config-address" --sanitize address
+          python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config-thread" --sanitize thread
+          for mutant in early-read replace-frozen lose-stop clear-conflict; do
+            python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config-$mutant" --mutant "$mutant"
+          done
+          python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer"
+          python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-address" --sanitize
+          for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
+            python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
+          done
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail flips present spanning fifofail fifopre fifopost; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case stop --mutant reject-late-end --out "$RUNNER_TEMP/auto-runtime-stop-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case stopvisit --mutant ignore-global-stop --out "$RUNNER_TEMP/auto-runtime-stopvisit-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case frames --mutant no-frame-boundary --out "$RUNNER_TEMP/auto-runtime-frame-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case clocks --mutant clock-put --out "$RUNNER_TEMP/auto-runtime-clock-put-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant segment-silent --out "$RUNNER_TEMP/auto-runtime-segment-silent-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case extsegments --mutant external-silent --out "$RUNNER_TEMP/auto-runtime-external-silent-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case extsegments --mutant writer-on-segment --out "$RUNNER_TEMP/auto-runtime-writer-on-segment-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant one-record-chunks --out "$RUNNER_TEMP/auto-runtime-one-record-chunks-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-flip-frames --out "$RUNNER_TEMP/auto-runtime-no-flip-frames-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case flips --mutant no-present-wait --out "$RUNNER_TEMP/auto-runtime-no-present-wait-mutant"
+          for mutant in poll-wait poll-scope-cadence; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case present --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
+          done
+          for mutant in boundary-cadence boundary-scope; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case spanning --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
+          done
+          python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam"
+          for mutant in alias-skips-hook drop-ok status-alias-skips-hook no-wait-scope double-hook self-bind cell-signature; do
+            python3 tests/sdk/auto-gcm-flip-test.py --out "$RUNNER_TEMP/auto-flip-seam-$mutant" --mutant "$mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopost --mutant fifo-publish --out "$RUNNER_TEMP/auto-runtime-fifo-publish-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifopre --mutant fifo-cancel --out "$RUNNER_TEMP/auto-runtime-fifo-cancel-mutant"
+          for mutant in fifo-owner fifo-freeze retired-owner; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case init --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-lease-mutants.py --baseline "$RUNNER_TEMP/auto-runtime-lease" --out "$RUNNER_TEMP/auto-lease-mutants"
+
       # ps3dk-prof clockmap: an independent exact (Fraction vertex/ray) cross-check of the solver on fixed cases
       # plus a fixed-seed random corpus, with the checker's own self-tests and runner controls (crash, truncation,
       # stderr with exit 0, wrong count, hang).  The larger multi-seed run is local evidence.
@@ -765,6 +890,21 @@ jobs:
       # in the declared set (docs/gcm-labels.md).
       - name: Test GCM label reservations and the label query
         run: bash tests/sdk/gcm-labels-test.sh
+      # The observed wrap variant (libgcm_cmd_prof_fifo.a): six boundaries per wrap, the protocol trace unchanged
+      # against the plain build for every observer mode, and three mutants the model must catch.
+      - name: Test the observed GCM FIFO wrap reports its boundaries without changing the protocol
+        run: bash tests/sdk/fifo-wrap-observe-test.sh
+
+      # Skips without PS3DEV; the observed wrap's timestamp helper must compile to sync; mftb; isync in both data
+      # models (a static instruction-sequence check), the previous helper must fail it, and default objects must match.
+      - name: Test the observed GCM FIFO wrap timestamp ordering sequence
+        run: bash tests/sdk/fifo-tb-order-test.sh
+
+      - name: Test FIFO installed identity and link-provider refusals
+        run: python3 tests/host/ps3dk-prof-runtime/fifo-link-check-test.py
+
+      - name: Test FIFO sample frame and lifecycle drain policy
+        run: python3 tests/host/ps3dk-prof-runtime/fifo-sample-test.py
 
       - name: Test checked initial GCM FIFO extent admission
         run: python3 tests/sdk/fifo-init-extent-test.py

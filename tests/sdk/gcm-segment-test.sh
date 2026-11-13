@@ -59,8 +59,7 @@ build() {   # build OUTPUT SEGMENT-SOURCE [extra segment flags]
         -c "$src/gcm_rsx_wrappers.c" -o "$out-wrappers.o"
     "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror "${san[@]}" "${inc[@]}" "$@" \
         -DPS3TC_GCM_SEGMENT_HOST_TEST -c "$seg" -o "$out-segment.o"
-    "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror -Wno-missing-field-initializers "${san[@]}" "${inc[@]}" \
-        -c "$repo_root/tests/sdk/gcm-segment-test.c" -o "$out-test.o"
+    "$cc" -std=gnu11 -O1 -Wall -Wextra -Werror -Wno-missing-field-initializers "${san[@]}" "${inc[@]}" ${test_defs:-}         -c "$repo_root/tests/sdk/gcm-segment-test.c" -o "$out-test.o"
     "$cc" "${san[@]}" -Wl,--gc-sections "$out-test.o" "$out-segment.o" "$out-wrappers.o" "$out-commands.o" -o "$out"
 }
 
@@ -94,5 +93,20 @@ mutant() {
 mutant call-split 's/^#define SEGMENT_CALL_WORDS 5u$/#define SEGMENT_CALL_WORDS 1u/'     "refused busy" "ring words kept" "segment kept" "call first"
 # Init accepting RSX local memory again.
 mutant local-init 's/^        location != GCM_LOCATION_CELL)$/        (location != GCM_LOCATION_CELL \&\& location != GCM_LOCATION_RSX))/'     "local refused" "segment untouched" "label untouched"
+
+# The observed build (libgcm_cmd_prof_auto.a) tells the automatic observer
+# which context is a segment context; without the seam the same test must fail.
+test_defs="-DTEST_AUTO_SEGMENT -DTEST_AUTO_OBSERVED" build "$tmp/auto" "$src/gcm_segment.c" -DPS3TC_PROF_AUTO=1
+rc=0; "$tmp/auto" > "$tmp/auto.log" 2>&1 || rc=$?
+cat "$tmp/auto.log"
+[[ "$rc" -eq 0 ]] || fail "observed segment seam: expected exit 0, got $rc"
+grep -q 'auto seam: open/close bracket every PPU-written segment' "$tmp/auto.log" || fail "observed seam not exercised"
+grep -q '8 or 4 words left: BUSY, ring and segment unchanged, no observer call; 9 words' "$tmp/auto.log" || fail "observed call room not exercised"
+test_defs=-DTEST_AUTO_SEGMENT build "$tmp/auto-control" "$src/gcm_segment.c"
+rc=0; "$tmp/auto-control" > "$tmp/auto-control.log" 2>&1 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "unobserved seam control: expected exit 1, got $rc"
+grep -q 'FAIL auto open' "$tmp/auto-control.log" || fail "unobserved control did not fail the seam check"
+grep -q 'FAIL auto release room' "$tmp/auto-control.log" || fail "unobserved control did not fail the call-room check"
+echo "control: the default build reports no segment contexts (exit 1)"
 
 echo "gcm-segment-test: PASS"

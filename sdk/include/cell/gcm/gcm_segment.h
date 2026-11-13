@@ -134,8 +134,9 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *segment, uint32_t usedBytes);
 /* Emit, into `ring`, a CALL to the segment followed by its retirement
  * label.  The segment must be closed without overflow.  Both commands are
  * one 5-word reservation: when the ring lacks the room and its callback
- * refuses (or makes none), CELL_GCM_SEGMENT_ERROR_BUSY with nothing
- * written and the segment unchanged. */
+ * refuses (or makes none), CELL_GCM_SEGMENT_ERROR_BUSY: no CALL or label
+ * is emitted and the segment is unchanged, but whatever the callback itself
+ * did to the ring (a flush or a wrap) is not undone. */
 int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *segment);
 
 /* Bytes the last End wrote (including the RETURN), and the words refused

@@ -3,6 +3,9 @@
 #include <rsx/gcm_sys.h>
 #include <rsx/commands.h>
 #include <ppu_intrinsics.h>
+#ifdef PS3TC_PROF_AUTO
+#include "../ps3tc_prof_auto.h"
+#endif
 
 #define RSX_INTERNAL	0
 

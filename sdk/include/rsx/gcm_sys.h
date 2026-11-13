@@ -1189,7 +1189,9 @@ Once a flip occurred, querying for a subsequent flip requires the flip status
 to be reset using \ref gcmResetFlipStatus.
 \return zero if no flip occured, nonzero otherwise.
 */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 u32 gcmGetFlipStatus();
+#endif
 
 /*! \brief Enqueues a flip command into the command buffer.
 \param context Pointer to the context object.
@@ -1197,7 +1199,9 @@ u32 gcmGetFlipStatus();
    \ref gcmSetDisplayBuffer).
 \return zero if no error occured, nonzero otherwise.
 */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 s32 gcmSetFlip(gcmContextData *context,const u8 bufferId);
+#endif
 
 /*! \brief Configures a display framebuffer.
 \param bufferId The buffer id (0-7).
@@ -1224,7 +1228,9 @@ s32 gcmMapMainMemory(const void *address,const u32 size,u32 *offset);
 u32* gcmGetLabelAddress(const u8 index);
 
 /*! \brief Reset the flip status. */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 void gcmResetFlipStatus();
+#endif
 
 /*! \brief Set flip mode.
 \param mode The specified flip mode. Possible vales are:
@@ -1232,18 +1238,24 @@ void gcmResetFlipStatus();
  - \ref GCM_FLIP_VSYNC
  - \ref GCM_FLIP_HSYNC_AND_BREAK_EVERYTHING
 */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 void gcmSetFlipMode(const u32 mode);
+#endif
 
 /*! \brief Wait for a flip to be completed.
 \param context Pointer to the context object.
 */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 void gcmSetWaitFlip(gcmContextData *context);
+#endif
 
 /*! \brief Perform preprocessing for display output
 \param context Pointer to context object
 \param id buffer id
 */
+#ifdef PS3TC_GCM_LEGACY_SHIM_TU /* elsewhere a typed inline alias, defined below */
 u32 gcmSetPrepareFlip(gcmContextData *context,const u8 id);
+#endif
 
 /*! \brief Register a callback function to be called upon VBlank.
 
@@ -1366,8 +1378,51 @@ s32 gcmDumpGraphicsError();
 
 void gcmSetUserCommand(void (*handler)(const u32 cause));
 
+
 #ifdef __cplusplus
 	}
+#endif
+
+/* The flip entry points are the cellGcm ones (<cell/gcm/ps3tc_gcm_flip.h>).
+ * The PSL1GHT spellings are typed inline aliases onto the same
+ * implementation: they keep their gcmContextData * signatures (so a call,
+ * or the address of the function, compiles in C and C++), make the same
+ * firmware call and, in a PS3_PROF_AUTO build, report each flip once. The
+ * out-of-line gcm* functions in libgcm_sys.a stay for code compiled against
+ * older headers; their own translation unit defines PS3TC_GCM_LEGACY_SHIM_TU
+ * and sees the plain declarations above instead. */
+#ifndef PS3TC_GCM_LEGACY_SHIM_TU
+#include <cell/gcm/ps3tc_gcm_flip.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+static inline s32 gcmSetFlip(gcmContextData *context,const u8 bufferId)
+{
+	return ps3tc_gcm_flip_SetFlip(context,bufferId);
+}
+static inline u32 gcmSetPrepareFlip(gcmContextData *context,const u8 id)
+{
+	return ps3tc_gcm_flip_SetPrepareFlip(context,id);
+}
+static inline u32 gcmGetFlipStatus(void)
+{
+	return ps3tc_gcm_flip_GetFlipStatus();
+}
+static inline void gcmResetFlipStatus(void)
+{
+	ps3tc_gcm_sys_ResetFlipStatus();
+}
+static inline void gcmSetWaitFlip(gcmContextData *context)
+{
+	ps3tc_gcm_sys_SetWaitFlip(context);
+}
+static inline void gcmSetFlipMode(const u32 mode)
+{
+	ps3tc_gcm_sys_SetFlipMode(mode);
+}
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 #endif

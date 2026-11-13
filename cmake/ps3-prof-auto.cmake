@@ -1,0 +1,284 @@
+# Selected by PS3_PROF_AUTO in either PPU toolchain, after project().
+get_property(_ps3_auto_try GLOBAL PROPERTY IN_TRY_COMPILE)
+if(_ps3_auto_try OR NOT PS3_PROF_AUTO)
+    return()
+endif()
+include_guard(GLOBAL)
+set(PS3_PROF_AUTO_ROOT "${PS3DK}" CACHE PATH "SDK prefix holding the automatic observation providers")
+if(CMAKE_VERSION VERSION_LESS 3.21)
+    message(FATAL_ERROR "Automatic RSX observation requires CMake 3.21 or newer")
+endif()
+# Every app-owned translation unit sees the same init seam, including static
+# libraries compiled by subdirectories. Prebuilt SDK libraries stay unchanged.
+add_compile_definitions("$<$<COMPILE_LANGUAGE:C,CXX>:PS3TC_PROF_AUTO=1>")
+include_directories(BEFORE "${PS3_PROF_AUTO_ROOT}/ppu/include")
+set_property(GLOBAL PROPERTY PS3_AUTO_ROOT "${PS3_PROF_AUTO_ROOT}")
+# The deferred walk selects executables after their ordinary libraries exist.
+# The link guard checks actual providers, including transitive dependencies.
+
+# One link item onto the AUTO providers. <out> receives the substituted item,
+# <kind> gcm, prof, live or empty (unchanged). $<LINK_ONLY:x> (a static
+# library's private dependency, as it appears in INTERFACE_LINK_LIBRARIES) is
+# substituted inside; any other generator expression naming a provider
+# cannot be resolved at configure time and is refused, naming <owner>.
+function(_ps3_auto_map item lib owner out kind)
+    set(inner "${item}")
+    set(wrap FALSE)
+    if(item MATCHES "^\\$<LINK_ONLY:([^<>]+)>$")
+        set(inner "${CMAKE_MATCH_1}")
+        set(wrap TRUE)
+    endif()
+    set(k "")
+    if(inner STREQUAL "gcm_cmd" OR inner STREQUAL "${lib}/libgcm_cmd.a" OR
+       inner STREQUAL "${lib}/libgcm_cmd_prof_auto.a")
+        set(m "${lib}/libgcm_cmd_prof_auto.a")
+        set(k gcm)
+    elseif(inner STREQUAL "ps3dkprof_ext" OR inner STREQUAL "${lib}/libps3dkprof_ext.a" OR
+           inner STREQUAL "${lib}/libps3dkprof_auto.a")
+        set(m "${lib}/libps3dkprof_auto.a")
+        set(k prof)
+    elseif(inner STREQUAL "ps3dkprof_ext_live" OR inner STREQUAL "${lib}/libps3dkprof_ext_live.a")
+        set(m "${lib}/libps3dkprof_ext_live.a")
+        set(k live)
+    elseif(inner MATCHES "(gcm_cmd|ps3dkprof|ps3prof)")
+        if(inner MATCHES "\\$<")
+            message(FATAL_ERROR "PS3_PROF_AUTO cannot select the AUTO providers for target '${owner}': its link "
+                "item '${item}' names a GCM or profiler library inside a generator expression, which cannot be "
+                "resolved at configure time, so the default gcm_cmd could link beside libgcm_cmd_prof_auto.a. "
+                "Name gcm_cmd (or the library) without a generator expression in '${owner}'.")
+        endif()
+        message(FATAL_ERROR "unsupported AUTO profiler composition: ${item} (in target '${owner}')")
+    else()
+        set(m "${inner}")
+    endif()
+    if(wrap)
+        set(m "$<LINK_ONLY:${m}>")
+    endif()
+    set(${out} "${m}" PARENT_SCOPE)
+    set(${kind} "${k}" PARENT_SCOPE)
+endfunction()
+
+# The library targets a link item brings into a link: the item itself, or
+# the target wrapped in $<LINK_ONLY:...> (how a static library's private
+# dependency appears in INTERFACE_LINK_LIBRARIES), parsed structurally
+# before any target lookup; ALIAS targets resolved. Any other generator
+# expression that names a target cannot be walked at configure time, so it
+# is refused, naming <owner>, rather than skipped.
+function(_ps3_auto_item_targets item owner out)
+    set(name "${item}")
+    if(item MATCHES "^\\$<LINK_ONLY:([^<>]+)>$")
+        set(name "${CMAKE_MATCH_1}")
+    elseif(item MATCHES "\\$<")
+        string(REGEX MATCHALL "[A-Za-z0-9_.+-]+(::[A-Za-z0-9_.+-]+)*" tokens "${item}")
+        get_property(hidden GLOBAL PROPERTY PS3_AUTO_DIRECTORY_IMPORTS)
+        foreach(token IN LISTS tokens)
+            if(NOT TARGET "${token}" AND ("${token}" IN_LIST hidden OR token MATCHES "::"))
+                message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': it "
+                    "names '${token}', an imported target that is not GLOBAL (or an ALIAS of one), inside a "
+                    "generator expression, so a default gcm_cmd behind it could link beside "
+                    "libgcm_cmd_prof_auto.a. Declare it IMPORTED GLOBAL and link it without a conditional "
+                    "generator expression in '${owner}'.")
+            endif()
+            if(TARGET "${token}")
+                message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': it "
+                    "names target '${token}' inside a generator expression other than $<LINK_ONLY:...>, which "
+                    "cannot be resolved at configure time, so a default gcm_cmd behind it could link beside "
+                    "libgcm_cmd_prof_auto.a. Link '${token}' without a conditional generator expression in "
+                    "'${owner}'.")
+            endif()
+        endforeach()
+        set(${out} "" PARENT_SCOPE)
+        return()
+    endif()
+    set(found "")
+    if(TARGET "${name}")
+        get_target_property(real "${name}" ALIASED_TARGET)
+        if(real)
+            set(name "${real}")
+        endif()
+        set(found "${name}")
+    else()
+        # A non-GLOBAL imported target is visible only in the directory that declares it and below; the walk
+        # runs from the top directory and cannot read its link interface, so it is refused rather than skipped.
+        # A name with '::' is never a plain library, so one the top directory cannot see is a hidden target too
+        # (for example an ALIAS of a directory-scoped imported target). A hidden ALIAS with a plain name cannot be
+        # told from a library name here; the link map check still refuses the mixed provider it would bring.
+        get_property(hidden GLOBAL PROPERTY PS3_AUTO_DIRECTORY_IMPORTS)
+        if("${name}" IN_LIST hidden OR name MATCHES "::")
+            message(FATAL_ERROR "PS3_PROF_AUTO cannot walk the link item '${item}' of target '${owner}': "
+                "'${name}' is an imported target that is not GLOBAL (or an ALIAS of one), so its link interface is "
+                "not visible where "
+                "the AUTO selection runs and a default gcm_cmd behind it could link beside "
+                "libgcm_cmd_prof_auto.a. Declare it with add_library(${name} ... IMPORTED GLOBAL), or link gcm_cmd "
+                "directly in '${owner}'.")
+        endif()
+    endif()
+    set(${out} "${found}" PARENT_SCOPE)
+endfunction()
+
+# The names of every directory's imported targets (IMPORTED_TARGETS, CMake 3.21), readable from the top
+# directory even where the targets themselves are not.
+function(_ps3_auto_directory_imports directory)
+    get_property(imports DIRECTORY "${directory}" PROPERTY IMPORTED_TARGETS)
+    set_property(GLOBAL APPEND PROPERTY PS3_AUTO_DIRECTORY_IMPORTS ${imports})
+    get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(child IN LISTS children)
+        _ps3_auto_directory_imports("${child}")
+    endforeach()
+endfunction()
+
+# The link closure of a selected executable: every library target it links,
+# recursively through LINK_LIBRARIES and INTERFACE_LINK_LIBRARIES, gets the
+# same provider substitution, so a gcm_cmd that reaches the link through a
+# library (an engine static library linking gcm_cmd) is the observed
+# provider too. A library target is rewritten once; under PS3_PROF_AUTO every
+# executable is selected, so the rewrite holds for all of them.
+function(_ps3_auto_closure target lib)
+    get_property(done GLOBAL PROPERTY PS3_AUTO_CLOSURE_DONE)
+    if("${target}" IN_LIST done)
+        return()
+    endif()
+    set_property(GLOBAL APPEND PROPERTY PS3_AUTO_CLOSURE_DONE "${target}")
+    get_target_property(kind "${target}" TYPE)
+    set(children "")
+    set(props INTERFACE_LINK_LIBRARIES)
+    if(NOT kind STREQUAL INTERFACE_LIBRARY)
+        list(APPEND props LINK_LIBRARIES)
+    endif()
+    foreach(prop IN LISTS props)
+        get_target_property(items "${target}" "${prop}")
+        if(NOT items)
+            continue()
+        endif()
+        set(mapped "")
+        set(changed FALSE)
+        foreach(item IN LISTS items)
+            _ps3_auto_map("${item}" "${lib}" "${target}" m k)
+            if(k)
+                set(changed TRUE)
+            else()
+                _ps3_auto_item_targets("${item}" "${target}" t)
+                list(APPEND children ${t})
+            endif()
+            list(APPEND mapped "${m}")
+        endforeach()
+        if(changed)
+            set_property(TARGET "${target}" PROPERTY "${prop}" "${mapped}")
+        endif()
+    endforeach()
+    foreach(child IN LISTS children)
+        _ps3_auto_closure("${child}" "${lib}")
+    endforeach()
+endfunction()
+
+function(ps3_target_prof_auto target)
+    cmake_parse_arguments(AUTO "" "ROOT" "" ${ARGN})
+    if(AUTO_UNPARSED_ARGUMENTS OR NOT AUTO_ROOT OR NOT TARGET "${target}")
+        message(FATAL_ERROR "ps3_target_prof_auto needs an executable target and ROOT")
+    endif()
+    get_target_property(kind "${target}" TYPE)
+    get_target_property(active "${target}" PS3_AUTO_ACTIVE)
+    get_target_property(fifo_active "${target}" PS3_FIFO_ACTIVE)
+    if(NOT kind STREQUAL EXECUTABLE OR active OR fifo_active)
+        message(FATAL_ERROR "AUTO selection requires an unselected executable")
+    endif()
+    if(CMAKE_VERSION VERSION_LESS 3.21 OR NOT CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
+        message(FATAL_ERROR "AUTO link guard requires CMake 3.21 and Ninja or Makefiles")
+    endif()
+    if(PS3_PROF_WAITS AND NOT PS3_PROF_WAITS STREQUAL "OFF")
+        message(FATAL_ERROR "AUTO/waits composition is not supported")
+    endif()
+    get_filename_component(root "${AUTO_ROOT}" REALPATH)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(abi ilp32)
+        set(lib "${root}/ppu/lib")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(abi lp64)
+        set(lib "${root}/ppu/lib/lp64")
+    else()
+        message(FATAL_ERROR "AUTO selection requires a known PPU pointer data model")
+    endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(checker "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/ps3-prof-auto-check.py")
+    set(args "${Python3_EXECUTABLE}" "${checker}" --root "${root}" --abi "${abi}")
+    execute_process(COMMAND ${args} RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "AUTO preflight refused: ${err}")
+    endif()
+    get_target_property(libs "${target}" LINK_LIBRARIES)
+    if(NOT libs)
+        set(libs "")
+    endif()
+    set(selected "")
+    set(gcm_seen FALSE)
+    set(prof_seen FALSE)
+    set(children "")
+    foreach(item IN LISTS libs)
+        _ps3_auto_map("${item}" "${lib}" "${target}" m k)
+        if(k STREQUAL gcm)
+            set(gcm_seen TRUE)
+        elseif(k STREQUAL prof)
+            set(prof_seen TRUE)
+        elseif(NOT k)
+            _ps3_auto_item_targets("${item}" "${target}" t)
+            list(APPEND children ${t})
+        endif()
+        list(APPEND selected "${m}")
+    endforeach()
+    # Library targets in the link closure get the same substitution.
+    foreach(child IN LISTS children)
+        if(NOT child STREQUAL target)
+            _ps3_auto_closure("${child}" "${lib}")
+        endif()
+    endforeach()
+    if(NOT prof_seen)
+        list(APPEND selected "${lib}/libps3dkprof_auto.a")
+    endif()
+    if(NOT gcm_seen)
+        list(APPEND selected "${lib}/libgcm_cmd_prof_auto.a")
+    endif()
+    set_property(TARGET "${target}" PROPERTY LINK_LIBRARIES "${selected}")
+    target_include_directories("${target}" BEFORE PRIVATE "${root}/ppu/include")
+    # Force these definitions even for a small link-only consumer. Their
+    # presence cannot be mistaken for an unexercised successful link.
+    target_link_options("${target}" PRIVATE "-Wl,-u,__ps3dk_prof_auto_startup_anchor,-u,ps3dk_prof__auto_gcm_init_result,-u,ps3dk_prof__auto_begin,-u,ps3dk_prof__auto_end,-u,ps3dk_prof__auto_encode_ops,-u,ps3dk_prof__auto_queue_claim,-u,ps3dk_prof_fifo_attach,-u,ps3dk_prof_fifo_detach,-u,ps3tc_fifo_wrap_callback,-u,rsxDrawVertexArray,-u,rsxDrawIndexArray,-u,rsxClearSurface")
+    target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_publish_before,-u,ps3dk_prof__auto_publish_after,-u,ps3dk_prof__auto_owner_retire,-u,ps3dk_prof__auto_completion_read,-u,rsxFlushBuffer")
+    target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_frame,-u,ps3dk_prof_auto_frame_end,-u,ps3dk_prof__auto_frames_close")
+    target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_clock_sample,-u,ps3dk_prof__auto_clock_before,-u,ps3dk_prof__auto_clock_after")
+    target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__auto_fifo_boundary,-u,ps3dk_prof__auto_lease_owner")
+    target_link_options("${target}" PRIVATE "-Wl,-u,ps3dk_prof__fifo_auto_prepare,-u,ps3dk_prof__fifo_auto_publish,-u,ps3dk_prof__fifo_auto_cancel")
+    # The observed CALL-segment member and its runtime seams, checked in the map like every provider above.
+    target_link_options("${target}" PRIVATE "-Wl,-u,cellGcmSegmentBegin,-u,cellGcmSegmentEnd,-u,cellGcmSegmentCall,-u,ps3dk_prof__auto_segment_open,-u,ps3dk_prof__auto_segment_close,-u,ps3dk_prof__auto_segment_call")
+    set(map "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto.map")
+    # One option: the cross-reference table must stay mangled, so --no-demangle cannot be separated from --cref.
+    target_link_options("${target}" PRIVATE "-Wl,--no-demangle,-Map,${map},--cref")
+    foreach(lang C CXX)
+        get_target_property(old "${target}" "${lang}_LINKER_LAUNCHER")
+        if(old)
+            message(FATAL_ERROR "AUTO selection cannot replace an existing link launcher")
+        endif()
+        set_property(TARGET "${target}" PROPERTY "${lang}_LINKER_LAUNCHER" "${args};--map;${map};--command")
+    endforeach()
+    set_property(TARGET "${target}" PROPERTY PS3_AUTO_ACTIVE TRUE)
+endfunction()
+
+function(_ps3_auto_targets directory)
+    get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(root GLOBAL PROPERTY PS3_AUTO_ROOT)
+    foreach(target IN LISTS targets)
+        get_target_property(kind "${target}" TYPE)
+        get_target_property(selected "${target}" PS3_AUTO_ACTIVE)
+        if(kind STREQUAL EXECUTABLE AND NOT selected)
+            ps3_target_prof_auto("${target}" ROOT "${root}")
+        endif()
+    endforeach()
+    get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(child IN LISTS children)
+        _ps3_auto_targets("${child}")
+    endforeach()
+endfunction()
+function(_ps3_auto_start directory)
+    _ps3_auto_directory_imports("${directory}")
+    _ps3_auto_targets("${directory}")
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _ps3_auto_start "${CMAKE_SOURCE_DIR}")

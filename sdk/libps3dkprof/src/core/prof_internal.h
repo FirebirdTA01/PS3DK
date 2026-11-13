@@ -16,6 +16,9 @@
 
 #include "../pal/pal.h"
 #include "prof_finalization.h"
+#ifdef PS3DK_PROF_WITH_AUTO
+#include "../auto_rsx/auto_lease.h"
+#endif
 #ifdef PS3DK_PROF_WITH_ARCS
 #include "../hooks/arc_runtime.h"
 #endif
@@ -264,9 +267,15 @@ typedef struct prof {
     /* P3.3 R2: GPU domains (host only).  spu_mutex is the EXTENSION mutex for both. */
     uint32_t gpu_max, gpu_slots_max; /* 0 = GPU domains disabled */
     uint32_t gpu_lifetime;           /* attaches so far (ids 1026 + n, never reused), under spu_mutex */
+#ifdef PS3DK_PROF_WITH_AUTO
+    auto_resource_lease auto_lease;  /* same mutex and domain-id frontier as manual GPU domains */
+#endif
     struct gpu_slot *gpu;            /* gpu_max table slots, in the block */
     struct prg_ledger *gpu_ledger;   /* the GPU share of the file-wide aggregates, under spu_mutex */
     const rsxcap_ops *rsxcap;        /* S2: atomic (release once under spu_mutex, acquire); NULL: not enabled */
+#ifdef PS3DK_PROF_WITH_FIFO
+    uint64_t gpu_declared;           /* drainer-private: bit (id - 1026) once that RSX domain's DOMAIN was accepted */
+#endif
 #endif
     /* HEADER strings, copied at init (the caller's config strings need not outlive init). */
     char app[33];

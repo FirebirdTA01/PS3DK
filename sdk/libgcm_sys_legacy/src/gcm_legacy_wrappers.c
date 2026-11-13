@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <ppu-types.h>
 #include <ppu-asm.h>
+/* This TU defines the out-of-line gcm* shims (ABI for objects compiled
+ * against older headers): it must see neither the gcm* -> cellGcm* aliases
+ * nor the static inline cellGcm flip entry points of <rsx/gcm_sys.h>. */
+#define PS3TC_GCM_LEGACY_SHIM_TU 1
 #include <rsx/gcm_sys.h>
 #include <sys/lv2_types.h>
 

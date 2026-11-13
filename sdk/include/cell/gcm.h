@@ -74,10 +74,13 @@ extern "C" {
  * current, callback}).  In C++ the cell headers expose a real struct tag so
  * both `CellGcmContextData *` and `struct CellGcmContextData *` spellings
  * compile, while still converting to the underlying RSX context type. */
+#ifndef PS3TC_CELL_GCM_CONTEXT_DATA /* normally defined by <cell/gcm/ps3tc_gcm_flip.h> */
+#define PS3TC_CELL_GCM_CONTEXT_DATA
 #ifdef __cplusplus
 struct CellGcmContextData : public gcmContextData {};
 #else
 typedef gcmContextData       CellGcmContextData;
+#endif
 #endif
 typedef gcmContextCallback   CellGcmContextCallback;
 
@@ -375,16 +378,31 @@ static inline int32_t cellGcmSetZcull(uint8_t index, uint32_t offset,
  * details). */
 #include <cell/gcm/ps3tc_fifo_wrap.h>
 
+#ifdef PS3TC_PROF_AUTO
+/* Selected together with the observed GCM/runtime providers. A strong symbol
+ * makes a missing provider a link failure, rather than silent non-observation.
+ * The notification cannot replace the application's initialization result. */
+void ps3dk_prof__auto_gcm_init_result(gcmContextData *, uint32_t, uint32_t, const void *, int32_t);
+#endif
+
 static inline int32_t cellGcmInit(uint32_t cmdSize, uint32_t ioSize, void *ioAddress)
 {
 	gcmContextData *tmp = NULL;
 	s32 rc = rsxInit(&tmp, cmdSize, ioSize, ioAddress);
 	if (rc == 0) {
 		rc = ps3tc_fifo_init_extent(tmp, cmdSize, ioSize, ioAddress);
-		if (rc != 0) return (int32_t)rc;
+		if (rc != 0) {
+#ifdef PS3TC_PROF_AUTO
+			ps3dk_prof__auto_gcm_init_result(tmp, cmdSize, ioSize, ioAddress, (int32_t)rc);
+#endif
+			return (int32_t)rc;
+		}
 		gGcmContext = (gcmContextData *)(uintptr_t)tmp;
 		ps3tc_fifo_wrap_install(tmp);
 	}
+#ifdef PS3TC_PROF_AUTO
+	ps3dk_prof__auto_gcm_init_result(tmp, cmdSize, ioSize, ioAddress, (int32_t)rc);
+#endif
 	return (int32_t)rc;
 }
 
@@ -469,21 +487,6 @@ static inline int32_t cellGcmSetDisplayBuffer(uint8_t id, uint32_t offset, uint3
 	return (int32_t)gcmSetDisplayBuffer(id, offset, pitch, width, height);
 }
 
-static inline void cellGcmSetFlipMode(uint32_t mode)
-{
-	gcmSetFlipMode(mode);
-}
-
-static inline uint32_t cellGcmGetFlipStatus(void)
-{
-	return (uint32_t)gcmGetFlipStatus();
-}
-
-static inline void cellGcmResetFlipStatus(void)
-{
-	gcmResetFlipStatus();
-}
-
 static inline void cellGcmSetFlipStatus(void)
 {
 	gcmSetFlipStatus();
@@ -560,20 +563,10 @@ static inline void cellGcmSetDefaultCommandBuffer(void)
  *     it from anywhere else races against in-flight GPU work and
  *     will glitch the display.
  * ---------------------------------------------------------------- */
-static inline int32_t cellGcmSetFlip(CellGcmContextData *context, uint8_t id)
-{
-	return (int32_t)gcmSetFlip(context, id);
-}
-
-static inline void cellGcmSetWaitFlip(CellGcmContextData *context)
-{
-	gcmSetWaitFlip(context);
-}
-
-static inline uint32_t cellGcmSetPrepareFlip(CellGcmContextData *context, uint8_t id)
-{
-	return (uint32_t)gcmSetPrepareFlip(context, id);
-}
+/* cellGcmSetFlip, cellGcmSetPrepareFlip and cellGcmSetWaitFlip (with
+ * cellGcmGetFlipStatus, cellGcmResetFlipStatus and cellGcmSetFlipMode) are
+ * defined over the firmware calls in <cell/gcm/ps3tc_gcm_flip.h>, included
+ * through <rsx/gcm_sys.h>; the gcm* spellings are aliases onto them. */
 
 static inline int32_t cellGcmSetFlipImmediate(uint8_t id)
 {
@@ -688,6 +681,45 @@ static inline uint32_t cellGcmGetReportDataLocation(uint32_t index, uint32_t loc
 /* Cell OS-style constant spellings (CELL_GCM_*).  Header-only; lives
  * next to the GCM_* originals our runtime layer exposes. */
 #include <cell/gcm/gcm_enum.h>
+
+/* Wait for the flip queued last to complete: poll cellGcmGetFlipStatus and
+ * sleep between polls (sys_timer_usleep, at most
+ * PS3TC_GCM_WAIT_FLIP_POLL_US each) until the status reads done.  max_us
+ * bounds the total requested sleep.  CELL_OK when the flip completed,
+ * CELL_GCM_ERROR_FAILURE when max_us of sleep passed first (the flip is still
+ * pending; nothing is cancelled).  Reset the status with
+ * cellGcmResetFlipStatus before queueing the flip, as for a hand-written
+ * poll loop.
+ *
+ * In a PS3_PROF_AUTO build the call is a flip-wait scope: the profiler
+ * records its outer elapsed time, including scheduling and polling, as the
+ * frame's presentation wait.  That is the evidence a frame needs to read as
+ * presentation pacing; a hand-written loop around cellGcmGetFlipStatus is
+ * recorded only as polling cadence. */
+#ifndef PS3TC_GCM_WAIT_FLIP_POLL_US
+#define PS3TC_GCM_WAIT_FLIP_POLL_US 100u
+#endif
+static inline int32_t cellGcmWaitFlipComplete(uint32_t max_us)
+{
+	uint32_t slept = 0;
+	int32_t rc = 0;
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
+	uint64_t scope = ps3dk_prof__auto_flip_wait_begin();
+#endif
+	while (cellGcmGetFlipStatus() != 0) {
+		uint32_t step = max_us - slept < PS3TC_GCM_WAIT_FLIP_POLL_US ? max_us - slept : PS3TC_GCM_WAIT_FLIP_POLL_US;
+		if (slept >= max_us) {
+			rc = (int32_t)CELL_GCM_ERROR_FAILURE;
+			break;
+		}
+		sys_timer_usleep(step);
+		slept += step;
+	}
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FLIP_HOOK)
+	ps3dk_prof__auto_flip_wait_end(scope, rc);
+#endif
+	return rc;
+}
 
 /* cellGcmCg* struct-walker API (libgcm_cmd.a in the installed SDK).  Cell OS
  * samples include <cell/gcm.h> and call cellGcmCgInitProgram /

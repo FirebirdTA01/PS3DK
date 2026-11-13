@@ -315,3 +315,5 @@ verify-install-ext:
 include waits.mk
 include func.mk
 include counters.mk
+include fifo.mk
+include auto-rsx.mk
