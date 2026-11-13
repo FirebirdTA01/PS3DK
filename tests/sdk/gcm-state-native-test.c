@@ -485,6 +485,219 @@ static void ref_unsafe_clearrep(gcmContextData *ctx, uint32_t type)
     ctx->current[1] = type;
     ctx->current   += 2;
 }
+
+/* surface (32 words) */
+static void ref_safe_surface(gcmContextData *ctx, const CellGcmSurface *surface)
+{
+    uint32_t log2Width = 31 - __cntlzw(surface->width);
+    uint32_t log2Height = 31 - __cntlzw(surface->height);
+    if (ctx->current + 32 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 32) != 0) return;
+    ctx->current[0]  = REF_METHOD(NV40TCL_DMA_COLOR0, 1);
+    ctx->current[1]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[0];
+    ctx->current[2]  = REF_METHOD(NV40TCL_DMA_COLOR1, 1);
+    ctx->current[3]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[1];
+    ctx->current[4]  = REF_METHOD(NV40TCL_DMA_COLOR2, 2);
+    ctx->current[5]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[2];
+    ctx->current[6]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[3];
+    ctx->current[7]  = REF_METHOD(NV40TCL_DMA_ZETA, 1);
+    ctx->current[8]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->depthLocation;
+    ctx->current[9]  = REF_METHOD(NV40TCL_RT_FORMAT, 6);
+    ctx->current[10] = ((log2Height << NV40TCL_RT_FORMAT_LOG2_HEIGHT_SHIFT) |
+                        (log2Width  << NV40TCL_RT_FORMAT_LOG2_WIDTH_SHIFT) |
+                        (surface->antiAlias << NV40TCL_RT_FORMAT_ANTIALIAS_SHIFT) |
+                        (surface->type << NV40TCL_RT_FORMAT_TYPE_SHIFT) |
+                        (surface->depthFormat << NV40TCL_RT_FORMAT_ZETA_SHIFT) |
+                        (surface->colorFormat << NV40TCL_RT_FORMAT_COLOR_SHIFT));
+    ctx->current[11] = surface->colorPitch[0];
+    ctx->current[12] = surface->colorOffset[0];
+    ctx->current[13] = surface->depthOffset;
+    ctx->current[14] = surface->colorOffset[1];
+    ctx->current[15] = surface->colorPitch[1];
+    ctx->current[16] = REF_METHOD(NV40TCL_ZETA_PITCH, 1);
+    ctx->current[17] = surface->depthPitch;
+    ctx->current[18] = REF_METHOD(NV40TCL_COLOR2_PITCH, 4);
+    ctx->current[19] = surface->colorPitch[2];
+    ctx->current[20] = surface->colorPitch[3];
+    ctx->current[21] = surface->colorOffset[2];
+    ctx->current[22] = surface->colorOffset[3];
+    ctx->current[23] = REF_METHOD(NV40TCL_RT_ENABLE, 1);
+    ctx->current[24] = surface->colorTarget;
+    ctx->current[25] = REF_METHOD(NV40TCL_WINDOW_OFFSET, 1);
+    ctx->current[26] = ((surface->y << 16) | surface->x);
+    ctx->current[27] = REF_METHOD(NV40TCL_RT_HORIZ, 2);
+    ctx->current[28] = ((surface->width << 16) | surface->x);
+    ctx->current[29] = ((surface->height << 16) | surface->y);
+    ctx->current[30] = REF_METHOD(NV40TCL_SHADER_WINDOW, 1);
+    ctx->current[31] = ((0 << 16) | (1 << 12) | surface->height);
+    ctx->current    += 32;
+}
+static void ref_unsafe_surface(gcmContextData *ctx, const CellGcmSurface *surface)
+{
+    uint32_t log2Width = 31 - __cntlzw(surface->width);
+    uint32_t log2Height = 31 - __cntlzw(surface->height);
+    ctx->current[0]  = REF_METHOD(NV40TCL_DMA_COLOR0, 1);
+    ctx->current[1]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[0];
+    ctx->current[2]  = REF_METHOD(NV40TCL_DMA_COLOR1, 1);
+    ctx->current[3]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[1];
+    ctx->current[4]  = REF_METHOD(NV40TCL_DMA_COLOR2, 2);
+    ctx->current[5]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[2];
+    ctx->current[6]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->colorLocation[3];
+    ctx->current[7]  = REF_METHOD(NV40TCL_DMA_ZETA, 1);
+    ctx->current[8]  = GCM_DMA_MEMORY_FRAME_BUFFER + surface->depthLocation;
+    ctx->current[9]  = REF_METHOD(NV40TCL_RT_FORMAT, 6);
+    ctx->current[10] = ((log2Height << NV40TCL_RT_FORMAT_LOG2_HEIGHT_SHIFT) |
+                        (log2Width  << NV40TCL_RT_FORMAT_LOG2_WIDTH_SHIFT) |
+                        (surface->antiAlias << NV40TCL_RT_FORMAT_ANTIALIAS_SHIFT) |
+                        (surface->type << NV40TCL_RT_FORMAT_TYPE_SHIFT) |
+                        (surface->depthFormat << NV40TCL_RT_FORMAT_ZETA_SHIFT) |
+                        (surface->colorFormat << NV40TCL_RT_FORMAT_COLOR_SHIFT));
+    ctx->current[11] = surface->colorPitch[0];
+    ctx->current[12] = surface->colorOffset[0];
+    ctx->current[13] = surface->depthOffset;
+    ctx->current[14] = surface->colorOffset[1];
+    ctx->current[15] = surface->colorPitch[1];
+    ctx->current[16] = REF_METHOD(NV40TCL_ZETA_PITCH, 1);
+    ctx->current[17] = surface->depthPitch;
+    ctx->current[18] = REF_METHOD(NV40TCL_COLOR2_PITCH, 4);
+    ctx->current[19] = surface->colorPitch[2];
+    ctx->current[20] = surface->colorPitch[3];
+    ctx->current[21] = surface->colorOffset[2];
+    ctx->current[22] = surface->colorOffset[3];
+    ctx->current[23] = REF_METHOD(NV40TCL_RT_ENABLE, 1);
+    ctx->current[24] = surface->colorTarget;
+    ctx->current[25] = REF_METHOD(NV40TCL_WINDOW_OFFSET, 1);
+    ctx->current[26] = ((surface->y << 16) | surface->x);
+    ctx->current[27] = REF_METHOD(NV40TCL_RT_HORIZ, 2);
+    ctx->current[28] = ((surface->width << 16) | surface->x);
+    ctx->current[29] = ((surface->height << 16) | surface->y);
+    ctx->current[30] = REF_METHOD(NV40TCL_SHADER_WINDOW, 1);
+    ctx->current[31] = ((0 << 16) | (1 << 12) | surface->height);
+    ctx->current    += 32;
+}
+
+/* vertex_data_array (4 words) */
+static void ref_safe_vtxarray(gcmContextData *ctx, uint8_t index, uint16_t frequency,
+                              uint8_t stride, uint8_t size, uint8_t type,
+                              uint8_t location, uint32_t offset)
+{
+    if (ctx->current + 4 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 4) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_VTXFMT(index), 1);
+    ctx->current[1] = ((frequency << 16) | (stride << NV40TCL_VTXFMT_STRIDE_SHIFT) | (size << NV40TCL_VTXFMT_SIZE_SHIFT) | type);
+    ctx->current[2] = REF_METHOD(NV40TCL_VTXBUF_ADDRESS(index), 1);
+    ctx->current[3] = ((location << 31) | offset);
+    ctx->current   += 4;
+}
+static void ref_unsafe_vtxarray(gcmContextData *ctx, uint8_t index, uint16_t frequency,
+                                uint8_t stride, uint8_t size, uint8_t type,
+                                uint8_t location, uint32_t offset)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_VTXFMT(index), 1);
+    ctx->current[1] = ((frequency << 16) | (stride << NV40TCL_VTXFMT_STRIDE_SHIFT) | (size << NV40TCL_VTXFMT_SIZE_SHIFT) | type);
+    ctx->current[2] = REF_METHOD(NV40TCL_VTXBUF_ADDRESS(index), 1);
+    ctx->current[3] = ((location << 31) | offset);
+    ctx->current   += 4;
+}
+
+/* vertex_program_constants */
+static void ref_safe_vp_consts(gcmContextData *ctx, uint32_t start, uint32_t count, const f32 *data)
+{
+    uint32_t loop = count >> 5;
+    uint32_t rest = count & 0x1f;
+    const f32 *value = data;
+    uint32_t reserve = loop * 34 + (rest != 0 ? 2 + rest : 0);
+    if (reserve == 0) return;
+    if (ctx->current + reserve > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, reserve) != 0) return;
+    for (uint32_t i = 0; i < loop; i++) {
+        uint32_t loadAt = start + i * 8;
+        ctx->current[0] = REF_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 33);
+        ctx->current[1] = loadAt;
+        memcpy(&ctx->current[2], value, sizeof(f32) * 16);
+        memcpy(&ctx->current[18], &value[16], sizeof(f32) * 16);
+        ctx->current += 34;
+        value += 32;
+    }
+    if (rest) {
+        ctx->current[0] = REF_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, rest + 1);
+        ctx->current[1] = start + (loop << 3);
+        memcpy(&ctx->current[2], value, sizeof(f32) * rest);
+        ctx->current += 2 + rest;
+    }
+}
+static void ref_unsafe_vp_consts(gcmContextData *ctx, uint32_t start, uint32_t count, const f32 *data)
+{
+    uint32_t loop = count >> 5;
+    uint32_t rest = count & 0x1f;
+    const f32 *value = data;
+    for (uint32_t i = 0; i < loop; i++) {
+        uint32_t loadAt = start + i * 8;
+        ctx->current[0] = REF_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, 33);
+        ctx->current[1] = loadAt;
+        memcpy(&ctx->current[2], value, sizeof(f32) * 16);
+        memcpy(&ctx->current[18], &value[16], sizeof(f32) * 16);
+        ctx->current += 34;
+        value += 32;
+    }
+    if (rest) {
+        ctx->current[0] = REF_METHOD(NV40TCL_VP_UPLOAD_CONST_ID, rest + 1);
+        ctx->current[1] = start + (loop << 3);
+        memcpy(&ctx->current[2], value, sizeof(f32) * rest);
+        ctx->current += 2 + rest;
+    }
+}
+
+/* update_fragment_program_parameter */
+static void ref_safe_upd_fp(gcmContextData *ctx, uint32_t offset)
+{
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_FP_ADDRESS, 1);
+    ctx->current[1] = ((GCM_LOCATION_RSX + 1) | (offset & 0x1fffffff));
+    ctx->current   += 2;
+}
+static void ref_unsafe_upd_fp(gcmContextData *ctx, uint32_t offset)
+{
+    ctx->current[0] = REF_METHOD(NV40TCL_FP_ADDRESS, 1);
+    ctx->current[1] = ((GCM_LOCATION_RSX + 1) | (offset & 0x1fffffff));
+    ctx->current   += 2;
+}
+
+/* nop_command */
+static void ref_safe_nop(gcmContextData *ctx, uint32_t count)
+{
+    if (count == 0) return;
+    if (ctx->current + count > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, count) != 0) return;
+    for (uint32_t i = 0; i < count; i++)
+        ctx->current[i] = 0;
+    ctx->current += count;
+}
+static void ref_unsafe_nop(gcmContextData *ctx, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; i++)
+        ctx->current[i] = 0;
+    ctx->current += count;
+}
+
+/* report_location */
+static void ref_safe_report_loc(gcmContextData *ctx, uint32_t location)
+{
+    uint32_t handle = (location == GCM_LOCATION_CELL) ? 0xBAD68000 : 0x66626660;
+    if (ctx->current + 2 > ctx->end)
+        if (ctx->callback && ctx->callback(ctx, 2) != 0) return;
+    ctx->current[0] = REF_METHOD(NV40TCL_DMA_QUERY, 1);
+    ctx->current[1] = handle;
+    ctx->current   += 2;
+}
+static void ref_unsafe_report_loc(gcmContextData *ctx, uint32_t location)
+{
+    uint32_t handle = (location == GCM_LOCATION_CELL) ? 0xBAD68000 : 0x66626660;
+    ctx->current[0] = REF_METHOD(NV40TCL_DMA_QUERY, 1);
+    ctx->current[1] = handle;
+    ctx->current   += 2;
+}
 static void ref_safe_viewport(gcmContextData *ctx, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                               f32 min, f32 max, const f32 scale[4], const f32 offset[4])
 {
@@ -543,6 +756,17 @@ static void cmp(const char *label, const uint32_t *nw, const uint32_t *rf, size_
     printf("]");
     if (memcmp(nw, rf, nwords * sizeof(*nw)) == 0) printf("  ok\n");
     else { printf("  MISMATCH\n"); failures++; }
+}
+
+static void cmp_mutant(const char *label, const uint32_t *nw, const uint32_t *rf_mut, size_t nwords)
+{
+    printf("  %-34s", label);
+    if (memcmp(nw, rf_mut, nwords * sizeof(*nw)) != 0) {
+        printf("  ok (swap mutant rejected, went red)\n");
+    } else {
+        printf("  FAIL (swap mutant accepted!)\n");
+        failures++;
+    }
 }
 
 /* safe/unsafe driver for the 2-word families. */
@@ -609,13 +833,13 @@ static void report_ring(const char *label, char kind, uint32_t expected_count)
 #define RING_CHECK(SAFE_N, UNSAFE_N, LABEL, EXPECTED, ...) do { \
         g_spy_calls = 0; g_spy_count = 0; \
         { gcmContextData rf; memset(&rf, 0, sizeof rf); \
-          uint32_t _rb[32]; \
+          uint32_t _rb[128]; \
           rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
           SAFE_N(&rf, ##__VA_ARGS__); \
           report_ring(LABEL, 's', EXPECTED); } \
         g_spy_calls = 0; g_spy_count = 0; \
         { gcmContextData rf; memset(&rf, 0, sizeof rf); \
-          uint32_t _rb[32]; \
+          uint32_t _rb[128]; \
           rf.begin = rf.current = _rb; rf.end = rf.current; rf.callback = spy_cb; \
           UNSAFE_N(&rf, ##__VA_ARGS__); \
           report_ring(LABEL, 'u', 0); } \
@@ -1456,6 +1680,226 @@ int main(void)
         cmp("  clear_report (unsafe)", A, B, 2);
     }
 
+    /* ---- surface / vertex-data-array / VP constants / update FP / nop / report location ---- */
+    /* surface (32 words) */
+    {
+        static uint32_t A[64], B[64];
+        const CellGcmSurface surf = {
+            .type = 0x01,
+            .antiAlias = 0x02,
+            .colorFormat = 0x03,
+            .colorTarget = 0x04,
+            .colorLocation = { 0x00, 0x01, 0x02, 0x03 },
+            .colorOffset = { 0x1000, 0x2000, 0x3000, 0x4000 },
+            .colorPitch = { 0x0100, 0x0200, 0x0300, 0x0400 },
+            .depthFormat = 0x05,
+            .depthLocation = 0x01,
+            ._pad = { 0, 0 },
+            .depthOffset = 0x5000,
+            .depthPitch = 0x0500,
+            .width = 1024,
+            .height = 512,
+            .x = 16,
+            .y = 32
+        };
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 64; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 64; r.callback = 0;
+        ps3tc_gcm_state_surface((CellGcmContextData *)&n, &surf);
+        ref_safe_surface(&r, &surf);
+        cmp("  surface (safe)", A, B, 32);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_surface_unsafe((CellGcmContextData *)&n, &surf);
+        ref_unsafe_surface(&r, &surf);
+        cmp("  surface (unsafe)", A, B, 32);
+
+        /* Swap mutant: surface with x and y swapped must go red */
+        CellGcmSurface surf_mut = surf;
+        surf_mut.x = surf.y;
+        surf_mut.y = surf.x;
+        r.begin = r.current = B;
+        ref_safe_surface(&r, &surf_mut);
+        cmp_mutant("  surface (swap mutant x/y)", A, B, 32);
+    }
+
+    /* vertex_data_array (4 words) */
+    {
+        static uint32_t A[8], B[8];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 8; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 8; r.callback = 0;
+        ps3tc_gcm_state_vertex_data_array((CellGcmContextData *)&n,
+                                          0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+        ref_safe_vtxarray(&r, 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+        cmp("  vertex_data_array (safe)", A, B, 4);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_data_array_unsafe((CellGcmContextData *)&n,
+                                                 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+        ref_unsafe_vtxarray(&r, 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+        cmp("  vertex_data_array (unsafe)", A, B, 4);
+
+        /* Case 2 with different arguments */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_data_array((CellGcmContextData *)&n,
+                                          0x03, 0x0001, 0x10, 0x02, 0x01, 0x00, 0x00ABCDEF);
+        ref_safe_vtxarray(&r, 0x03, 0x0001, 0x10, 0x02, 0x01, 0x00, 0x00ABCDEF);
+        cmp("  vertex_data_array (case 2)", A, B, 4);
+
+        /* Swap mutant: stride and size swapped must go red */
+        r.begin = r.current = B;
+        ref_safe_vtxarray(&r, 0x07, 0x1234, 0x04, 0x20, 0x02, 0x01, 0x00567890);
+        cmp_mutant("  vertex_data_array (swap mutant)", A, B, 4);
+    }
+
+    /* vertex_program_constants (lengths 1, 4, 32, and 36 crossing the 32-float split) */
+    {
+        static uint32_t A[64], B[64];
+        gcmContextData n, r;
+
+        /* len = 1 (3 words) */
+        const f32 c1[1] = { 1.25f };
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 64; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 64; r.callback = 0;
+        ps3tc_gcm_state_vertex_program_constants((CellGcmContextData *)&n, 0x10, 1, c1);
+        ref_safe_vp_consts(&r, 0x10, 1, c1);
+        cmp("  vertex_program_constants (len 1, safe)", A, B, 3);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants_unsafe((CellGcmContextData *)&n, 0x10, 1, c1);
+        ref_unsafe_vp_consts(&r, 0x10, 1, c1);
+        cmp("  vertex_program_constants (len 1, unsafe)", A, B, 3);
+
+        /* len = 4 (6 words) */
+        const f32 c4[4] = { 1.5f, -2.5f, 3.25f, -0.125f };
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants((CellGcmContextData *)&n, 0x20, 4, c4);
+        ref_safe_vp_consts(&r, 0x20, 4, c4);
+        cmp("  vertex_program_constants (len 4, safe)", A, B, 6);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants_unsafe((CellGcmContextData *)&n, 0x20, 4, c4);
+        ref_unsafe_vp_consts(&r, 0x20, 4, c4);
+        cmp("  vertex_program_constants (len 4, unsafe)", A, B, 6);
+
+        /* Swap mutant: c4[0] and c4[1] swapped must go red */
+        const f32 c4_mut[4] = { -2.5f, 1.5f, 3.25f, -0.125f };
+        r.begin = r.current = B;
+        ref_safe_vp_consts(&r, 0x20, 4, c4_mut);
+        cmp_mutant("  vertex_program_constants (swap mutant)", A, B, 6);
+
+        /* len = 32 (34 words) */
+        f32 c32[32];
+        for (int i = 0; i < 32; i++) c32[i] = (float)(i * 2.5f - 10.0f);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants((CellGcmContextData *)&n, 0x30, 32, c32);
+        ref_safe_vp_consts(&r, 0x30, 32, c32);
+        cmp("  vertex_program_constants (len 32, safe)", A, B, 34);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants_unsafe((CellGcmContextData *)&n, 0x30, 32, c32);
+        ref_unsafe_vp_consts(&r, 0x30, 32, c32);
+        cmp("  vertex_program_constants (len 32, unsafe)", A, B, 34);
+
+        /* len = 36 (crosses method-count split, 40 words) */
+        f32 c36[36];
+        for (int i = 0; i < 36; i++) c36[i] = (float)(i * 1.5f + 0.25f);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants((CellGcmContextData *)&n, 0x40, 36, c36);
+        ref_safe_vp_consts(&r, 0x40, 36, c36);
+        cmp("  vertex_program_constants (len 36, safe)", A, B, 40);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_vertex_program_constants_unsafe((CellGcmContextData *)&n, 0x40, 36, c36);
+        ref_unsafe_vp_consts(&r, 0x40, 36, c36);
+        cmp("  vertex_program_constants (len 36, unsafe)", A, B, 40);
+    }
+
+    /* update_fragment_program_parameter (2 words) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_update_fragment_program_parameter((CellGcmContextData *)&n, 0x01ABCDEFu);
+        ref_safe_upd_fp(&r, 0x01ABCDEFu);
+        cmp("  update_fp_parameter (safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_update_fragment_program_parameter_unsafe((CellGcmContextData *)&n, 0x01ABCDEFu);
+        ref_unsafe_upd_fp(&r, 0x01ABCDEFu);
+        cmp("  update_fp_parameter (unsafe)", A, B, 2);
+
+        /* Case 2 */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_update_fragment_program_parameter((CellGcmContextData *)&n, 0x12345678u);
+        ref_safe_upd_fp(&r, 0x12345678u);
+        cmp("  update_fp_parameter (case 2)", A, B, 2);
+    }
+
+    /* nop_command (0, 1 and large count) */
+    {
+        static uint32_t A[32], B[32];
+        gcmContextData n, r;
+
+        /* count = 0 (0 words) */
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 32; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 32; r.callback = 0;
+        ps3tc_gcm_state_nop_command((CellGcmContextData *)&n, 0);
+        ref_safe_nop(&r, 0);
+        cmp("  nop_command (count 0, safe)", A, B, 0);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_nop_command_unsafe((CellGcmContextData *)&n, 0);
+        ref_unsafe_nop(&r, 0);
+        cmp("  nop_command (count 0, unsafe)", A, B, 0);
+
+        /* count = 1 (1 word) */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_nop_command((CellGcmContextData *)&n, 1);
+        ref_safe_nop(&r, 1);
+        cmp("  nop_command (count 1, safe)", A, B, 1);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_nop_command_unsafe((CellGcmContextData *)&n, 1);
+        ref_unsafe_nop(&r, 1);
+        cmp("  nop_command (count 1, unsafe)", A, B, 1);
+
+        /* count = 16 (large count, 16 words) */
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_nop_command((CellGcmContextData *)&n, 16);
+        ref_safe_nop(&r, 16);
+        cmp("  nop_command (count 16, safe)", A, B, 16);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_nop_command_unsafe((CellGcmContextData *)&n, 16);
+        ref_unsafe_nop(&r, 16);
+        cmp("  nop_command (count 16, unsafe)", A, B, 16);
+    }
+
+    /* report_location (2 words, cell and rsx location) */
+    {
+        static uint32_t A[4], B[4];
+        gcmContextData n, r;
+        memset(&n, 0, sizeof n); memset(&r, 0, sizeof r);
+        n.begin = n.current = A; n.end = A + 4; n.callback = 0;
+        r.begin = r.current = B; r.end = B + 4; r.callback = 0;
+        ps3tc_gcm_state_report_location((CellGcmContextData *)&n, GCM_LOCATION_CELL);
+        ref_safe_report_loc(&r, GCM_LOCATION_CELL);
+        cmp("  report_location (CELL, safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_report_location_unsafe((CellGcmContextData *)&n, GCM_LOCATION_CELL);
+        ref_unsafe_report_loc(&r, GCM_LOCATION_CELL);
+        cmp("  report_location (CELL, unsafe)", A, B, 2);
+
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_report_location((CellGcmContextData *)&n, GCM_LOCATION_RSX);
+        ref_safe_report_loc(&r, GCM_LOCATION_RSX);
+        cmp("  report_location (RSX, safe)", A, B, 2);
+        n.begin = n.current = A; r.begin = r.current = B;
+        ps3tc_gcm_state_report_location_unsafe((CellGcmContextData *)&n, GCM_LOCATION_RSX);
+        ref_unsafe_report_loc(&r, GCM_LOCATION_RSX);
+        cmp("  report_location (RSX, unsafe)", A, B, 2);
+    }
+
     /* ---- Ring-full / callback: one case per native (point 3) ---- */
     printf("\n  Ring-full / callback (end==current, recording callback)\n");
     RING_CHECK(ps3tc_gcm_state_logic_op,
@@ -1648,6 +2092,47 @@ int main(void)
     RING_CHECK(ps3tc_gcm_state_clear_report,
                ps3tc_gcm_state_clear_report_unsafe,
                "clear_report", 2, 0x88C42A3D);
+    {
+        const CellGcmSurface surf = {
+            .type = 0x01,
+            .antiAlias = 0x02,
+            .colorFormat = 0x03,
+            .colorTarget = 0x04,
+            .colorLocation = { 0x00, 0x01, 0x02, 0x03 },
+            .colorOffset = { 0x1000, 0x2000, 0x3000, 0x4000 },
+            .colorPitch = { 0x0100, 0x0200, 0x0300, 0x0400 },
+            .depthFormat = 0x05,
+            .depthLocation = 0x01,
+            ._pad = { 0, 0 },
+            .depthOffset = 0x5000,
+            .depthPitch = 0x0500,
+            .width = 1024,
+            .height = 512,
+            .x = 16,
+            .y = 32
+        };
+        RING_CHECK(ps3tc_gcm_state_surface,
+                   ps3tc_gcm_state_surface_unsafe,
+                   "surface", 32, &surf);
+    }
+    RING_CHECK(ps3tc_gcm_state_vertex_data_array,
+               ps3tc_gcm_state_vertex_data_array_unsafe,
+               "vertex_data_array", 4, 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+    {
+        const f32 c4[4] = { 1.5f, -2.5f, 3.25f, -0.125f };
+        RING_CHECK(ps3tc_gcm_state_vertex_program_constants,
+                   ps3tc_gcm_state_vertex_program_constants_unsafe,
+                   "vertex_program_constants", 6, 0x20, 4, c4);
+    }
+    RING_CHECK(ps3tc_gcm_state_update_fragment_program_parameter,
+               ps3tc_gcm_state_update_fragment_program_parameter_unsafe,
+               "update_fragment_program_parameter", 2, 0x01ABCDEF);
+    RING_CHECK(ps3tc_gcm_state_nop_command,
+               ps3tc_gcm_state_nop_command_unsafe,
+               "nop_command", 16, 16);
+    RING_CHECK(ps3tc_gcm_state_report_location,
+               ps3tc_gcm_state_report_location_unsafe,
+               "report_location", 2, GCM_LOCATION_CELL);
 
 
     printf("\n");

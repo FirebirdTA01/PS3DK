@@ -15,7 +15,7 @@ static void check(const char *lab, const uint32_t *a, const uint32_t *b, int n)
 
 int main(void)
 {
-    static uint32_t A[8], B[8];
+    static uint32_t A[64], B[64];
     CellGcmContextData n, r;
 
     /* blend_func (3 words) */
@@ -441,6 +441,103 @@ int main(void)
     cellGcmSetClearReport(&n, 0x3Du);
     ps3tc_gcm_state_clear_report(&r, 0x3Du);
     check("cell==native clear_report (0x3D)", A, B, 2);
+
+    /* ---- surface / vertex-data-array / VP-constants / update-FP / nop / report-loc ---- */
+    /* surface (32 words) */
+    {
+        static uint32_t sA[64], sB[64];
+        const CellGcmSurface surf = {
+            .type = 0x01,
+            .antiAlias = 0x02,
+            .colorFormat = 0x03,
+            .colorTarget = 0x04,
+            .colorLocation = { 0x00, 0x01, 0x02, 0x03 },
+            .colorOffset = { 0x1000, 0x2000, 0x3000, 0x4000 },
+            .colorPitch = { 0x0100, 0x0200, 0x0300, 0x0400 },
+            .depthFormat = 0x05,
+            .depthLocation = 0x01,
+            ._pad = { 0, 0 },
+            .depthOffset = 0x5000,
+            .depthPitch = 0x0500,
+            .width = 1024,
+            .height = 512,
+            .x = 16,
+            .y = 32
+        };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=sA; n.end=sA+64; r.begin=r.current=sB; r.end=sB+64;
+        cellGcmSetSurface(&n, &surf);
+        ps3tc_gcm_state_surface(&r, &surf);
+        check("cell==native surface", sA, sB, 32);
+    }
+
+    /* vertex_data_array (4 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetVertexDataArray(&n, 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+    ps3tc_gcm_state_vertex_data_array(&r, 0x07, 0x1234, 0x20, 0x04, 0x02, 0x01, 0x00567890);
+    check("cell==native vertex_data_array", A, B, 4);
+
+    /* vertex_program_constants (lengths 4 and 36) */
+    {
+        static uint32_t vpA[64], vpB[64];
+        const float c4[4] = { 1.5f, -2.5f, 3.25f, -0.125f };
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=vpA; n.end=vpA+64; r.begin=r.current=vpB; r.end=vpB+64;
+        cellGcmSetVertexProgramConstants(&n, 0x20, 4, c4);
+        ps3tc_gcm_state_vertex_program_constants(&r, 0x20, 4, c4);
+        check("cell==native vertex_program_constants (len 4)", vpA, vpB, 6);
+
+        float c36[36];
+        for (int i = 0; i < 36; i++) c36[i] = (float)(i * 1.5f + 0.25f);
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=vpA; n.end=vpA+64; r.begin=r.current=vpB; r.end=vpB+64;
+        cellGcmSetVertexProgramConstants(&n, 0x40, 36, c36);
+        ps3tc_gcm_state_vertex_program_constants(&r, 0x40, 36, c36);
+        check("cell==native vertex_program_constants (len 36)", vpA, vpB, 40);
+    }
+
+    /* update_fragment_program_parameter (2 words) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetUpdateFragmentProgramParameter(&n, 0x01ABCDEFu);
+    ps3tc_gcm_state_update_fragment_program_parameter(&r, 0x01ABCDEFu);
+    check("cell==native update_fragment_program_parameter", A, B, 2);
+
+    /* nop_command (0, 1 and large count) */
+    {
+        static uint32_t nopA[64], nopB[64];
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=nopA; n.end=nopA+64; r.begin=r.current=nopB; r.end=nopB+64;
+        cellGcmSetNopCommand(&n, 0);
+        ps3tc_gcm_state_nop_command(&r, 0);
+        check("cell==native nop_command (0)", nopA, nopB, 0);
+
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=nopA; n.end=nopA+64; r.begin=r.current=nopB; r.end=nopB+64;
+        cellGcmSetNopCommand(&n, 1);
+        ps3tc_gcm_state_nop_command(&r, 1);
+        check("cell==native nop_command (1)", nopA, nopB, 1);
+
+        memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+        n.begin=n.current=nopA; n.end=nopA+64; r.begin=r.current=nopB; r.end=nopB+64;
+        cellGcmSetNopCommand(&n, 16);
+        ps3tc_gcm_state_nop_command(&r, 16);
+        check("cell==native nop_command (16)", nopA, nopB, 16);
+    }
+
+    /* report_location (2 words, cell and rsx location) */
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetReportLocation(&n, GCM_LOCATION_CELL);
+    ps3tc_gcm_state_report_location(&r, GCM_LOCATION_CELL);
+    check("cell==native report_location (CELL)", A, B, 2);
+
+    memset(&n,0,sizeof n); memset(&r,0,sizeof r);
+    n.begin=n.current=A; n.end=A+64; r.begin=r.current=B; r.end=B+64;
+    cellGcmSetReportLocation(&n, GCM_LOCATION_RSX);
+    ps3tc_gcm_state_report_location(&r, GCM_LOCATION_RSX);
+    check("cell==native report_location (RSX)", A, B, 2);
 
     puts("PASS (public cell* forwarders == shared natives, byte-for-byte)\n");
     return 0;

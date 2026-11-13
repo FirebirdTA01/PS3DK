@@ -96,7 +96,7 @@ static inline void cellGcmSetReferenceCommand(CellGcmContextData *thisContext, u
 
 static inline void cellGcmSetSurface(CellGcmContextData *thisContext, const CellGcmSurface *surface)
 {
-	rsxSetSurface(thisContext, (const gcmSurface *)surface);
+	ps3tc_gcm_state_surface(thisContext, surface);
 }
 
 static inline void cellGcmSetClearColor(CellGcmContextData *thisContext, uint32_t color)
@@ -163,7 +163,7 @@ static inline void cellGcmSetReturnCommand(CellGcmContextData *thisContext)
 
 static inline void cellGcmSetNopCommand(CellGcmContextData *thisContext, uint32_t count)
 {
-	rsxSetNopCommand(thisContext, count);
+	ps3tc_gcm_state_nop_command(thisContext, count);
 }
 
 /* Color / depth state */
@@ -498,11 +498,8 @@ static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
                                              uint8_t type, uint8_t location,
                                              uint32_t offset)
 {
-	/* The platform ABI and PSL1GHT agree on the param set but order args differently.
-	 * the platform ABI: (index, freq, stride, size, type, location, offset)
-	 * PSL1GHT:  (attr, freq, offset, stride, elems, dtype, location) */
-	rsxBindVertexArrayAttrib(thisContext, index, frequency, offset,
-	                         stride, size, type, location);
+	ps3tc_gcm_state_vertex_data_array(thisContext, index, frequency, stride,
+	                                  size, type, location, offset);
 }
 
 static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisContext, uint16_t mask)
@@ -523,7 +520,7 @@ static inline void cellGcmSetVertexProgramConstants(CellGcmContextData *thisCont
                                                     uint32_t start, uint32_t count,
                                                     const float *data)
 {
-	rsxSetVertexProgramConstants(thisContext, start, count, data);
+	ps3tc_gcm_state_vertex_program_constants(thisContext, start, count, data);
 }
 
 /* --- Fragment program flags --- */
@@ -748,7 +745,7 @@ static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisC
 
 static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *thisContext, uint32_t offset)
 {
-	rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);
+	ps3tc_gcm_state_update_fragment_program_parameter(thisContext, offset);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterUnsafe(CellGcmContextData *thisContext, uint32_t offset)
@@ -860,7 +857,7 @@ static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_
 
 static inline void cellGcmSetReportLocation(CellGcmContextData *thisContext, uint32_t location)
 {
-	rsxSetReportLocation(thisContext, location);
+	ps3tc_gcm_state_report_location(thisContext, location);
 }
 
 /* ==========================================================
