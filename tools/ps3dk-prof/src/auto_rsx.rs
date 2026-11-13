@@ -1736,7 +1736,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     let clocks: Vec<serde_json::Value> = r.clocks.iter().map(|a| json!({"id":a.id,"slot":a.slot,
         "outcome":a.outcome(),"frame":a.frame,"tb_before":a.tb_before,"tb_after":a.tb_after,"raw":a.raw,
         "polls":a.polls})).collect();
-    let v = json!({
+    let mut v = json!({
         "schema": 1,
         "capability": r.capability,
         "state": r.state,
@@ -1746,7 +1746,6 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "status": status,
         "operations": {"parsed": r.ops_parsed, "raw_valid": r.ops_valid},
         "frame_marks_missed": r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0),
-        "segment_replay": r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0),
         "frame_source": frame_source(r),
         "interval_note": INTERVAL_NOTE,
         "clock_map": map,
@@ -1755,6 +1754,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "thresholds": {"wait_share": [WAIT_SHARE.0, WAIT_SHARE.1], "rsx_span_share": [RSX_SPAN_SHARE.0, RSX_SPAN_SHARE.1],
             "pacing_share": [PACING_SHARE.0, PACING_SHARE.1]},
     });
+    if r.build_frames {
+        // 63/11 only: older captures keep their exact JSON
+        v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }

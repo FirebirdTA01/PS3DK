@@ -529,6 +529,23 @@ fn fixtures_from_the_host_runtime() {
     }
 }
 
+/// Captures written before the build-frame writer (CONFIG 15/11 and older) keep the exact JSON the previous
+/// reader printed: the 63/11 fields (segment_replay, built, recorded, segment_*) never appear for them. The goldens
+/// were produced by the reader at b451c6a5e.
+#[test]
+fn auto_json_unchanged_for_older_captures() {
+    let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
+    for name in ["segments", "d12-segments", "console-r2", "frames"] {
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
+            .args(["auto", "--json", &format!("{dir}/{name}.prof")]).output().unwrap();
+        let got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        let want: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(format!("{dir}/{name}.base-json.json")).unwrap()).unwrap();
+        assert_eq!(got, want, "{name}: JSON differs from the previous reader");
+        assert!(got.get("segment_replay").is_none(), "{name}: segment_replay outside 63/11");
+    }
+}
+
 #[test]
 fn cli_auto() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
