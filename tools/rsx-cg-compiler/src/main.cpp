@@ -194,7 +194,8 @@ static void printProgramStats(bool fragment, const std::vector<uint32_t>& words,
         ++insns;
         {
             const uint32_t op = (words[i] >> 16) | (words[i] << 16);   // on-disk halfword swap
-            if (!(op & NV40_FP_OP_OPCODE_IS_BRANCH) &&
+            const uint32_t src1 = (words[i + 2] >> 16) | (words[i + 2] << 16);
+            if (!(src1 & NV40_FP_OP_OPCODE_IS_BRANCH) &&   // the flow-control flag lives in SRC1, bit 31
                 ((op & NVFX_FP_OP_OPCODE_MASK) >> NVFX_FP_OP_OPCODE_SHIFT) == NVFX_FP_OP_OPCODE_KIL)
                 ++kills;   // counted from the ucode: the container field is 8 bits wide
         }
