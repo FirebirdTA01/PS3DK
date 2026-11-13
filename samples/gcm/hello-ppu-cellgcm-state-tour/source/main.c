@@ -109,7 +109,7 @@ static void *local_align(uint32_t align, uint32_t size)
  * hang the tour: on timeout we record FAIL under the *current group*
  * name (set by every group via g_current_group before any draw) and
  * continue.*/
-#define GCM_LABEL_INDEX    255
+#define GCM_LABEL_INDEX    CELL_GCM_LABEL_APP_FIRST   /* first label of the application block (ps3tc_gcm_labels.h) */
 static uint32_t g_label   = 1;
 static const char *g_current_group = "(init)";
 /* Set when a bounded GPU-idle wait times out.  Once set, the tour stops:
@@ -331,6 +331,11 @@ static void env_reset(CellGcmContextData *ctx)
 	t.mipmap    = 1;
 	t.dimension = CELL_GCM_TEXTURE_DIMENSION_2;
 	t.cubemap   = CELL_GCM_FALSE;
+	/* identity remap: each output channel comes from the same texel channel */
+	t.remap     = (CELL_GCM_TEXTURE_REMAP_REMAP <<  8) | (CELL_GCM_TEXTURE_REMAP_REMAP << 10)
+	            | (CELL_GCM_TEXTURE_REMAP_REMAP << 12) | (CELL_GCM_TEXTURE_REMAP_REMAP << 14)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_A << 0) | (CELL_GCM_TEXTURE_REMAP_FROM_R << 2)
+	            | (CELL_GCM_TEXTURE_REMAP_FROM_G << 4) | (CELL_GCM_TEXTURE_REMAP_FROM_B << 6);
 	t.width     = 1;
 	t.height    = 1;
 	t.depth     = 1;
@@ -373,6 +378,7 @@ static void env_reset(CellGcmContextData *ctx)
 /* Clear the tile to a colour and depth, wait idle. */
 static void clear_tile(CellGcmContextData *ctx, uint32_t color, uint32_t depth_value)
 {
+	if (g_aborted) return;
 	cellGcmSetClearColor(ctx, color);
 	cellGcmSetClearDepthStencil(ctx, depth_value);
 	cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B |
@@ -383,6 +389,7 @@ static void clear_tile(CellGcmContextData *ctx, uint32_t color, uint32_t depth_v
 /* Draw the full-tile quad and wait idle. */
 static void draw_tile(CellGcmContextData *ctx)
 {
+	if (g_aborted) return;
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 }
@@ -440,6 +447,7 @@ static void set_quad_uv(float u, float v)
  * fragment's own alpha is what the mask protects). */
 static void draw_color(CellGcmContextData *ctx, float r, float g, float b, float a)
 {
+	if (g_aborted) return;
 	set_quad_color(r, g, b, a);
 	commit_quad();
 	draw_tile(ctx);
@@ -468,10 +476,12 @@ static void g01_scissor(CellGcmContextData *ctx)
 	cellGcmSetClearColor(ctx, W_RED);
 	cellGcmSetClearSurface(ctx, GCM_CLEAR_R|GCM_CLEAR_G|GCM_CLEAR_B|GCM_CLEAR_A);
 	wait_idle(ctx);
+	if (g_aborted) return;
 	cellGcmSetScissor(ctx, 32, 0, 32, TILE_H);
 	cellGcmSetClearColor(ctx, W_BLUE);
 	cellGcmSetClearSurface(ctx, GCM_CLEAR_R|GCM_CLEAR_G|GCM_CLEAR_B|GCM_CLEAR_A);
 	wait_idle(ctx);
+	if (g_aborted) return;
 	/* expected = W_RED (left scissor) at x=16; W_BLUE (right scissor) at x=48. */
 	report("scissor-in",  W_RED,  read_px(16, 32));
 	report("scissor-out", W_BLUE, read_px(48, 32));
@@ -490,10 +500,12 @@ static void g02_depth(CellGcmContextData *ctx)
 	set_group("depth");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0xFFFFFFFFu);
+	if (g_aborted) return;
 	cellGcmSetDepthTestEnable(ctx, GCM_TRUE);
 	cellGcmSetDepthFunc(ctx, GCM_ALWAYS);
 	cellGcmSetDepthMask(ctx, GCM_TRUE);
 	draw_color(ctx, 1.0f, 0.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("depth-near", W_RED, read_px(32, 32));
 }
 
@@ -510,6 +522,7 @@ static void g03_stencil(CellGcmContextData *ctx)
 	set_group("stencil");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetStencilTestEnable(ctx, GCM_TRUE);
 	cellGcmSetTwoSidedStencilTestEnable(ctx, GCM_TRUE);
 	cellGcmSetStencilFunc(ctx, GCM_ALWAYS, 0, 0xFF);
@@ -519,6 +532,7 @@ static void g03_stencil(CellGcmContextData *ctx)
 	cellGcmSetBackStencilOp(ctx, GCM_REPLACE, GCM_REPLACE, GCM_REPLACE);
 	cellGcmSetBackStencilMask(ctx, 0x55);
 	draw_color(ctx, 0.0f, 0.0f, 1.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("stencil", W_BLUE, read_px(32, 32));
 }
 
@@ -540,6 +554,7 @@ static void g04_blend(CellGcmContextData *ctx)
 	cellGcmSetBlendEquation(ctx, GCM_FUNC_ADD, GCM_FUNC_ADD);
 	cellGcmSetBlendColor(ctx, 0, 0);
 	draw_color(ctx, 0.2f, 0.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	/* saturated: 0xFF + 0x33 = 0xFF -> W_RED */
 	report("blend", W_RED, read_px(32, 32));
 }
@@ -561,6 +576,7 @@ static void g05_colormask(CellGcmContextData *ctx)
 	cellGcmSetColorMask(ctx,
 	    GCM_COLOR_MASK_R | GCM_COLOR_MASK_G | GCM_COLOR_MASK_B); /* no A */
 	draw_color(ctx, 1.0f, 1.0f, 1.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("colormask", W_WHITE_NOA, read_px(32, 32));
 }
 
@@ -579,9 +595,11 @@ static void g06_logicop(CellGcmContextData *ctx)
 	set_group("logicop");
 	env_reset(ctx);
 	clear_tile(ctx, W_GREEN, 0);
+	if (g_aborted) return;
 	cellGcmSetLogicOpEnable(ctx, GCM_TRUE);
 	cellGcmSetLogicOp(ctx, GCM_XOR);
 	draw_color(ctx, 1.0f, 0.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("logicop", W_YELLOW, read_px(32, 32));
 }
 
@@ -596,6 +614,7 @@ static void g07_cull(CellGcmContextData *ctx)
 	set_group("cull");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetPolygonOffsetFillEnable(ctx, GCM_FALSE);
 	cellGcmSetPolygonOffset(ctx, 0.0f, 0.0f);
 	cellGcmSetCullFaceEnable(ctx, GCM_TRUE);
@@ -623,9 +642,11 @@ static void g08_fog(CellGcmContextData *ctx)
 	set_group("fog");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetFogMode(ctx, GCM_FOG_MODE_LINEAR);
 	cellGcmSetFogParams(ctx, 0.0f, 1.0f);
 	draw_color(ctx, 1.0f, 0.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("fog", W_RED, read_px(32, 32));
 }
 
@@ -643,6 +664,7 @@ static void g09_clipplane(CellGcmContextData *ctx)
 	set_group("clipplane");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	/* User clip plane 0: its input is the per-vertex clip distance the vertex
 	 * program emits (CLP0 = position x, see vpshader.vcg), routed out with the
 	 * UC0 output bit. ENABLE_LT discards fragments whose interpolated distance
@@ -658,6 +680,7 @@ static void g09_clipplane(CellGcmContextData *ctx)
 	    CELL_GCM_USER_CLIP_PLANE_DISABLE,
 	    CELL_GCM_USER_CLIP_PLANE_DISABLE);
 	draw_color(ctx, 0.0f, 0.0f, 1.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	wait_idle(ctx);
 	if (g_aborted) return;
 	/* plane 0 back to disabled so later groups see the default clip state */
@@ -683,6 +706,7 @@ static void g10_zcull(CellGcmContextData *ctx)
 	set_group("zcull");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetZcullEnable(ctx, GCM_TRUE, GCM_FALSE);
 	cellGcmSetZcullControl(ctx, CELL_GCM_ZCULL_LESS, CELL_GCM_ZCULL_LONES);
 	cellGcmSetZcullLimit(ctx, 0x80, 0x180);
@@ -690,6 +714,7 @@ static void g10_zcull(CellGcmContextData *ctx)
 	cellGcmSetClearZcullSurface(ctx, GCM_TRUE, GCM_FALSE);
 	cellGcmSetScullControl(ctx, CELL_GCM_SCULL_SFUNC_EQUAL, 0, 0xFF);
 	draw_color(ctx, 1.0f, 1.0f, 1.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("zcull", W_WHITE, read_px(32, 32));
 }
 
@@ -709,21 +734,24 @@ static void g11_zpass(CellGcmContextData *ctx)
 	if (g_aborted) return;
 	set_group("zpass");
 	const uint32_t ZPASS_EXPECTED = TILE_W * TILE_H;   /* 64*64 = 4096 */
-	/* Single application-owned report slot (index 0).  Both the write
-	 * (SetReport) and the read (GetReportDataAddress) use index 0, so the
-	 * counter lands in and is read from the same slot. */
-	const uint32_t REPORT_SLOT = 0;
+	/* One local report in the application block (512..2047; 0..511 are the
+	 * profiler's), written with SetReport after selecting local reports and
+	 * read back from the same index and location. */
+	const uint32_t REPORT_SLOT = CELL_GCM_REPORT_APP_FIRST;
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetZpassPixelCountEnable(ctx, GCM_TRUE);
 	cellGcmSetClearReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT);  /* cleared baseline: 0 */
 	draw_color(ctx, 1.0f, 0.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	wait_idle(ctx);                                   /* bounded: all 4096 pixels rasterized */
 	if (g_aborted) return;
+	cellGcmSetReportLocation(ctx, CELL_GCM_LOCATION_LOCAL);
 	cellGcmSetReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT, REPORT_SLOT);  /* write the count AFTER the draw */
 	wait_idle(ctx);                                   /* bounded: report command completes */
 	if (g_aborted) return;                            /* never fall through to an unbounded finish */
-	CellGcmReportData *rd = cellGcmGetReportDataAddress(REPORT_SLOT); /* same slot as written */
+	CellGcmReportData *rd = cellGcmGetReportDataAddressLocation(REPORT_SLOT, CELL_GCM_LOCATION_LOCAL); /* same slot as written */
 	uint32_t count = rd ? rd->value : 0;
 	int ok = (count == ZPASS_EXPECTED);
 	printf("STATE_TOUR zpass %s expected=0x%08x got=0x%08x\n",
@@ -747,6 +775,7 @@ static void g12_vertdata4f(CellGcmContextData *ctx)
 	set_group("vertdata4f");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetVertexAttribOutputMask(ctx,
 	    GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE | GCM_ATTRIB_OUTPUT_MASK_TEX0);
 	/* Decoy VBO colour (green): the wrong result if VBO is read instead of the 4f. */
@@ -760,6 +789,7 @@ static void g12_vertdata4f(CellGcmContextData *ctx)
 	                        (const float[4]){0.0f, 1.0f, 1.0f, 1.0f});
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
+	if (g_aborted) return;
 	report("vertdata4f", W_CYAN, read_px(32, 32));
 }
 
@@ -780,6 +810,7 @@ static void g13_texborder(CellGcmContextData *ctx)
 	set_group("texborder");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 
 	/* Set border colour and use the BORDER wrap mode so out-of-[0,1]
 	 * UVs hit the border, not the texel data. */
@@ -794,6 +825,7 @@ static void g13_texborder(CellGcmContextData *ctx)
 	set_quad_uv(1.5f, 1.5f);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
+	if (g_aborted) return;
 
 	/* vertex (1,1,1,1) * border (W_MAG) = W_MAG */
 	report("texborder", W_MAG, read_px(32, 32));
@@ -823,12 +855,14 @@ static void g14_cache(CellGcmContextData *ctx)
 	set_group("cache-invalidate");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 
 	/* Baseline draw with the in-frame white texel (set in init_rsx). */
 	set_quad_color(1.0f, 1.0f, 1.0f, 1.0f);
 	set_quad_uv(0.5f, 0.5f);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
+	if (g_aborted) return;
 
 	/* CPU edits the texel to cyan in local memory. */
 	g_texel[0] = W_CYAN;
@@ -838,6 +872,7 @@ static void g14_cache(CellGcmContextData *ctx)
 	/* Draw again: the fragment must see the new cyan texel. */
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
+	if (g_aborted) return;
 
 	/* vertex (1,1,1,1) * texel(W_CYAN) = W_CYAN (would be W_WHITE if the
 	 * cache were not invalidated). Gate on the NEW texel colour. */
@@ -860,10 +895,12 @@ static void g15_renderenable(CellGcmContextData *ctx)
 	set_group("renderenable");
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
+	if (g_aborted) return;
 	cellGcmSetAntiAliasingControl(ctx, 0, 0, 0, 0);
 	cellGcmSetFrequencyDividerOperation(ctx, CELL_GCM_FREQUENCY_DIVIDE);
 	cellGcmSetRenderEnable(ctx, GCM_TRUE, 0);
 	draw_color(ctx, 0.0f, 1.0f, 0.0f, /* a */ 1.0f);
+	if (g_aborted) return;
 	report("renderenable", W_GREEN, read_px(32, 32));
 }
 
