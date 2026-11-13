@@ -29,10 +29,10 @@ preceding owner, domain and epoch declarations.
 | Offset | Type | Attached value |
 |---|---|---|
 | 8, 12, 16, 20 | u32 each | domain, epoch, owner incarnation, context generation |
-| 24, 28 | u32 each | covered kind mask, unsupported form mask: 7/15 (first writer), 15/11 (segment and frame-mark writer) or 31/11 (presentation writer) |
+| 24, 28 | u32 each | covered kind mask, unsupported form mask: 7/15 (first writer), 15/11 (segment and frame-mark writer), 31/11 (presentation writer) or 63/11 (build-frame writer) |
 | 32, 36 | u32 each | report first, report count |
 | 40, 44 | u32 each | operation label, clock label |
-| 48, 52, 56, 60 | u32 each | pair capacity, metadata capacity, frame capacity, record width 128 |
+| 48, 52, 56, 60 | u32 each | pair capacity, metadata capacity, frame capacity, record width (144 with 63/11, else 128) |
 | 64 | u64 | PPU timebase frequency, equal to CLOCKS |
 | 72, 80 | u64 each | allocated bytes, allocation ceiling |
 | 88, 92 | u32 each | premise mask 3, managed exclusive lease policy 1 |
@@ -40,13 +40,19 @@ preceding owner, domain and epoch declarations.
 | 128 | 32 bytes | build binding |
 
 Unsupported-form bits name unsafe=1, immediate=2, CALL=4 and direct/uninstrumented=8.
-Kind bits name ARRAY=1, INDEX=2, CLEAR=4, FRAME=8 and PRESENT=16. PRESENT is not
-an OPS kind: it names flip-wait scopes and polling cadence in 384-byte COVERAGE
-rows (below). Exactly three pairs are valid: 7/15 for the first writer, 15/11 for
-the writer that records FRAME marks and covers CALL segments built through the
-segment API, and 31/11 for the presentation writer. A reader that knows only
-7/15, or only 7/15 and 15/11, refuses the newer CONFIG, so it never misreads the
-longer rows or reads the older poll interval as a wait.
+Kind bits name ARRAY=1, INDEX=2, CLEAR=4, FRAME=8, PRESENT=16 and SEGMENT_BUILD=32.
+PRESENT is not an OPS kind: it names flip-wait scopes and polling cadence in
+384-byte COVERAGE rows (below). SEGMENT_BUILD is not an OPS kind either: SEGMENT
+records carry the frame that built them in a 144-byte OPS record, and COVERAGE
+u32@380 counts the segment draws a CALL executed without a record. Exactly four
+pairs are valid: 7/15 for the first writer, 15/11 for the writer that records
+FRAME marks and covers CALL segments built through the segment API, 31/11 for
+the presentation writer and 63/11 for the build-frame writer. The record width
+is negotiated with the pair: 144 with 63/11 and 128 with every other pair, on
+CONFIG and on every OPS chunk. A reader that knows only older pairs refuses the
+newer CONFIG, so it never misreads the longer rows or records, reads the older
+poll interval as a wait, or matches a segment frame's records against the wrong
+population.
 Premise bits name report-before-label=1 and coherent stable read=2; these declare
 dependencies, not proven facts. Schema 1 reserves sixteen clock reports, so the
 report count is sixteen plus twice the pair capacity. The mechanism digest
@@ -98,8 +104,8 @@ commands, pipeline drains): it is not the isolated cost of that draw or clear.
 The reader prints this note with every report.
 
 Prefix 16 bytes: schema u16 at 0, reserved u16 at 2, instance u32 at 4, count u32
-at 8, record width u32 at 12 (128). Count is nonzero; exact size is `16+128*count`,
-within the 1 MiB chunk ceiling.
+at 8, record width u32 at 12 (the CONFIG width: 144 with 63/11, else 128). Count
+is nonzero; exact size is `16+width*count`, within the 1 MiB chunk ceiling.
 
 | Record offset | Type | Field |
 |---|---|---|
@@ -112,6 +118,18 @@ within the 1 MiB chunk ceiling.
 | 96, 100, 104, 108, 112 | u32 each | begin report, end report, begin serial, end serial, generation |
 | 116 | u32 | call ordinal (SEGMENT only, else reserved zero) |
 | 120 | u64 | actual publication snapshot |
+| 128 | u64 | build frame (63/11 SEGMENT records only, else zero) |
+| 136 | u32 | build owner (63/11 SEGMENT records only, else zero) |
+| 140, 142 | u16 each | build flags (BUILD_KNOWN=1), reserved zero |
+
+With 63/11 every SEGMENT record names the coverage frame that counted the draw
+when it was built (sampled per draw, so a build that spans a frame boundary
+names both frames). BUILD_KNOWN means a frame was open then; with it the build
+owner is the CONFIG owner and frame 0 is valid, without it owner and frame are
+zero. A record that is not SEGMENT carries an all-zero tail. When the record
+also has a CALL token of the same owner, the build frame is not later than the
+CALL frame; a dropped build (INCOMPLETE, call ordinal 0, no CALL token) keeps
+its build frame. Unknown build flags and a nonzero reserved field are refused.
 
 Kinds are ARRAY=1, INDEX=2, CLEAR=3 and, with kind mask bit 8, FRAME=4. Flags
 are TOKEN=1, RAW_VALID=2, INCOMPLETE=4, CLOCK_INVALID=8, READ_REFUSED=16,
@@ -155,7 +173,7 @@ not physical label reuse proof.
 
 ## COVERAGE, type 36
 
-Fixed 352 bytes (384 with the 31/11 masks): schema u16 at 0, flags u16 at 2, instance u32 at 4, owner u32 at
+Fixed 352 bytes (384 with the 31/11 and 63/11 masks): schema u16 at 0, flags u16 at 2, instance u32 at 4, owner u32 at
 8, reserved u32 at 12; frame id, PPU begin, PPU end, unsupported count and lost
 coverage count are u64 at 16, 24, 32, 40 and 48. Bytes 56..63 are reserved. Three
 96-byte rows from 64 describe ARRAY, INDEX and CLEAR, each twelve u64 counters:
@@ -179,7 +197,16 @@ Presentation with the 31/11 masks. Only a flip-wait scope is waiting evidence:
 | 364 | u32 | boundary-spanning flip-wait scopes |
 | 368 | u64 | polling cadence: summed bounded gaps of the complete runs |
 | 376 | u32 | flip-wait scopes that returned the timeout error (included at 12) |
-| 380 | u32 | reserved, zero |
+| 380 | u32 | 63/11: segment draws executed without a record (below); reserved zero with 31/11 |
+
+With 63/11, u32@380 counts the covered segment draws that CALLs in this frame
+executed without a committed record carrying the CALL's frame token: a CALL of
+an untracked segment (1: a lower bound, its draws are unknown), a second CALL of
+a build (that build's covered visits), the draws of a build that were refused or
+quarantined while building (including a draw that began in one part and ended in
+another, which both parts count), a refused CALL (the build's draws) and a pair
+lost at commit. Each CALL adds once. A part with no covered draws adds nothing.
+The counter saturates at UINT32_MAX and the row is then SATURATED.
 
 A flip-wait scope is one `cellGcmWaitFlipComplete(max_us)` call (cell/gcm.h). The
 helper polls `cellGcmGetFlipStatus`, sleeps between pending polls
@@ -289,7 +316,10 @@ Flags are FINAL=1, LOWER_BOUND=2, SATURATED=4, OWNER_UNACK=8,
 RESOURCE_CONFLICT=16, CONTEXT_RESET=32 and, when CONFIG covers CALL,
 SEGMENT_QUARANTINE=64, FRAME_MARK_MISSED=128, FRAMES_FLIP=256 and
 FRAMES_EXPLICIT=512 (both together: flips delimited frames until the first
-explicit call). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
+explicit call), and with 63/11 SEGMENT_REPLAY=1024: a build that wrote
+timestamp reports into its buffer was CALLed again without a rebuild, so its
+report writes ran again and may have overwritten other records' timestamps
+(every per-frame verdict of the capture is then UNKNOWN). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
 gauges and may decrease. operations_written counts accepted operation records, not chunks (a batched OPS chunk carries several). Exact admitted
 equals written plus dropped plus pending. Exact FINAL requires both gauges zero;
 an unacknowledged owner requires a lower bound. FINAL occurs once and forbids
@@ -423,12 +453,23 @@ wire, but totals across kinds (observed, excluded) may still not fit in u64, and
 such a row reads UNKNOWN "coverage totals overflow" rather than wrapping. The
 retained operation records of the frame are reconciled kind by kind (ARRAY,
 INDEX, CLEAR records against each kind's observed count), never only by their total: equal totals over different
-kinds are not the population the row describes. A frame with CALL-segment records reads UNKNOWN before this
-reconciliation: a segment's operations are counted in the row of the frame that built it and recorded under the
-frame that called it, and a record does not carry its building frame, so equal counts can describe different
-segments (one built in the frame, another called in it) and an exclusion in the building frame would be lost. With D the row's PPU interval, W the owner's
+kinds are not the population the row describes. Before 63/11 a frame with CALL-segment records reads UNKNOWN
+before this reconciliation: a segment's operations are counted in the row of the frame that built it and recorded
+under the frame that called it, and a record does not carry its building frame, so equal counts can describe
+different segments (one built in the frame, another called in it) and an exclusion in the building frame would be
+lost.
+
+With 63/11 the reader keeps two populations per frame F. The BUILD population is the records that are not
+SEGMENT under F's token plus the SEGMENT records whose build frame is F, wherever they were recorded (dropped
+INCOMPLETE builds included); it is what F's row counts and is reconciled with it kind by kind. The EXECUTION
+population is the covered records under F's token; it decides timing (emptiness, raw-valid, span). A row G is a
+clean build source when it is associated, closed exactly (not OPEN, SATURATED or after loss), excludes nothing,
+has no unsupported visits and its build population reconciles; that does not depend on G's own verdict. Besides
+the gates above, F needs SEGMENT_REPLAY clear, u32@380 zero, no dropped segment build built in F, and every
+SEGMENT record in its execution population built in F or in a clean build source with a known build frame;
+otherwise it reads UNKNOWN with that reason. With D the row's PPU interval, W the owner's
 complete FIFO wrap wait tagged with the frame (lower bound) and S the frame's
-RSX reached-marker span (first operation begin to last end) on the PPU clock:
+RSX reached-marker span (first operation begin to last end of the execution population) on the PPU clock:
 
 | Verdict | Condition |
 |---|---|
@@ -445,5 +486,5 @@ The two shares are provisional starting values, printed with every JSON
 report, to be tuned against the first console capture. FRAME marks give each
 frame's RSX begin and end (raw, and mapped as a duration when the map
 qualifies); they are shown but do not yet enter the verdict. Segment records
-count toward their call frame. A
+are timed in their call frame and counted in their build frame. A
 verdict is a candidate with its evidence, never utilization or a busy share.
