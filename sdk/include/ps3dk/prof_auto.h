@@ -41,6 +41,18 @@ typedef struct ps3dk_prof_auto_options {
 #define PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS 0u
 #endif
 
+/* Sealing the capture on an exit path that skips atexit handlers (_exit, a quit-guard deadline): call
+ * PS3DK_PROF_AUTO_SEAL() on the owner thread (the thread that initialised the profiler) just before it. It is
+ * ps3dk_prof_shutdown(): EPERM on another thread, EBUSY inside a profiler callback, EALREADY when already shut down,
+ * so calling it on every exit path is safe; it never waits on the RSX (pending draws are recorded incomplete, pending
+ * clock anchors get one last poll). Zero and no call when PS3_PROF_AUTO is off. */
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+int ps3dk_prof_shutdown(void);
+#define PS3DK_PROF_AUTO_SEAL() ps3dk_prof_shutdown()
+#else
+#define PS3DK_PROF_AUTO_SEAL() 0
+#endif
+
 /* Optional override, on the registered context owner before its first covered
  * operation, clock or frame observation. NULL options select the defaults.
  * The common SDK registry reserves the whole range and both labels; public
