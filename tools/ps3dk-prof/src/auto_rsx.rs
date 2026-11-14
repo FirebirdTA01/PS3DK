@@ -57,6 +57,11 @@ pub const MASKS_PRESENT: (u32, u32) = (31, 11);
 /// u32@380 counts segment draws a CALL executed without a record.  Not an OPS kind.  Readers that know only the older
 /// pairs refuse it at CONFIG.
 pub const MASKS_BUILD: (u32, u32) = (63, 11);
+/// The bracketed-clock writer: kind mask bit 64 CLOCK_BRACKET on top of 63/11.  Anchor k releases the clock label at
+/// 2k-1 before its timestamp and at 2k after it, and the drainer completes it later: tb_before is the last poll that
+/// saw the label below 2k-1 (or the issue time), tb_after the first that saw it at or above 2k; label_first and
+/// label_second carry those observed values.
+pub const MASKS_BRACKET: (u32, u32) = (127, 11);
 /// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
 pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
@@ -203,6 +208,10 @@ impl Attached {
     /// SEGMENT records name their building frame and rows count unrepresented CALL draws (CONFIG 63/11).
     pub fn build_frames(&self) -> bool {
         self.kind_mask & 32 != 0
+    }
+    /// Clock anchors are bracketed by two label values per anchor (CONFIG 127/11).
+    pub fn clock_bracket(&self) -> bool {
+        self.kind_mask & 64 != 0
     }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
@@ -519,7 +528,7 @@ impl Reader {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
-                    && (kinds, forms) != MASKS_BUILD
+                    && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -536,7 +545,7 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
-                let negotiated = if (kinds, forms) == MASKS_BUILD { OP_BYTES_BUILD } else { OP_BYTES };
+                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET { OP_BYTES_BUILD } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
@@ -996,7 +1005,13 @@ impl Reader {
             return bad(r, format!("{at}: polls {polls} owner {owner}"));
         }
         if flags == CK_VALID {
-            if raw == u64::MAX || raw != repeated || label_first != serial || label_second != serial
+            // bracketed anchors: the label was seen below 2k-1 (or never polled before, 0) and at or above 2k
+            let labels_ok = if cfg.clock_bracket() {
+                serial < u32::MAX / 2 && label_first < 2 * serial - 1 && label_second >= 2 * serial
+            } else {
+                label_first == serial && label_second == serial
+            };
+            if raw == u64::MAX || raw != repeated || !labels_ok
                 || tb_after < tb_before || elapsed != tb_after - tb_before || polls == 0
             {
                 return bad(r, format!("{at}: VALID without a stable exact completion"));
@@ -1073,17 +1088,25 @@ pub fn qualify(inv: &Inventory) -> MapState {
     if inv.refusal.is_some() || inv.clocks_parsed != inv.clocks.len() as u64 {
         return un("clock anchors not all retained".into());
     }
-    if let Some(a) = inv.clocks.iter().find(|a| a.flags != CK_VALID) {
-        return un(format!("anchor {} failed ({})", a.id, a.outcome()));
-    }
-    if let Some(s) = &inv.last_status {
-        if s.counters[11] != 0 {
-            return un(format!("{} anchor(s) lost to capacity", s.counters[11]));
+    // Bracketed writers (127/11) qualify from their VALID anchors: a failed or lost anchor carries no timestamp, so it
+    // removes an observation but cannot contradict the map. Older writers keep the rule that every anchor is VALID.
+    let bracket = inv.config.as_ref().and_then(Config::attached).is_some_and(Attached::clock_bracket);
+    if !bracket {
+        if let Some(a) = inv.clocks.iter().find(|a| a.flags != CK_VALID) {
+            return un(format!("anchor {} failed ({})", a.id, a.outcome()));
         }
+        if let Some(s) = &inv.last_status {
+            if s.counters[11] != 0 {
+                return un(format!("{} anchor(s) lost to capacity", s.counters[11]));
+            }
+        }
+    } else if inv.clocks.iter().any(|a| a.flags == CK_REGRESSION) {
+        return un("an anchor saw the PPU timebase regress".into());
     }
     let obs: Vec<Obs> = inv
         .clocks
         .iter()
+        .filter(|a| a.flags == CK_VALID)
         .map(|a| Obs { f: i128::from(a.raw), lo: i128::from(a.tb_before), hi: i128::from(a.tb_after) })
         .collect();
     let mut distinct: Vec<i128> = obs.iter().map(|o| o.f).collect();

@@ -1251,3 +1251,82 @@ fn build_frame_fixture_from_the_host_runtime() {
     assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.reason == ps3dk_prof::auto_rsx::SEGMENT_REPLAY),
         "{:#?}", r.frames);
 }
+
+// ---- bracketed clock anchors (CONFIG masks 127/11) ------------------------------------------------------------------
+
+fn brk_cfg() -> ACfg {
+    let mut c = bld_cfg();
+    c.words[4] = 127;
+    c
+}
+fn brk_file(cfg: ACfg, rest: Vec<Chunk>) -> File {
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(cfg.chunk());
+    f.chunks.extend(rest);
+    f
+}
+/// Anchor k one second of RSX time after k-1 (raw ns), PPU time at 79.8 MHz, bracketed by `half` ticks either side,
+/// with the bracketed label rule (seen below 2k-1, then at or above 2k).
+fn brk_anchor(id: u32, half: u64) -> AClk {
+    let raw = 1_000_000_000u64 * u64::from(id);
+    let t = raw / 1000 * 798 / 10 + 5_000_000; // 79.8 M ticks per second of RSX time
+    let mut a = anchor(id, raw, (t - half, t + half));
+    a.labels = (0, 2 * id);
+    a
+}
+fn timed_out(id: u32) -> AClk {
+    let mut a = brk_anchor(id, 1000);
+    a.flags = 2;
+    a.raw = 0;
+    a.repeated = 0;
+    a.labels = (0, 0);
+    a
+}
+
+/// 10 ms brackets (the drain interval) around nine one-second-apart anchors still qualify the map.
+#[test]
+fn bracketed_anchors_qualify_with_drain_interval_brackets() {
+    let half = FREQ / 200; // +/- 5 ms
+    let mut rest: Vec<Chunk> = (1..=9).map(|k| clock(&brk_anchor(k, half))).collect();
+    rest.push(status(1, status_for(0, 0, 9, 0)));
+    let r = analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"));
+    let Some(MapState::Qualified(m)) = &r.map else { panic!("map {:?}", r.map) };
+    assert_eq!(m.anchors, 9);
+}
+
+/// Under 127/11 a timed-out anchor removes an observation but does not unqualify the map; under 63/11 it still does.
+#[test]
+fn bracketed_map_ignores_failed_anchors() {
+    let half = FREQ / 200;
+    let ids = [1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    let build = |cfg: ACfg, bracket: bool| {
+        let mut rest: Vec<Chunk> = ids.iter().map(|&k| {
+            let mut a = if k == 4 || k == 8 { timed_out(k) } else { brk_anchor(k, half) };
+            if !bracket && a.flags == 1 { a.labels = (k, k); }
+            clock(&a)
+        }).collect();
+        rest.push(status(1, status_for(0, 0, 11, 0)));
+        analyze(&reader::read(&brk_file(cfg, rest).bytes()).expect("reads"))
+    };
+    let r = build(brk_cfg(), true);
+    let Some(MapState::Qualified(m)) = &r.map else { panic!("map {:?}", r.map) };
+    assert_eq!(m.anchors, 9, "two timed-out anchors left out");
+    let r = build(bld_cfg(), false);
+    assert!(matches!(&r.map, Some(MapState::Unqualified(why)) if why.contains("anchor 4 failed")), "{:?}", r.map);
+}
+
+/// The label rule belongs to the CONFIG: 127/11 needs (below 2k-1, at or above 2k), older masks need (k, k).
+#[test]
+fn bracketed_label_rule_follows_the_config() {
+    let mut a = brk_anchor(1, 1000);
+    a.labels = (1, 1);
+    let f = brk_file(brk_cfg(), vec![clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "127/11 refuses the unbracketed label pair");
+    let a = brk_anchor(1, 1000); // labels (0, 2)
+    let f = brk_file(bld_cfg(), vec![clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "63/11 refuses the bracketed label pair");
+    let mut a = brk_anchor(2, 1000);
+    a.labels = (3, 4); // seen at 2k-1: not a lower bound
+    let f = brk_file(brk_cfg(), vec![clock(&brk_anchor(1, 1000)), clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "a lower-bound poll must have seen the label below 2k-1");
+}
