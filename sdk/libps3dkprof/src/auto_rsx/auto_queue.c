@@ -13,7 +13,7 @@ int auto_queue_init(auto_queue *q, auto_queue_entry *entries, uint32_t capacity,
     memset(q,0,sizeof *q);
     memset(entries,0,(size_t)capacity*sizeof *entries);
     q->entries=entries; q->capacity=capacity; q->pairs=pairs;
-    q->next_id=1; q->next_serial=1;
+    q->next_id=1; q->next_serial=1; q->free_pairs=pairs;
     return 1;
 }
 
@@ -28,12 +28,14 @@ auto_queue_entry *auto_queue_claim(auto_queue *q)
     if(q->next_serial>UINT32_MAX-2u || q->next_id==UINT64_MAX) {q->refusal=AUTO_QUEUE_EXHAUSTED;return NULL;}
     w=RLX(&q->write_idx); r=ACQ(&q->read_idx);
     if(w-r>=q->capacity) {q->refusal=AUTO_QUEUE_METADATA;return NULL;}
+    if(ACQ(&q->free_pairs)<=q->reserve) {q->refusal=AUTO_QUEUE_REPORTS;return NULL;}
     for(i=0;i<q->pairs;i++) {
         pair=(q->pair_cursor+i)%q->pairs;
         if(ACQ(&q->pair_state[pair])==0) break;
     }
     if(i==q->pairs) {q->refusal=AUTO_QUEUE_REPORTS;return NULL;}
     REL(&q->pair_state[pair],1u);
+    __atomic_fetch_sub(&q->free_pairs,1u,__ATOMIC_ACQ_REL);
     q->pair_cursor=(pair+1u)%q->pairs;
     e=&q->entries[w%q->capacity];
     memset(e,0,sizeof *e);
@@ -43,20 +45,24 @@ auto_queue_entry *auto_queue_claim(auto_queue *q)
     return e;
 }
 
-int auto_queue_take_pair(auto_queue *q)
+static int take_pair(auto_queue *q,uint32_t keep)
 {
     uint32_t i,pair=0;
     q->refusal=AUTO_QUEUE_NONE;
     if(ACQ(&q->stopped)) {q->refusal=AUTO_QUEUE_STOPPED;return -1;}
+    if(ACQ(&q->free_pairs)<=keep) {q->refusal=AUTO_QUEUE_REPORTS;return -1;}
     for(i=0;i<q->pairs;i++) {
         pair=(q->pair_cursor+i)%q->pairs;
         if(ACQ(&q->pair_state[pair])==0) break;
     }
     if(i==q->pairs) {q->refusal=AUTO_QUEUE_REPORTS;return -1;}
     REL(&q->pair_state[pair],1u);
+    __atomic_fetch_sub(&q->free_pairs,1u,__ATOMIC_ACQ_REL);
     q->pair_cursor=(pair+1u)%q->pairs;
     return (int)pair;
 }
+int auto_queue_take_pair(auto_queue *q) {return take_pair(q,q->reserve);}
+int auto_queue_take_reserved_pair(auto_queue *q) {return take_pair(q,0);}
 
 void auto_queue_quarantine_pair(auto_queue *q, uint32_t pair)
 {
@@ -110,7 +116,12 @@ int auto_queue_ack(auto_queue *q, uint64_t id, int completed, int whole)
     const auto_queue_entry *e=auto_queue_peek(q);
     uint64_t r=RLX(&q->read_idx);
     if(!whole || !e || e->op.id!=id) return 0;
-    REL(&q->pair_state[e->pair],completed && !ACQ(&q->stopped) ? 0u:2u);
+    if(completed && !ACQ(&q->stopped)) {
+        REL(&q->pair_state[e->pair],0u);
+        __atomic_fetch_add(&q->free_pairs,1u,__ATOMIC_ACQ_REL);
+    } else {
+        REL(&q->pair_state[e->pair],2u);
+    }
     q->written++;
     REL(&q->read_idx,r+1u); /* no slot can change until sink acceptance and every read are finished */
     return 1;

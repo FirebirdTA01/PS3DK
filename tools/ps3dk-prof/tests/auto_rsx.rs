@@ -1539,3 +1539,99 @@ fn bracketed_label_rule_follows_the_config() {
     let f = brk_file(brk_cfg(), vec![clock(&brk_anchor(1, 1000)), clock(&a)]);
     assert!(reader::read(&f.bytes()).is_err(), "a lower-bound poll must have seen the label below 2k-1");
 }
+
+// ---- whole-CALL brackets (CONFIG masks 255/11) ----------------------------------------------------------------------
+
+/// 255/11: one frame (PPU 10000..110000) with a FIFO wait, marks at RSX 5000..45000 and one short timed clear, plus one
+/// segment draw refused for report capacity while building in this frame and CALLed here (unrepresented 1). `call`
+/// is the whole-CALL bracket: (raw span, flags, args[1] without a record, args[4] build-excluded), or None.
+fn call_frame(call: Option<((u64, u64), u16, u32, u32)>, unrep: u32, masks: u32) -> File {
+    let mut list = vec![mark(1, 0, 1, 5000), op(2, 0, (6000, 7000))];
+    if let Some((raw, flags, without, excl)) = call {
+        let mut c = op(3, 0, raw);
+        c.kind = 5;
+        c.flags = flags;
+        if flags & 4 != 0 {
+            c.published = 0;
+        }
+        c.args = [1, without, 1, 1, excl, 0, 0];
+        if excl != 0 {
+            c.tail = (0, OWNER, 1, 0);
+        }
+        list.push(c);
+    }
+    let end = list.len() as u64 + 1;
+    list.push(mark(end, 0, 2, 45_000));
+    let n = list.len() as u64;
+    let mut x = row(0, (10_000, 110_000), 1);
+    x.rows[2][0] = 2;
+    x.rows[2][3] = 1;
+    x.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 0)),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), coverage_p(&x, &Blk { reserved: unrep, ..Blk::default() })];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 1, 9, 2 * n)));
+    let mut cfg = brk_cfg();
+    cfg.words[4] = masks;
+    brk_file(cfg, rest)
+}
+
+/// A whole-CALL bracket times every draw its CALL executed: the draws it names leave the calling frame's untimed
+/// count (and its build frame's, for those refused while building there), and its span joins the frame's RSX span,
+/// so a frame the timed draws alone could not decide gets the exact verdict. A failed bracket covers nothing.
+#[test]
+fn call_brackets_decide_untimed_segment_frames() {
+    let read = |f: File| analyze(&reader::read(&f.bytes()).expect("reads")).frames[0].clone();
+    // no bracket: the short timed span with an untimed draw decides nothing
+    let f = read(call_frame(None, 1, 255));
+    assert_eq!(f.verdict, Verdict::Unknown);
+    assert_eq!(f.rsx_busy_raw, Some(1000));
+    assert!(f.reason.contains("does not decide"), "{}", f.reason);
+    assert_eq!(f.call_brackets, 0);
+    // the bracket covers the unrepresented draw and its build-frame exclusion: the exact rule, no bounds
+    let f = read(call_frame(Some(((6500, 40_000), 3, 1, 1)), 1, 255));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("fetch:"), "{}", f.reason);
+    assert!(f.rsx_busy_bounds.is_none());
+    assert_eq!(f.call_brackets, 1);
+    assert_eq!(f.rsx_span_raw, Some(40_000 - 6000));
+    // busy time merges the overlapping clear into the CALL's interval
+    assert_eq!(f.rsx_busy_raw, Some(40_000 - 6000));
+    assert!(f.rsx_busy_ppu.is_some());
+    // a gap between the clear and the CALL: in the span, not in busy time
+    let f = read(call_frame(Some(((8000, 40_000), 3, 1, 1)), 1, 255));
+    assert_eq!((f.rsx_span_raw, f.rsx_busy_raw), (Some(34_000), Some(1000 + 32_000)));
+    // a bracket that names no build-frame exclusion leaves that draw untimed: bounded, on a lower bound that now
+    // includes the CALL's span
+    let f = read(call_frame(Some(((6500, 40_000), 3, 1, 0)), 1, 255));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("1 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    // an INCOMPLETE bracket covers nothing and adds no span
+    let f = read(call_frame(Some(((0, 0), 1 | 4 | 16, 1, 1)), 1, 255));
+    assert_eq!(f.verdict, Verdict::Unknown);
+    assert!(f.reason.contains("does not decide"), "{}", f.reason);
+    assert_eq!(f.call_brackets, 0);
+    // a bracket naming more draws than the row counted without a record refuses
+    let f = read(call_frame(Some(((6500, 40_000), 3, 1, 1)), 0, 255));
+    assert_eq!(f.verdict, Verdict::Unknown);
+    assert!(f.reason.contains("above the row's 0 unrepresented"), "{}", f.reason);
+}
+
+/// CALL records are a 255/11 kind with fixed argument rules; older masks refuse kind 5.
+#[test]
+fn call_brackets_are_checked() {
+    assert!(reader::read(&call_frame(Some(((6500, 40_000), 3, 1, 1)), 1, 255).bytes()).is_ok());
+    assert!(reader::read(&call_frame(Some(((6500, 40_000), 3, 1, 1)), 1, 127).bytes()).is_err(), "127/11 has no kind 5");
+    // without a record > covered, build-excluded > without a record, a SEGMENT flag, no token
+    for (flags, without, excl) in [(3, 2, 0), (3, 0, 1), (3 | 64, 1, 1), (2, 1, 1)] {
+        let f = call_frame(Some(((6500, 40_000), flags, without, excl)), 1, 255);
+        assert!(reader::read(&f.bytes()).is_err(), "flags {flags} args {without}/{excl}");
+    }
+    // a build tail exactly with build-excluded draws
+    let mut f = call_frame(Some(((6500, 40_000), 3, 1, 0)), 1, 255);
+    let at = f.chunks.iter().position(|c| c.ty == 35).unwrap();
+    let base = 16 + 144 * 2; // the third record
+    f.chunks[at].payload[base + 140] = 1;
+    f.chunks[at].payload[base + 136..base + 140].copy_from_slice(&OWNER.to_le_bytes());
+    assert!(reader::read(&f.bytes()).is_err(), "a tail without build-excluded draws");
+}

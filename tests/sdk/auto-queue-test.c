@@ -61,6 +61,27 @@ static void limits(void)
     assert(!auto_queue_claim(&q) && q.refusal==AUTO_QUEUE_METADATA);
 }
 
+/* The reserve: claim and take_pair stop when only `reserve` pairs are free; take_reserved_pair may use them; an
+ * acknowledged completion returns its pair to the free count, a quarantined one does not. */
+static void reserved(void)
+{
+    auto_queue_entry *e;
+    assert(auto_queue_init(&q,entries,4,4) && q.free_pairs==4 && q.reserve==0);
+    q.reserve=2;
+    e=auto_queue_claim(&q); assert(e); auto_queue_commit(&q);
+    assert(auto_queue_take_pair(&q)>=0 && q.free_pairs==2);
+    assert(!auto_queue_claim(&q) && q.refusal==AUTO_QUEUE_REPORTS);
+    assert(auto_queue_take_pair(&q)<0 && q.refusal==AUTO_QUEUE_REPORTS);
+    assert(auto_queue_take_reserved_pair(&q)>=0 && auto_queue_take_reserved_pair(&q)>=0 && q.free_pairs==0);
+    assert(auto_queue_take_reserved_pair(&q)<0 && q.refusal==AUTO_QUEUE_REPORTS);
+    assert(auto_queue_ack(&q,1,1,1) && q.free_pairs==1);   /* completed: free again */
+    assert(auto_queue_take_reserved_pair(&q)>=0 && q.free_pairs==0);
+    assert(auto_queue_init(&q,entries,4,1));
+    e=auto_queue_claim(&q); assert(e); auto_queue_commit(&q);
+    assert(auto_queue_ack(&q,1,0,1) && q.free_pairs==0);   /* quarantined: still charged */
+    assert(auto_queue_take_reserved_pair(&q)<0);
+}
+
 static void *producer(void *unused)
 {
     unsigned i;
@@ -93,7 +114,7 @@ static void *consumer(void *unused)
 int main(void)
 {
     pthread_t a,b;
-    bounded(); limits();
+    bounded(); limits(); reserved();
     assert(auto_queue_init(&q,entries,4,2));
     assert(!pthread_create(&a,NULL,producer,NULL));
     assert(!pthread_create(&b,NULL,consumer,NULL));

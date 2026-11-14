@@ -16,12 +16,12 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
-                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent'])
+                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -30,7 +30,7 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
                           'boundary-cadence':'spanning','boundary-scope':'spanning',
-                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested'}[a.mutant] and not a.sanitize
+                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested','no-call-reserve':'callbracket','bracket-silent':'callbracket'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -75,7 +75,9 @@ def run(name,cmd,cwd=out):
                   'replay-silent':b're-CALL of a timed build sets the replay latch',
                   'recall-silent':b"a re-CALL counts the build's visits",
                   'moved-draw-silent':b'the part a moved draw ends in counts it',
-                  'nested-silent':b'a CALL inside a draw bracket sets the replay latch'}[a.mutant]
+                  'nested-silent':b'a CALL inside a draw bracket sets the replay latch',
+                  'no-call-reserve':b'timed==504u-32u-2u',
+                  'bracket-silent':b'context.current==a+before'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -93,7 +95,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -104,7 +106,7 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('extsegments','segbuild','segnested'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('extsegments','segbuild','segnested','callbracket'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
@@ -193,9 +195,17 @@ for rel in sources:
         # CALL completeness reintroduced as silent: a replay, a re-CALL's draws, or a moved draw's destination
         old,new={'replay-silent':('if(s->reports) ST_REL(&a->segment_replay,1u);','(void)0;'),
                  'recall-silent':('(void)auto_frames_unrepresented(&a->coverage,s->visits);return;','return;'),
-                 'moved-draw-silent':('if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);}','(void)d;')}[a.mutant]
+                 'moved-draw-silent':('if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);history_add(&d->other_refused,1);}','(void)d;')}[a.mutant]
         code=source.read_text();assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,new).encode())
+    elif a.mutant=='no-call-reserve' and rel=='auto_rsx/auto_queue.c':
+        # covered draws may take the pairs kept for whole-CALL brackets
+        code=source.read_text();old='int auto_queue_take_pair(auto_queue *q) {return take_pair(q,q->reserve);}';assert code.count(old)==1
+        source=out/'auto_queue.c';source.write_bytes(code.replace(old,'int auto_queue_take_pair(auto_queue *q) {return take_pair(q,0);}').encode())
+    elif a.mutant=='bracket-silent' and rel=='auto_rsx/auto_runtime.c':
+        # no whole-CALL bracket: a build that is not fully timed gets no CALL span
+        code=source.read_text();old='    if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;\n';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    return;\n').encode())
     elif a.mutant=='writer-on-segment' and rel=='auto_rsx/auto_runtime.c':
         # review finding reintroduced: the in-flight emitter is matched by the segment's writer, which a part close clears
         code=source.read_text();old='a->segment_active_writer==(void *)context';assert code.count(old)==1
@@ -268,6 +278,7 @@ if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capa
 if a.case=='segmetatail':application=Path(__file__).with_name('auto-segment-metadata-tail-test.c').read_text()
 if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-frame-test.c').read_text()
 if a.case=='segnested':application=Path(__file__).with_name('auto-segment-call-in-bracket-test.c').read_text()
+if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
@@ -284,6 +295,8 @@ if a.case=='segmetatail':
     assert result.returncode==0 and result.stdout==b'AUTO metadata exhaustion latches the frame tail PASS\n',result.stdout
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
+if a.case=='callbracket':
+    assert result.returncode==0 and result.stdout==b'AUTO whole-CALL brackets: 470 timed draws, 32 brackets from the reserve, the 33rd refused PASS\n',result.stdout
 if a.case=='segcapacity':
     assert result.returncode==0 and result.stdout.startswith(b'AUTO segment capacity: 24 segments, 100 draws per build') and result.stdout.endswith(b'untimed PASS\n'),result.stdout
     print(result.stdout.decode(),end='')
@@ -297,6 +310,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO external segment timing PASS\n' if a.case=='extsegments'
                        else b'AUTO segment build frames and CALL completeness PASS\n' if a.case=='segbuild'
                        else b'AUTO segment CALL inside a draw bracket PASS\n' if a.case=='segnested'
+                       else b'AUTO whole-CALL brackets: 470 timed draws, 32 brackets from the reserve, the 33rd refused PASS\n' if a.case=='callbracket'
                        else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
                        else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
@@ -339,7 +353,7 @@ if a.case=='fifopost':
     raise SystemExit(0)
 if a.case=='segbuild':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(127,11) and struct.unpack_from('<I',config,60)[0]==OP
+    assert struct.unpack_from('<2I',config,24)==(255,11) and struct.unpack_from('<I',config,60)[0]==OP
     owner=struct.unpack_from('<I',config,16)[0]
     records=[]
     for k,b in auto:
@@ -369,13 +383,37 @@ if a.case=='segbuild':
     raise SystemExit(0)
 if a.case=='segnested':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(127,11)
+    assert struct.unpack_from('<2I',config,24)==(255,11)
     rows=[b for k,b in auto if k==36];assert rows and all(len(b)==384 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
     print('real capture: CALLs inside a draw bracket counted and the replay latch set PASS')
+    raise SystemExit(0)
+if a.case=='callbracket':
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(255,11)
+    owner=struct.unpack_from('<I',config,16)[0]
+    calls=[]
+    for k,b in auto:
+        if k!=35:continue
+        for i in range(struct.unpack_from('<I',b,8)[0]):
+            q=b[16+OP*i:16+OP*(i+1)]
+            if struct.unpack_from('<H',q,12)[0]==5:
+                calls.append((struct.unpack_from('<H',q,14)[0],struct.unpack_from('<Q',q,16)[0],
+                              struct.unpack_from('<7I',q,64),struct.unpack_from('<2I',q,92)[0:1]+struct.unpack_from('<I',q,116),
+                              build_tail(q)))
+    assert len(calls)==32,len(calls)
+    # TOKEN|RAW_VALID in frame 0, never SEGMENT; part 1 (ordinal 2): 471 draws, 1 refused for report capacity in frame 0
+    assert all(f==3 and fr==0 and so==(0,0) for f,fr,a_,so,t in calls),calls[:2]
+    assert calls[0][2]==(471,1,2,2,1,0,0) and calls[0][4]==(0,owner,1,0),calls[0]
+    # parts 2..31 (ordinals 3..32) and part 0 rebuilt (ordinal 1): one refused draw each, call ordinals 4..34
+    assert [c[2][2] for c in calls[1:]]==list(range(3,33))+[1],[c[2] for c in calls]
+    assert all(c[2][0:2]==(1,1) and c[2][4]==1 and c[4]==(0,owner,1,0) for c in calls[1:])
+    fields=struct.unpack_from('<HHI15Q',auto[-1][1])
+    assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
+    print('real capture: 32 whole-CALL records with their build frames, replay latched PASS')
     raise SystemExit(0)
 if a.case=='extsegments':
     records=[]
@@ -405,7 +443,7 @@ if a.case=='extsegments':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(127,11),'CONFIG kind/form masks of the build-frame writer'
+    assert struct.unpack_from('<2I',config,24)==(255,11),'CONFIG kind/form masks of the build-frame writer'
     assert struct.unpack_from('<I',config,60)[0]==OP,'CONFIG record width'
     records=[]
     for k,b in auto:
@@ -452,7 +490,7 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(127,11)
+    assert struct.unpack_from('<2I',config,24)==(255,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
     assert all(len(b)==384 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -483,7 +521,7 @@ if a.case=='flips':
     raise SystemExit(0)
 if a.case in ('present','spanning'):
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(127,11)
+    assert struct.unpack_from('<2I',config,24)==(255,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
     assert len(rows)==n and all(len(b)==384 for b in rows),[len(b) for b in rows]
@@ -613,7 +651,7 @@ config,status=auto[0][1],auto[1][1]
 assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,127,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,255,11)
     assert struct.unpack_from('<I',config,60)[0]==OP
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
