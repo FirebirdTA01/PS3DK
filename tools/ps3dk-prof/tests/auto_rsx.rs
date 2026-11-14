@@ -531,14 +531,25 @@ fn fixtures_from_the_host_runtime() {
 
 /// Captures written before the build-frame writer (CONFIG 15/11 and older) keep the exact JSON the previous
 /// reader printed: the 63/11 fields (segment_replay, built, recorded, segment_*) never appear for them. The goldens
-/// were produced by the reader at b451c6a5e.
+/// were produced by the reader at b451c6a5e; the per-reason exclusion columns added since are checked separately.
 #[test]
 fn auto_json_unchanged_for_older_captures() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
     for name in ["segments", "d12-segments", "console-r2", "frames"] {
         let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
             .args(["auto", "--json", &format!("{dir}/{name}.prof")]).output().unwrap();
-        let got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        let mut got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        // the only addition since b451c6a5e: per-kind exclusion-reason columns on every frame row
+        for fr in got["frames"].as_array_mut().unwrap() {
+            let ex = fr.as_object_mut().unwrap().remove("exclusions").expect("exclusions on every frame");
+            for kind in ["ARRAY", "INDEX", "CLEAR"] {
+                let cols = ex[kind].as_object().unwrap();
+                assert_eq!(cols.len(), 10, "{name}: ten reason columns");
+                let sum: u64 = cols.values().map(|v| v.as_u64().unwrap()).sum();
+                let k = ["ARRAY", "INDEX", "CLEAR"].iter().position(|x| *x == kind).unwrap();
+                assert_eq!(sum, fr["excluded"][k].as_u64().unwrap(), "{name}: columns sum to excluded");
+            }
+        }
         let want: serde_json::Value =
             serde_json::from_slice(&std::fs::read(format!("{dir}/{name}.base-json.json")).unwrap()).unwrap();
         assert_eq!(got, want, "{name}: JSON differs from the previous reader");
@@ -586,6 +597,43 @@ fn cli_auto_ops() {
     assert_eq!(run(&["auto", "--ops", &format!("{dir}/noinit.prof")]).status.code(), Some(0));
     assert_eq!(run(&["auto", "--ops", "--frame", "x", &format!("{dir}/segments.prof")]).status.code(), Some(3));
     assert_eq!(run(&["auto", "--ops", "--bogus", &format!("{dir}/segments.prof")]).status.code(), Some(3));
+}
+
+/// Past the operation retention ceiling the reader no longer refuses the whole capture: frames that kept every
+/// record keep exactly the verdict a full read gives them, and frames that lost records read UNKNOWN with the
+/// ceiling as the reason.
+#[test]
+fn auto_ops_ceiling_keeps_retained_frames() {
+    let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
+    for name in ["console-r2", "segbuild"] {
+        let bytes = std::fs::read(format!("{dir}/{name}.prof")).unwrap();
+        let full = analyze(&reader::read(&bytes).unwrap());
+        let n = full.ops_parsed;
+        assert!(n > 4, "{name}: fixture has records");
+        let budgets = ps3dk_prof::auto_rsx::Budgets { max_ops: n - 1, ..Default::default() };
+        let cap = reader::read_with_auto_budgets(&bytes, budgets).unwrap();
+        let dropped = cap.auto.as_ref().unwrap().dropped_frames.clone();
+        let part = analyze(&cap);
+        assert!(part.refusal.is_none(), "{name}: no capture-wide refusal");
+        assert_eq!(part.ops_dropped, 1, "{name}: dropped count");
+        assert!(!dropped.is_empty(), "{name}: some frame lost records");
+        assert_eq!(full.frames.len(), part.frames.len());
+        let mut kept = 0;
+        for (a, b) in full.frames.iter().zip(part.frames.iter()) {
+            if dropped.contains(&(b.owner, b.frame)) {
+                assert_eq!(b.verdict, Verdict::Unknown, "{name}: frame {} lost records", b.frame);
+            } else if b.reason != a.reason {
+                // a kept frame may only differ when it imports segment draws built in a frame that lost records
+                assert!(b.reason.contains(ps3dk_prof::auto_rsx::OPS_PAST_CEILING), "{name}: frame {}: {} vs {}", b.frame, a.reason, b.reason);
+            } else {
+                assert_eq!(a.verdict, b.verdict);
+                kept += 1;
+            }
+        }
+        if name == "console-r2" {
+            assert!(kept > 1, "{name}: frames before the ceiling keep their verdicts");
+        }
+    }
 }
 
 #[test]
