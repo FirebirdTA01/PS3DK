@@ -10,28 +10,25 @@ ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
 ap.add_argument('--mutant',choices=['release-failed','partial-ack','owner-release','slot-serial',
-                                    'serial-wrap','skip-cursor','handoff'])
+                                    'serial-wrap','skip-cursor'])
 a=ap.parse_args();src=root/'sdk/libps3dkprof/src/auto_rsx'
 assert (src/'auto_clock.c').is_file(),'AUTO_CLOCK_IMPLEMENTATION'
 a.out.mkdir(parents=True,exist_ok=False)
 source=src/'auto_clock.c'
 # Each mutant removes one load-bearing rule; the named assertion must catch it.
 mutations={
-    'release-failed':('release=r->flags==1u || !emitted;','(void)emitted;release=1u;',
+    'release-failed':('q->release[i]=r->flags==1u || !q->emitted[i];','q->release[i]=1u;(void)r;',
                       'slot_state(FIRST+1)==AUTO_CLOCK_QUARANTINED'),
     'partial-ack':('if(!whole || !r || r->id!=id) return 0;','(void)whole;if(!r || r->id!=id) return 0;',
                    '!auto_clock_ack(&q,1,0)'),
-    'owner-release':('q->release[index]=release;','q->release[index]=release;if(release)REL(&q->slots[s],AUTO_CLOCK_FREE);',
+    'owner-release':('REL(&q->state[i],AUTO_CLOCK_DONE);','REL(&q->state[i],AUTO_CLOCK_DONE);if(q->release[i])REL(&q->slots[r->slot-q->first],AUTO_CLOCK_FREE);',
                      'slot_state(r->slot)==AUTO_CLOCK_HELD'),
-    'slot-serial':('r->id=r->serial=serial;','r->id=r->serial=s+1u;','auto_clock_after(&q,serial)'),
-    'serial-wrap':('q->serial>=UINT32_MAX-1u','0','auto_clock_sample(&q,&port,7,8)==2'),
+    'slot-serial':('r->id=r->serial=serial;','r->id=r->serial=s+1u;','r->flags==1 && r->id==n && r->serial==n'),
+    'serial-wrap':('q->serial>=UINT32_MAX/2u-1u','0','auto_clock_sample(&q,&port,7,8)==2'),
     'skip-cursor':('q->cursor=(s+1u)%AUTO_CLOCK_SLOTS;','q->cursor=0;',
                    'r->slot==FIRST+(n-1)%AUTO_CLOCK_SLOTS'),
-    'handoff':('REL(&q->write_idx,w+1u);','__atomic_store_n(&q->write_idx,w+1u,__ATOMIC_RELAXED);',
-               'WARNING: ThreadSanitizer: data race'),
 }
 if a.mutant:
-    assert (a.sanitize=='thread')==(a.mutant=='handoff')
     old,new,expected=mutations[a.mutant];code=source.read_text();assert code.count(old)==1,old
     source=a.out/'auto_clock.c';source.write_bytes(code.replace(old,new).encode())
 flags=['-std=c11','-O2','-g','-pthread','-Wall','-Wextra','-Werror']

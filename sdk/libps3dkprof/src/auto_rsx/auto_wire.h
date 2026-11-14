@@ -33,9 +33,12 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * 144-byte OPS record; COVERAGE u32@380 counts segment draws a CALL executed
  * without a record; not an OPS kind); unsafe, immediate and
  * direct/uninstrumented forms unsupported (CALL segments built through the
- * segment API are covered). A reader that knows only 7/15, 15/11 or 31/11
- * refuses 63/11 at CONFIG. */
-enum { AUTO_KIND_MASK=63, AUTO_FORM_MASK=11 };
+ * segment API are covered), and CLOCK_BRACKET=64 (a clock anchor k releases the
+ * label at 2k-1 before its timestamp and 2k after it; the drainer brackets the
+ * timestamp between the last poll below 2k-1 and the first at or above 2k:
+ * label_first/label_second carry those observed values). A reader that knows
+ * only 7/15, 15/11, 31/11 or 63/11 refuses 127/11 at CONFIG. */
+enum { AUTO_KIND_MASK=127, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64

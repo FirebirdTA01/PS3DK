@@ -57,6 +57,11 @@ pub const MASKS_PRESENT: (u32, u32) = (31, 11);
 /// u32@380 counts segment draws a CALL executed without a record.  Not an OPS kind.  Readers that know only the older
 /// pairs refuse it at CONFIG.
 pub const MASKS_BUILD: (u32, u32) = (63, 11);
+/// The bracketed-clock writer: kind mask bit 64 CLOCK_BRACKET on top of 63/11.  Anchor k releases the clock label at
+/// 2k-1 before its timestamp and at 2k after it, and the drainer completes it later: tb_before is the last poll that
+/// saw the label below 2k-1 (or the issue time), tb_after the first that saw it at or above 2k; label_first and
+/// label_second carry those observed values.
+pub const MASKS_BRACKET: (u32, u32) = (127, 11);
 /// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
 pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
@@ -127,6 +132,11 @@ pub const EXCLUSIONS: [&str; 10] = [
     "resource lease unverified",
     "epoch invalid",
 ];
+/// EXCLUSIONS columns that only leave a draw UNTIMED (it still executes in the owner's command stream between
+/// the frame's RSX marks): room, report capacity, metadata capacity, reentry, unsupported arguments. The other
+/// columns (shutdown, ownership uncertainty, observer disabled, resource lease unverified, epoch invalid) mean the
+/// evidence itself cannot be trusted, so a frame with any of them stays UNKNOWN.
+pub const UNTIMED_ONLY: [bool; 10] = [true, true, true, true, true, false, false, false, false, false];
 pub const KINDS: [&str; 3] = ["ARRAY", "INDEX", "CLEAR"];
 /// STATUS counters from offset 8, in wire order.
 pub const STATUS_FIELDS: [&str; 15] = [
@@ -203,6 +213,10 @@ impl Attached {
     /// SEGMENT records name their building frame and rows count unrepresented CALL draws (CONFIG 63/11).
     pub fn build_frames(&self) -> bool {
         self.kind_mask & 32 != 0
+    }
+    /// Clock anchors are bracketed by two label values per anchor (CONFIG 127/11).
+    pub fn clock_bracket(&self) -> bool {
+        self.kind_mask & 64 != 0
     }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
@@ -363,6 +377,11 @@ pub struct Inventory {
     pub config: Option<Config>,
     pub ops: Vec<Op>,
     pub ops_parsed: u64,
+    /// Records parsed but not retained past the operation ceiling, and every (owner, frame) they belonged to
+    /// (their own frame token and, for segment draws, their build frame): those frames read UNKNOWN, the
+    /// others keep their verdicts.
+    pub ops_dropped: u64,
+    pub dropped_frames: BTreeSet<(u32, u64)>,
     pub frames: Vec<Coverage>,
     pub frames_parsed: u64,
     pub clocks: Vec<Anchor>,
@@ -519,7 +538,7 @@ impl Reader {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
-                    && (kinds, forms) != MASKS_BUILD
+                    && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -536,7 +555,7 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
-                let negotiated = if (kinds, forms) == MASKS_BUILD { OP_BYTES_BUILD } else { OP_BYTES };
+                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET { OP_BYTES_BUILD } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
@@ -735,7 +754,9 @@ impl Reader {
             self.result.ops_parsed += 1;
             self.result.max_snapshot = self.result.max_snapshot.max(published);
             if self.result.ops.len() as u64 >= self.budgets.max_ops {
-                self.result.refusal.get_or_insert("AUTO operation retention ceiling");
+                self.result.ops_dropped += 1;
+                if flags & OP_TOKEN != 0 { self.result.dropped_frames.insert((frame_owner, frame)); }
+                if build_known { self.result.dropped_frames.insert((build_owner, build_frame)); }
                 continue;
             }
             self.result.ops.push(Op {
@@ -996,7 +1017,13 @@ impl Reader {
             return bad(r, format!("{at}: polls {polls} owner {owner}"));
         }
         if flags == CK_VALID {
-            if raw == u64::MAX || raw != repeated || label_first != serial || label_second != serial
+            // bracketed anchors: the label was seen below 2k-1 (or never polled before, 0) and at or above 2k
+            let labels_ok = if cfg.clock_bracket() {
+                serial < u32::MAX / 2 && label_first < 2 * serial - 1 && label_second >= 2 * serial
+            } else {
+                label_first == serial && label_second == serial
+            };
+            if raw == u64::MAX || raw != repeated || !labels_ok
                 || tb_after < tb_before || elapsed != tb_after - tb_before || polls == 0
             {
                 return bad(r, format!("{at}: VALID without a stable exact completion"));
@@ -1073,17 +1100,25 @@ pub fn qualify(inv: &Inventory) -> MapState {
     if inv.refusal.is_some() || inv.clocks_parsed != inv.clocks.len() as u64 {
         return un("clock anchors not all retained".into());
     }
-    if let Some(a) = inv.clocks.iter().find(|a| a.flags != CK_VALID) {
-        return un(format!("anchor {} failed ({})", a.id, a.outcome()));
-    }
-    if let Some(s) = &inv.last_status {
-        if s.counters[11] != 0 {
-            return un(format!("{} anchor(s) lost to capacity", s.counters[11]));
+    // Bracketed writers (127/11) qualify from their VALID anchors: a failed or lost anchor carries no timestamp, so it
+    // removes an observation but cannot contradict the map. Older writers keep the rule that every anchor is VALID.
+    let bracket = inv.config.as_ref().and_then(Config::attached).is_some_and(Attached::clock_bracket);
+    if !bracket {
+        if let Some(a) = inv.clocks.iter().find(|a| a.flags != CK_VALID) {
+            return un(format!("anchor {} failed ({})", a.id, a.outcome()));
         }
+        if let Some(s) = &inv.last_status {
+            if s.counters[11] != 0 {
+                return un(format!("{} anchor(s) lost to capacity", s.counters[11]));
+            }
+        }
+    } else if inv.clocks.iter().any(|a| a.flags == CK_REGRESSION) {
+        return un("an anchor saw the PPU timebase regress".into());
     }
     let obs: Vec<Obs> = inv
         .clocks
         .iter()
+        .filter(|a| a.flags == CK_VALID)
         .map(|a| Obs { f: i128::from(a.raw), lo: i128::from(a.tb_before), hi: i128::from(a.tb_after) })
         .collect();
     let mut distinct: Vec<i128> = obs.iter().map(|o| o.f).collect();
@@ -1158,6 +1193,8 @@ pub const PACING_SHARE: (u64, u64) = (1, 4);
 pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
 /// Flip-status polling was seen, but polling shows how often the owner looked at the flip, not that it waited.
 pub const POLLING_ONLY: &str = "presentation polling observed; waiting not established";
+/// Some of this frame's operation records lie past the reader's operation retention ceiling (a very long capture).
+pub const OPS_PAST_CEILING: &str = "operation records past the reader's retention ceiling (capture too long to retain whole)";
 /// A frame with CALL-segment records: no per-frame verdict (the records do not carry the building frame).
 pub const SEGMENT_POPULATION: &str = "from CALL segments: a segment is counted where it was built and recorded where \
     it was called, so this frame's records and coverage are not one population";
@@ -1211,6 +1248,8 @@ pub struct FrameView {
     pub visited: [u64; 3],
     pub observed: [u64; 3],
     pub excluded: [u64; 3],
+    /// Per kind (ARRAY, INDEX, CLEAR), the ten exclusion columns in EXCLUSIONS order.
+    pub exclusions: [[u64; 10]; 3],
     /// Retained operation records of this frame by kind (ARRAY, INDEX, CLEAR).
     pub records: [u64; 3],
     pub unsupported: u64,
@@ -1226,6 +1265,9 @@ pub struct FrameView {
     pub rsx_frame_raw: (Option<u64>, Option<u64>),
     /// D2: end mark minus begin mark on the PPU clock through the qualified map: [lo, hi] ticks.
     pub rsx_frame_ppu: Option<(u64, u64)>,
+    /// Set only when some covered draws went untimed for a reason that leaves the evidence valid: the RSX busy
+    /// span bounds the verdict was decided on (lower = the timed draws' span, upper = the RSX frame marks).
+    pub rsx_busy_bounds: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
     /// 63/11 only (else zero): `records` is then the frame's BUILD population (records not built in a segment
@@ -1259,6 +1301,8 @@ pub struct Presentation {
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     pub capability: bool,
+    /// Operation records the reader parsed but did not retain (past its operation ceiling).
+    pub ops_dropped: u64,
     /// The capture's CONFIG is 63/11 (segment records carry their build frame).
     pub build_frames: bool,
     pub state: String,
@@ -1315,7 +1359,10 @@ fn build_populations(inv: &Inventory) -> (BTreeMap<(u32, u64), [u64; 3]>, BTreeM
 /// A frame row is a clean BUILD source for segment draws recorded elsewhere: present, associated, closed exactly,
 /// nothing excluded or outside the observed population, and its build population reconciles kind by kind.  This does
 /// not depend on that frame's own verdict (its own imports, timing or presentation).
-fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>) -> Result<(), String> {
+/// A frame row as a clean, reconciled build source. With `untimed_ok` (127/11 bounded verdicts) exclusions in the
+/// untimed-only columns are allowed: those draws still executed where they were called, and the calling frame counts
+/// them as untimed (its segment_unrepresented). Any other failure still refuses.
+fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>, untimed_ok: bool) -> Result<(), String> {
     if f.flags & FR_TOKEN == 0 {
         return Err("unassociated coverage row".into());
     }
@@ -1325,6 +1372,7 @@ fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>) -> Result<(
     match (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?)) {
         None => return Err(TOTALS_OVERFLOW.into()),
         Some(0) => {}
+        Some(_) if untimed_ok && !(0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0)) => {}
         Some(n) => return Err(format!("{n} covered operation(s) excluded")),
     }
     if f.unsupported != 0 {
@@ -1348,12 +1396,16 @@ pub fn analyze(cap: &Capture) -> Report {
         status: inv.last_status.clone(),
         ops_parsed: inv.ops_parsed,
         ops_valid: inv.ops.iter().filter(|o| o.raw_valid()).count() as u64,
+        ops_dropped: inv.ops_dropped,
         clocks: inv.clocks.clone(),
         refusal: inv.refusal,
         ..Report::default()
     };
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
     let build = attached.build_frames();
+    // Bounded verdicts for untimed draws come with the bracketed-clock writer (127/11); older captures keep their
+    // exact rules and output.
+    let bounded_rule = attached.clock_bracket();
     rep.build_frames = build;
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
@@ -1361,6 +1413,11 @@ pub fn analyze(cap: &Capture) -> Report {
     let fifo = crate::fifo::analyze(cap);
     let status_ok = inv.final_seen && inv.refusal.is_none();
     let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
+    // A segment build none of whose draws were timed leaves no record naming its build frame, so a CALL of it
+    // cannot be traced back to that frame's evidence. Treat such unrepresented draws as merely untimed only when
+    // the capture shows no invalid-evidence exclusion anywhere and no segment quarantine; otherwise they refuse.
+    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
+        && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
@@ -1376,6 +1433,7 @@ pub fn analyze(cap: &Capture) -> Report {
             visited: [f.rows[0][0], f.rows[1][0], f.rows[2][0]],
             observed: [f.rows[0][1], f.rows[1][1], f.rows[2][1]],
             excluded: [f.excluded(0), f.excluded(1), f.excluded(2)],
+            exclusions: std::array::from_fn(|k| std::array::from_fn(|c| f.rows[k][2 + c])),
             unsupported: f.unsupported,
             records: if build {
                 built.get(&(f.owner, f.frame)).copied().unwrap_or_default()
@@ -1389,6 +1447,7 @@ pub fn analyze(cap: &Capture) -> Report {
             fifo_wait: None,
             rsx_frame_raw,
             rsx_frame_ppu: None,
+            rsx_busy_bounds: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
             recorded: if build { ops.len() as u64 } else { 0 },
             segment_imports: if build {
@@ -1431,12 +1490,16 @@ pub fn analyze(cap: &Capture) -> Report {
         let d = f.tb_end.saturating_sub(f.tb_begin);
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
+        let mut bounds = None;
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
                 return Err(format!("capture not final ({})", inv.state()));
             }
             if status_flags & (ST_RESOURCE_CONFLICT | ST_CONTEXT_RESET) != 0 {
                 return Err("timing invalidated by a resource conflict or context reset".into());
+            }
+            if inv.dropped_frames.contains(&(f.owner, f.frame)) {
+                return Err(OPS_PAST_CEILING.into());
             }
             if status_flags & ST_SEGMENT_REPLAY != 0 {
                 return Err(SEGMENT_REPLAY.into());
@@ -1453,9 +1516,17 @@ pub fn analyze(cap: &Capture) -> Report {
             let (Some(_), Some(excluded)) = (observed, excluded) else {
                 return Err(TOTALS_OVERFLOW.into());
             };
-            if excluded != 0 {
-                return Err(format!("{excluded} covered operation(s) excluded"));
-            }
+            // Untimed draws whose evidence is still valid do not block a verdict by themselves: it is decided on RSX
+            // busy bounds below (timed span .. frame marks). Any other exclusion keeps the frame UNKNOWN.
+            let mut untimed = if excluded != 0 {
+                let invalid = (0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0));
+                if invalid || !bounded_rule {
+                    return Err(format!("{excluded} covered operation(s) excluded"));
+                }
+                excluded
+            } else {
+                0
+            };
             if f.unsupported != 0 {
                 return Err(format!("{} visit(s) outside the observed population (segment or private buffer)",
                     f.unsupported));
@@ -1468,7 +1539,11 @@ pub fn analyze(cap: &Capture) -> Report {
                 return Err(format!("{} operation record(s) {SEGMENT_POPULATION}", v.segment_ops));
             }
             // 63/11: every segment draw a CALL executed here has a record carrying this frame's token.
-            if v.segment_unrepresented != 0 {
+            // With 127/11 those draws ran between this frame's marks without a timed record: untimed, so they fall
+            // under the bounded rule (a replay already returned above, through the sticky status).
+            if v.segment_unrepresented != 0 && bounded_rule && provenance_clean {
+                untimed = untimed.saturating_add(u64::from(v.segment_unrepresented));
+            } else if v.segment_unrepresented != 0 {
                 return Err(format!("at least {} segment draw(s) executed in this frame have no record (a CALL of an \
                     untracked, replayed, refused or partly untimed segment)", v.segment_unrepresented));
             }
@@ -1499,7 +1574,10 @@ pub fn analyze(cap: &Capture) -> Report {
                     let Some(row) = rows.get(&(o, g)) else {
                         return Err(format!("segment draw(s) built in frame {o}/{g}, which has no coverage row"));
                     };
-                    build_clean(row, &built).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
+                    if inv.dropped_frames.contains(&(o, g)) {
+                        return Err(format!("segment draw(s) built in frame {o}/{g}: {OPS_PAST_CEILING}"));
+                    }
+                    build_clean(row, &built, bounded_rule).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
                 }
             }
             if v.ops_incomplete != 0 {
@@ -1514,10 +1592,21 @@ pub fn analyze(cap: &Capture) -> Report {
             }
             // The EXECUTION population (records recorded here) decides emptiness and span; with 63/11 the row's
             // observed counts are what this frame built, which a CALL-only or build-only frame does not match.
-            let span = match (ops.is_empty(), v.rsx_span_ppu) {
+            let timed = match (ops.is_empty(), v.rsx_span_ppu) {
                 (true, _) => (0, 0),
                 (false, Some(s)) => s,
                 (false, None) => return Err("RSX span outside the map's interpolation support".into()),
+            };
+            // With untimed draws the true span lies between the timed draws' span (lower) and the RSX frame marks
+            // (upper): rsx_long uses the lower bound, rsx_short the upper, so a verdict reached here cannot depend
+            // on the untimed draws.
+            let span = if untimed != 0 {
+                let Some(frame) = v.rsx_frame_ppu else {
+                    return Err(format!("{untimed} covered draw(s) untimed and the RSX frame marks give no upper bound (missing or outside the map's support)"));
+                };
+                (timed.0, frame.1.max(timed.1))
+            } else {
+                timed
             };
             let rsx_long = share(span.0, d, RSX_SPAN_SHARE);
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
@@ -1525,7 +1614,7 @@ pub fn analyze(cap: &Capture) -> Report {
             // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
             // where the RSX is not limiting is PACING only with flip-wait scope evidence (cellGcmWaitFlipComplete),
             // otherwise UNKNOWN.  Polling cadence and 15/11 poll intervals are named observations, never waiting.
-            if waited && rsx_long {
+            let out = (|| -> Result<(Verdict, String), String> { if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
             } else if w == 0 && rsx_short {
@@ -1550,6 +1639,14 @@ pub fn analyze(cap: &Capture) -> Report {
                     ticks", span.0)))
             } else {
                 Err(format!("unresolved: FIFO wait >= {w}, RSX span {}..{} of {d} PPU ticks", span.0, span.1))
+            } })();
+            if untimed == 0 {
+                return out;
+            }
+            bounds = Some(span);
+            match out {
+                Ok((verdict, why)) => Ok((verdict, format!("{untimed} covered draw(s) untimed; verdict holds for RSX busy in [{}, {}] PPU ticks; {why}", span.0, span.1))),
+                Err(why) => Err(format!("{untimed} covered draw(s) untimed; RSX busy in [{}, {}] PPU ticks does not decide the verdict ({why})", span.0, span.1)),
             }
         })()
         .map(|(verdict, why)| {
@@ -1557,6 +1654,7 @@ pub fn analyze(cap: &Capture) -> Report {
             why
         })
         .unwrap_or_else(|why| why);
+        v.rsx_busy_bounds = bounds;
         rep.frames.push(v);
     }
     rep.map = Some(map);
@@ -1595,6 +1693,9 @@ fn rat_text(r: &Rat) -> String {
 pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result<()> {
     writeln!(out, "Automatic RSX observation: {}", r.state)?;
     writeln!(out, "{SCOPE}")?;
+    if r.ops_dropped != 0 {
+        writeln!(out, "{} operation record(s) past the reader's retention ceiling were not kept; frames that lost records read UNKNOWN, the others keep their verdicts.", r.ops_dropped)?;
+    }
     if !r.capability {
         return Ok(());
     }
@@ -1715,7 +1816,11 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     };
     let frames: Vec<serde_json::Value> = r.frames.iter().map(|f| (f, json!({
         "owner":f.owner,"frame":f.frame,"flags":f.flags,"tb_begin":f.tb_begin,"tb_end":f.tb_end,
-        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"records":f.records,"unsupported":f.unsupported,
+        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,
+        "exclusions":KINDS.iter().enumerate().map(|(k, kind)| ((*kind).to_string(),
+            serde_json::Value::Object(EXCLUSIONS.iter().enumerate().map(|(c, n)| ((*n).to_string(), json!(f.exclusions[k][c]))).collect())))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "records":f.records,"unsupported":f.unsupported,
         "ops_valid":f.ops_valid,"ops_incomplete":f.ops_incomplete,"rsx_span_raw":f.rsx_span_raw,
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,
@@ -1730,6 +1835,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["segment_imports"] = json!(f.segment_imports);
             v["segment_unrepresented"] = json!(f.segment_unrepresented);
             v["segment_abandoned"] = json!(f.segment_abandoned);
+        }
+        if let Some((lo, hi)) = f.rsx_busy_bounds {
+            // only on frames decided on bounds, so fully timed frames keep their exact JSON
+            v["rsx_busy_bounds"] = json!({"lo": lo, "hi": hi});
         }
         v
     }).collect();
@@ -1757,6 +1866,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    }
+    if r.ops_dropped != 0 {
+        // only when the reader could not retain every record, so complete captures keep their exact JSON
+        v["operations"]["dropped"] = json!(r.ops_dropped);
     }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)

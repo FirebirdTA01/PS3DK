@@ -76,7 +76,7 @@ int main(void) {
 #else
     assert(rc==PS3DK_PROF_ENOTQUIESCED);
     assert(p->auto_lease.ctx==&context && p->auto_lease.published);
-    assert(context.current==words+18);
+    assert(context.current==words+18); /* the clear between its two report markers */
     puts("AUTO in-flight owner seal retains claim and lower bound PASS");
 #endif
 }

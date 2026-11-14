@@ -26,7 +26,7 @@ static void flush(gpp_ctx *ctx) {
     assert(ctx==&context && ++flushes==1);
     uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);
     ps3dk_prof__auto_publish_after((void *)ctx,op);
-    st64(&reports[1024][0],10000);st32(&labels[246],1);
+    st64(&reports[1024][0],10000);st32(&labels[246],2);
 }
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
@@ -67,8 +67,8 @@ int main(void) {
     other=(gpp_ctx){private_words,private_words+64,private_words,NULL};
     ps3dk_prof_test_hooks.gpu_gpp_dev=&device;
     ps3dk_prof__auto_gcm_init_result(&context,sizeof words,sizeof words,words,0);
-    ps3dk_prof_frame(); /* frame 0: clock anchor (6 words), coverage opens, FRAME begin mark (12) */
-    assert(context.current==words+18);
+    ps3dk_prof_frame(); /* frame 0: clock anchor (12 words), coverage opens, FRAME begin mark (12) */
+    assert(context.current==words+24); /* clock anchor (12 words), FRAME begin mark (12) */
     assert(draw(&context,3)); /* the ring clear is observed */
     ps3dk_prof__auto_segment_open((void *)&a_ctx);
     assert(draw(&a_ctx,1) && draw(&a_ctx,2));

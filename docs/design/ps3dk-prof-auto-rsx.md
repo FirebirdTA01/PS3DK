@@ -370,6 +370,30 @@ invalidates the instance. With no free slot, no record room (sixteen records)
 or no serial left, the attempt is a capacity loss with no device write, counted
 in STATUS clock_lost. Slot state never passes to another instance or capture.
 
+**Bracketed anchors (CONFIG kind bit CLOCK_BRACKET=64, masks 127/11).** In an
+RSX-bound title the command FIFO holds frames of work, so an owner that waits
+for its own anchor runs out of polls long before the RSX reaches it. With this
+bit the owner never waits: anchor k writes two timestamp + label pairs into its
+slot (twelve words, room checked without a callback), releasing the clock label
+at 2k-1 and then at 2k, so the slot's final timestamp is written after the
+label reaches 2k-1 and before it reaches 2k. The owner publishes the anchor as
+PENDING and returns. On every drain slice (and before sealing) the drainer reads
+the label once, with an ordered PPU read before and after it: a read below 2k-1
+moves the lower bound to the time before that read (the RSX had not reached the
+timestamp), a read at or above 2k completes the anchor with the upper bound at
+the time after that read, then reads the timer twice (stable) and the label again
+(not lower). An anchor whose first poll already sees 2k keeps its issue time as
+the lower bound. Brackets are therefore about one drain interval wide (10 ms by
+default). Two seconds after its issue an anchor still pending is a TIMEOUT; at
+seal every pending anchor gets one last poll and then times out. A label below
+the last one the drainer saw, or above 2k for the newest anchor the owner
+prepared, invalidates the instance (the drainer invalidates the configuration
+itself). First and second label reads carry the value seen at the lower-bound
+poll (0 when there was none) and at the completing poll; a VALID record has
+first < 2k-1 and second >= 2k. Slot reuse, quarantine and capacity loss are
+unchanged. Older masks keep the single-label rule above (both reads equal the
+serial).
+
 The capture must establish its own bounded map and both H-SPLIT hold-outs. No
 nominal timestamp rate or per-application profile row substitutes for missing
 clock evidence. The timer, report-before-label/coherent-read, reuse and console
@@ -433,8 +457,11 @@ The exit status is that of `check`, or 1 when the capture has no AUTO family,
 a REFUSED CONFIG (shown as `automatic observation unavailable: <REASON>`) or a
 retention refusal.
 
-The capture maps RSX ticks only through its own anchors: every anchor VALID,
-no anchor lost to capacity, at least four distinct RSX coordinates, a
+The capture maps RSX ticks only through its own anchors: every anchor VALID and
+no anchor lost to capacity (older masks; with CLOCK_BRACKET the map is built from
+the VALID anchors only, since a failed or lost anchor carries no timestamp and
+cannot contradict the map, while a clock-regression anchor still unqualifies it),
+at least four distinct RSX coordinates, a
 nonempty exact affine feasible set with a slope bounded above and away from
 zero (the `clockmap` solver), and in both H-SPLIT parities at least one
 DECISIVE held-out anchor and no contradiction. Otherwise the map is

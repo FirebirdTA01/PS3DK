@@ -531,14 +531,25 @@ fn fixtures_from_the_host_runtime() {
 
 /// Captures written before the build-frame writer (CONFIG 15/11 and older) keep the exact JSON the previous
 /// reader printed: the 63/11 fields (segment_replay, built, recorded, segment_*) never appear for them. The goldens
-/// were produced by the reader at b451c6a5e.
+/// were produced by the reader at b451c6a5e; the per-reason exclusion columns added since are checked separately.
 #[test]
 fn auto_json_unchanged_for_older_captures() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
     for name in ["segments", "d12-segments", "console-r2", "frames"] {
         let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
             .args(["auto", "--json", &format!("{dir}/{name}.prof")]).output().unwrap();
-        let got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        let mut got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        // the only addition since b451c6a5e: per-kind exclusion-reason columns on every frame row
+        for fr in got["frames"].as_array_mut().unwrap() {
+            let ex = fr.as_object_mut().unwrap().remove("exclusions").expect("exclusions on every frame");
+            for kind in ["ARRAY", "INDEX", "CLEAR"] {
+                let cols = ex[kind].as_object().unwrap();
+                assert_eq!(cols.len(), 10, "{name}: ten reason columns");
+                let sum: u64 = cols.values().map(|v| v.as_u64().unwrap()).sum();
+                let k = ["ARRAY", "INDEX", "CLEAR"].iter().position(|x| *x == kind).unwrap();
+                assert_eq!(sum, fr["excluded"][k].as_u64().unwrap(), "{name}: columns sum to excluded");
+            }
+        }
         let want: serde_json::Value =
             serde_json::from_slice(&std::fs::read(format!("{dir}/{name}.base-json.json")).unwrap()).unwrap();
         assert_eq!(got, want, "{name}: JSON differs from the previous reader");
@@ -586,6 +597,43 @@ fn cli_auto_ops() {
     assert_eq!(run(&["auto", "--ops", &format!("{dir}/noinit.prof")]).status.code(), Some(0));
     assert_eq!(run(&["auto", "--ops", "--frame", "x", &format!("{dir}/segments.prof")]).status.code(), Some(3));
     assert_eq!(run(&["auto", "--ops", "--bogus", &format!("{dir}/segments.prof")]).status.code(), Some(3));
+}
+
+/// Past the operation retention ceiling the reader no longer refuses the whole capture: frames that kept every
+/// record keep exactly the verdict a full read gives them, and frames that lost records read UNKNOWN with the
+/// ceiling as the reason.
+#[test]
+fn auto_ops_ceiling_keeps_retained_frames() {
+    let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
+    for name in ["console-r2", "segbuild"] {
+        let bytes = std::fs::read(format!("{dir}/{name}.prof")).unwrap();
+        let full = analyze(&reader::read(&bytes).unwrap());
+        let n = full.ops_parsed;
+        assert!(n > 4, "{name}: fixture has records");
+        let budgets = ps3dk_prof::auto_rsx::Budgets { max_ops: n - 1, ..Default::default() };
+        let cap = reader::read_with_auto_budgets(&bytes, budgets).unwrap();
+        let dropped = cap.auto.as_ref().unwrap().dropped_frames.clone();
+        let part = analyze(&cap);
+        assert!(part.refusal.is_none(), "{name}: no capture-wide refusal");
+        assert_eq!(part.ops_dropped, 1, "{name}: dropped count");
+        assert!(!dropped.is_empty(), "{name}: some frame lost records");
+        assert_eq!(full.frames.len(), part.frames.len());
+        let mut kept = 0;
+        for (a, b) in full.frames.iter().zip(part.frames.iter()) {
+            if dropped.contains(&(b.owner, b.frame)) {
+                assert_eq!(b.verdict, Verdict::Unknown, "{name}: frame {} lost records", b.frame);
+            } else if b.reason != a.reason {
+                // a kept frame may only differ when it imports segment draws built in a frame that lost records
+                assert!(b.reason.contains(ps3dk_prof::auto_rsx::OPS_PAST_CEILING), "{name}: frame {}: {} vs {}", b.frame, a.reason, b.reason);
+            } else {
+                assert_eq!(a.verdict, b.verdict);
+                kept += 1;
+            }
+        }
+        if name == "console-r2" {
+            assert!(kept > 1, "{name}: frames before the ceiling keep their verdicts");
+        }
+    }
 }
 
 #[test]
@@ -874,6 +922,167 @@ fn four_frames_scopes(scopes: [(u32, u64); 4], blk: [Blk; 4]) -> File {
         f.chunks[i] = coverage_p(&x, &blk[k]);
     }
     f
+}
+
+/// One 127/11 frame (PPU 10000..110000) with frame marks at RSX `marks` (raw; None = no end mark), one timed clear
+/// at `timed`, one untimed clear in exclusion column `col`, a FIFO wait when `wait`, and flip-wait scopes `scope`.
+fn bounded_frame(timed: (u64, u64), marks: (u64, Option<u64>), col: usize, wait: bool, scope: (u32, u64)) -> File {
+    let mut list = vec![mark(1, 0, 1, marks.0), op(2, 0, timed)];
+    if let Some(e) = marks.1 {
+        list.push(mark(3, 0, 2, e));
+    }
+    let n = list.len() as u64;
+    let mut x = row(0, (10_000, 110_000), 1);
+    x.rows[2][0] = 2;
+    x.rows[2][2 + col] = 1;
+    x.flags |= 64;
+    x.present = scope;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, if wait { 0 } else { 7 })),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), coverage_p(&x, &Blk::default())];
+    // the same nine anchors with the bracketed label rule (seen below 2k-1, then at or above 2k)
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 1, 9, 2 * n)));
+    brk_file(brk_cfg(), rest)
+}
+
+/// Untimed draws (report capacity and the other untimed-only columns) are decided on RSX busy bounds: the timed
+/// span below, the frame marks above. A verdict both bounds give stands; otherwise, or without both marks, or with
+/// an exclusion that invalidates the evidence, the frame stays UNKNOWN.
+#[test]
+fn untimed_draws_get_bounded_verdicts() {
+    let cap = 1; // report capacity
+    let verdict = |f: File| {
+        let r = analyze(&reader::read(&f.bytes()).expect("reads"));
+        let fr = r.frames[0].clone();
+        (fr.verdict, fr.reason, fr.rsx_busy_bounds)
+    };
+    // a long timed span and a FIFO wait: RSX-bound whatever the untimed draw did
+    let (v, why, b) = verdict(bounded_frame((6000, 36_000), (5000, Some(45_000)), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::RsxBound, "{why}");
+    assert!(why.starts_with("1 covered draw(s) untimed; verdict holds for RSX busy in ["), "{why}");
+    let (lo, hi) = b.expect("bounds");
+    assert!(lo >= 50_000 && hi >= lo, "{lo}..{hi}");
+    // the marks are close together (RSX short even at its upper bound), no FIFO wait, 60% inside flip waits: PACING
+    let (v, why, b) = verdict(bounded_frame((6000, 7000), (5000, Some(20_000)), cap, false, (2, 60_000)));
+    assert_eq!(v, Verdict::Pacing, "{why}");
+    assert!(b.expect("bounds").1 < 50_000);
+    // a short timed span but marks far apart: the untimed draw could make the RSX limiting or not
+    let (v, why, b) = verdict(bounded_frame((6000, 7000), (5000, Some(45_000)), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::Unknown);
+    assert!(why.starts_with("1 covered draw(s) untimed; RSX busy in [") && why.contains("does not decide"), "{why}");
+    assert!(b.is_some());
+    // no end mark: no upper bound
+    let (v, why, b) = verdict(bounded_frame((6000, 36_000), (5000, None), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::Unknown);
+    assert!(why.contains("give no upper bound"), "{why}");
+    assert!(b.is_none());
+    // every untimed-only column behaves the same; the evidence-invalidating ones keep the old refusal
+    for col in 0..10 {
+        let (v, why, _) = verdict(bounded_frame((6000, 36_000), (5000, Some(45_000)), col, true, (0, 0)));
+        if ps3dk_prof::auto_rsx::UNTIMED_ONLY[col] {
+            assert_eq!(v, Verdict::RsxBound, "column {col}: {why}");
+        } else {
+            assert_eq!(v, Verdict::Unknown, "column {col}");
+            assert_eq!(why, "1 covered operation(s) excluded", "column {col}");
+        }
+    }
+}
+
+/// 127/11, two frames: G (frame 0) builds segment A (one clear timed, `g_col` an excluded column if any), F (frame 1)
+/// calls A with `unrep` draws executed without a record, A's record at RSX `timed`, F's marks at `marks`, a FIFO wait in F.
+fn seg_bounded(g_col: Option<usize>, unrep: u32, timed: (u64, u64), marks: (u64, u64), status_flags: u16) -> Report {
+    let mut m1 = mark(1, 1, 1, marks.0);
+    m1.serials = (1, 2);
+    m1.published = 2;
+    let a = built_op(2, 1, timed, 1, 1, 0);
+    let mut m2 = mark(3, 1, 2, marks.1);
+    m2.serials = (5, 6);
+    m2.published = 6;
+    let mut g = row(0, (10_000, 110_000), 1);
+    if let Some(c) = g_col {
+        g.rows[2][0] = 2;
+        g.rows[2][2 + c] = 1;
+    }
+    let mut f = row(1, (110_000, 210_000), 0);
+    f.flags |= 64;
+    g.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 120_000, 20_000, 10_000, 1)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops_b(&[m1, a, m2]), coverage_b(&g, 0), coverage_b(&f, unrep)];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(status_flags, status_for(3, 2, 9, 6)));
+    analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"))
+}
+
+/// Review case: G's only segment draw was excluded with column `g_col` (never recorded), F CALLs that build (one
+/// unrepresented draw) and also has its own timed draw built in F, so no record of F names G.
+fn seg_unnamed_build(g_col: usize) -> Report {
+    let mut m1 = mark(1, 1, 1, 56_000);
+    m1.serials = (1, 2);
+    m1.published = 2;
+    let a = built_op(2, 1, (60_000, 90_000), 1, 1, 1);
+    let mut m2 = mark(3, 1, 2, 100_000);
+    m2.serials = (5, 6);
+    m2.published = 6;
+    let mut g = row(0, (10_000, 110_000), 0);
+    g.rows[2][0] = 1;
+    g.rows[2][2 + g_col] = 1;
+    let mut f = row(1, (110_000, 210_000), 1);
+    f.flags |= 64;
+    g.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 120_000, 20_000, 10_000, 1)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops_b(&[m1, a, m2]), coverage_b(&g, 0), coverage_b(&f, 1)];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(3, 2, 9, 6)));
+    analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"))
+}
+
+/// A CALL of a wholly untimed build whose frame holds invalid evidence cannot be traced to that frame (no record
+/// names it), so the calling frame refuses instead of taking a bounded verdict; untimed-only exclusions still bound.
+#[test]
+fn unnamed_invalid_build_refuses() {
+    for (col, name) in [(9, "epoch invalid"), (6, "ownership uncertainty")] {
+        let r = seg_unnamed_build(col);
+        assert_eq!(r.frames[1].verdict, Verdict::Unknown, "{name}: {}", r.frames[1].reason);
+        assert!(r.frames[1].reason.contains("have no record"), "{name}: {}", r.frames[1].reason);
+    }
+    let r = seg_unnamed_build(1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "report capacity: {}", r.frames[1].reason);
+}
+
+/// Segment draws a CALL executed in F without a timed record (segment_unrepresented, including draws its build could
+/// not time) are untimed for the bounded rule; a build frame whose only exclusions are untimed-only is still a source.
+#[test]
+fn segment_frames_get_bounded_verdicts() {
+    let long = (60_000, 90_000);
+    let wide = (56_000, 100_000);
+    // an untracked or refused draw in F, long timed span: RSX-bound on both bounds
+    let r = seg_bounded(None, 1, long, wide, 1);
+    let f = &r.frames[1];
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("1 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    assert!(f.rsx_busy_bounds.is_some());
+    // the same with a short timed span: the unrepresented draw could decide it
+    let r = seg_bounded(None, 1, (60_000, 61_000), wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert!(r.frames[1].reason.contains("does not decide"), "{}", r.frames[1].reason);
+    // A's second draw was excluded for report capacity while G built it (and counted as unrepresented in F):
+    // G is still a source, F is bounded
+    let r = seg_bounded(Some(1), 1, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+    // G with an evidence-invalidating column (ownership uncertainty) still refuses the import
+    let r = seg_bounded(Some(6), 1, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    // (it now refuses one check earlier: an invalid column anywhere means F's unrepresented draw cannot be traced)
+    assert!(r.frames[1].reason.contains("have no record"), "{}", r.frames[1].reason);
+    // a replayed segment: the sticky status keeps every frame UNKNOWN
+    let r = seg_bounded(None, 1, long, wide, 1 | 1024);
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown));
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::SEGMENT_REPLAY);
+    // fully timed: today's verdict and reason, no bounds
+    let r = seg_bounded(None, 0, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+    assert!(r.frames[1].reason.starts_with("fetch:"), "{}", r.frames[1].reason);
+    assert!(r.frames[1].rsx_busy_bounds.is_none());
 }
 
 #[test]
@@ -1250,4 +1459,83 @@ fn build_frame_fixture_from_the_host_runtime() {
     // a segment was replayed: no frame of this capture has a verdict
     assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.reason == ps3dk_prof::auto_rsx::SEGMENT_REPLAY),
         "{:#?}", r.frames);
+}
+
+// ---- bracketed clock anchors (CONFIG masks 127/11) ------------------------------------------------------------------
+
+fn brk_cfg() -> ACfg {
+    let mut c = bld_cfg();
+    c.words[4] = 127;
+    c
+}
+fn brk_file(cfg: ACfg, rest: Vec<Chunk>) -> File {
+    let mut f = base(AUTO_FLAGS);
+    f.chunks.push(cfg.chunk());
+    f.chunks.extend(rest);
+    f
+}
+/// Anchor k one second of RSX time after k-1 (raw ns), PPU time at 79.8 MHz, bracketed by `half` ticks either side,
+/// with the bracketed label rule (seen below 2k-1, then at or above 2k).
+fn brk_anchor(id: u32, half: u64) -> AClk {
+    let raw = 1_000_000_000u64 * u64::from(id);
+    let t = raw / 1000 * 798 / 10 + 5_000_000; // 79.8 M ticks per second of RSX time
+    let mut a = anchor(id, raw, (t - half, t + half));
+    a.labels = (0, 2 * id);
+    a
+}
+fn timed_out(id: u32) -> AClk {
+    let mut a = brk_anchor(id, 1000);
+    a.flags = 2;
+    a.raw = 0;
+    a.repeated = 0;
+    a.labels = (0, 0);
+    a
+}
+
+/// 10 ms brackets (the drain interval) around nine one-second-apart anchors still qualify the map.
+#[test]
+fn bracketed_anchors_qualify_with_drain_interval_brackets() {
+    let half = FREQ / 200; // +/- 5 ms
+    let mut rest: Vec<Chunk> = (1..=9).map(|k| clock(&brk_anchor(k, half))).collect();
+    rest.push(status(1, status_for(0, 0, 9, 0)));
+    let r = analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"));
+    let Some(MapState::Qualified(m)) = &r.map else { panic!("map {:?}", r.map) };
+    assert_eq!(m.anchors, 9);
+}
+
+/// Under 127/11 a timed-out anchor removes an observation but does not unqualify the map; under 63/11 it still does.
+#[test]
+fn bracketed_map_ignores_failed_anchors() {
+    let half = FREQ / 200;
+    let ids = [1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    let build = |cfg: ACfg, bracket: bool| {
+        let mut rest: Vec<Chunk> = ids.iter().map(|&k| {
+            let mut a = if k == 4 || k == 8 { timed_out(k) } else { brk_anchor(k, half) };
+            if !bracket && a.flags == 1 { a.labels = (k, k); }
+            clock(&a)
+        }).collect();
+        rest.push(status(1, status_for(0, 0, 11, 0)));
+        analyze(&reader::read(&brk_file(cfg, rest).bytes()).expect("reads"))
+    };
+    let r = build(brk_cfg(), true);
+    let Some(MapState::Qualified(m)) = &r.map else { panic!("map {:?}", r.map) };
+    assert_eq!(m.anchors, 9, "two timed-out anchors left out");
+    let r = build(bld_cfg(), false);
+    assert!(matches!(&r.map, Some(MapState::Unqualified(why)) if why.contains("anchor 4 failed")), "{:?}", r.map);
+}
+
+/// The label rule belongs to the CONFIG: 127/11 needs (below 2k-1, at or above 2k), older masks need (k, k).
+#[test]
+fn bracketed_label_rule_follows_the_config() {
+    let mut a = brk_anchor(1, 1000);
+    a.labels = (1, 1);
+    let f = brk_file(brk_cfg(), vec![clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "127/11 refuses the unbracketed label pair");
+    let a = brk_anchor(1, 1000); // labels (0, 2)
+    let f = brk_file(bld_cfg(), vec![clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "63/11 refuses the bracketed label pair");
+    let mut a = brk_anchor(2, 1000);
+    a.labels = (3, 4); // seen at 2k-1: not a lower bound
+    let f = brk_file(brk_cfg(), vec![clock(&brk_anchor(1, 1000)), clock(&a)]);
+    assert!(reader::read(&f.bytes()).is_err(), "a lower-bound poll must have seen the label below 2k-1");
 }

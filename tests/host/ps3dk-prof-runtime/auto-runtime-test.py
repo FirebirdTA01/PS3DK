@@ -58,7 +58,7 @@ def run(name,cmd,cwd=out):
     if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks'):
         expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
-                  'no-frame-boundary':b'context.current==words+18',
+                  'no-frame-boundary':b'context.current==words+24',
                   'fifo-publish':b'g_fifo.state==FS_SEALED',
                   'fifo-cancel':b'auto_test_fifo_installs==1 && auto_test_fifo_removes==1',
                   'fifo-owner':b'p_gpu_fifo_owner(g_prof,g_fifo.domain,&context)==PS3DK_PROF_EPERM',
@@ -339,7 +339,7 @@ if a.case=='fifopost':
     raise SystemExit(0)
 if a.case=='segbuild':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(63,11) and struct.unpack_from('<I',config,60)[0]==OP
+    assert struct.unpack_from('<2I',config,24)==(127,11) and struct.unpack_from('<I',config,60)[0]==OP
     owner=struct.unpack_from('<I',config,16)[0]
     records=[]
     for k,b in auto:
@@ -369,7 +369,7 @@ if a.case=='segbuild':
     raise SystemExit(0)
 if a.case=='segnested':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(63,11)
+    assert struct.unpack_from('<2I',config,24)==(127,11)
     rows=[b for k,b in auto if k==36];assert rows and all(len(b)==384 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
@@ -405,7 +405,7 @@ if a.case=='extsegments':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(63,11),'CONFIG kind/form masks of the build-frame writer'
+    assert struct.unpack_from('<2I',config,24)==(127,11),'CONFIG kind/form masks of the build-frame writer'
     assert struct.unpack_from('<I',config,60)[0]==OP,'CONFIG record width'
     records=[]
     for k,b in auto:
@@ -452,7 +452,7 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(63,11)
+    assert struct.unpack_from('<2I',config,24)==(127,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
     assert all(len(b)==384 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -483,7 +483,7 @@ if a.case=='flips':
     raise SystemExit(0)
 if a.case in ('present','spanning'):
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(63,11)
+    assert struct.unpack_from('<2I',config,24)==(127,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
     assert len(rows)==n and all(len(b)==384 for b in rows),[len(b) for b in rows]
@@ -534,7 +534,9 @@ if a.case in ('clocks','clockcap'):
         assert 1<=struct.unpack_from('<I',b,28)[0]<=100000
         before,after,raw,repeated=struct.unpack_from('<4Q',b,32)
         assert after>=before and raw==repeated==10000*(i+1)
-        assert struct.unpack_from('<2I',b,64)==(i+1,i+1)
+        # bracketed anchors (127/11): the device ran both pairs before the first drain poll, so no poll saw the
+        # label below 2k-1 (label_first 0, lower bound = issue time) and the completing poll saw 2k
+        assert struct.unpack_from('<2I',b,64)==(0,2*(i+1))
         assert struct.unpack_from('<QIIQ',b,72)==(schedule[i],owner,0,after-before)
     coverage=[b for k,b in auto if k==36];assert len(coverage)==frames
     assert all(struct.unpack_from('<H',b,2)[0]==3|64 for b in coverage)
@@ -611,7 +613,7 @@ config,status=auto[0][1],auto[1][1]
 assert len(config)==160 and len(status)==128
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,63,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,127,11)
     assert struct.unpack_from('<I',config,60)[0]==OP
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152

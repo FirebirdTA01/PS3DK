@@ -110,7 +110,7 @@ def main():
     assert run.returncode == 0, ('writer/short-buffer control', run.returncode)
     chunks = []
     c = bytearray(160)
-    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,63,11,1024,1024,239,238,504,1024,256,144,
+    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,127,11,1024,1024,239,238,504,1024,256,144,
                      79800000,262144,2097152,3,1)
     c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
     for reason in range(1,11):
