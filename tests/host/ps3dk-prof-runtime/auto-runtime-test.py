@@ -204,10 +204,8 @@ for rel in sources:
         source=out/'auto_queue.c';source.write_bytes(code.replace(old,'int auto_queue_take_pair(auto_queue *q) {return take_pair(q,0);}').encode())
     elif a.mutant=='bracket-silent' and rel=='auto_rsx/auto_runtime.c':
         # no whole-CALL bracket: a build that is not fully timed gets no CALL span
-        code=source.read_text();old='    if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;
-';assert code.count(old)==1
-        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    return;
-').encode())
+        code=source.read_text();old='    if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;\n';assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    return;\n').encode())
     elif a.mutant=='writer-on-segment' and rel=='auto_rsx/auto_runtime.c':
         # review finding reintroduced: the in-flight emitter is matched by the segment's writer, which a part close clears
         code=source.read_text();old='a->segment_active_writer==(void *)context';assert code.count(old)==1
