@@ -38,6 +38,7 @@ samples/gcm/hello-ppu-cellgcm-global-uniforms/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-laneelision/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-loops/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-quad/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-cellgcm-state-tour/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-sysmenu/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-textured-cube/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-triangle/shaders/vpshader.vcg|auto|general

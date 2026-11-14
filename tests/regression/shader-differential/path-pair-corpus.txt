@@ -10,6 +10,7 @@ samples/gcm/hello-ppu-cellgcm-global-uniforms/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-laneelision/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-loops/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-quad/shaders/fpshader.fcg
+samples/gcm/hello-ppu-cellgcm-state-tour/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-sysmenu/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-textured-cube/shaders/fpshader.fcg
 samples/gcm/hello-ppu-cellgcm-triangle/shaders/fpshader.fcg
