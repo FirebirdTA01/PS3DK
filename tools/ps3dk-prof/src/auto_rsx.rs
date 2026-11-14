@@ -132,6 +132,11 @@ pub const EXCLUSIONS: [&str; 10] = [
     "resource lease unverified",
     "epoch invalid",
 ];
+/// EXCLUSIONS columns that only leave a draw UNTIMED (it still executes in the owner's command stream between
+/// the frame's RSX marks): room, report capacity, metadata capacity, reentry, unsupported arguments. The other
+/// columns (shutdown, ownership uncertainty, observer disabled, resource lease unverified, epoch invalid) mean the
+/// evidence itself cannot be trusted, so a frame with any of them stays UNKNOWN.
+pub const UNTIMED_ONLY: [bool; 10] = [true, true, true, true, true, false, false, false, false, false];
 pub const KINDS: [&str; 3] = ["ARRAY", "INDEX", "CLEAR"];
 /// STATUS counters from offset 8, in wire order.
 pub const STATUS_FIELDS: [&str; 15] = [
@@ -1249,6 +1254,9 @@ pub struct FrameView {
     pub rsx_frame_raw: (Option<u64>, Option<u64>),
     /// D2: end mark minus begin mark on the PPU clock through the qualified map: [lo, hi] ticks.
     pub rsx_frame_ppu: Option<(u64, u64)>,
+    /// Set only when some covered draws went untimed for a reason that leaves the evidence valid: the RSX busy
+    /// span bounds the verdict was decided on (lower = the timed draws' span, upper = the RSX frame marks).
+    pub rsx_busy_bounds: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
     /// 63/11 only (else zero): `records` is then the frame's BUILD population (records not built in a segment
@@ -1377,6 +1385,9 @@ pub fn analyze(cap: &Capture) -> Report {
     };
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
     let build = attached.build_frames();
+    // Bounded verdicts for untimed draws come with the bracketed-clock writer (127/11); older captures keep their
+    // exact rules and output.
+    let bounded_rule = attached.clock_bracket();
     rep.build_frames = build;
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
@@ -1412,6 +1423,7 @@ pub fn analyze(cap: &Capture) -> Report {
             fifo_wait: None,
             rsx_frame_raw,
             rsx_frame_ppu: None,
+            rsx_busy_bounds: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
             recorded: if build { ops.len() as u64 } else { 0 },
             segment_imports: if build {
@@ -1454,6 +1466,7 @@ pub fn analyze(cap: &Capture) -> Report {
         let d = f.tb_end.saturating_sub(f.tb_begin);
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
+        let mut bounds = None;
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
                 return Err(format!("capture not final ({})", inv.state()));
@@ -1476,9 +1489,17 @@ pub fn analyze(cap: &Capture) -> Report {
             let (Some(_), Some(excluded)) = (observed, excluded) else {
                 return Err(TOTALS_OVERFLOW.into());
             };
-            if excluded != 0 {
-                return Err(format!("{excluded} covered operation(s) excluded"));
-            }
+            // Untimed draws whose evidence is still valid do not block a verdict by themselves: it is decided on RSX
+            // busy bounds below (timed span .. frame marks). Any other exclusion keeps the frame UNKNOWN.
+            let untimed = if excluded != 0 {
+                let invalid = (0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0));
+                if invalid || !bounded_rule {
+                    return Err(format!("{excluded} covered operation(s) excluded"));
+                }
+                excluded
+            } else {
+                0
+            };
             if f.unsupported != 0 {
                 return Err(format!("{} visit(s) outside the observed population (segment or private buffer)",
                     f.unsupported));
@@ -1537,10 +1558,21 @@ pub fn analyze(cap: &Capture) -> Report {
             }
             // The EXECUTION population (records recorded here) decides emptiness and span; with 63/11 the row's
             // observed counts are what this frame built, which a CALL-only or build-only frame does not match.
-            let span = match (ops.is_empty(), v.rsx_span_ppu) {
+            let timed = match (ops.is_empty(), v.rsx_span_ppu) {
                 (true, _) => (0, 0),
                 (false, Some(s)) => s,
                 (false, None) => return Err("RSX span outside the map's interpolation support".into()),
+            };
+            // With untimed draws the true span lies between the timed draws' span (lower) and the RSX frame marks
+            // (upper): rsx_long uses the lower bound, rsx_short the upper, so a verdict reached here cannot depend
+            // on the untimed draws.
+            let span = if untimed != 0 {
+                let Some(frame) = v.rsx_frame_ppu else {
+                    return Err(format!("{untimed} covered draw(s) untimed and the RSX frame marks give no upper bound (missing or outside the map's support)"));
+                };
+                (timed.0, frame.1.max(timed.1))
+            } else {
+                timed
             };
             let rsx_long = share(span.0, d, RSX_SPAN_SHARE);
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
@@ -1548,7 +1580,7 @@ pub fn analyze(cap: &Capture) -> Report {
             // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
             // where the RSX is not limiting is PACING only with flip-wait scope evidence (cellGcmWaitFlipComplete),
             // otherwise UNKNOWN.  Polling cadence and 15/11 poll intervals are named observations, never waiting.
-            if waited && rsx_long {
+            let out = (|| -> Result<(Verdict, String), String> { if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
             } else if w == 0 && rsx_short {
@@ -1573,6 +1605,14 @@ pub fn analyze(cap: &Capture) -> Report {
                     ticks", span.0)))
             } else {
                 Err(format!("unresolved: FIFO wait >= {w}, RSX span {}..{} of {d} PPU ticks", span.0, span.1))
+            } })();
+            if untimed == 0 {
+                return out;
+            }
+            bounds = Some(span);
+            match out {
+                Ok((verdict, why)) => Ok((verdict, format!("{untimed} covered draw(s) untimed; verdict holds for RSX busy in [{}, {}] PPU ticks; {why}", span.0, span.1))),
+                Err(why) => Err(format!("{untimed} covered draw(s) untimed; RSX busy in [{}, {}] PPU ticks does not decide the verdict ({why})", span.0, span.1)),
             }
         })()
         .map(|(verdict, why)| {
@@ -1580,6 +1620,7 @@ pub fn analyze(cap: &Capture) -> Report {
             why
         })
         .unwrap_or_else(|why| why);
+        v.rsx_busy_bounds = bounds;
         rep.frames.push(v);
     }
     rep.map = Some(map);
@@ -1753,6 +1794,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["segment_imports"] = json!(f.segment_imports);
             v["segment_unrepresented"] = json!(f.segment_unrepresented);
             v["segment_abandoned"] = json!(f.segment_abandoned);
+        }
+        if let Some((lo, hi)) = f.rsx_busy_bounds {
+            // only on frames decided on bounds, so fully timed frames keep their exact JSON
+            v["rsx_busy_bounds"] = json!({"lo": lo, "hi": hi});
         }
         v
     }).collect();

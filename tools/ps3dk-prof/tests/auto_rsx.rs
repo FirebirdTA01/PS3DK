@@ -876,6 +876,70 @@ fn four_frames_scopes(scopes: [(u32, u64); 4], blk: [Blk; 4]) -> File {
     f
 }
 
+/// One 127/11 frame (PPU 10000..110000) with frame marks at RSX `marks` (raw; None = no end mark), one timed clear
+/// at `timed`, one untimed clear in exclusion column `col`, a FIFO wait when `wait`, and flip-wait scopes `scope`.
+fn bounded_frame(timed: (u64, u64), marks: (u64, Option<u64>), col: usize, wait: bool, scope: (u32, u64)) -> File {
+    let mut list = vec![mark(1, 0, 1, marks.0), op(2, 0, timed)];
+    if let Some(e) = marks.1 {
+        list.push(mark(3, 0, 2, e));
+    }
+    let n = list.len() as u64;
+    let mut x = row(0, (10_000, 110_000), 1);
+    x.rows[2][0] = 2;
+    x.rows[2][2 + col] = 1;
+    x.flags |= 64;
+    x.present = scope;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, if wait { 0 } else { 7 })),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), coverage_p(&x, &Blk::default())];
+    // the same nine anchors with the bracketed label rule (seen below 2k-1, then at or above 2k)
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 1, 9, 2 * n)));
+    brk_file(brk_cfg(), rest)
+}
+
+/// Untimed draws (report capacity and the other untimed-only columns) are decided on RSX busy bounds: the timed
+/// span below, the frame marks above. A verdict both bounds give stands; otherwise, or without both marks, or with
+/// an exclusion that invalidates the evidence, the frame stays UNKNOWN.
+#[test]
+fn untimed_draws_get_bounded_verdicts() {
+    let cap = 1; // report capacity
+    let verdict = |f: File| {
+        let r = analyze(&reader::read(&f.bytes()).expect("reads"));
+        let fr = r.frames[0].clone();
+        (fr.verdict, fr.reason, fr.rsx_busy_bounds)
+    };
+    // a long timed span and a FIFO wait: RSX-bound whatever the untimed draw did
+    let (v, why, b) = verdict(bounded_frame((6000, 36_000), (5000, Some(45_000)), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::RsxBound, "{why}");
+    assert!(why.starts_with("1 covered draw(s) untimed; verdict holds for RSX busy in ["), "{why}");
+    let (lo, hi) = b.expect("bounds");
+    assert!(lo >= 50_000 && hi >= lo, "{lo}..{hi}");
+    // the marks are close together (RSX short even at its upper bound), no FIFO wait, 60% inside flip waits: PACING
+    let (v, why, b) = verdict(bounded_frame((6000, 7000), (5000, Some(20_000)), cap, false, (2, 60_000)));
+    assert_eq!(v, Verdict::Pacing, "{why}");
+    assert!(b.expect("bounds").1 < 50_000);
+    // a short timed span but marks far apart: the untimed draw could make the RSX limiting or not
+    let (v, why, b) = verdict(bounded_frame((6000, 7000), (5000, Some(45_000)), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::Unknown);
+    assert!(why.starts_with("1 covered draw(s) untimed; RSX busy in [") && why.contains("does not decide"), "{why}");
+    assert!(b.is_some());
+    // no end mark: no upper bound
+    let (v, why, b) = verdict(bounded_frame((6000, 36_000), (5000, None), cap, true, (0, 0)));
+    assert_eq!(v, Verdict::Unknown);
+    assert!(why.contains("give no upper bound"), "{why}");
+    assert!(b.is_none());
+    // every untimed-only column behaves the same; the evidence-invalidating ones keep the old refusal
+    for col in 0..10 {
+        let (v, why, _) = verdict(bounded_frame((6000, 36_000), (5000, Some(45_000)), col, true, (0, 0)));
+        if ps3dk_prof::auto_rsx::UNTIMED_ONLY[col] {
+            assert_eq!(v, Verdict::RsxBound, "column {col}: {why}");
+        } else {
+            assert_eq!(v, Verdict::Unknown, "column {col}");
+            assert_eq!(why, "1 covered operation(s) excluded", "column {col}");
+        }
+    }
+}
+
 #[test]
 fn pacing_needs_flip_wait_scopes() {
     let none = Blk::default();
