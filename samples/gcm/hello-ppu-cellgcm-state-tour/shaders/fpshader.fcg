@@ -1,0 +1,21 @@
+/* hello-ppu-cellgcm-state-tour — fragment program.
+ *
+ * out_color = in_color * tex2D(tex, uv)
+ *
+ * In-frame (0 ≤ uv ≤ 1): texel is white (1,1,1,1) → out = in_color.
+ * Out-of-frame (uv outside [0,1]): the sampler clamps to the border
+ * colour set via cellGcmSetTextureBorderColor → out = in_color × border.
+ * After a CPU texel edit + cache-invalidate: out = in_color × new_texel.
+ *
+ * The 1×1 identity texel is in RSX local memory and shared by all
+ * groups; group 14 modifies it and invalidates the texture cache to
+ * prove the GPU picks up the new value.
+ */
+void main(
+    float2 in_uv     : TEXCOORD0,
+    float4 in_color  : COLOR,
+    uniform sampler2D tex : TEXUNIT0,
+    out float4 out_color  : COLOR)
+{
+    out_color = in_color * tex2D(tex, in_uv);
+}
