@@ -1,5 +1,9 @@
 //! Integration tests for `ps3dk-prof export`.
 
+#[allow(dead_code)]
+mod common;
+use common::*;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -477,4 +481,305 @@ fn export_bytes_renumbers_sequences_and_computes_crc() {
         pos += 20 + len;
     }
     assert!(expected_seq > 5, "exported file should contain multiple chunks");
+}
+
+#[test]
+fn export_exact_accounting_equations() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let exported = ps3dk_prof::export_bytes(&input_bytes, 10..=20).unwrap();
+    let cap = ps3dk_prof::reader::read(&exported).expect("read exported capture");
+
+    let exp = cap.export.as_ref().expect("EXPORT chunk present");
+    assert_eq!(exp.frame_first, 10);
+    assert_eq!(exp.frame_last, 20);
+
+    // Exact reader accounting checks
+    let mut sum_kept = 0u64;
+    let mut sum_dropped = 0u64;
+    for (&inc, lane) in &cap.lanes {
+        let el = exp.lanes.get(&inc).expect("lane in EXPORT table");
+        assert_eq!(lane.written, el.kept, "lane {inc}: parsed records != declared kept");
+        sum_kept += el.kept;
+        sum_dropped += el.dropped_by_export;
+
+        let e = lane.final_entry.as_ref().expect("final entry present");
+        assert_eq!(
+            e.written_count,
+            el.kept + el.dropped_by_export,
+            "lane {inc}: writer written != kept + dropped_by_export"
+        );
+        assert_eq!(
+            u128::from(e.produced_count),
+            u128::from(e.written_count) + u128::from(e.dropped_count),
+            "lane {inc}: writer produced != written + dropped"
+        );
+
+        if el.kept > 0 {
+            assert_eq!(lane.first_seq, Some(el.first_seq));
+            assert_eq!(lane.last_seq, Some(el.last_seq));
+            let span = u128::from(el.last_seq) - u128::from(el.first_seq) + 1;
+            assert_eq!(
+                span,
+                u128::from(lane.written) + lane.gap_sum,
+                "lane {inc}: kept range span != written + gap_sum"
+            );
+        }
+    }
+    assert_eq!(sum_kept, exp.records_kept);
+    assert_eq!(sum_dropped, exp.records_dropped);
+
+    if let Some(auto) = &cap.auto {
+        assert_eq!(auto.ops_parsed as u64, exp.ops_kept);
+        if let Some(st) = &auto.last_status {
+            assert_eq!(st.counters[2], exp.ops_kept + exp.ops_dropped);
+        }
+    }
+}
+
+#[test]
+fn export_runs_to_end_of_run_when_closing_frame_absent() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let cap_src = ps3dk_prof::reader::read(&input_bytes).unwrap();
+    let last_frame = cap_src.lanes[&1].frames.last().unwrap().id;
+
+    let output = temp_prof("console-r2-to-end");
+    let out_str = output.to_str().unwrap();
+
+    let frames_arg = format!("{}..{}", last_frame - 2, last_frame);
+    let (code, _, stderr) = run_cmd(&["export", "--frames", &frames_arg, &fixture_path("console-r2"), out_str]);
+    assert_eq!(code, Some(0), "export stderr: {stderr}");
+
+    let (c_rep, rep_out, _) = run_cmd(&["report", out_str]);
+    assert_eq!(c_rep, Some(0));
+    assert!(
+        rep_out.contains("(to end of run)"),
+        "report must state (to end of run): {rep_out}"
+    );
+
+    let (c_auto, auto_out, _) = run_cmd(&["auto", out_str]);
+    assert_eq!(c_auto, Some(0));
+    assert!(
+        auto_out.contains("(to end of run)"),
+        "auto must state (to end of run): {auto_out}"
+    );
+
+    let exported_bytes = std::fs::read(&output).unwrap();
+    let cap_exp = ps3dk_prof::reader::read(&exported_bytes).unwrap();
+    let exp = cap_exp.export.unwrap();
+    assert_ne!(exp.flags & ps3dk_prof::model::EXPORT_FLAG_TO_END, 0);
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn export_forged_refusals() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let valid_exported = ps3dk_prof::export_bytes(&input_bytes, 10..=15).unwrap();
+
+    // Helper to decode raw chunks
+    struct Chunk {
+        ty: u32,
+        payload: Vec<u8>,
+    }
+    let parse_chunks = |bytes: &[u8]| -> Vec<Chunk> {
+        let mut chunks = Vec::new();
+        let mut pos = 16;
+        while pos < bytes.len() {
+            let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            let payload = bytes[pos + 16..pos + 16 + len].to_vec();
+            chunks.push(Chunk { ty, payload });
+            pos += 20 + len;
+        }
+        chunks
+    };
+
+    let serialize = |chunks: &[Chunk]| -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&valid_exported[0..16]);
+        for (seq, c) in chunks.iter().enumerate() {
+            let chunk_seq = seq as u64;
+            let len = c.payload.len() as u32;
+            let mut buf = Vec::with_capacity(16 + c.payload.len() + 4);
+            buf.extend_from_slice(&c.ty.to_le_bytes());
+            buf.extend_from_slice(&len.to_le_bytes());
+            buf.extend_from_slice(&chunk_seq.to_le_bytes());
+            buf.extend_from_slice(&c.payload);
+            let crc = ps3dk_prof::hash::crc32(&buf);
+            buf.extend_from_slice(&crc.to_le_bytes());
+            out.extend_from_slice(&buf);
+        }
+        out
+    };
+
+    // 1. Refuse forged EXPORT chunk placed late
+    {
+        let mut chunks = parse_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        assert_eq!(exp_idx, 3);
+        // Swap exp_idx and exp_idx + 1
+        chunks.swap(exp_idx, exp_idx + 1);
+        let tampered = serialize(&chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+        assert!(err.detail.contains("expected chunk 3"), "detail: {}", err.detail);
+    }
+
+    // 2. Refuse duplicate EXPORT chunk
+    {
+        let mut chunks = parse_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        let dup = chunks[exp_idx].payload.clone();
+        chunks.insert(exp_idx + 2, Chunk { ty: ps3dk_prof::model::CHUNK_EXPORT, payload: dup });
+        let tampered = serialize(&chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+        assert!(err.detail.contains("expected chunk 3") || err.detail.contains("duplicate"), "detail: {}", err.detail);
+    }
+
+    // 3. Refuse forged counts: lane first_seq does not match actual first record
+    {
+        let mut chunks = parse_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        // Mutate first_seq of lane 1 in EXPORT payload
+        // EXPORT header is 96 bytes; lane 1 entry is at offset 96.
+        // Lane entry: inc: u32 (0..4), res: u32 (4..8), first_seq: u64 (8..16)
+        let off = 96 + 8;
+        let mut first_seq = u64::from_le_bytes(chunks[exp_idx].payload[off..off + 8].try_into().unwrap());
+        first_seq += 100;
+        chunks[exp_idx].payload[off..off + 8].copy_from_slice(&first_seq.to_le_bytes());
+        let tampered = serialize(&chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+    }
+
+    // 4. Refuse forged counts: kept records count disagrees with records
+    {
+        let mut chunks = parse_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        // Mutate kept count of lane 1
+        let off = 96 + 24;
+        let mut kept = u64::from_le_bytes(chunks[exp_idx].payload[off..off + 8].try_into().unwrap());
+        kept += 1;
+        chunks[exp_idx].payload[off..off + 8].copy_from_slice(&kept.to_le_bytes());
+        // Also update header records_kept (offset 40)
+        let mut hdr_kept = u64::from_le_bytes(chunks[exp_idx].payload[40..48].try_into().unwrap());
+        hdr_kept += 1;
+        chunks[exp_idx].payload[40..48].copy_from_slice(&hdr_kept.to_le_bytes());
+        let tampered = serialize(&chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+    }
+}
+
+#[test]
+fn export_zone_clipping_left_right_nested() {
+    let raw_rec = |kind: u8, depth: u8, a: u32, seq: u64, b: u64, c: u64| -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf[0] = kind;
+        buf[1] = depth;
+        buf[4..8].copy_from_slice(&a.to_le_bytes());
+        buf[8..16].copy_from_slice(&seq.to_le_bytes());
+        buf[16..24].copy_from_slice(&b.to_le_bytes());
+        buf[24..32].copy_from_slice(&c.to_le_bytes());
+        buf
+    };
+
+    // Construct tailored records on incarnation 1:
+    // Window will be frame 1..=1. Mark A is frame 1 (tb 2000), Mark B+1 is frame 2 (tb 4000).
+    // Span 1: begins at 1500 (< 2000), ends at 2500 (>= 2000) -> CROSSES LEFT EDGE -> CLIPPED
+    // Span 4: begins at 2600 (>= 2000), ends at 2800 (<= 4000) -> FULLY INSIDE WINDOW -> UNCLIPPED
+    // Span 2: begins at 3000 (<= 4000), ends at 4500 (> 4000) -> CROSSES RIGHT EDGE -> CLIPPED
+    // Span 3: begins at 3200, ends at 3500, child of Span 2 -> NESTED DESCENDANT OF CLIPPED -> CLIPPED
+    let mut records = Vec::new();
+    records.push(raw_rec(ps3dk_prof::model::KIND_FRAME, 0, 0, 0, 1000, 0)); // FRAME 0
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 1, 1500, 1)); // Span 1 BEGIN
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 2, 0, 0)); // Span 1 BP
+    records.push(raw_rec(ps3dk_prof::model::KIND_FRAME, 0, 0, 3, 2000, 1)); // FRAME 1 (Mark A!)
+    records.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 4, 2500, 1)); // Span 1 END (clipped!)
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 5, 2600, 4)); // Span 4 BEGIN
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 6, 0, 0)); // Span 4 BP
+    records.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 7, 2800, 4)); // Span 4 END (kept!)
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 8, 3000, 2)); // Span 2 BEGIN
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 9, 0, 0)); // Span 2 BP
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 1, 1, 10, 3200, 3)); // Span 3 BEGIN (child of 2)
+    records.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 1, 0, 11, 2, 0)); // Span 3 BP
+    records.push(raw_rec(ps3dk_prof::model::KIND_END, 1, 1, 12, 3500, 3)); // Span 3 END (child of 2)
+    records.push(raw_rec(ps3dk_prof::model::KIND_FRAME, 0, 0, 13, 4000, 2)); // FRAME 2 (Mark B+1!)
+    records.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 14, 4500, 2)); // Span 2 END (crosses right)
+
+    // Build new CHUNK_RECORDS payload
+    let mut rec_payload = Vec::new();
+    rec_payload.extend_from_slice(&1u32.to_le_bytes()); // inc = 1
+    rec_payload.extend_from_slice(&(records.len() as u32).to_le_bytes()); // count
+    for r in &records {
+        rec_payload.extend_from_slice(r);
+    }
+
+    let trl = Trl {
+        end_flags: 0,
+        fins: vec![Fin {
+            inc: 1,
+            state: 1,
+            limit: 0,
+            reserved: 0,
+            produced: records.len() as u64,
+            written: records.len() as u64,
+            dropped: 0,
+            refused: 0,
+            regerr: 0,
+            open: 0,
+        }],
+        sink_errors: 0,
+        first_error: 0,
+        reserved: 0,
+        unregistered: 0,
+        desc_count: 1,
+    };
+
+    let synth_file = File::new(vec![
+        chunk(T_HEADER, Hdr::default().payload()),
+        chunk(T_CLOCKS, clocks_payload(1, 1, 0, 79_800_000, 0)),
+        chunk(T_DESCS, descs_payload(&[desc(1, "work", "")])),
+        chunk(T_THREADS, threads_payload(&[thr(1)])),
+        chunk(T_RECORDS, rec_payload),
+        chunk(T_TRAILER, trl.payload()),
+    ]);
+    let synth_bytes = synth_file.bytes();
+
+    // Validate that the synthetic capture parses cleanly in the reader
+    let cap_src = ps3dk_prof::reader::read(&synth_bytes).expect("synthetic capture must be valid");
+    assert_eq!(cap_src.spans.len(), 4, "4 spans created in source");
+
+    // Export frame 1..=1
+    let exported = ps3dk_prof::export_bytes(&synth_bytes, 1..=1).expect("export frame 1..=1");
+    let cap_exp = ps3dk_prof::reader::read(&exported).expect("exported capture must be valid");
+
+    let exp = cap_exp.export.as_ref().expect("EXPORT chunk present");
+    assert_eq!(exp.frame_first, 1);
+    assert_eq!(exp.frame_last, 1);
+    assert_eq!(exp.clipped_zones, 3, "Spans 1, 2, and 3 must be clipped");
+
+    // Verify exact kept records and gaps
+    let el = exp.lanes.get(&1).expect("lane 1 in EXPORT");
+    assert_eq!(el.first_seq, 3);
+    assert_eq!(el.last_seq, 13);
+    assert_eq!(el.kept, 5); // seq 3, 5, 6, 7, 13
+    assert_eq!(el.dropped_by_export, 10); // 15 - 5
+
+    let lane = &cap_exp.lanes[&1];
+    assert_eq!(lane.written, 5);
+    // Span 13 - 3 + 1 = 11. Written = 5, gap_sum = 6 (GAP [4, 4] len 1, GAP [8, 12] len 5)
+    assert_eq!(lane.gap_sum, 6);
+    assert_eq!(el.last_seq - el.first_seq + 1, lane.written + lane.gap_sum as u64);
+
+    // Only unclipped Span 4 remains in cap_exp.spans
+    assert_eq!(cap_exp.spans.len(), 1, "Only Span 4 should remain in export");
+    assert_eq!(cap_exp.spans[0].begin_seq, 5);
+    assert_eq!(cap_exp.spans[0].depth, 0);
+
+    // Verify report format
+    let analysis = ps3dk_prof::analysis::analyze(cap_exp).expect("analysis");
+    let rep = ps3dk_prof::report::render(&analysis);
+    assert!(rep.contains("3 zone(s) clipped at window edges"), "report: {rep}");
 }

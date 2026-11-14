@@ -462,7 +462,7 @@ impl Reader {
             CHUNK_AUTO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_AUTO_OPS => self.ops(payload),
             CHUNK_AUTO_COVERAGE => self.coverage(payload),
-            CHUNK_AUTO_STATUS => self.status(payload, cap.export.is_some()),
+            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref()),
             CHUNK_AUTO_CLOCK => self.clock(payload),
             _ => unreachable!("AUTO chunk type {ty}"),
         }
@@ -891,7 +891,7 @@ impl Reader {
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8], export: bool) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
         if payload.len() != STATUS_BYTES {
             return bad(r, format!("AUTO_STATUS is {} bytes, not {STATUS_BYTES}", payload.len()));
@@ -958,8 +958,16 @@ impl Reader {
             return bad(r, "AUTO_STATUS more clock anchors written than attempted");
         }
         if fin {
-            let ops_ok = if export { n[2] >= self.result.ops_parsed } else { n[2] == self.result.ops_parsed };
-            let frames_ok = if export { n[5] >= self.result.frames_parsed } else { n[5] == self.result.frames_parsed };
+            let ops_ok = if let Some(exp) = export {
+                self.result.ops_parsed as u64 == exp.ops_kept && n[2] == exp.ops_kept + exp.ops_dropped
+            } else {
+                n[2] == self.result.ops_parsed as u64
+            };
+            let frames_ok = if let Some(exp) = export {
+                self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+            } else {
+                n[5] == self.result.frames_parsed
+            };
             if !ops_ok || !frames_ok || n[10] != self.result.clocks_parsed {
                 return bad(r, format!("FINAL AUTO_STATUS written {}/{}/{} against parsed {}/{}/{}", n[2], n[5],
                     n[10], self.result.ops_parsed, self.result.frames_parsed, self.result.clocks_parsed));
@@ -1697,7 +1705,14 @@ fn rat_text(r: &Rat) -> String {
 pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result<()> {
     writeln!(out, "Automatic RSX observation: {}", r.state)?;
     if let Some(exp) = &r.export {
-        writeln!(out, "exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last)?;
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        writeln!(out, "{banner}")?;
+        if exp.clipped_zones > 0 {
+            writeln!(out, "{} zone(s) clipped at window edges", exp.clipped_zones)?;
+        }
     }
     writeln!(out, "{SCOPE}")?;
     if r.ops_dropped != 0 {

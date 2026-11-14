@@ -323,7 +323,15 @@ pub fn verdict_block(a: &Analysis) -> String {
     };
     if let Some(exp) = &a.capture.export {
         s.push('\n');
-        s.push_str(&format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last));
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        s.push_str(&banner);
+        if exp.clipped_zones > 0 {
+            s.push('\n');
+            s.push_str(&format!("{} zone(s) clipped at window edges", exp.clipped_zones));
+        }
     }
     s
 }
@@ -343,7 +351,14 @@ pub fn render(a: &Analysis) -> String {
     let cap = &a.capture;
     let _ = writeln!(o, "verdict: {}", verdict_text(a));
     if let Some(exp) = &cap.export {
-        let _ = writeln!(o, "exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        let _ = writeln!(o, "{banner}");
+        if exp.clipped_zones > 0 {
+            let _ = writeln!(o, "{} zone(s) clipped at window edges", exp.clipped_zones);
+        }
     }
     if a.prefix.is_some() {
         let _ = writeln!(o, "{ENDING_NO_TRAILER}");

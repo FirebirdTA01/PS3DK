@@ -41,6 +41,27 @@ struct RawChunk<'a> {
     payload: &'a [u8],
 }
 
+fn encode_record(r: &RawRecord) -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    buf[0] = r.kind;
+    buf[1] = r.depth;
+    buf[2..4].copy_from_slice(&r.flags.to_le_bytes());
+    buf[4..8].copy_from_slice(&r.a.to_le_bytes());
+    buf[8..16].copy_from_slice(&r.seq.to_le_bytes());
+    buf[16..24].copy_from_slice(&r.b.to_le_bytes());
+    buf[24..32].copy_from_slice(&r.c.to_le_bytes());
+    buf
+}
+
+fn encode_gap(start_seq: u64, end_seq: u64) -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    buf[0] = KIND_GAP;
+    buf[8..16].copy_from_slice(&start_seq.to_le_bytes());
+    buf[16..24].copy_from_slice(&start_seq.to_le_bytes());
+    buf[24..32].copy_from_slice(&end_seq.to_le_bytes());
+    buf
+}
+
 /// Export one frame or a range of frames from capture bytes into standalone capture bytes.
 pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>, ExportError> {
     if bytes.len() < 16 {
@@ -84,46 +105,76 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         .and_then(|c| c.attached())
         .map_or(OP_BYTES, |att| att.op_width()) as usize;
 
-    // 4. Determine interval bounds per thread.
-    // For each frame owner lane: keep from mark A (r.c == A) to mark B+1 (r.c == B+1) inclusive.
-    // If B+1 does not exist in the run, keep from mark A to end of thread.
-    struct ThreadInterval {
-        seq_start: u64,
-        seq_end: u64,
+    // 4. Determine frame owner lane and time bounds.
+    let owner_lane = cap
+        .lanes
+        .values()
+        .find(|l| l.frames.iter().any(|fr| fr.id == *range.start()))
+        .ok_or(ExportError::FrameNotFound(*range.start()))?;
+    let mark_a = owner_lane
+        .frames
+        .iter()
+        .find(|fr| fr.id == *range.start())
+        .unwrap();
+    let tb_start = mark_a.tb;
+    let owner_start_seq = mark_a.seq;
+
+    let mark_b1 = owner_lane
+        .frames
+        .iter()
+        .find(|fr| fr.id == *range.end() + 1);
+    let to_end_of_run = mark_b1.is_none();
+    let tb_end = mark_b1.map(|fr| fr.tb);
+    let owner_end_seq = mark_b1.map(|fr| fr.seq);
+
+    // 5. Detect clipped zones:
+    // Any zone crossing window edges:
+    // - BEGIN before mark A whose END is inside (or open)
+    // - BEGIN inside whose END is after mark B+1 (or open, when B+1 exists)
+    // Drop both halves of any zone not fully inside the window (nesting included).
+    let mut clipped_span_ids: BTreeSet<(u32, u64)> = BTreeSet::new();
+    for span in &cap.spans {
+        let crosses_left =
+            span.begin_tb < tb_start && span.end_tb.map_or(true, |etb| etb >= tb_start);
+        let crosses_right = if let Some(etb) = tb_end {
+            span.begin_tb <= etb && span.end_tb.map_or(true, |end_tb| end_tb > etb)
+        } else {
+            false
+        };
+        if crosses_left || crosses_right {
+            clipped_span_ids.insert((span.incarnation, span.span_id));
+        }
     }
 
-    let mut thread_intervals: BTreeMap<u32, ThreadInterval> = BTreeMap::new();
-    let mut global_tb_start: Option<u64> = None;
-    let mut global_tb_end: Option<u64> = None;
-
-    for (&inc, lane) in &cap.lanes {
-        if !lane.frames.is_empty() {
-            let mark_a = lane.frames.iter().find(|fr| fr.id == *range.start());
-            let mark_b1 = lane.frames.iter().find(|fr| fr.id == *range.end() + 1);
-            if let Some(a) = mark_a {
-                if global_tb_start.is_none() || a.tb < global_tb_start.unwrap() {
-                    global_tb_start = Some(a.tb);
+    // Propagate to nested descendants
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for span in &cap.spans {
+            if !clipped_span_ids.contains(&(span.incarnation, span.span_id)) {
+                if clipped_span_ids.contains(&(span.incarnation, span.parent)) {
+                    clipped_span_ids.insert((span.incarnation, span.span_id));
+                    changed = true;
                 }
-                let seq_end = if let Some(b1) = mark_b1 {
-                    if global_tb_end.is_none() || b1.tb > global_tb_end.unwrap() {
-                        global_tb_end = Some(b1.tb);
-                    }
-                    b1.seq
-                } else {
-                    u64::MAX
-                };
-                thread_intervals.insert(
-                    inc,
-                    ThreadInterval {
-                        seq_start: a.seq,
-                        seq_end,
-                    },
-                );
+            }
+        }
+    }
+    let clipped_zones = clipped_span_ids.len() as u64;
+
+    // Collect sequence numbers of records belonging to clipped zones
+    let mut clipped_record_seqs: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
+    for span in &cap.spans {
+        if clipped_span_ids.contains(&(span.incarnation, span.span_id)) {
+            let set = clipped_record_seqs.entry(span.incarnation).or_default();
+            set.insert(span.begin_seq);
+            set.insert(span.begin_seq + 1);
+            if let Some(end_seq) = span.end_seq {
+                set.insert(end_seq);
             }
         }
     }
 
-    // 5. Linear walk to parse raw chunks from bytes.
+    // 6. Linear walk to parse raw chunks from bytes.
     let mut raw_chunks = Vec::new();
     let mut pos = 16;
     while pos < bytes.len() {
@@ -146,47 +197,134 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         pos += 20 + len;
     }
 
-    // 6. Pass 1: Count kept and dropped items for EXPORT chunk.
-    let mut records_kept = 0u64;
-    let mut records_dropped = 0u64;
-    let mut records_kept_per_lane: BTreeMap<u32, u64> = BTreeMap::new();
+    // Collect all raw records per lane from CHUNK_RECORDS
+    let mut raw_lane_records: BTreeMap<u32, Vec<RawRecord>> = BTreeMap::new();
+    for chunk in &raw_chunks {
+        if chunk.ty == CHUNK_RECORDS && chunk.payload.len() >= 8 {
+            let inc = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap());
+            let n = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
+            for i in 0..n {
+                let off = 8 + i * RECORD_LEN;
+                if off + RECORD_LEN <= chunk.payload.len() {
+                    let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
+                    raw_lane_records.entry(inc).or_default().push(rec);
+                }
+            }
+        }
+    }
 
+    // Filter records per lane and build per-lane export table
+    let mut export_lanes: BTreeMap<u32, ExportLane> = BTreeMap::new();
+    let mut output_records_per_lane: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+    let mut records_kept_total = 0u64;
+    let mut records_dropped_total = 0u64;
+
+    for (&inc, lane) in &cap.lanes {
+        let is_owner = lane.is_frame_owner();
+        let all_recs = raw_lane_records.get(&inc).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        let mut kept_records = Vec::new();
+        let mut last_begin_tb: Option<u64> = None;
+
+        for rec in all_recs {
+            let rec_tb = match rec.kind {
+                KIND_BEGIN => {
+                    last_begin_tb = Some(rec.b);
+                    Some(rec.b)
+                }
+                KIND_BEGIN_PARENT => last_begin_tb,
+                KIND_END | KIND_FRAME | KIND_REGERR => Some(rec.b),
+                _ => None,
+            };
+
+            let in_window = if is_owner {
+                rec.seq >= owner_start_seq
+                    && (if let Some(end_seq) = owner_end_seq {
+                        rec.seq <= end_seq
+                    } else {
+                        true
+                    })
+            } else if let Some(tb) = rec_tb {
+                tb >= tb_start
+                    && (if let Some(end_tb) = tb_end {
+                        tb <= end_tb
+                    } else {
+                        true
+                    })
+            } else {
+                false
+            };
+
+            let is_clipped = clipped_record_seqs
+                .get(&inc)
+                .map_or(false, |set| set.contains(&rec.seq));
+
+            if in_window && !is_clipped && rec.kind != KIND_GAP {
+                kept_records.push(*rec);
+            }
+        }
+
+        let writer_written = lane.written;
+        if kept_records.is_empty() {
+            export_lanes.insert(
+                inc,
+                ExportLane {
+                    incarnation: inc,
+                    first_seq: 0,
+                    last_seq: 0,
+                    kept: 0,
+                    dropped_by_export: writer_written,
+                },
+            );
+            records_dropped_total += writer_written;
+        } else {
+            let first_seq = kept_records.first().unwrap().seq;
+            let last_seq = kept_records.last().unwrap().seq;
+            let kept = kept_records.len() as u64;
+            let dropped_by_export = writer_written - kept;
+
+            export_lanes.insert(
+                inc,
+                ExportLane {
+                    incarnation: inc,
+                    first_seq,
+                    last_seq,
+                    kept,
+                    dropped_by_export,
+                },
+            );
+            records_kept_total += kept;
+            records_dropped_total += dropped_by_export;
+
+            // Reconstruct lane records, inserting KIND_GAP for any missing sequences between kept records
+            let mut out_bytes = Vec::new();
+            for (i, rec) in kept_records.iter().enumerate() {
+                if i > 0 {
+                    let prev_seq = kept_records[i - 1].seq;
+                    if rec.seq > prev_seq + 1 {
+                        out_bytes.extend_from_slice(&encode_gap(prev_seq + 1, rec.seq - 1));
+                    }
+                }
+                out_bytes.extend_from_slice(&encode_record(rec));
+            }
+
+            let count = (out_bytes.len() / RECORD_LEN) as u32;
+            let mut payload = Vec::with_capacity(8 + out_bytes.len());
+            payload.extend_from_slice(&inc.to_le_bytes());
+            payload.extend_from_slice(&count.to_le_bytes());
+            payload.extend_from_slice(&out_bytes);
+            output_records_per_lane.insert(inc, payload);
+        }
+    }
+
+    // Count kept and dropped for AUTO ops and FIFO events
     let mut ops_kept = 0u64;
     let mut ops_dropped = 0u64;
-
     let mut events_kept = 0u64;
     let mut events_dropped = 0u64;
 
     for chunk in &raw_chunks {
         match chunk.ty {
-            CHUNK_RECORDS if chunk.payload.len() >= 8 => {
-                let inc = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap());
-                let n = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
-                let interval = thread_intervals.get(&inc);
-
-                for i in 0..n {
-                    let off = 8 + i * RECORD_LEN;
-                    if off + RECORD_LEN <= chunk.payload.len() {
-                        let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
-                        let keep = if let Some(iv) = interval {
-                            rec.seq >= iv.seq_start && rec.seq <= iv.seq_end
-                        } else if let (Some(tb0), Some(tb1)) = (global_tb_start, global_tb_end) {
-                            rec.b >= tb0 && rec.b <= tb1
-                        } else if let Some(tb0) = global_tb_start {
-                            rec.b >= tb0
-                        } else {
-                            false
-                        };
-
-                        if keep {
-                            records_kept += 1;
-                            *records_kept_per_lane.entry(inc).or_insert(0) += 1;
-                        } else {
-                            records_dropped += 1;
-                        }
-                    }
-                }
-            }
             CHUNK_AUTO_OPS if chunk.payload.len() >= 16 => {
                 let count = u32::from_le_bytes(chunk.payload[8..12].try_into().unwrap()) as usize;
                 let width = u32::from_le_bytes(chunk.payload[12..16].try_into().unwrap()) as usize;
@@ -199,14 +337,18 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 for i in 0..count {
                     let off = 16 + i * actual_width;
                     if off + actual_width <= chunk.payload.len() {
-                        let flags = u16::from_le_bytes(chunk.payload[off + 14..off + 16].try_into().unwrap());
-                        let frame = u64::from_le_bytes(chunk.payload[off + 16..off + 24].try_into().unwrap());
+                        let flags =
+                            u16::from_le_bytes(chunk.payload[off + 14..off + 16].try_into().unwrap());
+                        let frame =
+                            u64::from_le_bytes(chunk.payload[off + 16..off + 24].try_into().unwrap());
                         let has_token = flags & OP_TOKEN != 0 && range.contains(&frame);
                         let has_build = if actual_width == OP_BYTES_BUILD as usize {
-                            let b_frame =
-                                u64::from_le_bytes(chunk.payload[off + 128..off + 136].try_into().unwrap());
-                            let b_flags =
-                                u16::from_le_bytes(chunk.payload[off + 140..off + 142].try_into().unwrap());
+                            let b_frame = u64::from_le_bytes(
+                                chunk.payload[off + 128..off + 136].try_into().unwrap(),
+                            );
+                            let b_flags = u16::from_le_bytes(
+                                chunk.payload[off + 140..off + 142].try_into().unwrap(),
+                            );
                             (b_flags & OP_BUILD_KNOWN != 0) && range.contains(&b_frame)
                         } else {
                             false
@@ -228,7 +370,8 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 for i in 0..count {
                     let off = 16 + i * actual_stride;
                     if off + actual_stride <= chunk.payload.len() {
-                        let flags = u16::from_le_bytes(chunk.payload[off + 10..off + 12].try_into().unwrap());
+                        let flags =
+                            u16::from_le_bytes(chunk.payload[off + 10..off + 12].try_into().unwrap());
                         let frame_id =
                             u64::from_le_bytes(chunk.payload[off + 40..off + 48].try_into().unwrap());
                         if flags & EV_TOKEN_PRESENT != 0 && range.contains(&frame_id) {
@@ -243,40 +386,62 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         }
     }
 
-    // Build the 72-byte EXPORT chunk payload.
-    let mut export_payload = Vec::with_capacity(EXPORT_PAYLOAD_LEN);
+    // Build the 96-byte EXPORT header + per-lane 40-byte entries
+    let lane_count = export_lanes.len();
+    let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+    let mut export_payload = Vec::with_capacity(total_export_len);
+
+    let flags = if to_end_of_run { EXPORT_FLAG_TO_END } else { 0 };
     export_payload.extend_from_slice(&EXPORT_SCHEMA.to_le_bytes()); // schema: u16
-    export_payload.extend_from_slice(&0u16.to_le_bytes());          // reserved: u16
-    export_payload.extend_from_slice(&crc32(bytes).to_le_bytes());  // source_crc: u32
+    export_payload.extend_from_slice(&flags.to_le_bytes());         // flags: u16
+    export_payload.extend_from_slice(&crc32(bytes).to_le_bytes()); // source_crc: u32
     export_payload.extend_from_slice(&(bytes.len() as u64).to_le_bytes()); // source_size: u64
-    export_payload.extend_from_slice(&(*range.start()).to_le_bytes());     // frame_first: u64
-    export_payload.extend_from_slice(&(*range.end()).to_le_bytes());       // frame_last: u64
-    export_payload.extend_from_slice(&records_kept.to_le_bytes());
-    export_payload.extend_from_slice(&records_dropped.to_le_bytes());
+    export_payload.extend_from_slice(&(*range.start()).to_le_bytes()); // frame_first: u64
+    export_payload.extend_from_slice(&(*range.end()).to_le_bytes()); // frame_last: u64
+    export_payload.extend_from_slice(&clipped_zones.to_le_bytes());
+    export_payload.extend_from_slice(&records_kept_total.to_le_bytes());
+    export_payload.extend_from_slice(&records_dropped_total.to_le_bytes());
     export_payload.extend_from_slice(&ops_kept.to_le_bytes());
     export_payload.extend_from_slice(&ops_dropped.to_le_bytes());
     export_payload.extend_from_slice(&events_kept.to_le_bytes());
     export_payload.extend_from_slice(&events_dropped.to_le_bytes());
+    export_payload.extend_from_slice(&(lane_count as u32).to_le_bytes());
+    export_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved: u32
+
+    for el in export_lanes.values() {
+        export_payload.extend_from_slice(&el.incarnation.to_le_bytes());
+        export_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved: u32
+        export_payload.extend_from_slice(&el.first_seq.to_le_bytes());
+        export_payload.extend_from_slice(&el.last_seq.to_le_bytes());
+        export_payload.extend_from_slice(&el.kept.to_le_bytes());
+        export_payload.extend_from_slice(&el.dropped_by_export.to_le_bytes());
+    }
 
     // 7. Pass 2: Filter and serialize chunks.
+    // Placement rule: EXPORT is emitted strictly right after HEADER/CLOCKS (and PROFILE if present).
     let mut emitted_chunks: Vec<(u32, Vec<u8>)> = Vec::new();
-    let mut export_emitted = false;
+    let mut records_emitted = false;
 
     for chunk in &raw_chunks {
-        // Emit CHUNK_EXPORT after preamble (before event data chunks, or right after threads/clocks/configs).
-        if !export_emitted
-            && (chunk.ty == CHUNK_RECORDS
-                || chunk.ty == CHUNK_AUTO_OPS
-                || chunk.ty == CHUNK_FIFO_EVENTS
-                || chunk.ty == CHUNK_TRAILER)
-        {
-            emitted_chunks.push((CHUNK_EXPORT, export_payload.clone()));
-            export_emitted = true;
-        }
-
         match chunk.ty {
-            CHUNK_HEADER | CHUNK_CLOCKS | CHUNK_DESCRIPTORS | CHUNK_THREADS
-            | crate::profile::CHUNK_PROFILE | crate::waits::CHUNK_WAIT_CONFIG
+            CHUNK_HEADER => {
+                emitted_chunks.push((CHUNK_HEADER, chunk.payload.to_vec()));
+            }
+            CHUNK_CLOCKS => {
+                emitted_chunks.push((CHUNK_CLOCKS, chunk.payload.to_vec()));
+                if !cap.profile_flag {
+                    emitted_chunks.push((CHUNK_EXPORT, export_payload.clone()));
+                }
+            }
+            crate::profile::CHUNK_PROFILE => {
+                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                if cap.profile_flag {
+                    emitted_chunks.push((CHUNK_EXPORT, export_payload.clone()));
+                }
+            }
+
+            CHUNK_DESCRIPTORS | CHUNK_THREADS
+            | crate::waits::CHUNK_WAIT_CONFIG
             | crate::func_paths::CHUNK_FUNC_CONFIG | crate::counters::CHUNK_COUNTERS
             | crate::source_checkpoints::CHUNK_ADMISSION | crate::source_checkpoints::CHUNK_SOURCE_SEAL
             | crate::fifo::CHUNK_FIFO_CONFIG | crate::auto_rsx::CHUNK_AUTO_CONFIG | crate::auto_rsx::CHUNK_AUTO_CLOCK => {
@@ -387,76 +552,18 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 }
             }
 
-            CHUNK_RECORDS if chunk.payload.len() >= 8 => {
-                let inc = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap());
-                let n = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
-                let interval = thread_intervals.get(&inc);
-
-                let mut kept_recs = Vec::new();
-                for i in 0..n {
-                    let off = 8 + i * RECORD_LEN;
-                    if off + RECORD_LEN <= chunk.payload.len() {
-                        let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
-                        let keep = if let Some(iv) = interval {
-                            rec.seq >= iv.seq_start && rec.seq <= iv.seq_end
-                        } else if let (Some(tb0), Some(tb1)) = (global_tb_start, global_tb_end) {
-                            rec.b >= tb0 && rec.b <= tb1
-                        } else if let Some(tb0) = global_tb_start {
-                            rec.b >= tb0
-                        } else {
-                            false
-                        };
-
-                        if keep {
-                            kept_recs.extend_from_slice(&chunk.payload[off..off + RECORD_LEN]);
-                        }
+            CHUNK_RECORDS => {
+                if !records_emitted {
+                    for payload in output_records_per_lane.values() {
+                        emitted_chunks.push((CHUNK_RECORDS, payload.clone()));
                     }
-                }
-
-                if !kept_recs.is_empty() {
-                    let mut new_payload = Vec::with_capacity(8 + kept_recs.len());
-                    new_payload.extend_from_slice(&inc.to_le_bytes());
-                    let new_count = (kept_recs.len() / RECORD_LEN) as u32;
-                    new_payload.extend_from_slice(&new_count.to_le_bytes());
-                    new_payload.extend_from_slice(&kept_recs);
-                    emitted_chunks.push((CHUNK_RECORDS, new_payload));
+                    records_emitted = true;
                 }
             }
 
-            CHUNK_RETIRED if chunk.payload.len() >= 4 => {
-                let count = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap()) as usize;
-                let mut new_payload = chunk.payload.to_vec();
-                for i in 0..count {
-                    let off = 4 + i * FINAL_ENTRY_LEN;
-                    if off + FINAL_ENTRY_LEN <= new_payload.len() {
-                        let inc = u32::from_le_bytes(new_payload[off..off + 4].try_into().unwrap());
-                        let kept = records_kept_per_lane.get(&inc).copied().unwrap_or(0);
-                        let dropped =
-                            u64::from_le_bytes(new_payload[off + 24..off + 32].try_into().unwrap());
-                        let produced = kept.saturating_add(dropped);
-                        new_payload[off + 8..off + 16].copy_from_slice(&produced.to_le_bytes());
-                        new_payload[off + 16..off + 24].copy_from_slice(&kept.to_le_bytes());
-                    }
-                }
-                emitted_chunks.push((CHUNK_RETIRED, new_payload));
-            }
-
-            CHUNK_TRAILER if chunk.payload.len() >= 8 => {
-                let n_final = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
-                let mut new_payload = chunk.payload.to_vec();
-                for i in 0..n_final {
-                    let off = 8 + i * FINAL_ENTRY_LEN;
-                    if off + FINAL_ENTRY_LEN <= new_payload.len() {
-                        let inc = u32::from_le_bytes(new_payload[off..off + 4].try_into().unwrap());
-                        let kept = records_kept_per_lane.get(&inc).copied().unwrap_or(0);
-                        let dropped =
-                            u64::from_le_bytes(new_payload[off + 24..off + 32].try_into().unwrap());
-                        let produced = kept.saturating_add(dropped);
-                        new_payload[off + 8..off + 16].copy_from_slice(&produced.to_le_bytes());
-                        new_payload[off + 16..off + 24].copy_from_slice(&kept.to_le_bytes());
-                    }
-                }
-                emitted_chunks.push((CHUNK_TRAILER, new_payload));
+            // Keep RETIRED and TRAILER as written by the original writer!
+            CHUNK_RETIRED | CHUNK_TRAILER => {
+                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
             }
 
             _ => {
@@ -465,41 +572,37 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         }
     }
 
-    if !export_emitted {
-        emitted_chunks.push((CHUNK_EXPORT, export_payload));
-    }
+    // 8. Re-sequence chunks and serialize with CRCs.
+    let mut out = Vec::new();
+    out.extend_from_slice(&bytes[0..16]); // Header preamble (magic, versions, flags)
 
-    // 8. Re-sequence chunks with chunk_seq 0..N and recompute CRC32.
-    let mut out = Vec::with_capacity(bytes.len());
-    out.extend_from_slice(&bytes[0..16]);
+    for (seq, (ty, payload)) in emitted_chunks.iter().enumerate() {
+        let chunk_seq = seq as u64;
+        let len = payload.len() as u32;
+        let mut chunk_bytes = Vec::with_capacity(16 + payload.len() + 4);
+        chunk_bytes.extend_from_slice(&ty.to_le_bytes());
+        chunk_bytes.extend_from_slice(&len.to_le_bytes());
+        chunk_bytes.extend_from_slice(&chunk_seq.to_le_bytes());
+        chunk_bytes.extend_from_slice(payload);
 
-    for (seq, (ty, payload)) in emitted_chunks.into_iter().enumerate() {
-        let mut chunk_head = Vec::with_capacity(16);
-        chunk_head.extend_from_slice(&ty.to_le_bytes());
-        chunk_head.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        chunk_head.extend_from_slice(&(seq as u64).to_le_bytes());
+        let crc = crc32(&chunk_bytes);
+        chunk_bytes.extend_from_slice(&crc.to_le_bytes());
 
-        let mut full_chunk_bytes = Vec::with_capacity(16 + payload.len());
-        full_chunk_bytes.extend_from_slice(&chunk_head);
-        full_chunk_bytes.extend_from_slice(&payload);
-
-        let crc = crc32(&full_chunk_bytes);
-        full_chunk_bytes.extend_from_slice(&crc.to_le_bytes());
-
-        out.extend_from_slice(&full_chunk_bytes);
+        out.extend_from_slice(&chunk_bytes);
     }
 
     Ok(out)
 }
 
-/// Export a frame or frame range from an input file to an output file.
+/// Export one frame or a range of frames from an input capture file to an output capture file.
 pub fn export_capture<P: AsRef<Path>, Q: AsRef<Path>>(
     in_path: P,
     out_path: Q,
     range: RangeInclusive<u64>,
 ) -> Result<(), ExportError> {
-    let in_bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
-    let out_bytes = export_bytes(&in_bytes, range)?;
-    std::fs::write(out_path.as_ref(), out_bytes).map_err(ExportError::Io)?;
+    let bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
+    let exported = export_bytes(&bytes, range)?;
+    std::fs::write(out_path.as_ref(), exported).map_err(ExportError::Io)?;
     Ok(())
 }
+

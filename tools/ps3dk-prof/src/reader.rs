@@ -420,6 +420,13 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
         if export_ty {
+            let expected_idx = if r.cap.profile_flag { 3 } else { 2 };
+            if index != expected_idx {
+                return malformed(Rule::Export, format!("chunk {index} is type 40, expected chunk {expected_idx}"));
+            }
+            if r.cap.export.is_some() {
+                return malformed(Rule::Export, format!("chunk {index} is a duplicate EXPORT chunk"));
+            }
             r.export(payload)?;
             pos += total;
             index += 1;
@@ -754,14 +761,14 @@ impl Reader {
 
     fn export(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::Export;
-        if payload.len() != EXPORT_PAYLOAD_LEN {
-            return malformed(r, format!("CHUNK_EXPORT is {} bytes, expected {EXPORT_PAYLOAD_LEN}", payload.len()));
+        if payload.len() < EXPORT_HEADER_LEN {
+            return malformed(r, format!("CHUNK_EXPORT is {} bytes, minimum {EXPORT_HEADER_LEN}", payload.len()));
         }
         let mut c = Cursor::new(payload, "EXPORT");
         let schema = c.u16()?;
-        let reserved = c.u16()?;
-        if schema != EXPORT_SCHEMA || reserved != 0 {
-            return malformed(r, format!("EXPORT schema {schema} reserved {reserved}"));
+        let flags = c.u16()?;
+        if schema != EXPORT_SCHEMA || (flags & !EXPORT_FLAG_TO_END != 0) {
+            return malformed(r, format!("EXPORT schema {schema} flags {flags:#x}"));
         }
         let source_crc = c.u32()?;
         let source_size = c.u64()?;
@@ -770,26 +777,90 @@ impl Reader {
         if frame_first > frame_last {
             return malformed(r, format!("EXPORT frames {frame_first}..{frame_last} out of order"));
         }
+        let clipped_zones = c.u64()?;
         let records_kept = c.u64()?;
         let records_dropped = c.u64()?;
         let ops_kept = c.u64()?;
         let ops_dropped = c.u64()?;
         let events_kept = c.u64()?;
         let events_dropped = c.u64()?;
+        let lane_count = c.u32()? as usize;
+        let reserved = c.u32()?;
+        if reserved != 0 {
+            return malformed(r, format!("EXPORT reserved {reserved}"));
+        }
+        let expected_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+        if payload.len() != expected_len {
+            return malformed(
+                r,
+                format!("CHUNK_EXPORT is {} bytes, expected {expected_len} for {lane_count} lanes", payload.len()),
+            );
+        }
+        let mut lanes = BTreeMap::new();
+        let mut sum_kept = 0u64;
+        let mut sum_dropped = 0u64;
+        for _ in 0..lane_count {
+            let incarnation = c.u32()?;
+            let lane_res = c.u32()?;
+            if lane_res != 0 {
+                return malformed(r, format!("EXPORT lane {incarnation} reserved {lane_res}"));
+            }
+            let first_seq = c.u64()?;
+            let last_seq = c.u64()?;
+            let kept = c.u64()?;
+            let dropped_by_export = c.u64()?;
+            if kept == 0 {
+                if first_seq != 0 || last_seq != 0 {
+                    return malformed(r, format!("EXPORT lane {incarnation} kept 0 but seq {first_seq}..{last_seq}"));
+                }
+            } else if first_seq > last_seq {
+                return malformed(r, format!("EXPORT lane {incarnation} first_seq {first_seq} > last_seq {last_seq}"));
+            }
+            if lanes.contains_key(&incarnation) {
+                return malformed(r, format!("EXPORT duplicate lane {incarnation}"));
+            }
+            sum_kept = sum_kept
+                .checked_add(kept)
+                .ok_or_else(|| Malformed { rule: r, detail: "records_kept overflow".into() })?;
+            sum_dropped = sum_dropped
+                .checked_add(dropped_by_export)
+                .ok_or_else(|| Malformed { rule: r, detail: "records_dropped overflow".into() })?;
+            lanes.insert(
+                incarnation,
+                ExportLane {
+                    incarnation,
+                    first_seq,
+                    last_seq,
+                    kept,
+                    dropped_by_export,
+                },
+            );
+        }
         c.done()?;
+        if sum_kept != records_kept || sum_dropped != records_dropped {
+            return malformed(
+                r,
+                format!(
+                    "EXPORT lane sums kept {}/dropped {} do not match declared {}/{}",
+                    sum_kept, sum_dropped, records_kept, records_dropped
+                ),
+            );
+        }
         self.cap.export = Some(ExportRecord {
             schema,
-            reserved,
+            flags,
             source_crc,
             source_size,
             frame_first,
             frame_last,
+            clipped_zones,
             records_kept,
             records_dropped,
             ops_kept,
             ops_dropped,
             events_kept,
             events_dropped,
+            lanes,
         });
         Ok(())
     }
@@ -818,7 +889,7 @@ impl Reader {
         let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
             crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
             || recs.iter().filter(|r| r.kind == KIND_END).count()));
-        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.is_some())?;
+        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.as_ref())?;
         // No identity is published until the entire legacy chunk has succeeded,
         // including the final pending-BEGIN / pending-GAP checks.
         if let Some(source) = self.source_checkpoints.as_mut() { source.observe(batch.as_ref(), chunk_seq)?; }
@@ -840,13 +911,45 @@ impl Reader {
         // Final-entry consistency (section 6), for RETIRED entries and TRAILER entries alike.
         let mut any_state3 = false;
         let mut any_limit = false;
+        if let Some(exp) = &self.cap.export {
+            if exp.lanes.len() != self.cap.lanes.len() {
+                return malformed(
+                    Rule::Export,
+                    format!("EXPORT lanes {} != capture lanes {}", exp.lanes.len(), self.cap.lanes.len()),
+                );
+            }
+        }
         for (&inc, lane) in &self.cap.lanes {
             let Some(e) = &lane.final_entry else { continue };
-            if e.written_count != lane.written {
-                return malformed(
-                    Rule::WrittenCountMismatch,
-                    format!("incarnation {inc}: written_count {} but {} records", e.written_count, lane.written),
-                );
+            if let Some(exp) = &self.cap.export {
+                let exp_lane = exp.lanes.get(&inc).ok_or_else(|| {
+                    Malformed {
+                        rule: Rule::Export,
+                        detail: format!("incarnation {inc} missing from EXPORT table"),
+                    }
+                })?;
+                if lane.written != exp_lane.kept {
+                    return malformed(
+                        Rule::Export,
+                        format!("incarnation {inc}: written {} records != declared kept {}", lane.written, exp_lane.kept),
+                    );
+                }
+                if e.written_count != exp_lane.kept + exp_lane.dropped_by_export {
+                    return malformed(
+                        Rule::Export,
+                        format!(
+                            "incarnation {inc}: final entry written {} != kept {} + dropped_by_export {}",
+                            e.written_count, exp_lane.kept, exp_lane.dropped_by_export
+                        ),
+                    );
+                }
+            } else {
+                if e.written_count != lane.written {
+                    return malformed(
+                        Rule::WrittenCountMismatch,
+                        format!("incarnation {inc}: written_count {} but {} records", e.written_count, lane.written),
+                    );
+                }
             }
             if e.state == STATE_NOT_QUIESCED {
                 any_state3 = true;
@@ -861,16 +964,47 @@ impl Reader {
                     format!("incarnation {inc}: produced_count {} > 2^63", e.produced_count),
                 );
             }
-            if self.cap.export.is_none() {
-                if u128::from(e.produced_count) != u128::from(e.written_count) + u128::from(e.dropped_count) {
+            if u128::from(e.produced_count) != u128::from(e.written_count) + u128::from(e.dropped_count) {
+                return malformed(
+                    Rule::ProducedCountArithmetic,
+                    format!(
+                        "incarnation {inc}: produced {} != written {} + dropped {}",
+                        e.produced_count, e.written_count, e.dropped_count
+                    ),
+                );
+            }
+            if let Some(exp) = &self.cap.export {
+                let exp_lane = exp.lanes.get(&inc).unwrap();
+                if exp_lane.kept > 0 {
+                    if lane.first_seq != Some(exp_lane.first_seq) {
+                        return malformed(
+                            Rule::Export,
+                            format!("incarnation {inc}: first seq {:?} != declared {}", lane.first_seq, exp_lane.first_seq),
+                        );
+                    }
+                    if lane.last_seq != Some(exp_lane.last_seq) {
+                        return malformed(
+                            Rule::Export,
+                            format!("incarnation {inc}: last seq {:?} != declared {}", lane.last_seq, exp_lane.last_seq),
+                        );
+                    }
+                    let kept_span = u128::from(exp_lane.last_seq) - u128::from(exp_lane.first_seq) + 1;
+                    if kept_span != u128::from(lane.written) + lane.gap_sum {
+                        return malformed(
+                            Rule::Export,
+                            format!(
+                                "incarnation {inc}: kept range span {kept_span} != written {} + gap_sum {}",
+                                lane.written, lane.gap_sum
+                            ),
+                        );
+                    }
+                } else if lane.written != 0 || exp_lane.first_seq != 0 || exp_lane.last_seq != 0 {
                     return malformed(
-                        Rule::ProducedCountArithmetic,
-                        format!(
-                            "incarnation {inc}: produced {} != written {} + dropped {}",
-                            e.produced_count, e.written_count, e.dropped_count
-                        ),
+                        Rule::Export,
+                        format!("incarnation {inc}: kept 0 but written {} or seqs {}..{}", lane.written, exp_lane.first_seq, exp_lane.last_seq),
                     );
                 }
+            } else {
                 let next = lane.last_seq.map_or(0u128, |s| u128::from(s) + 1);
                 let produced = u128::from(e.produced_count);
                 if produced < next || u128::from(e.dropped_count) != lane.gap_sum + (produced - next) {
@@ -893,6 +1027,34 @@ impl Reader {
                         e.regerr_count, lane.regerr_records
                     ),
                 );
+            }
+        }
+
+        if let Some(exp) = &self.cap.export {
+            for lane in self.cap.lanes.values() {
+                if lane.is_frame_owner() {
+                    if let Some(first) = lane.frames.first() {
+                        if first.id != exp.frame_first {
+                            return malformed(
+                                Rule::Export,
+                                format!("first frame id {} != declared frame_first {}", first.id, exp.frame_first),
+                            );
+                        }
+                    }
+                    if let Some(last) = lane.frames.last() {
+                        let expected_last = if exp.flags & EXPORT_FLAG_TO_END != 0 {
+                            exp.frame_last
+                        } else {
+                            exp.frame_last + 1
+                        };
+                        if last.id != expected_last {
+                            return malformed(
+                                Rule::Export,
+                                format!("last frame id {} != expected closing frame {}", last.id, expected_last),
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -951,7 +1113,7 @@ fn process_records(
     inc: u32,
     recs: &[RawRecord],
     mut evidence: Option<&mut crate::dependencies::Batch>,
-    export: bool,
+    export: Option<&ExportRecord>,
 ) -> Result<(), Malformed> {
     for (i, r) in recs.iter().enumerate() {
         let at = || format!("incarnation {inc}, record {i} (seq {})", r.seq);
@@ -1014,13 +1176,31 @@ fn process_records(
                 return malformed(Rule::SeqOrder, format!("{}: GAP ends at {c} but next seq is {}", at(), r.seq));
             }
             None if r.seq != lane.expected_seq => {
-                if export && lane.written == 0 && lane.pending_begin.is_none() {
-                    lane.expected_seq = r.seq;
-                } else {
+                if let Some(exp) = export {
+                    if lane.written == 0 && lane.pending_begin.is_none() {
+                        let exp_lane = exp.lanes.get(&inc).ok_or_else(|| {
+                            Malformed {
+                                rule: Rule::Export,
+                                detail: format!("{}: undeclared export incarnation", at()),
+                            }
+                        })?;
+                        if r.seq != exp_lane.first_seq {
+                            return malformed(
+                                Rule::Export,
+                                format!("{}: lane first seq {} != declared {}", at(), r.seq, exp_lane.first_seq),
+                            );
+                        }
+                        lane.expected_seq = r.seq;
+                    }
+                }
+                if r.seq != lane.expected_seq {
                     return malformed(Rule::SeqOrder, format!("{}: expected seq {}", at(), lane.expected_seq));
                 }
             }
             _ => {}
+        }
+        if lane.first_seq.is_none() {
+            lane.first_seq = Some(r.seq);
         }
         lane.expected_seq = r.seq + 1;
         lane.written += 1;
@@ -1050,8 +1230,16 @@ fn process_records(
             },
             KIND_FRAME => {
                 let id = r.c;
-                if export && lane.frames.is_empty() {
-                    lane.next_frame_id = id;
+                if let Some(exp) = export {
+                    if lane.frames.is_empty() {
+                        if id != exp.frame_first {
+                            return malformed(
+                                Rule::Export,
+                                format!("{}: frame id {id} != declared frame_first {}", at(), exp.frame_first),
+                            );
+                        }
+                        lane.next_frame_id = id;
+                    }
                 }
                 // Strictly increasing by 1, or skipping ahead only across a GAP; never repeated, never after the
                 // last assignable id.
@@ -1208,6 +1396,7 @@ fn begin_span(
         begin_seq: begin.seq,
         begin_tb: begin.b,
         end_tb: None,
+        end_seq: None,
         truncated_at_stop: false,
         affected: lane.base_unknown,
         frame_context,
@@ -1249,6 +1438,7 @@ fn end_span(lane: &mut Lane, spans: &mut [Span], r: &RawRecord) -> Result<(), (R
     let gaps = lane.gap_count;
     let span = &mut spans[top];
     span.end_tb = Some(r.b);
+    span.end_seq = Some(r.seq);
     span.truncated_at_stop = r.flags & FLAG_TRUNCATED_AT_STOP != 0;
     span.frames_before_end = Some(frames);
     span.gaps_before_end = Some(gaps);
