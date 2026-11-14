@@ -316,11 +316,16 @@ pub const ENDING_NO_TRAILER: &str = "ending: NO-TRAILER";
 
 /// The verdict line, plus the `ending:` line for a file without a TRAILER.
 pub fn verdict_block(a: &Analysis) -> String {
-    match a.prefix {
+    let mut s = match a.prefix {
         Some(_) => format!("{}
 {ENDING_NO_TRAILER}", verdict_text(a)),
         None => verdict_text(a),
+    };
+    if let Some(exp) = &a.capture.export {
+        s.push('\n');
+        s.push_str(&format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last));
     }
+    s
 }
 
 pub fn verdict_line(v: &Verdict) -> String {
@@ -337,6 +342,9 @@ pub fn render(a: &Analysis) -> String {
     let mut o = String::new();
     let cap = &a.capture;
     let _ = writeln!(o, "verdict: {}", verdict_text(a));
+    if let Some(exp) = &cap.export {
+        let _ = writeln!(o, "exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+    }
     if a.prefix.is_some() {
         let _ = writeln!(o, "{ENDING_NO_TRAILER}");
     }

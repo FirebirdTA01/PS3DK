@@ -32,6 +32,26 @@ pub const CHUNK_THREADS: u32 = 4;
 pub const CHUNK_RECORDS: u32 = 5;
 pub const CHUNK_TRAILER: u32 = 6;
 pub const CHUNK_RETIRED: u32 = 7;
+pub const CHUNK_EXPORT: u32 = 40;
+pub const EXPORT_SCHEMA: u16 = 1;
+pub const EXPORT_PAYLOAD_LEN: usize = 80;
+
+/// A parsed EXPORT chunk (type 40).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportRecord {
+    pub schema: u16,
+    pub reserved: u16,
+    pub source_crc: u32,
+    pub source_size: u64,
+    pub frame_first: u64,
+    pub frame_last: u64,
+    pub records_kept: u64,
+    pub records_dropped: u64,
+    pub ops_kept: u64,
+    pub ops_dropped: u64,
+    pub events_kept: u64,
+    pub events_dropped: u64,
+}
 
 pub const KIND_BEGIN: u8 = 1;
 pub const KIND_BEGIN_PARENT: u8 = 2;
@@ -86,6 +106,8 @@ pub enum Rule {
     AutoStatus,
     /// An AUTO_CLOCK anchor violates its wire or identity rules.
     AutoClock,
+    /// An EXPORT chunk (type 40) violates its wire or range rules.
+    Export,
     // 1. Primitives
     StringTooLong,
     StringInvalidUtf8,
@@ -492,6 +514,8 @@ pub struct Capture {
     pub profile_flag: bool,
     /// The decoded PROFILE (chunk 2); None when bit 1 is clear or the file is torn before chunk 2 is complete.
     pub profile: Option<crate::profile::ProfileRecord>,
+    /// Standalone export metadata (chunk 40); Some when exported from another capture.
+    pub export: Option<ExportRecord>,
 }
 
 impl Capture {

@@ -19,7 +19,7 @@ pub struct RawRecord {
 }
 
 impl RawRecord {
-    fn decode(bytes: &[u8]) -> RawRecord {
+    pub fn decode(bytes: &[u8]) -> RawRecord {
         RawRecord {
             kind: bytes[0],
             depth: bytes[1],
@@ -403,8 +403,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             && (crate::auto_rsx::CHUNK_AUTO_CONFIG..=crate::auto_rsx::CHUNK_AUTO_CLOCK).contains(&ty);
         let fifo_ty = r.fifo.is_some()
             && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
+        let export_ty = ty == crate::model::CHUNK_EXPORT;
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty && !auto_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -418,6 +419,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             return malformed(Rule::DuplicateHeaderOrClocks, format!("chunk {index} is a second HEADER or CLOCKS"));
         }
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
+        if export_ty {
+            r.export(payload)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
         if wait_ty {
             r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
             pos += total;
@@ -745,6 +752,48 @@ impl Reader {
         Ok(())
     }
 
+    fn export(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+        let r = Rule::Export;
+        if payload.len() != EXPORT_PAYLOAD_LEN {
+            return malformed(r, format!("CHUNK_EXPORT is {} bytes, expected {EXPORT_PAYLOAD_LEN}", payload.len()));
+        }
+        let mut c = Cursor::new(payload, "EXPORT");
+        let schema = c.u16()?;
+        let reserved = c.u16()?;
+        if schema != EXPORT_SCHEMA || reserved != 0 {
+            return malformed(r, format!("EXPORT schema {schema} reserved {reserved}"));
+        }
+        let source_crc = c.u32()?;
+        let source_size = c.u64()?;
+        let frame_first = c.u64()?;
+        let frame_last = c.u64()?;
+        if frame_first > frame_last {
+            return malformed(r, format!("EXPORT frames {frame_first}..{frame_last} out of order"));
+        }
+        let records_kept = c.u64()?;
+        let records_dropped = c.u64()?;
+        let ops_kept = c.u64()?;
+        let ops_dropped = c.u64()?;
+        let events_kept = c.u64()?;
+        let events_dropped = c.u64()?;
+        c.done()?;
+        self.cap.export = Some(ExportRecord {
+            schema,
+            reserved,
+            source_crc,
+            source_size,
+            frame_first,
+            frame_last,
+            records_kept,
+            records_dropped,
+            ops_kept,
+            ops_dropped,
+            events_kept,
+            events_dropped,
+        });
+        Ok(())
+    }
+
     fn records(&mut self, payload: &[u8], chunk_seq: u64) -> Result<(), Malformed> {
         let mut c = Cursor::new(payload, "RECORDS");
         let inc = c.u32()?;
@@ -769,7 +818,7 @@ impl Reader {
         let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
             crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
             || recs.iter().filter(|r| r.kind == KIND_END).count()));
-        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut())?;
+        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.is_some())?;
         // No identity is published until the entire legacy chunk has succeeded,
         // including the final pending-BEGIN / pending-GAP checks.
         if let Some(source) = self.source_checkpoints.as_mut() { source.observe(batch.as_ref(), chunk_seq)?; }
@@ -812,25 +861,27 @@ impl Reader {
                     format!("incarnation {inc}: produced_count {} > 2^63", e.produced_count),
                 );
             }
-            if u128::from(e.produced_count) != u128::from(e.written_count) + u128::from(e.dropped_count) {
-                return malformed(
-                    Rule::ProducedCountArithmetic,
-                    format!(
-                        "incarnation {inc}: produced {} != written {} + dropped {}",
-                        e.produced_count, e.written_count, e.dropped_count
-                    ),
-                );
-            }
-            let next = lane.last_seq.map_or(0u128, |s| u128::from(s) + 1);
-            let produced = u128::from(e.produced_count);
-            if produced < next || u128::from(e.dropped_count) != lane.gap_sum + (produced - next) {
-                return malformed(
-                    Rule::DroppedCountArithmetic,
-                    format!(
-                        "incarnation {inc}: dropped {} != GAP ranges {} + terminal tail",
-                        e.dropped_count, lane.gap_sum
-                    ),
-                );
+            if self.cap.export.is_none() {
+                if u128::from(e.produced_count) != u128::from(e.written_count) + u128::from(e.dropped_count) {
+                    return malformed(
+                        Rule::ProducedCountArithmetic,
+                        format!(
+                            "incarnation {inc}: produced {} != written {} + dropped {}",
+                            e.produced_count, e.written_count, e.dropped_count
+                        ),
+                    );
+                }
+                let next = lane.last_seq.map_or(0u128, |s| u128::from(s) + 1);
+                let produced = u128::from(e.produced_count);
+                if produced < next || u128::from(e.dropped_count) != lane.gap_sum + (produced - next) {
+                    return malformed(
+                        Rule::DroppedCountArithmetic,
+                        format!(
+                            "incarnation {inc}: dropped {} != GAP ranges {} + terminal tail",
+                            e.dropped_count, lane.gap_sum
+                        ),
+                    );
+                }
             }
             // Section 5.3: regerr_count is incremented unconditionally and the REGERR record is best effort, so the
             // counter covers every REGERR record written.
@@ -900,6 +951,7 @@ fn process_records(
     inc: u32,
     recs: &[RawRecord],
     mut evidence: Option<&mut crate::dependencies::Batch>,
+    export: bool,
 ) -> Result<(), Malformed> {
     for (i, r) in recs.iter().enumerate() {
         let at = || format!("incarnation {inc}, record {i} (seq {})", r.seq);
@@ -962,7 +1014,11 @@ fn process_records(
                 return malformed(Rule::SeqOrder, format!("{}: GAP ends at {c} but next seq is {}", at(), r.seq));
             }
             None if r.seq != lane.expected_seq => {
-                return malformed(Rule::SeqOrder, format!("{}: expected seq {}", at(), lane.expected_seq));
+                if export && lane.written == 0 && lane.pending_begin.is_none() {
+                    lane.expected_seq = r.seq;
+                } else {
+                    return malformed(Rule::SeqOrder, format!("{}: expected seq {}", at(), lane.expected_seq));
+                }
             }
             _ => {}
         }
@@ -994,6 +1050,9 @@ fn process_records(
             },
             KIND_FRAME => {
                 let id = r.c;
+                if export && lane.frames.is_empty() {
+                    lane.next_frame_id = id;
+                }
                 // Strictly increasing by 1, or skipping ahead only across a GAP; never repeated, never after the
                 // last assignable id.
                 let in_sequence = !lane.frame_ids_exhausted
