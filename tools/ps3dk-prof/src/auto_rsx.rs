@@ -363,6 +363,11 @@ pub struct Inventory {
     pub config: Option<Config>,
     pub ops: Vec<Op>,
     pub ops_parsed: u64,
+    /// Records parsed but not retained past the operation ceiling, and every (owner, frame) they belonged to
+    /// (their own frame token and, for segment draws, their build frame): those frames read UNKNOWN, the
+    /// others keep their verdicts.
+    pub ops_dropped: u64,
+    pub dropped_frames: BTreeSet<(u32, u64)>,
     pub frames: Vec<Coverage>,
     pub frames_parsed: u64,
     pub clocks: Vec<Anchor>,
@@ -735,7 +740,9 @@ impl Reader {
             self.result.ops_parsed += 1;
             self.result.max_snapshot = self.result.max_snapshot.max(published);
             if self.result.ops.len() as u64 >= self.budgets.max_ops {
-                self.result.refusal.get_or_insert("AUTO operation retention ceiling");
+                self.result.ops_dropped += 1;
+                if flags & OP_TOKEN != 0 { self.result.dropped_frames.insert((frame_owner, frame)); }
+                if build_known { self.result.dropped_frames.insert((build_owner, build_frame)); }
                 continue;
             }
             self.result.ops.push(Op {
@@ -1158,6 +1165,8 @@ pub const PACING_SHARE: (u64, u64) = (1, 4);
 pub const NOT_DISTINGUISHED: &str = "RSX not limiting; PPU work vs presentation pacing not distinguished";
 /// Flip-status polling was seen, but polling shows how often the owner looked at the flip, not that it waited.
 pub const POLLING_ONLY: &str = "presentation polling observed; waiting not established";
+/// Some of this frame's operation records lie past the reader's operation retention ceiling (a very long capture).
+pub const OPS_PAST_CEILING: &str = "operation records past the reader's retention ceiling (capture too long to retain whole)";
 /// A frame with CALL-segment records: no per-frame verdict (the records do not carry the building frame).
 pub const SEGMENT_POPULATION: &str = "from CALL segments: a segment is counted where it was built and recorded where \
     it was called, so this frame's records and coverage are not one population";
@@ -1261,6 +1270,8 @@ pub struct Presentation {
 #[derive(Debug, Clone, Default)]
 pub struct Report {
     pub capability: bool,
+    /// Operation records the reader parsed but did not retain (past its operation ceiling).
+    pub ops_dropped: u64,
     /// The capture's CONFIG is 63/11 (segment records carry their build frame).
     pub build_frames: bool,
     pub state: String,
@@ -1350,6 +1361,7 @@ pub fn analyze(cap: &Capture) -> Report {
         status: inv.last_status.clone(),
         ops_parsed: inv.ops_parsed,
         ops_valid: inv.ops.iter().filter(|o| o.raw_valid()).count() as u64,
+        ops_dropped: inv.ops_dropped,
         clocks: inv.clocks.clone(),
         refusal: inv.refusal,
         ..Report::default()
@@ -1441,6 +1453,9 @@ pub fn analyze(cap: &Capture) -> Report {
             if status_flags & (ST_RESOURCE_CONFLICT | ST_CONTEXT_RESET) != 0 {
                 return Err("timing invalidated by a resource conflict or context reset".into());
             }
+            if inv.dropped_frames.contains(&(f.owner, f.frame)) {
+                return Err(OPS_PAST_CEILING.into());
+            }
             if status_flags & ST_SEGMENT_REPLAY != 0 {
                 return Err(SEGMENT_REPLAY.into());
             }
@@ -1502,6 +1517,9 @@ pub fn analyze(cap: &Capture) -> Report {
                     let Some(row) = rows.get(&(o, g)) else {
                         return Err(format!("segment draw(s) built in frame {o}/{g}, which has no coverage row"));
                     };
+                    if inv.dropped_frames.contains(&(o, g)) {
+                        return Err(format!("segment draw(s) built in frame {o}/{g}: {OPS_PAST_CEILING}"));
+                    }
                     build_clean(row, &built).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
                 }
             }
@@ -1598,6 +1616,9 @@ fn rat_text(r: &Rat) -> String {
 pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result<()> {
     writeln!(out, "Automatic RSX observation: {}", r.state)?;
     writeln!(out, "{SCOPE}")?;
+    if r.ops_dropped != 0 {
+        writeln!(out, "{} operation record(s) past the reader's retention ceiling were not kept; frames that lost records read UNKNOWN, the others keep their verdicts.", r.ops_dropped)?;
+    }
     if !r.capability {
         return Ok(());
     }
@@ -1764,6 +1785,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    }
+    if r.ops_dropped != 0 {
+        // only when the reader could not retain every record, so complete captures keep their exact JSON
+        v["operations"]["dropped"] = json!(r.ops_dropped);
     }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)

@@ -599,6 +599,43 @@ fn cli_auto_ops() {
     assert_eq!(run(&["auto", "--ops", "--bogus", &format!("{dir}/segments.prof")]).status.code(), Some(3));
 }
 
+/// Past the operation retention ceiling the reader no longer refuses the whole capture: frames that kept every
+/// record keep exactly the verdict a full read gives them, and frames that lost records read UNKNOWN with the
+/// ceiling as the reason.
+#[test]
+fn auto_ops_ceiling_keeps_retained_frames() {
+    let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
+    for name in ["console-r2", "segbuild"] {
+        let bytes = std::fs::read(format!("{dir}/{name}.prof")).unwrap();
+        let full = analyze(&reader::read(&bytes).unwrap());
+        let n = full.ops_parsed;
+        assert!(n > 4, "{name}: fixture has records");
+        let budgets = ps3dk_prof::auto_rsx::Budgets { max_ops: n - 1, ..Default::default() };
+        let cap = reader::read_with_auto_budgets(&bytes, budgets).unwrap();
+        let dropped = cap.auto.as_ref().unwrap().dropped_frames.clone();
+        let part = analyze(&cap);
+        assert!(part.refusal.is_none(), "{name}: no capture-wide refusal");
+        assert_eq!(part.ops_dropped, 1, "{name}: dropped count");
+        assert!(!dropped.is_empty(), "{name}: some frame lost records");
+        assert_eq!(full.frames.len(), part.frames.len());
+        let mut kept = 0;
+        for (a, b) in full.frames.iter().zip(part.frames.iter()) {
+            if dropped.contains(&(b.owner, b.frame)) {
+                assert_eq!(b.verdict, Verdict::Unknown, "{name}: frame {} lost records", b.frame);
+            } else if b.reason != a.reason {
+                // a kept frame may only differ when it imports segment draws built in a frame that lost records
+                assert!(b.reason.contains(ps3dk_prof::auto_rsx::OPS_PAST_CEILING), "{name}: frame {}: {} vs {}", b.frame, a.reason, b.reason);
+            } else {
+                assert_eq!(a.verdict, b.verdict);
+                kept += 1;
+            }
+        }
+        if name == "console-r2" {
+            assert!(kept > 1, "{name}: frames before the ceiling keep their verdicts");
+        }
+    }
+}
+
 #[test]
 fn cli_auto() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
