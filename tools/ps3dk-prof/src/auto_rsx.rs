@@ -1611,15 +1611,6 @@ pub fn analyze(cap: &Capture) -> Report {
             let rsx_long = share(span.0, d, RSX_SPAN_SHARE);
             let rsx_short = !share(span.1, d, RSX_SPAN_SHARE);
             let waited = share(w, d, WAIT_SHARE);
-            // 127/11: an owner that never waited in FIFO wraps but polled flip status (complete cadence runs, none
-            // spanning the frame boundary) for at least WAIT_SHARE of the frame while the RSX reached-marker span
-            // (its lower bound) held at least RSX_SPAN_SHARE: the RSX, not the PPU, held the frame. Polling cadence
-            // alone stays a named observation; it decides only together with a long RSX span.
-            let polled = match present.as_ref() {
-                Some(Presentation { cadence: Some(c), flip_wait_spanning: 0, .. })
-                    if bounded_rule && w == 0 && c.spanning == 0 && c.runs > 0 && share(c.ticks, d, WAIT_SHARE) => Some(c.ticks),
-                _ => None,
-            };
             // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
             // where the RSX is not limiting is PACING only with flip-wait scope evidence (cellGcmWaitFlipComplete),
             // otherwise UNKNOWN.  Polling cadence and 15/11 poll intervals are named observations, never waiting.
@@ -1643,8 +1634,6 @@ pub fn analyze(cap: &Capture) -> Report {
                     Some(Presentation { cadence: Some(c), .. }) if c.runs > 0 || c.broken > 0 => POLLING_ONLY.into(),
                     _ => NOT_DISTINGUISHED.into(),
                 })
-            } else if let (Some(p), true) = (polled, rsx_long) {
-                Ok((Verdict::RsxBound, format!("presentation polling: the owner polled flip status for >= {p} of {d} PPU ticks while the RSX reached-marker span was >= {} ticks", span.0)))
             } else if w > 0 && !waited && rsx_long {
                 Ok((Verdict::Mixed, format!("owner waited >= {w} of {d} PPU ticks; RSX reached-marker span >= {} \
                     ticks", span.0)))
