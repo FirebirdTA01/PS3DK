@@ -95,9 +95,9 @@ fn counters_chunks_without_the_capability_are_unknown() {
 #[test]
 fn a_reader_that_does_not_know_bit_8_refuses_other_high_bits() {
     let mut f = good();
-    f.flags = FLAG_COUNTERS | 512;
+    f.flags = FLAG_COUNTERS | 1024;
     assert_eq!(rule(&f), Rule::FileFlagsNonzero);
-    // the partial-header path agrees: byte 13 may be 0 or 1 only
+    // the partial-header path agrees: byte 13 may be 0, 1, 2, or 3 only
     let bytes = f.bytes();
     assert!(ps3dk_prof::reader::read(&bytes[..14]).is_err());
     let ok = good().bytes();
