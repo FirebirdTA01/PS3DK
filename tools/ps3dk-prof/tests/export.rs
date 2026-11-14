@@ -37,9 +37,23 @@ fn frame_verdicts(auto_stdout: &str, range: std::ops::RangeInclusive<u64>) -> Ve
         .collect()
 }
 
+fn frame_elapsed(report_stdout: &str, range: std::ops::RangeInclusive<u64>) -> Vec<String> {
+    report_stdout
+        .lines()
+        .filter(|l| {
+            l.trim_start().starts_with("owner ")
+                && range.clone().any(|f| l.contains(&format!("frame {f}:")))
+        })
+        .map(|l| l.trim().to_string())
+        .collect()
+}
+
 #[test]
 fn export_single_frame_matching_verdict() {
     let input = fixture_path("console-r2");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
     let output = temp_prof("console-r2-f50");
     let out_str = output.to_str().unwrap();
 
@@ -52,10 +66,30 @@ fn export_single_frame_matching_verdict() {
     let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
     assert_eq!(c_exp, Some(0));
 
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 50..50")),
+        "export header missing in auto output: {out_exp}"
+    );
+
     let want = frame_verdicts(&out_full, 50..=50);
     let got = frame_verdicts(&out_exp, 50..=50);
     assert_eq!(got, want, "verdict mismatch on frame 50");
     assert_eq!(got.len(), 1);
+
+    // Compare report frame elapsed output
+    let (c_rep_full, rep_full, _) = run_cmd(&["report", &input]);
+    assert_eq!(c_rep_full, Some(0));
+    let (c_rep_exp, rep_exp, _) = run_cmd(&["report", out_str]);
+    assert_eq!(c_rep_exp, Some(0));
+    assert!(
+        rep_exp.contains(&format!("exported from {src_crc:08x} frames 50..50")),
+        "export header missing in report output: {rep_exp}"
+    );
+
+    let want_el = frame_elapsed(&rep_full, 50..=50);
+    let got_el = frame_elapsed(&rep_exp, 50..=50);
+    assert_eq!(got_el, want_el, "frame elapsed mismatch on frame 50");
+    assert_eq!(got_el.len(), 1);
 
     // Existing check and auto --ops must succeed normally on exported file
     let (c_check, _, _) = run_cmd(&["check", out_str]);
@@ -71,6 +105,9 @@ fn export_single_frame_matching_verdict() {
 #[test]
 fn export_frame_range_matching_verdicts() {
     let input = fixture_path("console-r2");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
     let output = temp_prof("console-r2-f10-20");
     let out_str = output.to_str().unwrap();
 
@@ -82,10 +119,30 @@ fn export_frame_range_matching_verdicts() {
     let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
     assert_eq!(c_exp, Some(0));
 
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 10..20")),
+        "export header missing in auto output: {out_exp}"
+    );
+
     let want = frame_verdicts(&out_full, 10..=20);
     let got = frame_verdicts(&out_exp, 10..=20);
     assert_eq!(got, want, "verdicts mismatch on frames 10..20");
     assert_eq!(got.len(), 11);
+
+    // Compare report frame elapsed output
+    let (c_rep_full, rep_full, _) = run_cmd(&["report", &input]);
+    assert_eq!(c_rep_full, Some(0));
+    let (c_rep_exp, rep_exp, _) = run_cmd(&["report", out_str]);
+    assert_eq!(c_rep_exp, Some(0));
+    assert!(
+        rep_exp.contains(&format!("exported from {src_crc:08x} frames 10..20")),
+        "export header missing in report output: {rep_exp}"
+    );
+
+    let want_el = frame_elapsed(&rep_full, 10..=20);
+    let got_el = frame_elapsed(&rep_exp, 10..=20);
+    assert_eq!(got_el, want_el, "frame elapsed mismatch on frames 10..20");
+    assert_eq!(got_el.len(), 11);
 
     let _ = std::fs::remove_file(&output);
 }
@@ -93,6 +150,9 @@ fn export_frame_range_matching_verdicts() {
 #[test]
 fn export_frame_range_inclusive_syntax() {
     let input = fixture_path("console-r2");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
     let output = temp_prof("console-r2-f5-10");
     let out_str = output.to_str().unwrap();
 
@@ -104,6 +164,11 @@ fn export_frame_range_inclusive_syntax() {
     assert_eq!(c_full, Some(0));
     assert_eq!(c_exp, Some(0));
 
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 5..10")),
+        "export header missing in auto output: {out_exp}"
+    );
+
     let want = frame_verdicts(&out_full, 5..=10);
     let got = frame_verdicts(&out_exp, 5..=10);
     assert_eq!(got, want);
@@ -113,8 +178,51 @@ fn export_frame_range_inclusive_syntax() {
 }
 
 #[test]
+fn export_frame_range_at_start() {
+    let input = fixture_path("console-r2");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
+    let output = temp_prof("console-r2-f0-5");
+    let out_str = output.to_str().unwrap();
+
+    let (code, _, stderr) = run_cmd(&["export", "--frames", "0..5", &input, out_str]);
+    assert_eq!(code, Some(0), "export stderr: {stderr}");
+
+    let (c_full, out_full, _) = run_cmd(&["auto", &input]);
+    let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
+    assert_eq!(c_full, Some(0));
+    assert_eq!(c_exp, Some(0));
+
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 0..5")),
+        "export header missing in auto output: {out_exp}"
+    );
+
+    let want = frame_verdicts(&out_full, 0..=5);
+    let got = frame_verdicts(&out_exp, 0..=5);
+    assert_eq!(got, want);
+    assert_eq!(got.len(), 6);
+
+    let (c_rep_full, rep_full, _) = run_cmd(&["report", &input]);
+    let (c_rep_exp, rep_exp, _) = run_cmd(&["report", out_str]);
+    assert_eq!(c_rep_full, Some(0));
+    assert_eq!(c_rep_exp, Some(0));
+
+    let want_el = frame_elapsed(&rep_full, 0..=5);
+    let got_el = frame_elapsed(&rep_exp, 0..=5);
+    assert_eq!(got_el, want_el);
+    assert_eq!(got_el.len(), 6);
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
 fn export_segbuild_frame_matching_verdict() {
     let input = fixture_path("segbuild");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
     let output = temp_prof("segbuild-f1");
     let out_str = output.to_str().unwrap();
 
@@ -125,6 +233,11 @@ fn export_segbuild_frame_matching_verdict() {
     let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
     assert_eq!(c_full, Some(0));
     assert_eq!(c_exp, Some(0));
+
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 1..1")),
+        "export header missing in auto output: {out_exp}"
+    );
 
     let want = frame_verdicts(&out_full, 1..=1);
     let got = frame_verdicts(&out_exp, 1..=1);
@@ -137,6 +250,9 @@ fn export_segbuild_frame_matching_verdict() {
 #[test]
 fn export_frames_fixture() {
     let input = fixture_path("frames");
+    let input_bytes = std::fs::read(&input).unwrap();
+    let src_crc = ps3dk_prof::hash::crc32(&input_bytes);
+
     let output = temp_prof("frames-f0");
     let out_str = output.to_str().unwrap();
 
@@ -147,6 +263,11 @@ fn export_frames_fixture() {
     let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
     assert_eq!(c_full, Some(0));
     assert_eq!(c_exp, Some(0));
+
+    assert!(
+        out_exp.contains(&format!("exported from {src_crc:08x} frames 0..0")),
+        "export header missing in auto output: {out_exp}"
+    );
 
     let want = frame_verdicts(&out_full, 0..=0);
     let got = frame_verdicts(&out_exp, 0..=0);
@@ -183,6 +304,105 @@ fn export_clockasync_console_if_present() {
     assert_eq!(got.len(), 11);
 
     let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn export_capture_with_losses_preserves_loss_evidence() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    // Locate CHUNK_AUTO_STATUS (type 37) and mutate operations_dropped to 5, admitted to 844.
+    let mut mutated = input_bytes.clone();
+    let mut pos = 16;
+    let mut found_status = false;
+    while pos < mutated.len() {
+        let ty = u32::from_le_bytes(mutated[pos..pos + 4].try_into().unwrap());
+        let len = u32::from_le_bytes(mutated[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let payload_off = pos + 16;
+        if ty == 37 && len == 128 {
+            // Header is 8 bytes: schema: u16 (0..2), flags: u16 (2..4), instance: u32 (4..8).
+            // Followed by 15 u64 counters:
+            // n[0] last_admitted_id: u64 (8..16)
+            // n[1] admitted: u64 (16..24)
+            // n[2] operations_written: u64 (24..32)
+            // n[3] operations_dropped: u64 (32..40)
+            let admitted = 844u64;
+            let dropped = 5u64;
+            mutated[payload_off + 16..payload_off + 24].copy_from_slice(&admitted.to_le_bytes());
+            mutated[payload_off + 32..payload_off + 40].copy_from_slice(&dropped.to_le_bytes());
+            let chunk_crc = ps3dk_prof::hash::crc32(&mutated[pos..payload_off + len]);
+            mutated[payload_off + len..payload_off + len + 4].copy_from_slice(&chunk_crc.to_le_bytes());
+            found_status = true;
+            break;
+        }
+        pos += 20 + len;
+    }
+    assert!(found_status, "failed to locate CHUNK_AUTO_STATUS in console-r2");
+
+    let input_loss_file = temp_prof("console-r2-loss-in");
+    let output = temp_prof("console-r2-loss-out");
+    std::fs::write(&input_loss_file, &mutated).unwrap();
+
+    let in_str = input_loss_file.to_str().unwrap();
+    let out_str = output.to_str().unwrap();
+
+    // Verify source reports losses
+    let (c_src, out_src, err_src) = run_cmd(&["auto", in_str]);
+    assert_eq!(c_src, Some(0), "source stderr: {err_src}, stdout: {out_src}");
+    assert!(out_src.contains("operations_dropped 5"), "source should report operations_dropped 5: {out_src}");
+
+    // Export frames 10..20
+    let (code, _, stderr) = run_cmd(&["export", "--frames", "10..20", in_str, out_str]);
+    assert_eq!(code, Some(0), "export stderr: {stderr}");
+
+    // Exported capture must still report the original run losses
+    let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
+    assert_eq!(c_exp, Some(0));
+    assert!(out_exp.contains("operations_dropped 5"), "export must preserve writer losses: {out_exp}");
+    let crc = ps3dk_prof::hash::crc32(&mutated);
+    assert!(out_exp.contains(&format!("exported from {crc:08x} frames 10..20")));
+
+    let _ = std::fs::remove_file(&input_loss_file);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn export_frames_fixture_frame_1_preserves_coverage_loss_verdict() {
+    let input = fixture_path("frames");
+    let output = temp_prof("frames-f0-2-loss");
+    let out_str = output.to_str().unwrap();
+
+    let (code, _, stderr) = run_cmd(&["export", "--frames", "0..2", &input, out_str]);
+    assert_eq!(code, Some(0), "export stderr: {stderr}");
+
+    let (c_exp, out_exp, _) = run_cmd(&["auto", out_str]);
+    assert_eq!(c_exp, Some(0));
+    assert!(
+        out_exp.contains("coverage row OPEN, SATURATED or after coverage loss"),
+        "frame 1 coverage loss verdict must be preserved: {out_exp}"
+    );
+
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn export_records_chunk_filters_outside_window() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let exported = ps3dk_prof::export_bytes(&input_bytes, 10..=20).unwrap();
+    let cap = ps3dk_prof::reader::read(&exported).expect("read exported capture");
+
+    let exp = cap.export.expect("EXPORT chunk parsed");
+    assert_eq!(exp.frame_first, 10);
+    assert_eq!(exp.frame_last, 20);
+    assert_eq!(exp.source_crc, ps3dk_prof::hash::crc32(&input_bytes));
+    assert_eq!(exp.source_size, input_bytes.len() as u64);
+    assert!(exp.records_kept > 0);
+    assert!(exp.records_dropped > 0);
+
+    // Verify that the owner lane only has 12 frame records (frame 10 through 21 mark)
+    let lane = &cap.lanes[&1];
+    assert_eq!(lane.frames.len(), 12);
+    assert_eq!(lane.frames[0].id, 10);
+    assert_eq!(lane.frames.last().unwrap().id, 21);
+    assert_eq!(lane.written, exp.records_kept);
 }
 
 #[test]
