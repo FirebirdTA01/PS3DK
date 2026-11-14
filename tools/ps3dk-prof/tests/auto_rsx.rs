@@ -945,6 +945,54 @@ fn bounded_frame(timed: (u64, u64), marks: (u64, Option<u64>), col: usize, wait:
     brk_file(brk_cfg(), rest)
 }
 
+/// One 127/11 frame (PPU 10000..110000) with frame marks, one timed clear at `timed` (and one untimed clear for
+/// report capacity when `untimed`), no FIFO wait, no flip-wait scope, and the polling cadence block `cad`.
+fn polled_frame(timed: (u64, u64), untimed: bool, cad: Blk) -> File {
+    let list = vec![mark(1, 0, 1, 5000), op(2, 0, timed), mark(3, 0, 2, 45_000)];
+    let n = list.len() as u64;
+    let mut x = row(0, (10_000, 110_000), 1);
+    if untimed {
+        x.rows[2][0] = 2;
+        x.rows[2][3] = 1;
+    }
+    x.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), coverage_p(&x, &cad)];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 1, 9, 2 * n)));
+    brk_file(brk_cfg(), rest)
+}
+
+/// An owner that polled flip status (complete cadence runs) for at least a quarter of the frame while the RSX span
+/// held at least half of it is RSX-bound (127/11), named as polling; short polling, a short RSX span or a
+/// boundary-spanning run keep the previous verdict.
+#[test]
+fn presentation_polling_with_a_long_rsx_span_is_rsx_bound() {
+    let read = |f: File| { let r = analyze(&reader::read(&f.bytes()).expect("reads")); r.frames[0].clone() };
+    let long = (6000, 36_000);
+    let poll = |ticks: u64, spanning: u32| Blk { runs: 1, ticks, spanning, ..Blk::default() };
+    let f = read(polled_frame(long, false, poll(30_000, 0)));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("presentation polling: the owner polled flip status for >= 30000 of 100000 PPU ticks"), "{}", f.reason);
+    assert!(!f.reason.contains("FIFO"), "{}", f.reason);
+    // polling under a quarter of the frame: the previous verdict
+    let f = read(polled_frame(long, false, poll(20_000, 0)));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("unresolved: FIFO wait >= 0"), "{}", f.reason);
+    // a short RSX span: polling alone is not RSX-bound
+    let f = read(polled_frame((6000, 7000), false, poll(60_000, 0)));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert_eq!(f.reason, ps3dk_prof::auto_rsx::POLLING_ONLY, "{}", f.reason);
+    // a run spanning the frame boundary: no attribution
+    let f = read(polled_frame(long, false, poll(30_000, 1)));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // with an untimed draw the long span must hold on the lower bound; it does here, so the bounded verdict stands
+    let f = read(polled_frame(long, true, poll(30_000, 0)));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("1 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    assert!(f.reason.contains("presentation polling"), "{}", f.reason);
+}
+
 /// Untimed draws (report capacity and the other untimed-only columns) are decided on RSX busy bounds: the timed
 /// span below, the frame marks above. A verdict both bounds give stands; otherwise, or without both marks, or with
 /// an exclusion that invalidates the evidence, the frame stays UNKNOWN.
