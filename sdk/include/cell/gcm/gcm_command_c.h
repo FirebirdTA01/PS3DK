@@ -45,6 +45,7 @@
 #include <rsx/commands.h>
 #include <cell/gcm/gcm_enum.h>
 
+
 /* Native NV40 emitters for the texture-family cellGcmSet* functions —
  * replaces the rsx* forwarders we shipped while librsx was still the
  * sole command source.  The header pulls in gcm_cg_bridge.h transitively
@@ -54,6 +55,17 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if defined(PS3TC_PROF_AUTO)
+/* PS3_PROF_AUTO observation (libps3dkprof_auto.a): an application report write that
+ * reaches the profiler's report indices is a resource conflict. The inline report
+ * calls below never go through the rsx library bodies that carry this hook, so they
+ * call it themselves (kind 1 = report index); it never changes the write. */
+void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
+#define PS3TC_GCM_REPORT_OBSERVED(ctx, index) ps3dk_prof__auto_resource_write((struct _gcmCtxData *)(ctx), 1u, (index))
+#else
+#define PS3TC_GCM_REPORT_OBSERVED(ctx, index) ((void)0)
 #endif
 
 /* CellGcmContextData / CellGcmConfig come from <cell/gcm.h>; this
@@ -87,7 +99,7 @@ static inline void cellGcmFinishUnsafe(CellGcmContextData *thisContext, uint32_t
 
 static inline void cellGcmSetReferenceCommand(CellGcmContextData *thisContext, uint32_t ref)
 {
-	rsxSetReferenceCommand(thisContext, ref);
+	ps3tc_gcm_state_reference_command(thisContext, ref);
 }
 
 /* ==========================================================
@@ -96,17 +108,17 @@ static inline void cellGcmSetReferenceCommand(CellGcmContextData *thisContext, u
 
 static inline void cellGcmSetSurface(CellGcmContextData *thisContext, const CellGcmSurface *surface)
 {
-	rsxSetSurface(thisContext, (const gcmSurface *)surface);
+	ps3tc_gcm_state_surface(thisContext, surface);
 }
 
 static inline void cellGcmSetClearColor(CellGcmContextData *thisContext, uint32_t color)
 {
-	rsxSetClearColor(thisContext, color);
+	ps3tc_gcm_state_clear_color(thisContext, color);
 }
 
 static inline void cellGcmSetClearDepthStencil(CellGcmContextData *thisContext, uint32_t value)
 {
-	rsxSetClearDepthStencil(thisContext, value);
+	ps3tc_gcm_state_clear_depth_stencil(thisContext, value);
 }
 
 static inline void cellGcmSetClearSurface(CellGcmContextData *thisContext, uint32_t mask)
@@ -163,7 +175,7 @@ static inline void cellGcmSetReturnCommand(CellGcmContextData *thisContext)
 
 static inline void cellGcmSetNopCommand(CellGcmContextData *thisContext, uint32_t count)
 {
-	rsxSetNopCommand(thisContext, count);
+	ps3tc_gcm_state_nop_command(thisContext, count);
 }
 
 /* Color / depth state */
@@ -214,7 +226,7 @@ static inline void cellGcmSetAntiAliasingControl(CellGcmContextData *thisContext
                                                  uint32_t enable, uint32_t alphaToCoverage,
                                                  uint32_t alphaToOne, uint32_t sampleMask)
 {
-	rsxSetAntialiasingControl(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
+	ps3tc_gcm_state_anti_aliasing_control(thisContext, enable, alphaToCoverage, alphaToOne, sampleMask);
 }
 
 /* Blend / dither group — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
@@ -279,14 +291,17 @@ static inline void cellGcmSetShadeMode(CellGcmContextData *thisContext, uint32_t
 	ps3tc_gcm_state_shade_model(thisContext, mode);
 }
 
+/* Fog group — NV40 native emitters in <cell/gcm/gcm_state_native.h>.
+ * Safe/unsafe pair lives in the shared header; rsx* safe and rsx*-Unsafe
+ * both resolve to the native.  See tests/sdk/gcm-state-native-test. */
 static inline void cellGcmSetFogMode(CellGcmContextData *thisContext, uint32_t mode)
 {
-	rsxSetFogMode(thisContext, mode);
+	ps3tc_gcm_state_fog_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetFogParams(CellGcmContextData *thisContext, float p0, float p1)
 {
-	rsxSetFogParams(thisContext, p0, p1);
+	ps3tc_gcm_state_fog_params(thisContext, p0, p1);
 }
 
 /* ==========================================================
@@ -298,13 +313,13 @@ static inline void cellGcmSetViewport(CellGcmContextData *thisContext,
                                       float min_z, float max_z,
                                       const float scale[4], const float offset[4])
 {
-	rsxSetViewport(thisContext, x, y, w, h, min_z, max_z, scale, offset);
+	ps3tc_gcm_state_viewport(thisContext, x, y, w, h, min_z, max_z, scale, offset);
 }
 
 static inline void cellGcmSetScissor(CellGcmContextData *thisContext,
                                      uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-	rsxSetScissor(thisContext, x, y, w, h);
+	ps3tc_gcm_state_scissor(thisContext, x, y, w, h);
 }
 
 /* ==========================================================
@@ -369,7 +384,7 @@ static inline void cellGcmSetTextureAddress(CellGcmContextData *thisContext,
 static inline void cellGcmSetTextureBorderColor(CellGcmContextData *thisContext,
                                                 uint8_t index, uint32_t color)
 {
-	rsxTextureBorderColor(thisContext, index, color);
+	ps3tc_gcm_state_texture_border_color(thisContext, index, color);
 }
 
 /* ==========================================================
@@ -395,6 +410,7 @@ static inline void cellGcmSetTextureBorderColor(CellGcmContextData *thisContext,
 static inline void cellGcmSetTimeStamp(CellGcmContextData *thisContext, uint32_t index)
 {
 	if (!thisContext) return;
+	PS3TC_GCM_REPORT_OBSERVED(thisContext, index);
 	uint32_t *w = ps3tc_gcm_reserve(thisContext, 2);
 	if (!w) return;
 	w[0] = PS3TC_GCM_METHOD(NV40TCL_QUERY_GET, 1);
@@ -436,7 +452,7 @@ static inline void cellGcmSetUserClipPlaneControl(CellGcmContextData *thisContex
                                                   uint32_t plane2, uint32_t plane3,
                                                   uint32_t plane4, uint32_t plane5)
 {
-	rsxSetUserClipPlaneControl(thisContext, plane0, plane1, plane2, plane3, plane4, plane5);
+	ps3tc_gcm_state_user_clip_plane_control(thisContext, plane0, plane1, plane2, plane3, plane4, plane5);
 }
 
 /* ==========================================================
@@ -486,7 +502,7 @@ static inline void cellGcmSetDrawEnd(CellGcmContextData *thisContext)
 static inline void cellGcmSetVertexData4f(CellGcmContextData *thisContext,
                                           uint8_t index, const float v[4])
 {
-	rsxDrawVertex4f(thisContext, index, v);
+	ps3tc_gcm_state_vertex_data_4f(thisContext, index, v);
 }
 
 static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
@@ -495,11 +511,8 @@ static inline void cellGcmSetVertexDataArray(CellGcmContextData *thisContext,
                                              uint8_t type, uint8_t location,
                                              uint32_t offset)
 {
-	/* The platform ABI and PSL1GHT agree on the param set but order args differently.
-	 * the platform ABI: (index, freq, stride, size, type, location, offset)
-	 * PSL1GHT:  (attr, freq, offset, stride, elems, dtype, location) */
-	rsxBindVertexArrayAttrib(thisContext, index, frequency, offset,
-	                         stride, size, type, location);
+	ps3tc_gcm_state_vertex_data_array(thisContext, index, frequency, stride,
+	                                  size, type, location, offset);
 }
 
 static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisContext, uint16_t mask)
@@ -511,7 +524,7 @@ static inline void cellGcmSetVertexAttribInputMask(CellGcmContextData *thisConte
 
 static inline void cellGcmSetVertexAttribOutputMask(CellGcmContextData *thisContext, uint32_t mask)
 {
-	rsxSetVertexAttribOutputMask(thisContext, mask);
+	ps3tc_gcm_state_vertex_attrib_output_mask(thisContext, mask);
 }
 
 /* --- Vertex program constants (no Cg handle needed) --- */
@@ -520,7 +533,7 @@ static inline void cellGcmSetVertexProgramConstants(CellGcmContextData *thisCont
                                                     uint32_t start, uint32_t count,
                                                     const float *data)
 {
-	rsxSetVertexProgramConstants(thisContext, start, count, data);
+	ps3tc_gcm_state_vertex_program_constants(thisContext, start, count, data);
 }
 
 /* --- Fragment program flags --- */
@@ -528,32 +541,32 @@ static inline void cellGcmSetVertexProgramConstants(CellGcmContextData *thisCont
 static inline void cellGcmSetFragmentProgramGammaEnable(CellGcmContextData *thisContext,
                                                         uint32_t enable)
 {
-	rsxSetFragmentProgramGammaEnable(thisContext, enable);
+	ps3tc_gcm_state_fragment_program_gamma_enable(thisContext, enable);
 }
 
 /* --- Texture cache invalidation --- */
 
 static inline void cellGcmSetInvalidateVertexCache(CellGcmContextData *thisContext)
 {
-	rsxInvalidateVertexCache(thisContext);
+	ps3tc_gcm_state_invalidate_vertex_cache(thisContext);
 }
 
 static inline void cellGcmSetInvalidateTextureCache(CellGcmContextData *thisContext, uint32_t type)
 {
-	rsxInvalidateTextureCache(thisContext, type);
+	ps3tc_gcm_state_invalidate_texture_cache(thisContext, type);
 }
 
 /* --- 2D transfer engine (BLT path; no shaders required) --- */
 
 static inline void cellGcmSetTransferDataMode(CellGcmContextData *thisContext, uint8_t mode)
 {
-	rsxSetTransferDataMode(thisContext, mode);
+	ps3tc_gcm_state_transfer_data_mode(thisContext, mode);
 }
 
 static inline void cellGcmSetTransferDataOffset(CellGcmContextData *thisContext,
                                                 uint32_t dst, uint32_t src)
 {
-	rsxSetTransferDataOffset(thisContext, dst, src);
+	ps3tc_gcm_state_transfer_data_offset(thisContext, dst, src);
 }
 
 static inline void cellGcmSetTransferDataFormat(CellGcmContextData *thisContext,
@@ -561,8 +574,8 @@ static inline void cellGcmSetTransferDataFormat(CellGcmContextData *thisContext,
                                                 uint32_t linelength, uint32_t linecount,
                                                 uint8_t inbytes, uint8_t outbytes)
 {
-	rsxSetTransferDataFormat(thisContext, inpitch, outpitch,
-	                         linelength, linecount, inbytes, outbytes);
+	ps3tc_gcm_state_transfer_data_format(thisContext, inpitch, outpitch,
+	                                     linelength, linecount, inbytes, outbytes);
 }
 
 static inline void cellGcmSetTransferData(CellGcmContextData *thisContext,
@@ -570,8 +583,8 @@ static inline void cellGcmSetTransferData(CellGcmContextData *thisContext,
                                           uint32_t src, uint32_t inpitch,
                                           uint32_t linelength, uint32_t linecount)
 {
-	rsxSetTransferData(thisContext, mode, dst, outpitch, src,
-	                   inpitch, linelength, linecount);
+	ps3tc_gcm_state_transfer_data(thisContext, mode, dst, (int32_t)outpitch,
+	                              src, (int32_t)inpitch, linelength, linecount);
 }
 
 static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
@@ -583,30 +596,30 @@ static inline void cellGcmSetTransferImage(CellGcmContextData *thisContext,
                                            uint32_t width, uint32_t height,
                                            uint32_t bytesPerPixel)
 {
-	rsxSetTransferImage(thisContext, mode,
-	                    dstOffset, dstPitch, dstX, dstY,
-	                    srcOffset, srcPitch, srcX, srcY,
-	                    width, height, bytesPerPixel);
+	ps3tc_gcm_state_transfer_image(thisContext, mode,
+	                               dstOffset, dstPitch, dstX, dstY,
+	                               srcOffset, srcPitch, srcX, srcY,
+	                               width, height, bytesPerPixel);
 }
 
 static inline void cellGcmSetTransferScaleMode(CellGcmContextData *thisContext,
                                                uint8_t mode, uint8_t surface)
 {
-	rsxSetTransferScaleMode(thisContext, mode, surface);
+	ps3tc_gcm_state_transfer_scale_mode(thisContext, mode, surface);
 }
 
 static inline void cellGcmSetTransferScaleSurface(CellGcmContextData *thisContext,
                                                   const gcmTransferScale *scale,
                                                   const gcmTransferSurface *surface)
 {
-	rsxSetTransferScaleSurface(thisContext, scale, surface);
+	ps3tc_gcm_state_transfer_scale_surface(thisContext, scale, surface);
 }
 
 static inline void cellGcmSetTransferScaleSwizzle(CellGcmContextData *thisContext,
                                                   const gcmTransferScale *scale,
                                                   const gcmTransferSwizzle *swizzle)
 {
-	rsxSetTransferScaleSwizzle(thisContext, scale, swizzle);
+	ps3tc_gcm_state_transfer_scale_swizzle(thisContext, scale, swizzle);
 }
 
 /* ==========================================================
@@ -724,7 +737,7 @@ static inline void cellGcmSetDrawInlineArray(CellGcmContextData *thisContext, ui
 
 static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisContext, uint16_t op)
 {
-	rsxSetFrequencyDividerOperation(thisContext, op);
+	ps3tc_gcm_state_frequency_divider_operation(thisContext, op);
 }
 
 /* ==========================================================
@@ -745,24 +758,24 @@ static inline void cellGcmSetFrequencyDividerOperation(CellGcmContextData *thisC
 
 static inline void cellGcmSetUpdateFragmentProgramParameter(CellGcmContextData *thisContext, uint32_t offset)
 {
-	rsxUpdateFragmentProgramLocation(thisContext, offset, GCM_LOCATION_RSX);
+	ps3tc_gcm_state_update_fragment_program_parameter(thisContext, offset);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterUnsafe(CellGcmContextData *thisContext, uint32_t offset)
 {
-	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, GCM_LOCATION_RSX);
+	ps3tc_gcm_state_update_fragment_program_parameter_unsafe(thisContext, offset);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterLocation(CellGcmContextData *thisContext,
                                                                      uint32_t offset, uint32_t location)
 {
-	rsxUpdateFragmentProgramLocation(thisContext, offset, location);
+	ps3tc_gcm_state_update_fragment_program_location(thisContext, offset, location);
 }
 
 static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGcmContextData *thisContext,
                                                                           uint32_t offset, uint32_t location)
 {
-	rsxUpdateFragmentProgramLocationUnsafe(thisContext, offset, location);
+	ps3tc_gcm_state_update_fragment_program_location_unsafe(thisContext, offset, location);
 }
 
 /* cellGcmSetFragmentProgramControl (Safe + Unsafe) + the no-context
@@ -780,41 +793,41 @@ static inline void cellGcmSetUpdateFragmentProgramParameterLocationUnsafe(CellGc
 
 static inline void cellGcmSetInvalidateZcull(CellGcmContextData *thisContext)
 {
-	rsxSetZCullInvalidate(thisContext);
+	ps3tc_gcm_state_invalidate_zcull(thisContext);
 }
 
 static inline void cellGcmSetZcullControl(CellGcmContextData *thisContext, uint8_t cullDir, uint8_t cullFmt)
 {
-	rsxSetZCullControl(thisContext, cullDir, cullFmt);
+	ps3tc_gcm_state_zcull_control(thisContext, cullDir, cullFmt);
 }
 
 static inline void cellGcmSetZcullEnable(CellGcmContextData *thisContext,
                                          uint32_t depth, uint32_t stencil)
 {
-	rsxSetZCullEnable(thisContext, depth, stencil);
+	ps3tc_gcm_state_zcull_enable(thisContext, depth, stencil);
 }
 
 static inline void cellGcmSetZcullStatsEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetZCullStatsEnable(thisContext, enable);
+	ps3tc_gcm_state_zcull_stats_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetZcullLimit(CellGcmContextData *thisContext,
                                         uint16_t moveForwardLimit, uint16_t pushBackLimit)
 {
-	rsxSetZCullLimit(thisContext, moveForwardLimit, pushBackLimit);
+	ps3tc_gcm_state_zcull_limit(thisContext, moveForwardLimit, pushBackLimit);
 }
 
 static inline void cellGcmSetClearZcullSurface(CellGcmContextData *thisContext,
                                                uint32_t depth, uint32_t stencil)
 {
-	rsxSetClearZCullSurface(thisContext, depth, stencil);
+	ps3tc_gcm_state_clear_zcull_surface(thisContext, depth, stencil);
 }
 
 static inline void cellGcmSetScullControl(CellGcmContextData *thisContext,
                                           uint16_t func, uint8_t ref, uint8_t mask)
 {
-	rsxSetSCullControl(thisContext, func, ref, mask);
+	ps3tc_gcm_state_scull_control(thisContext, func, ref, mask);
 }
 
 static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
@@ -822,8 +835,8 @@ static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
                                             uint32_t zclampEnable,
                                             uint32_t cullIgnoreW)
 {
-	rsxSetZMinMaxControl(thisContext, (uint8_t)cullNearFarEnable,
-	                     (uint8_t)zclampEnable, (uint8_t)cullIgnoreW);
+	ps3tc_gcm_state_zminmax_control(thisContext, (uint8_t)cullNearFarEnable,
+	                                (uint8_t)zclampEnable, (uint8_t)cullIgnoreW);
 }
 
 /* ==========================================================
@@ -831,30 +844,34 @@ static inline void cellGcmSetZMinMaxControl(CellGcmContextData *thisContext,
  * via the report register.
  * ========================================================== */
 
+/* Render-enable family — branching native (conditional 4 words vs
+   unconditional 2 words).  The wire-level shape is owned by
+   ps3tc_gcm_state_render_enable{,_unsafe}; see <cell/gcm/gcm_state_native.h>. */
 static inline void cellGcmSetRenderEnable(CellGcmContextData *thisContext,
                                           uint32_t enable, uint32_t offset)
 {
-	rsxSetRenderEnable(thisContext, enable, offset);
+	ps3tc_gcm_state_render_enable(thisContext, enable, offset);
 }
 
 static inline void cellGcmSetZpassPixelCountEnable(CellGcmContextData *thisContext, uint32_t enable)
 {
-	rsxSetZPixelCountEnable(thisContext, enable);
+	ps3tc_gcm_state_zpass_pixel_count_enable(thisContext, enable);
 }
 
 static inline void cellGcmSetReport(CellGcmContextData *thisContext, uint8_t type, uint32_t index)
 {
-	rsxSetReport(thisContext, type, index);
+	PS3TC_GCM_REPORT_OBSERVED(thisContext, index);
+	ps3tc_gcm_state_report(thisContext, type, index);
 }
 
 static inline void cellGcmSetClearReport(CellGcmContextData *thisContext, uint8_t type)
 {
-	rsxSetClearReport(thisContext, type);
+	ps3tc_gcm_state_clear_report(thisContext, type);
 }
 
 static inline void cellGcmSetReportLocation(CellGcmContextData *thisContext, uint32_t location)
 {
-	rsxSetReportLocation(thisContext, location);
+	ps3tc_gcm_state_report_location(thisContext, location);
 }
 
 /* ==========================================================
