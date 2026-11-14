@@ -546,6 +546,48 @@ fn auto_json_unchanged_for_older_captures() {
     }
 }
 
+/// `auto --ops`: every retained record once, in emission order, intervals exactly raw_end - raw_begin, --frame
+/// keeps only that frame token, and the usual exit codes (1 without automatic observation, 3 for bad arguments).
+#[test]
+fn cli_auto_ops() {
+    let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
+    let run = |args: &[&str]| std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(args).output().unwrap();
+    for name in ["segments", "segbuild", "console-r2"] {
+        let f = format!("{dir}/{name}.prof");
+        let o = run(&["auto", "--json", &f]);
+        let parsed = serde_json::from_slice::<serde_json::Value>(&o.stdout).unwrap()["operations"]["parsed"].as_u64().unwrap();
+        let o = run(&["auto", "--ops", "--json", &f]);
+        assert_eq!(o.status.code(), Some(0), "{name}");
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(v["schema"], 1);
+        let ops = v["ops"].as_array().unwrap();
+        assert_eq!(ops.len() as u64, parsed, "{name}: every retained record listed once");
+        assert!(ops.windows(2).all(|w| w[0]["id"].as_u64() < w[1]["id"].as_u64()), "{name}: emission order");
+        for op in ops {
+            if let Some(i) = op["interval"].as_u64() {
+                assert_eq!(i, op["raw_end"].as_u64().unwrap() - op["raw_begin"].as_u64().unwrap());
+                assert!(op["flags"].as_u64().unwrap() & 2 != 0, "{name}: an interval only for RAW_VALID");
+            }
+        }
+        if let Some(fr) = ops.iter().find_map(|op| op["frame"].as_u64()) {
+            let o = run(&["auto", "--ops", "--frame", &fr.to_string(), "--json", &f]);
+            let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+            let sel = v["ops"].as_array().unwrap();
+            assert!(!sel.is_empty() && sel.iter().all(|op| op["frame"].as_u64() == Some(fr)), "{name}: --frame filter");
+            // gaps are in execution order: exactly one raw-valid record of the frame (the first to begin) has none
+            let valid = sel.iter().filter(|op| op["interval"].is_u64()).count();
+            let no_gap = sel.iter().filter(|op| op["interval"].is_u64() && op["gap"].is_null()).count();
+            assert!(valid == 0 || no_gap == 1, "{name}: {no_gap} raw-valid records without a gap");
+            let o = run(&["auto", "--ops", "--frame", &fr.to_string(), &f]);
+            assert_eq!(o.status.code(), Some(0));
+            assert!(String::from_utf8_lossy(&o.stdout).contains(&format!("frame {fr} ")) || sel.iter().all(|op| op["interval"].is_null()));
+        }
+    }
+    assert_eq!(run(&["auto", "--ops", &format!("{dir}/noinit.prof")]).status.code(), Some(0));
+    assert_eq!(run(&["auto", "--ops", "--frame", "x", &format!("{dir}/segments.prof")]).status.code(), Some(3));
+    assert_eq!(run(&["auto", "--ops", "--bogus", &format!("{dir}/segments.prof")]).status.code(), Some(3));
+}
+
 #[test]
 fn cli_auto() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));

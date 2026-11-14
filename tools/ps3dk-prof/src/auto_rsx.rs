@@ -1761,3 +1761,110 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }
+
+// ---- per-operation listing (`auto --ops`) -------------------------------------------------------------------------
+
+/// One retained OPS record as `auto --ops` lists it: emission order (record id), the reached-marker interval when the
+/// record is RAW_VALID, and the gap from the previous RAW_VALID record of the same frame token (its end marker to this
+/// record's begin marker). Raw RSX timestamp ticks, no clock map and no verdict: the same evidence the frame verdicts
+/// use, one record at a time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpRow {
+    pub op: Op,
+    pub interval: Option<u64>,
+    pub gap: Option<u64>,
+}
+
+/// The records of an AUTO capture in emission order, optionally only those whose frame token is `frame`. The gap
+/// is taken in EXECUTION order: among the RAW_VALID records of the same frame token sorted by begin marker, this
+/// begin minus the latest end before it (a segment draw is emitted when built but runs when CALLed).
+pub fn op_rows(cap: &Capture, frame: Option<u64>) -> Vec<OpRow> {
+    let Some(inv) = cap.auto.as_ref() else { return Vec::new() };
+    let mut ops: Vec<&Op> = inv.ops.iter().collect();
+    ops.sort_by_key(|o| o.id);
+    let valid = |o: &Op| o.raw_valid() && o.raw_end >= o.raw_begin;
+    let mut by_token: BTreeMap<(u32, u64), Vec<usize>> = BTreeMap::new();
+    for (i, o) in ops.iter().enumerate() {
+        if let (true, Some(t)) = (valid(o), o.token()) { by_token.entry(t).or_default().push(i); }
+    }
+    let mut gaps: Vec<Option<u64>> = vec![None; ops.len()];
+    for idx in by_token.values_mut() {
+        idx.sort_by_key(|&i| (ops[i].raw_begin, ops[i].id));
+        let mut last_end: Option<u64> = None;
+        for &i in idx.iter() {
+            gaps[i] = last_end.map(|e| ops[i].raw_begin.saturating_sub(e));
+            last_end = Some(last_end.map_or(ops[i].raw_end, |e| e.max(ops[i].raw_end)));
+        }
+    }
+    ops.iter().enumerate()
+        .filter(|(_, o)| frame.is_none() || o.token().map(|t| t.1) == frame)
+        .map(|(i, o)| OpRow { op: (*o).clone(), interval: valid(o).then(|| o.raw_end - o.raw_begin), gap: gaps[i] })
+        .collect()
+}
+
+fn op_kind_name(kind: u16) -> &'static str {
+    match kind {
+        KIND_ARRAY => "ARRAY",
+        KIND_INDEX => "INDEX",
+        KIND_CLEAR => "CLEAR",
+        KIND_FRAME => "FRAME",
+        _ => "KIND?",
+    }
+}
+
+fn op_flag_names(flags: u16) -> String {
+    const NAMES: [(u16, &str); 7] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
+        (OP_CLOCK_INVALID, "CLOCK_INVALID"), (OP_READ_REFUSED, "READ_REFUSED"),
+        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT")];
+    let v: Vec<&str> = NAMES.iter().filter(|(b, _)| flags & b != 0).map(|(_, n)| *n).collect();
+    if v.is_empty() { "-".into() } else { v.join("|") }
+}
+
+pub const OPS_NOTE: &str = "interval = raw_end - raw_begin and gap = this begin - the latest earlier RAW_VALID end of the \
+same frame in execution (begin-marker) order, 0 when they overlap, in raw RSX report-timestamp ticks; an interval is reached-marker elapsed time between two command-stream \
+positions (it includes RSX-side waits between them), not the isolated cost of one draw";
+
+/// `auto --ops` text: one line per record, then (with a frame) the per-kind sums.
+pub fn write_ops_text<W: std::io::Write>(out: &mut W, rows: &[OpRow], frame: Option<u64>) -> std::io::Result<()> {
+    writeln!(out, "{OPS_NOTE}")?;
+    writeln!(out, "id frame kind flags interval gap raw_begin raw_end segment call caller args")?;
+    for r in rows {
+        let o = &r.op;
+        let fr = o.token().map_or("-".into(), |t| t.1.to_string());
+        writeln!(out, "{} {} {} {} {} {} {} {} {} {} {:#x} {}", o.id, fr, op_kind_name(o.kind), op_flag_names(o.flags),
+            r.interval.map_or("-".into(), |x| x.to_string()), r.gap.map_or("-".into(), |x| x.to_string()),
+            o.raw_begin, o.raw_end, o.segment, o.call, o.caller,
+            o.args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","))?;
+    }
+    if let Some(f) = frame {
+        let mut sums: BTreeMap<&str, (u64, u64, u64)> = BTreeMap::new();
+        for r in rows {
+            if let Some(i) = r.interval {
+                let e = sums.entry(op_kind_name(r.op.kind)).or_default();
+                e.0 += 1;
+                e.1 = e.1.saturating_add(i);
+                e.2 = e.2.saturating_add(r.gap.unwrap_or(0));
+            }
+        }
+        for (k, (n, i, g)) in sums {
+            writeln!(out, "frame {f} {k}: {n} raw-valid, interval sum {i}, gap sum {g}")?;
+        }
+    }
+    writeln!(out, "{} record(s)", rows.len())
+}
+
+/// `auto --ops --json`: {"schema":1,"note":..,"frame":..,"ops":[..]}.
+pub fn write_ops_json<W: std::io::Write>(out: &mut W, rows: &[OpRow], frame: Option<u64>) -> std::io::Result<()> {
+    use serde_json::json;
+    let ops: Vec<serde_json::Value> = rows.iter().map(|r| {
+        let o = &r.op;
+        json!({"id":o.id,"frame":o.token().map(|t| t.1),"owner":o.token().map(|t| t.0),"kind":op_kind_name(o.kind),
+            "flags":o.flags,"flag_names":op_flag_names(o.flags),"interval":r.interval,"gap":r.gap,
+            "raw_begin":o.raw_begin,"raw_end":o.raw_end,"tb_before":o.tb_before,"tb_after":o.tb_after,
+            "caller":o.caller,"args":o.args,"segment":o.segment,"call":o.call,
+            "build_frame":o.build.map(|b| b.1)})
+    }).collect();
+    let v = json!({"schema":1,"note":OPS_NOTE,"frame":frame,"ops":ops});
+    serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
+    writeln!(out)
+}
