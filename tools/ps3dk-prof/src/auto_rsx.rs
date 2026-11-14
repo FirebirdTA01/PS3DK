@@ -474,7 +474,7 @@ impl Reader {
             CHUNK_AUTO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_AUTO_OPS => self.ops(payload),
             CHUNK_AUTO_COVERAGE => self.coverage(payload),
-            CHUNK_AUTO_STATUS => self.status(payload),
+            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref()),
             CHUNK_AUTO_CLOCK => self.clock(payload),
             _ => unreachable!("AUTO chunk type {ty}"),
         }
@@ -912,7 +912,7 @@ impl Reader {
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
         if payload.len() != STATUS_BYTES {
             return bad(r, format!("AUTO_STATUS is {} bytes, not {STATUS_BYTES}", payload.len()));
@@ -979,7 +979,18 @@ impl Reader {
             return bad(r, "AUTO_STATUS more clock anchors written than attempted");
         }
         if fin {
-            if n[2] != self.result.ops_parsed || n[5] != self.result.frames_parsed || n[10] != self.result.clocks_parsed {
+            let ops_ok = if let Some(exp) = export {
+                self.result.ops_parsed as u64 == exp.ops_kept && n[2] == exp.ops_kept + exp.ops_dropped
+            } else {
+                n[2] == self.result.ops_parsed as u64
+            };
+            let frames_ok = if let Some(exp) = export {
+                self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+                    && n[5] == exp.source_auto_frames
+            } else {
+                n[5] == self.result.frames_parsed
+            };
+            if !ops_ok || !frames_ok || n[10] != self.result.clocks_parsed {
                 return bad(r, format!("FINAL AUTO_STATUS written {}/{}/{} against parsed {}/{}/{}", n[2], n[5],
                     n[10], self.result.ops_parsed, self.result.frames_parsed, self.result.clocks_parsed));
             }
@@ -1342,6 +1353,7 @@ pub struct Report {
     pub clocks: Vec<Anchor>,
     pub frames: Vec<FrameView>,
     pub refusal: Option<&'static str>,
+    pub export: Option<crate::model::ExportRecord>,
 }
 
 /// The FIFO wait evidence of one frame: Ok(lower-bound ticks) or the reason it is unavailable.
@@ -1427,6 +1439,7 @@ pub fn analyze(cap: &Capture) -> Report {
         ops_dropped: inv.ops_dropped,
         clocks: inv.clocks.clone(),
         refusal: inv.refusal,
+        export: cap.export.clone(),
         ..Report::default()
     };
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
@@ -1765,6 +1778,16 @@ fn rat_text(r: &Rat) -> String {
 
 pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result<()> {
     writeln!(out, "Automatic RSX observation: {}", r.state)?;
+    if let Some(exp) = &r.export {
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        writeln!(out, "{banner}")?;
+        if exp.clipped_zones > 0 {
+            writeln!(out, "{} zone(s) clipped at window edges", exp.clipped_zones)?;
+        }
+    }
     writeln!(out, "{SCOPE}")?;
     if r.ops_dropped != 0 {
         writeln!(out, "{} operation record(s) past the reader's retention ceiling were not kept; frames that lost records read UNKNOWN, the others keep their verdicts.", r.ops_dropped)?;
@@ -1951,6 +1974,22 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "thresholds": {"wait_share": [WAIT_SHARE.0, WAIT_SHARE.1], "rsx_span_share": [RSX_SPAN_SHARE.0, RSX_SPAN_SHARE.1],
             "pacing_share": [PACING_SHARE.0, PACING_SHARE.1]},
     });
+    if let Some(exp) = &r.export {
+        v["export"] = json!({
+            "source_crc": format!("{:08x}", exp.source_crc),
+            "source_size": exp.source_size,
+            "frame_first": exp.frame_first,
+            "frame_last": exp.frame_last,
+            "records_kept": exp.records_kept,
+            "records_dropped": exp.records_dropped,
+            "ops_kept": exp.ops_kept,
+            "ops_dropped": exp.ops_dropped,
+            "events_kept": exp.events_kept,
+            "events_dropped": exp.events_dropped,
+            "source_fifo_last_attempt_seq": exp.source_fifo_last_attempt_seq,
+            "source_auto_frames": exp.source_auto_frames,
+        });
+    }
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));

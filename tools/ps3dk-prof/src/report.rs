@@ -316,11 +316,24 @@ pub const ENDING_NO_TRAILER: &str = "ending: NO-TRAILER";
 
 /// The verdict line, plus the `ending:` line for a file without a TRAILER.
 pub fn verdict_block(a: &Analysis) -> String {
-    match a.prefix {
+    let mut s = match a.prefix {
         Some(_) => format!("{}
 {ENDING_NO_TRAILER}", verdict_text(a)),
         None => verdict_text(a),
+    };
+    if let Some(exp) = &a.capture.export {
+        s.push('\n');
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        s.push_str(&banner);
+        if exp.clipped_zones > 0 {
+            s.push('\n');
+            s.push_str(&format!("{} zone(s) clipped at window edges", exp.clipped_zones));
+        }
     }
+    s
 }
 
 pub fn verdict_line(v: &Verdict) -> String {
@@ -337,6 +350,16 @@ pub fn render(a: &Analysis) -> String {
     let mut o = String::new();
     let cap = &a.capture;
     let _ = writeln!(o, "verdict: {}", verdict_text(a));
+    if let Some(exp) = &cap.export {
+        let mut banner = format!("exported from {:08x} frames {}..{}", exp.source_crc, exp.frame_first, exp.frame_last);
+        if exp.flags & crate::model::EXPORT_FLAG_TO_END != 0 {
+            banner.push_str(" (to end of run)");
+        }
+        let _ = writeln!(o, "{banner}");
+        if exp.clipped_zones > 0 {
+            let _ = writeln!(o, "{} zone(s) clipped at window edges", exp.clipped_zones);
+        }
+    }
     if a.prefix.is_some() {
         let _ = writeln!(o, "{ENDING_NO_TRAILER}");
     }

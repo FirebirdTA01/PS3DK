@@ -181,7 +181,7 @@ impl Reader {
         match ty {
             CHUNK_FIFO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_FIFO_EVENTS => self.events(payload),
-            CHUNK_FIFO_STATUS => self.status(payload),
+            CHUNK_FIFO_STATUS => self.status(payload, cap.export.as_ref()),
             _ => unreachable!("FIFO chunk type {ty}"),
         }
     }
@@ -448,7 +448,7 @@ impl Reader {
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8]) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
         let r = Rule::FifoStatus;
         let Some(cfg) = self.result.config.as_ref() else {
             return bad(r, "FIFO_STATUS before FIFO_CONFIG");
@@ -491,14 +491,37 @@ impl Reader {
         if flags & ST_OWNER_UNACK != 0 && flags & ST_LOWER_BOUND == 0 {
             return bad(r, "OWNER_UNACK without LOWER_BOUND");
         }
-        if s.written != self.result.parsed_events {
+        let events_ok = if let Some(exp) = export {
+            if s.is_final() {
+                self.result.parsed_events == exp.events_kept && s.written == exp.events_kept + exp.events_dropped
+            } else {
+                s.written == self.result.parsed_events
+            }
+        } else {
+            s.written == self.result.parsed_events
+        };
+        if !events_ok {
             return bad(r, format!("FIFO_STATUS written {} but {} events were written before it", s.written,
                 self.result.parsed_events));
         }
         let last = self.last.as_ref().map_or(0, |e| e.seq);
-        if s.last_attempt_seq != last {
-            return bad(r, format!("FIFO_STATUS last attempt sequence {} is not the last written event's {last}",
-                s.last_attempt_seq));
+        let seq_ok = if let Some(exp) = export {
+            if s.is_final() {
+                s.last_attempt_seq == exp.source_fifo_last_attempt_seq
+            } else {
+                s.last_attempt_seq == last
+            }
+        } else {
+            s.last_attempt_seq == last
+        };
+        if !seq_ok {
+            if let Some(exp) = export {
+                return bad(r, format!("FIFO_STATUS last attempt sequence {} is not declared source {}",
+                    s.last_attempt_seq, exp.source_fifo_last_attempt_seq));
+            } else {
+                return bad(r, format!("FIFO_STATUS last attempt sequence {} is not the last written event's {last}",
+                    s.last_attempt_seq));
+            }
         }
         let sat = flags & ST_SATURATED != 0;
         if !sat {

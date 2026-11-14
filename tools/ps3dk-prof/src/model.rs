@@ -32,6 +32,42 @@ pub const CHUNK_THREADS: u32 = 4;
 pub const CHUNK_RECORDS: u32 = 5;
 pub const CHUNK_TRAILER: u32 = 6;
 pub const CHUNK_RETIRED: u32 = 7;
+pub const CHUNK_EXPORT: u32 = 40;
+pub const EXPORT_SCHEMA: u16 = 1;
+pub const EXPORT_FLAG_TO_END: u16 = 1;
+pub const EXPORT_HEADER_LEN: usize = 112;
+pub const EXPORT_LANE_ENTRY_LEN: usize = 40;
+
+/// Per-lane accounting entry inside an EXPORT chunk (40 bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportLane {
+    pub incarnation: u32,
+    pub first_seq: u64,
+    pub last_seq: u64,
+    pub kept: u64,
+    pub dropped_by_export: u64,
+}
+
+/// A parsed EXPORT chunk (type 40).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportRecord {
+    pub schema: u16,
+    pub flags: u16,
+    pub source_crc: u32,
+    pub source_size: u64,
+    pub frame_first: u64,
+    pub frame_last: u64,
+    pub clipped_zones: u64,
+    pub records_kept: u64,
+    pub records_dropped: u64,
+    pub ops_kept: u64,
+    pub ops_dropped: u64,
+    pub events_kept: u64,
+    pub events_dropped: u64,
+    pub source_fifo_last_attempt_seq: u64,
+    pub source_auto_frames: u64,
+    pub lanes: BTreeMap<u32, ExportLane>,
+}
 
 pub const KIND_BEGIN: u8 = 1;
 pub const KIND_BEGIN_PARENT: u8 = 2;
@@ -86,6 +122,8 @@ pub enum Rule {
     AutoStatus,
     /// An AUTO_CLOCK anchor violates its wire or identity rules.
     AutoClock,
+    /// An EXPORT chunk (type 40) violates its wire or range rules.
+    Export,
     // 1. Primitives
     StringTooLong,
     StringInvalidUtf8,
@@ -363,6 +401,7 @@ pub struct Span {
     pub begin_seq: u64,
     pub begin_tb: u64,
     pub end_tb: Option<u64>,
+    pub end_seq: Option<u64>,
     pub truncated_at_stop: bool,
     /// Section 4: on the partial stack at a GAP, or begun while the base was UNKNOWN.
     pub affected: bool,
@@ -422,6 +461,7 @@ pub struct Lane {
     pub info: Option<ThreadInfo>,
     /// Sequenced records written for this incarnation.
     pub written: u64,
+    pub first_seq: Option<u64>,
     pub last_seq: Option<u64>,
     /// Sum of the GAP ranges, and the number of GAPs.
     pub gap_sum: u128,
@@ -492,6 +532,8 @@ pub struct Capture {
     pub profile_flag: bool,
     /// The decoded PROFILE (chunk 2); None when bit 1 is clear or the file is torn before chunk 2 is complete.
     pub profile: Option<crate::profile::ProfileRecord>,
+    /// Standalone export metadata (chunk 40); Some when exported from another capture.
+    pub export: Option<ExportRecord>,
 }
 
 impl Capture {

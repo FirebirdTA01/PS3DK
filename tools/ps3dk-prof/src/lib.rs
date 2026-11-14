@@ -48,5 +48,8 @@ pub use model::{Capture, Incomplete, Malformed, Metric, Rule, Verdict};
 
 pub mod arcs;
 pub mod companions;
+pub mod export;
 pub mod gmon;
 mod wire;
+
+pub use export::{export_bytes, export_capture, ExportError};
