@@ -390,6 +390,8 @@ static void clear_tile(CellGcmContextData *ctx, uint32_t color, uint32_t depth_v
 static void draw_tile(CellGcmContextData *ctx)
 {
 	if (g_aborted) return;
+	/* the PPU just rewrote the quad's vertices in local memory: drop the RSX's cached copy */
+	cellGcmSetInvalidateVertexCache(ctx);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 }
@@ -787,6 +789,7 @@ static void g12_vertdata4f(CellGcmContextData *ctx)
 	                          CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL, 0);
 	cellGcmSetVertexData4f(ctx, (uint8_t)g_color_attr,
 	                        (const float[4]){0.0f, 1.0f, 1.0f, 1.0f});
+	cellGcmSetInvalidateVertexCache(ctx);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 	if (g_aborted) return;
@@ -823,6 +826,7 @@ static void g13_texborder(CellGcmContextData *ctx)
 	 * border colour, not the in-frame white texel. */
 	set_quad_color(1.0f, 1.0f, 1.0f, 1.0f);
 	set_quad_uv(1.5f, 1.5f);
+	cellGcmSetInvalidateVertexCache(ctx);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 	if (g_aborted) return;
@@ -860,6 +864,7 @@ static void g14_cache(CellGcmContextData *ctx)
 	/* Baseline draw with the in-frame white texel (set in init_rsx). */
 	set_quad_color(1.0f, 1.0f, 1.0f, 1.0f);
 	set_quad_uv(0.5f, 0.5f);
+	cellGcmSetInvalidateVertexCache(ctx);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 	if (g_aborted) return;
@@ -870,6 +875,7 @@ static void g14_cache(CellGcmContextData *ctx)
 	cellGcmSetInvalidateTextureCache(ctx, CELL_GCM_INVALIDATE_TEXTURE);
 
 	/* Draw again: the fragment must see the new cyan texel. */
+	cellGcmSetInvalidateVertexCache(ctx);
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 	wait_idle(ctx);
 	if (g_aborted) return;
