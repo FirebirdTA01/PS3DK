@@ -978,7 +978,28 @@ impl Reader {
                 );
             }
             if let Some(exp) = &self.cap.export {
-                let exp_lane = exp.lanes.get(&inc).unwrap();
+                let exp_lane = match exp.lanes.get(&inc) {
+                    Some(l) => l,
+                    None => {
+                        return malformed(
+                            Rule::Export,
+                            format!("incarnation {inc}: missing from EXPORT lane table"),
+                        );
+                    }
+                };
+                let declared_written = match u128::from(exp_lane.kept).checked_add(u128::from(exp_lane.dropped_by_export)) {
+                    Some(sum) => sum,
+                    None => return malformed(Rule::Export, format!("incarnation {inc}: kept + dropped_by_export overflow")),
+                };
+                if declared_written != u128::from(e.written_count) {
+                    return malformed(
+                        Rule::Export,
+                        format!(
+                            "incarnation {inc}: kept {} + dropped_by_export {} != source written {}",
+                            exp_lane.kept, exp_lane.dropped_by_export, e.written_count
+                        ),
+                    );
+                }
                 if exp_lane.kept > 0 {
                     if lane.first_seq != Some(exp_lane.first_seq) {
                         return malformed(
@@ -992,8 +1013,40 @@ impl Reader {
                             format!("incarnation {inc}: last seq {:?} != declared {}", lane.last_seq, exp_lane.last_seq),
                         );
                     }
-                    let kept_span = u128::from(exp_lane.last_seq) - u128::from(exp_lane.first_seq) + 1;
-                    if kept_span != u128::from(lane.written) + lane.gap_sum {
+                    if exp_lane.first_seq > exp_lane.last_seq {
+                        return malformed(
+                            Rule::Export,
+                            format!("incarnation {inc}: declared first seq {} > last seq {}", exp_lane.first_seq, exp_lane.last_seq),
+                        );
+                    }
+                    if u128::from(exp_lane.last_seq) >= u128::from(e.produced_count) {
+                        return malformed(
+                            Rule::Export,
+                            format!(
+                                "incarnation {inc}: declared last seq {} >= source produced {}",
+                                exp_lane.last_seq, e.produced_count
+                            ),
+                        );
+                    }
+                    let kept_span = match (u128::from(exp_lane.last_seq) - u128::from(exp_lane.first_seq)).checked_add(1) {
+                        Some(span) => span,
+                        None => {
+                            return malformed(
+                                Rule::Export,
+                                format!("incarnation {inc}: kept span overflow"),
+                            );
+                        }
+                    };
+                    let written_plus_gap = match u128::from(lane.written).checked_add(lane.gap_sum) {
+                        Some(sum) => sum,
+                        None => {
+                            return malformed(
+                                Rule::Export,
+                                format!("incarnation {inc}: written + gap overflow"),
+                            );
+                        }
+                    };
+                    if kept_span != written_plus_gap {
                         return malformed(
                             Rule::Export,
                             format!(

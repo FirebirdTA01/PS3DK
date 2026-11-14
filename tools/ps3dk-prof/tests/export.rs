@@ -1050,3 +1050,160 @@ fn export_fifo_events_with_writer_losses() {
     let _ = std::fs::remove_file(src_path);
     let _ = std::fs::remove_file(exp_path);
 }
+
+fn synth_probe_source(recs: Vec<Rec>, late: bool) -> Vec<u8> {
+    let fin = |inc, n| Fin {
+        inc,
+        state: 1,
+        limit: 0,
+        reserved: 0,
+        produced: n,
+        written: n,
+        dropped: 0,
+        refused: 0,
+        regerr: 0,
+        open: 0,
+    };
+    let mut cs = vec![
+        chunk(T_HEADER, Hdr::default().payload()),
+        chunk(T_CLOCKS, clocks_payload(1, 1, 0, 79_800_000, 0)),
+        chunk(T_DESCS, descs_payload(&[desc(1, "work", "")])),
+        chunk(T_THREADS, threads_payload(&[thr(1)])),
+        chunk(T_RECORDS, records_payload(1, &recs)),
+    ];
+    let mut fins = vec![fin(1, recs.len() as u64)];
+    if late {
+        cs.push(chunk(T_THREADS, threads_payload(&[thr(2)])));
+        cs.push(chunk(
+            T_RECORDS,
+            records_payload(2, &[begin(0, 1, 0, 2500, 1), bparent(1, 0, 0), end(2, 1, 0, 3000, 1)]),
+        ));
+        fins.push(fin(2, 3));
+    }
+    cs.push(chunk(
+        T_TRAILER,
+        Trl {
+            end_flags: 0,
+            fins,
+            sink_errors: 0,
+            first_error: 0,
+            reserved: 0,
+            unregistered: 0,
+            desc_count: 1,
+        }
+        .payload(),
+    ));
+    let bytes = File::new(cs).bytes();
+    ps3dk_prof::reader::read(&bytes).expect("source valid");
+    bytes
+}
+
+#[test]
+fn export_e1_retained_seq_numbers_must_remain_below_source_produced_count() {
+    let simple = vec![frame(0, 1000, 0), frame(1, 2000, 1), frame(2, 4000, 2)];
+    let src = synth_probe_source(simple, false);
+    let one = ps3dk_prof::export_bytes(&src, 1..=1).unwrap();
+    assert!(ps3dk_prof::reader::read(&one).is_ok());
+
+    let (flags, mut cs) = parse_file_chunks(&one);
+    for c in &mut cs {
+        if c.ty == T_RECORDS {
+            for rec in c.payload[8..].chunks_exact_mut(32) {
+                let n = u64::from_le_bytes(rec[8..16].try_into().unwrap());
+                rec[8..16].copy_from_slice(&(n + 100).to_le_bytes());
+            }
+        }
+        if c.ty == ps3dk_prof::model::CHUNK_EXPORT {
+            for off in [112 + 8, 112 + 16] {
+                let n = u64::from_le_bytes(c.payload[off..off + 8].try_into().unwrap());
+                c.payload[off..off + 8].copy_from_slice(&(n + 100).to_le_bytes());
+            }
+        }
+    }
+    let forged = serialize_chunks(flags, cs);
+    let err = ps3dk_prof::reader::read(&forged).unwrap_err();
+    assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+    assert!(err.detail.contains("declared last seq") && err.detail.contains(">= source produced"));
+}
+
+#[test]
+fn export_e2_preserve_declaration_order_when_emitting_filtered_records() {
+    let simple = vec![frame(0, 1000, 0), frame(1, 2000, 1), frame(2, 4000, 2)];
+    let src = synth_probe_source(simple, true);
+    let out = ps3dk_prof::export_bytes(&src, 1..=1).expect("export returns success");
+    let cap = ps3dk_prof::reader::read(&out).expect("exported capture with late thread declaration must be valid");
+    assert!(cap.export.is_some());
+}
+
+#[test]
+fn export_e3_apply_owner_lane_sequence_boundaries_to_zone_clipping() {
+    let recs = vec![
+        frame(0, 1000, 0),
+        begin(1, 1, 0, 2000, 1),
+        bparent(2, 0, 0),
+        frame(3, 2000, 1),
+        end(4, 1, 0, 2500, 1),
+        frame(5, 4000, 2),
+    ];
+    let src = synth_probe_source(recs, false);
+    let out = ps3dk_prof::export_bytes(&src, 1..=1).expect("export returns success");
+    let cap = ps3dk_prof::reader::read(&out).expect("exported capture with boundary tie must be valid");
+    assert!(cap.export.is_some());
+    let exp = cap.export.unwrap();
+    assert_eq!(exp.clipped_zones, 1, "zone crossing frame 1 boundary must be clipped");
+}
+
+#[test]
+fn export_e4_handle_already_exported_source_refusal() {
+    let simple = vec![frame(0, 1000, 0), frame(1, 2000, 1), frame(2, 4000, 2)];
+    let src = synth_probe_source(simple, false);
+    let one = ps3dk_prof::export_bytes(&src, 1..=1).unwrap();
+    assert!(ps3dk_prof::reader::read(&one).is_ok());
+
+    let err = ps3dk_prof::export_bytes(&one, 1..=1).unwrap_err();
+    match err {
+        ps3dk_prof::ExportError::Refused(msg) => {
+            assert!(msg.contains("re-exporting an already-exported capture is not supported"));
+        }
+        other => panic!("expected ExportError::Refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn export_e5_reconcile_provisional_fifo_status() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let (flags, mut chunks) = parse_file_chunks(&input_bytes);
+
+    let mut evs = Vec::new();
+    for (i, kind) in [1u16, 2, 3, 4, 5, 6].iter().enumerate() {
+        let mut e = fifo_support::ev(1 + i as u64, 1, *kind, 4440890000000 + i as u64 * 1000, 4440890000500 + i as u64 * 1000);
+        e.frame = 49;
+        evs.push(e);
+    }
+    for (i, kind) in [1u16, 2, 3, 4, 5, 6].iter().enumerate() {
+        let mut e = fifo_support::ev(11 + i as u64, 2, *kind, 4440892300000 + i as u64 * 1000, 4440892300500 + i as u64 * 1000);
+        e.frame = 50;
+        evs.push(e);
+    }
+
+    let ev_chunk = fifo_support::events(&evs[..6]);
+    let st_idx = chunks.iter().rposition(|c| c.ty == ps3dk_prof::fifo::CHUNK_FIFO_STATUS).unwrap();
+    chunks.insert(st_idx, Chunk { ty: ev_chunk.ty, payload: ev_chunk.payload });
+    chunks.insert(st_idx + 1, fifo_support::St::new(2, 6, 6, 0, 6, 1, 1, 0).chunk());
+    chunks.insert(st_idx + 2, fifo_support::events(&evs[6..]));
+
+    let new_st = fifo_support::St::new(1, 16, 12, 4, 16, 2, 2, 0);
+    let final_st_idx = chunks.iter().rposition(|c| c.ty == ps3dk_prof::fifo::CHUNK_FIFO_STATUS).unwrap();
+    chunks[final_st_idx].payload = new_st.chunk().payload;
+
+    let src = serialize_chunks(flags, chunks);
+    ps3dk_prof::reader::read(&src).expect("source with provisional status valid");
+
+    let out = ps3dk_prof::export_bytes(&src, 50..=50).expect("export success");
+    let cap = ps3dk_prof::reader::read(&out).expect("export with provisional status must be valid");
+    let fifo = cap.fifo.expect("fifo in exported capture");
+    assert_eq!(fifo.parsed_events, 6);
+    let st = fifo.last_status.expect("final fifo status");
+    assert_eq!(st.written, 12);
+    assert_eq!(st.last_attempt_seq, 16);
+}

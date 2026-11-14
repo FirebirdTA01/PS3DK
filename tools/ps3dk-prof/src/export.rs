@@ -16,7 +16,8 @@ use crate::reader::RawRecord;
 #[derive(Debug)]
 pub enum ExportError {
     Io(std::io::Error),
-    Malformed(&'static str),
+    Malformed(String),
+    Refused(&'static str),
     FrameNotFound(u64),
     Usage(String),
 }
@@ -26,6 +27,7 @@ impl std::fmt::Display for ExportError {
         match self {
             ExportError::Io(e) => write!(f, "{e}"),
             ExportError::Malformed(why) => write!(f, "MALFORMED: {why}"),
+            ExportError::Refused(why) => write!(f, "export refused: {why}"),
             ExportError::FrameNotFound(frame) => {
                 write!(f, "export: frame {frame} is not in the capture")
             }
@@ -65,18 +67,22 @@ fn encode_gap(start_seq: u64, end_seq: u64) -> [u8; 32] {
 /// Export one frame or a range of frames from capture bytes into standalone capture bytes.
 pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>, ExportError> {
     if bytes.len() < 16 {
-        return Err(ExportError::Malformed("capture header shorter than 16 bytes"));
+        return Err(ExportError::Malformed("capture header shorter than 16 bytes".into()));
     }
     if &bytes[0..8] != b"PS3DKPRF" {
-        return Err(ExportError::Malformed("bad magic"));
+        return Err(ExportError::Malformed("bad magic".into()));
     }
     let major = u16::from_le_bytes(bytes[8..10].try_into().unwrap());
     if major != 1 {
-        return Err(ExportError::Malformed("unsupported major version"));
+        return Err(ExportError::Malformed("unsupported major version".into()));
     }
 
     // 1. Structural parse of the source capture using the reader.
-    let cap = crate::reader::read(bytes).map_err(|_| ExportError::Malformed("source capture malformed"))?;
+    let cap = crate::reader::read(bytes).map_err(|_| ExportError::Malformed("source capture malformed".into()))?;
+
+    if cap.export.is_some() {
+        return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));
+    }
 
     // 2. Collect all present frames and verify the requested range.
     let mut present_frames = BTreeSet::new();
@@ -106,10 +112,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         .map_or(OP_BYTES, |att| att.op_width()) as usize;
 
     // 4. Determine frame owner lane and time bounds.
-    let owner_lane = cap
+    let (&owner_inc, owner_lane) = cap
         .lanes
-        .values()
-        .find(|l| l.frames.iter().any(|fr| fr.id == *range.start()))
+        .iter()
+        .find(|(_, l)| l.frames.iter().any(|fr| fr.id == *range.start()))
         .ok_or(ExportError::FrameNotFound(*range.start()))?;
     let mark_a = owner_lane
         .frames
@@ -132,14 +138,28 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     // - BEGIN before mark A whose END is inside (or open)
     // - BEGIN inside whose END is after mark B+1 (or open, when B+1 exists)
     // Drop both halves of any zone not fully inside the window (nesting included).
+    // For the owner lane, boundaries are exact sequence numbers matching record filtering;
+    // for worker lanes without frame marks, timestamps are used.
     let mut clipped_span_ids: BTreeSet<(u32, u64)> = BTreeSet::new();
     for span in &cap.spans {
-        let crosses_left =
-            span.begin_tb < tb_start && span.end_tb.map_or(true, |etb| etb >= tb_start);
-        let crosses_right = if let Some(etb) = tb_end {
-            span.begin_tb <= etb && span.end_tb.map_or(true, |end_tb| end_tb > etb)
+        let (crosses_left, crosses_right) = if span.incarnation == owner_inc {
+            let left = span.begin_seq < owner_start_seq
+                && span.end_seq.map_or(true, |eseq| eseq >= owner_start_seq);
+            let right = if let Some(end_seq) = owner_end_seq {
+                span.begin_seq <= end_seq && span.end_seq.map_or(true, |eseq| eseq > end_seq)
+            } else {
+                false
+            };
+            (left, right)
         } else {
-            false
+            let left = span.begin_tb < tb_start
+                && span.end_tb.map_or(true, |etb| etb >= tb_start);
+            let right = if let Some(etb) = tb_end {
+                span.begin_tb <= etb && span.end_tb.map_or(true, |end_tb| end_tb > etb)
+            } else {
+                false
+            };
+            (left, right)
         };
         if crosses_left || crosses_right {
             clipped_span_ids.insert((span.incarnation, span.span_id));
@@ -179,19 +199,22 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     let mut pos = 16;
     while pos < bytes.len() {
         if bytes.len() - pos < 20 {
-            return Err(ExportError::Malformed("truncated chunk header"));
+            return Err(ExportError::Malformed("truncated chunk header".into()));
         }
         let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+        if ty == CHUNK_EXPORT {
+            return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));
+        }
         let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
         if bytes.len() - pos < 16 + len + 4 {
-            return Err(ExportError::Malformed("truncated chunk payload"));
+            return Err(ExportError::Malformed("truncated chunk payload".into()));
         }
         let payload = &bytes[pos + 16..pos + 16 + len];
         let file_crc =
             u32::from_le_bytes(bytes[pos + 16 + len..pos + 20 + len].try_into().unwrap());
         let computed_crc = crc32(&bytes[pos..pos + 16 + len]);
         if file_crc != computed_crc {
-            return Err(ExportError::Malformed("chunk CRC mismatch"));
+            return Err(ExportError::Malformed("chunk CRC mismatch".into()));
         }
         raw_chunks.push(RawChunk { ty, payload });
         pos += 20 + len;
@@ -215,7 +238,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
 
     // Filter records per lane and build per-lane export table
     let mut export_lanes: BTreeMap<u32, ExportLane> = BTreeMap::new();
-    let mut output_records_per_lane: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+    let mut kept_record_keys: BTreeSet<(u32, u64)> = BTreeSet::new();
     let mut records_kept_total = 0u64;
     let mut records_dropped_total = 0u64;
 
@@ -261,6 +284,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
 
             if in_window && !is_clipped && rec.kind != KIND_GAP {
                 kept_records.push(*rec);
+                kept_record_keys.insert((inc, rec.seq));
             }
         }
 
@@ -295,25 +319,6 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             );
             records_kept_total += kept;
             records_dropped_total += dropped_by_export;
-
-            // Reconstruct lane records, inserting KIND_GAP for any missing sequences between kept records
-            let mut out_bytes = Vec::new();
-            for (i, rec) in kept_records.iter().enumerate() {
-                if i > 0 {
-                    let prev_seq = kept_records[i - 1].seq;
-                    if rec.seq > prev_seq + 1 {
-                        out_bytes.extend_from_slice(&encode_gap(prev_seq + 1, rec.seq - 1));
-                    }
-                }
-                out_bytes.extend_from_slice(&encode_record(rec));
-            }
-
-            let count = (out_bytes.len() / RECORD_LEN) as u32;
-            let mut payload = Vec::with_capacity(8 + out_bytes.len());
-            payload.extend_from_slice(&inc.to_le_bytes());
-            payload.extend_from_slice(&count.to_le_bytes());
-            payload.extend_from_slice(&out_bytes);
-            output_records_per_lane.insert(inc, payload);
         }
     }
 
@@ -432,7 +437,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     // 7. Pass 2: Filter and serialize chunks.
     // Placement rule: EXPORT is emitted strictly right after HEADER/CLOCKS (and PROFILE if present).
     let mut emitted_chunks: Vec<(u32, Vec<u8>)> = Vec::new();
-    let mut records_emitted = false;
+    let mut prev_emitted_seq: BTreeMap<u32, u64> = BTreeMap::new();
 
     for chunk in &raw_chunks {
         match chunk.ty {
@@ -525,8 +530,17 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             }
 
             // Keep STATUS chunks as written! (Evidence preservation)
-            CHUNK_AUTO_STATUS | CHUNK_FIFO_STATUS => {
+            CHUNK_AUTO_STATUS => {
                 emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+            }
+
+            CHUNK_FIFO_STATUS => {
+                if chunk.payload.len() >= 4 {
+                    let flags = u16::from_le_bytes(chunk.payload[2..4].try_into().unwrap());
+                    if flags & crate::fifo::ST_FINAL != 0 {
+                        emitted_chunks.push((CHUNK_FIFO_STATUS, chunk.payload.to_vec()));
+                    }
+                }
             }
 
             CHUNK_FIFO_EVENTS if chunk.payload.len() >= 16 => {
@@ -563,12 +577,32 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 }
             }
 
-            CHUNK_RECORDS => {
-                if !records_emitted {
-                    for payload in output_records_per_lane.values() {
-                        emitted_chunks.push((CHUNK_RECORDS, payload.clone()));
+            CHUNK_RECORDS if chunk.payload.len() >= 8 => {
+                let inc = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap());
+                let count = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
+                let mut chunk_out = Vec::new();
+                for i in 0..count {
+                    let off = 8 + i * RECORD_LEN;
+                    if off + RECORD_LEN <= chunk.payload.len() {
+                        let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
+                        if kept_record_keys.contains(&(inc, rec.seq)) {
+                            if let Some(&prev) = prev_emitted_seq.get(&inc) {
+                                if rec.seq > prev + 1 {
+                                    chunk_out.extend_from_slice(&encode_gap(prev + 1, rec.seq - 1));
+                                }
+                            }
+                            chunk_out.extend_from_slice(&encode_record(&rec));
+                            prev_emitted_seq.insert(inc, rec.seq);
+                        }
                     }
-                    records_emitted = true;
+                }
+                if !chunk_out.is_empty() {
+                    let new_count = (chunk_out.len() / RECORD_LEN) as u32;
+                    let mut payload = Vec::with_capacity(8 + chunk_out.len());
+                    payload.extend_from_slice(&inc.to_le_bytes());
+                    payload.extend_from_slice(&new_count.to_le_bytes());
+                    payload.extend_from_slice(&chunk_out);
+                    emitted_chunks.push((CHUNK_RECORDS, payload));
                 }
             }
 
@@ -602,6 +636,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         out.extend_from_slice(&chunk_bytes);
     }
 
+    // 9. Integrity self-validation before reporting success.
+    crate::reader::read(&out)
+        .map_err(|e| ExportError::Malformed(format!("exported capture failed integrity check: {e}")))?;
+
     Ok(out)
 }
 
@@ -613,7 +651,22 @@ pub fn export_capture<P: AsRef<Path>, Q: AsRef<Path>>(
 ) -> Result<(), ExportError> {
     let bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
     let exported = export_bytes(&bytes, range)?;
-    std::fs::write(out_path.as_ref(), exported).map_err(ExportError::Io)?;
+    let out = out_path.as_ref();
+    let tmp = match out.file_name() {
+        Some(name) => {
+            let mut tmp_name = name.to_os_string();
+            tmp_name.push(format!(".tmp-{}", std::process::id()));
+            out.with_file_name(tmp_name)
+        }
+        None => out.with_extension(format!("tmp-{}", std::process::id())),
+    };
+    if let Err(e) = std::fs::write(&tmp, exported) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ExportError::Io(e));
+    }
+    if let Err(e) = std::fs::rename(&tmp, out) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ExportError::Io(e));
+    }
     Ok(())
 }
-

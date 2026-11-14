@@ -672,6 +672,10 @@ fn export(args: &[String]) -> ExitCode {
             eprintln!("ps3dk-prof: {input}: MALFORMED: {why}");
             ExitCode::from(2)
         }
+        Err(ps3dk_prof::ExportError::Refused(why)) => {
+            eprintln!("ps3dk-prof: export: {why}");
+            ExitCode::from(2)
+        }
         Err(ps3dk_prof::ExportError::Io(e)) => {
             eprintln!("ps3dk-prof: {e}");
             ExitCode::from(3)
