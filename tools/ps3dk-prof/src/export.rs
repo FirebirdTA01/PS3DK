@@ -364,16 +364,15 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             }
             CHUNK_FIFO_EVENTS if chunk.payload.len() >= 16 => {
                 let count = u32::from_le_bytes(chunk.payload[8..12].try_into().unwrap()) as usize;
-                let stride = u32::from_le_bytes(chunk.payload[12..16].try_into().unwrap()) as usize;
-                let actual_stride = if stride == 64 { 64 } else { 64 };
+                let actual_stride = 96;
 
                 for i in 0..count {
                     let off = 16 + i * actual_stride;
                     if off + actual_stride <= chunk.payload.len() {
                         let flags =
-                            u16::from_le_bytes(chunk.payload[off + 10..off + 12].try_into().unwrap());
+                            u16::from_le_bytes(chunk.payload[off + 38..off + 40].try_into().unwrap());
                         let frame_id =
-                            u64::from_le_bytes(chunk.payload[off + 40..off + 48].try_into().unwrap());
+                            u64::from_le_bytes(chunk.payload[off + 48..off + 56].try_into().unwrap());
                         if flags & EV_TOKEN_PRESENT != 0 && range.contains(&frame_id) {
                             events_kept += 1;
                         } else {
@@ -386,7 +385,18 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         }
     }
 
-    // Build the 96-byte EXPORT header + per-lane 40-byte entries
+    let source_auto_frames = cap
+        .auto
+        .as_ref()
+        .and_then(|a| a.last_status.as_ref())
+        .map_or(0, |s| s.counters[5]);
+    let source_fifo_last_attempt_seq = cap
+        .fifo
+        .as_ref()
+        .and_then(|f| f.last_status.as_ref())
+        .map_or(0, |s| s.last_attempt_seq);
+
+    // Build the 112-byte EXPORT header + per-lane 40-byte entries
     let lane_count = export_lanes.len();
     let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
     let mut export_payload = Vec::with_capacity(total_export_len);
@@ -405,6 +415,8 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     export_payload.extend_from_slice(&ops_dropped.to_le_bytes());
     export_payload.extend_from_slice(&events_kept.to_le_bytes());
     export_payload.extend_from_slice(&events_dropped.to_le_bytes());
+    export_payload.extend_from_slice(&source_fifo_last_attempt_seq.to_le_bytes());
+    export_payload.extend_from_slice(&source_auto_frames.to_le_bytes());
     export_payload.extend_from_slice(&(lane_count as u32).to_le_bytes());
     export_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved: u32
 
@@ -522,17 +534,16 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 let reserved = u16::from_le_bytes(chunk.payload[2..4].try_into().unwrap());
                 let instance = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap());
                 let count = u32::from_le_bytes(chunk.payload[8..12].try_into().unwrap()) as usize;
-                let stride = u32::from_le_bytes(chunk.payload[12..16].try_into().unwrap()) as usize;
-                let actual_stride = if stride == 64 { 64 } else { 64 };
+                let actual_stride = 96;
 
                 let mut kept_events = Vec::new();
                 for i in 0..count {
                     let off = 16 + i * actual_stride;
                     if off + actual_stride <= chunk.payload.len() {
                         let flags =
-                            u16::from_le_bytes(chunk.payload[off + 10..off + 12].try_into().unwrap());
+                            u16::from_le_bytes(chunk.payload[off + 38..off + 40].try_into().unwrap());
                         let frame_id =
-                            u64::from_le_bytes(chunk.payload[off + 40..off + 48].try_into().unwrap());
+                            u64::from_le_bytes(chunk.payload[off + 48..off + 56].try_into().unwrap());
                         if flags & EV_TOKEN_PRESENT != 0 && range.contains(&frame_id) {
                             kept_events.extend_from_slice(&chunk.payload[off..off + actual_stride]);
                         }
@@ -546,7 +557,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     new_payload.extend_from_slice(&instance.to_le_bytes());
                     let new_count = (kept_events.len() / actual_stride) as u32;
                     new_payload.extend_from_slice(&new_count.to_le_bytes());
-                    new_payload.extend_from_slice(&(actual_stride as u32).to_le_bytes());
+                    new_payload.extend_from_slice(&0u32.to_le_bytes()); // z1 (reserved)
                     new_payload.extend_from_slice(&kept_events);
                     emitted_chunks.push((CHUNK_FIFO_EVENTS, new_payload));
                 }

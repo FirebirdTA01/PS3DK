@@ -784,6 +784,8 @@ impl Reader {
         let ops_dropped = c.u64()?;
         let events_kept = c.u64()?;
         let events_dropped = c.u64()?;
+        let source_fifo_last_attempt_seq = c.u64()?;
+        let source_auto_frames = c.u64()?;
         let lane_count = c.u32()? as usize;
         let reserved = c.u32()?;
         if reserved != 0 {
@@ -860,6 +862,8 @@ impl Reader {
             ops_dropped,
             events_kept,
             events_dropped,
+            source_fifo_last_attempt_seq,
+            source_auto_frames,
             lanes,
         });
         Ok(())

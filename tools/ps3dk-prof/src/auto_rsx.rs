@@ -965,6 +965,7 @@ impl Reader {
             };
             let frames_ok = if let Some(exp) = export {
                 self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+                    && n[5] == exp.source_auto_frames
             } else {
                 n[5] == self.result.frames_parsed
             };
@@ -1897,6 +1898,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             "ops_dropped": exp.ops_dropped,
             "events_kept": exp.events_kept,
             "events_dropped": exp.events_dropped,
+            "source_fifo_last_attempt_seq": exp.source_fifo_last_attempt_seq,
+            "source_auto_frames": exp.source_auto_frames,
         });
     }
     if r.build_frames {

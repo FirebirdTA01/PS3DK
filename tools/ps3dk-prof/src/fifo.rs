@@ -492,7 +492,11 @@ impl Reader {
             return bad(r, "OWNER_UNACK without LOWER_BOUND");
         }
         let events_ok = if let Some(exp) = export {
-            self.result.parsed_events == exp.events_kept && s.written == exp.events_kept + exp.events_dropped
+            if s.is_final() {
+                self.result.parsed_events == exp.events_kept && s.written == exp.events_kept + exp.events_dropped
+            } else {
+                s.written == self.result.parsed_events
+            }
         } else {
             s.written == self.result.parsed_events
         };
@@ -502,17 +506,22 @@ impl Reader {
         }
         let last = self.last.as_ref().map_or(0, |e| e.seq);
         let seq_ok = if let Some(exp) = export {
-            if exp.events_dropped == 0 {
-                s.last_attempt_seq == last
+            if s.is_final() {
+                s.last_attempt_seq == exp.source_fifo_last_attempt_seq
             } else {
-                s.last_attempt_seq == exp.events_kept + exp.events_dropped
+                s.last_attempt_seq == last
             }
         } else {
             s.last_attempt_seq == last
         };
         if !seq_ok {
-            return bad(r, format!("FIFO_STATUS last attempt sequence {} is not the last written event's {last}",
-                s.last_attempt_seq));
+            if let Some(exp) = export {
+                return bad(r, format!("FIFO_STATUS last attempt sequence {} is not declared source {}",
+                    s.last_attempt_seq, exp.source_fifo_last_attempt_seq));
+            } else {
+                return bad(r, format!("FIFO_STATUS last attempt sequence {} is not the last written event's {last}",
+                    s.last_attempt_seq));
+            }
         }
         let sat = flags & ST_SATURATED != 0;
         if !sat {

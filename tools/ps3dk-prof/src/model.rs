@@ -35,7 +35,7 @@ pub const CHUNK_RETIRED: u32 = 7;
 pub const CHUNK_EXPORT: u32 = 40;
 pub const EXPORT_SCHEMA: u16 = 1;
 pub const EXPORT_FLAG_TO_END: u16 = 1;
-pub const EXPORT_HEADER_LEN: usize = 96;
+pub const EXPORT_HEADER_LEN: usize = 112;
 pub const EXPORT_LANE_ENTRY_LEN: usize = 40;
 
 /// Per-lane accounting entry inside an EXPORT chunk (40 bytes).
@@ -64,6 +64,8 @@ pub struct ExportRecord {
     pub ops_dropped: u64,
     pub events_kept: u64,
     pub events_dropped: u64,
+    pub source_fifo_last_attempt_seq: u64,
+    pub source_auto_frames: u64,
     pub lanes: BTreeMap<u32, ExportLane>,
 }
 

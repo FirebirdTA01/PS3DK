@@ -2,6 +2,8 @@
 
 #[allow(dead_code)]
 mod common;
+#[allow(dead_code)]
+mod fifo_support;
 use common::*;
 
 use std::path::{Path, PathBuf};
@@ -571,55 +573,39 @@ fn export_runs_to_end_of_run_when_closing_frame_absent() {
     let _ = std::fs::remove_file(&output);
 }
 
+fn parse_file_chunks(bytes: &[u8]) -> (u32, Vec<Chunk>) {
+    let flags = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+    let mut chunks = Vec::new();
+    let mut pos = 16;
+    while pos < bytes.len() {
+        let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+        let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let payload = bytes[pos + 16..pos + 16 + len].to_vec();
+        chunks.push(Chunk { ty, payload });
+        pos += 20 + len;
+    }
+    (flags, chunks)
+}
+
+fn serialize_chunks(flags: u32, chunks: Vec<Chunk>) -> Vec<u8> {
+    let mut f = File::new(chunks);
+    f.flags = flags;
+    f.bytes()
+}
+
 #[test]
 fn export_forged_refusals() {
     let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
     let valid_exported = ps3dk_prof::export_bytes(&input_bytes, 10..=15).unwrap();
 
-    // Helper to decode raw chunks
-    struct Chunk {
-        ty: u32,
-        payload: Vec<u8>,
-    }
-    let parse_chunks = |bytes: &[u8]| -> Vec<Chunk> {
-        let mut chunks = Vec::new();
-        let mut pos = 16;
-        while pos < bytes.len() {
-            let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
-            let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
-            let payload = bytes[pos + 16..pos + 16 + len].to_vec();
-            chunks.push(Chunk { ty, payload });
-            pos += 20 + len;
-        }
-        chunks
-    };
-
-    let serialize = |chunks: &[Chunk]| -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(&valid_exported[0..16]);
-        for (seq, c) in chunks.iter().enumerate() {
-            let chunk_seq = seq as u64;
-            let len = c.payload.len() as u32;
-            let mut buf = Vec::with_capacity(16 + c.payload.len() + 4);
-            buf.extend_from_slice(&c.ty.to_le_bytes());
-            buf.extend_from_slice(&len.to_le_bytes());
-            buf.extend_from_slice(&chunk_seq.to_le_bytes());
-            buf.extend_from_slice(&c.payload);
-            let crc = ps3dk_prof::hash::crc32(&buf);
-            buf.extend_from_slice(&crc.to_le_bytes());
-            out.extend_from_slice(&buf);
-        }
-        out
-    };
-
     // 1. Refuse forged EXPORT chunk placed late
     {
-        let mut chunks = parse_chunks(&valid_exported);
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
         let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
         assert_eq!(exp_idx, 3);
         // Swap exp_idx and exp_idx + 1
         chunks.swap(exp_idx, exp_idx + 1);
-        let tampered = serialize(&chunks);
+        let tampered = serialize_chunks(flags, chunks);
         let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
         assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
         assert!(err.detail.contains("expected chunk 3"), "detail: {}", err.detail);
@@ -627,11 +613,11 @@ fn export_forged_refusals() {
 
     // 2. Refuse duplicate EXPORT chunk
     {
-        let mut chunks = parse_chunks(&valid_exported);
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
         let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
         let dup = chunks[exp_idx].payload.clone();
         chunks.insert(exp_idx + 2, Chunk { ty: ps3dk_prof::model::CHUNK_EXPORT, payload: dup });
-        let tampered = serialize(&chunks);
+        let tampered = serialize_chunks(flags, chunks);
         let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
         assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
         assert!(err.detail.contains("expected chunk 3") || err.detail.contains("duplicate"), "detail: {}", err.detail);
@@ -639,26 +625,26 @@ fn export_forged_refusals() {
 
     // 3. Refuse forged counts: lane first_seq does not match actual first record
     {
-        let mut chunks = parse_chunks(&valid_exported);
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
         let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
         // Mutate first_seq of lane 1 in EXPORT payload
-        // EXPORT header is 96 bytes; lane 1 entry is at offset 96.
+        // EXPORT header is 112 bytes; lane 1 entry is at offset 112.
         // Lane entry: inc: u32 (0..4), res: u32 (4..8), first_seq: u64 (8..16)
-        let off = 96 + 8;
+        let off = 112 + 8;
         let mut first_seq = u64::from_le_bytes(chunks[exp_idx].payload[off..off + 8].try_into().unwrap());
         first_seq += 100;
         chunks[exp_idx].payload[off..off + 8].copy_from_slice(&first_seq.to_le_bytes());
-        let tampered = serialize(&chunks);
+        let tampered = serialize_chunks(flags, chunks);
         let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
         assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
     }
 
     // 4. Refuse forged counts: kept records count disagrees with records
     {
-        let mut chunks = parse_chunks(&valid_exported);
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
         let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
         // Mutate kept count of lane 1
-        let off = 96 + 24;
+        let off = 112 + 24;
         let mut kept = u64::from_le_bytes(chunks[exp_idx].payload[off..off + 8].try_into().unwrap());
         kept += 1;
         chunks[exp_idx].payload[off..off + 8].copy_from_slice(&kept.to_le_bytes());
@@ -666,9 +652,35 @@ fn export_forged_refusals() {
         let mut hdr_kept = u64::from_le_bytes(chunks[exp_idx].payload[40..48].try_into().unwrap());
         hdr_kept += 1;
         chunks[exp_idx].payload[40..48].copy_from_slice(&hdr_kept.to_le_bytes());
-        let tampered = serialize(&chunks);
+        let tampered = serialize_chunks(flags, chunks);
         let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
         assert_eq!(err.rule, ps3dk_prof::model::Rule::Export);
+    }
+
+    // 5. Refuse forged source_auto_frames
+    {
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        // Mutate source_auto_frames (offset 96..104)
+        let mut frames = u64::from_le_bytes(chunks[exp_idx].payload[96..104].try_into().unwrap());
+        frames += 1;
+        chunks[exp_idx].payload[96..104].copy_from_slice(&frames.to_le_bytes());
+        let tampered = serialize_chunks(flags, chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::AutoStatus);
+    }
+
+    // 6. Refuse forged source_fifo_last_attempt_seq
+    {
+        let (flags, mut chunks) = parse_file_chunks(&valid_exported);
+        let exp_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_EXPORT).unwrap();
+        // Mutate source_fifo_last_attempt_seq (offset 88..96)
+        let mut seq = u64::from_le_bytes(chunks[exp_idx].payload[88..96].try_into().unwrap());
+        seq += 1;
+        chunks[exp_idx].payload[88..96].copy_from_slice(&seq.to_le_bytes());
+        let tampered = serialize_chunks(flags, chunks);
+        let err = ps3dk_prof::reader::read(&tampered).unwrap_err();
+        assert_eq!(err.rule, ps3dk_prof::model::Rule::FifoStatus);
     }
 }
 
@@ -782,4 +794,259 @@ fn export_zone_clipping_left_right_nested() {
     let analysis = ps3dk_prof::analysis::analyze(cap_exp).expect("analysis");
     let rep = ps3dk_prof::report::render(&analysis);
     assert!(rep.contains("3 zone(s) clipped at window edges"), "report: {rep}");
+}
+
+#[test]
+fn export_worker_lane_without_frame_marks() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let (flags, mut chunks) = parse_file_chunks(&input_bytes);
+
+    // Frame 50 is at tb = 4440892032538 (Mark A)
+    // Frame 51 is at tb = 4440893362262 (Mark B+1)
+    let tb_start = 4440892032538u64;
+    let tb_end = 4440893362262u64;
+
+    // 1. Insert CHUNK_DESCRIPTORS declaring descriptor 1
+    let build_id = b"0fe54bcc02e9242f21b6bf270f9ec0a16e0b1188d0128f7a59bda027dec1e429";
+    let desc_id = ps3dk_prof::hash::descriptor_id(build_id, "worker.c", 10, "worker_task");
+    let mut desc_payload = Vec::new();
+    desc_payload.extend_from_slice(&1u32.to_le_bytes()); // count = 1
+    desc_payload.extend_from_slice(&1u32.to_le_bytes()); // index = 1
+    desc_payload.extend_from_slice(&desc_id.to_le_bytes()); // id
+    desc_payload.push(1); // scope = 1
+    desc_payload.push(0); // reserved = 0
+    desc_payload.extend_from_slice(&10u32.to_le_bytes()); // line = 10
+    // name: "worker_task"
+    desc_payload.extend_from_slice(&(11u16).to_le_bytes());
+    desc_payload.extend_from_slice(b"worker_task");
+    // tag: ""
+    desc_payload.extend_from_slice(&(0u16).to_le_bytes());
+    // file: "worker.c"
+    desc_payload.extend_from_slice(&(8u16).to_le_bytes());
+    desc_payload.extend_from_slice(b"worker.c");
+
+    let thr_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_THREADS).unwrap();
+    chunks.insert(thr_idx, Chunk { ty: ps3dk_prof::model::CHUNK_DESCRIPTORS, payload: desc_payload });
+
+    // 2. Update CHUNK_THREADS to declare 2 threads: inc=1 and inc=2 (worker)
+    let thr_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_THREADS).unwrap();
+    let old_thr = chunks[thr_idx].payload.clone();
+    let mut thr_payload = Vec::new();
+    thr_payload.extend_from_slice(&2u32.to_le_bytes()); // count = 2
+    // Thread 1 (main) from original fixture (offset 4 onwards)
+    thr_payload.extend_from_slice(&old_thr[4..]);
+    // Thread 2 (worker)
+    thr_payload.extend_from_slice(&2u32.to_le_bytes()); // inc = 2
+    thr_payload.extend_from_slice(&1u32.to_le_bytes()); // slot = 1
+    thr_payload.extend_from_slice(&200u64.to_le_bytes()); // os_thread_id = 200
+    thr_payload.extend_from_slice(&(6u16).to_le_bytes()); // name len = 6
+    thr_payload.extend_from_slice(b"worker");
+    chunks[thr_idx].payload = thr_payload;
+
+    // 3. Create records for worker thread (inc = 2) without frame marks
+    let raw_rec = |kind: u8, depth: u8, a: u32, seq: u64, b: u64, c: u64| -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf[0] = kind;
+        buf[1] = depth;
+        buf[4..8].copy_from_slice(&a.to_le_bytes());
+        buf[8..16].copy_from_slice(&seq.to_le_bytes());
+        buf[16..24].copy_from_slice(&b.to_le_bytes());
+        buf[24..32].copy_from_slice(&c.to_le_bytes());
+        buf
+    };
+
+    let mut recs = Vec::new();
+    // Span 1: strictly before window -> DROPPED by timestamp
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 0, tb_start - 1000, 1));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 1, 0, 0));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 2, tb_start - 500, 1));
+
+    // Span 2: begins before tb_start, ends inside window -> CROSSES LEFT EDGE -> CLIPPED
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 3, tb_start - 200, 2));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 4, 0, 0));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 5, tb_start + 300, 2));
+
+    // Span 3: fully inside window [tb_start, tb_end] -> KEPT
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 6, tb_start + 400, 3));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 7, 0, 0));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 8, tb_start + 800, 3));
+
+    // Span 4: begins inside window, ends after tb_end -> CROSSES RIGHT EDGE -> CLIPPED
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 9, tb_end - 200, 4));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 10, 0, 0));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 11, tb_end + 500, 4));
+
+    // Span 5: strictly after window -> DROPPED by timestamp
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN, 0, 1, 12, tb_end + 600, 5));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_BEGIN_PARENT, 0, 0, 13, 0, 0));
+    recs.push(raw_rec(ps3dk_prof::model::KIND_END, 0, 1, 14, tb_end + 1000, 5));
+
+    let mut rec_payload = Vec::new();
+    rec_payload.extend_from_slice(&2u32.to_le_bytes()); // inc = 2
+    rec_payload.extend_from_slice(&(recs.len() as u32).to_le_bytes());
+    for r in &recs {
+        rec_payload.extend_from_slice(r);
+    }
+    let trl_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_TRAILER).unwrap();
+    chunks.insert(trl_idx, Chunk { ty: ps3dk_prof::model::CHUNK_RECORDS, payload: rec_payload });
+
+    // 4. Update CHUNK_TRAILER: n_final = 2, add final entry for inc = 2, set desc_count = 1
+    let trl_idx = chunks.iter().position(|c| c.ty == ps3dk_prof::model::CHUNK_TRAILER).unwrap();
+    let old_trl = &chunks[trl_idx].payload;
+    let mut new_trl = Vec::new();
+    new_trl.extend_from_slice(&old_trl[0..4]); // end_flags
+    new_trl.extend_from_slice(&2u32.to_le_bytes()); // n_final = 2
+    new_trl.extend_from_slice(&old_trl[8..8 + 56]); // fin 0 (main thread)
+    // Fin 1 (worker thread inc = 2)
+    new_trl.extend_from_slice(&2u32.to_le_bytes()); // inc = 2
+    new_trl.push(ps3dk_prof::model::STATE_RETIRED); // state = 1
+    new_trl.push(0); // limit_flags = 0
+    new_trl.extend_from_slice(&0u16.to_le_bytes()); // reserved = 0
+    new_trl.extend_from_slice(&15u64.to_le_bytes()); // produced = 15
+    new_trl.extend_from_slice(&15u64.to_le_bytes()); // written = 15
+    new_trl.extend_from_slice(&0u64.to_le_bytes()); // dropped = 0
+    new_trl.extend_from_slice(&0u64.to_le_bytes()); // refused = 0
+    new_trl.extend_from_slice(&0u64.to_le_bytes()); // regerr = 0
+    new_trl.extend_from_slice(&0u64.to_le_bytes()); // open_spans = 0
+    // Tail of trailer: 24 bytes (sink_error_count..unregistered_refusals)
+    let tail_start = 8 + 56;
+    new_trl.extend_from_slice(&old_trl[tail_start..tail_start + 24]);
+    let old_desc_count = u64::from_le_bytes(old_trl[tail_start + 24..tail_start + 32].try_into().unwrap());
+    new_trl.extend_from_slice(&(old_desc_count + 1).to_le_bytes()); // desc_count + 1
+    chunks[trl_idx].payload = new_trl;
+
+    // Serialize source capture with worker thread
+    let worker_src_bytes = serialize_chunks(flags, chunks);
+    let cap_src = ps3dk_prof::reader::read(&worker_src_bytes).expect("worker src capture must be valid");
+    assert_eq!(cap_src.lanes.len(), 2, "2 lanes in source");
+
+    let src_path = temp_prof("worker-src");
+    let exp_path = temp_prof("worker-exp");
+    std::fs::write(&src_path, &worker_src_bytes).unwrap();
+
+    let src_str = src_path.to_str().unwrap();
+    let exp_str = exp_path.to_str().unwrap();
+
+    // Export frame 50
+    let (code, _out, err) = run_cmd(&["export", "--frame", "50", src_str, exp_str]);
+    assert_eq!(code, Some(0), "export stderr: {err}");
+
+    // Round-trip report
+    let (c_rep, rep_out, _) = run_cmd(&["report", exp_str]);
+    assert_eq!(c_rep, Some(0));
+    assert!(rep_out.contains("2 zone(s) clipped at window edges"), "report: {rep_out}");
+
+    // Round-trip auto
+    let (c_auto, auto_out, _) = run_cmd(&["auto", exp_str]);
+    assert_eq!(c_auto, Some(0));
+    assert!(auto_out.contains("frame 1/50: UNKNOWN"), "auto: {auto_out}");
+
+    // Detailed verification of the exported capture
+    let exp_bytes = std::fs::read(&exp_path).unwrap();
+    let cap_exp = ps3dk_prof::reader::read(&exp_bytes).expect("exported capture must be valid");
+    let exp_meta = cap_exp.export.as_ref().expect("EXPORT chunk present");
+    assert_eq!(exp_meta.clipped_zones, 2);
+
+    let el2 = exp_meta.lanes.get(&2).expect("worker lane in EXPORT");
+    assert_eq!(el2.kept, 3, "Only Span 3 (3 records) kept on worker lane");
+    assert_eq!(el2.dropped_by_export, 12, "12 records dropped on worker lane");
+    assert_eq!(el2.first_seq, 6);
+    assert_eq!(el2.last_seq, 8);
+
+    let l2 = &cap_exp.lanes[&2];
+    assert_eq!(l2.written, 3);
+    assert_eq!(l2.gap_sum, 0);
+
+    let worker_spans: Vec<_> = cap_exp.spans.iter().filter(|s| s.incarnation == 2).collect();
+    assert_eq!(worker_spans.len(), 1);
+    assert_eq!(worker_spans[0].begin_seq, 6);
+
+    let _ = std::fs::remove_file(src_path);
+    let _ = std::fs::remove_file(exp_path);
+}
+
+#[test]
+fn export_fifo_events_with_writer_losses() {
+    let input_bytes = std::fs::read(fixture_path("console-r2")).unwrap();
+    let (flags, mut chunks) = parse_file_chunks(&input_bytes);
+
+    // Create 12 FIFO events across 2 wraps:
+    // Wrap 1 on frame 49: 6 events (seqs 1..=6)
+    // Gap: seqs 7..=10 lost by writer (writer loss = 4)
+    // Wrap 2 on frame 50: 6 events (seqs 11..=16)
+    // Total written = 12, dropped = 4, attempted = 16, last_attempt_seq = 16.
+    let mut evs = Vec::new();
+    for (i, kind) in [1u16, 2, 3, 4, 5, 6].iter().enumerate() {
+        let mut e = fifo_support::ev(1 + i as u64, 1, *kind, 4440890000000 + i as u64 * 1000, 4440890000500 + i as u64 * 1000);
+        e.frame = 49;
+        evs.push(e);
+    }
+    for (i, kind) in [1u16, 2, 3, 4, 5, 6].iter().enumerate() {
+        let mut e = fifo_support::ev(11 + i as u64, 2, *kind, 4440892300000 + i as u64 * 1000, 4440892300500 + i as u64 * 1000);
+        e.frame = 50;
+        evs.push(e);
+    }
+
+    let ev_chunk = fifo_support::events(&evs);
+    let st_idx = chunks.iter().rposition(|c| c.ty == ps3dk_prof::fifo::CHUNK_FIFO_STATUS).unwrap();
+    chunks.insert(st_idx, Chunk { ty: ev_chunk.ty, payload: ev_chunk.payload });
+
+    // Update the final CHUNK_FIFO_STATUS:
+    // flags = 1 (ST_FINAL), attempted = 16, written = 12, dropped = 4, last = 16, started = 2, completed = 2, open = 0
+    let new_st = fifo_support::St::new(1, 16, 12, 4, 16, 2, 2, 0);
+    let st_idx = chunks.iter().rposition(|c| c.ty == ps3dk_prof::fifo::CHUNK_FIFO_STATUS).unwrap();
+    chunks[st_idx].payload = new_st.chunk().payload;
+
+    // Serialize source capture with FIFO losses
+    let fifo_src_bytes = serialize_chunks(flags, chunks);
+    let cap_src = ps3dk_prof::reader::read(&fifo_src_bytes).expect("fifo src capture must be valid");
+    let fifo_src = cap_src.fifo.as_ref().expect("FIFO in source");
+    assert_eq!(fifo_src.parsed_events, 12);
+    let st_src = fifo_src.last_status.as_ref().expect("status in source");
+    assert_eq!(st_src.written, 12);
+    assert_eq!(st_src.last_attempt_seq, 16);
+    assert_eq!(st_src.dropped, 4);
+
+    let src_path = temp_prof("fifo-loss-src");
+    let exp_path = temp_prof("fifo-loss-exp");
+    std::fs::write(&src_path, &fifo_src_bytes).unwrap();
+
+    let src_str = src_path.to_str().unwrap();
+    let exp_str = exp_path.to_str().unwrap();
+
+    // Export frame 50
+    let (code, _out, err) = run_cmd(&["export", "--frame", "50", src_str, exp_str]);
+    assert_eq!(code, Some(0), "export stderr: {err}");
+
+    // Round-trip report
+    let (c_rep, rep_out, _) = run_cmd(&["report", exp_str]);
+    assert_eq!(c_rep, Some(0), "report failed: {rep_out}");
+    assert!(rep_out.contains("exported from "), "report: {rep_out}");
+
+    // Round-trip auto
+    let (c_auto, auto_out, _) = run_cmd(&["auto", exp_str]);
+    assert_eq!(c_auto, Some(0), "auto failed: {auto_out}");
+    assert!(auto_out.contains("frame 1/50: UNKNOWN"), "auto: {auto_out}");
+
+    // Round-trip fifo command
+    let (c_fifo, fifo_out, _) = run_cmd(&["fifo", exp_str]);
+    assert_eq!(c_fifo, Some(0), "fifo failed: {fifo_out}");
+
+    // Detailed verification of the exported capture
+    let exp_bytes = std::fs::read(&exp_path).unwrap();
+    let cap_exp = ps3dk_prof::reader::read(&exp_bytes).expect("exported capture must be valid");
+    let exp_meta = cap_exp.export.as_ref().expect("EXPORT chunk present");
+
+    assert_eq!(exp_meta.events_kept, 6);
+    assert_eq!(exp_meta.events_dropped, 6);
+    assert_eq!(exp_meta.source_fifo_last_attempt_seq, 16);
+
+    let fifo_exp = cap_exp.fifo.as_ref().expect("FIFO in export");
+    assert_eq!(fifo_exp.parsed_events, 6);
+    let st_exp = fifo_exp.last_status.as_ref().expect("status in export");
+    assert_eq!(st_exp.written, 12, "source written count preserved");
+    assert_eq!(st_exp.last_attempt_seq, 16, "source last_attempt_seq preserved");
+
+    let _ = std::fs::remove_file(src_path);
+    let _ = std::fs::remove_file(exp_path);
 }
