@@ -1211,6 +1211,8 @@ pub struct FrameView {
     pub visited: [u64; 3],
     pub observed: [u64; 3],
     pub excluded: [u64; 3],
+    /// Per kind (ARRAY, INDEX, CLEAR), the ten exclusion columns in EXCLUSIONS order.
+    pub exclusions: [[u64; 10]; 3],
     /// Retained operation records of this frame by kind (ARRAY, INDEX, CLEAR).
     pub records: [u64; 3],
     pub unsupported: u64,
@@ -1376,6 +1378,7 @@ pub fn analyze(cap: &Capture) -> Report {
             visited: [f.rows[0][0], f.rows[1][0], f.rows[2][0]],
             observed: [f.rows[0][1], f.rows[1][1], f.rows[2][1]],
             excluded: [f.excluded(0), f.excluded(1), f.excluded(2)],
+            exclusions: std::array::from_fn(|k| std::array::from_fn(|c| f.rows[k][2 + c])),
             unsupported: f.unsupported,
             records: if build {
                 built.get(&(f.owner, f.frame)).copied().unwrap_or_default()
@@ -1715,7 +1718,11 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     };
     let frames: Vec<serde_json::Value> = r.frames.iter().map(|f| (f, json!({
         "owner":f.owner,"frame":f.frame,"flags":f.flags,"tb_begin":f.tb_begin,"tb_end":f.tb_end,
-        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,"records":f.records,"unsupported":f.unsupported,
+        "visited":f.visited,"observed":f.observed,"excluded":f.excluded,
+        "exclusions":KINDS.iter().enumerate().map(|(k, kind)| ((*kind).to_string(),
+            serde_json::Value::Object(EXCLUSIONS.iter().enumerate().map(|(c, n)| ((*n).to_string(), json!(f.exclusions[k][c]))).collect())))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "records":f.records,"unsupported":f.unsupported,
         "ops_valid":f.ops_valid,"ops_incomplete":f.ops_incomplete,"rsx_span_raw":f.rsx_span_raw,
         "rsx_span_ppu":f.rsx_span_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"fifo_wait_min":f.fifo_wait,
         "rsx_frame_begin_raw":f.rsx_frame_raw.0,"rsx_frame_end_raw":f.rsx_frame_raw.1,

@@ -531,14 +531,25 @@ fn fixtures_from_the_host_runtime() {
 
 /// Captures written before the build-frame writer (CONFIG 15/11 and older) keep the exact JSON the previous
 /// reader printed: the 63/11 fields (segment_replay, built, recorded, segment_*) never appear for them. The goldens
-/// were produced by the reader at b451c6a5e.
+/// were produced by the reader at b451c6a5e; the per-reason exclusion columns added since are checked separately.
 #[test]
 fn auto_json_unchanged_for_older_captures() {
     let dir = format!("{}/tests/fixtures/auto", env!("CARGO_MANIFEST_DIR"));
     for name in ["segments", "d12-segments", "console-r2", "frames"] {
         let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
             .args(["auto", "--json", &format!("{dir}/{name}.prof")]).output().unwrap();
-        let got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        let mut got: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        // the only addition since b451c6a5e: per-kind exclusion-reason columns on every frame row
+        for fr in got["frames"].as_array_mut().unwrap() {
+            let ex = fr.as_object_mut().unwrap().remove("exclusions").expect("exclusions on every frame");
+            for kind in ["ARRAY", "INDEX", "CLEAR"] {
+                let cols = ex[kind].as_object().unwrap();
+                assert_eq!(cols.len(), 10, "{name}: ten reason columns");
+                let sum: u64 = cols.values().map(|v| v.as_u64().unwrap()).sum();
+                let k = ["ARRAY", "INDEX", "CLEAR"].iter().position(|x| *x == kind).unwrap();
+                assert_eq!(sum, fr["excluded"][k].as_u64().unwrap(), "{name}: columns sum to excluded");
+            }
+        }
         let want: serde_json::Value =
             serde_json::from_slice(&std::fs::read(format!("{dir}/{name}.base-json.json")).unwrap()).unwrap();
         assert_eq!(got, want, "{name}: JSON differs from the previous reader");
