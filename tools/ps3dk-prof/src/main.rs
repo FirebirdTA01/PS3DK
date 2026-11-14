@@ -27,6 +27,8 @@ const USAGE: &str = "usage:
                              every retained AUTO operation record in emission order: kind, flags,
                              reached-marker interval and gap (raw RSX ticks), args; per-kind sums with
                              --frame; 1 when the capture has no automatic observation
+  ps3dk-prof export --frame N | --frames A..B <in.prof> <out.prof>
+                             write one frame or a frame range of a capture as a standalone .prof
   ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
                              phase 1 / phase 2 / outer elapsed bounds, OPEN and lost endpoints, entered
                              and completed counts; never GPU busy or idle time (exit status as check,
@@ -583,8 +585,109 @@ fn func_paths(rest: &[String]) -> ExitCode {
     }
 }
 
+fn export(args: &[String]) -> ExitCode {
+    use std::ops::RangeInclusive;
+    let mut frame_range: Option<RangeInclusive<u64>> = None;
+    let mut in_path: Option<&str> = None;
+    let mut out_path: Option<&str> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--frame" => {
+                if frame_range.is_some() {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                let Ok(n) = v.parse::<u64>() else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                frame_range = Some(n..=n);
+                i += 1;
+            }
+            "--frames" => {
+                if frame_range.is_some() {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                let parsed = if let Some((a, b)) = v.split_once("..=") {
+                    match (a.parse::<u64>(), b.parse::<u64>()) {
+                        (Ok(start), Ok(end)) if start <= end => Some(start..=end),
+                        _ => None,
+                    }
+                } else if let Some((a, b)) = v.split_once("..") {
+                    match (a.parse::<u64>(), b.parse::<u64>()) {
+                        (Ok(start), Ok(end)) if start <= end => Some(start..=end),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let Some(range) = parsed else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                frame_range = Some(range);
+                i += 1;
+            }
+            arg if !arg.starts_with('-') => {
+                if in_path.is_none() {
+                    in_path = Some(arg);
+                } else if out_path.is_none() {
+                    out_path = Some(arg);
+                } else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                }
+            }
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+        }
+        i += 1;
+    }
+
+    let (Some(range), Some(input), Some(output)) = (frame_range, in_path, out_path) else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+
+    match ps3dk_prof::export_capture(input, output, range) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(ps3dk_prof::ExportError::FrameNotFound(f)) => {
+            eprintln!("ps3dk-prof: export: frame {f} is not in the capture");
+            ExitCode::from(1)
+        }
+        Err(ps3dk_prof::ExportError::Malformed(why)) => {
+            eprintln!("ps3dk-prof: {input}: MALFORMED: {why}");
+            ExitCode::from(2)
+        }
+        Err(ps3dk_prof::ExportError::Io(e)) => {
+            eprintln!("ps3dk-prof: {e}");
+            ExitCode::from(3)
+        }
+        Err(ps3dk_prof::ExportError::Usage(msg)) => {
+            eprintln!("ps3dk-prof: {msg}");
+            ExitCode::from(3)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|c| c == "export") {
+        return export(&args[1..]);
+    }
     if args.first().is_some_and(|c| c == "paths") && args.iter().any(|a| a == "--functions") {
         return func_paths(&args[1..]);
     }
