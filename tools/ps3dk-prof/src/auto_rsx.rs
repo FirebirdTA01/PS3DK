@@ -44,6 +44,12 @@ pub const KIND_INDEX: u16 = 2;
 pub const KIND_CLEAR: u16 = 3;
 /// D2: a frame boundary mark (args[0] 1 = frame begin, 2 = frame end); only with CONFIG kind mask bit 3.
 pub const KIND_FRAME: u16 = 4;
+/// A whole cellGcmSegmentCall bracketed by one report pair (CONFIG kind mask bit 128 CALL_BRACKET): written for a
+/// build whose draws were not all timed.  TOKEN is the calling frame; args[0] the build's covered draws, args[1] the
+/// draws this CALL executed without a record of their own (counted into that frame's segment_unrepresented), args[2]
+/// the segment ordinal, args[3] the call ordinal, args[4] how many of args[1] were refused while building with an
+/// untimed-only exclusion counted in the build-tail frame (BUILD_KNOWN exactly when args[4] is nonzero).
+pub const KIND_CALL: u16 = 5;
 pub const FRAME_BEGIN: u32 = 1;
 pub const FRAME_END: u32 = 2;
 /// CONFIG masks: the first writer (no FRAME, CALL unsupported) and the D1/D2 writer (FRAME, CALL segments).
@@ -62,6 +68,8 @@ pub const MASKS_BUILD: (u32, u32) = (63, 11);
 /// saw the label below 2k-1 (or the issue time), tb_after the first that saw it at or above 2k; label_first and
 /// label_second carry those observed values.
 pub const MASKS_BRACKET: (u32, u32) = (127, 11);
+/// The whole-CALL writer: kind mask bit 128 CALL_BRACKET on top of 127/11 (OPS kind 5 CALL, 144-byte records).
+pub const MASKS_CALL: (u32, u32) = (255, 11);
 /// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
 pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
@@ -217,6 +225,10 @@ impl Attached {
     /// Clock anchors are bracketed by two label values per anchor (CONFIG 127/11).
     pub fn clock_bracket(&self) -> bool {
         self.kind_mask & 64 != 0
+    }
+    /// Whole-CALL brackets (OPS kind 5) for builds whose draws were not all timed (CONFIG 255/11).
+    pub fn call_bracket(&self) -> bool {
+        self.kind_mask & 128 != 0
     }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
@@ -538,7 +550,7 @@ impl Reader {
                     return bad(r, "AUTO_CONFIG domain, epoch, owner and generation must be nonzero");
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
-                    && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET
+                    && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET && (kinds, forms) != MASKS_CALL
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -555,7 +567,8 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
-                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET { OP_BYTES_BUILD } else { OP_BYTES };
+                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET
+                    || (kinds, forms) == MASKS_CALL { OP_BYTES_BUILD } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
@@ -671,7 +684,8 @@ impl Reader {
                 return bad(r, format!("{at}: build tail flags {build_flags:#x} reserved {build_reserved}"));
             }
             let build_known = build_flags & OP_BUILD_KNOWN != 0;
-            if !segment_op && (build_known || build_owner != 0 || build_frame != 0) {
+            let call_kind = kind == KIND_CALL && cfg.call_bracket();
+            if !segment_op && !call_kind && (build_known || build_owner != 0 || build_frame != 0) {
                 return bad(r, format!("{at}: build tail on a record not built in a segment"));
             }
             if build_known && build_owner != cfg.owner {
@@ -685,8 +699,14 @@ impl Reader {
                 return bad(r, format!("{at}: build frame {build_frame} after its CALL frame {frame}"));
             }
             let frame_kind = kind == KIND_FRAME && cfg.frames_marked();
-            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind {
+            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind && !call_kind {
                 return bad(r, format!("{at}: kind {kind}"));
+            }
+            if call_kind && (segment_op || flags & OP_TOKEN == 0 || args[0] == 0 || args[1] > args[0] || args[2] == 0
+                || args[3] == 0 || args[4] > args[1] || args[5] | args[6] != 0 || build_known != (args[4] != 0))
+            {
+                return bad(r, format!("{at}: CALL bracket needs a token, no SEGMENT flag, covered >= untimed >= \
+                    build-excluded, segment and call ordinals, and a build tail exactly with build-excluded draws"));
             }
             if frame_kind && (segment_op || flags & OP_TOKEN == 0 || !(FRAME_BEGIN..=FRAME_END).contains(&args[0])
                 || args[1..].iter().any(|&a| a != 0))
@@ -727,6 +747,7 @@ impl Reader {
                 KIND_ARRAY => &[1, 2, 5],
                 KIND_INDEX => &[2, 3, 4, 5],
                 KIND_FRAME => &[],
+                KIND_CALL => &[1, 2, 3, 4],
                 _ => &[6],
             };
             if (1..7).any(|j| !used.contains(&j) && args[j] != 0) {
@@ -1259,6 +1280,11 @@ pub struct FrameView {
     pub rsx_span_raw: Option<u64>,
     /// The same span on the PPU clock through the qualified map: [lo, hi] ticks.
     pub rsx_span_ppu: Option<(u64, u64)>,
+    /// 127/11 and later: RSX busy time, the union of the execution population's timed intervals (its records and,
+    /// with 255/11, its whole-CALL brackets; overlaps merged), raw ticks; gaps between them are not counted.
+    pub rsx_busy_raw: Option<u64>,
+    /// The same on the PPU clock through the qualified map: [lo, hi] ticks.
+    pub rsx_busy_ppu: Option<(u64, u64)>,
     /// PPU ticks the owner provably waited in complete FIFO wrap phases tagged with this frame (lower bound).
     pub fifo_wait: Option<u64>,
     /// D2: the raw RSX timestamps of the frame's begin and end marks (raw-valid marks only).
@@ -1278,6 +1304,8 @@ pub struct FrameView {
     pub recorded: u64,
     pub segment_imports: u64,
     pub segment_unrepresented: u32,
+    /// 255/11: whole-CALL brackets with valid timestamps recorded for this frame (in its span).
+    pub call_brackets: u64,
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
@@ -1418,9 +1446,23 @@ pub fn analyze(cap: &Capture) -> Report {
     // the capture shows no invalid-evidence exclusion anywhere and no segment quarantine; otherwise they refuse.
     let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
         && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
+    // 255/11: whole-CALL brackets with valid timestamps.  Each one times every draw its CALL executed, so the draws it
+    // names as without a record of their own are not untimed in the calling frame, and those refused while building
+    // are not untimed in their build frame (they ran inside the bracket, not there).
+    let bracket_ok = |o: &Op| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0;
+    let mut call_built: BTreeMap<(u32, u64), u64> = BTreeMap::new();
+    for o in inv.ops.iter().filter(|o| bracket_ok(o)) {
+        if let Some(b) = o.build {
+            let e = call_built.entry(b).or_default();
+            *e = e.saturating_add(u64::from(o.args[4]));
+        }
+    }
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
+        let calls: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| bracket_ok(o)).collect();
+        let call_unrep: u64 = calls.iter().fold(0u64, |a, o| a.saturating_add(u64::from(o.args[1])));
+        let call_excl = call_built.get(&(f.owner, f.frame)).copied().unwrap_or(0);
         let mark = |role: u32| inv.ops.iter().filter(mine)
             .find(|o| o.kind == KIND_FRAME && o.args[0] == role && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0);
         let rsx_frame_raw = (mark(FRAME_BEGIN).map(|o| o.raw_begin), mark(FRAME_END).map(|o| o.raw_end));
@@ -1444,6 +1486,8 @@ pub fn analyze(cap: &Capture) -> Report {
             ops_incomplete: ops.iter().filter(|o| !o.raw_valid()).count() as u64,
             rsx_span_raw: None,
             rsx_span_ppu: None,
+            rsx_busy_raw: None,
+            rsx_busy_ppu: None,
             fifo_wait: None,
             rsx_frame_raw,
             rsx_frame_ppu: None,
@@ -1456,6 +1500,7 @@ pub fn analyze(cap: &Capture) -> Report {
                 0
             },
             segment_unrepresented: f.segment_unrepresented,
+            call_brackets: calls.len() as u64,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
@@ -1470,13 +1515,31 @@ pub fn analyze(cap: &Capture) -> Report {
         // Checked aggregation: per-kind rows are each valid on the wire, but their cross-kind totals may not fit.
         let observed: Option<u64> = v.observed.iter().try_fold(0u64, |a, &b| a.checked_add(b));
         let excluded: Option<u64> = (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?));
-        if !ops.is_empty() && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
-            let lo = ops.iter().map(|o| o.raw_begin).min().unwrap();
-            let hi = ops.iter().map(|o| o.raw_end).max().unwrap();
+        // the execution population's span: its records and, with 255/11, its whole-CALL brackets
+        let timed_set: Vec<&Op> = ops.iter().chain(calls.iter()).copied().collect();
+        if !timed_set.is_empty() && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
+            let lo = timed_set.iter().map(|o| o.raw_begin).min().unwrap();
+            let hi = timed_set.iter().map(|o| o.raw_end).max().unwrap();
             v.rsx_span_raw = Some(hi - lo);
+            let busy = bounded_rule.then(|| {
+                let mut iv: Vec<(u64, u64)> = timed_set.iter().map(|o| (o.raw_begin, o.raw_end.max(o.raw_begin))).collect();
+                iv.sort_unstable();
+                let (mut sum, mut cur): (u64, Option<(u64, u64)>) = (0, None);
+                for (b, e) in iv {
+                    cur = match cur {
+                        Some((cb, ce)) if b <= ce => Some((cb, ce.max(e))),
+                        Some((cb, ce)) => { sum = sum.saturating_add(ce - cb); Some((b, e)) }
+                        None => Some((b, e)),
+                    };
+                }
+                if let Some((cb, ce)) = cur { sum = sum.saturating_add(ce - cb); }
+                sum
+            });
+            v.rsx_busy_raw = busy;
             if let MapState::Qualified(m) = &map {
                 if i128::from(lo) >= m.fmin && i128::from(hi) <= m.fmax {
                     v.rsx_span_ppu = Some((sat(&floor_mul(hi - lo, &m.slope_lo)), sat(&ceil_mul(hi - lo, &m.slope_hi))));
+                    v.rsx_busy_ppu = busy.map(|b| (sat(&floor_mul(b, &m.slope_lo)), sat(&ceil_mul(b, &m.slope_hi))));
                 }
             }
         }
@@ -1527,6 +1590,11 @@ pub fn analyze(cap: &Capture) -> Report {
             } else {
                 0
             };
+            if call_excl > untimed {
+                return Err(format!("CALL brackets name {call_excl} draw(s) refused while building in this frame, \
+                    above its {untimed} untimed exclusion(s)"));
+            }
+            untimed -= call_excl;
             if f.unsupported != 0 {
                 return Err(format!("{} visit(s) outside the observed population (segment or private buffer)",
                     f.unsupported));
@@ -1541,11 +1609,16 @@ pub fn analyze(cap: &Capture) -> Report {
             // 63/11: every segment draw a CALL executed here has a record carrying this frame's token.
             // With 127/11 those draws ran between this frame's marks without a timed record: untimed, so they fall
             // under the bounded rule (a replay already returned above, through the sticky status).
-            if v.segment_unrepresented != 0 && bounded_rule && provenance_clean {
-                untimed = untimed.saturating_add(u64::from(v.segment_unrepresented));
-            } else if v.segment_unrepresented != 0 {
+            if call_unrep > u64::from(v.segment_unrepresented) {
+                return Err(format!("CALL brackets name {call_unrep} draw(s) without a record, above the row's {} \
+                    unrepresented", v.segment_unrepresented));
+            }
+            let unrepresented = u64::from(v.segment_unrepresented) - call_unrep;
+            if unrepresented != 0 && bounded_rule && provenance_clean {
+                untimed = untimed.saturating_add(unrepresented);
+            } else if unrepresented != 0 {
                 return Err(format!("at least {} segment draw(s) executed in this frame have no record (a CALL of an \
-                    untracked, replayed, refused or partly untimed segment)", v.segment_unrepresented));
+                    untracked, replayed, refused or partly untimed segment)", unrepresented));
             }
             // Reconcile the row's population with its records kind by kind: equal totals over different kinds are
             // not the population the row describes.  With 63/11 that population is what this frame BUILT.
@@ -1592,7 +1665,7 @@ pub fn analyze(cap: &Capture) -> Report {
             }
             // The EXECUTION population (records recorded here) decides emptiness and span; with 63/11 the row's
             // observed counts are what this frame built, which a CALL-only or build-only frame does not match.
-            let timed = match (ops.is_empty(), v.rsx_span_ppu) {
+            let timed = match (timed_set.is_empty(), v.rsx_span_ppu) {
                 (true, _) => (0, 0),
                 (false, Some(s)) => s,
                 (false, None) => return Err("RSX span outside the map's interpolation support".into()),
@@ -1754,6 +1827,13 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
                 builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
         }
+        if f.call_brackets != 0 {
+            writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
+        }
+        if let Some(b) = f.rsx_busy_raw {
+            writeln!(out, "  RSX busy (timed intervals, overlaps merged): raw {b}, PPU {}",
+                f.rsx_busy_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")))?;
+        }
     }
     Ok(())
 }
@@ -1836,6 +1916,14 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["segment_unrepresented"] = json!(f.segment_unrepresented);
             v["segment_abandoned"] = json!(f.segment_abandoned);
         }
+        if f.call_brackets != 0 {
+            v["call_brackets"] = json!(f.call_brackets);
+        }
+        if let Some(b) = f.rsx_busy_raw {
+            // 127/11 and later only, so older captures keep their exact JSON
+            v["rsx_busy_raw"] = json!(b);
+            v["rsx_busy_ppu"] = json!(f.rsx_busy_ppu.map(|(a, b)| json!({"lo":a,"hi":b})));
+        }
         if let Some((lo, hi)) = f.rsx_busy_bounds {
             // only on frames decided on bounds, so fully timed frames keep their exact JSON
             v["rsx_busy_bounds"] = json!({"lo": lo, "hi": hi});
@@ -1898,7 +1986,7 @@ pub fn op_rows(cap: &Capture, frame: Option<u64>) -> Vec<OpRow> {
     let valid = |o: &Op| o.raw_valid() && o.raw_end >= o.raw_begin;
     let mut by_token: BTreeMap<(u32, u64), Vec<usize>> = BTreeMap::new();
     for (i, o) in ops.iter().enumerate() {
-        if let (true, Some(t)) = (valid(o), o.token()) { by_token.entry(t).or_default().push(i); }
+        if let (true, Some(t), false) = (valid(o), o.token(), o.kind == KIND_CALL) { by_token.entry(t).or_default().push(i); }
     }
     let mut gaps: Vec<Option<u64>> = vec![None; ops.len()];
     for idx in by_token.values_mut() {
@@ -1921,6 +2009,7 @@ fn op_kind_name(kind: u16) -> &'static str {
         KIND_INDEX => "INDEX",
         KIND_CLEAR => "CLEAR",
         KIND_FRAME => "FRAME",
+        KIND_CALL => "CALL",
         _ => "KIND?",
     }
 }

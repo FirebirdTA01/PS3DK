@@ -36,15 +36,27 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * segment API are covered), and CLOCK_BRACKET=64 (a clock anchor k releases the
  * label at 2k-1 before its timestamp and 2k after it; the drainer brackets the
  * timestamp between the last poll below 2k-1 and the first at or above 2k:
- * label_first/label_second carry those observed values). A reader that knows
- * only 7/15, 15/11, 31/11 or 63/11 refuses 127/11 at CONFIG. */
-enum { AUTO_KIND_MASK=127, AUTO_FORM_MASK=11 };
+ * label_first/label_second carry those observed values), and CALL_BRACKET=128
+ * (OPS kind 5 CALL: one report pair around a whole cellGcmSegmentCall whose
+ * build was not fully timed, see below). A reader that knows only 7/15, 15/11,
+ * 31/11, 63/11 or 127/11 refuses 255/11 at CONFIG. */
+enum { AUTO_KIND_MASK=255, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
  * SEGMENT marks an operation built inside a CALL segment (u32@92 segment
  * ordinal, u32@116 call ordinal, both nonzero). */
 enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=64 };
+/* OPS kind 5 CALL (CALL_BRACKET): the begin report precedes a CALL in the ring,
+ * the end report follows its retirement label, and the operation-label release
+ * of that CALL completes it with the build's records. TOKEN is the calling
+ * frame; not SEGMENT; args[0] the build's covered draws, args[1] those this
+ * CALL executed without a record of their own (counted into that frame's
+ * segment_unrepresented), args[2] the segment ordinal, args[3] the call
+ * ordinal, args[4] how many of args[1] were refused while building with an
+ * untimed-only exclusion counted in the build-tail frame (BUILD_KNOWN only when
+ * args[4] is nonzero; the tail is zero otherwise), args[5..6] zero. */
+enum { AUTO_KIND_CALL=5 };
 /* OPS build tail (SEGMENT records only, zero otherwise): u64@128 build frame,
  * u32@136 build owner, u16@140 build flags (BUILD_KNOWN=1: the draw was
  * admitted while a coverage frame was open; without it owner and frame are

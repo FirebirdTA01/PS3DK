@@ -140,6 +140,10 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     }
     (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
                           o->metadata_records,(o->report_count-16)/2);
+    {
+        uint32_t pairs=(o->report_count-16)/2;
+        next->operations.reserve=pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u;
+    }
     for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
     next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
     gpp_bind(&next->operations_device,&next->operations_port);
@@ -393,6 +397,7 @@ static void history_add(uint32_t *v,uint32_t n)
 static void segment_new_build(auto_segment *s)
 {
     s->visits=s->refused=s->called=s->reports=0;
+    s->untimed_refused=s->other_refused=s->untimed_mixed=0;s->untimed_frame=0;
 }
 
 /* Built operations that will never complete through our label: commit each as
@@ -546,6 +551,12 @@ static void segment_report(gpp_ctx *ctx,uint32_t report)
  * two reports in the segment (four words, current room only, no callback). The
  * operation-label release that completes it comes after the CALL, in ring
  * order. Returns the ticket (nonzero) or 0 after counting the exclusion. */
+/* A refused segment draw: counted like any exclusion; the column is kept for the build's refusal history. */
+static uint32_t seg_refuse(auto_capture *a,uint32_t kind,uint32_t column)
+{
+    a->admit_column=auto_frames_count(&a->coverage,kind,column) ? column:0;
+    return 0;
+}
 static uint32_t segment_admit(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const ps3tc_auto_call *call,
                               uint64_t caller)
 {
@@ -557,24 +568,23 @@ static uint32_t segment_admit(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
     if(!auto_frames_count(&a->coverage,call->kind,0)) increment(a,&a->unassociated);
     increment(a,&a->segment_visits);
     if(!auto_config_can_admit(&configuration) || LD_ACQ(&g_prof->stop_latch)) {
-        (void)auto_frames_count(&a->coverage,call->kind,LD_ACQ(&g_prof->stop_latch) ? 7:9);return 0;
+        return seg_refuse(a,call->kind,LD_ACQ(&g_prof->stop_latch) ? 7:9);
     }
-    if(a->pool_tail_column) {(void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0;}
+    if(a->pool_tail_column) {return seg_refuse(a,call->kind,a->pool_tail_column);}
     words=auto_command_words(call);
-    if(!words) {(void)auto_frames_count(&a->coverage,call->kind,6);return 0;}
+    if(!words) {return seg_refuse(a,call->kind,6);}
     if(!cur || (cur&3u) || cur>end || words>UINT32_MAX-4u || words+4u>(uint64_t)(end-cur)/4u) {
-        (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
+        return seg_refuse(a,call->kind,2);
     }
     if(a->segment_free==AUTO_SEGMENT_NONE) {
-        a->pool_tail_column=4;(void)auto_frames_count(&a->coverage,call->kind,4);return 0;
+        a->pool_tail_column=4;return seg_refuse(a,call->kind,4);
     }
-    if(!initialize_device(a)) {(void)auto_frames_count(&a->coverage,call->kind,10);return 0;}
+    if(!initialize_device(a)) {return seg_refuse(a,call->kind,10);}
     pair=auto_queue_take_pair(&a->operations);
     if(pair<0) {
         uint32_t column=a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:3;
         if(column==3) a->pool_tail_column=3;
-        (void)auto_frames_count(&a->coverage,call->kind,column);
-        return 0;
+        return seg_refuse(a,call->kind,column);
     }
     a->segment_pending=pool_take(a);
     b=&a->segment_pool[a->segment_pending];memset(b,0,sizeof *b);b->pair=(uint32_t)pair;b->next=AUTO_SEGMENT_NONE;
@@ -609,8 +619,16 @@ static uint32_t segment_begin(auto_capture *a,auto_segment *s,gpp_ctx *ctx,const
 {
     uint32_t ticket;
     history_add(&s->visits,1);
+    a->admit_column=0;
     ticket=segment_admit(a,s,ctx,call,caller);
-    if(!ticket) history_add(&s->refused,1);
+    if(!ticket) {
+        history_add(&s->refused,1);
+        /* untimed-only exclusions are columns 2..6 (room, reports, metadata, reentry, unsupported arguments) */
+        if(a->admit_column>=2 && a->admit_column<=6) {
+            if(s->untimed_refused && s->untimed_frame!=a->coverage.live.frame) s->untimed_mixed=1;
+            s->untimed_frame=a->coverage.live.frame;history_add(&s->untimed_refused,1);
+        } else history_add(&s->other_refused,1);
+    }
     return ticket;
 }
 
@@ -652,8 +670,8 @@ static void segment_end(auto_capture *a,gpp_ctx *ctx)
         ST_REL(&a->segment_quarantine,1u);
         (void)auto_frames_count(&a->coverage,b->op.kind,11);
         pool_give(a,slot);
-        history_add(&s->refused,1);
-        if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);}
+        history_add(&s->refused,1);history_add(&s->other_refused,1);
+        if(d && d!=s) {history_add(&d->visits,1);history_add(&d->refused,1);history_add(&d->other_refused,1);}
         return;
     }
     segment_report(ctx,b->op.report_end);
@@ -661,6 +679,40 @@ static void segment_end(auto_capture *a,gpp_ctx *ctx)
     if(b->op.tb_after<b->op.tb_before) b->op.flags|=8;
     (void)auto_frames_count(&a->coverage,b->op.kind,1);
     segment_append(a,s,slot);
+}
+
+/* cellGcmSegmentCall (observed build), before its CALL: a build that is not fully represented by its own records
+ * (some covered draw of it was refused) gets a whole-CALL bracket instead, one report pair from the reserve kept for
+ * them: the begin timestamp report here, in the ring before the CALL, and the end report after the retirement label
+ * (ps3dk_prof__auto_segment_call), completed by the same operation-label release as the build's records. Only the
+ * first CALL of a build, on the attached ring, inside a coverage frame and outside any draw bracket. Call reserved
+ * the 2 words here together with its own; nothing here allocates, flushes or calls a callback. */
+void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring,struct _gcmCtxData *segment)
+{
+    auto_capture *a;
+    auto_segment *s;
+    const auto_wire_config *c;
+    gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
+    uintptr_t cur,end;
+    int pair;
+    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;
+    c=auto_config_read(&configuration);
+    cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
+    /* room: this report (2), the CALL and its label (5), the end report (2) and the release (4) */
+    if(ctx!=a->context || !c || c->reason || a->active || a->segment_active || !a->coverage.active ||
+       a->call_ordinal==UINT32_MAX || LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
+       (uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end || (cur&3u) || cur>end || end-cur<52 ||
+       !initialize_device(a) || (pair=auto_queue_take_reserved_pair(&a->operations))<0) {
+        increment(a,&a->call_brackets_refused);return;
+    }
+    s->bracket=1;s->bracket_pair=(uint32_t)pair;
+    a->operations_device.write_timer(a->operations_device.ctx,c->report_first+16+(uint32_t)pair*2,PRG_POISON);
+    a->operations_device.write_timer(a->operations_device.ctx,c->report_first+17+(uint32_t)pair*2,PRG_POISON);
+    a->operations_device.sync(a->operations_device.ctx);
+    s->bracket_tb=observation_tb();
+    segment_report(ctx,c->report_first+16+(uint32_t)pair*2);
+    increment(a,&a->call_brackets);
 }
 
 /* cellGcmSegmentCall (observed build), after its CALL and retirement label.
@@ -676,6 +728,7 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
     gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
     uint32_t share=0,call,i;
     int meta_short;
+    uint32_t bracket;
     uintptr_t cur,end;
     uint32_t lost=0;
     if(!ring || !segment || !p_ready() || !(a=owner_capture(NULL,1))) return;
@@ -702,22 +755,25 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         (void)auto_frames_unrepresented(&a->coverage,s->visits);return;
     }
     s->called=1;
-    if(!s->count) {(void)auto_frames_unrepresented(&a->coverage,s->refused);return;}
+    bracket=s->bracket;s->bracket=0;
+    if(!s->count && !bracket) {(void)auto_frames_unrepresented(&a->coverage,s->refused);return;}
     c=auto_config_read(&configuration);
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
-    meta_short=a->operations.capacity-(uint32_t)(a->operations.write_idx-LD_ACQ(&a->operations.read_idx))<s->count;
+    meta_short=a->operations.capacity-(uint32_t)(a->operations.write_idx-LD_ACQ(&a->operations.read_idx))<
+               s->count+(bracket ? 1u:0u);
     if(ctx!=a->context || !c || c->reason || a->active || a->call_ordinal==UINT32_MAX ||
        LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
-       (cur&3u) || cur>end || end-cur<16 || meta_short) {
+       (cur&3u) || cur>end || end-cur<(bracket ? 24u:16u) || meta_short) {
         /* Metadata exhaustion latches the frame tail like a refused admission does: later covered draws of this
-         * frame are not timed either. */
+         * frame are not timed either. A bracket's begin report is already in the ring: its pair is quarantined. */
         if(meta_short) a->pool_tail_column=4;
+        if(bracket) {auto_queue_quarantine_pair(&a->operations,s->bracket_pair);ST_REL(&a->segment_quarantine,1u);}
         lost=s->count;history_add(&lost,s->refused);
         (void)auto_frames_unrepresented(&a->coverage,lost);
         segment_drop(a,s);return;
     }
     call=++a->call_ordinal;
-    for(i=s->head;i!=AUTO_SEGMENT_NONE;i=a->segment_pool[i].next) {
+    for(i=s->count ? s->head:AUTO_SEGMENT_NONE;i!=AUTO_SEGMENT_NONE;i=a->segment_pool[i].next) {
         auto_segment_op *b=&a->segment_pool[i];
         auto_queue_entry *e=auto_queue_claim_held(&a->operations,b->pair,share);
         uint64_t id;
@@ -736,6 +792,39 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
     segment_release(a,s);
     history_add(&lost,s->refused);
     (void)auto_frames_unrepresented(&a->coverage,lost);
+    if(bracket) {
+        /* The whole CALL: its end report after the retirement label, then one CALL record (kind 5) completed by
+         * the release below with the build's records. args: draws of the build, draws of this CALL without a
+         * record of their own (as counted into segment_unrepresented just above), segment and call ordinals, and
+         * those refused with an untimed-only exclusion in one coverage frame (the build tail names it). */
+        const uint32_t report=c->report_first+16+s->bracket_pair*2;
+        auto_queue_entry *e;
+        segment_report(ctx,report+1);
+        e=a->coverage.active ? auto_queue_claim_held(&a->operations,s->bracket_pair,share):NULL;
+        if(!e) {
+            auto_queue_quarantine_pair(&a->operations,s->bracket_pair);ST_REL(&a->segment_quarantine,1u);
+        } else {
+            uint64_t id=e->op.id;
+            uint32_t sb=e->op.serial_begin,se=e->op.serial_end;
+            memset(&e->op,0,sizeof e->op);
+            e->op.id=id;e->op.serial_begin=sb;e->op.serial_end=se;
+            e->op.kind=AUTO_KIND_CALL;e->op.generation=c->generation;
+            e->op.flags=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;
+            e->op.args[0]=s->visits;e->op.args[1]=lost;e->op.args[2]=s->ordinal;e->op.args[3]=call;
+            if(s->untimed_refused && !s->untimed_mixed && !s->other_refused && s->untimed_refused<=lost &&
+               s->untimed_frame<=a->coverage.live.frame) {
+                e->op.args[4]=s->untimed_refused;
+                e->op.build_flags=AUTO_OP_BUILD_KNOWN;e->op.build_owner=a->owner_incarnation;
+                e->op.build_frame=s->untimed_frame;
+            }
+            e->op.report_begin=report;e->op.report_end=report+1;
+            e->op.tb_before=s->bracket_tb;e->op.tb_after=observation_tb();
+            if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
+            ST_REL(&a->admitted,id);
+            auto_queue_commit(&a->operations);
+            share=se;
+        }
+    }
     if(share) {
         uint32_t *w=(uint32_t *)(void *)ctx->current;
         w[0]=(1u<<18)|0x1d6cu;w[1]=c->op_label*16u;   /* SEMAPHORE_OFFSET */
@@ -1162,6 +1251,12 @@ void ps3dk_prof__auto_test_unrepresented(uint32_t out[3])
 void ps3dk_prof__auto_test_unrepresented_preset(uint32_t v)
 {
     if(capture && capture->coverage.active) capture->coverage.live.segment_unrepresented=v;
+}
+/* Owner thread only: whole-CALL brackets begun, and CALLs that needed one and got none. */
+void ps3dk_prof__auto_test_call_brackets(uint64_t out[2])
+{
+    const auto_capture *a=capture;
+    out[0]=a ? a->call_brackets:0;out[1]=a ? a->call_brackets_refused:0;
 }
 /* Owner thread only: the frame's capacity-exhaustion latch (0, or the exclusion column it applies). */
 uint32_t ps3dk_prof__auto_test_pool_tail(void)

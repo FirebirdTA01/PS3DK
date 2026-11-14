@@ -29,6 +29,11 @@ void ps3dk_prof__auto_segment_close(struct _gcmCtxData *);
  * cellGcmSegmentCall reserved those 4 words together with the CALL and the
  * label, so the hook always has them; a BUSY Call never reaches the hook. */
 void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
+/* cellGcmSegmentCall in the observed build, after its room check and before the
+ * CALL: the observer may write a 2-word timestamp report (the begin of a
+ * whole-CALL bracket, ended by ps3dk_prof__auto_segment_call). Call reserved
+ * those words too, with the 2 of the bracket's end report. */
+void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
 void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key, const void *buffer, uint32_t size);
 void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key);
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),

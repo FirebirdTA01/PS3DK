@@ -13,6 +13,7 @@
 #define auto_queue_take_pair ps3dk_prof__auto_queue_take_pair
 #define auto_queue_quarantine_pair ps3dk_prof__auto_queue_quarantine_pair
 #define auto_queue_claim_held ps3dk_prof__auto_queue_claim_held
+#define auto_queue_take_reserved_pair ps3dk_prof__auto_queue_take_reserved_pair
 
 enum { AUTO_PAIRS_MAX=504, AUTO_METADATA_MAX=1024 };
 enum { AUTO_QUEUE_NONE, AUTO_QUEUE_STOPPED, AUTO_QUEUE_REENTRY,
@@ -28,6 +29,10 @@ typedef struct auto_queue {
     uint64_t write_idx, read_idx; /* owner release / consumer release respectively */
     uint32_t stopped;
     uint32_t pair_state[AUTO_PAIRS_MAX]; /* 0 free, 1 owned, 2 quarantined */
+    /* free pairs (state 0): the owner takes, the consumer's ack returns; a lower bound for the owner */
+    uint32_t free_pairs;
+    /* owner only: pairs that claim and take_pair leave free for take_reserved_pair (whole-CALL brackets) */
+    uint32_t reserve;
     /* owner only */
     uint32_t claimed, pair_cursor, next_serial, refusal;
     uint64_t next_id;
@@ -63,4 +68,7 @@ void auto_queue_quarantine_pair(auto_queue *, uint32_t pair);
  * is the serial_end of the previous record of the same CALL, which completes
  * every record of that call at once. */
 auto_queue_entry *auto_queue_claim_held(auto_queue *, uint32_t pair, uint32_t share);
+/* Owner only: take_pair that may use the reserve (claim and take_pair refuse REPORTS once only `reserve` pairs are
+ * free). The reserve is 0 after init. */
+int auto_queue_take_reserved_pair(auto_queue *);
 #endif

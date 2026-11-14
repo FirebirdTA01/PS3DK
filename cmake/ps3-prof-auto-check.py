@@ -56,6 +56,7 @@ REQUIRED = {
     'ps3dk_prof__auto_segment_open': (ARCHIVES[0], 'auto_runtime.o'),
     'ps3dk_prof__auto_segment_close': (ARCHIVES[0], 'auto_runtime.o'),
     'ps3dk_prof__auto_segment_call': (ARCHIVES[0], 'auto_runtime.o'),
+    'ps3dk_prof__auto_segment_call_begin': (ARCHIVES[0], 'auto_runtime.o'),
 }
 
 

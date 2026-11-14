@@ -30,12 +30,14 @@ typedef gcmTransferSwizzle CellGcmTransferSwizzle;
 #define SEGMENT_OBSERVE_OPEN(c) ps3dk_prof__auto_segment_open(c)
 #define SEGMENT_OBSERVE_CLOSE(c) ps3dk_prof__auto_segment_close(c)
 #define SEGMENT_OBSERVE_CALL(r, c) ps3dk_prof__auto_segment_call(r, c)
+#define SEGMENT_OBSERVE_CALL_BEGIN(r, c) ps3dk_prof__auto_segment_call_begin(r, c)
 #define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ps3dk_prof__auto_segment_external_open(c, b, n)
 #define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ps3dk_prof__auto_segment_external_close(c)
 #else
 #define SEGMENT_OBSERVE_OPEN(c) ((void)0)
 #define SEGMENT_OBSERVE_CLOSE(c) ((void)0)
 #define SEGMENT_OBSERVE_CALL(r, c) ((void)0)
+#define SEGMENT_OBSERVE_CALL_BEGIN(r, c) ((void)0)
 #define SEGMENT_OBSERVE_EXTERNAL_OPEN(c, b, n) ((void)0)
 #define SEGMENT_OBSERVE_EXTERNAL_CLOSE(c) ((void)0)
 #endif
@@ -213,10 +215,11 @@ int32_t cellGcmSegmentEndExternal(CellGcmSegment *s, uint32_t usedBytes)
 #define SEGMENT_CALL_WORDS 5u
 /* The observed build also reserves, in the same request, the 4 words of the
  * observer's operation-label release that follows the retirement label
- * (ps3dk_prof__auto_segment_call), so a refused Call emits nothing at all and
+ * (ps3dk_prof__auto_segment_call) and the 2 + 2 words of a whole-CALL bracket's
+ * timestamp reports around the CALL, so a refused Call emits nothing at all and
  * an accepted one always leaves the observer its room. */
 #ifdef PS3TC_PROF_AUTO
-#define SEGMENT_OBSERVE_WORDS 4u
+#define SEGMENT_OBSERVE_WORDS 8u
 #else
 #define SEGMENT_OBSERVE_WORDS 0u
 #endif
@@ -244,6 +247,7 @@ int32_t cellGcmSegmentCall(CellGcmSegmentContext *ring, CellGcmSegment *s)
         (!ring->callback || ring->callback(ring, SEGMENT_CALL_RESERVE) != 0 ||
          !ring_has_room(ring, SEGMENT_CALL_RESERVE)))
         return CELL_GCM_SEGMENT_ERROR_BUSY;
+    SEGMENT_OBSERVE_CALL_BEGIN(ring, &s->context);
     rsxSetCallCommand(ring, s->offset);
     rsxSetWriteBackendLabel(ring, s->labelIndex, s->serial + 1u);
     s->serial += 1u;

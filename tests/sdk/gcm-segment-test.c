@@ -355,10 +355,11 @@ static void test_external(void)
 
 /* ---- Call: the CALL and the retirement label are one 5-word reservation ---- */
 
-/* The observed build (libgcm_cmd_prof_auto.a) asks for 4 more words in the
- * same request: the observer's operation-label release after the CALL block. */
+/* The observed build (libgcm_cmd_prof_auto.a) asks for 8 more words in the
+ * same request: the observer's operation-label release after the CALL block
+ * and the two 2-word reports of a whole-CALL bracket around it. */
 #ifdef TEST_AUTO_OBSERVED   /* the test object of the observed build (gcm-segment-test.sh) */
-#define CALL_BLOCK_WORDS 9u
+#define CALL_BLOCK_WORDS 13u
 #else
 #define CALL_BLOCK_WORDS 5u
 #endif
@@ -463,11 +464,22 @@ static gcmContextData *auto_open_ctx[8];
 static unsigned auto_opens, auto_closes, auto_calls, auto_checking;
 static gcmContextData *auto_call_ring, *auto_call_ctx;
 static size_t auto_call_room;   /* words left in the ring when the observer was called */
+static unsigned auto_begins;
+static size_t auto_begin_room;  /* words left when the pre-CALL hook was called */
+static gcmContextData *auto_begin_ctx;
+static uint32_t *auto_begin_at;  /* the cursor the pre-CALL hook saw */
 void ps3dk_prof__auto_segment_call(struct _gcmCtxData *r, struct _gcmCtxData *c)
 {
     if (!auto_checking) return;
     auto_call_ring = r; auto_call_ctx = c; ++auto_calls;
     auto_call_room = (size_t)(r->end - r->current);
+}
+void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *r, struct _gcmCtxData *c)
+{
+    if (!auto_checking) return;
+    auto_begin_ctx = c; ++auto_begins;
+    auto_begin_room = (size_t)(r->end - r->current);
+    auto_begin_at = (uint32_t *)r->current;
 }
 void ps3dk_prof__auto_segment_open(struct _gcmCtxData *c)
 {
@@ -501,7 +513,7 @@ static void test_auto_seam(void)
     gcmContextData *c;
 
     puts("auto seam:");
-    auto_opens = auto_closes = auto_calls = 0;
+    auto_opens = auto_closes = auto_calls = auto_begins = 0;
     auto_checking = 1;
     ring_reset();
     CHECK("init", cellGcmSegmentInit(&s, &arena[12288], 256, GCM_LOCATION_CELL, 211) == CELL_OK);
@@ -543,7 +555,7 @@ static void test_auto_call_room(void)
     for (unsigned k = 0; k < 2; ++k) {
         ring_reset();
         CHECK("setup", closed_segment(&s, 215));
-        auto_calls = 0; auto_checking = 1;
+        auto_calls = 0; auto_begins = 0; auto_checking = 1;
         ring.current = ring.end - rooms[k];
         ring.callback = refuse_cb;
         memset(ring_mem, 0xc3, RING_WORDS * 4u);
@@ -555,21 +567,24 @@ static void test_auto_call_room(void)
         CHECK("auto ring cursor kept", ring.current == ring.end - rooms[k]);
         CHECK("auto ring words kept", memcmp(canary, ring_mem, sizeof(canary)) == 0);
         CHECK("auto segment kept", memcmp(&before, &s, sizeof(s)) == 0);
-        CHECK("auto no release", auto_calls == 0);
+        CHECK("auto no release", auto_calls == 0 && auto_begins == 0);
         auto_checking = 0;
     }
-    /* Exactly the block: accepted, and the observer is called with its 4 words left. */
+    /* Exactly the block: accepted; the pre-CALL hook sees the whole block before the CALL, and the observer is
+     * called after the CALL and its label with the bracket end report and the release (8 words) left. */
     ring_reset();
     CHECK("setup", closed_segment(&s, 216));
-    auto_calls = 0; auto_checking = 1;
+    auto_calls = 0; auto_begins = 0; auto_checking = 1;
     ring.current = ring.end - CALL_BLOCK_WORDS;
     ring.callback = refuse_cb;
     cb_calls = 0;
     CHECK("auto exact ok", cellGcmSegmentCall(&ring, &s) == CELL_OK && cb_calls == 0);
-    CHECK("auto release room", auto_calls == 1 && auto_call_room >= 4u);
+    CHECK("auto begin room", auto_begins == 1 && auto_begin_ctx == &s.context && auto_begin_room == CALL_BLOCK_WORDS &&
+          auto_begin_at == (uint32_t *)ring.end - CALL_BLOCK_WORDS);
+    CHECK("auto release room", auto_calls == 1 && auto_call_room >= 8u);
     auto_checking = 0;
     ring.callback = NULL;
-    printf("  %u or 4 words left: BUSY, ring and segment unchanged, no observer call; %u words: observer called with 4 left\n",
+    printf("  %u or 4 words left: BUSY, ring and segment unchanged, no observer call; %u words: pre-CALL hook before the CALL, observer called with 8 left\n",
            CALL_BLOCK_WORDS - 1u, CALL_BLOCK_WORDS);
 }
 #endif

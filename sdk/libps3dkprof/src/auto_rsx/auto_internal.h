@@ -30,6 +30,9 @@ extern const char ps3dk_prof__auto_app[];
  * pair pool (report_count <= 1024, 16 for clocks: at most 504 pairs), so report pairs, not the pool, bound how many
  * segment draws can be timed in flight. */
 enum { AUTO_SEGMENTS_OPEN=32, AUTO_SEGMENT_POOL=512, AUTO_SEGMENT_NONE=0xffffffffu };
+/* Report pairs kept for whole-CALL brackets: covered draws and FRAME marks stop taking pairs when only this many
+ * are free (fewer with a small pool: a quarter of it). */
+enum { AUTO_CALL_PAIRS=32 };
 /* One covered operation built inside a CALL segment: its report pair is owned
  * from the build; its record is committed at cellGcmSegmentCall (or as an
  * INCOMPLETE record when the segment is rebuilt, never called or called
@@ -49,6 +52,15 @@ typedef struct auto_segment {
      * (or its CALL refused) at least once; reports: a timestamp report was written into its buffer, so a later
      * CALL replays report writes. */
     uint32_t visits, refused, called, reports;
+    /* Of the refused: untimed_refused were counted in a coverage frame with an untimed-only exclusion (room, report
+     * capacity, metadata capacity, reentry, unsupported arguments), all in untimed_frame unless untimed_mixed;
+     * other_refused were refused otherwise or counted in no frame. Reset with the build. */
+    uint32_t untimed_refused, other_refused, untimed_mixed;
+    uint64_t untimed_frame;
+    /* A whole-CALL bracket between cellGcmSegmentCall's pre-CALL hook and its CALL hook: its pair (the begin
+     * report is in the ring before the CALL) and the PPU time before that report. */
+    uint32_t bracket, bracket_pair;
+    uint64_t bracket_tb;
 } auto_segment;
 
 /* One allocation before observation; variable queues follow this control block
@@ -80,6 +92,8 @@ typedef struct auto_capture {
     auto_segment *segment_active; /* between a segment emitter's begin and end */
     void *segment_active_writer;  /* that emitter's context: kept here, not on the segment, which a part close clears */
     uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;
+    uint64_t call_brackets, call_brackets_refused; /* whole-CALL brackets begun; CALLs that needed one and got none */
+    uint32_t admit_column; /* the column segment_admit counted its last refusal in (0: counted in no frame) */
     /* owner only: frame source. A flip opens frames until an explicit
      * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
      * ignored (counted). Both kinds are reported in STATUS. */
