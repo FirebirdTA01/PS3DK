@@ -25,7 +25,7 @@ static void flush(gpp_ctx *ctx) {
     assert(ctx==&context && ++flushes==1);
     uint32_t op=ps3dk_prof__auto_publish_before((void *)ctx);
     ps3dk_prof__auto_publish_after((void *)ctx,op);
-    st64(&reports[1024][0],10000);st32(&labels[246],1);
+    st64(&reports[1024][0],10000);st32(&labels[246],2);
 }
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);

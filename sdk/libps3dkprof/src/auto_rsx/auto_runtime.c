@@ -310,22 +310,32 @@ static int clock_live(void *user)
     return !LD_ACQ(&g_prof->stop_latch) && auto_config_can_admit(&configuration) &&
            !auto_config_flags(&configuration);
 }
-static int clock_emit(void *user,uint32_t report,uint32_t serial)
+static int clock_emit(void *user,uint32_t report,uint32_t k)
 {
     auto_capture *a=user;
     uintptr_t begin=(uintptr_t)(void *)a->context->begin,current=(uintptr_t)(void *)a->context->current,
               end=(uintptr_t)(void *)a->context->end;
-    /* Six words, no reserve callback or special tail. This boundary may refuse
-     * an anchor; it cannot expand or wrap the application's command extent. */
-    if(begin>current || current>end || (current&3u) || end-current<24 || !initialize_device(a)) return 0;
+    /* Twelve words, no reserve callback or special tail. This boundary may refuse
+     * an anchor; it cannot expand or wrap the application's command extent. The
+     * report's final timestamp is written after the label reaches 2k-1 and before
+     * it reaches 2k. */
+    if(begin>current || current>end || (current&3u) || end-current<48 || !initialize_device(a)) return 0;
     a->clock_device.write_timer(a->clock_device.ctx,report,PRG_POISON);
     a->clock_device.sync(a->clock_device.ctx);
-    return a->clock_device.reserve_pair(a->clock_device.ctx,report,a->clock_port.label,serial)==0;
+    if(a->clock_device.reserve_pair(a->clock_device.ctx,report,a->clock_port.label,2u*k-1u)!=0) return 0;
+    return a->clock_device.reserve_pair(a->clock_device.ctx,report,a->clock_port.label,2u*k)==0 ? 1:2;
 }
 static void clock_flush(void *user) {auto_capture *a=user;a->clock_device.flush(a->clock_device.ctx);}
 static uint32_t clock_label(void *user) {auto_capture *a=user;return a->clock_device.read_label(a->clock_device.ctx,a->clock_port.label);}
 static uint64_t clock_timer(void *user,uint32_t report) {auto_capture *a=user;return a->clock_device.read_timer(a->clock_device.ctx,report);}
 static void clock_sync(void *user) {auto_capture *a=user;a->clock_device.sync(a->clock_device.ctx);}
+/* Drainer side: reading an anchor the RSX already wrote needs only an initialized device and a configuration
+ * nothing invalidated (a stop or seal still lets the final poll read it); never the owner's context pointers. */
+static int clock_drain_live(void *user)
+{
+    auto_capture *a=user;
+    return a->device_initialized && !auto_config_flags(&configuration);
+}
 static void sample_clock(auto_capture *a,uint64_t frame)
 {
     const auto_clock_port port={a,clock_tb,clock_live,clock_emit,clock_flush,clock_label,clock_timer,clock_sync};
@@ -1282,6 +1292,13 @@ void p_auto_drain(prof *p, int seal)
         uint32_t owner=frame->owner;uint64_t id=frame->frame;
         if(!auto_writer_frame(&writer,frame)) return;
         if(!auto_frames_ack(&capture->coverage,owner,id,1)) {p_ext_sink_fail(p,-2);return;}
+    }
+    {
+        const auto_clock_port port={capture,clock_tb,clock_drain_live,clock_emit,clock_flush,clock_label,clock_timer,
+                                    clock_sync};
+        if(!auto_clock_poll(&capture->clocks,&port,seal)) {
+            auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&capture->operations);
+        }
     }
     const auto_wire_clock *clock;
     while((clock=auto_clock_peek(&capture->clocks))!=NULL) {

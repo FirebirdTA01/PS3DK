@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded clock samples with independently supplied device facts."""
+"""Bracketed clock anchors (owner issues, drainer completes) with independently supplied device facts."""
 import argparse
 import json
 import os
@@ -15,12 +15,12 @@ assert (src/'auto_clock.c').is_file(),'AUTO_CLOCK_IMPLEMENTATION'
 a.out.mkdir(parents=True,exist_ok=False)
 source=src/'auto_clock.c'
 mutations={
-    'deadline':('if(r->elapsed>=q->frequency*2u)','if(0 && r->elapsed>=q->frequency*2u)','r && r->flags==flags'),
-    'put':('if(ACQ(&q->published)!=r->serial)','if(0 && ACQ(&q->published)!=r->serial)','r && r->flags==flags'),
-    'unstable':('raw!=repeated','raw==0','r && r->flags==flags'),
-    'label-regression':('r->label_first<q->last_label || ','','regressed->flags==8 && regressed->polls==1'),
-    'partial-ack':('if(!whole || !r ||','(void)whole; if(!r ||','!auto_clock_ack(&clock_state,1,0)'),
-    'handoff':('REL(&q->write_idx,w+1u);','__atomic_store_n(&q->write_idx,w+1u,__ATOMIC_RELAXED);','WARNING: ThreadSanitizer: data race'),
+    'deadline':('if(seal || now-q->issue[i]>=q->frequency*2u)','if(seal)','++n < 1000'),
+    'put':('if(ACQ(&q->published)!=serial) goto failed;','if(0) goto failed;','r && r->flags == 8'),
+    'unstable':('raw!=UINT64_MAX && raw==repeated','raw!=UINT64_MAX','done()->flags == 8 && !done()->raw'),
+    'label-regression':('label<q->last_label || ','','!auto_clock_poll(&clock_state, &port, 0) && clock_state.invalid'),
+    'partial-ack':('if(!whole || !r ||','(void)whole; if(!r ||','!auto_clock_ack(&clock_state, 1, 0)'),
+    'handoff':('if(r==ACQ(&q->write_idx) || ACQ(&q->state[r%AUTO_CLOCK_RECORDS])!=AUTO_CLOCK_DONE) return NULL;','if(r==ACQ(&q->write_idx)) return NULL;','!done() && fake.emits == 1 && fake.flushes == 1'),
 }
 if a.mutant:
     assert (a.sanitize=='thread')==(a.mutant=='handoff')
@@ -38,8 +38,7 @@ r=subprocess.run(run,capture_output=True,timeout=30,env=dict(os.environ,TSAN_OPT
 (a.out/'commands.json').write_bytes((json.dumps(dict(build=cmd,run=run,rc=r.returncode),indent=2)+'\n').encode())
 if a.mutant:
     assert r.returncode!=0 and expected.encode() in r.stderr,r.stderr.decode()
-    if a.mutant=='handoff':assert r.returncode==66
-    else:assert b'Assertion' in r.stderr
+    assert b'Assertion' in r.stderr
     print(a.mutant+' rejected by '+expected)
 else:
     assert r.returncode==0,r.stderr.decode()

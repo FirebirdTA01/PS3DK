@@ -29,11 +29,13 @@ static void st64(volatile uint64_t *a,uint64_t v) {__atomic_store_n(a,v,__ATOMIC
 static void st32(volatile uint32_t *a,uint32_t v) {__atomic_store_n(a,v,__ATOMIC_SEQ_CST);}
 static void flush(gpp_ctx *c) {
 #if TEST_FRAMES
-    assert(c==&context && c->current==words+6);
+    /* the frame-0 clock anchor: two timestamp + label pairs into slot 64, releasing 1 then 2 */
+    assert(c==&context && c->current==words+12);
+    assert(c->current[-11]==0x1000000u+64*16 && c->current[-9]==246*16);
     assert(c->current[-5]==0x1000000u+64*16 && c->current[-3]==246*16);
     uint32_t frontier=ps3dk_prof__auto_publish_before((void *)c);
     ps3dk_prof__auto_publish_after((void *)c,frontier);
-    st64(&reports[64][0],10000);st32(&labels[246],1);
+    st64(&reports[64][0],10000);st32(&labels[246],2);
 #else
     (void)c;assert(0 && "observer must not flush inside operation hooks");
 #endif
@@ -61,7 +63,7 @@ int main(void) {
     ps3dk_prof_frame();
     ps3dk_prof_token first=ps3dk_prof_frame_token();
     assert(first.owner && first.frame==0);
-    assert(context.current==words+18); /* the boundary's clock (6 words), then the begin FRAME mark (12) */
+    assert(context.current==words+24); /* the boundary's clock (12 words: two pairs), then the begin FRAME mark (12) */
 #endif
     uint32_t *application_begin=context.current;
     clear.clear_mask=0x80000000;
@@ -85,7 +87,7 @@ int main(void) {
 #endif
         assert(ld32(&labels[247])==0 && ld32(&labels[246])==
 #if TEST_FRAMES
-               1
+               2 /* the frame-0 anchor released 2k = 2 */
 #else
                0
 #endif
