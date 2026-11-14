@@ -1413,6 +1413,11 @@ pub fn analyze(cap: &Capture) -> Report {
     let fifo = crate::fifo::analyze(cap);
     let status_ok = inv.final_seen && inv.refusal.is_none();
     let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
+    // A segment build none of whose draws were timed leaves no record naming its build frame, so a CALL of it
+    // cannot be traced back to that frame's evidence. Treat such unrepresented draws as merely untimed only when
+    // the capture shows no invalid-evidence exclusion anywhere and no segment quarantine; otherwise they refuse.
+    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
+        && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
@@ -1536,7 +1541,7 @@ pub fn analyze(cap: &Capture) -> Report {
             // 63/11: every segment draw a CALL executed here has a record carrying this frame's token.
             // With 127/11 those draws ran between this frame's marks without a timed record: untimed, so they fall
             // under the bounded rule (a replay already returned above, through the sticky status).
-            if v.segment_unrepresented != 0 && bounded_rule {
+            if v.segment_unrepresented != 0 && bounded_rule && provenance_clean {
                 untimed = untimed.saturating_add(u64::from(v.segment_unrepresented));
             } else if v.segment_unrepresented != 0 {
                 return Err(format!("at least {} segment draw(s) executed in this frame have no record (a CALL of an \

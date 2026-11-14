@@ -1013,6 +1013,42 @@ fn seg_bounded(g_col: Option<usize>, unrep: u32, timed: (u64, u64), marks: (u64,
     analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"))
 }
 
+/// Review case: G's only segment draw was excluded with column `g_col` (never recorded), F CALLs that build (one
+/// unrepresented draw) and also has its own timed draw built in F, so no record of F names G.
+fn seg_unnamed_build(g_col: usize) -> Report {
+    let mut m1 = mark(1, 1, 1, 56_000);
+    m1.serials = (1, 2);
+    m1.published = 2;
+    let a = built_op(2, 1, (60_000, 90_000), 1, 1, 1);
+    let mut m2 = mark(3, 1, 2, 100_000);
+    m2.serials = (5, 6);
+    m2.published = 6;
+    let mut g = row(0, (10_000, 110_000), 0);
+    g.rows[2][0] = 1;
+    g.rows[2][2 + g_col] = 1;
+    let mut f = row(1, (110_000, 210_000), 1);
+    f.flags |= 64;
+    g.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 120_000, 20_000, 10_000, 1)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops_b(&[m1, a, m2]), coverage_b(&g, 0), coverage_b(&f, 1)];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(3, 2, 9, 6)));
+    analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"))
+}
+
+/// A CALL of a wholly untimed build whose frame holds invalid evidence cannot be traced to that frame (no record
+/// names it), so the calling frame refuses instead of taking a bounded verdict; untimed-only exclusions still bound.
+#[test]
+fn unnamed_invalid_build_refuses() {
+    for (col, name) in [(9, "epoch invalid"), (6, "ownership uncertainty")] {
+        let r = seg_unnamed_build(col);
+        assert_eq!(r.frames[1].verdict, Verdict::Unknown, "{name}: {}", r.frames[1].reason);
+        assert!(r.frames[1].reason.contains("have no record"), "{name}: {}", r.frames[1].reason);
+    }
+    let r = seg_unnamed_build(1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "report capacity: {}", r.frames[1].reason);
+}
+
 /// Segment draws a CALL executed in F without a timed record (segment_unrepresented, including draws its build could
 /// not time) are untimed for the bounded rule; a build frame whose only exclusions are untimed-only is still a source.
 #[test]
@@ -1036,7 +1072,8 @@ fn segment_frames_get_bounded_verdicts() {
     // G with an evidence-invalidating column (ownership uncertainty) still refuses the import
     let r = seg_bounded(Some(6), 1, long, wide, 1);
     assert_eq!(r.frames[1].verdict, Verdict::Unknown);
-    assert_eq!(r.frames[1].reason, format!("segment draw(s) built in frame {OWNER}/0: 1 covered operation(s) excluded"));
+    // (it now refuses one check earlier: an invalid column anywhere means F's unrepresented draw cannot be traced)
+    assert!(r.frames[1].reason.contains("have no record"), "{}", r.frames[1].reason);
     // a replayed segment: the sticky status keeps every frame UNKNOWN
     let r = seg_bounded(None, 1, long, wide, 1 | 1024);
     assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown));
