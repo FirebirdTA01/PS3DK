@@ -669,13 +669,14 @@ static void g09_clipplane(CellGcmContextData *ctx)
 	if (g_aborted) return;
 	/* User clip plane 0: its input is the per-vertex clip distance the vertex
 	 * program emits (CLP0 = position x, see vpshader.vcg), routed out with the
-	 * UC0 output bit. ENABLE_LT discards fragments whose interpolated distance
-	 * is below zero, so the left half of the full-tile quad (x < 0) is clipped
-	 * and stays black, and the right half is drawn blue. */
+	 * UC0 output bit. ENABLE_GE keeps fragments whose interpolated distance is
+	 * at or above zero (measured on the console: ENABLE_LT keeps the negative
+	 * side), so the left half of the full-tile quad (x < 0) is clipped and stays
+	 * black, and the right half is drawn blue. */
 	cellGcmSetVertexAttribOutputMask(ctx, GCM_ATTRIB_OUTPUT_MASK_FRONTDIFFUSE |
 	    GCM_ATTRIB_OUTPUT_MASK_TEX0 | GCM_ATTRIB_OUTPUT_MASK_UC0);
 	cellGcmSetUserClipPlaneControl(ctx,
-	    CELL_GCM_USER_CLIP_PLANE_ENABLE_LT,
+	    CELL_GCM_USER_CLIP_PLANE_ENABLE_GE,
 	    CELL_GCM_USER_CLIP_PLANE_DISABLE,
 	    CELL_GCM_USER_CLIP_PLANE_DISABLE,
 	    CELL_GCM_USER_CLIP_PLANE_DISABLE,
@@ -902,7 +903,8 @@ static void g15_renderenable(CellGcmContextData *ctx)
 	env_reset(ctx);
 	clear_tile(ctx, W_BLACK, 0);
 	if (g_aborted) return;
-	cellGcmSetAntiAliasingControl(ctx, 0, 0, 0, 0);
+	/* AA off, every sample enabled: a zero sample mask would discard every fragment */
+	cellGcmSetAntiAliasingControl(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE, CELL_GCM_FALSE, 0xFFFF);
 	cellGcmSetFrequencyDividerOperation(ctx, CELL_GCM_FREQUENCY_DIVIDE);
 	cellGcmSetRenderEnable(ctx, GCM_TRUE, 0);
 	draw_color(ctx, 0.0f, 1.0f, 0.0f, /* a */ 1.0f);
