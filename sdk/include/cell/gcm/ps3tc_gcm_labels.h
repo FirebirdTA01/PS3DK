@@ -167,16 +167,47 @@ static inline uint32_t cellGcmReadLabelOrdered(const volatile uint32_t *label)
 #endif
 }
 
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_LABEL_HOOK)
+/* PS3_PROF_AUTO observation (libps3dkprof_auto.a): each query is reported as one label poll with its result, so
+ * the profiler can record label-poll cadence (how often the owner looked; never evidence of waiting). The read,
+ * its ordering and the result are unchanged. */
+uint64_t ps3dk_prof__auto_label_poll_begin(void);
+void     ps3dk_prof__auto_label_poll_end(uint64_t before, uint32_t label, int passed);
+#define PS3TC_GCM_LABEL_POLL_OBSERVED 1
+#endif
+
+/* The shared query; `index` is the label index, or 0xffffffff when the caller passed an address. */
+static inline int ps3tc_gcm_label_passed(const volatile uint32_t *label, uint32_t target, uint32_t index)
+{
+#ifdef PS3TC_GCM_LABEL_POLL_OBSERVED
+    uint64_t before = ps3dk_prof__auto_label_poll_begin();
+    int passed = cellGcmIsSerialReached(cellGcmReadLabelOrdered(label), target);
+    ps3dk_prof__auto_label_poll_end(before, index, passed);
+    return passed;
+#else
+    (void)index;
+    return cellGcmIsSerialReached(cellGcmReadLabelOrdered(label), target);
+#endif
+}
+
 /* Non-blocking: 1 when the label word at `label` has reached `target` (serial order), else 0. */
 static inline int cellGcmIsLabelValuePassed(const volatile uint32_t *label, uint32_t target)
 {
-    return cellGcmIsSerialReached(cellGcmReadLabelOrdered(label), target);
+#ifdef PS3TC_GCM_LABEL_POLL_OBSERVED
+    /* the label index when the address is in the label area (observation only) */
+    uintptr_t base = (uintptr_t)cellGcmGetLabelAddress(0), at = (uintptr_t)label;
+    uint32_t index = at >= base && at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?
+                     (uint32_t)((at - base) / 4u) : 0xffffffffu;
+    return ps3tc_gcm_label_passed(label, target, index);
+#else
+    return ps3tc_gcm_label_passed(label, target, 0xffffffffu);
+#endif
 }
 
 /* Non-blocking: 1 when GCM label `index` has reached `target` (serial order), else 0.  Never waits, never writes. */
 static inline int cellGcmIsLabelPassed(uint8_t index, uint32_t target)
 {
-    return cellGcmIsLabelValuePassed((const volatile uint32_t *)cellGcmGetLabelAddress(index), target);
+    return ps3tc_gcm_label_passed((const volatile uint32_t *)cellGcmGetLabelAddress(index), target, index);
 }
 
 #ifdef __cplusplus

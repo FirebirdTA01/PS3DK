@@ -198,6 +198,24 @@ Presentation with the 31/11 masks. Only a flip-wait scope is waiting evidence:
 | 368 | u64 | polling cadence: summed bounded gaps of the complete runs |
 | 376 | u32 | flip-wait scopes that returned the timeout error (included at 12) |
 | 380 | u32 | 63/11: segment draws executed without a record (below); reserved zero with 31/11 |
+| 384 | u32 | 511/11 (416-byte rows): complete label-poll runs |
+| 388 | u32 | broken label-poll runs (a gap over the bound, a poll of another label, or a flip-wait scope began) |
+| 392 | u32 | boundary-spanning label-poll runs |
+| 396 | u32 | the complete runs' label + 1: 0 none, 0xffffffff several (or an address outside the label area) |
+| 400 | u64 | label-poll cadence: summed bounded gaps of the complete runs |
+| 408 | u64 | reserved zero |
+
+Label-poll cadence (511/11). The seam is the SDK's own non-blocking label query,
+`cellGcmIsLabelPassed(index, target)` and `cellGcmIsLabelValuePassed(address,
+target)` (<cell/gcm/ps3tc_gcm_labels.h>): in a PS3_PROF_AUTO translation unit each
+call is reported as one poll with its label and result, so an application that
+already waits through these queries needs no change. A raw read of the label
+word (`*cellGcmGetLabelAddress(i)` in a loop) has no seam and is not observed;
+such a loop is observed once it uses the query. The run rules are the flip-status
+cadence rules applied to one label at a time, with the same 1 ms bound, the same
+frame-boundary ownership, and polls inside a flip-wait scope not counted. Like
+flip-status cadence, label-poll cadence shows how often the owner looked, never
+that it waited.
 
 With 63/11, u32@380 counts the covered segment draws that CALLs in this frame
 executed without a committed record carrying the CALL's frame token: a CALL of
@@ -505,9 +523,20 @@ RSX reached-marker span (first operation begin to last end of the execution popu
 | UNKNOWN: "presentation attribution unavailable: a flip-wait scope spans a frame boundary" (or "... flip-status polling spans a frame boundary") | W = 0 and S < D/2 without such a P, and a spanning scope (or run) touched the row |
 | UNKNOWN: "presentation polling observed; waiting not established" | W = 0 and S < D/2 without such a P, with polling cadence (complete or broken runs) or 15/11 poll intervals |
 | UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 with no presentation evidence |
+| RSX-bound candidate (busy polling, 255/11 and later) | W = 0, RSX busy time B >= D/2 (lower bound), complete polling cadence of flip status or of a label >= D/4 (no run or flip-wait scope across a boundary of the frame) |
+| UNKNOWN with an observation (255/11 and later) | S >= D/2 but not decided above: the reason prints B and both cadences, labelled "observation, not a verdict" |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |
 | PPU-bound candidate | never from this family: it needs positive evidence that the owner was busy, not waiting |
 | UNKNOWN | anything else, named as unresolved |
+
+RSX busy time B (127/11 and later) is the union of the execution population's
+timed intervals (records, and with 255/11 whole-CALL brackets), overlaps merged,
+on the PPU clock: unlike S it does not count the gaps where the RSX waited for
+the PPU to submit, so a long span over a few short operations is not busy time.
+The two cadences are compared with D/4 separately, never added: a loop that
+polls both would count the same time twice. JSON (255/11 and later) reports each
+frame's `cadence_share` and `label_cadence_share` (complete-run ticks over D).
+Frames are flip- or submission-delimited intervals, not presented frames.
 
 The two shares are provisional starting values, printed with every JSON
 report, to be tuned against the first console capture. FRAME marks give each

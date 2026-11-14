@@ -107,6 +107,9 @@ typedef struct auto_capture {
     /* the open run or scope crossed a frame boundary: it belongs to no frame */
     uint32_t cadence_spanning, flip_wait_spanning;
     uint64_t cadence_last, cadence_ticks, cadence_bound, flip_wait_since;
+    /* owner only: label-poll cadence, the same rules for cellGcmIsLabelPassed reads of one label (label_at) */
+    uint32_t label_open, label_spanning, label_at;
+    uint64_t label_last, label_ticks;
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

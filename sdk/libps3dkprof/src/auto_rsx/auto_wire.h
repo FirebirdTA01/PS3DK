@@ -10,7 +10,7 @@
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=144, AUTO_FRAME_BYTES=384,
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=144, AUTO_FRAME_BYTES=416,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
@@ -38,9 +38,11 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * timestamp between the last poll below 2k-1 and the first at or above 2k:
  * label_first/label_second carry those observed values), and CALL_BRACKET=128
  * (OPS kind 5 CALL: one report pair around a whole cellGcmSegmentCall whose
- * build was not fully timed, see below). A reader that knows only 7/15, 15/11,
- * 31/11, 63/11 or 127/11 refuses 255/11 at CONFIG. */
-enum { AUTO_KIND_MASK=255, AUTO_FORM_MASK=11 };
+ * build was not fully timed, see below), and LABEL_POLL=256 (416-byte COVERAGE
+ * rows: a label-poll cadence block at 384, see auto_wire_frame). A reader that
+ * knows only 7/15, 15/11, 31/11, 63/11, 127/11 or 255/11 refuses 511/11 at
+ * CONFIG. */
+enum { AUTO_KIND_MASK=511, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
@@ -107,6 +109,14 @@ typedef struct auto_wire_frame {
      * the CALL's token (re-CALL, untracked segment, draws refused or quarantined while building, a refused CALL,
      * a pair lost at commit). A lower bound: an untracked segment counts 1. Saturates (row SATURATED). */
     uint32_t segment_unrepresented;
+    /* label-poll block at 384 (LABEL_POLL): cellGcmIsLabelPassed / cellGcmIsLabelValuePassed reads on the owner
+     * thread, with the same run rules as flip-status polling cadence (a run of not-yet-passed polls of one label
+     * closed by a passed poll, every gap within the bound). Polling cadence, never evidence of waiting. */
+    uint32_t label_runs;        /* u32@384: complete runs */
+    uint32_t label_broken;      /* u32@388: runs ended by a gap over the bound, another label or a flip-wait scope */
+    uint32_t label_spanning;    /* u32@392: runs that crossed a boundary of this frame (charged to neither) */
+    uint32_t label_index;       /* u32@396: the complete runs' label + 1; 0 none, 0xffffffff several or unknown */
+    uint64_t label_cadence;     /* u64@400: summed bounded gaps of the complete runs; u64@408 reserved zero */
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
 } auto_wire_frame;
 

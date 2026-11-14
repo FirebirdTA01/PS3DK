@@ -30,6 +30,8 @@ pub const OP_BYTES_BUILD: u32 = 144;
 pub const FRAME_BYTES: usize = 352;
 /// COVERAGE rows of the presentation writer (CONFIG masks 31/11): the 352-byte row plus a presentation block.
 pub const FRAME_BYTES_PRESENT: usize = 384;
+/// COVERAGE rows of the label-poll writer (511/11): a label-poll cadence block at 384.
+pub const FRAME_BYTES_LABEL: usize = 416;
 pub const STATUS_BYTES: usize = 128;
 pub const CLOCK_BYTES: usize = 96;
 /// Schema 1: the first sixteen reports of the lease are clock anchors.
@@ -70,6 +72,12 @@ pub const MASKS_BUILD: (u32, u32) = (63, 11);
 pub const MASKS_BRACKET: (u32, u32) = (127, 11);
 /// The whole-CALL writer: kind mask bit 128 CALL_BRACKET on top of 127/11 (OPS kind 5 CALL, 144-byte records).
 pub const MASKS_CALL: (u32, u32) = (255, 11);
+/// The label-poll writer: kind mask bit 256 LABEL_POLL on top of 255/11.  COVERAGE rows are 416 bytes: u32@384
+/// complete label-poll runs, u32@388 broken, u32@392 spanning, u32@396 the complete runs' label + 1 (0 none,
+/// 0xffffffff several or unknown), u64@400 their bounded-gap ticks, u64@408 zero.  Label polls are
+/// cellGcmIsLabelPassed / cellGcmIsLabelValuePassed reads on the owner thread; like flip-status cadence they show how
+/// often the owner looked, not that it waited.
+pub const MASKS_LABEL: (u32, u32) = (511, 11);
 /// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
 pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
@@ -227,6 +235,9 @@ impl Attached {
         self.kind_mask & 64 != 0
     }
     /// Whole-CALL brackets (OPS kind 5) for builds whose draws were not all timed (CONFIG 255/11).
+    pub fn label_polls(&self) -> bool {
+        self.kind_mask & 256 != 0
+    }
     pub fn call_bracket(&self) -> bool {
         self.kind_mask & 128 != 0
     }
@@ -317,6 +328,9 @@ pub struct Coverage {
     /// 63/11 rows (u32@380): covered segment draws that CALLs in this frame executed without a committed record
     /// carrying the CALL's token.  A lower bound (an untracked segment counts 1); zero in older captures.
     pub segment_unrepresented: u32,
+    /// 511/11 rows: the label-poll cadence block (runs, broken, spanning, bounded-gap ticks) and the complete runs'
+    /// label + 1 (0 none, 0xffffffff several or unknown).
+    pub label_polls: Option<(Cadence, u32)>,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -551,6 +565,7 @@ impl Reader {
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
                     && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET && (kinds, forms) != MASKS_CALL
+                    && (kinds, forms) != MASKS_LABEL
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -568,7 +583,7 @@ impl Reader {
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
                 let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET
-                    || (kinds, forms) == MASKS_CALL { OP_BYTES_BUILD } else { OP_BYTES };
+                    || (kinds, forms) == MASKS_CALL || (kinds, forms) == MASKS_LABEL { OP_BYTES_BUILD } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
@@ -809,7 +824,8 @@ impl Reader {
     fn coverage(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::AutoCoverage;
         let cfg = self.attached().clone();
-        let width = if cfg.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        let width = if cfg.label_polls() { FRAME_BYTES_LABEL } else if cfg.presentation_scopes() { FRAME_BYTES_PRESENT }
+            else { FRAME_BYTES };
         if payload.len() != width {
             return bad(r, format!("AUTO_COVERAGE is {} bytes, not {width}", payload.len()));
         }
@@ -842,8 +858,24 @@ impl Reader {
             timeouts = c.u32()?;
             r2 = c.u32()?;
         }
+        let mut label = Cadence::default();
+        let (mut label_index, mut r3) = (0u32, 0u64);
+        if cfg.label_polls() {
+            label.runs = c.u32()?;
+            label.broken = c.u32()?;
+            label.spanning = c.u32()?;
+            label_index = c.u32()?;
+            label.ticks = c.u64()?;
+            r3 = c.u64()?;
+        }
         c.done()?;
         let at = format!("AUTO coverage frame {owner}/{frame}");
+        if r3 != 0 || (label.runs == 0) != (label_index == 0) || (label_index > 256 && label_index != u32::MAX)
+            || (label.runs == 0 && label.ticks != 0)
+        {
+            return bad(r, format!("{at}: label-poll block runs {} label {label_index:#x} ticks {} reserved {r3}",
+                label.runs, label.ticks));
+        }
         let present = flags & FR_PRESENT != 0;
         // u32@380 is the 63/11 unrepresented-CALL count; reserved zero under every older pair
         if (r2 != 0 && !cfg.build_frames())
@@ -908,7 +940,8 @@ impl Reader {
             flip_waits: if scopes { r0 } else { 0 }, flip_wait: if scopes { r1 } else { 0 },
             flip_wait_spanning: scope_spanning, flip_wait_timeouts: timeouts, cadence,
             legacy_polls: (present && !scopes).then_some((r0, r1)),
-            segment_unrepresented: if cfg.build_frames() { r2 } else { 0 } });
+            segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
+            label_polls: cfg.label_polls().then_some((label, label_index)) });
         Ok(())
     }
 
@@ -1320,6 +1353,8 @@ pub struct FrameView {
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
+    /// 511/11: label-poll cadence and its label + 1 (see MASKS_LABEL), None for older writers.
+    pub label_polls: Option<(Cadence, u32)>,
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1344,6 +1379,8 @@ pub struct Report {
     pub ops_dropped: u64,
     /// The capture's CONFIG is 63/11 (segment records carry their build frame).
     pub build_frames: bool,
+    /// 255/11 and later: the busy-time polling rule applies and frames report their polling shares.
+    pub busy_rule: bool,
     pub state: String,
     pub config: Option<Config>,
     pub status: Option<Status>,
@@ -1448,6 +1485,9 @@ pub fn analyze(cap: &Capture) -> Report {
     // exact rules and output.
     let bounded_rule = attached.clock_bracket();
     rep.build_frames = build;
+    // The causal polling rule needs RSX busy time with whole-CALL brackets (255/11 and later).
+    let busy_rule = attached.call_bracket();
+    rep.busy_rule = busy_rule;
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
     let map = qualify(inv);
@@ -1515,6 +1555,7 @@ pub fn analyze(cap: &Capture) -> Report {
             segment_unrepresented: f.segment_unrepresented,
             call_brackets: calls.len() as u64,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
+            label_polls: f.label_polls,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
                 flip_wait_timeouts: f.flip_wait_timeouts,
@@ -1566,6 +1607,8 @@ pub fn analyze(cap: &Capture) -> Report {
         let d = f.tb_end.saturating_sub(f.tb_begin);
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
+        let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
+        let label_cadence = v.label_polls.map(|(c, _)| c);
         let mut bounds = None;
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
@@ -1700,9 +1743,26 @@ pub fn analyze(cap: &Capture) -> Report {
             // PPU-bound needs positive evidence that the owner was busy, which this family does not carry: a frame
             // where the RSX is not limiting is PACING only with flip-wait scope evidence (cellGcmWaitFlipComplete),
             // otherwise UNKNOWN.  Polling cadence and 15/11 poll intervals are named observations, never waiting.
+            // 255/11: polling cadence (flip status or a label: complete runs, none across a frame boundary, no
+            // flip-wait scope across one) of at least WAIT_SHARE of the frame decides RSX-bound only together with
+            // RSX BUSY time (merged timed intervals, CALL brackets included) of at least RSX_SPAN_SHARE: busy time,
+            // unlike the span, does not count the gaps where the RSX waited for the PPU to submit.
+            let flip_polled = match present.as_ref() {
+                Some(Presentation { cadence: Some(c), flip_wait_spanning: 0, .. }) if c.spanning == 0 && c.runs > 0 => c.ticks,
+                _ => 0,
+            };
+            let label_polled = match label_cadence {
+                Some(c) if c.spanning == 0 && c.runs > 0 && present.as_ref().map_or(true, |p| p.flip_wait_spanning == 0) => c.ticks,
+                _ => 0,
+            };
+            let polled = flip_polled.max(label_polled);
+            let polled_kind = if flip_polled >= label_polled { "flip status" } else { "a label" };
+            let busy_long = busy_lo.is_some_and(|b| share(b, d, RSX_SPAN_SHARE));
             let out = (|| -> Result<(Verdict, String), String> { if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
+            } else if busy_rule && w == 0 && busy_long && share(polled, d, WAIT_SHARE) {
+                Ok((Verdict::RsxBound, format!("busy polling: RSX busy time >= {} of {d} PPU ticks while the owner polled {polled_kind} for >= {polled} ticks in complete runs; no FIFO wait", busy_lo.unwrap_or(0))))
             } else if w == 0 && rsx_short {
                 Err(match present {
                     Some(Presentation { flip_wait: Some((p, n)), .. }) if share(p, d, PACING_SHARE) => {
@@ -1723,6 +1783,9 @@ pub fn analyze(cap: &Capture) -> Report {
             } else if w > 0 && !waited && rsx_long {
                 Ok((Verdict::Mixed, format!("owner waited >= {w} of {d} PPU ticks; RSX reached-marker span >= {} \
                     ticks", span.0)))
+            } else if busy_rule && rsx_long {
+                // the span alone is not evidence of RSX work: say what was seen, decide nothing
+                Err(format!("unresolved: FIFO wait >= {w}, RSX span {}..{} of {d} PPU ticks; observation, not a verdict: RSX busy >= {} ticks, polling in complete runs {flip_polled} (flip status) / {label_polled} (labels) ticks", span.0, span.1, busy_lo.map_or("UNKNOWN".into(), |b| b.to_string())))
             } else {
                 Err(format!("unresolved: FIFO wait >= {w}, RSX span {}..{} of {d} PPU ticks", span.0, span.1))
             } })();
@@ -1853,6 +1916,10 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
         }
+        if let Some((c, l)) = f.label_polls {
+            writeln!(out, "  label polling: {} run(s) ({} ticks of bounded gaps), {} broken, {} across a frame boundary, label {}", c.runs, c.ticks, c.broken, c.spanning,
+                match l { 0 => "-".to_string(), u32::MAX => "several".into(), n => (n - 1).to_string() })?;
+        }
         if let Some(b) = f.rsx_busy_raw {
             writeln!(out, "  RSX busy (timed intervals, overlaps merged): raw {b}, PPU {}",
                 f.rsx_busy_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")))?;
@@ -1941,6 +2008,18 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         }
         if f.call_brackets != 0 {
             v["call_brackets"] = json!(f.call_brackets);
+        }
+        if r.busy_rule {
+            // 255/11 and later: polling shares of the frame interval (complete runs only), as observed numbers
+            let d = f.tb_end.saturating_sub(f.tb_begin);
+            let ratio = |t: u64| if d == 0 { serde_json::Value::Null } else { json!(t as f64 / d as f64) };
+            let flip = f.presentation.as_ref().and_then(|p| p.cadence).map_or(0, |c| c.ticks);
+            v["cadence_share"] = ratio(flip);
+            if let Some((c, l)) = f.label_polls {
+                v["label_cadence_share"] = ratio(c.ticks);
+                v["label_polling"] = json!({"runs":c.runs,"ticks":c.ticks,"broken":c.broken,"spanning":c.spanning,
+                    "label":match l { 0 => serde_json::Value::Null, u32::MAX => json!("several"), n => json!(n - 1) }});
+            }
         }
         if let Some(b) = f.rsx_busy_raw {
             // 127/11 and later only, so older captures keep their exact JSON

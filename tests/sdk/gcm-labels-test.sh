@@ -47,6 +47,51 @@ if command -v "$cxx" >/dev/null 2>&1; then
     echo "C++17 build: ok"
 fi
 
+# PS3_PROF_AUTO: each query is reported once as a label poll with its index (0xffffffff for an address outside the
+# label area) and its result, in C and C++; without PS3TC_PROF_AUTO the header references no hook.
+cat > "$tmp/seam.c" <<'EOS'
+#define PS3TC_GCM_LABELS_NO_GCM 1
+#include <stdint.h>
+#include <stdio.h>
+static uint32_t l[256], outside;
+static uint32_t *cellGcmGetLabelAddress(uint8_t i) { return &l[i]; }
+#include <cell/gcm/ps3tc_gcm_labels.h>
+#ifdef PS3TC_PROF_AUTO
+#ifdef __cplusplus
+extern "C" {
+#endif
+static unsigned begins, ends; static uint32_t last_label; static int last_passed;
+uint64_t ps3dk_prof__auto_label_poll_begin(void) { begins++; return 77; }
+void ps3dk_prof__auto_label_poll_end(uint64_t b, uint32_t label, int passed)
+{ if (b == 77) ends++; last_label = label; last_passed = passed; }
+#ifdef __cplusplus
+}
+#endif
+#define SEEN(n, lab, p) (begins == (n) && ends == (n) && last_label == (lab) && last_passed == (p))
+#else
+#define SEEN(n, lab, p) 1
+#endif
+int main(void)
+{
+    int ok = 1;
+    l[70] = 4; ok &= !cellGcmIsLabelPassed(70, 5) && SEEN(1u, 70u, 0);
+    l[70] = 5; ok &= cellGcmIsLabelPassed(70, 5) && SEEN(2u, 70u, 1);
+    l[9] = 7; ok &= cellGcmIsLabelValuePassed(&l[9], 7) && SEEN(3u, 9u, 1);
+    outside = 1; ok &= !cellGcmIsLabelValuePassed(&outside, 2) && SEEN(4u, 0xffffffffu, 0);
+    puts(ok ? "seam ok" : "seam FAIL");
+    return ok ? 0 : 1;
+}
+EOS
+"$cc" -std=c11 -Wall -Wextra -Werror -I "$inc" -DPS3TC_PROF_AUTO=1 "$tmp/seam.c" -o "$tmp/seam" && "$tmp/seam" || fail "observed label query seam (C)"
+if command -v "$cxx" >/dev/null 2>&1; then
+    cp "$tmp/seam.c" "$tmp/seam.cc"
+    "$cxx" -std=c++17 -Wall -Wextra -Werror -I "$inc" -DPS3TC_PROF_AUTO=1 "$tmp/seam.cc" -o "$tmp/seamxx" && "$tmp/seamxx" || fail "observed label query seam (C++)"
+fi
+"$cc" -std=c11 -Wall -Wextra -Werror -I "$inc" -c "$tmp/seam.c" -o "$tmp/plain.o"
+if nm "$tmp/plain.o" | grep -q ps3dk_prof__auto_label_poll; then fail "the default build references the label-poll hooks"; fi
+"$cc" -std=c11 -Wall -Wextra -Werror -I "$inc" "$tmp/seam.c" -o "$tmp/plain" && "$tmp/plain" >/dev/null || fail "default label query build"
+echo "label-poll seam: observed in PS3_PROF_AUTO units (C and C++), absent otherwise"
+
 "$tmp/fixed" --dump > "$tmp/ranges.jsonl"
 python3 "$repo_root/tests/sdk/gcm-label-reservation-test.py" --ranges "$tmp/ranges.jsonl" --self-test
 python3 "$repo_root/tests/sdk/gcm-label-reservation-test.py" --ranges "$tmp/ranges.jsonl"
