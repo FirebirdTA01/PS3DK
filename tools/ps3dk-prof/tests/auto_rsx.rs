@@ -940,6 +940,66 @@ fn untimed_draws_get_bounded_verdicts() {
     }
 }
 
+/// 127/11, two frames: G (frame 0) builds segment A (one clear timed, `g_col` an excluded column if any), F (frame 1)
+/// calls A with `unrep` draws executed without a record, A's record at RSX `timed`, F's marks at `marks`, a FIFO wait in F.
+fn seg_bounded(g_col: Option<usize>, unrep: u32, timed: (u64, u64), marks: (u64, u64), status_flags: u16) -> Report {
+    let mut m1 = mark(1, 1, 1, marks.0);
+    m1.serials = (1, 2);
+    m1.published = 2;
+    let a = built_op(2, 1, timed, 1, 1, 0);
+    let mut m2 = mark(3, 1, 2, marks.1);
+    m2.serials = (5, 6);
+    m2.published = 6;
+    let mut g = row(0, (10_000, 110_000), 1);
+    if let Some(c) = g_col {
+        g.rows[2][0] = 2;
+        g.rows[2][2 + c] = 1;
+    }
+    let mut f = row(1, (110_000, 210_000), 0);
+    f.flags |= 64;
+    g.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 120_000, 20_000, 10_000, 1)), St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(),
+        ops_b(&[m1, a, m2]), coverage_b(&g, 0), coverage_b(&f, unrep)];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(status_flags, status_for(3, 2, 9, 6)));
+    analyze(&reader::read(&brk_file(brk_cfg(), rest).bytes()).expect("reads"))
+}
+
+/// Segment draws a CALL executed in F without a timed record (segment_unrepresented, including draws its build could
+/// not time) are untimed for the bounded rule; a build frame whose only exclusions are untimed-only is still a source.
+#[test]
+fn segment_frames_get_bounded_verdicts() {
+    let long = (60_000, 90_000);
+    let wide = (56_000, 100_000);
+    // an untracked or refused draw in F, long timed span: RSX-bound on both bounds
+    let r = seg_bounded(None, 1, long, wide, 1);
+    let f = &r.frames[1];
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("1 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    assert!(f.rsx_busy_bounds.is_some());
+    // the same with a short timed span: the unrepresented draw could decide it
+    let r = seg_bounded(None, 1, (60_000, 61_000), wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert!(r.frames[1].reason.contains("does not decide"), "{}", r.frames[1].reason);
+    // A's second draw was excluded for report capacity while G built it (and counted as unrepresented in F):
+    // G is still a source, F is bounded
+    let r = seg_bounded(Some(1), 1, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+    // G with an evidence-invalidating column (ownership uncertainty) still refuses the import
+    let r = seg_bounded(Some(6), 1, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::Unknown);
+    assert_eq!(r.frames[1].reason, format!("segment draw(s) built in frame {OWNER}/0: 1 covered operation(s) excluded"));
+    // a replayed segment: the sticky status keeps every frame UNKNOWN
+    let r = seg_bounded(None, 1, long, wide, 1 | 1024);
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown));
+    assert_eq!(r.frames[1].reason, ps3dk_prof::auto_rsx::SEGMENT_REPLAY);
+    // fully timed: today's verdict and reason, no bounds
+    let r = seg_bounded(None, 0, long, wide, 1);
+    assert_eq!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+    assert!(r.frames[1].reason.starts_with("fetch:"), "{}", r.frames[1].reason);
+    assert!(r.frames[1].rsx_busy_bounds.is_none());
+}
+
 #[test]
 fn pacing_needs_flip_wait_scopes() {
     let none = Blk::default();

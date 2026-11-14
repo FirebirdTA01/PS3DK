@@ -1346,7 +1346,10 @@ fn build_populations(inv: &Inventory) -> (BTreeMap<(u32, u64), [u64; 3]>, BTreeM
 /// A frame row is a clean BUILD source for segment draws recorded elsewhere: present, associated, closed exactly,
 /// nothing excluded or outside the observed population, and its build population reconciles kind by kind.  This does
 /// not depend on that frame's own verdict (its own imports, timing or presentation).
-fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>) -> Result<(), String> {
+/// A frame row as a clean, reconciled build source. With `untimed_ok` (127/11 bounded verdicts) exclusions in the
+/// untimed-only columns are allowed: those draws still executed where they were called, and the calling frame counts
+/// them as untimed (its segment_unrepresented). Any other failure still refuses.
+fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>, untimed_ok: bool) -> Result<(), String> {
     if f.flags & FR_TOKEN == 0 {
         return Err("unassociated coverage row".into());
     }
@@ -1356,6 +1359,7 @@ fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>) -> Result<(
     match (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?)) {
         None => return Err(TOTALS_OVERFLOW.into()),
         Some(0) => {}
+        Some(_) if untimed_ok && !(0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0)) => {}
         Some(n) => return Err(format!("{n} covered operation(s) excluded")),
     }
     if f.unsupported != 0 {
@@ -1491,7 +1495,7 @@ pub fn analyze(cap: &Capture) -> Report {
             };
             // Untimed draws whose evidence is still valid do not block a verdict by themselves: it is decided on RSX
             // busy bounds below (timed span .. frame marks). Any other exclusion keeps the frame UNKNOWN.
-            let untimed = if excluded != 0 {
+            let mut untimed = if excluded != 0 {
                 let invalid = (0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0));
                 if invalid || !bounded_rule {
                     return Err(format!("{excluded} covered operation(s) excluded"));
@@ -1512,7 +1516,11 @@ pub fn analyze(cap: &Capture) -> Report {
                 return Err(format!("{} operation record(s) {SEGMENT_POPULATION}", v.segment_ops));
             }
             // 63/11: every segment draw a CALL executed here has a record carrying this frame's token.
-            if v.segment_unrepresented != 0 {
+            // With 127/11 those draws ran between this frame's marks without a timed record: untimed, so they fall
+            // under the bounded rule (a replay already returned above, through the sticky status).
+            if v.segment_unrepresented != 0 && bounded_rule {
+                untimed = untimed.saturating_add(u64::from(v.segment_unrepresented));
+            } else if v.segment_unrepresented != 0 {
                 return Err(format!("at least {} segment draw(s) executed in this frame have no record (a CALL of an \
                     untracked, replayed, refused or partly untimed segment)", v.segment_unrepresented));
             }
@@ -1543,7 +1551,7 @@ pub fn analyze(cap: &Capture) -> Report {
                     let Some(row) = rows.get(&(o, g)) else {
                         return Err(format!("segment draw(s) built in frame {o}/{g}, which has no coverage row"));
                     };
-                    build_clean(row, &built).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
+                    build_clean(row, &built, bounded_rule).map_err(|why| format!("segment draw(s) built in frame {o}/{g}: {why}"))?;
                 }
             }
             if v.ops_incomplete != 0 {
