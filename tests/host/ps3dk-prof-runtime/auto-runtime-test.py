@@ -109,6 +109,10 @@ if a.case=='flips':
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
 if a.case in ('extsegments','segbuild','segnested','callbracket'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case=='labels' and a.sanitize=='thread':
+    # the header's host-only ordering fence (cellGcmReadLabelOrdered) is a seq_cst fence, which GCC warns about under
+    # TSan; the runtime under test has no fence of its own
+    flags+=['-Wno-tsan']
 if a.case=='labels':
     # only the label query header: the SDK's own libc headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -183,13 +187,13 @@ for rel in sources:
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    if(0) {'+old.split('{',1)[1]).encode())
     elif a.mutant=='poll-scope-cadence' and rel=='auto_rsx/auto_runtime.c':
         # polls inside a flip-wait scope counted again as cadence
-        code=source.read_text();old='if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;'
+        code=source.read_text();old='if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;\n    if(status) {'
         assert code.count(old)==1
-        new='if(!before || !(a=owner_capture(NULL,0))) return;'
+        new='if(!before || !(a=owner_capture(NULL,0))) return;\n    if(status) {'
         code=code.replace(old,new)
-        old2='if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;\n    return observation_tb()|1u;'
+        old2='flip_status_begin(void)\n{\n    auto_capture *a;\n    if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return 0;\n    return observation_tb()|1u;'
         assert code.count(old2)==1
-        code=code.replace(old2,'if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;\n    return observation_tb()|1u;')
+        code=code.replace(old2,'flip_status_begin(void)\n{\n    auto_capture *a;\n    if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;\n    return observation_tb()|1u;')
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
     elif a.mutant=='one-record-chunks' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='enum { AUTO_OPS_BATCH=64 };';assert code.count(old)==1
