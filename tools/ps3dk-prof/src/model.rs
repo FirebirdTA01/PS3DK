@@ -599,7 +599,7 @@ pub struct CaptureWindow {
     pub name: String,
     pub name_desc: u32,
     pub first_frame: u64,
-    pub last_frame: u64,
+    pub last_frame: Option<u64>,
     pub source: WindowSource,
     pub kind: WindowKind,
     pub reason: WindowReason,
@@ -609,7 +609,17 @@ pub struct CaptureWindow {
 
 impl CaptureWindow {
     pub fn contains_frame(&self, frame: u64) -> bool {
-        frame >= self.first_frame && frame <= self.last_frame
+        match self.last_frame {
+            Some(last) => frame >= self.first_frame && frame <= last,
+            None => false,
+        }
+    }
+
+    pub fn frames_desc(&self) -> String {
+        match self.last_frame {
+            Some(last) => format!("frames {}..{}", self.first_frame, last),
+            None => "0 frames".to_string(),
+        }
     }
 }
 

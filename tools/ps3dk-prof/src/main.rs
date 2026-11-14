@@ -432,8 +432,8 @@ fn windows(args: &[String]) -> ExitCode {
             for w in &a.capture.windows {
                 let status_note = if w.incomplete { " (incomplete)" } else { "" };
                 println!(
-                    "window {}: \"{}\" source {} kind {} frames {}..{} reason {}{}",
-                    w.id, w.name, w.source, w.kind, w.first_frame, w.last_frame, w.reason, status_note
+                    "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                    w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
                 );
             }
             verdict_code(&a)
@@ -493,8 +493,8 @@ fn frames(args: &[String]) -> ExitCode {
                 };
                 let status_note = if w.incomplete { " (incomplete)" } else { "" };
                 println!(
-                    "window {}: \"{}\" source {} kind {} frames {}..{} reason {}{}",
-                    w.id, w.name, w.source, w.kind, w.first_frame, w.last_frame, w.reason, status_note
+                    "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                    w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
                 );
                 println!("\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
                 for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
@@ -504,8 +504,8 @@ fn frames(args: &[String]) -> ExitCode {
                 for w in &a.capture.windows {
                     let status_note = if w.incomplete { " (incomplete)" } else { "" };
                     println!(
-                        "window {}: \"{}\" source {} kind {} frames {}..{} reason {}{}",
-                        w.id, w.name, w.source, w.kind, w.first_frame, w.last_frame, w.reason, status_note
+                        "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
                     );
                     println!("\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
                     for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
@@ -949,7 +949,11 @@ fn export(args: &[String]) -> ExitCode {
                     eprintln!("ps3dk-prof: export: no window matching {w_query:?}");
                     return ExitCode::from(3);
                 };
-                w.first_frame..=w.last_frame
+                let Some(last) = w.last_frame else {
+                    eprintln!("ps3dk-prof: export: window {w_query:?} has 0 frames");
+                    return ExitCode::from(3);
+                };
+                w.first_frame..=last
             }
         }
     } else {

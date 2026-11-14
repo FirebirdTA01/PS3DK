@@ -498,8 +498,8 @@ pub fn render_window(a: &Analysis, w: &crate::model::CaptureWindow) -> String {
     let mut o = String::new();
     let _ = writeln!(
         o,
-        "window {}: \"{}\" source {} kind {} frames {}..{} reason {}",
-        w.id, w.name, w.source, w.kind, w.first_frame, w.last_frame, w.reason
+        "window {}: \"{}\" source {} kind {} {} reason {}",
+        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason
     );
     let cap = &a.capture;
     let _ = writeln!(o, "verdict: {}", verdict_text(a));

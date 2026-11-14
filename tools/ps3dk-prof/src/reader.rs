@@ -536,11 +536,17 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
-    let max_frame = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).max().unwrap_or(0);
+    let mut frame_marks: Vec<u64> = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).collect();
+    if let Some(auto) = &r.cap.auto {
+        for cov in &auto.frames {
+            frame_marks.push(cov.frame);
+        }
+    }
     if let Some(w) = r.windows.take() {
-        r.cap.windows = w.finish(max_frame);
+        r.cap.windows = w.finish(&frame_marks);
     } else {
-        let min_frame = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).min().unwrap_or(0);
+        let min_frame = frame_marks.iter().copied().min().unwrap_or(0);
+        let max_frame = frame_marks.iter().copied().max();
         r.cap.windows = vec![crate::model::CaptureWindow {
             id: 1,
             name: "default".to_string(),

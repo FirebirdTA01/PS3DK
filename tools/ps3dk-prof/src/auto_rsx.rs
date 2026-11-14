@@ -1876,8 +1876,8 @@ pub fn write_text_window<W: std::io::Write>(
 ) -> std::io::Result<()> {
     writeln!(
         out,
-        "window {}: \"{}\" source {} kind {} frames {}..{} reason {}",
-        w.id, w.name, w.source, w.kind, w.first_frame, w.last_frame, w.reason
+        "window {}: \"{}\" source {} kind {} {} reason {}",
+        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason
     )?;
     let filtered = r.filter_window(w);
     write_text(out, &filtered)

@@ -29,6 +29,7 @@ pub struct Reader {
     pub windows: Vec<CaptureWindow>,
     pub open: Option<PendingWindow>,
     pub last_id: u32,
+    pub prev_last_frame: Option<u64>,
 }
 
 impl Reader {
@@ -84,6 +85,14 @@ impl Reader {
                 format!("window id {id} <= previous window id {}", self.last_id),
             );
         }
+        if let Some(prev_last) = self.prev_last_frame {
+            if first_frame <= prev_last {
+                return malformed(
+                    Rule::Windows,
+                    format!("window {id} first_frame {first_frame} <= previous window last_frame {prev_last}"),
+                );
+            }
+        }
         let desc = cap.descriptors.get(&name_desc).ok_or_else(|| Malformed {
             rule: Rule::Windows,
             detail: format!("window {id}: undeclared name descriptor {name_desc}"),
@@ -102,7 +111,12 @@ impl Reader {
                 }
                 WindowKind::Manual
             }
-            WINDOW_KIND_FRAMES => WindowKind::Frames(frames_count),
+            WINDOW_KIND_FRAMES => {
+                if frames_count == 0 {
+                    return malformed(Rule::Windows, format!("window {id}: zero frames_count for FRAMES"));
+                }
+                WindowKind::Frames(frames_count)
+            }
             WINDOW_KIND_SECTION => {
                 if frames_count != 0 {
                     return malformed(Rule::Windows, format!("window {id}: non-zero frames_count for SECTION"));
@@ -168,7 +182,26 @@ impl Reader {
         }
         let reason = match reason_raw {
             WINDOW_REASON_END => WindowReason::End,
-            WINDOW_REASON_COUNT => WindowReason::Count,
+            WINDOW_REASON_COUNT => {
+                match open.kind {
+                    WindowKind::Frames(expected) => {
+                        let span = last_frame - open.first_frame + 1;
+                        if span != expected as u64 {
+                            return malformed(
+                                Rule::Windows,
+                                format!("window {id}: reason COUNT span {span} != frames_count {expected}"),
+                            );
+                        }
+                        WindowReason::Count
+                    }
+                    _ => {
+                        return malformed(
+                            Rule::Windows,
+                            format!("window {id}: reason COUNT is valid only for kind FRAMES"),
+                        );
+                    }
+                }
+            }
             WINDOW_REASON_SHUTDOWN => WindowReason::Shutdown,
             WINDOW_REASON_SEAL => WindowReason::Seal,
             WINDOW_REASON_REFUSED_CAPACITY => WindowReason::RefusedCapacity,
@@ -176,12 +209,13 @@ impl Reader {
         };
 
         self.last_id = id;
+        self.prev_last_frame = Some(last_frame);
         self.windows.push(CaptureWindow {
             id,
             name: open.name,
             name_desc: open.name_desc,
             first_frame: open.first_frame,
-            last_frame,
+            last_frame: Some(last_frame),
             source: open.source,
             kind: open.kind,
             reason,
@@ -191,9 +225,9 @@ impl Reader {
         Ok(())
     }
 
-    pub fn finish(mut self, max_frame: u64) -> Vec<CaptureWindow> {
+    pub fn finish(mut self, frame_marks: &[u64]) -> Vec<CaptureWindow> {
         if let Some(open) = self.open.take() {
-            let last_frame = max_frame.max(open.first_frame);
+            let last_frame = frame_marks.iter().copied().filter(|&f| f >= open.first_frame).max();
             self.windows.push(CaptureWindow {
                 id: open.id,
                 name: open.name,

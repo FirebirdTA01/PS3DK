@@ -128,7 +128,7 @@ fn windows_listing_and_model_parsing() {
     assert_eq!(w1.id, 1);
     assert_eq!(w1.name, "init_pass");
     assert_eq!(w1.first_frame, 0);
-    assert_eq!(w1.last_frame, 4);
+    assert_eq!(w1.last_frame, Some(4));
     assert_eq!(w1.source, WindowSource::App);
     assert_eq!(w1.kind, WindowKind::Manual);
     assert_eq!(w1.reason, WindowReason::End);
@@ -138,7 +138,7 @@ fn windows_listing_and_model_parsing() {
     assert_eq!(w2.id, 2);
     assert_eq!(w2.name, "render_burst");
     assert_eq!(w2.first_frame, 5);
-    assert_eq!(w2.last_frame, 9);
+    assert_eq!(w2.last_frame, Some(9));
     assert_eq!(w2.source, WindowSource::Live);
     assert_eq!(w2.kind, WindowKind::Frames(5));
     assert_eq!(w2.reason, WindowReason::Count);
@@ -170,7 +170,7 @@ fn legacy_file_without_windows_flag_has_implicit_window_and_unchanged_report() {
     assert_eq!(w.id, 1);
     assert_eq!(w.name, "default");
     assert_eq!(w.first_frame, 0);
-    assert_eq!(w.last_frame, 9);
+    assert_eq!(w.last_frame, Some(9));
     assert_eq!(w.source, WindowSource::App);
     assert_eq!(w.kind, WindowKind::Manual);
     assert_eq!(w.reason, WindowReason::End);
@@ -304,7 +304,7 @@ fn window_open_at_end_of_capture_is_not_refused() {
     let w = &cap.windows[0];
     assert_eq!(w.id, 1);
     assert_eq!(w.first_frame, 2);
-    assert_eq!(w.last_frame, 9);
+    assert_eq!(w.last_frame, Some(9));
     assert_eq!(w.reason, WindowReason::OpenAtEnd);
     assert!(w.incomplete);
 
@@ -495,4 +495,126 @@ fn refusals_structural_rules() {
         0, // flag is 0!
     );
     assert_eq!(reader::read(&f_no_flag.bytes()).unwrap_err().rule, Rule::UnknownChunkType);
+}
+
+#[test]
+fn overlap_by_frames_refused() {
+    let f = base_file(
+        vec![
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_END, 4)),
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(2, 1, 4, WINDOW_SOURCE_LIVE, WINDOW_KIND_MANUAL, 0),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(2, WINDOW_REASON_END, 8)),
+        ],
+        FLAG_WINDOWS,
+    );
+    assert_eq!(reader::read(&f.bytes()).unwrap_err().rule, Rule::Windows);
+}
+
+#[test]
+fn frames_with_count_0_refused() {
+    let f = base_file(
+        vec![
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_FRAMES, 0),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_END, 4)),
+        ],
+        FLAG_WINDOWS,
+    );
+    assert_eq!(reader::read(&f.bytes()).unwrap_err().rule, Rule::Windows);
+}
+
+#[test]
+fn manual_with_count_3_refused() {
+    let f = base_file(
+        vec![
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 3),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_END, 4)),
+        ],
+        FLAG_WINDOWS,
+    );
+    assert_eq!(reader::read(&f.bytes()).unwrap_err().rule, Rule::Windows);
+}
+
+#[test]
+fn count_reason_on_manual_refused() {
+    let f = base_file(
+        vec![
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_COUNT, 4)),
+        ],
+        FLAG_WINDOWS,
+    );
+    assert_eq!(reader::read(&f.bytes()).unwrap_err().rule, Rule::Windows);
+}
+
+#[test]
+fn count_with_the_wrong_span_refused() {
+    let f = base_file(
+        vec![
+            chunk(
+                CHUNK_WINDOW_BEGIN,
+                window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_FRAMES, 5),
+            ),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_COUNT, 5)), // span = 6 != 5
+        ],
+        FLAG_WINDOWS,
+    );
+    assert_eq!(reader::read(&f.bytes()).unwrap_err().rule, Rule::Windows);
+}
+
+#[test]
+fn open_at_end_with_no_frames_reported_as_0_frames() {
+    // Window 1 begins at frame 100, but file only holds frames 0..9.
+    let f = base_file(
+        vec![chunk(
+            CHUNK_WINDOW_BEGIN,
+            window_begin_payload(1, 0, 100, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0),
+        )],
+        FLAG_WINDOWS,
+    );
+    let cap = match ps3dk_prof::load(&f.bytes()) {
+        Outcome::Analysed(a) => a.capture,
+        Outcome::Malformed(m) => panic!("unclosed window should not be malformed: {m}"),
+    };
+    assert_eq!(cap.windows.len(), 1);
+    let w = &cap.windows[0];
+    assert_eq!(w.id, 1);
+    assert_eq!(w.first_frame, 100);
+    assert_eq!(w.last_frame, None);
+    assert_eq!(w.reason, WindowReason::OpenAtEnd);
+    assert!(w.incomplete);
+
+    let tmp = temp_prof("open-at-end-zero-frames");
+    std::fs::write(&tmp, f.bytes()).unwrap();
+
+    let (code, stdout, _) = run_cmd(&["windows", tmp.to_str().unwrap()]);
+    assert_eq!(code, Some(0));
+    assert!(
+        stdout.contains("window 1: \"init_pass\" source app kind manual 0 frames reason open at end of capture (incomplete)"),
+        "stdout: {stdout}"
+    );
+
+    let (code, stdout_rep, _) = run_cmd(&["report", tmp.to_str().unwrap()]);
+    assert_eq!(code, Some(0));
+    assert!(
+        stdout_rep.contains("window 1: \"init_pass\" source app kind manual 0 frames reason open at end of capture"),
+        "stdout_rep: {stdout_rep}"
+    );
+
+    let _ = std::fs::remove_file(&tmp);
 }
