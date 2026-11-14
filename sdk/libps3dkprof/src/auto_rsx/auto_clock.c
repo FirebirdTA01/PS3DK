@@ -147,7 +147,12 @@ int auto_clock_poll(auto_clock *q,const auto_clock_port *p,int seal)
             p->sync(p->user);repeated=p->timer(p->user,r->slot);
             p->sync(p->user);second=p->label(p->user);after=p->tb(p->user);
             r->label_second=label;r->tb_after=now;
-            if(second<label) {REL(&q->invalid,1u);live=0;r->elapsed=0;finish(q,n);continue;}
+            /* every label observation is checked like the first: below the highest value seen is a regression,
+             * above the newest prepared 2k a write nobody issued; the highest value seen is kept */
+            if(second<label || second<q->last_label || second>2u*ACQ(&q->prepared)) {
+                REL(&q->invalid,1u);live=0;r->elapsed=0;finish(q,n);continue;
+            }
+            if(second>q->last_label) q->last_label=second;
             if(after<now || now<r->tb_before) {r->flags=4;r->elapsed=0;finish(q,n);continue;}
             r->elapsed=now-r->tb_before;
             if(raw!=UINT64_MAX && raw==repeated) {r->raw=raw;r->repeated=repeated;r->flags=1;}

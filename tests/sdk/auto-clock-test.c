@@ -44,9 +44,12 @@ static void rsx_to(uint32_t value)
     if (value >= 2u * fake.k - 1u && fake.rsx < 2u * fake.k - 1u) {fake.written_at = fake.tick;fake.raw = 9000 + fake.k;}
     fake.rsx = value;
 }
+/* scripted label reads (each read takes the next value) for the second-read checks */
+static uint32_t script[8], script_n, script_i;
 static uint32_t label(void *u)
 {
     (void)u;
+    if (script_i < script_n) return script[script_i++];
     if (fake.mode == THREADED) return __atomic_load_n(&threaded_rsx, __ATOMIC_ACQUIRE);
     if (fake.regress) return fake.rsx - 2u;
     if (fake.future) return fake.rsx + 5u;
@@ -56,7 +59,8 @@ static uint64_t timer(void *u, uint32_t slot)
 {
     (void)u;
     if (fake.mode == THREADED) return 5000u + slot;
-    assert(slot == 1024 + (fake.k - 1) % 16);fake.reads++;
+    if (!script_n) assert(slot == 1024 + (fake.k - 1) % 16);   /* scripted cases complete older anchors too */
+    fake.reads++;
     if (fake.mode == POISON) return UINT64_MAX;
     return fake.raw + (fake.mode == UNSTABLE ? fake.reads : 0);
 }
@@ -146,6 +150,23 @@ static void regression_and_future(void)
     fake.future = 1;
     assert(!auto_clock_poll(&clock_state, &port, 0) && clock_state.invalid && done()->flags == 8);
 }
+/* Every label read is checked, the second read of a completion included, and the highest value seen is kept:
+ * one prepared anchor reading 2 then 99 is a future write; two anchors reading 2 then 4, then 3, is a regression. */
+static void second_read_checked(void)
+{
+    setup(NORMAL);script_i = 0;
+    assert(auto_clock_sample(&clock_state, &port, 42, 0) == 1);
+    script[0] = 2;script[1] = 99;script_n = 2;
+    assert(!auto_clock_poll(&clock_state, &port, 0) && clock_state.invalid);
+    setup(NORMAL);script_i = 0;script_n = 0;
+    assert(auto_clock_sample(&clock_state, &port, 42, 0) == 1);
+    assert(auto_clock_sample(&clock_state, &port, 42, 8) == 1);
+    script[0] = 2;script[1] = 4;script_n = 2;
+    assert(auto_clock_poll(&clock_state, &port, 0) && !clock_state.invalid && clock_state.last_label == 4);
+    script[2] = 3;script_n = 3;
+    assert(!auto_clock_poll(&clock_state, &port, 0) && clock_state.invalid);
+    script_i = script_n = 0;
+}
 /* Failures that never reach the RSX in full are immediate facts; nothing is polled. */
 static void immediate(uint32_t mode)
 {
@@ -190,7 +211,7 @@ static void *consume(void *u)
 }
 int main(void)
 {
-    far_behind();first_poll_done();timeout_then_late();seal();regression_and_future();
+    far_behind();first_poll_done();timeout_then_late();seal();regression_and_future();second_read_checked();
     immediate(NO_ROOM);immediate(PARTIAL);immediate(UNPUBLISHED);
     bad_timer(UNSTABLE);bad_timer(POISON);
     setup(THREADED);thread_tick = 1000;

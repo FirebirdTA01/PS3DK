@@ -341,7 +341,8 @@ static void sample_clock(auto_capture *a,uint64_t frame)
     const auto_clock_port port={a,clock_tb,clock_live,clock_emit,clock_flush,clock_label,clock_timer,clock_sync};
     g_tls.in_gpu=1;
     (void)auto_clock_sample(&a->clocks,&port,a->owner_incarnation,frame);
-    if(a->clocks.invalid) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
+    /* the drainer now sets invalid (it invalidates the configuration itself); read it atomically here */
+    if(LD_ACQ(&a->clocks.invalid)) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
     g_tls.in_gpu=0;
 }
 
