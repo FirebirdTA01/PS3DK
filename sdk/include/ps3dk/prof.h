@@ -122,7 +122,7 @@ typedef struct ps3dk_prof_live_config {
     uint16_t port;                 /* TCP port on every interface; default 31750 */
     uint16_t reserved;             /* 0 */
     uint32_t poll_us;              /* 1000..1000000; default 10000: the agent's wait between checks */
-    uint32_t send_timeout_us;      /* 1000..60000000; default 2000000: no send progress for this long drops a viewer */
+    uint32_t send_timeout_us;      /* 1000..60000000; default 2000000: send-stall and post-END input-drain limit */
     uint32_t handshake_timeout_us; /* 1000..60000000; default 2000000: the viewer's hello must arrive within this */
     uint32_t stack_bytes;          /* 16 KiB..1 MiB; default 64 KiB: the agent thread's stack */
     uint32_t reserved2;            /* 0 */
