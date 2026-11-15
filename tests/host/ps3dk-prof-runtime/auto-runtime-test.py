@@ -21,7 +21,7 @@ ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-f
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
-                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent','label-silent','label-switch-silent'])
+                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent','label-silent','label-switch-silent','label-stride-4','label-sum','label-unknown-run'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -30,7 +30,7 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
                           'boundary-cadence':'spanning','boundary-scope':'spanning',
-                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested','no-call-reserve':'callbracket','bracket-silent':'callbracket','label-silent':'labels','label-switch-silent':'labels'}[a.mutant] and not a.sanitize
+                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested','no-call-reserve':'callbracket','bracket-silent':'callbracket','label-silent':'labels','label-switch-silent':'labels','label-stride-4':'labels','label-sum':'labels','label-unknown-run':'labels'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -79,7 +79,10 @@ def run(name,cmd,cwd=out):
                   'no-call-reserve':b'timed==504u-32u-2u',
                   'bracket-silent':b'context.current==a+before',
                   'label-silent':b'l[0]==1 && l[1]==0 && l[3]==71',
-                  'label-switch-silent':b'l[0]==2 && l[1]==2 && l[3]==0xffffffffu'}[a.mutant]
+                  'label-switch-silent':b'l[0]==2 && l[1]==2 && l[3]==0xffffffffu',
+                  'label-stride-4':b'l[0]==1 && l[3]==91 && l[5]==l[4]',
+                  'label-sum':b'l[5]<l[4]',
+                  'label-unknown-run':b'l[0]==1 && l[1]==1 && l[3]==91'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -117,6 +120,12 @@ if a.case=='labels':
     # only the label query header: the SDK's own libc headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
     shutil.copyfile(root/'sdk/include/cell/gcm/ps3tc_gcm_labels.h',inc.parent/'cell/gcm/ps3tc_gcm_labels.h')
+    if a.mutant=='label-stride-4':
+        # the review's decoder: a 4-byte stride over a 1024-byte area (label 90's slot decodes as no label)
+        hp=inc.parent/'cell/gcm/ps3tc_gcm_labels.h';code=hp.read_text()
+        old='at < base + 16u * CELL_GCM_LABEL_COUNT && !((at - base) & 15u) ?\n                     (uint32_t)((at - base) / 16u)'
+        assert code.count(old)==1
+        hp.write_text(code.replace(old,'at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?\n                     (uint32_t)((at - base) / 4u)'))
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
@@ -213,6 +222,12 @@ for rel in sources:
         # covered draws may take the pairs kept for whole-CALL brackets
         code=source.read_text();old='int auto_queue_take_pair(auto_queue *q) {return take_pair(q,q->reserve);}';assert code.count(old)==1
         source=out/'auto_queue.c';source.write_bytes(code.replace(old,'int auto_queue_take_pair(auto_queue *q) {return take_pair(q,0);}').encode())
+    elif a.mutant in ('label-sum','label-unknown-run') and rel=='auto_rsx/auto_runtime.c':
+        # the one-label total replaced by the sum across labels, or an unidentified address forming runs again
+        old,new={'label-sum':('    if(a->label_sum[i]>f->label_one) f->label_one=a->label_sum[i];\n','    f->label_one=f->label_cadence;\n'),
+                 'label-unknown-run':('    if(label==0xffffffffu) return; /* no identity: no run */\n','')}[a.mutant]
+        code=source.read_text();assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,new).encode())
     elif a.mutant in ('label-silent','label-switch-silent') and rel=='auto_rsx/auto_runtime.c':
         # label polls unobserved, or a poll of another label continuing the open run
         old,new={'label-silent':('    if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;\n    if(a->label_open && a->label_at!=label)',
@@ -442,11 +457,13 @@ if a.case=='labels':
     rows=[b for k,b in auto if k==36]
     assert len(rows)>=3 and all(len(b)==416 for b in rows),[len(b) for b in rows]
     block=[struct.unpack_from('<4IQQ',b,384) for b in rows[:3]]
-    # frame 0: two complete runs (labels 70 and 80: several), two broken; frame 1: two complete (label 90 and an
-    # address outside the label area), one spanning; frame 2: one spanning run, nothing complete
-    assert block[0][:4]==(2,2,0,0xffffffff) and block[0][5]==0,block[0]
-    assert block[1][:4]==(2,0,1,0xffffffff),block[1]
-    assert block[2][:4]==(0,0,1,0) and block[2][4]==0,block[2]
+    # frame 0: two complete runs (labels 70 and 80: several), two broken, the one-label total (u64@408) below the
+    # sum; frame 1: one complete run (label 90 through the address form), two broken (the 90 -> 91 switch and an
+    # unidentified poll), one spanning, the one-label total equal to the sum; frame 2: one spanning run, nothing
+    # complete
+    assert block[0][:4]==(2,2,0,0xffffffff) and 0<block[0][5]<block[0][4],block[0]
+    assert block[1][:4]==(1,2,1,91) and block[1][5]==block[1][4],block[1]
+    assert block[2][:4]==(0,0,1,0) and block[2][4]==0 and block[2][5]==0,block[2]
     print('real capture: label-poll blocks in 416-byte rows PASS')
     raise SystemExit(0)
 if a.case=='extsegments':

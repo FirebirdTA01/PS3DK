@@ -74,7 +74,9 @@ pub const MASKS_BRACKET: (u32, u32) = (127, 11);
 pub const MASKS_CALL: (u32, u32) = (255, 11);
 /// The label-poll writer: kind mask bit 256 LABEL_POLL on top of 255/11.  COVERAGE rows are 416 bytes: u32@384
 /// complete label-poll runs, u32@388 broken, u32@392 spanning, u32@396 the complete runs' label + 1 (0 none,
-/// 0xffffffff several or unknown), u64@400 their bounded-gap ticks, u64@408 zero.  Label polls are
+/// 0xffffffff several), u64@400 their bounded-gap ticks summed over every label, u64@408 the largest total of any
+/// ONE label's complete runs (equal to u64@400 for a single label).  Only u64@408 can meet a polling share: cadence
+/// is never summed across labels.  A poll of an address outside the label area forms no run.  Label polls are
 /// cellGcmIsLabelPassed / cellGcmIsLabelValuePassed reads on the owner thread; like flip-status cadence they show how
 /// often the owner looked, not that it waited.
 pub const MASKS_LABEL: (u32, u32) = (511, 11);
@@ -328,9 +330,9 @@ pub struct Coverage {
     /// 63/11 rows (u32@380): covered segment draws that CALLs in this frame executed without a committed record
     /// carrying the CALL's token.  A lower bound (an untracked segment counts 1); zero in older captures.
     pub segment_unrepresented: u32,
-    /// 511/11 rows: the label-poll cadence block (runs, broken, spanning, bounded-gap ticks) and the complete runs'
-    /// label + 1 (0 none, 0xffffffff several or unknown).
-    pub label_polls: Option<(Cadence, u32)>,
+    /// 511/11 rows: the label-poll cadence block (runs, broken, spanning, bounded-gap ticks over every label), the
+    /// complete runs' label + 1 (0 none, 0xffffffff several) and the largest one-label total of complete-run ticks.
+    pub label_polls: Option<(Cadence, u32, u64)>,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -859,21 +861,23 @@ impl Reader {
             r2 = c.u32()?;
         }
         let mut label = Cadence::default();
-        let (mut label_index, mut r3) = (0u32, 0u64);
+        let (mut label_index, mut one) = (0u32, 0u64);
         if cfg.label_polls() {
             label.runs = c.u32()?;
             label.broken = c.u32()?;
             label.spanning = c.u32()?;
             label_index = c.u32()?;
             label.ticks = c.u64()?;
-            r3 = c.u64()?;
+            one = c.u64()?;
         }
         c.done()?;
         let at = format!("AUTO coverage frame {owner}/{frame}");
-        if r3 != 0 || (label.runs == 0) != (label_index == 0) || (label_index > 256 && label_index != u32::MAX)
+        // one label: its total is the whole cadence; several: at least two runs, and no one label above the sum
+        let one_ok = if label_index == u32::MAX { label.runs >= 2 && one <= label.ticks } else { one == label.ticks };
+        if !one_ok || (label.runs == 0) != (label_index == 0) || (label_index > 256 && label_index != u32::MAX)
             || (label.runs == 0 && label.ticks != 0)
         {
-            return bad(r, format!("{at}: label-poll block runs {} label {label_index:#x} ticks {} reserved {r3}",
+            return bad(r, format!("{at}: label-poll block runs {} label {label_index:#x} ticks {} one-label {one}",
                 label.runs, label.ticks));
         }
         let present = flags & FR_PRESENT != 0;
@@ -941,7 +945,7 @@ impl Reader {
             flip_wait_spanning: scope_spanning, flip_wait_timeouts: timeouts, cadence,
             legacy_polls: (present && !scopes).then_some((r0, r1)),
             segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
-            label_polls: cfg.label_polls().then_some((label, label_index)) });
+            label_polls: cfg.label_polls().then_some((label, label_index, one)) });
         Ok(())
     }
 
@@ -1353,8 +1357,9 @@ pub struct FrameView {
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
-    /// 511/11: label-poll cadence and its label + 1 (see MASKS_LABEL), None for older writers.
-    pub label_polls: Option<(Cadence, u32)>,
+    /// 511/11: label-poll cadence, its label + 1 and the largest one-label total (see MASKS_LABEL), None for older
+    /// writers.
+    pub label_polls: Option<(Cadence, u32, u64)>,
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1608,7 +1613,7 @@ pub fn analyze(cap: &Capture) -> Report {
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
-        let label_cadence = v.label_polls.map(|(c, _)| c);
+        let label_cadence = v.label_polls.map(|(c, _, one)| (c, one));
         let mut bounds = None;
         v.reason = (|| -> Result<(Verdict, String), String> {
             if !status_ok {
@@ -1751,8 +1756,9 @@ pub fn analyze(cap: &Capture) -> Report {
                 Some(Presentation { cadence: Some(c), flip_wait_spanning: 0, .. }) if c.spanning == 0 && c.runs > 0 => c.ticks,
                 _ => 0,
             };
+            // a label's polling is the largest ONE label's complete runs, never a sum across labels
             let label_polled = match label_cadence {
-                Some(c) if c.spanning == 0 && c.runs > 0 && present.as_ref().map_or(true, |p| p.flip_wait_spanning == 0) => c.ticks,
+                Some((c, one)) if c.spanning == 0 && c.runs > 0 && present.as_ref().map_or(true, |p| p.flip_wait_spanning == 0) => one,
                 _ => 0,
             };
             let polled = flip_polled.max(label_polled);
@@ -1916,8 +1922,8 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
         }
-        if let Some((c, l)) = f.label_polls {
-            writeln!(out, "  label polling: {} run(s) ({} ticks of bounded gaps), {} broken, {} across a frame boundary, label {}", c.runs, c.ticks, c.broken, c.spanning,
+        if let Some((c, l, one)) = f.label_polls {
+            writeln!(out, "  label polling: {} run(s) ({} ticks of bounded gaps, largest one label {}), {} broken, {} across a frame boundary, label {}", c.runs, c.ticks, one, c.broken, c.spanning,
                 match l { 0 => "-".to_string(), u32::MAX => "several".into(), n => (n - 1).to_string() })?;
         }
         if let Some(b) = f.rsx_busy_raw {
@@ -2015,9 +2021,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             let ratio = |t: u64| if d == 0 { serde_json::Value::Null } else { json!(t as f64 / d as f64) };
             let flip = f.presentation.as_ref().and_then(|p| p.cadence).map_or(0, |c| c.ticks);
             v["cadence_share"] = ratio(flip);
-            if let Some((c, l)) = f.label_polls {
-                v["label_cadence_share"] = ratio(c.ticks);
-                v["label_polling"] = json!({"runs":c.runs,"ticks":c.ticks,"broken":c.broken,"spanning":c.spanning,
+            if let Some((c, l, one)) = f.label_polls {
+                v["label_cadence_share"] = ratio(one);
+                v["label_polling"] = json!({"runs":c.runs,"ticks":c.ticks,"one_label_ticks":one,"broken":c.broken,"spanning":c.spanning,
                     "label":match l { 0 => serde_json::Value::Null, u32::MAX => json!("several"), n => json!(n - 1) }});
             }
         }

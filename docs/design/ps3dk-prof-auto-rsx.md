@@ -201,9 +201,9 @@ Presentation with the 31/11 masks. Only a flip-wait scope is waiting evidence:
 | 384 | u32 | 511/11 (416-byte rows): complete label-poll runs |
 | 388 | u32 | broken label-poll runs (a gap over the bound, a poll of another label, or a flip-wait scope began) |
 | 392 | u32 | boundary-spanning label-poll runs |
-| 396 | u32 | the complete runs' label + 1: 0 none, 0xffffffff several (or an address outside the label area) |
-| 400 | u64 | label-poll cadence: summed bounded gaps of the complete runs |
-| 408 | u64 | reserved zero |
+| 396 | u32 | the complete runs' label + 1: 0 none, 0xffffffff several (at least two runs) |
+| 400 | u64 | label-poll cadence: summed bounded gaps of the complete runs, over every label |
+| 408 | u64 | the largest total of any ONE label's complete runs; equal to u64@400 for a single label, at most u64@400 for several |
 
 Label-poll cadence (511/11). The seam is the SDK's own non-blocking label query,
 `cellGcmIsLabelPassed(index, target)` and `cellGcmIsLabelValuePassed(address,
@@ -216,6 +216,15 @@ cadence rules applied to one label at a time, with the same 1 ms bound, the same
 frame-boundary ownership, and polls inside a flip-wait scope not counted. Like
 flip-status cadence, label-poll cadence shows how often the owner looked, never
 that it waited.
+
+A label is identified by its index: the address form decodes the GCM label
+area at its real 16-byte stride (label i at base + 16 i). A poll of an address
+outside the label area, or not on a label slot, has no identity: it ends any open
+run as broken and starts or completes none, so distinct unidentified addresses
+can never form one run. Cadence is kept per label within the frame (up to 8
+labels; later labels in the same frame are not credited), and only the largest
+one-label total (u64@408) can meet the polling share of the verdict: two labels
+that are each below the share never add up to it.
 
 With 63/11, u32@380 counts the covered segment draws that CALLs in this frame
 executed without a committed record carrying the CALL's frame token: a CALL of
@@ -523,7 +532,7 @@ RSX reached-marker span (first operation begin to last end of the execution popu
 | UNKNOWN: "presentation attribution unavailable: a flip-wait scope spans a frame boundary" (or "... flip-status polling spans a frame boundary") | W = 0 and S < D/2 without such a P, and a spanning scope (or run) touched the row |
 | UNKNOWN: "presentation polling observed; waiting not established" | W = 0 and S < D/2 without such a P, with polling cadence (complete or broken runs) or 15/11 poll intervals |
 | UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 with no presentation evidence |
-| RSX-bound candidate (busy polling, 255/11 and later) | W = 0, RSX busy time B >= D/2 (lower bound), complete polling cadence of flip status or of a label >= D/4 (no run or flip-wait scope across a boundary of the frame) |
+| RSX-bound candidate (busy polling, 255/11 and later) | W = 0, RSX busy time B >= D/2 (lower bound), complete polling cadence of flip status or of ONE label (u64@408) >= D/4 (no run or flip-wait scope across a boundary of the frame) |
 | UNKNOWN with an observation (255/11 and later) | S >= D/2 but not decided above: the reason prints B and both cadences, labelled "observation, not a verdict" |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |
 | PPU-bound candidate | never from this family: it needs positive evidence that the owner was busy, not waiting |
@@ -535,7 +544,7 @@ on the PPU clock: unlike S it does not count the gaps where the RSX waited for
 the PPU to submit, so a long span over a few short operations is not busy time.
 The two cadences are compared with D/4 separately, never added: a loop that
 polls both would count the same time twice. JSON (255/11 and later) reports each
-frame's `cadence_share` and `label_cadence_share` (complete-run ticks over D).
+frame's `cadence_share` and `label_cadence_share` (complete-run ticks over D; for labels the largest one-label total, also given as `label_polling.one_label_ticks`).
 Frames are flip- or submission-delimited intervals, not presented frames.
 
 The two shares are provisional starting values, printed with every JSON
