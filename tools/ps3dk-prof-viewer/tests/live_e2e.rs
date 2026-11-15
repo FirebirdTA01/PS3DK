@@ -81,15 +81,18 @@ fn the_client_and_the_real_agent_interoperate() {
     let client = LiveClient::start(c).unwrap();
     let t0 = Instant::now();
     // A provisional parse of a growing capture: still streaming, some but not
-    // all bytes received, and a parsed (not empty) INCOMPLETE document.
+    // all bytes received, and a parsed header. This fixture has one large
+    // RECORDS chunk: while it is torn, metadata alone is still INCOMPLETE.
     let mut provisional = false;
     while !client.finished() {
         assert!(t0.elapsed() < Duration::from_secs(20));
         let v = client.view();
         if let (LinkState::Streaming, Some(d)) = (&v.link, &v.doc) {
             let partial = v.received > 0 && v.received < cap.len() as u64;
-            let parsed = d.analysis().is_some_and(|a| a.capture.header.is_some());
-            provisional |= partial && parsed && d.verdict().tone == VerdictTone::Incomplete;
+            let metadata = d.analysis().is_some_and(|a| {
+                a.capture.header.is_some() && a.capture.trailer.is_none() && a.prefix.is_none()
+            });
+            provisional |= partial && metadata && d.verdict().tone == VerdictTone::Incomplete;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -169,13 +172,18 @@ fn the_client_and_the_runtime_live_api_interoperate() {
     c.ping_every = Duration::from_millis(250);
     let client = LiveClient::start(c).unwrap();
     let t0 = Instant::now();
+    // Unlike the single-chunk fixture above, the runtime flushes whole event
+    // chunks as it goes: those bytes form an accepted prefix before END. The
+    // link remains Streaming; final publication is checked separately below.
     let mut provisional = false;
     while !client.finished() {
         assert!(t0.elapsed() < Duration::from_secs(20));
         let v = client.view();
         if let (LinkState::Streaming, Some(d)) = (&v.link, &v.doc) {
-            let parsed = d.analysis().is_some_and(|a| a.capture.header.is_some());
-            provisional |= v.received > 0 && parsed && d.verdict().tone == VerdictTone::Incomplete;
+            let prefix = d.analysis().is_some_and(|a| {
+                a.capture.header.is_some() && a.capture.trailer.is_none() && a.prefix.is_some()
+            });
+            provisional |= v.received > 0 && prefix && d.verdict().tone == VerdictTone::CompleteEarly;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
