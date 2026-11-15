@@ -50,7 +50,7 @@ __attribute__((destructor(100))) static void automatic_finish(void)
     if(LD_ACQ(&active)) {
         int rc=ps3dk_prof_shutdown();
         ST_REL(&active,0u);
-        if(rc!=PS3DK_PROF_OK) {
+        if(rc!=PS3DK_PROF_OK && rc!=PS3DK_PROF_EALREADY) {
             static const char message[]="ps3prof: automatic finalization failed; inspect capture validity\n";
             diagnostic(message,sizeof message-1);
         }
