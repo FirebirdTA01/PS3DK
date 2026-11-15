@@ -65,7 +65,7 @@ static void *local_align(uint32_t align, uint32_t size)
 }
 
 static uint32_t g_fence_counter = 1;
-static void wait_rsx(CellGcmContextData *ctx)
+static int wait_rsx(CellGcmContextData *ctx)
 {
 	uint32_t target = g_fence_counter++;
 	cellGcmSetWriteBackEndLabel(ctx, GCM_FENCE_LABEL, target);
@@ -73,11 +73,12 @@ static void wait_rsx(CellGcmContextData *ctx)
 	for (uint32_t i = 0; i < 2000000u; ++i) {
 		if (cellGcmIsLabelPassed(GCM_FENCE_LABEL, target)) {
 			__asm__ __volatile__("sync" ::: "memory");
-			return;
+			return 1;
 		}
 		usleep(30);
 	}
 	printf("ERROR: timeout waiting for RSX fence label %u\n", target);
+	return 0;
 }
 
 typedef struct {
@@ -363,7 +364,9 @@ static int run_case_rep(CellGcmContextData *ctx,
 
 	cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_FALSE);
 
-	wait_rsx(ctx);
+	if (!wait_rsx(ctx)) {
+		return -1;
+	}
 
 	CellGcmReportData *rd_start = cellGcmGetReportDataAddressLocation(REPORT_TS_START, CELL_GCM_LOCATION_LOCAL);
 	CellGcmReportData *rd_end   = cellGcmGetReportDataAddressLocation(REPORT_TS_END, CELL_GCM_LOCATION_LOCAL);
@@ -398,10 +401,10 @@ typedef struct {
 	uint32_t zs[4];
 } rep_result_t;
 
-static void run_case(CellGcmContextData *ctx,
-                     int is_occluded,
-                     int is_kil,
-                     int zcull_on)
+static int run_case(CellGcmContextData *ctx,
+                    int is_occluded,
+                    int is_kil,
+                    int zcull_on)
 {
 	rep_result_t results[3];
 	for (int r = 0; r < 3; ++r) {
@@ -413,12 +416,13 @@ static void run_case(CellGcmContextData *ctx,
 		                      &results[r].zs[2],
 		                      &results[r].zs[3]);
 		if (rc != 0) {
-			printf("ZKP case=%s-%s zcull=%s ABORTED: bind failed rc=%d\n",
+			printf("ZKP case=%s-%s zcull=%s ABORTED: %s rc=%d\n",
 			       is_occluded ? "O" : "V",
 			       is_kil ? "kil" : "nokil",
 			       zcull_on ? "on" : "off",
+			       (rc == -1) ? "fence timeout" : "bind failed",
 			       rc);
-			return;
+			return rc;
 		}
 	}
 
@@ -449,6 +453,7 @@ static void run_case(CellGcmContextData *ctx,
 		       median->zpass,
 		       median->zpass / 16u);
 	}
+	return 0;
 }
 
 int main(int argc, const char **argv)
@@ -476,23 +481,36 @@ int main(int argc, const char **argv)
 		return 1;
 	}
 
+	int failed = 0;
+
 	/* 8 cases:
 	 * V-nokil off, on
 	 * V-kil   off, on
 	 * O-nokil off, on
 	 * O-kil   off, on
 	 */
-	run_case(ctx, 0, 0, 0); /* V-nokil zcull=off */
-	run_case(ctx, 0, 0, 1); /* V-nokil zcull=on  */
-	run_case(ctx, 0, 1, 0); /* V-kil   zcull=off */
-	run_case(ctx, 0, 1, 1); /* V-kil   zcull=on  */
-	run_case(ctx, 1, 0, 0); /* O-nokil zcull=off */
-	run_case(ctx, 1, 0, 1); /* O-nokil zcull=on  */
-	run_case(ctx, 1, 1, 0); /* O-kil   zcull=off */
-	run_case(ctx, 1, 1, 1); /* O-kil   zcull=on  */
+	if (run_case(ctx, 0, 0, 0) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 0, 0, 1) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 0, 1, 0) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 0, 1, 1) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 1, 0, 0) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 1, 0, 1) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 1, 1, 0) != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 1, 1, 1) != 0) { failed = 1; goto exit_block; }
+
+exit_block:
+	/* Exit block: always run before 'ZKP DONE' */
+	cellGcmSetZcullStatsEnable(ctx, CELL_GCM_FALSE);
+	cellGcmSetZcullEnable(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
+	cellGcmSetInvalidateZcull(ctx);
+	if (!wait_rsx(ctx)) {
+		printf("ZKP exit: RSX not idle\n");
+		failed = 1;
+	}
+	printf("cellGcmUnbindZcull rc=%d\n", (int)cellGcmUnbindZcull(0));
 
 	printf("ZKP DONE\n");
 
 	free(host_addr);
-	return 0;
+	return failed ? 1 : 0;
 }
