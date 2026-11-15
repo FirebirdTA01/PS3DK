@@ -10,6 +10,8 @@ use ps3dk_prof::model::Capture;
 pub struct AutoView {
     pub report: Report,
     pub tb_freq: u64,
+    /// Absolute intervals mapped and merged by the reader, cached with this report.
+    pub busy: auto_rsx::BusyTimeline,
 }
 
 impl AutoView {
@@ -22,7 +24,8 @@ impl AutoView {
             .map(|c| c.freq_hz)
             .filter(|&f| f > 0)
             .unwrap_or(79_800_000);
-        AutoView { report, tb_freq }
+        let busy = auto_rsx::busy_timeline(cap, &report);
+        AutoView { report, tb_freq, busy }
     }
 
     /// Whether this capture contains automatic profiler capability (FLAG_AUTO / auto chunks).

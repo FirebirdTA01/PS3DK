@@ -132,6 +132,17 @@ pub fn timeline(a: &Analysis) -> Timeline {
             longest,
         });
     }
+    // Coverage frame boundaries are PPU timestamps too, including captures
+    // without a registered PPU zone lane. Unassociated/open-invalid rows do
+    // not establish an axis.
+    if let Some(auto) = &cap.auto {
+        for f in &auto.frames {
+            if f.flags & ps3dk_prof::auto_rsx::FR_TOKEN != 0 && f.tb_end >= f.tb_begin {
+                seen(f.tb_begin);
+                seen(f.tb_end);
+            }
+        }
+    }
     let has_data = lo <= hi;
     if !has_data {
         lo = 0;

@@ -124,6 +124,7 @@ fn main() -> eframe::Result<()> {
             if let (Some((t0, dt)), Some(st)) = (window, app.timeline.as_mut()) {
                 st.view = ps3dk_prof_viewer::timeline::View { t0, dt };
                 st.view.clamp(&st.tl);
+                st.fit_all = false; // preserve an explicit window when mapped lanes extend the axis
             }
             Ok(Box::new(app))
         }),

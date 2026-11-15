@@ -1112,6 +1112,9 @@ pub struct Map {
     pub slope_lo: Rat,
     pub slope_hi: Rat,
     pub decisive: (u64, u64),
+    // Keep the affine offset constraints too: duration slopes alone cannot
+    // place an operation on the absolute PPU timeline.
+    model: Box<clockmap::Model>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1198,7 +1201,91 @@ pub fn qualify(inv: &Inventory) -> MapState {
         slope_lo: model.slope_lo.clone(),
         slope_hi: hi,
         decisive: (decisive[0], decisive[1]),
+        model,
     }))
+}
+
+/// One union interval in an execution frame. Endpoint bounds are absolute PPU
+/// ticks, rounded outwards; no point estimate or extrapolation is supplied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusyInterval {
+    pub owner: u32,
+    pub frame: u64,
+    pub raw_begin: u64,
+    pub raw_end: u64,
+    pub begin: (u64, u64),
+    pub end: (u64, u64),
+    pub operations: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BusyTimeline {
+    pub bars: Vec<BusyInterval>,
+    /// Retained draw/CALL records not placed (invalid, unassociated, or outside
+    /// the map's support). FRAME marks are not busy operations.
+    pub omitted: u64,
+    pub notice: Option<&'static str>,
+}
+
+/// Map retained timed operations using the qualified model in this capture's
+/// report. The caller must pass the report from `analyze(cap)`. These reached
+/// marker intervals include RSX waits; they are not shader execution time.
+/// Unknown frame verdicts do not erase valid partial timing, but replay,
+/// resource conflicts, context resets and reader refusals invalidate placement.
+pub fn busy_timeline(cap: &Capture, report: &Report) -> BusyTimeline {
+    let mut result = BusyTimeline::default();
+    let Some(MapState::Qualified(map)) = &report.map else {
+        result.notice = Some("clock map not qualified: RSX lanes unavailable");
+        return result;
+    };
+    if report.refusal.is_some() || report.status.as_ref().is_some_and(|s|
+        s.flags & (ST_SEGMENT_REPLAY | ST_RESOURCE_CONFLICT | ST_CONTEXT_RESET) != 0)
+    {
+        result.notice = Some("RSX timing invalidated: busy intervals unavailable");
+        return result;
+    }
+    let Some(inv) = &cap.auto else { return result };
+    let mut intervals = Vec::new();
+    for op in inv.ops.iter().filter(|o| o.covered() || o.kind == KIND_CALL) {
+        let token = op.token();
+        if token.is_none() || !op.raw_valid() || op.flags & OP_CLOCK_INVALID != 0
+            || op.raw_end < op.raw_begin || i128::from(op.raw_begin) < map.fmin
+            || i128::from(op.raw_end) > map.fmax
+        {
+            result.omitted += 1;
+            continue;
+        }
+        let (owner, frame) = token.unwrap();
+        intervals.push((owner, frame, op.raw_begin, op.raw_end));
+    }
+    intervals.sort_unstable();
+    let mut merged: Vec<(u32, u64, u64, u64, u64)> = Vec::new();
+    for (owner, frame, begin, end) in intervals {
+        if let Some(last) = merged.last_mut().filter(|last|
+            (last.0, last.1) == (owner, frame) && begin <= last.3)
+        {
+            last.3 = last.3.max(end);
+            last.4 += 1;
+        } else {
+            merged.push((owner, frame, begin, end, 1));
+        }
+    }
+    let mut meter = Meter::new(clockmap::project_budget((merged.len() as u64).saturating_mul(2), map.anchors), Limit::Capture);
+    let project = |meter: &mut Meter, raw: u64| -> Option<(u64, u64)> {
+        let p = map.model.project(meter, i128::from(raw)).ok()?;
+        let (clockmap::End::At { value: lo, .. }, clockmap::End::At { value: hi, .. }) = (p.lo, p.hi) else { return None };
+        p.interpolated.then_some((lo.floor().to_u64()?, hi.ceil().to_u64()?))
+    };
+    for (owner, frame, raw_begin, raw_end, operations) in merged {
+        let (Some(begin), Some(end)) = (project(&mut meter, raw_begin), project(&mut meter, raw_end)) else {
+            result.bars.clear();
+            result.notice = Some("clock projection refused: RSX busy intervals unavailable");
+            return result;
+        };
+        result.bars.push(BusyInterval { owner, frame, raw_begin, raw_end, begin, end, operations });
+    }
+    result.bars.sort_unstable_by_key(|b| (b.begin.0, b.end.1, b.owner, b.frame));
+    result
 }
 
 fn floor_mul(x: u64, r: &Rat) -> BigInt {
