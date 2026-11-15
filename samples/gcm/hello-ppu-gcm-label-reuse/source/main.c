@@ -413,9 +413,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
         }
     }
 
-    /* Reset labels per trial */
-    *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL) = 0u;
-    *(volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL) = 0u;
+    /* Monotonic trial serial */
     uint32_t serial = ++(*p_serial);
 
     /* 1. Backlog draws: BACKLOG_PASSES full-screen draws of heavy fragment program (fp_heavy_nokil)
@@ -715,6 +713,17 @@ int main(void)
         return 1;
     }
 
+    /* Reset label memory to 0 with sync and confirm before any GPU work */
+    volatile uint32_t *done_lbl = (volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL);
+    volatile uint32_t *readback_lbl = (volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL);
+    *done_lbl = 0;
+    *readback_lbl = 0;
+    __asm__ volatile("sync" ::: "memory");
+    if (*done_lbl != 0 || *readback_lbl != 0) {
+        crumb("A2P_FAIL label reset failed: done=0x%08x readback=0x%08x", *done_lbl, *readback_lbl);
+        return 1;
+    }
+
     uint32_t serial = 0;
 
     /* Warm-up without poison to ensure shader compilation on emulator is complete */
@@ -862,9 +871,18 @@ int main(void)
     volatile uint32_t *readback = (volatile uint32_t *)(arena + ARENA_READBACK);
     static const uint16_t idx[6] = {0, 1, 2, 2, 1, 3};
     memcpy(ibo, idx, sizeof idx);
-    *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL) = 0u;
-    *(volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL) = 0u;
     cellGcmCgUploadInternalConsts(ctx, prog.vp);
+
+    /* Reset label memory to 0 with sync and confirm before any GPU work */
+    volatile uint32_t *done_lbl = (volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL);
+    volatile uint32_t *readback_lbl = (volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL);
+    *done_lbl = 0;
+    *readback_lbl = 0;
+    __asm__ volatile("sync" ::: "memory");
+    if (*done_lbl != 0 || *readback_lbl != 0) {
+        crumb("GCM_LABEL_REUSE_FAIL label reset failed: done=0x%08x readback=0x%08x", *done_lbl, *readback_lbl);
+        return 1;
+    }
 
     uint32_t serial = 0;
     /* mode -1 is the warm-up: an emulator that compiles shaders asynchronously skips draws until the program is
