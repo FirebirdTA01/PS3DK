@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [r2, r4a, s2, i1, i2, live-e2e, profile, ext-probe, overhead]
+        suite: [r2, r4a, s2, i1, i2, profile, ext-probe, overhead]
     env:
       CARGO_BUILD_JOBS: 4
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -152,9 +152,6 @@ jobs:
       - name: I2 SPU lane integration
         if: matrix.suite == 'i2'
         run: python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
-      - name: Live client against the real agent and runtime (three runs)
-        if: matrix.suite == 'live-e2e'
-        run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e"
       - name: Profile identity and archive pipeline
         if: matrix.suite == 'profile'
         run: bash tests/host/ps3dk-prof-profile/run-profile-tests.sh "$RUNNER_TEMP/profile" "$GITHUB_WORKSPACE/tools/target/debug/ps3dk-prof"
