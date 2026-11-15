@@ -82,12 +82,14 @@ fn main() -> eframe::Result<()> {
         .into_iter()
         .find(|a| !a.starts_with('-'))
         .map(PathBuf::from);
+    let min_w = size[0].min(860.0).min(500.0);
+    let min_h = size[1].min(540.0).min(300.0);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
             .with_app_id("ps3dk-prof-viewer")
             .with_inner_size(size)
-            .with_min_inner_size([860.0, 540.0]),
+            .with_min_inner_size([min_w, min_h]),
         ..Default::default()
     };
     eframe::run_native(
