@@ -3,6 +3,13 @@
  *
  * Measures RSX ticks, ZPASS pixel count, and ZCULL_STATS across eight cases
  * (visible vs occluded, heavy nokil vs heavy kil, zcull on vs off).
+ *
+ * Note on ZPASS Pixel Counting in Emulation vs Hardware:
+ *   cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_TRUE) and cellGcmSetClearReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT)
+ *   are invoked unconditionally across all test cases (both zcull=off and zcull=on).
+ *   In RPCS3 emulation, ZPASS report reads 0 in every zcull-off case and 14,745,600 with zcull-on.
+ *   On physical PS3 hardware, ZPASS pixel count reports count passing fragments regardless of whether
+ *   Zcull acceleration is active. The zpass_enabled=1 state is printed per case.
  */
 
 #include <stdint.h>
@@ -251,8 +258,25 @@ static void bind_quad_vb(CellGcmContextData *ctx, uint32_t vb_offset)
 	cellGcmSetVertexAttribInputMask(ctx, (uint16_t)(1u << g_position_attr));
 }
 
-static int bind_zcull_hardware(void)
+static int bind_zcull_hardware(CellGcmContextData *ctx)
 {
+	/* Ensure RSX is idle via a bounded fence before calling cellGcmBindZcull */
+	uint32_t target = g_fence_counter++;
+	cellGcmSetWriteBackEndLabel(ctx, GCM_FENCE_LABEL, target);
+	cellGcmFlush(ctx);
+	int fence_ok = 0;
+	for (int n = 0; n < 2000; ++n) {
+		if (cellGcmIsLabelPassed(GCM_FENCE_LABEL, target)) {
+			fence_ok = 1;
+			break;
+		}
+		usleep(1000);
+	}
+	if (!fence_ok) {
+		printf("ERROR: RSX not idle before cellGcmBindZcull (fence timeout)\n");
+		return -1;
+	}
+
 	int32_t rc = cellGcmBindZcull(0,
 	                              g_depth_offset,
 	                              ZCULL_W,
@@ -508,7 +532,7 @@ static int run_case(CellGcmContextData *ctx,
 	}
 	rep_result_t *median = &results[1];
 
-	printf("ZKP case=%s-%s zcull=%s rsx_ticks=%llu zpass=%u zcull_stats=%u,%u,%u,%u\n",
+	printf("ZKP case=%s-%s zcull=%s zpass_enabled=1 rsx_ticks=%llu zpass=%u zcull_stats=%u,%u,%u,%u\n",
 	       is_occluded ? "O" : "V",
 	       is_kil ? "kil" : "nokil",
 	       zcull_on ? "on" : "off",
@@ -517,11 +541,12 @@ static int run_case(CellGcmContextData *ctx,
 	       median->zs[0], median->zs[1], median->zs[2], median->zs[3]);
 
 	if (!is_occluded) {
-		printf("ZPASS V case=%s zcull=%s: total=%u per_draw=%u (expected ~921600 per draw x 16 visible = 14745600)\n",
+		printf("ZPASS V case=%s zcull=%s: total=%u per_draw=%u (expected ~921600 per draw x 16 visible = 14745600)%s\n",
 		       is_kil ? "kil" : "nokil",
 		       zcull_on ? "on" : "off",
 		       median->zpass,
-		       median->zpass / 16u);
+		       median->zpass / 16u,
+		       (!zcull_on && median->zpass == 0) ? " [RPCS3 emulator reads 0 when zcull=off; on hardware ZPASS counts passing samples regardless of Zcull state]" : "");
 	}
 	return 0;
 }
@@ -581,20 +606,17 @@ int main(int argc, const char **argv)
 	if (run_case(ctx, 1, 1, 0) != 0) { failed = 1; goto exit_block; } /* O-kil   off */
 
 	/* ---- Block 2: zcull=on (4 cases, bound once) ---- */
-	if (bind_zcull_hardware() != 0) { failed = 1; goto exit_block; }
+	if (bind_zcull_hardware(ctx) != 0) { failed = 1; goto exit_block; }
 	if (run_case(ctx, 0, 0, 1) != 0) { failed = 1; goto exit_block; } /* V-nokil on */
 	if (run_case(ctx, 0, 1, 1) != 0) { failed = 1; goto exit_block; } /* V-kil   on */
 	if (run_case(ctx, 1, 0, 1) != 0) { failed = 1; goto exit_block; } /* O-nokil on */
 	if (run_case(ctx, 1, 1, 1) != 0) { failed = 1; goto exit_block; } /* O-kil   on */
 
 exit_block:
-	/* Step 1: Unbind Zcull */
+	/* Step 1: Queue stats off + Zcull off + invalidate */
 	cellGcmSetZcullStatsEnable(ctx, CELL_GCM_FALSE);
 	cellGcmSetZcullEnable(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
 	cellGcmSetInvalidateZcull(ctx);
-	int rc = (int)cellGcmUnbindZcull(0);
-	printf("ZKP EXIT unbind rc=%d\n", rc);
-	fflush(stdout);
 
 	/* Step 2: Fresh label value written with cellGcmSetWriteBackEndLabel, bounded 2 s fence */
 	uint32_t exit_target = g_fence_counter++;
@@ -611,14 +633,27 @@ exit_block:
 	printf("ZKP EXIT fence=%s\n", fence_ok ? "ok" : "timeout");
 	fflush(stdout);
 
-	/* Step 3: cellGcmFinish */
+	if (!fence_ok) {
+		printf("ZKP EXIT unbind skipped (RSX not idle)\n");
+		fflush(stdout);
+		cellSysutilUnregisterCallback(0);
+		free(host_addr);
+		return 1;
+	}
+
+	/* Step 3: Only after fence passes, call cellGcmUnbindZcull(0) and print its rc */
+	int rc = (int)cellGcmUnbindZcull(0);
+	printf("ZKP EXIT unbind rc=%d\n", rc);
+	fflush(stdout);
+
+	/* Step 4: cellGcmFinish */
 	cellGcmFinish(ctx, 0);
 
-	/* Step 4: Unregister sysutil callback */
+	/* Step 5: Unregister sysutil callback */
 	cellSysutilUnregisterCallback(0);
 
-	/* Step 5: print clean exit */
-	if (!fence_ok || failed) {
+	/* Step 6: print clean exit */
+	if (failed) {
 		free(host_addr);
 		return 1;
 	}
