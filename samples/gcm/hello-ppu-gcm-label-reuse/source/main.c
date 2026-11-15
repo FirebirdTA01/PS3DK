@@ -196,19 +196,11 @@ static void fill_poison_indices(uint32_t *ibo, uint32_t count)
     }
 }
 
-static void print_buffer_verdict(const char *buf_kind, unsigned cmd_corrupt, unsigned backend_corrupt, unsigned trials)
-{
-    const char *verdict_str;
-    if (backend_corrupt > 0) {
-        verdict_str = "refuted";
-    } else if (cmd_corrupt >= 8) {
-        verdict_str = "supported-for-this-workload";
-    } else {
-        verdict_str = "inconclusive";
-    }
-    crumb("A2P VERDICT buffer=%s %s (command=%u/%u backend=%u/%u; note: 0/%u is not a zero-risk bound)",
-          buf_kind, verdict_str, cmd_corrupt, trials, backend_corrupt, trials, trials);
-}
+typedef struct {
+    unsigned expected;   /* trials with expected-pattern corruption (exp > 0) */
+    unsigned unrelated;  /* trials with unrelated failure (unrel > 0) */
+    unsigned clean;      /* trials with exp == 0 && unrel == 0 */
+} series_result;
 
 static int run_probe_trial(CellGcmContextData *ctx,
                            const arena_program *prog_main,
@@ -309,15 +301,17 @@ static int run_probe_trial(CellGcmContextData *ctx,
     uint32_t seen_val = *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL);
 
     /* Poison write: publication order is label seen -> poison written -> fence */
-    if (poison_kind == POISON_VERTEX) {
-        vbo[0] = (arena_vertex){{2.0f, 3.0f}, {0.0f, 0.0f}};
-        vbo[1] = (arena_vertex){{3.0f, 3.0f}, {1.0f, 0.0f}};
-        vbo[2] = (arena_vertex){{2.0f, 2.0f}, {0.0f, 1.0f}};
-        vbo[3] = (arena_vertex){{3.0f, 2.0f}, {1.0f, 1.0f}};
-    } else if (poison_kind == POISON_INDEX) {
-        fill_poison_indices(ibo, INDEX_COUNT);
-    } else if (poison_kind == POISON_TEXTURE) {
-        arena_fill(tex, TEX_W * TEX_H, COLOR_POISON);
+    if (mode != MODE_REFERENCE && poison_kind != POISON_NONE) {
+        if (poison_kind == POISON_VERTEX) {
+            vbo[0] = (arena_vertex){{2.0f, 3.0f}, {0.0f, 0.0f}};
+            vbo[1] = (arena_vertex){{3.0f, 3.0f}, {1.0f, 0.0f}};
+            vbo[2] = (arena_vertex){{2.0f, 2.0f}, {0.0f, 1.0f}};
+            vbo[3] = (arena_vertex){{3.0f, 2.0f}, {1.0f, 1.0f}};
+        } else if (poison_kind == POISON_INDEX) {
+            fill_poison_indices(ibo, INDEX_COUNT);
+        } else if (poison_kind == POISON_TEXTURE) {
+            arena_fill(tex, TEX_W * TEX_H, COLOR_POISON);
+        }
     }
     __asm__ __volatile__("sync" ::: "memory");
 
@@ -358,10 +352,14 @@ static int run_probe_trial(CellGcmContextData *ctx,
     }
 
     unsigned expected = 0;
-    if (poison_kind == POISON_TEXTURE)
+    if (mode == MODE_REFERENCE || poison_kind == POISON_NONE) {
+        unrelated += bad;
+        expected = 0;
+    } else if (poison_kind == POISON_TEXTURE) {
         expected = saw_poison;
-    else if (poison_kind == POISON_VERTEX || poison_kind == POISON_INDEX)
+    } else if (poison_kind == POISON_VERTEX || poison_kind == POISON_INDEX) {
         expected = saw_clear;
+    }
 
     *out_corrupt = (bad > 0);
     *out_expected = expected;
@@ -372,28 +370,89 @@ static int run_probe_trial(CellGcmContextData *ctx,
     return 0;
 }
 
-static unsigned run_series(CellGcmContextData *ctx,
-                           const arena_program *prog_main,
-                           const arena_program *prog_heavy,
-                           uint8_t *arena,
-                           uint32_t arena_off,
-                           uint32_t rt_off,
-                           uint32_t rt_depth_off,
-                           int mode,
-                           int poison_kind,
-                           uint32_t *p_serial)
+static series_result run_series(CellGcmContextData *ctx,
+                                const arena_program *prog_main,
+                                const arena_program *prog_heavy,
+                                uint8_t *arena,
+                                uint32_t arena_off,
+                                uint32_t rt_off,
+                                uint32_t rt_depth_off,
+                                int mode,
+                                int poison_kind,
+                                uint32_t *p_serial)
 {
-    unsigned corrupt_total = 0;
+    series_result res = {0, 0, 0};
     for (unsigned trial = 0; trial < TRIALS; ++trial) {
         unsigned c = 0, exp = 0, unrel = 0;
         run_probe_trial(ctx, prog_main, prog_heavy, arena, arena_off, rt_off, rt_depth_off,
                         mode, poison_kind, trial, p_serial, &c, &exp, &unrel);
-        if (c)
-            corrupt_total++;
+        if (exp > 0)
+            res.expected++;
+        if (unrel > 0)
+            res.unrelated++;
+        if (exp == 0 && unrel == 0)
+            res.clean++;
     }
-    crumb("A2P mode=%s poison=%s corrupt=%u/%u",
-          get_mode_str(mode), get_poison_str(poison_kind), corrupt_total, TRIALS);
-    return corrupt_total;
+    crumb("A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u",
+          get_mode_str(mode), get_poison_str(poison_kind), res.expected, TRIALS, res.unrelated, TRIALS, res.clean, TRIALS);
+    return res;
+}
+
+static void print_buffer_verdict(const char *buf_kind,
+                                 series_result ref,
+                                 series_result early,
+                                 series_result cmd,
+                                 series_result cand,
+                                 const char *cand_mode_name,
+                                 const series_result *extra,
+                                 const char *extra_mode_name,
+                                 char *out_verdict,
+                                 size_t out_verdict_len)
+{
+    /* Verdict order per kind: invalid > refuted > supported-for-this-workload > inconclusive */
+    const char *status = NULL;
+    char reason[128] = {0};
+
+    if (ref.expected > 0 || ref.unrelated > 0) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "reference corrupt");
+    } else if (early.unrelated > 0) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "unrelated failure in early");
+    } else if (early.expected < 8) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "detector not sensitive");
+    } else if (cmd.unrelated > 0) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "unrelated failure in command");
+    } else if (cand.unrelated > 0) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "unrelated failure in %s", cand_mode_name);
+    } else if (extra && extra->unrelated > 0) {
+        status = "invalid";
+        snprintf(reason, sizeof reason, "unrelated failure in %s", extra_mode_name);
+    } else if (cand.expected > 0) {
+        status = "refuted";
+    } else if (cmd.expected >= 8) {
+        status = "supported-for-this-workload";
+    } else {
+        status = "inconclusive";
+    }
+
+    if (strcmp(status, "invalid") == 0) {
+        snprintf(out_verdict, out_verdict_len, "invalid (%s)", reason);
+        crumb("A2P VERDICT buffer=%s invalid (%s)", buf_kind, reason);
+    } else {
+        snprintf(out_verdict, out_verdict_len, "%s", status);
+        if (extra) {
+            crumb("A2P VERDICT buffer=%s %s (%s=%u/%u command=%u/%u %s=%u/%u; note: 0/%u is not a zero-risk bound)",
+                  buf_kind, status, cand_mode_name, cand.expected, TRIALS, cmd.expected, TRIALS,
+                  extra_mode_name, extra->expected, TRIALS, TRIALS);
+        } else {
+            crumb("A2P VERDICT buffer=%s %s (%s=%u/%u command=%u/%u; note: 0/%u is not a zero-risk bound)",
+                  buf_kind, status, cand_mode_name, cand.expected, TRIALS, cmd.expected, TRIALS, TRIALS);
+        }
+    }
 }
 
 #endif /* LABEL_REUSE_HEAVY */
@@ -460,52 +519,67 @@ int main(void)
     crumb("A2P_WARMUP trials=%u clean=1", warmup);
 
     /* Buffer kind 1: VERTEX poison */
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_REFERENCE, POISON_VERTEX, &serial);
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_EARLY, POISON_VERTEX, &serial);
-    unsigned corrupt_cmd_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                        MODE_COMMAND, POISON_VERTEX, &serial);
-    unsigned corrupt_back_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_BACKEND, POISON_VERTEX, &serial);
-    print_buffer_verdict("vertex", corrupt_cmd_v, corrupt_back_v, TRIALS);
+    series_result res_ref_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_REFERENCE, POISON_VERTEX, &serial);
+    series_result res_early_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                           MODE_EARLY, POISON_VERTEX, &serial);
+    series_result res_cmd_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_COMMAND, POISON_VERTEX, &serial);
+    series_result res_back_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                          MODE_BACKEND, POISON_VERTEX, &serial);
+    char v_verdict[128];
+    print_buffer_verdict("vertex", res_ref_v, res_early_v, res_cmd_v, res_back_v, "backend",
+                         NULL, NULL, v_verdict, sizeof v_verdict);
 
     /* Buffer kind 2: INDEX poison */
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_REFERENCE, POISON_INDEX, &serial);
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_EARLY, POISON_INDEX, &serial);
-    unsigned corrupt_cmd_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                        MODE_COMMAND, POISON_INDEX, &serial);
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_TEXTURE, POISON_INDEX, &serial);
-    unsigned corrupt_back_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_BACKEND, POISON_INDEX, &serial);
-    print_buffer_verdict("index", corrupt_cmd_i, corrupt_back_i, TRIALS);
+    series_result res_ref_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_REFERENCE, POISON_INDEX, &serial);
+    series_result res_early_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                           MODE_EARLY, POISON_INDEX, &serial);
+    series_result res_cmd_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_COMMAND, POISON_INDEX, &serial);
+    series_result res_tex_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_TEXTURE, POISON_INDEX, &serial);
+    series_result res_back_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                          MODE_BACKEND, POISON_INDEX, &serial);
+    char i_verdict[128];
+    print_buffer_verdict("index", res_ref_i, res_early_i, res_cmd_i, res_back_i, "backend",
+                         &res_tex_i, "texture", i_verdict, sizeof i_verdict);
 
     /* Buffer kind 3: TEXTURE poison */
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_EARLY, POISON_TEXTURE, &serial);
-    unsigned corrupt_cmd_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                        MODE_COMMAND, POISON_TEXTURE, &serial);
-    run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-               MODE_TEXTURE, POISON_TEXTURE, &serial);
-    unsigned corrupt_back_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_BACKEND, POISON_TEXTURE, &serial);
-    print_buffer_verdict("texture", corrupt_cmd_t, corrupt_back_t, TRIALS);
+    series_result res_ref_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_REFERENCE, POISON_TEXTURE, &serial);
+    series_result res_early_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                           MODE_EARLY, POISON_TEXTURE, &serial);
+    series_result res_cmd_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_COMMAND, POISON_TEXTURE, &serial);
+    series_result res_tex_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                         MODE_TEXTURE, POISON_TEXTURE, &serial);
+    series_result res_back_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
+                                          MODE_BACKEND, POISON_TEXTURE, &serial);
+    char t_verdict[128];
+    print_buffer_verdict("texture", res_ref_t, res_early_t, res_cmd_t, res_tex_t, "texture",
+                         &res_back_t, "backend", t_verdict, sizeof t_verdict);
 
-    /* Overall verdict rules */
-    int v_supp = (corrupt_cmd_v >= 8 && corrupt_back_v == 0);
-    int i_supp = (corrupt_cmd_i >= 8 && corrupt_back_i == 0);
-    int refuted = (corrupt_back_v > 0 || corrupt_back_i > 0 || corrupt_back_t > 0);
-
-    const char *overall;
-    if (refuted) {
-        overall = "refuted (backend corruption detected)";
-    } else if (v_supp && i_supp) {
-        overall = "supported-for-this-workload (command control caught for both vertex and index; note: 0/32 is not a zero-risk bound)";
+    /* Overall verdict rules: invalid > refuted > supported-for-this-workload > inconclusive */
+    char overall[512];
+    if (strncmp(v_verdict, "invalid", 7) == 0) {
+        snprintf(overall, sizeof overall, "invalid (vertex %s)", strchr(v_verdict, '(') ? strchr(v_verdict, '(') : v_verdict);
+    } else if (strncmp(i_verdict, "invalid", 7) == 0) {
+        snprintf(overall, sizeof overall, "invalid (index %s)", strchr(i_verdict, '(') ? strchr(i_verdict, '(') : i_verdict);
+    } else if (strncmp(t_verdict, "invalid", 7) == 0) {
+        snprintf(overall, sizeof overall, "invalid (texture %s)", strchr(t_verdict, '(') ? strchr(t_verdict, '(') : t_verdict);
+    } else if (strcmp(v_verdict, "refuted") == 0 || strcmp(i_verdict, "refuted") == 0 || strcmp(t_verdict, "refuted") == 0) {
+        snprintf(overall, sizeof overall, "refuted (corruption detected: vertex=%s index=%s texture=%s)",
+                 v_verdict, i_verdict, t_verdict);
+    } else if (strcmp(v_verdict, "supported-for-this-workload") == 0 && strcmp(i_verdict, "supported-for-this-workload") == 0) {
+        if (strcmp(t_verdict, "supported-for-this-workload") == 0) {
+            snprintf(overall, sizeof overall, "supported-for-this-workload (vertex, index, and texture supported; note: 0/32 is not a zero-risk bound)");
+        } else {
+            snprintf(overall, sizeof overall, "supported-for-this-workload (vertex and index supported; note: 0/32 is not a zero-risk bound)");
+        }
     } else {
-        overall = "inconclusive (command control not caught in >= 8/32 for both vertex and index; note: 0/32 is not a zero-risk bound)";
+        snprintf(overall, sizeof overall, "inconclusive (command control not caught in >= 8/32; note: 0/32 is not a zero-risk bound)");
     }
     crumb("A2P VERDICT overall %s", overall);
     crumb("A2P DONE");
