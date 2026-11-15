@@ -406,13 +406,22 @@ static int run_case_rep(CellGcmContextData *ctx,
 		return -1;
 	}
 
-	/* Treat any report slot still holding the sentinel as not written (error) */
-	uint64_t t_start = rd_start ? rd_start->timer : REPORT_SENTINEL_U64;
-	uint64_t t_end   = rd_end   ? rd_end->timer   : REPORT_SENTINEL_U64;
-	uint32_t zpass   = rd_zpass ? rd_zpass->value : REPORT_SENTINEL_U32;
+	/* Poll briefly after fence for report write to settle from sentinel */
+	uint64_t t_start = REPORT_SENTINEL_U64;
+	uint64_t t_end   = REPORT_SENTINEL_U64;
+	uint32_t zpass   = REPORT_SENTINEL_U32;
+	for (int n = 0; n < 2000; ++n) {
+		t_start = rd_start ? rd_start->timer : REPORT_SENTINEL_U64;
+		t_end   = rd_end   ? rd_end->timer   : REPORT_SENTINEL_U64;
+		zpass   = rd_zpass ? rd_zpass->value : REPORT_SENTINEL_U32;
+		if (t_start != REPORT_SENTINEL_U64 && t_end != REPORT_SENTINEL_U64 && zpass != REPORT_SENTINEL_U32)
+			break;
+		usleep(100);
+	}
 
 	if (t_start == REPORT_SENTINEL_U64 || t_end == REPORT_SENTINEL_U64) {
-		printf("ERROR: timestamp report not written by RSX (holds sentinel)\n");
+		printf("ERROR: timestamp report holds sentinel after wait: t_start=0x%llx t_end=0x%llx\n",
+		       (unsigned long long)t_start, (unsigned long long)t_end);
 		return -1;
 	}
 	if (t_start == 0 || t_end == 0 || t_end < t_start) {
