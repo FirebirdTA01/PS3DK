@@ -318,6 +318,15 @@ int main(void)
         return 1;
     }
 
+    /* Reset label memory to 0 with sync and confirm before any GPU work */
+    volatile uint32_t *label_addr = (volatile uint32_t *)cellGcmGetLabelAddress(LABEL_PHASE_E);
+    *label_addr = 0;
+    __asm__ volatile("sync" ::: "memory");
+    if (*label_addr != 0) {
+        printf("hello-ppu-prof-auto-verdicts: label %u failed to zero (read 0x%08x)\n", LABEL_PHASE_E, *label_addr);
+        return 1;
+    }
+
     init_shaders();
     init_geometry();
 
@@ -389,13 +398,6 @@ int main(void)
     }
 
     /* ---- Phase E: RSX-bound waiting by label polling (frames 240..299) ---- */
-    /* Initialize label 200 to 0 before phase E with sync to ensure cellGcmIsLabelPassed
-     * in serial arithmetic does not prematurely pass on stale memory values.
-     * Each frame waits on a strictly increasing target value starting at 1. */
-    volatile uint32_t *label_addr = (volatile uint32_t *)cellGcmGetLabelAddress(LABEL_PHASE_E);
-    *label_addr = 0;
-    __asm__ volatile("sync" ::: "memory");
-
     print_phase_banner('E');
 
     uint32_t label_v = 0;
