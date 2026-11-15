@@ -4,24 +4,41 @@
  * cellGcmMapMainMemory'd arena (CELL_GCM_LOCATION_MAIN), filled with a per-trial GOOD colour.
  * After the last draw the trial's completion label (application label 101) is written by the mode under test.
  * The PPU polls it with cellGcmIsLabelPassed and, the moment it has passed, rewrites the arena according to
- * the selected poison kind.  The target is then copied to main memory by an image transfer that a second
+ * the selected poison kind. The target is then copied to main memory by an image transfer that a second
  * label (102, back-end) completes, and checked.
  *
  * Under LABEL_REUSE_HEAVY (A2 label probe):
+ *   Workload and Geometry:
+ *     - Target: 512x512 checked surface (rt), plus separate local-memory backlog surface (backlog_rt).
+ *     - Backlog load: 4 full-screen draws of heavy fragment program (fp_heavy_nokil, 131 instructions)
+ *       into backlog_rt to saturate GPU pipelines without polluting the checked surface.
+ *     - Checked region: split into a 16x16 grid of 256 non-overlapping tiles over the 512x512 surface.
+ *     - Baseline: checked surface is cleared to pure COLOR_CLEAR before tile draws.
+ *     - Distinct vertices: 1032 vertices total:
+ *         * 1024 on-target vertices across 256 tiles (4 distinct vertices per tile, indices 0..1023)
+ *         * 4 backlog full-screen quad vertices (indices 1024..1027, covering [-1, 1])
+ *         * 4 valid off-screen vertices for index poison redirection (indices 1028..1031, placed at [2, 3])
+ *     - Index ranges: 192 32-bit indices per tile (32 quads x 6 indices). Tile t spans indices
+ *       [t * 192, (t + 1) * 192 - 1]. Each tile's quad references its own distinct vertex indices (4t..4t+3).
+ *     - Total indices: 49,152 32-bit indices (192 KiB in mapped main-memory arena).
+ *     - Estimated runtime: ~4-5 ms per trial; ~2.5 - 5 seconds total runtime across all 448 trials in
+ *       the 14 series (well bounded under 5 minutes).
+ *
  *   Poison kinds:
- *     VERTEX: rewrites only vertices to off-screen coordinates [2, 3]
- *     INDEX:  rewrites only the index buffer to point to in-bounds off-target vertices [4..7]
- *     TEXTURE: rewrites only texture to COLOR_POISON
- *     REFERENCE: no poison (unpoisoned baseline)
- *   Workload per trial:
- *     4 full-screen draws of heavy fragment program (fp_heavy_nokil, 131 instructions) to back up pipeline,
- *     followed by 32 large indexed draws (24,000 32-bit indices each) reading from main-memory arena.
+ *     - VERTEX: rewrites on-target vertices 0..1023 to off-screen coordinates [2.0f, 3.0f].
+ *     - INDEX: rewrites tile indices to valid in-bounds off-screen vertices 1028..1031.
+ *     - TEXTURE: fills texture with COLOR_POISON (0xffff00ff).
+ *     - REFERENCE: unpoisoned baseline (no poison written; asserts pure clear baseline and clean coverage).
+ *
  *   Modes:
- *     reference: baseline unpoisoned
- *     early:     command label before any draws (detector sensitivity control)
- *     command:   command label after last draw (front-end race control)
- *     texture:   texture label after last draw
- *     backend:   back-end label after last draw (A2 candidate)
+ *     - reference: baseline unpoisoned (gated: must be 0/32 corruption).
+ *     - early: command label before any draws (gated: must catch expected corruption >= 8/32).
+ *     - command: command label after last draw (front-end race control).
+ *     - texture: texture label after last draw (candidate for texture reuse; extra control for index).
+ *     - backend: back-end label after last draw (candidate for vertex and index reuse).
+ *
+ *   Verdict Precedence:
+ *     invalid > refuted > supported-for-this-workload > inconclusive
  */
 #include <inttypes.h>
 #include <stdarg.h>
@@ -35,6 +52,7 @@
 #include <sys/process.h>
 
 #include "../../common/gcm_arena_common.h"
+#include "a2p_classifier.h"
 #include "arena_fp_fpo.h"
 #include "arena_vp_vpo.h"
 
@@ -44,48 +62,69 @@
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
+#define COLOR_POISON    A2P_COLOR_POISON
+#define COLOR_CLEAR     A2P_COLOR_CLEAR
+#define SENTINEL        A2P_SENTINEL
+
+#define POISON_NONE     A2P_POISON_NONE
+#define POISON_VERTEX   A2P_POISON_VERTEX
+#define POISON_INDEX    A2P_POISON_INDEX
+#define POISON_TEXTURE  A2P_POISON_TEXTURE
+
 #ifdef LABEL_REUSE_HEAVY
 enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 8 << 20 };
 enum { RT = 512, TEX_W = 1024, TEX_H = 1024, TRIALS = 32 };
-#define LARGE_DRAWS     32u
-#define INDEX_COUNT     24000u
-#define ARENA_VBO       0x00000u
-#define ARENA_QUAD_IBO  0x01000u
-#define ARENA_IBO       0x020000u
-#define ARENA_TEX       0x100000u
-#define ARENA_READBACK  0x600000u
-#define POLLS           4000000u /* x 5 us: watchdog per wait */
-#define VARIANT         "heavy"
-#else
-enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 1 << 20 };
-enum { RT = 256, TEX_W = 64, TEX_H = 64, DRAWS = 64, TRIALS = 32, MODES = 4 };
-#define ARENA_TEX       0x10000u
-#define ARENA_READBACK  0x40000u
-#define POLLS           400000u
-#define VARIANT         "light"
-#define ARENA_VBO       0x00000u
-#define ARENA_IBO       0x01000u
-#endif
 
-#define DONE_LABEL      101u     /* completion label written by mode under test */
-#define READBACK_LABEL  102u     /* back-end label after readback transfer */
-#define COLOR_POISON    0xffff00ffu
-#define COLOR_CLEAR     0xff000000u
-#define SENTINEL        0x5a5a5a5au
-#define CRUMB_PATH      "/dev_hdd0/tmp/gcmlabel-crumb.txt"
-#define SPIN_POLLS      100000u  /* spin before sleeping */
+#define TILES_X             16u
+#define TILES_Y             16u
+#define TILES               (TILES_X * TILES_Y) /* 256 tiles */
+#define QUADS_PER_TILE      32u
+#define INDICES_PER_TILE    (QUADS_PER_TILE * 6u) /* 192 indices */
+#define TOTAL_INDICES       (TILES * INDICES_PER_TILE) /* 49,152 indices */
 
-_Static_assert(DONE_LABEL >= CELL_GCM_LABEL_APP_FIRST && READBACK_LABEL <= CELL_GCM_LABEL_APP_LAST, "app labels");
-#ifdef LABEL_REUSE_HEAVY
-_Static_assert(ARENA_IBO + INDEX_COUNT * sizeof(uint32_t) <= ARENA_TEX, "IBO fits before texture");
+#define ON_TARGET_VERTS     (TILES * 4u) /* 1024 vertices (indices 0..1023) */
+#define BACKLOG_VERTS_BASE  ON_TARGET_VERTS /* 4 vertices (indices 1024..1027) */
+#define OFF_SCREEN_BASE     (BACKLOG_VERTS_BASE + 4u) /* 4 vertices (indices 1028..1031) */
+#define TOTAL_VERTS         (OFF_SCREEN_BASE + 4u) /* 1032 distinct vertices */
+
+#define ARENA_VBO           0x00000u
+#define ARENA_QUAD_IBO      0x08000u
+#define ARENA_IBO           0x10000u
+#define ARENA_TEX           0x100000u
+#define ARENA_READBACK      0x600000u
+#define POLLS               4000000u /* x 5 us: watchdog per wait */
+#define VARIANT             "heavy"
+
+_Static_assert(ARENA_VBO + TOTAL_VERTS * sizeof(arena_vertex) <= ARENA_QUAD_IBO, "VBO fits before quad IBO");
+_Static_assert(ARENA_IBO + TOTAL_INDICES * sizeof(uint32_t) <= ARENA_TEX, "IBO fits before texture");
 _Static_assert(ARENA_TEX + TEX_W * TEX_H * 4 <= ARENA_READBACK, "texture fits before readback");
 _Static_assert(ARENA_READBACK + RT * RT * 4 <= ARENA_BYTES, "readback fits the arena");
 _Static_assert(ARENA_TEX % 128 == 0, "texture offset alignment");
 _Static_assert(ARENA_IBO % 128 == 0, "ibo offset alignment");
+_Static_assert(ARENA_QUAD_IBO % 128 == 0, "quad ibo alignment");
+
 #else
+
+enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 1 << 20 };
+enum { RT = 256, TEX_W = 64, TEX_H = 64, DRAWS = 64, TRIALS = 32, MODES = 4 };
+#define ARENA_TEX           0x10000u
+#define ARENA_READBACK      0x40000u
+#define POLLS               400000u
+#define VARIANT             "light"
+#define ARENA_VBO           0x00000u
+#define ARENA_IBO           0x01000u
+
 _Static_assert(ARENA_READBACK + RT * RT * 4 <= ARENA_BYTES, "readback fits the arena");
 _Static_assert(ARENA_TEX % 128 == 0, "texture offset alignment");
+
 #endif
+
+#define DONE_LABEL          101u     /* completion label written by mode under test */
+#define READBACK_LABEL      102u     /* back-end label after readback transfer */
+#define CRUMB_PATH          "/dev_hdd0/tmp/gcmlabel-crumb.txt"
+#define SPIN_POLLS          100000u  /* spin before sleeping */
+
+_Static_assert(DONE_LABEL >= CELL_GCM_LABEL_APP_FIRST && READBACK_LABEL <= CELL_GCM_LABEL_APP_LAST, "app labels");
 
 static int wait_readback(uint32_t serial)
 {
@@ -100,7 +139,7 @@ static int wait_readback(uint32_t serial)
 static void crumb(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void crumb(const char *fmt, ...)
 {
-    char line[256];
+    char line[512];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
@@ -122,13 +161,6 @@ static uint32_t good_color(uint32_t seed)
 }
 
 #ifdef LABEL_REUSE_HEAVY
-
-enum {
-    POISON_NONE = 0,
-    POISON_VERTEX,
-    POISON_INDEX,
-    POISON_TEXTURE
-};
 
 enum {
     MODE_REFERENCE = 0,
@@ -163,44 +195,78 @@ static const char *get_poison_str(int p)
 
 static void init_arena_vbo(arena_vertex *vbo)
 {
-    /* On-target quad: vertices 0..3 */
-    vbo[0] = (arena_vertex){{-1.0f,  1.0f}, {0.0f, 0.0f}};
-    vbo[1] = (arena_vertex){{ 1.0f,  1.0f}, {1.0f, 0.0f}};
-    vbo[2] = (arena_vertex){{-1.0f, -1.0f}, {0.0f, 1.0f}};
-    vbo[3] = (arena_vertex){{ 1.0f, -1.0f}, {1.0f, 1.0f}};
+    /* 1. On-target tiles: 16x16 grid of 256 non-overlapping quads */
+    for (unsigned ty = 0; ty < TILES_Y; ++ty) {
+        float y0 = -1.0f + (float)ty * (2.0f / (float)TILES_Y);
+        float y1 = y0 + (2.0f / (float)TILES_Y);
+        float v0 = (float)ty / (float)TILES_Y;
+        float v1 = (float)(ty + 1) / (float)TILES_Y;
+        for (unsigned tx = 0; tx < TILES_X; ++tx) {
+            float x0 = -1.0f + (float)tx * (2.0f / (float)TILES_X);
+            float x1 = x0 + (2.0f / (float)TILES_X);
+            float u0 = (float)tx / (float)TILES_X;
+            float u1 = (float)(tx + 1) / (float)TILES_X;
+            unsigned base = (ty * TILES_X + tx) * 4;
+            vbo[base + 0] = (arena_vertex){{x0, y1}, {u0, v0}};
+            vbo[base + 1] = (arena_vertex){{x1, y1}, {u1, v0}};
+            vbo[base + 2] = (arena_vertex){{x0, y0}, {u0, v1}};
+            vbo[base + 3] = (arena_vertex){{x1, y0}, {u1, v1}};
+        }
+    }
 
-    /* In-bounds off-target block: vertices 4..7 (outside viewport [-1, 1]) */
-    vbo[4] = (arena_vertex){{ 2.0f,  3.0f}, {0.0f, 0.0f}};
-    vbo[5] = (arena_vertex){{ 3.0f,  3.0f}, {1.0f, 0.0f}};
-    vbo[6] = (arena_vertex){{ 2.0f,  2.0f}, {0.0f, 1.0f}};
-    vbo[7] = (arena_vertex){{ 3.0f,  2.0f}, {1.0f, 1.0f}};
+    /* 2. Full-screen quad for backlog draws (indices 1024..1027) */
+    vbo[BACKLOG_VERTS_BASE + 0] = (arena_vertex){{-1.0f,  1.0f}, {0.0f, 0.0f}};
+    vbo[BACKLOG_VERTS_BASE + 1] = (arena_vertex){{ 1.0f,  1.0f}, {1.0f, 0.0f}};
+    vbo[BACKLOG_VERTS_BASE + 2] = (arena_vertex){{-1.0f, -1.0f}, {0.0f, 1.0f}};
+    vbo[BACKLOG_VERTS_BASE + 3] = (arena_vertex){{ 1.0f, -1.0f}, {1.0f, 1.0f}};
+
+    /* 3. Valid in-bounds off-screen vertices for index poison redirection (indices 1028..1031) */
+    vbo[OFF_SCREEN_BASE + 0] = (arena_vertex){{ 2.0f,  3.0f}, {0.0f, 0.0f}};
+    vbo[OFF_SCREEN_BASE + 1] = (arena_vertex){{ 3.0f,  3.0f}, {1.0f, 0.0f}};
+    vbo[OFF_SCREEN_BASE + 2] = (arena_vertex){{ 2.0f,  2.0f}, {0.0f, 1.0f}};
+    vbo[OFF_SCREEN_BASE + 3] = (arena_vertex){{ 3.0f,  2.0f}, {1.0f, 1.0f}};
 }
 
-static void init_unpoisoned_indices(uint32_t *ibo, uint32_t count)
+static void poison_vertices(arena_vertex *vbo)
 {
-    static const uint32_t quad_idx[6] = {0, 1, 2, 2, 1, 3};
-    for (uint32_t i = 0; i < count; i += 6) {
-        for (uint32_t j = 0; j < 6; ++j) {
-            ibo[i + j] = quad_idx[j];
+    for (unsigned i = 0; i < ON_TARGET_VERTS; i += 4) {
+        vbo[i + 0] = (arena_vertex){{2.0f, 3.0f}, {0.0f, 0.0f}};
+        vbo[i + 1] = (arena_vertex){{3.0f, 3.0f}, {1.0f, 0.0f}};
+        vbo[i + 2] = (arena_vertex){{2.0f, 2.0f}, {0.0f, 1.0f}};
+        vbo[i + 3] = (arena_vertex){{3.0f, 2.0f}, {1.0f, 1.0f}};
+    }
+}
+
+static void init_unpoisoned_indices(uint32_t *ibo)
+{
+    for (unsigned t = 0; t < TILES; ++t) {
+        uint32_t base_v = t * 4;
+        uint32_t *tile_ibo = ibo + t * INDICES_PER_TILE;
+        for (unsigned q = 0; q < QUADS_PER_TILE; ++q) {
+            tile_ibo[q * 6 + 0] = base_v + 0;
+            tile_ibo[q * 6 + 1] = base_v + 1;
+            tile_ibo[q * 6 + 2] = base_v + 2;
+            tile_ibo[q * 6 + 3] = base_v + 2;
+            tile_ibo[q * 6 + 4] = base_v + 1;
+            tile_ibo[q * 6 + 5] = base_v + 3;
         }
     }
 }
 
-static void fill_poison_indices(uint32_t *ibo, uint32_t count)
+static void fill_poison_indices(uint32_t *ibo)
 {
-    static const uint32_t off_idx[6] = {4, 5, 6, 6, 5, 7};
-    for (uint32_t i = 0; i < count; i += 6) {
-        for (uint32_t j = 0; j < 6; ++j) {
-            ibo[i + j] = off_idx[j];
+    for (unsigned t = 0; t < TILES; ++t) {
+        uint32_t *tile_ibo = ibo + t * INDICES_PER_TILE;
+        for (unsigned q = 0; q < QUADS_PER_TILE; ++q) {
+            tile_ibo[q * 6 + 0] = OFF_SCREEN_BASE + 0;
+            tile_ibo[q * 6 + 1] = OFF_SCREEN_BASE + 1;
+            tile_ibo[q * 6 + 2] = OFF_SCREEN_BASE + 2;
+            tile_ibo[q * 6 + 3] = OFF_SCREEN_BASE + 2;
+            tile_ibo[q * 6 + 4] = OFF_SCREEN_BASE + 1;
+            tile_ibo[q * 6 + 5] = OFF_SCREEN_BASE + 3;
         }
     }
 }
-
-typedef struct {
-    unsigned expected;   /* trials with expected-pattern corruption (exp > 0) */
-    unsigned unrelated;  /* trials with unrelated failure (unrel > 0) */
-    unsigned clean;      /* trials with exp == 0 && unrel == 0 */
-} series_result;
 
 static int run_probe_trial(CellGcmContextData *ctx,
                            const arena_program *prog_main,
@@ -208,14 +274,13 @@ static int run_probe_trial(CellGcmContextData *ctx,
                            uint8_t *arena,
                            uint32_t arena_off,
                            uint32_t rt_off,
+                           uint32_t backlog_rt_off,
                            uint32_t rt_depth_off,
                            int mode,
                            int poison_kind,
                            unsigned trial,
                            uint32_t *p_serial,
-                           unsigned *out_corrupt,
-                           unsigned *out_expected,
-                           unsigned *out_unrelated)
+                           int *out_trial_outcome)
 {
     arena_vertex *vbo = (arena_vertex *)(arena + ARENA_VBO);
     uint16_t *quad_ibo = (uint16_t *)(arena + ARENA_QUAD_IBO);
@@ -226,7 +291,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
     init_arena_vbo(vbo);
     static const uint16_t q_idx[6] = {0, 1, 2, 2, 1, 3};
     memcpy(quad_ibo, q_idx, sizeof q_idx);
-    init_unpoisoned_indices(ibo, INDEX_COUNT);
+    init_unpoisoned_indices(ibo);
 
     uint32_t good = good_color(trial + ((uint32_t)mode << 8) + ((uint32_t)poison_kind << 16));
     arena_fill(tex, TEX_W * TEX_H, good);
@@ -239,24 +304,18 @@ static int run_probe_trial(CellGcmContextData *ctx,
     *(volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL) = 0u;
     uint32_t serial = ++(*p_serial);
 
-    cellGcmSetInvalidateVertexCache(ctx);
-    cellGcmSetInvalidateTextureCache(ctx, CELL_GCM_INVALIDATE_TEXTURE);
-
-    arena_set_target(ctx, rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
-    cellGcmSetClearColor(ctx, COLOR_CLEAR);
-    cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
-
-    if (mode == MODE_EARLY)
-        cellGcmSetWriteCommandLabel(ctx, DONE_LABEL, serial);
-
-    /* 4 full-screen draws of heavy fragment program (fp_heavy_nokil) to back up the pipeline */
+    /* 1. Backlog draws: 4 full-screen draws of heavy fragment program (fp_heavy_nokil)
+     * into a SEPARATE backlog surface to saturate pipelines without touching checked target */
+    arena_set_target(ctx, backlog_rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
     cellGcmSetVertexProgram(ctx, prog_heavy->vp, prog_heavy->vp_ucode);
     cellGcmSetVertexDataArray(ctx, (uint8_t)prog_heavy->position_index, 0, (uint8_t)sizeof(arena_vertex), 2,
                               CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_MAIN,
-                              arena_off + ARENA_VBO + (uint32_t)offsetof(arena_vertex, pos));
+                              arena_off + ARENA_VBO + BACKLOG_VERTS_BASE * (uint32_t)sizeof(arena_vertex) +
+                              (uint32_t)offsetof(arena_vertex, pos));
     cellGcmSetVertexDataArray(ctx, (uint8_t)prog_heavy->texcoord_index, 0, (uint8_t)sizeof(arena_vertex), 2,
                               CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_MAIN,
-                              arena_off + ARENA_VBO + (uint32_t)offsetof(arena_vertex, uv));
+                              arena_off + ARENA_VBO + BACKLOG_VERTS_BASE * (uint32_t)sizeof(arena_vertex) +
+                              (uint32_t)offsetof(arena_vertex, uv));
     cellGcmSetFragmentProgram(ctx, prog_heavy->fp, prog_heavy->fp_offset);
     cellGcmSetInvalidateVertexCache(ctx);
     for (unsigned h = 0; h < 4; ++h) {
@@ -264,16 +323,28 @@ static int run_probe_trial(CellGcmContextData *ctx,
                                  CELL_GCM_LOCATION_MAIN, arena_off + ARENA_QUAD_IBO);
     }
 
-    /* Tens of large indexed draws (~24k 32-bit indices each) reading vertices and indices from mapped arena */
+    /* 2. Switch to checked render target; clear baseline to pure COLOR_CLEAR before tile draws */
+    arena_set_target(ctx, rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
+    cellGcmSetClearColor(ctx, COLOR_CLEAR);
+    cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+
+    /* 3. Emit early label if MODE_EARLY */
+    if (mode == MODE_EARLY)
+        cellGcmSetWriteCommandLabel(ctx, DONE_LABEL, serial);
+
+    /* 4. Draw 256 non-overlapping tiles with distinct vertices and index ranges */
     arena_bind(ctx, prog_main, arena_off + ARENA_VBO, arena_off + ARENA_TEX, TEX_W, TEX_H);
     cellGcmSetInvalidateVertexCache(ctx);
     cellGcmSetInvalidateTextureCache(ctx, CELL_GCM_INVALIDATE_TEXTURE);
 
-    for (unsigned k = 0; k < LARGE_DRAWS; ++k) {
-        cellGcmSetDrawIndexArray(ctx, CELL_GCM_PRIMITIVE_TRIANGLES, INDEX_COUNT, CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32,
-                                 CELL_GCM_LOCATION_MAIN, arena_off + ARENA_IBO);
+    for (unsigned t = 0; t < TILES; ++t) {
+        uint32_t tile_ibo_off = arena_off + ARENA_IBO + t * INDICES_PER_TILE * (uint32_t)sizeof(uint32_t);
+        cellGcmSetDrawIndexArray(ctx, CELL_GCM_PRIMITIVE_TRIANGLES,
+                                 INDICES_PER_TILE, CELL_GCM_DRAW_INDEX_ARRAY_TYPE_32,
+                                 CELL_GCM_LOCATION_MAIN, tile_ibo_off);
     }
 
+    /* 5. Issue completion label for mode under test */
     if (mode == MODE_BACKEND || mode == MODE_REFERENCE)
         cellGcmSetWriteBackEndLabel(ctx, DONE_LABEL, serial);
     else if (mode == MODE_TEXTURE)
@@ -291,8 +362,6 @@ static int run_probe_trial(CellGcmContextData *ctx,
             crumb("A2P_FAIL done-label wait mode=%s poison=%s trial=%u label=0x%08x serial=%u",
                   get_mode_str(mode), get_poison_str(poison_kind), trial,
                   *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL), serial);
-            *out_unrelated = 1;
-            *out_corrupt = 1;
             return -1;
         }
         if (polls > SPIN_POLLS)
@@ -303,12 +372,9 @@ static int run_probe_trial(CellGcmContextData *ctx,
     /* Poison write: publication order is label seen -> poison written -> fence */
     if (mode != MODE_REFERENCE && poison_kind != POISON_NONE) {
         if (poison_kind == POISON_VERTEX) {
-            vbo[0] = (arena_vertex){{2.0f, 3.0f}, {0.0f, 0.0f}};
-            vbo[1] = (arena_vertex){{3.0f, 3.0f}, {1.0f, 0.0f}};
-            vbo[2] = (arena_vertex){{2.0f, 2.0f}, {0.0f, 1.0f}};
-            vbo[3] = (arena_vertex){{3.0f, 2.0f}, {1.0f, 1.0f}};
+            poison_vertices(vbo);
         } else if (poison_kind == POISON_INDEX) {
-            fill_poison_indices(ibo, INDEX_COUNT);
+            fill_poison_indices(ibo);
         } else if (poison_kind == POISON_TEXTURE) {
             arena_fill(tex, TEX_W * TEX_H, COLOR_POISON);
         }
@@ -324,87 +390,67 @@ static int run_probe_trial(CellGcmContextData *ctx,
     if (wait_readback(serial)) {
         crumb("A2P_FAIL readback wait mode=%s poison=%s trial=%u",
               get_mode_str(mode), get_poison_str(poison_kind), trial);
-        *out_unrelated = 1;
-        *out_corrupt = 1;
         return -1;
     }
 
-    /* Check readback pixels */
-    unsigned bad = 0, saw_poison = 0, saw_clear = 0, unrelated = 0, sentinel = 0;
-    for (unsigned i = 0; i < RT * RT; i += 97) {
-        uint32_t v = readback[i];
-        if (v == SENTINEL) {
-            sentinel++;
-            unrelated++;
-            continue;
-        }
-        v &= 0x00ffffffu;
-        if (v != (good & 0x00ffffffu)) {
-            bad++;
-            if (v == (COLOR_CLEAR & 0x00ffffffu)) {
-                saw_clear++;
-            } else if ((v & 0x00ff00ffu) == 0x00ff00ffu) {
-                saw_poison++;
-            } else {
-                unrelated++;
-            }
-        }
-    }
+    /* Check readback pixels using classifier */
+    unsigned exp_samples = 0, unrel_samples = 0;
+    int is_ref = (mode == MODE_REFERENCE || poison_kind == POISON_NONE);
+    int outcome = a2p_classify_trial_samples(readback, RT * RT, good, poison_kind, is_ref,
+                                             &exp_samples, &unrel_samples);
+    *out_trial_outcome = outcome;
 
-    unsigned expected = 0;
-    if (mode == MODE_REFERENCE || poison_kind == POISON_NONE) {
-        unrelated += bad;
-        expected = 0;
-    } else if (poison_kind == POISON_TEXTURE) {
-        expected = saw_poison;
-    } else if (poison_kind == POISON_VERTEX || poison_kind == POISON_INDEX) {
-        expected = saw_clear;
-    }
-
-    *out_corrupt = (bad > 0);
-    *out_expected = expected;
-    *out_unrelated = unrelated;
-
-    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u poison_order=seen->written->sync bad=%u expected=%u unrelated=%u sentinel=%u polls=%u",
-          get_mode_str(mode), get_poison_str(poison_kind), trial, seen_val, bad, expected, unrelated, sentinel, polls);
+    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u poison_order=seen->written->sync expected=%u unrelated=%u polls=%u",
+          get_mode_str(mode), get_poison_str(poison_kind), trial, seen_val, exp_samples, unrel_samples, polls);
     return 0;
 }
 
-static series_result run_series(CellGcmContextData *ctx,
-                                const arena_program *prog_main,
-                                const arena_program *prog_heavy,
-                                uint8_t *arena,
-                                uint32_t arena_off,
-                                uint32_t rt_off,
-                                uint32_t rt_depth_off,
-                                int mode,
-                                int poison_kind,
-                                uint32_t *p_serial)
+static int run_series(CellGcmContextData *ctx,
+                      const arena_program *prog_main,
+                      const arena_program *prog_heavy,
+                      uint8_t *arena,
+                      uint32_t arena_off,
+                      uint32_t rt_off,
+                      uint32_t backlog_rt_off,
+                      uint32_t rt_depth_off,
+                      int mode,
+                      int poison_kind,
+                      uint32_t *p_serial,
+                      a2p_series_counts *out_counts)
 {
-    series_result res = {0, 0, 0};
+    out_counts->expected = 0;
+    out_counts->unrelated = 0;
+    out_counts->clean = 0;
+
     for (unsigned trial = 0; trial < TRIALS; ++trial) {
-        unsigned c = 0, exp = 0, unrel = 0;
-        run_probe_trial(ctx, prog_main, prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                        mode, poison_kind, trial, p_serial, &c, &exp, &unrel);
-        if (exp > 0)
-            res.expected++;
-        if (unrel > 0)
-            res.unrelated++;
-        if (exp == 0 && unrel == 0)
-            res.clean++;
+        int outcome = A2P_TRIAL_CLEAN;
+        int rc = run_probe_trial(ctx, prog_main, prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                                 mode, poison_kind, trial, p_serial, &outcome);
+        if (rc != 0) {
+            crumb("A2P_ABORT series mode=%s poison=%s trial=%u",
+                  get_mode_str(mode), get_poison_str(poison_kind), trial);
+            return -1;
+        }
+        if (outcome == A2P_TRIAL_EXPECTED)
+            out_counts->expected++;
+        else if (outcome == A2P_TRIAL_UNRELATED)
+            out_counts->unrelated++;
+        else
+            out_counts->clean++;
     }
     crumb("A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u",
-          get_mode_str(mode), get_poison_str(poison_kind), res.expected, TRIALS, res.unrelated, TRIALS, res.clean, TRIALS);
-    return res;
+          get_mode_str(mode), get_poison_str(poison_kind),
+          out_counts->expected, TRIALS, out_counts->unrelated, TRIALS, out_counts->clean, TRIALS);
+    return 0;
 }
 
 static void print_buffer_verdict(const char *buf_kind,
-                                 series_result ref,
-                                 series_result early,
-                                 series_result cmd,
-                                 series_result cand,
+                                 a2p_series_counts ref,
+                                 a2p_series_counts early,
+                                 a2p_series_counts cmd,
+                                 a2p_series_counts cand,
                                  const char *cand_mode_name,
-                                 const series_result *extra,
+                                 const a2p_series_counts *extra,
                                  const char *extra_mode_name,
                                  char *out_verdict,
                                  size_t out_verdict_len)
@@ -465,8 +511,8 @@ int main(void)
     uint32_t arena_off = 0, rt_off = 0, rt_depth_off = 0;
 
 #ifdef LABEL_REUSE_HEAVY
-    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u draws=%u indices=%u",
-          VARIANT, RT, RT, TEX_W, TEX_H, LARGE_DRAWS, INDEX_COUNT);
+    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u vertices=%u indices=%u",
+          VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_VERTS, TOTAL_INDICES);
 #else
     unsigned corrupt[MODES] = {0}, poison[MODES] = {0}, clear[MODES] = {0};
     uint32_t polls_total[MODES] = {0};
@@ -481,6 +527,19 @@ int main(void)
     }
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     void *rt = arena_local_alloc(&d, 64, RT * RT * 4), *rtz = arena_local_alloc(&d, 64, RT * RT * 2);
+
+#ifdef LABEL_REUSE_HEAVY
+    void *backlog_rt = arena_local_alloc(&d, 64, RT * RT * 4);
+    uint32_t backlog_rt_off = 0;
+    if (!rt || !rtz || !backlog_rt || cellGcmAddressToOffset(rt, &rt_off) ||
+        cellGcmAddressToOffset(rtz, &rt_depth_off) || cellGcmAddressToOffset(backlog_rt, &backlog_rt_off) ||
+        gcm_host_buffer_alloc(ARENA_BYTES, &arena_ea) ||
+        cellGcmMapMainMemory((const void *)(uintptr_t)arena_ea, ARENA_BYTES, &arena_off) ||
+        arena_program_init(&d, &prog, arena_vp_vpo, arena_fp_fpo)) {
+        crumb("A2P_FAIL setup");
+        return 1;
+    }
+#else
     if (!rt || !rtz || cellGcmAddressToOffset(rt, &rt_off) || cellGcmAddressToOffset(rtz, &rt_depth_off) ||
         gcm_host_buffer_alloc(ARENA_BYTES, &arena_ea) ||
         cellGcmMapMainMemory((const void *)(uintptr_t)arena_ea, ARENA_BYTES, &arena_off) ||
@@ -488,6 +547,8 @@ int main(void)
         crumb("A2P_FAIL setup");
         return 1;
     }
+#endif
+
     uint8_t *arena = (uint8_t *)(uintptr_t)arena_ea;
 
 #ifdef LABEL_REUSE_HEAVY
@@ -503,60 +564,76 @@ int main(void)
     unsigned warmup = 0;
     int warm_ok = 0;
     for (unsigned w = 0; w < 30; ++w) {
-        unsigned c = 0, exp = 0, unrel = 0;
-        run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                        MODE_REFERENCE, POISON_NONE, w, &serial, &c, &exp, &unrel);
+        int outcome = A2P_TRIAL_CLEAN;
+        int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                                 MODE_REFERENCE, POISON_NONE, w, &serial, &outcome);
+        if (rc != 0) {
+            crumb("A2P_ABORT warmup trial=%u", w);
+            return 1;
+        }
         warmup++;
-        if (!c && !unrel) {
+        if (outcome == A2P_TRIAL_CLEAN) {
             warm_ok = 1;
             break;
         }
     }
     if (!warm_ok) {
-        crumb("A2P_FAIL warm-up: no clean trial in 30");
+        crumb("A2P_ABORT warmup: no clean trial in 30");
         return 1;
     }
     crumb("A2P_WARMUP trials=%u clean=1", warmup);
 
     /* Buffer kind 1: VERTEX poison */
-    series_result res_ref_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_REFERENCE, POISON_VERTEX, &serial);
-    series_result res_early_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                           MODE_EARLY, POISON_VERTEX, &serial);
-    series_result res_cmd_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_COMMAND, POISON_VERTEX, &serial);
-    series_result res_back_v = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                          MODE_BACKEND, POISON_VERTEX, &serial);
+    a2p_series_counts res_ref_v, res_early_v, res_cmd_v, res_back_v;
+    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_REFERENCE, POISON_VERTEX, &serial, &res_ref_v) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_EARLY, POISON_VERTEX, &serial, &res_early_v) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_COMMAND, POISON_VERTEX, &serial, &res_cmd_v) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_BACKEND, POISON_VERTEX, &serial, &res_back_v)) {
+        crumb("A2P_ABORT session vertex");
+        return 1;
+    }
     char v_verdict[128];
     print_buffer_verdict("vertex", res_ref_v, res_early_v, res_cmd_v, res_back_v, "backend",
                          NULL, NULL, v_verdict, sizeof v_verdict);
 
     /* Buffer kind 2: INDEX poison */
-    series_result res_ref_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_REFERENCE, POISON_INDEX, &serial);
-    series_result res_early_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                           MODE_EARLY, POISON_INDEX, &serial);
-    series_result res_cmd_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_COMMAND, POISON_INDEX, &serial);
-    series_result res_tex_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_TEXTURE, POISON_INDEX, &serial);
-    series_result res_back_i = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                          MODE_BACKEND, POISON_INDEX, &serial);
+    a2p_series_counts res_ref_i, res_early_i, res_cmd_i, res_tex_i, res_back_i;
+    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_REFERENCE, POISON_INDEX, &serial, &res_ref_i) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_EARLY, POISON_INDEX, &serial, &res_early_i) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_COMMAND, POISON_INDEX, &serial, &res_cmd_i) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_BACKEND, POISON_INDEX, &serial, &res_back_i)) {
+        crumb("A2P_ABORT session index");
+        return 1;
+    }
     char i_verdict[128];
     print_buffer_verdict("index", res_ref_i, res_early_i, res_cmd_i, res_back_i, "backend",
                          &res_tex_i, "texture", i_verdict, sizeof i_verdict);
 
     /* Buffer kind 3: TEXTURE poison */
-    series_result res_ref_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_REFERENCE, POISON_TEXTURE, &serial);
-    series_result res_early_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                           MODE_EARLY, POISON_TEXTURE, &serial);
-    series_result res_cmd_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_COMMAND, POISON_TEXTURE, &serial);
-    series_result res_tex_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                         MODE_TEXTURE, POISON_TEXTURE, &serial);
-    series_result res_back_t = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, rt_depth_off,
-                                          MODE_BACKEND, POISON_TEXTURE, &serial);
+    a2p_series_counts res_ref_t, res_early_t, res_cmd_t, res_tex_t, res_back_t;
+    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_REFERENCE, POISON_TEXTURE, &serial, &res_ref_t) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_EARLY, POISON_TEXTURE, &serial, &res_early_t) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_COMMAND, POISON_TEXTURE, &serial, &res_cmd_t) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_TEXTURE, POISON_TEXTURE, &serial, &res_tex_t) ||
+        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                   MODE_BACKEND, POISON_TEXTURE, &serial, &res_back_t)) {
+        crumb("A2P_ABORT session texture");
+        return 1;
+    }
     char t_verdict[128];
     print_buffer_verdict("texture", res_ref_t, res_early_t, res_cmd_t, res_tex_t, "texture",
                          &res_back_t, "backend", t_verdict, sizeof t_verdict);

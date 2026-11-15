@@ -762,6 +762,9 @@ jobs:
       - name: Test GCM transfer data emitter words and negative controls
         run: bash tests/host/gcm-transfer-data-test.sh
 
+      - name: Test A2 label probe classifier and abort path
+        run: bash tests/host/a2p-probe-test.sh
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
