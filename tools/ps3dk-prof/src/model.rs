@@ -69,6 +69,26 @@ pub struct ExportRecord {
     pub lanes: BTreeMap<u32, ExportLane>,
 }
 
+pub const CHUNK_WINDOW_BEGIN: u32 = 41;
+pub const CHUNK_WINDOW_END: u32 = 42;
+
+pub const FLAG_WINDOWS: u32 = 512;
+pub const WINDOW_BEGIN_LEN: usize = 32;
+pub const WINDOW_END_LEN: usize = 32;
+
+pub const WINDOW_SOURCE_APP: u8 = 1;
+pub const WINDOW_SOURCE_LIVE: u8 = 2;
+
+pub const WINDOW_KIND_MANUAL: u8 = 1;
+pub const WINDOW_KIND_FRAMES: u8 = 2;
+pub const WINDOW_KIND_SECTION: u8 = 3;
+
+pub const WINDOW_REASON_END: u8 = 1;
+pub const WINDOW_REASON_COUNT: u8 = 2;
+pub const WINDOW_REASON_SHUTDOWN: u8 = 3;
+pub const WINDOW_REASON_SEAL: u8 = 4;
+pub const WINDOW_REASON_REFUSED_CAPACITY: u8 = 5;
+
 pub const KIND_BEGIN: u8 = 1;
 pub const KIND_BEGIN_PARENT: u8 = 2;
 pub const KIND_END: u8 = 3;
@@ -101,6 +121,8 @@ pub enum Rule {
     WaitStatus,
     /// Named per-frame counters (file_flags bit 8, chunk 39) violate their wire contract.
     Counters,
+    /// Capture windows (file_flags bit 9, chunks 41-42) violate their wire contract.
+    Windows,
     /// Function paths (file_flags bit 5, chunk types 28-30; ps3dk-prof-func-paths.md): FUNC_CONFIG.
     FuncConfig,
     /// A FUNC_TREE chunk violates its wire, ordering or definition rules.
@@ -500,6 +522,109 @@ impl Lane {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowSource {
+    App = 1,
+    Live = 2,
+}
+
+impl WindowSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WindowSource::App => "app",
+            WindowSource::Live => "live",
+        }
+    }
+}
+
+impl fmt::Display for WindowSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowKind {
+    Manual,
+    Frames(u32),
+    Section,
+}
+
+impl WindowKind {
+    pub fn as_str(&self) -> String {
+        match self {
+            WindowKind::Manual => "manual".to_string(),
+            WindowKind::Frames(n) => format!("frames({n})"),
+            WindowKind::Section => "section".to_string(),
+        }
+    }
+}
+
+impl fmt::Display for WindowKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowReason {
+    End = 1,
+    Count = 2,
+    Shutdown = 3,
+    Seal = 4,
+    RefusedCapacity = 5,
+    OpenAtEnd = 6,
+}
+
+impl WindowReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WindowReason::End => "end",
+            WindowReason::Count => "count",
+            WindowReason::Shutdown => "shutdown",
+            WindowReason::Seal => "seal",
+            WindowReason::RefusedCapacity => "refused_capacity",
+            WindowReason::OpenAtEnd => "open at end of capture",
+        }
+    }
+}
+
+impl fmt::Display for WindowReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureWindow {
+    pub id: u32,
+    pub name: String,
+    pub name_desc: u32,
+    pub first_frame: u64,
+    pub last_frame: Option<u64>,
+    pub source: WindowSource,
+    pub kind: WindowKind,
+    pub reason: WindowReason,
+    pub is_open: bool,
+    pub incomplete: bool,
+}
+
+impl CaptureWindow {
+    pub fn contains_frame(&self, frame: u64) -> bool {
+        match self.last_frame {
+            Some(last) => frame >= self.first_frame && frame <= last,
+            None => false,
+        }
+    }
+
+    pub fn frames_desc(&self) -> String {
+        match self.last_frame {
+            Some(last) => format!("frames {}..{}", self.first_frame, last),
+            None => "0 frames".to_string(),
+        }
+    }
+}
+
 /// A decoded capture that is not MALFORMED.  It may be INCOMPLETE; then `incomplete` says why.
 #[derive(Debug, Clone, Default)]
 pub struct Capture {
@@ -528,6 +653,9 @@ pub struct Capture {
     pub spans: Vec<Span>,
     pub trailer: Option<Trailer>,
     pub incomplete: Vec<Incomplete>,
+    /// file_flags bit 9 (FLAG_WINDOWS): explicit capture windows, or 1 implicit window for legacy files.
+    pub windows: Vec<CaptureWindow>,
+    pub windows_flag: bool,
     /// file_flags bit 0 (DOMAIN_EXTENSIONS): the extension sources; None for a v1 file (flags 0).
     pub ext: Option<crate::ext::ExtCapture>,
     /// file_flags bit 1 (PROFILE_RECORD) is set.

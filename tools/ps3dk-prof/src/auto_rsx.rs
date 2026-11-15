@@ -1360,6 +1360,14 @@ pub struct Report {
     pub export: Option<crate::model::ExportRecord>,
 }
 
+impl Report {
+    pub fn filter_window(&self, w: &crate::model::CaptureWindow) -> Self {
+        let mut r = self.clone();
+        r.frames.retain(|f| w.contains_frame(f.frame));
+        r
+    }
+}
+
 /// The FIFO wait evidence of one frame: Ok(lower-bound ticks) or the reason it is unavailable.
 fn fifo_wait(cap: &Capture, fifo: &crate::fifo::Report, owner: u32, frame: u64) -> Result<u64, String> {
     use crate::fifo::Phase;
@@ -1870,6 +1878,20 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         }
     }
     Ok(())
+}
+
+pub fn write_text_window<W: std::io::Write>(
+    out: &mut W,
+    r: &Report,
+    w: &crate::model::CaptureWindow,
+) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "window {}: \"{}\" source {} kind {} {} reason {}",
+        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason
+    )?;
+    let filtered = r.filter_window(w);
+    write_text(out, &filtered)
 }
 
 fn presentation_text(p: &Presentation) -> String {
