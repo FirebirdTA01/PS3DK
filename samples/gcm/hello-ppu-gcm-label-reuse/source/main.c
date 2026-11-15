@@ -175,7 +175,7 @@ static int wait_readback(uint32_t serial)
             return 0;
 #ifdef LABEL_REUSE_HEAVY
         uint64_t elapsed = a2p_elapsed_us();
-        if (elapsed >= A2P_SESSION_LIMIT_US) {
+        if (a2p_deadline_expired(elapsed)) {
             crumb("A2P_ABORT deadline elapsed_us=%llu at=readback-wait", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }
@@ -350,7 +350,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
 {
     /* Check deadline before trial */
     uint64_t elapsed = a2p_elapsed_us();
-    if (elapsed >= A2P_SESSION_LIMIT_US) {
+    if (a2p_deadline_expired(elapsed)) {
         crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-trial", (unsigned long long)elapsed);
         return A2P_RC_DEADLINE;
     }
@@ -438,7 +438,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
     uint32_t polls = 0;
     while (!cellGcmIsLabelPassed(DONE_LABEL, serial)) {
         elapsed = a2p_elapsed_us();
-        if (elapsed >= A2P_SESSION_LIMIT_US) {
+        if (a2p_deadline_expired(elapsed)) {
             crumb("A2P_ABORT deadline elapsed_us=%llu at=done-label-wait", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }
@@ -467,7 +467,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
 
     /* Check deadline before readback */
     elapsed = a2p_elapsed_us();
-    if (elapsed >= A2P_SESSION_LIMIT_US) {
+    if (a2p_deadline_expired(elapsed)) {
         crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-readback", (unsigned long long)elapsed);
         return A2P_RC_DEADLINE;
     }
@@ -650,7 +650,7 @@ int main(void)
     int warm_ok = 0;
     for (unsigned w = 0; w < 30; ++w) {
         uint64_t elapsed = a2p_elapsed_us();
-        if (elapsed >= A2P_SESSION_LIMIT_US) {
+        if (a2p_deadline_expired(elapsed)) {
             crumb("A2P_ABORT deadline elapsed_us=%llu at=warmup", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }

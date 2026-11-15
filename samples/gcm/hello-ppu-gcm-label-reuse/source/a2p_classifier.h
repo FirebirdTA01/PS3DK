@@ -42,6 +42,13 @@
 #define A2P_SESSION_LIMIT_US    (180ULL * 1000000ULL) /* 180 s cooperative session deadline in microseconds */
 #define A2P_RC_DEADLINE         3
 
+/* The one deadline test used at every checkpoint: elapsed_us is monotonic microseconds since A2P_BEGIN.
+ * Expired from exactly A2P_SESSION_LIMIT_US on; one microsecond short is not expired. */
+static inline int a2p_deadline_expired(uint64_t elapsed_us)
+{
+    return elapsed_us >= A2P_SESSION_LIMIT_US;
+}
+
 enum {
     A2P_POISON_NONE = 0,
     A2P_POISON_VERTEX,

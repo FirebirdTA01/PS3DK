@@ -591,6 +591,16 @@ static void test_all_clear_reference_invalid(void)
     printf("PASS: all-CLEAR completed reference classified invalid (asserted explicitly)\n");
 }
 
+static void test_deadline_boundary(void)
+{
+    assert(!a2p_deadline_expired(0));
+    assert(!a2p_deadline_expired(A2P_SESSION_LIMIT_US - 1u));
+    assert(a2p_deadline_expired(A2P_SESSION_LIMIT_US));
+    assert(a2p_deadline_expired(A2P_SESSION_LIMIT_US + 1u));
+    assert(a2p_deadline_expired(UINT64_MAX));
+    printf("PASS: deadline boundary: limit - 1 continues, limit and beyond expire\n");
+}
+
 int main(void)
 {
     test_neg_poison_under_vertex();
@@ -604,6 +614,7 @@ int main(void)
     test_abort_immediate_stop();
     test_abort_wrong_behaviour_detected();
     test_abort_deadline_fake_clock();
+    test_deadline_boundary();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 

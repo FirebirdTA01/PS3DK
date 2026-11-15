@@ -104,6 +104,19 @@ def main():
         if "ALL A2P PROBE TESTS PASSED" not in res.stdout:
             sys.exit("FAIL: missing success marker in test output")
 
+    # The executable's deadline checkpoints: exactly five, all through the tested helper.
+    import re
+    src = (INC_DIR / "main.c").read_text(encoding="utf-8")
+    calls = re.findall(r"a2p_deadline_expired\(elapsed\)", src)
+    if len(calls) != 5:
+        sys.exit(f"FAIL: expected 5 deadline checkpoints in main.c, found {len(calls)}")
+    if re.search(r"[<>]=?\s*A2P_SESSION_LIMIT_US", src):
+        sys.exit("FAIL: main.c compares against A2P_SESSION_LIMIT_US outside the helper")
+    names = sorted(re.findall(r"A2P_ABORT deadline elapsed_us=%llu at=([a-z-]+)", src))
+    want = sorted(["done-label-wait", "pre-readback", "pre-trial", "readback-wait", "warmup"])
+    if names != want:
+        sys.exit(f"FAIL: deadline checkpoint names {names} != {want}")
+    print("PASS: main.c has exactly the five deadline checkpoints, all through a2p_deadline_expired")
     print("a2p-probe-test: PASS")
     return 0
 
