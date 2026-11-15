@@ -35,6 +35,8 @@
 #define A2P_COLOR_CLEAR         0xff000000u
 #define A2P_COLOR_POISON        0xffff00ffu
 #define A2P_SENTINEL            0x5a5a5a5au
+#define A2P_SESSION_LIMIT_US    (180ULL * 1000000ULL) /* 180 s session deadline in microseconds */
+#define A2P_RC_DEADLINE         3
 
 enum {
     A2P_POISON_NONE = 0,
@@ -318,7 +320,7 @@ static inline int a2p_run_series_loop(void *user_ctx, int mode, int poison_kind,
         if (rc != 0) {
             if (out_failed_trial)
                 *out_failed_trial = t;
-            return -1; /* Immediate abort */
+            return rc; /* Immediate abort with trial error/deadline code */
         }
         if (all_clear)
             out_counts->all_clear_trials++;

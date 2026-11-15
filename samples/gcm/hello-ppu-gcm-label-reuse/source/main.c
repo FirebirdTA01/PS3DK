@@ -122,6 +122,16 @@ _Static_assert((ARENA_ALLOC_BYTES % (1024u * 1024u)) == 0, "ARENA_ALLOC_BYTES mu
 _Static_assert((FIFO_BYTES % (1024u * 1024u)) == 0, "FIFO_BYTES must be 1 MiB multiple");
 _Static_assert((HOST_BYTES % (1024u * 1024u)) == 0, "HOST_BYTES must be 1 MiB multiple");
 
+#include <sys/sys_time.h>
+
+static uint64_t g_session_start_us = 0;
+
+static inline uint64_t a2p_elapsed_us(void)
+{
+    uint64_t now = (uint64_t)sys_time_get_system_time();
+    return now >= g_session_start_us ? now - g_session_start_us : 0;
+}
+
 #else /* Light variant */
 
 enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 1 << 20 };
@@ -152,11 +162,20 @@ static const char *const mode_names[MODES + 1] = {"warmup", "backend", "texture"
 
 _Static_assert(DONE_LABEL >= CELL_GCM_LABEL_APP_FIRST && READBACK_LABEL <= CELL_GCM_LABEL_APP_LAST, "app labels");
 
+static void crumb(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
 static int wait_readback(uint32_t serial)
 {
     for (uint32_t i = 0; i < POLLS; ++i) {
         if (cellGcmIsLabelPassed(READBACK_LABEL, serial))
             return 0;
+#ifdef LABEL_REUSE_HEAVY
+        uint64_t elapsed = a2p_elapsed_us();
+        if (elapsed >= A2P_SESSION_LIMIT_US) {
+            crumb("A2P_ABORT deadline elapsed_us=%llu at=readback-wait", (unsigned long long)elapsed);
+            return A2P_RC_DEADLINE;
+        }
+#endif
         usleep(5);
     }
     return -1;
@@ -325,6 +344,13 @@ static int run_probe_trial(CellGcmContextData *ctx,
                            int *out_trial_outcome,
                            int *out_all_clear)
 {
+    /* Check deadline before trial */
+    uint64_t elapsed = a2p_elapsed_us();
+    if (elapsed >= A2P_SESSION_LIMIT_US) {
+        crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-trial", (unsigned long long)elapsed);
+        return A2P_RC_DEADLINE;
+    }
+
     arena_vertex *vbo = (arena_vertex *)(arena + ARENA_VBO);
     uint16_t *quad_ibo = (uint16_t *)(arena + ARENA_QUAD_IBO);
     uint32_t *ibo = (uint32_t *)(arena + ARENA_IBO);
@@ -407,6 +433,11 @@ static int run_probe_trial(CellGcmContextData *ctx,
     /* Poll completion label */
     uint32_t polls = 0;
     while (!cellGcmIsLabelPassed(DONE_LABEL, serial)) {
+        elapsed = a2p_elapsed_us();
+        if (elapsed >= A2P_SESSION_LIMIT_US) {
+            crumb("A2P_ABORT deadline elapsed_us=%llu at=done-label-wait", (unsigned long long)elapsed);
+            return A2P_RC_DEADLINE;
+        }
         if (++polls > SPIN_POLLS + POLLS) {
             crumb("A2P_FAIL done-label wait mode=%s poison=%s trial=%u label=0x%08x serial=%u",
                   get_mode_str(mode), get_poison_str(poison_kind), trial,
@@ -430,16 +461,26 @@ static int run_probe_trial(CellGcmContextData *ctx,
     }
     __asm__ __volatile__("sync" ::: "memory");
 
+    /* Check deadline before readback */
+    elapsed = a2p_elapsed_us();
+    if (elapsed >= A2P_SESSION_LIMIT_US) {
+        crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-readback", (unsigned long long)elapsed);
+        return A2P_RC_DEADLINE;
+    }
+
     /* Issue readback transfer and fence strictly AFTER poison write */
     cellGcmSetTransferImage(ctx, CELL_GCM_TRANSFER_LOCAL_TO_MAIN, arena_off + ARENA_READBACK, RT * 4, 0, 0,
                             rt_off, RT * 4, 0, 0, RT, RT, 4);
     cellGcmSetWriteBackEndLabel(ctx, READBACK_LABEL, serial);
     cellGcmFlush(ctx);
 
-    if (wait_readback(serial)) {
-        crumb("A2P_FAIL readback wait mode=%s poison=%s trial=%u",
-              get_mode_str(mode), get_poison_str(poison_kind), trial);
-        return -1;
+    int rb_rc = wait_readback(serial);
+    if (rb_rc != 0) {
+        if (rb_rc != A2P_RC_DEADLINE) {
+            crumb("A2P_FAIL readback wait mode=%s poison=%s trial=%u",
+                  get_mode_str(mode), get_poison_str(poison_kind), trial);
+        }
+        return rb_rc;
     }
 
     /* Check readback pixels using tile classifier across all 8,192 sub-quad centers */
@@ -516,13 +557,17 @@ static int run_series(CellGcmContextData *ctx,
     int rc = a2p_run_series_loop(&sctx, mode, poison_kind, TRIALS,
                                  a2p_trial_callback, out_counts, &failed_trial);
     if (rc != 0) {
-        crumb("A2P_ABORT series mode=%s poison=%s trial=%u",
-              get_mode_str(mode), get_poison_str(poison_kind), failed_trial);
-        return -1;
+        if (rc != A2P_RC_DEADLINE) {
+            crumb("A2P_ABORT series mode=%s poison=%s trial=%u",
+                  get_mode_str(mode), get_poison_str(poison_kind), failed_trial);
+        }
+        return rc;
     }
-    crumb("A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u",
+    uint64_t elapsed_us = a2p_elapsed_us();
+    crumb("A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u elapsed_us=%llu",
           get_mode_str(mode), get_poison_str(poison_kind),
-          out_counts->expected, TRIALS, out_counts->unrelated, TRIALS, out_counts->clean, TRIALS);
+          out_counts->expected, TRIALS, out_counts->unrelated, TRIALS, out_counts->clean, TRIALS,
+          (unsigned long long)elapsed_us);
     return 0;
 }
 
@@ -562,8 +607,10 @@ int main(void)
     uint32_t arena_off = 0, rt_off = 0, rt_depth_off = 0;
 
 #ifdef LABEL_REUSE_HEAVY
-    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u",
-          VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES);
+    g_session_start_us = (uint64_t)sys_time_get_system_time();
+    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u elapsed_us=%llu",
+          VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES,
+          (unsigned long long)a2p_elapsed_us());
 
     if (gcm_host_buffer_alloc(HOST_BYTES, &host) || cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host) ||
         arena_display_init(&d)) {
@@ -596,13 +643,18 @@ int main(void)
     unsigned warmup = 0;
     int warm_ok = 0;
     for (unsigned w = 0; w < 30; ++w) {
+        uint64_t elapsed = a2p_elapsed_us();
+        if (elapsed >= A2P_SESSION_LIMIT_US) {
+            crumb("A2P_ABORT deadline elapsed_us=%llu at=warmup", (unsigned long long)elapsed);
+            return A2P_RC_DEADLINE;
+        }
         int outcome = A2P_TRIAL_CLEAN;
         int all_clear = 0;
         int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
                                  MODE_REFERENCE, POISON_NONE, w, &serial, &outcome, &all_clear);
         if (rc != 0) {
             crumb("A2P_ABORT warmup trial=%u", w);
-            return 1;
+            return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
         }
         warmup++;
         if (outcome == A2P_TRIAL_CLEAN) {
@@ -618,16 +670,17 @@ int main(void)
 
     /* Buffer kind 1: VERTEX poison */
     a2p_series_counts res_ref_v, res_early_v, res_cmd_v, res_back_v;
-    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_REFERENCE, POISON_VERTEX, &serial, &res_ref_v) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_EARLY, POISON_VERTEX, &serial, &res_early_v) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_COMMAND, POISON_VERTEX, &serial, &res_cmd_v) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_BACKEND, POISON_VERTEX, &serial, &res_back_v)) {
+    int rc;
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_REFERENCE, POISON_VERTEX, &serial, &res_ref_v)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_EARLY, POISON_VERTEX, &serial, &res_early_v)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_COMMAND, POISON_VERTEX, &serial, &res_cmd_v)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_BACKEND, POISON_VERTEX, &serial, &res_back_v)) != 0) {
         crumb("A2P_ABORT session vertex");
-        return 1;
+        return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
     }
     char v_verdict[128];
     print_buffer_verdict("vertex", res_ref_v, res_early_v, res_cmd_v, res_back_v, "backend",
@@ -635,18 +688,18 @@ int main(void)
 
     /* Buffer kind 2: INDEX poison */
     a2p_series_counts res_ref_i, res_early_i, res_cmd_i, res_back_i, res_tex_i;
-    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_REFERENCE, POISON_INDEX, &serial, &res_ref_i) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_EARLY, POISON_INDEX, &serial, &res_early_i) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_COMMAND, POISON_INDEX, &serial, &res_cmd_i) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_BACKEND, POISON_INDEX, &serial, &res_back_i) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i)) {
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_REFERENCE, POISON_INDEX, &serial, &res_ref_i)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_EARLY, POISON_INDEX, &serial, &res_early_i)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_COMMAND, POISON_INDEX, &serial, &res_cmd_i)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_BACKEND, POISON_INDEX, &serial, &res_back_i)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i)) != 0) {
         crumb("A2P_ABORT session index");
-        return 1;
+        return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
     }
     char i_verdict[128];
     print_buffer_verdict("index", res_ref_i, res_early_i, res_cmd_i, res_back_i, "backend",
@@ -654,18 +707,18 @@ int main(void)
 
     /* Buffer kind 3: TEXTURE poison */
     a2p_series_counts res_ref_t, res_early_t, res_cmd_t, res_tex_t, res_back_t;
-    if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_REFERENCE, POISON_TEXTURE, &serial, &res_ref_t) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_EARLY, POISON_TEXTURE, &serial, &res_early_t) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_COMMAND, POISON_TEXTURE, &serial, &res_cmd_t) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_TEXTURE, POISON_TEXTURE, &serial, &res_tex_t) ||
-        run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_BACKEND, POISON_TEXTURE, &serial, &res_back_t)) {
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_REFERENCE, POISON_TEXTURE, &serial, &res_ref_t)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_EARLY, POISON_TEXTURE, &serial, &res_early_t)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_COMMAND, POISON_TEXTURE, &serial, &res_cmd_t)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_TEXTURE, POISON_TEXTURE, &serial, &res_tex_t)) != 0 ||
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+                         MODE_BACKEND, POISON_TEXTURE, &serial, &res_back_t)) != 0) {
         crumb("A2P_ABORT session texture");
-        return 1;
+        return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
     }
     char t_verdict[128];
     print_buffer_verdict("texture", res_ref_t, res_early_t, res_cmd_t, res_tex_t, "texture",
@@ -689,7 +742,8 @@ int main(void)
         snprintf(overall, sizeof overall, "inconclusive (command control not caught in >= 8/32; note: 0/32 is not a zero-risk bound)");
     }
     crumb("A2P VERDICT overall %s", overall);
-    crumb("A2P DONE");
+    crumb("A2P_END elapsed_us=%llu", (unsigned long long)a2p_elapsed_us());
+    crumb("A2P DONE elapsed_us=%llu", (unsigned long long)a2p_elapsed_us());
     return 0;
 
 #else /* Light variant (LABEL_REUSE_HEAVY not defined) — exact origin/main implementation */

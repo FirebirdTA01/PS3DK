@@ -77,6 +77,10 @@ typedef struct {
     unsigned rewritten;
     int outcome_to_report;
     int all_clear_to_report;
+    uint64_t fake_now_us;
+    uint64_t deadline_us;
+    uint64_t step_per_trial_us;
+    const char *deadline_at;
 } fake_trial_state;
 
 static int fake_trial_fn(void *user_ctx, int mode, int poison_kind, unsigned trial,
@@ -185,6 +189,103 @@ static void test_abort_wrong_behaviour_detected(void)
     assert(s_real.submitted == 7);
 
     printf("PASS: abort test detects and rejects continue-on-failure loop behaviour\n");
+}
+
+/* Fake clock trial runner simulating pre-trial, wait loop, and readback deadline checks */
+static int fake_trial_clock_fn(void *user_ctx, int mode, int poison_kind, unsigned trial,
+                               int *out_trial_outcome, int *out_all_clear)
+{
+    (void)mode;
+    (void)poison_kind;
+    (void)trial;
+    fake_trial_state *s = (fake_trial_state *)user_ctx;
+    s->calls++;
+
+    /* 1. Check deadline before trial */
+    if (s->fake_now_us >= s->deadline_us) {
+        s->deadline_at = "pre-trial";
+        return A2P_RC_DEADLINE;
+    }
+
+    s->submitted++;
+
+    /* Advance clock to simulate execution up to completion label wait loop */
+    s->fake_now_us += s->step_per_trial_us / 2;
+
+    /* 2. Check deadline inside bounded wait loop */
+    if (s->fake_now_us >= s->deadline_us) {
+        s->deadline_at = "done-label-wait";
+        return A2P_RC_DEADLINE;
+    }
+
+    s->reset++;
+    s->rewritten++;
+
+    /* Advance clock to simulate execution up to readback */
+    s->fake_now_us += s->step_per_trial_us / 2;
+
+    /* 3. Check deadline before readback / inside readback wait */
+    if (s->fake_now_us >= s->deadline_us) {
+        s->deadline_at = "readback-wait";
+        return A2P_RC_DEADLINE;
+    }
+
+    *out_trial_outcome = s->outcome_to_report;
+    if (out_all_clear)
+        *out_all_clear = s->all_clear_to_report;
+    return 0;
+}
+
+/* Deadline abort test: a fake clock that crosses the limit mid-series stops loop immediately with nothing after it */
+static void test_abort_deadline_fake_clock(void)
+{
+    /* Case 1: Deadline crossed inside wait loop mid-trial (at trial 7) */
+    fake_trial_state s;
+    memset(&s, 0, sizeof s);
+    s.fail_at_trial = 999;
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = 0;
+    /* 25 seconds per trial: trial 7 advances from 175s to 187.5s in wait loop */
+    s.step_per_trial_us = 25000000ULL;
+
+    a2p_series_counts counts;
+    unsigned failed_trial = 0;
+
+    int rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 7);
+    assert(strcmp(s.deadline_at, "done-label-wait") == 0);
+    /* Only trials 0..7 were called; trials 8..31 were never called */
+    assert(s.calls == 8);
+    /* Trial 7 submitted before wait loop, but was aborted before reset or rewrite */
+    assert(s.submitted == 8);
+    assert(s.reset == 7);
+    assert(s.rewritten == 7);
+    assert(counts.clean == 7);
+    assert(counts.expected == 0);
+    assert(counts.unrelated == 0);
+
+    /* Case 2: Deadline crossed before trial begins (pre-trial at trial 0) */
+    memset(&s, 0, sizeof s);
+    s.fail_at_trial = 999;
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = A2P_SESSION_LIMIT_US; /* already at deadline */
+    s.step_per_trial_us = 1000000ULL;
+    failed_trial = 999;
+
+    rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 0);
+    assert(strcmp(s.deadline_at, "pre-trial") == 0);
+    assert(s.calls == 1);
+    assert(s.submitted == 0);
+    assert(s.reset == 0);
+    assert(s.rewritten == 0);
+    assert(counts.clean == 0);
+
+    printf("PASS: fake clock crossing deadline mid-series stops loop immediately with nothing after it\n");
 }
 
 /* Eight-fetch max semantics test:
@@ -383,6 +484,7 @@ int main(void)
     test_reference_counted_once();
     test_abort_immediate_stop();
     test_abort_wrong_behaviour_detected();
+    test_abort_deadline_fake_clock();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 
