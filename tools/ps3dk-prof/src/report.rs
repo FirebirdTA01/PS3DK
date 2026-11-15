@@ -575,7 +575,8 @@ pub fn render_window(a: &Analysis, w: &crate::model::CaptureWindow) -> String {
     }
 
     let _ = writeln!(o, "\nzones (valid lanes only):");
-    for z in &a.zones {
+    let win_zones = a.window_zones(w);
+    for z in &win_zones {
         let tag = if z.logical_tag.is_empty() { String::new() } else { format!(" [{}]", z.logical_tag) };
         let _ = writeln!(o, "  {}{tag}: {} instances", z.name, z.instances);
         if let Some(label) = &z.label {
@@ -606,7 +607,7 @@ pub fn render_window(a: &Analysis, w: &crate::model::CaptureWindow) -> String {
             Some((_, f)) => w.contains_frame(f),
             None => match s.frame_context {
                 FrameContext::Frame(f) => w.contains_frame(f),
-                _ => true,
+                _ => false,
             },
         };
         if !in_window {
