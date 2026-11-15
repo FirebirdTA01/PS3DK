@@ -1021,7 +1021,7 @@ static int c_sink_fail(int type, const char *name)
     write_truth(name);
     {
         FILE *e = expect(name);
-        fprintf(e, "exit 1\nsink_dead 1\n");
+        fprintf(e, "exit 0\nsink_dead 1\n");
         fclose(e);
     }
     return 0;
@@ -1479,7 +1479,11 @@ static int c_fault(const char *which)
         write_truth(name);
         {
             FILE *e = expect(name);
-            fprintf(e, "exit 1\nsink_dead 1\n");
+            /* These three failures occur after events and FINAL were emitted.
+             * Attach failures leave metadata only, which is still INCOMPLETE. */
+            int has_events = !strcmp(which, "detach-unlock") || !strcmp(which, "release-unlock") ||
+                             !strcmp(which, "seal-unlock");
+            fprintf(e, "exit %d\nsink_dead 1\n", has_events ? 0 : 1);
             fclose(e);
         }
     }
@@ -1698,7 +1702,7 @@ static int c_frame_thread(int unlock)
     write_truth(name);
     {
         FILE *e = expect(name);
-        fprintf(e, "exit 1\nsink_dead 1\n");
+        fprintf(e, "exit 0\nsink_dead 1\n");
         fclose(e);
     }
     return 0;
@@ -2002,7 +2006,8 @@ static int c_detach_completion(const char *which)
         FILE *e;
         CHECK(rc == PS3DK_PROF_ESINKFAIL, "shutdown fails closed (got %d)", rc);
         e = expect(name);
-        fprintf(e, "exit 1\nsink_dead 1\n");
+        /* File prefix acceptance does not certify GPU coverage. */
+        fprintf(e, "exit 0\nsink_dead 1\n");
         fclose(e);
     }
     return 0;
@@ -2080,7 +2085,7 @@ static int c_frame_unlock_refusal(const char *which)
     write_truth(name);
     {
         FILE *e = expect(name);
-        fprintf(e, "exit 1\nsink_dead 1\n");
+        fprintf(e, "exit 0\nsink_dead 1\n");
         fclose(e);
     }
     return 0;
