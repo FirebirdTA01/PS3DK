@@ -41,8 +41,8 @@ impl AutoState {
         v: &AutoView,
         timeline: Option<&mut TimelineState>,
     ) {
-        self.selected_frame = frame;
-        if let (Some(k), Some(tl)) = (frame, timeline) {
+        self.selected_frame = frame.filter(|k| v.report.frames.iter().any(|f| f.frame == *k));
+        if let (Some(k), Some(tl)) = (self.selected_frame, timeline) {
             if let Some(f) = v.report.frames.iter().find(|f| f.frame == k) {
                 tl.view.show_range(&tl.tl, f.tb_begin, f.tb_end);
                 tl.fit_all = false;
@@ -72,6 +72,8 @@ impl AutoState {
     pub fn refresh(&mut self, v: Option<&AutoView>) {
         let Some(view) = v else {
             self.selected_frame = None;
+            self.steady_start = 0;
+            self.steady_end = 0;
             return;
         };
         if view.report.frames.is_empty() {
@@ -155,7 +157,7 @@ pub fn verdict_tone(v: Verdict) -> ui::Tone {
 }
 
 /// Pill-shaped badge styled like ps3dk_ui::badge, but with hover-only sense and no internal wrapping.
-pub fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+fn auto_badge_with_sense(ui: &mut egui::Ui, text: &str, tone: ui::Tone, sense: Sense) -> egui::Response {
     let p = ui::Palette::of(ui);
     let (fill, outline, color) = match tone {
         ui::Tone::Neutral => (p.surface_alt, p.border, p.text_muted),
@@ -172,7 +174,7 @@ pub fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Respon
     let pad_x = 7.0;
     let pad_y = 1.0;
     let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
-    let (rect, response) = ui.allocate_exact_size(total_size, egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(total_size, sense);
     if ui.is_rect_visible(rect) {
         ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0, outline));
         let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
@@ -181,31 +183,30 @@ pub fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Respon
     response
 }
 
-/// Clickable pill-shaped badge for interactive filters.
-pub fn auto_badge_clickable(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+    auto_badge_with_sense(ui, text, tone, Sense::hover())
+}
+
+fn auto_badge_clickable(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+    auto_badge_with_sense(ui, text, tone, Sense::click())
+}
+
+// Automatic-specific wrapping. Existing shared widgets retain their contract.
+fn auto_card_header(ui: &mut egui::Ui, title: &str, subtitle: Option<&str>, trailing: impl FnOnce(&mut egui::Ui)) {
     let p = ui::Palette::of(ui);
-    let (fill, outline, color) = match tone {
-        ui::Tone::Neutral => (p.surface_alt, p.border, p.text_muted),
-        ui::Tone::Accent => (p.accent.gamma_multiply(0.18), p.accent.gamma_multiply(0.55), p.accent),
-        tone => {
-            let color = tone.color(&p);
-            let fill = color.gamma_multiply(0.18);
-            (fill, color.gamma_multiply(0.45), color)
-        }
-    };
-    let font_id = egui::FontId::proportional(11.5);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id, color);
-    let text_size = galley.size();
-    let pad_x = 7.0;
-    let pad_y = 1.0;
-    let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
-    let (rect, response) = ui.allocate_exact_size(total_size, egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0, outline));
-        let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
-        ui.painter().galley(text_pos, galley, color);
+    ui.horizontal(|h| {
+        h.label(RichText::new(title).text_style(ui::title_style()).strong().color(p.text));
+        h.with_layout(egui::Layout::right_to_left(egui::Align::Min), trailing);
+    });
+    if let Some(text) = subtitle {
+        ui.add_space(2.0);
+        ui.add(egui::Label::new(RichText::new(text).small().color(p.text_muted)).wrap());
     }
-    response
+    ui.add_space(ui::SPACE_SM);
+}
+
+fn bounds_ms((lo, hi): (f64, f64)) -> String {
+    if lo == hi { format!("{lo:.3} ms") } else { format!("{lo:.3}..{hi:.3} ms") }
 }
 
 /// Draws the Automatic page. Returns Some(Page) if an interaction requested a page change.
@@ -228,26 +229,7 @@ pub fn page(
         return None;
     }
 
-    if v.report.frames.is_empty() {
-        st.steady_start = 0;
-        st.steady_end = 0;
-        st.selected_frame = None;
-    } else {
-        let (min_frame, max_frame) = v.frame_range();
-        if st.selected_frame.is_some_and(|sel| !v.report.frames.iter().any(|f| f.frame == sel)) {
-            st.selected_frame = None;
-        }
-        if !st.steady_customized {
-            st.steady_start = min_frame;
-            st.steady_end = max_frame;
-        } else {
-            st.steady_start = st.steady_start.clamp(min_frame, max_frame);
-            st.steady_end = st.steady_end.clamp(min_frame, max_frame);
-            if st.steady_start > st.steady_end {
-                st.steady_start = st.steady_end;
-            }
-        }
-    }
+    st.refresh(Some(v));
     drawn.selected_frame = st.selected_frame;
 
     // ── 1. CAPTURE FACTS ───────────────────────────────────────────────
@@ -301,7 +283,7 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
     ui::card(p, |c| {
         let card_w = card_available_width(c);
         c.set_max_width(card_w);
-        ui::card_header(
+        auto_card_header(
             c,
             "CAPTURE FACTS",
             Some("Clock map qualification, capture completion and operational counters."),
@@ -325,20 +307,20 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
                             m.decisive.1
                         );
                         drawn.map_state = "QUALIFIED".to_string();
-                        ui::badge(h, "QUALIFIED", ui::Tone::Success);
+                        auto_badge(h, "QUALIFIED", ui::Tone::Success);
                         h.add_space(ui::SPACE_XS);
                         h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
                     }
                     Some(MapState::Unqualified(why)) => {
                         drawn.map_state = format!("UNQUALIFIED ({why})");
-                        ui::badge(h, "UNQUALIFIED", ui::Tone::Warning);
+                        auto_badge(h, "UNQUALIFIED", ui::Tone::Warning);
                         h.add_space(ui::SPACE_XS);
                         let text = format!("AUTO_CLOCK_UNQUALIFIED: {why} (raw RSX ticks only)");
                         h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
                     }
                     None => {
                         drawn.map_state = "NO MAP".to_string();
-                        ui::badge(h, "NO MAP", ui::Tone::Neutral);
+                        auto_badge(h, "NO MAP", ui::Tone::Neutral);
                         h.add_space(ui::SPACE_XS);
                         let text = "No clock anchors recorded";
                         h.add(egui::Label::new(text).wrap()).on_hover_text(text);
@@ -352,12 +334,12 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         fact_row(c, "Capture state", |v_ui| {
             v_ui.horizontal_top(|h| {
                 if v.is_final() {
-                    ui::badge(h, "FINAL", ui::Tone::Success);
+                    auto_badge(h, "FINAL", ui::Tone::Success);
                     h.add_space(ui::SPACE_XS);
                     let text = "Closed with complete stop / finalization";
                     h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                 } else {
-                    ui::badge(h, "PROVISIONAL", ui::Tone::Warning);
+                    auto_badge(h, "PROVISIONAL", ui::Tone::Warning);
                     h.add_space(ui::SPACE_XS);
                     let text = "Provisional snapshot / open session";
                     h.add(egui::Label::new(text).wrap()).on_hover_text(text);
@@ -371,12 +353,12 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         fact_row(c, "Ops dropped past ceiling", |v_ui| {
             v_ui.horizontal_top(|h| {
                 if dropped > 0 {
-                    ui::badge(h, &format!("{dropped} DROPPED"), ui::Tone::Warning);
+                    auto_badge(h, &format!("{dropped} DROPPED"), ui::Tone::Warning);
                     h.add_space(ui::SPACE_XS);
                     let text = "Operations parsed but not retained past operation ceiling";
                     h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                 } else {
-                    ui::badge(h, "0 DROPPED", ui::Tone::Success);
+                    auto_badge(h, "0 DROPPED", ui::Tone::Success);
                     h.add_space(ui::SPACE_XS);
                     let text = "All operations retained within ceiling";
                     h.add(egui::Label::new(text).wrap()).on_hover_text(text);
@@ -384,23 +366,22 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
             });
         });
 
-        // Frame marks missed
-        let lost = v.frames_lost();
-        drawn.frames_lost = lost;
-        fact_row(c, "Frame marks missed", |v_ui| {
+        // Marker refusal and lost coverage rows are independent wire facts.
+        drawn.frame_marks_missed = v.frame_marks_missed();
+        fact_row(c, "RSX frame marks", |v_ui| {
             v_ui.horizontal_top(|h| {
-                if lost > 0 {
-                    ui::badge(h, &format!("{lost} LOST"), ui::Tone::Danger);
-                    h.add_space(ui::SPACE_XS);
-                    let text = "Missed frame boundary markers (frames_lost)";
-                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                if drawn.frame_marks_missed {
+                    auto_badge(h, "MISSED", ui::Tone::Danger);
+                    h.add(egui::Label::new("At least one RSX frame marker was refused; no count is recorded.").wrap());
                 } else {
-                    ui::badge(h, "0 LOST", ui::Tone::Success);
-                    h.add_space(ui::SPACE_XS);
-                    let text = "No missed frame boundaries";
-                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                    auto_badge(h, "NO MISSES REPORTED", ui::Tone::Neutral);
                 }
             });
+        });
+        let lost = v.coverage_rows_lost();
+        drawn.coverage_rows_lost = lost;
+        fact_row(c, "Coverage rows lost", |v_ui| {
+            auto_badge(v_ui, &format!("{lost} LOST"), if lost == 0 { ui::Tone::Neutral } else { ui::Tone::Danger });
         });
     });
 }
@@ -416,7 +397,7 @@ fn draw_verdict_strip(
     ui::card(p, |c| {
         let card_w = card_available_width(c);
         c.set_max_width(card_w);
-        ui::card_header(
+        auto_card_header(
             c,
             "VERDICT STRIP",
             Some("Per-frame verdict sequence; click a frame to inspect its details and jump the Timeline."),
@@ -433,7 +414,7 @@ fn draw_verdict_strip(
                 h.label(RichText::new(format!("Total: {}", v.report.frames.len())).strong());
                 h.add_space(ui::SPACE_SM);
                 for (verdict, count) in v.verdict_counts() {
-                    let badge_resp = ui::badge(h, &format!("{}: {}", verdict.key(), count), verdict_tone(verdict));
+                    let badge_resp = auto_badge_clickable(h, &format!("{}: {}", verdict.key(), count), verdict_tone(verdict));
                     if badge_resp.clicked() {
                         st.filter = match verdict {
                             Verdict::RsxBound => VerdictFilter::RsxBound,
@@ -503,7 +484,7 @@ fn draw_verdict_strip(
 
             resp.clone().on_hover_ui(|tip| {
                 tip.label(RichText::new(format!("Frame #{} (owner {})", f.frame, f.owner)).strong());
-                ui::badge(tip, f.verdict.key(), verdict_tone(f.verdict));
+                auto_badge(tip, f.verdict.key(), verdict_tone(f.verdict));
                 tip.label(RichText::new(&f.reason).italics());
                 tip.add_space(ui::SPACE_XS);
                 tip.label(format!("Interval: {:.3} ms ({} PPU ticks)", interval_ms, interval_ticks));
@@ -537,7 +518,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
         let card_w = card_available_width(c);
         c.set_max_width(card_w);
 
-        ui::card_header(
+        auto_card_header(
             c,
             "STEADY RANGE SUMMARY",
             Some("Interactive frame range selector; medians and verdict mix across steady frames."),
@@ -574,6 +555,9 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
         let summary = v.steady_summary(st.steady_start, st.steady_end);
         drawn.steady_frame_count = summary.frame_count;
         drawn.steady_mix = summary.verdict_counts.to_vec();
+        drawn.steady_median_interval_ms = summary.median_interval_ms();
+        drawn.steady_median_span_ppu_ticks = summary.median_span_ppu_ticks;
+        drawn.steady_median_busy_ppu_ticks = summary.median_busy_ppu_ticks;
 
         if summary.frame_count == 0 {
             c.label("No frames in selected range.");
@@ -586,7 +570,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
                 h.label(format!("{} frames: ", summary.frame_count));
                 for (verdict, count) in &summary.verdict_counts {
                     let pct = summary.mix_pct(*verdict);
-                    ui::badge(h, &format!("{}: {} ({:.1}%)", verdict.key(), count, pct), verdict_tone(*verdict));
+                    auto_badge(h, &format!("{}: {} ({:.1}%)", verdict.key(), count, pct), verdict_tone(*verdict));
                     h.add_space(ui::SPACE_XS);
                 }
             });
@@ -609,7 +593,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
         fact_row(c, "Median RSX Span", |v_ui| {
             v_ui.horizontal_top(|h| {
                 let span_text = if let Some(ms) = summary.median_span_ms() {
-                    format!("{ms:.3} ms")
+                    bounds_ms(ms)
                 } else if let Some(raw) = summary.median_span_raw_ticks {
                     format!("{raw} raw ticks (unmapped)")
                 } else {
@@ -617,7 +601,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
                 };
                 let span_tip = format!(
                     "PPU ticks: {}, raw ticks: {}",
-                    summary.median_span_ppu_ticks.map_or("-".into(), |t| t.to_string()),
+                    summary.median_span_ppu_ticks.map_or("-".into(), |(lo, hi)| format!("{lo}..{hi}")),
                     summary.median_span_raw_ticks.map_or("-".into(), |t| t.to_string())
                 );
                 h.label(&span_text).on_hover_text(span_tip);
@@ -628,7 +612,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
         fact_row(c, "Median RSX Busy", |v_ui| {
             v_ui.horizontal_top(|h| {
                 let busy_text = if let Some(ms) = summary.median_busy_ms() {
-                    format!("{ms:.3} ms")
+                    bounds_ms(ms)
                 } else if let Some(raw) = summary.median_busy_raw_ticks {
                     format!("{raw} raw ticks (unmapped)")
                 } else {
@@ -636,7 +620,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
                 };
                 let busy_tip = format!(
                     "PPU ticks: {}, raw ticks: {}",
-                    summary.median_busy_ppu_ticks.map_or("-".into(), |t| t.to_string()),
+                    summary.median_busy_ppu_ticks.map_or("-".into(), |(lo, hi)| format!("{lo}..{hi}")),
                     summary.median_busy_raw_ticks.map_or("-".into(), |t| t.to_string())
                 );
                 h.label(&busy_text).on_hover_text(busy_tip);
@@ -657,7 +641,7 @@ fn draw_frames_table(
     ui::card(p, |c| {
         let card_w = card_available_width(c);
         c.set_max_width(card_w);
-        ui::card_header(
+        auto_card_header(
             c,
             "FRAMES",
             Some("Per-frame details, intervals, RSX metrics, exclusions and reason text."),
@@ -763,7 +747,7 @@ fn draw_frames_table(
                             }
 
                             // Verdict
-                            ui::badge(g, f.verdict.key(), verdict_tone(f.verdict));
+                            auto_badge(g, f.verdict.key(), verdict_tone(f.verdict));
 
                             // Interval
                             let interval_ms = v.frame_interval_ms(f);
@@ -900,7 +884,7 @@ fn draw_frame_detail(
             |h| {
                 h.set_max_width(card_w);
                 h.label(RichText::new(format!("FRAME #{} DETAIL", f.frame)).strong());
-                ui::badge(h, f.verdict.key(), verdict_tone(f.verdict));
+                auto_badge(h, f.verdict.key(), verdict_tone(f.verdict));
                 h.add_space(ui::SPACE_LG);
 
                 if ui::primary_button(h, "View in Timeline").clicked() {

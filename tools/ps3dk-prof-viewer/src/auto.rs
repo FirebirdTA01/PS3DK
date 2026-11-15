@@ -48,11 +48,6 @@ impl AutoView {
         self.report.status.as_ref().map_or(0, |s| s.counters[6])
     }
 
-    /// Legacy alias for coverage_rows_lost.
-    pub fn frames_lost(&self) -> u64 {
-        self.coverage_rows_lost()
-    }
-
     /// Operations dropped past the retention ceiling.
     pub fn ops_dropped(&self) -> u64 {
         self.report.ops_dropped

@@ -320,3 +320,66 @@ fn parity_against_auto_json_segments() {
         assert_eq!(f.unsupported, g["unsupported"].as_u64().unwrap());
     }
 }
+
+#[test]
+fn missed_marks_and_lost_rows_are_independent() {
+    let mut doc = Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+    let v = doc.auto.as_mut().unwrap();
+    v.report.status.as_mut().unwrap().flags |= auto_rsx::ST_FRAME_MARK_MISSED;
+    v.report.status.as_mut().unwrap().counters[6] = 0;
+    let mut app=App::new(None); app.install(Arc::new(doc),true);
+    let mut ui=Ui::new(); let drawn=ui.frame(vec![], &mut app);
+    assert!(drawn.frame_marks_missed);
+    assert_eq!(drawn.coverage_rows_lost,0);
+    let mut doc=Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+    let s=doc.auto.as_mut().unwrap().report.status.as_mut().unwrap();
+    s.flags &= !auto_rsx::ST_FRAME_MARK_MISSED; s.counters[6]=7;
+    app.install(Arc::new(doc),true);
+    let drawn=ui.frame(vec![],&mut app);
+    assert!(!drawn.frame_marks_missed); assert_eq!(drawn.coverage_rows_lost,7);
+}
+
+#[test]
+fn steady_medians_preserve_bounds_without_overflow() {
+    use ps3dk_prof_viewer::auto::median_of;
+    assert_eq!(median_of(vec![u64::MAX,u64::MAX]),Some(u64::MAX));
+    let mut doc=Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+    let v=doc.auto.as_mut().unwrap();v.report.frames.truncate(1);
+    v.report.frames[0].rsx_span_ppu=Some((10,100));
+    v.report.frames[0].rsx_busy_ppu=Some((3,81));
+    let mut app=App::new(None);app.install(Arc::new(doc),true);
+    let drawn=Ui::new().frame(vec![],&mut app);
+    assert_eq!(drawn.steady_median_span_ppu_ticks,Some((10,100)));
+    assert_eq!(drawn.steady_median_busy_ppu_ticks,Some((3,81)));
+}
+
+#[test]
+fn live_refresh_keeps_controls_and_fresh_install_resets_them() {
+    let doc=Arc::new(Document::from_bytes(PathBuf::from("console-r2.prof"), &fixture_bytes("console-r2")));
+    let mut app=App::new(None);app.install(doc.clone(),true);
+    app.auto.selected_frame=Some(5);app.auto.steady_start=5;app.auto.steady_end=9;
+    app.auto.steady_customized=true;app.auto.filter=VerdictFilter::Unknown;
+    app.install(doc.clone(),false);
+    assert_eq!(app.auto.selected_frame,Some(5));
+    assert_eq!((app.auto.steady_start,app.auto.steady_end),(5,9));
+    assert!(app.auto.steady_customized);assert_eq!(app.auto.filter,VerdictFilter::Unknown);
+    app.install(doc,true);
+    assert_eq!(app.auto.selected_frame,None);assert!(!app.auto.steady_customized);
+    assert_eq!(app.auto.filter,VerdictFilter::All);
+}
+
+#[test]
+fn empty_single_and_stale_ranges_reconcile_before_paint() {
+    for n in [0,1] {
+        let mut doc=Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+        let v=doc.auto.as_mut().unwrap();v.report.frames.truncate(n);
+        if n==1 {v.report.frames[0].frame=17;}
+        let mut app=App::new(None);app.install(Arc::new(doc),true);
+        app.auto.selected_frame=Some(999);app.auto.steady_start=1000;app.auto.steady_end=2000;app.auto.steady_customized=true;
+        let mut ui=Ui::new();let drawn=ui.frame(vec![],&mut app);
+        assert_eq!(app.auto.selected_frame,None);
+        assert_eq!((app.auto.steady_start,app.auto.steady_end),if n==0 {(0,0)} else {(17,17)});
+        assert_eq!(drawn.steady_frame_count,n);
+        let drawn=ui.frame(vec![],&mut app);assert_eq!(drawn.steady_frame_count,n);
+    }
+}
