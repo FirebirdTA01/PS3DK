@@ -711,7 +711,7 @@ impl eframe::App for App {
         if page == Page::Timeline {
             if let (Some(doc), Some(st)) = (self.doc.as_ref(), self.timeline.as_mut()) {
                 if let Some(a) = doc.analysis() {
-                    timeline_ui::draw(ctx, &doc.foreign_tl, a, st, &mut self.selected_zone);
+                    timeline_ui::draw_with_auto(ctx, &doc.foreign_tl, a, doc.auto.as_ref(), st, &mut self.selected_zone);
                     return;
                 }
             }

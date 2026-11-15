@@ -288,6 +288,18 @@ Open a capture either by passing the file on the command line, or from inside th
 - **Zones** — named-zone statistics for PPU zones only, from PPU lanes that are MEASUREMENT VALID (`ps3dk-prof report` prints each lane's validity; spans on other lanes are excluded); SPU and RSX zones are not listed. Columns: Zone (name and tag), Instances, Completed, Censored, Total, Mean, p50, p90, p99 and Max (all durations inclusive), and Qualification. Percentiles use the usable completed duration samples and are refused when there are fewer than 20 of them. Unknown values sort last.
 - **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains. For a capture with automatic function paths, a **Source** selector switches between **Zones** and **Functions (automatic)**; the latter shows one thread's indented call tree (calls, inclusive, self, % of the selection's wall elapsed, row statuses) for the whole capture or one interval, with the counters and statuses above it, the LOST row apart from the tree, and **Load ELF symbols...** for names.
 
+AUTO captures also add three collapsible Timeline lanes below the PPU threads:
+frame verdicts, mapped RSX busy intervals, and presentation aggregates. Busy
+intervals are the reader's union of retained draw/CALL intervals within each
+execution frame. They include RSX waits, so they are not shader execution time.
+Their solid cores lie inside the qualified clock map's endpoint bounds;
+whiskers show the outer bounds. Unqualified maps and invalidated timing have no
+busy bars, and intervals outside the map's support are not extrapolated.
+Flip-wait ticks/counts and polling cadence are per-frame annotations: this
+capture format does not record their positions, so it supplies no wait bars.
+The lanes share Timeline zoom and pan. A notice identifies any visible bars or
+aggregate rows beyond the paint limit; zooming narrows the displayed population.
+
 ### 3.4 Live sessions
 
 While data is streaming, the app bar shows a `LIVE · PROVISIONAL` badge and the progress strip reports `PROVISIONAL: still receiving (<bytes> so far); <coverage>`; the verdict is provisional until the session ends. The live link is served by the profiler's own agent thread. The agent drops the viewer as stalled when it has output pending and a send makes no progress for longer than `send_timeout_us` (default 2 s); this is not a deadline from the moment the viewer stops reading, because buffers may keep accepting bytes, and a link with nothing to send is never stalled. A closed peer or a failed send is recorded when the agent detects it. The console's capture file is written independently of the link, subject to its own writer succeeding; after the live link is stopped the app can read the drop counters with `ps3dk_prof_live_get_stats`.
