@@ -6,7 +6,7 @@ mod common;
 mod fifo_support;
 use common::*;
 use fifo_support::*;
-use ps3dk_prof::auto_rsx::{analyze, Config, MapState, Report, Verdict};
+use ps3dk_prof::auto_rsx::{analyze, write_json, write_text, Config, MapState, Report, Verdict};
 use ps3dk_prof::{reader, Rule};
 
 const AUTO_FLAGS: u32 = 1 | 64 | 128;
@@ -1634,4 +1634,56 @@ fn call_brackets_are_checked() {
     f.chunks[at].payload[base + 140] = 1;
     f.chunks[at].payload[base + 136..base + 140].copy_from_slice(&OWNER.to_le_bytes());
     assert!(reader::read(&f.bytes()).is_err(), "a tail without build-excluded draws");
+}
+
+#[test]
+fn call_covered_reported_in_text_and_json() {
+    let rep = analyze(&reader::read(&call_frame(Some(((6500, 40_000), 3, 1, 1)), 1, 255).bytes()).unwrap());
+    assert!(rep.call_bracket);
+    let f = &rep.frames[0];
+    assert_eq!(f.call_brackets, 1);
+    assert_eq!(f.call_covered, 1);
+    assert_eq!(f.segment_unrepresented, 1);
+
+    // Text output verification
+    let mut text_out = Vec::new();
+    write_text(&mut text_out, &rep).unwrap();
+    let text = String::from_utf8(text_out).unwrap();
+    assert!(text.contains("unrepresented >= 1, call_covered 1, dropped builds 0"), "{}", text);
+
+    // JSON output verification
+    let mut json_out = Vec::new();
+    write_json(&mut json_out, &rep).unwrap();
+    let json_str = String::from_utf8(json_out).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(parsed["frames"][0]["call_covered"], 1);
+    assert_eq!(parsed["frames"][0]["segment_unrepresented"], 1);
+
+    // Golden check on older masks (call_bracket false): call_covered must not be emitted in JSON or text
+    let rep_old = analyze(&reader::read(&call_frame(None, 1, 127).bytes()).unwrap());
+    assert!(!rep_old.call_bracket);
+    let f_old = &rep_old.frames[0];
+    assert_eq!(f_old.call_covered, 0);
+
+    let mut old_text_out = Vec::new();
+    write_text(&mut old_text_out, &rep_old).unwrap();
+    let old_text = String::from_utf8(old_text_out).unwrap();
+    assert!(!old_text.contains("call_covered"), "{}", old_text);
+
+    let mut old_json_out = Vec::new();
+    write_json(&mut old_json_out, &rep_old).unwrap();
+    let old_json_str = String::from_utf8(old_json_out).unwrap();
+    let parsed_old: serde_json::Value = serde_json::from_str(&old_json_str).unwrap();
+    assert!(parsed_old["frames"][0].get("call_covered").is_none());
+
+    // Also verify golden fixture (console-r2) has call_bracket false and no call_covered
+    let rep_fixture = read_fixture("console-r2");
+    assert!(!rep_fixture.call_bracket);
+    let mut fix_json_out = Vec::new();
+    write_json(&mut fix_json_out, &rep_fixture).unwrap();
+    let fix_json_str = String::from_utf8(fix_json_out).unwrap();
+    let parsed_fix: serde_json::Value = serde_json::from_str(&fix_json_str).unwrap();
+    for fr in parsed_fix["frames"].as_array().unwrap() {
+        assert!(fr.get("call_covered").is_none());
+    }
 }

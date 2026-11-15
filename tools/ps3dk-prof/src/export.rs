@@ -55,9 +55,12 @@ fn encode_record(r: &RawRecord) -> [u8; 32] {
     buf
 }
 
-fn encode_gap(start_seq: u64, end_seq: u64) -> [u8; 32] {
+fn encode_gap(start_seq: u64, end_seq: u64, is_export: bool) -> [u8; 32] {
     let mut buf = [0u8; 32];
     buf[0] = KIND_GAP;
+    if is_export {
+        buf[2..4].copy_from_slice(&GAP_FLAG_EXPORT.to_le_bytes());
+    }
     buf[8..16].copy_from_slice(&start_seq.to_le_bytes());
     buf[16..24].copy_from_slice(&start_seq.to_le_bytes());
     buf[24..32].copy_from_slice(&end_seq.to_le_bytes());
@@ -246,6 +249,36 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         let is_owner = lane.is_frame_owner();
         let all_recs = raw_lane_records.get(&inc).map(|v| v.as_slice()).unwrap_or(&[]);
 
+        let mut worker_window_seq_range: Option<(u64, u64)> = None;
+        if !is_owner {
+            let mut w_last_tb = None;
+            let mut min_seq = None;
+            let mut max_seq = None;
+            for rec in all_recs {
+                let tb = match rec.kind {
+                    KIND_BEGIN => {
+                        w_last_tb = Some(rec.b);
+                        Some(rec.b)
+                    }
+                    KIND_BEGIN_PARENT => w_last_tb,
+                    KIND_END | KIND_REGERR => Some(rec.b),
+                    _ => None,
+                };
+                if let Some(t) = tb {
+                    let in_win = t >= tb_start && (if let Some(end_tb) = tb_end { t <= end_tb } else { true });
+                    if in_win {
+                        if min_seq.is_none() {
+                            min_seq = Some(rec.seq);
+                        }
+                        max_seq = Some(rec.seq);
+                    }
+                }
+            }
+            if let (Some(s), Some(e)) = (min_seq, max_seq) {
+                worker_window_seq_range = Some((s, e));
+            }
+        }
+
         let mut kept_records = Vec::new();
         let mut last_begin_tb: Option<u64> = None;
 
@@ -260,7 +293,20 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 _ => None,
             };
 
-            let in_window = if is_owner {
+            let in_window = if rec.kind == KIND_GAP {
+                if is_owner {
+                    rec.seq >= owner_start_seq
+                        && (if let Some(end_seq) = owner_end_seq {
+                            rec.c <= end_seq
+                        } else {
+                            true
+                        })
+                } else if let Some((ws, we)) = worker_window_seq_range {
+                    rec.seq >= ws && rec.c <= we
+                } else {
+                    false
+                }
+            } else if is_owner {
                 rec.seq >= owner_start_seq
                     && (if let Some(end_seq) = owner_end_seq {
                         rec.seq <= end_seq
@@ -282,7 +328,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 .get(&inc)
                 .map_or(false, |set| set.contains(&rec.seq));
 
-            if in_window && !is_clipped && rec.kind != KIND_GAP {
+            if in_window && !is_clipped {
                 kept_records.push(*rec);
                 kept_record_keys.insert((inc, rec.seq));
             }
@@ -303,8 +349,9 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             records_dropped_total += writer_written;
         } else {
             let first_seq = kept_records.first().unwrap().seq;
-            let last_seq = kept_records.last().unwrap().seq;
-            let kept = kept_records.len() as u64;
+            let last_rec = kept_records.last().unwrap();
+            let last_seq = if last_rec.kind == KIND_GAP { last_rec.c } else { last_rec.seq };
+            let kept = kept_records.iter().filter(|r| r.kind != KIND_GAP).count() as u64;
             let dropped_by_export = writer_written - kept;
 
             export_lanes.insert(
@@ -586,13 +633,26 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     if off + RECORD_LEN <= chunk.payload.len() {
                         let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
                         if kept_record_keys.contains(&(inc, rec.seq)) {
+                            let mut rec_to_emit = rec;
                             if let Some(&prev) = prev_emitted_seq.get(&inc) {
                                 if rec.seq > prev + 1 {
-                                    chunk_out.extend_from_slice(&encode_gap(prev + 1, rec.seq - 1));
+                                    if rec.kind == KIND_GAP {
+                                        rec_to_emit.seq = prev + 1;
+                                        rec_to_emit.b = prev + 1;
+                                    } else if chunk_out.len() >= RECORD_LEN
+                                        && chunk_out[chunk_out.len() - RECORD_LEN] == KIND_GAP
+                                    {
+                                        let last_start = chunk_out.len() - RECORD_LEN;
+                                        chunk_out[last_start + 24..last_start + 32]
+                                            .copy_from_slice(&(rec.seq - 1).to_le_bytes());
+                                    } else {
+                                        chunk_out.extend_from_slice(&encode_gap(prev + 1, rec.seq - 1, true));
+                                    }
                                 }
                             }
-                            chunk_out.extend_from_slice(&encode_record(&rec));
-                            prev_emitted_seq.insert(inc, rec.seq);
+                            chunk_out.extend_from_slice(&encode_record(&rec_to_emit));
+                            let end_seq = if rec_to_emit.kind == KIND_GAP { rec_to_emit.c } else { rec_to_emit.seq };
+                            prev_emitted_seq.insert(inc, end_seq);
                         }
                     }
                 }
