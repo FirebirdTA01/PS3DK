@@ -9,6 +9,76 @@ use fifo_support::*;
 use ps3dk_prof::auto_rsx::{analyze, write_json, write_text, Config, MapState, Report, Verdict};
 use ps3dk_prof::{reader, Rule};
 
+#[test]
+fn timeline_busy_uses_absolute_qualified_endpoint_bounds() {
+    use ps3dk_prof::{auto_rsx::busy_timeline, clockmap::{self, End, Meter, Obs, Solved}};
+    let cap = reader::read(&fixture("console-r2")).unwrap();
+    let report = analyze(&cap);
+    let timeline = busy_timeline(&cap, &report);
+    assert!(timeline.notice.is_none(), "{:?}", timeline.notice);
+    assert!(!timeline.bars.is_empty());
+    let observations: Vec<_> = report.clocks.iter().filter(|a| a.flags == 1).map(|a| Obs {
+        f: a.raw.into(), lo: a.tb_before.into(), hi: a.tb_after.into(),
+    }).collect();
+    let mut meter = Meter::unlimited();
+    let Solved::Compatible(model) = clockmap::solve(&mut meter, &observations).unwrap() else { panic!() };
+    for bar in timeline.bars {
+        for (raw, bounds) in [(bar.raw_begin, bar.begin), (bar.raw_end, bar.end)] {
+            let projection = model.project(&mut meter, raw.into()).unwrap();
+            assert!(projection.interpolated);
+            let (End::At { value: lo, .. }, End::At { value: hi, .. }) = (projection.lo, projection.hi) else { panic!() };
+            assert_eq!(bounds.0.to_string(), lo.floor().to_string());
+            assert_eq!(bounds.1.to_string(), hi.ceil().to_string());
+        }
+        assert!(report.frames.iter().any(|f| (f.owner, f.frame) == (bar.owner, bar.frame)));
+    }
+}
+
+#[test]
+fn timeline_busy_merges_execution_intervals_and_refuses_unsafe_evidence() {
+    use ps3dk_prof::auto_rsx::*;
+    let mut cap = reader::read(&fixture("console-r2")).unwrap();
+    let report = analyze(&cap);
+    let Some(MapState::Qualified(map)) = report.map else { panic!() };
+    let x = u64::try_from(map.fmin).unwrap() + 10;
+    assert!(u64::try_from(map.fmax).unwrap() > x + 300);
+    let inv = cap.auto.as_mut().unwrap();
+    let seed = inv.ops.iter().find(|o| o.covered() && o.raw_valid() && o.token().is_some()).unwrap().clone();
+    let op = |b, e, frame, flags, kind| {
+        let mut o = seed.clone();
+        o.raw_begin = b; o.raw_end = e; o.frame = frame; o.flags = flags; o.kind = kind;
+        o
+    };
+    let flags = OP_TOKEN | OP_RAW_VALID;
+    inv.ops = vec![
+        op(x, x + 100, seed.frame, flags, KIND_CLEAR),
+        op(x + 50, x + 200, seed.frame, flags, KIND_CALL),
+        op(x + 250, x + 300, seed.frame + 1, flags, KIND_ARRAY),
+        op(x, x + 300, seed.frame, flags | OP_CLOCK_INVALID, KIND_CLEAR),
+        op(x, x + 300, seed.frame, flags, KIND_FRAME),
+        op(0, u64::MAX, seed.frame, flags, KIND_CLEAR),
+        op(x + 300, x, seed.frame, flags, KIND_CLEAR),
+    ];
+    let report = analyze(&cap);
+    let timeline = busy_timeline(&cap, &report);
+    assert_eq!(timeline.bars.len(), 2);
+    assert_eq!((timeline.bars[0].raw_begin, timeline.bars[0].raw_end, timeline.bars[0].operations), (x, x + 200, 2));
+    assert_eq!(timeline.bars[1].frame, seed.frame + 1);
+    assert_eq!(timeline.omitted, 3); // invalid clock, outside support, reversed interval; FRAME is not an op
+
+    for flag in [ST_SEGMENT_REPLAY, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET] {
+        let mut bad = report.clone();
+        bad.status.as_mut().unwrap().flags |= flag;
+        let refused = busy_timeline(&cap, &bad);
+        assert!(refused.bars.is_empty());
+        assert!(refused.notice.as_ref().unwrap().contains("invalidated"));
+    }
+    cap.auto.as_mut().unwrap().clocks.clear();
+    let unavailable = busy_timeline(&cap, &analyze(&cap));
+    assert!(unavailable.bars.is_empty());
+    assert_eq!(unavailable.notice.as_deref(), Some("clock map not qualified: RSX lanes unavailable"));
+}
+
 const AUTO_FLAGS: u32 = 1 | 64 | 128;
 
 fn fixture(name: &str) -> Vec<u8> {
