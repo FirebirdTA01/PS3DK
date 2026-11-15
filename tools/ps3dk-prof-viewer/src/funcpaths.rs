@@ -41,7 +41,9 @@ pub struct FRow {
     pub path: String,
     pub calls: String,
     pub incl: String,
+    pub incl_exact: String,
     pub self_time: String,
+    pub self_time_exact: String,
     pub incl_pct: Option<f64>,
     pub self_pct: Option<f64>,
     pub flags: String,
@@ -73,6 +75,7 @@ pub struct FuncView {
     pub thread_lines: Vec<String>,
     /// The selection's own header (interval ticks, epochs, flags, counters).
     pub selection_lines: Vec<String>,
+    pub elapsed_exact: String,
     /// Set instead of rows when the selection has no data (UNKNOWN) or was refused.
     pub notice: Option<String>,
     pub rows: Vec<FRow>,
@@ -117,8 +120,10 @@ fn frow(
         label,
         path,
         calls: r.calls.to_string(),
-        incl: tb.ticks(r.incl),
-        self_time: tb.ticks(r.self_ticks()),
+        incl: tb.short_ticks(r.incl),
+        incl_exact: tb.ticks(r.incl),
+        self_time: tb.short_ticks(r.self_ticks()),
+        self_time_exact: tb.ticks(r.self_ticks()),
         incl_pct: percent(r.incl, elapsed),
         self_pct: percent(r.self_ticks(), elapsed),
         flags: if r.present {
@@ -286,6 +291,7 @@ pub fn build(
         }
         Selected::Refused(r) => v.notice = Some(format!("Interval rows REFUSED ({r}).")),
         Selected::View(w) => {
+            v.elapsed_exact = w.elapsed.map_or("UNKNOWN (clock anomaly)".into(), |e| tb.ticks(e));
             match &w.cut {
                 Some(c) => {
                     v.selection_lines.push(format!(
@@ -293,7 +299,7 @@ pub fn build(
                          flags {}",
                         c.start,
                         c.cut,
-                        c.elapsed().map_or("UNKNOWN (clock anomaly)".to_string(), |e| tb.ticks(u128::from(e))),
+                        c.elapsed().map_or("UNKNOWN (clock anomaly)".to_string(), |e| tb.short_ticks(u128::from(e))),
                         c.answered,
                         c.requested,
                         c.open,
@@ -307,7 +313,7 @@ pub fn build(
                     "whole capture: {} data interval(s), elapsed {}",
                     actor.data_cuts,
                     w.elapsed
-                        .map_or("UNKNOWN (clock anomaly)".to_string(), |e| tb.ticks(e))
+                        .map_or("UNKNOWN (clock anomaly)".to_string(), |e| tb.short_ticks(e))
                 )),
             }
             v.rows = w

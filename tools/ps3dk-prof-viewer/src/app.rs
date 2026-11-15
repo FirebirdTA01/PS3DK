@@ -744,7 +744,8 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
-                    Page::Overview | Page::Timeline | Page::Snapshot => {
+                    Page::Snapshot => ui::empty_state(p, "No frame snapshot selected", "Use Capture full frame on a measured frame, or open a saved snapshot from the sidebar."),
+                    Page::Overview | Page::Timeline => {
                         draw_overview(p, a, &d.ext, &d.rsx.get(a))
                     }
                     Page::Frames => match &d.frames {
@@ -939,6 +940,9 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx:
         kv_grid(p, "identity", &o.identity);
         p.add_space(ui::SPACE_LG);
         ui::section_label(p, "LANES");
+        if o.lanes.is_empty() {
+            ui::field_message(p, ui::Tone::Neutral, "No PPU lanes recorded: no thread records are present in these capture bytes.");
+        }
         egui::Grid::new("lanes")
             .num_columns(7)
             .striped(true)
@@ -1133,6 +1137,10 @@ fn draw_zones(
             "No usable clock: durations are shown in timebase ticks only.",
         );
     }
+    if rows.is_empty() {
+        ui::field_message(p, ui::Tone::Neutral, "No zones recorded: no named-zone instances are retained in this capture.");
+        return;
+    }
     // The page scrolls vertically; the table scrolls horizontally, with its
     // bar always shown so a wide table never hides columns silently. The bar
     // is solid (a dormant floating bar is invisible until hover), its area is
@@ -1243,3 +1251,7 @@ pub fn finish_live(caps: &mut Captures, o: &Outcome) -> (bool, String) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "polish_tests.rs"]
+mod polish_tests;

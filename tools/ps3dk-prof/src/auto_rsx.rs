@@ -1337,6 +1337,18 @@ pub enum Verdict {
     Unknown,
 }
 impl Verdict {
+    /// One-sentence UI definition, owned here beside the classifier and its thresholds.
+    /// A candidate is evidence for a classification, not proof of GPU occupancy or CPU work.
+    pub fn explanation(self) -> &'static str {
+        match self {
+            Self::RsxBound => "The owner waited in FIFO wraps for at least a quarter of the frame and the RSX reached-marker span covered at least half of it.",
+            Self::Pacing => "Flip-wait scopes covered at least a quarter of the frame, with no FIFO wait and an RSX reached-marker span below half the frame.",
+            Self::PpuBound => "A PPU-bound candidate needs positive PPU-busy evidence, which this capture family does not provide, so this class is not emitted.",
+            Self::Mixed => "The frame had some FIFO waiting and a long RSX reached-marker span, but the waiting was below the RSX-bound threshold.",
+            Self::Unknown => "The recorded evidence cannot distinguish a verdict; the frame reason identifies the missing, invalid or inconclusive evidence.",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Verdict::PpuBound => "PPU-bound candidate",

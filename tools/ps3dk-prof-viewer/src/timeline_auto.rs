@@ -96,26 +96,36 @@ pub fn layout(v: &AutoView, tl: &Timeline, view: &View, width: f64) -> Layout {
     out
 }
 
+/// Exact aggregate values for hovers and diagnostics.
 pub fn presentation_text(f: &FrameView) -> String {
+    presentation_with(f, |t| format!("{t} ticks"))
+}
+
+/// Visible aggregate values use the capture clock; absent clocks remain raw.
+pub fn presentation_short(f: &FrameView, tb: crate::model::TimeBase) -> String {
+    presentation_with(f, |t| tb.short_ticks(t.into()))
+}
+
+fn presentation_with(f: &FrameView, time: impl Fn(u64) -> String) -> String {
     let Some(p) = &f.presentation else {
         return "No presentation observations".into();
     };
     let mut parts = Vec::new();
     if let Some((ticks, scopes)) = p.flip_wait {
         parts.push(format!(
-            "flip-wait: {ticks} ticks / {scopes} scope(s); {} timeout(s), {} spanning",
-            p.flip_wait_timeouts, p.flip_wait_spanning
+            "flip-wait: {} / {scopes} scope(s); {} timeout(s), {} spanning",
+            time(ticks), p.flip_wait_timeouts, p.flip_wait_spanning
         ));
     }
     if let Some(c) = p.cadence {
         parts.push(format!(
-            "polling cadence: {} ticks / {} run(s); {} broken, {} spanning",
-            c.ticks, c.runs, c.broken, c.spanning
+            "polling cadence: {} / {} run(s); {} broken, {} spanning",
+            time(c.ticks), c.runs, c.broken, c.spanning
         ));
     }
     if let Some((count, ticks)) = p.legacy_polls {
         parts.push(format!(
-            "poll intervals: {ticks} ticks / {count} interval(s)"
+            "poll intervals: {} / {count} interval(s)", time(ticks)
         ));
     }
     parts.join(" | ")

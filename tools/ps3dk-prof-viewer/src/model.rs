@@ -224,13 +224,21 @@ impl TimeBase {
     }
 
     pub fn ms(&self, ticks: f64) -> Option<f64> {
-        self.freq_hz.map(|f| ticks * 1000.0 / f as f64)
+        self.freq_hz.filter(|&f| f > 0).map(|f| ticks * 1000.0 / f as f64)
     }
 
     /// "13.305 ms (1061712 ticks)", or "1061712 ticks" without a clock.
     pub fn ticks(&self, ticks: u128) -> String {
         match self.ms(ticks as f64) {
             Some(ms) => format!("{} ({ticks} ticks)", format_ms(ms)),
+            None => format!("{ticks} ticks"),
+        }
+    }
+
+    /// A visible duration; retain the integer verbatim if conversion is unavailable.
+    pub fn short_ticks(&self, ticks: u128) -> String {
+        match self.ms(ticks as f64) {
+            Some(ms) => format_ms(ms),
             None => format!("{ticks} ticks"),
         }
     }
@@ -253,13 +261,7 @@ impl TimeBase {
 }
 
 pub fn format_ms(ms: f64) -> String {
-    if ms >= 1000.0 {
-        format!("{:.3} s", ms / 1000.0)
-    } else if ms >= 1.0 {
-        format!("{ms:.3} ms")
-    } else {
-        format!("{:.3} us", ms * 1000.0)
-    }
+    format!("{ms:.3} ms")
 }
 
 /// Display a metric: a value through `show`, otherwise the reader's reason.
@@ -529,12 +531,12 @@ pub fn zone_cell(z: &ZoneStats, col: ZoneColumn, tb: TimeBase) -> String {
         ZoneColumn::Instances => z.instances.to_string(),
         ZoneColumn::Completed => z.completed.to_string(),
         ZoneColumn::Censored => z.censored.to_string(),
-        ZoneColumn::Total => metric_text(&z.total, |v| tb.short(*v as f64)),
+        ZoneColumn::Total => metric_text(&z.total, |v| tb.short_ticks((*v).into())),
         ZoneColumn::Mean => metric_text(&z.mean, |v| tb.short(*v)),
-        ZoneColumn::P50 => metric_text(&z.p50, |v| tb.short(*v as f64)),
-        ZoneColumn::P90 => metric_text(&z.p90, |v| tb.short(*v as f64)),
-        ZoneColumn::P99 => metric_text(&z.p99, |v| tb.short(*v as f64)),
-        ZoneColumn::Max => metric_text(&z.max, |v| tb.short(*v as f64)),
+        ZoneColumn::P50 => metric_text(&z.p50, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::P90 => metric_text(&z.p90, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::P99 => metric_text(&z.p99, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::Max => metric_text(&z.max, |v| tb.short_ticks((*v).into())),
     }
 }
 

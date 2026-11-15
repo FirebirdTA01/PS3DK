@@ -188,11 +188,21 @@ fn auto_badge_with_sense(ui: &mut egui::Ui, text: &str, tone: ui::Tone, sense: S
 }
 
 fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
-    auto_badge_with_sense(ui, text, tone, Sense::hover())
+    verdict_hover(auto_badge_with_sense(ui, text, tone, Sense::hover()), text)
 }
 
 fn auto_badge_clickable(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
-    auto_badge_with_sense(ui, text, tone, Sense::click())
+    verdict_hover(auto_badge_with_sense(ui, text, tone, Sense::click()), text)
+}
+
+fn verdict_hover(response: egui::Response, text: &str) -> egui::Response {
+    let key = text.split_once(':').map_or(text, |(key, _)| key);
+    let verdict = [Verdict::RsxBound, Verdict::Pacing, Verdict::PpuBound, Verdict::Mixed, Verdict::Unknown]
+        .into_iter().find(|v| key == v.key());
+    match verdict {
+        Some(v) => response.on_hover_text(v.explanation()),
+        None => response,
+    }
 }
 
 // Automatic-specific wrapping. Existing shared widgets retain their contract.
@@ -248,6 +258,9 @@ pub fn page(
     }
 
     st.refresh(Some(v));
+    if v.report.frames.is_empty() {
+        ui::field_message(p, ui::Tone::Neutral, "No AUTO frame rows retained: no coverage rows were recorded or the reader refused them; see the capture facts below.");
+    }
     drawn.selected_frame = st.selected_frame;
 
     // ── 1. CAPTURE FACTS ───────────────────────────────────────────────
@@ -503,6 +516,7 @@ fn draw_verdict_strip(
             resp.clone().on_hover_ui(|tip| {
                 tip.label(RichText::new(format!("Frame #{} (owner {})", f.frame, f.owner)).strong());
                 auto_badge(tip, f.verdict.key(), verdict_tone(f.verdict));
+                tip.label(f.verdict.explanation());
                 tip.label(RichText::new(&f.reason).italics());
                 tip.add_space(ui::SPACE_XS);
                 tip.label(format!("Interval: {:.3} ms ({} PPU ticks)", interval_ms, interval_ticks));
@@ -700,6 +714,9 @@ fn draw_frames_table(
             .collect();
         sort_frames(&mut visible_frames, st.sort_col, st.sort_asc);
         drawn.table_rows = visible_frames.len();
+        if visible_frames.is_empty() && !v.report.frames.is_empty() {
+            ui::field_message(c, ui::Tone::Neutral, "No frames match this verdict filter; choose All to see the recorded frames.");
+        }
 
         let show_call_covered = v.report.call_bracket || visible_frames.iter().any(|f| f.call_covered > 0);
 
@@ -902,7 +919,7 @@ fn draw_frame_detail(
                 );
                 g.horizontal_wrapped(|h| {
                     h.set_max_width(col2_max_w);
-                    h.add(egui::Label::new(&tb_text).wrap()).on_hover_text(&tb_text);
+                    h.add(egui::Label::new(v.format_ms(AutoView::frame_interval_ticks(f))).wrap()).on_hover_text(&tb_text);
                 });
                 g.end_row();
 
@@ -915,16 +932,20 @@ fn draw_frame_detail(
                 let mapped_marks = f.rsx_frame_ppu.map_or(String::new(), |(a, b)| {
                     format!(" · PPU: {a}..{b} ticks ({:.3}..{:.3} ms)", v.ticks_to_ms(a), v.ticks_to_ms(b))
                 });
-                let marks_text = format!("{raw_marks}{mapped_marks}");
+                let marks_text = f.rsx_frame_ppu.map_or_else(|| format!("{raw_marks} (raw RSX ticks; unmapped)"),
+                    |(a, b)| bounds_ms((v.ticks_to_ms(a), v.ticks_to_ms(b))));
+                let marks_tip = format!("{raw_marks} raw RSX ticks{mapped_marks}");
                 g.horizontal_wrapped(|h| {
                     h.set_max_width(col2_max_w);
-                    h.add(egui::Label::new(&marks_text).wrap()).on_hover_text(&marks_text);
+                    h.add(egui::Label::new(&marks_text).wrap()).on_hover_text(&marks_tip);
                 });
                 g.end_row();
 
                 if let Some(fw) = f.fifo_wait {
                     g.label("FIFO Wait Evidence:");
-                    g.label(format!(">= {fw} PPU ticks ({:.3} ms)", v.ticks_to_ms(fw)));
+                    // Round a lower bound down before displaying it at millisecond precision.
+                    let us = u128::from(fw) * 1_000_000 / u128::from(v.tb_freq);
+                    g.label(format!(">= {}.{:03} ms", us / 1000, us % 1000)).on_hover_text(format!(">= {fw} PPU ticks"));
                     g.end_row();
                 }
 
@@ -973,4 +994,49 @@ fn draw_frame_detail(
         }
     });
     next_page
+}
+
+#[cfg(test)]
+mod polish_tests {
+    use super::*;
+
+    fn text(out: &egui::FullOutput) -> String {
+        fn walk(s: &egui::Shape, v: &mut String) {
+            match s {
+                egui::Shape::Text(t) => { v.push_str(&t.galley.job.text); v.push('\n'); },
+                egui::Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, v)),
+                _ => {}
+            }
+        }
+        let mut v = String::new();
+        for s in &out.shapes { walk(&s.shape, &mut v); }
+        v
+    }
+
+    #[test]
+    fn verdict_hovers_use_reader_definitions() {
+        for verdict in [Verdict::RsxBound, Verdict::PpuBound, Verdict::Pacing, Verdict::Mixed, Verdict::Unknown] {
+            for counted in [false, true] {
+                let ctx = egui::Context::default();
+                ctx.style_mut(|s| { s.interaction.tooltip_delay = 0.0; s.interaction.tooltip_grace_time = 0.0; });
+                let mut at = Pos2::new(20.0, 20.0);
+                let mut painted = String::new();
+                for i in 0..4 {
+                    let out = ctx.run(egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0))),
+                        time: Some(i as f64),
+                        events: vec![egui::Event::PointerMoved(at)],
+                        ..Default::default()
+                    }, |ctx| { egui::CentralPanel::default().show(ctx, |p| {
+                        let label = if counted { format!("{}: 12", verdict.key()) } else { verdict.key().into() };
+                        let response = if counted { auto_badge_clickable(p, &label, verdict_tone(verdict)) }
+                            else { auto_badge(p, &label, verdict_tone(verdict)) };
+                        at = response.rect.center();
+                    }); });
+                    painted = text(&out);
+                }
+                assert!(painted.contains(verdict.explanation()), "{} counted={counted}: {painted}", verdict.key());
+            }
+        }
+    }
 }

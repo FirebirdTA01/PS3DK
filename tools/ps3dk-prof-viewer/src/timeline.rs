@@ -384,13 +384,13 @@ pub fn frame_marks(tl: &Timeline, track: &Track, view: &View, width: f64, min_px
 /// 1-2-5 step, in time when the capture has a clock, else in ticks. Labels
 /// are offsets from the start of the capture.
 pub fn ruler(view: &View, tb: TimeBase, width: f64, min_px: f64) -> Vec<(f64, String)> {
+    let tb = TimeBase { freq_hz: tb.freq_hz.filter(|&f| f > 0) };
     let per_px = view.dt / width;
     let unit = tb.freq_hz.map_or(1.0, |f| f as f64 / 1e9); // ticks per ns
     let raw = per_px * min_px / unit; // ns (or ticks) per label at minimum
-    let step = nice_step(raw);
+    let step = if tb.freq_hz.is_some() { nice_step(raw).max(1000.0) } else { nice_step(raw) };
     let step_ticks = step * unit;
     let first = (view.t0 / step_ticks).ceil() as i64;
-    let scale = (view.t0.abs().max((view.t0 + view.dt).abs()) / unit).max(step);
     let mut out = Vec::new();
     let mut k = first;
     loop {
@@ -400,7 +400,7 @@ pub fn ruler(view: &View, tb: TimeBase, width: f64, min_px: f64) -> Vec<(f64, St
         }
         let x = (t - view.t0) / per_px;
         let label = match tb.freq_hz {
-            Some(_) => format_ns(k as f64 * step, step, scale),
+            Some(_) => format_ns(k as f64 * step),
             None => format!("{} ticks", (k as f64 * step).round() as i64),
         };
         out.push((x, label));
@@ -426,29 +426,10 @@ pub fn nice_step(x: f64) -> f64 {
     10.0 * p
 }
 
-/// "+12.5 ms" style labels: the unit suits `scale_ns` (the largest offset
-/// on the ruler, so one ruler uses one unit), with enough decimals for the
-/// step.
-fn format_ns(ns: f64, step_ns: f64, scale_ns: f64) -> String {
-    let (div, unit) = if scale_ns >= 1e9 {
-        (1e9, "s")
-    } else if scale_ns >= 1e6 {
-        (1e6, "ms")
-    } else if scale_ns >= 1e3 {
-        (1e3, "us")
-    } else {
-        (1.0, "ns")
-    };
-    let step = step_ns / div;
-    let decimals = if step >= 1.0 {
-        0
-    } else {
-        (-step.log10()).ceil() as usize
-    };
-    // Offsets before the capture's start (a widened axis) are negative: one sign, never "+-".
-    let v = ns / div;
-    let sign = if v < 0.0 { "-" } else { "+" };
-    format!("{sign}{:.*} {unit}", decimals, v.abs())
+/// Millisecond ruler labels use the same precision at every zoom level.
+fn format_ns(ns: f64) -> String {
+    let sign = if ns < 0.0 { "-" } else { "+" };
+    format!("{sign}{:.3} ms", ns.abs() / 1e6)
 }
 
 /// The tooltip lines for one bar: zone, site, durations as the reader gives

@@ -258,6 +258,15 @@ Exit status: `0` COMPLETE, `1` INCOMPLETE, `2` MALFORMED, `3` usage or I/O error
 
 ### 3.2 The viewer
 
+Time displays use milliseconds with three decimal places; hover time cells and
+bars for the underlying tick values. Without a usable clock or a qualified
+mapping, the viewer labels raw ticks instead of inventing a time conversion.
+Exact bound diagnostics retain their rational values. Automatic verdict badges
+and strip cells explain the reader's classification on hover; the per-frame
+reason still describes the evidence for that particular frame. Empty pages name
+the missing records or capability, rather than treating missing data as zero work.
+
+
 The GUI viewer is started with an optional capture and flags (from the viewer's `main.rs`):
 
 ```
