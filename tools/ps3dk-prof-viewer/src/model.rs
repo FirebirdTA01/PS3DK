@@ -36,6 +36,8 @@ pub struct Document {
     pub func_paths: crate::funcpaths::FuncSlot,
     /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
     pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
+    /// Automatic RSX observation page view, computed ONCE here.
+    pub auto: Option<crate::auto::AutoView>,
     /// The RSX frames page (captures found in the data): built once, on first need.
     pub rsx: crate::rsx::RsxSlot,
 }
@@ -110,12 +112,13 @@ impl Document {
     // One construction path for file/live results and policy-controlled parser
     // results. It never accepts an index from another capture.
     pub(crate) fn from_outcome(path: PathBuf, size: usize, prefix_ok: bool, loaded: Outcome) -> Document {
-        let (state, ext, frames, hot, waits, fifo) = match loaded {
+        let (state, ext, frames, hot, waits, fifo, auto) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
                 },
                 ExtView::None,
+                None,
                 None,
                 None,
                 None,
@@ -128,7 +131,8 @@ impl Document {
                 let hot = crate::hotpaths::build(&a, &pm);
                 let waits = crate::waits::WaitsView::build(&a.capture, crate::waits::Budget::default());
                 let fifo = crate::fifo::FifoView::build(&a.capture);
-                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo))
+                let auto = Some(crate::auto::AutoView::build(&a.capture));
+                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo), auto)
             }
         };
         Document {
@@ -142,6 +146,7 @@ impl Document {
             hot,
             waits,
             fifo,
+            auto,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),

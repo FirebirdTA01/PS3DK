@@ -34,6 +34,8 @@ pub enum Page {
     Waits,
     /// FIFO wrap waits on the PPU clock (file_flags bit 6 captures).
     Fifo,
+    /// Automatic RSX observation (AUTO verdicts, busy/span, exclusions).
+    Automatic,
     /// RSX frame captures found in the data.
     RsxFrames,
     /// One frame snapshot (`App::shown`).
@@ -73,6 +75,7 @@ pub struct App {
     /// The RSX frames page selection.
     pub rsx: crate::rsx_ui::RsxState,
     pub waits: crate::waits_ui::WaitState,
+    pub auto: crate::auto_ui::AutoState,
     pub live: Option<Live>,
     connect: Option<ConnectForm>,
     last_host: String,
@@ -86,6 +89,8 @@ pub struct App {
     pub retiring: Vec<(Live, Captures)>,
     /// The one accounted retention budget every session (current and retiring) draws on.
     pub pool: Arc<crate::capture::Pool>,
+    pub screenshot: Option<PathBuf>,
+    pub screenshot_frames: usize,
 }
 
 /// Turns the dialog's fields into a checked client config, changing
@@ -163,6 +168,7 @@ impl App {
             hot: crate::hotpaths_ui::HotState::default(),
             rsx: crate::rsx_ui::RsxState::default(),
             waits: crate::waits_ui::WaitState::default(),
+            auto: crate::auto_ui::AutoState::default(),
             live: None,
             connect: None,
             last_host: String::new(),
@@ -171,6 +177,8 @@ impl App {
             shown: None,
             sessions: 0,
             retiring: Vec::new(),
+            screenshot: None,
+            screenshot_frames: 0,
         };
         if let Some(p) = open {
             app.open(p);
@@ -204,7 +212,7 @@ impl App {
     /// Shows a document. `fresh` is a different capture (reset the views);
     /// otherwise it is a newer snapshot of the same live capture (keep the
     /// selection and the timeline window).
-    fn install(&mut self, doc: Arc<Document>, fresh: bool) {
+    pub fn install(&mut self, doc: Arc<Document>, fresh: bool) {
         self.zone_rows = doc.analysis().map(zones).unwrap_or_default();
         sort_zones(&mut self.zone_rows, self.sort.0, self.sort.1);
         match (fresh, self.timeline.as_mut(), doc.analysis()) {
@@ -225,7 +233,9 @@ impl App {
             // RSX frames: a newer snapshot keeps the selected cap (the page shows nothing if it is gone).
             self.rsx = crate::rsx_ui::RsxState::default();
             self.waits = crate::waits_ui::WaitState::default();
+            self.auto = crate::auto_ui::AutoState::default();
         }
+        self.auto.reset(doc.auto.as_ref());
         self.doc = Some(doc);
     }
 
@@ -255,6 +265,7 @@ impl App {
         self.hot = crate::hotpaths_ui::HotState::default();
         self.rsx = crate::rsx_ui::RsxState::default();
         self.waits = crate::waits_ui::WaitState::default();
+        self.auto = crate::auto_ui::AutoState::default();
         self.zone_rows.clear();
         self.selected_zone = None;
         self.error = None;
@@ -467,6 +478,34 @@ fn verdict_word(t: VerdictTone) -> &'static str {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(path) = self.screenshot.clone() {
+            self.screenshot_frames += 1;
+            if self.screenshot_frames == 5 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            }
+            ctx.input(|i| {
+                for event in &i.events {
+                    if let egui::Event::Screenshot { image, .. } = event {
+                        let w = image.size[0] as u32;
+                        let h = image.size[1] as u32;
+                        let raw = image.as_raw();
+                        if let Err(e) = image::save_buffer(
+                            &path,
+                            raw,
+                            w,
+                            h,
+                            image::ColorType::Rgba8,
+                        ) {
+                            eprintln!("Failed to save screenshot to {}: {e}", path.display());
+                            std::process::exit(1);
+                        }
+                        println!("Screenshot saved to {}", path.display());
+                        std::process::exit(0);
+                    }
+                }
+            });
+            ctx.request_repaint();
+        }
         self.poll_live(ctx);
         let live_view = self.live.as_ref().map(|l| l.client.view());
         let doc_line = match &live_view {
@@ -603,6 +642,12 @@ impl eframe::App for App {
                     {
                         self.page = Page::Fifo;
                     }
+                    if self.doc.as_ref().and_then(|d| d.auto.as_ref()).is_some_and(|a| a.has_auto()) {
+                        let n = self.doc.as_ref().and_then(|d| d.auto.as_ref()).map(|a| a.report.frames.len());
+                        if ui::nav_item(side, self.page == Page::Automatic, "🤖", "Automatic", n).clicked() {
+                            self.page = Page::Automatic;
+                        }
+                    }
                     if let Some(n) = rsx_count {
                         if ui::nav_item(side, self.page == Page::RsxFrames, "🖼", crate::rsx_ui::TITLE, Some(n)).clicked() {
                             self.page = Page::RsxFrames;
@@ -677,7 +722,9 @@ impl eframe::App for App {
         let hot = &mut self.hot;
         let rsx = &mut self.rsx;
         let waits = &mut self.waits;
+        let auto = &mut self.auto;
         let mut nav: Option<(u32, u64)> = None;
+        let mut auto_nav: Option<Page> = None;
         ui::page(ctx, |p| {
             match &self.doc {
             None => ui::empty_state(
@@ -720,10 +767,29 @@ impl eframe::App for App {
                         Some(v) => crate::fifo_ui::page(p, v, &mut crate::fifo_ui::Drawn::default()),
                         None => ui::field_message(p, ui::Tone::Neutral, "No FIFO wrap analysis for this document."),
                     },
+                    Page::Automatic => match &d.auto {
+                        Some(v) => {
+                            auto_nav = crate::auto_ui::page(
+                                p,
+                                v,
+                                auto,
+                                timeline.as_mut(),
+                                &mut crate::auto_ui::Drawn::default(),
+                            );
+                        }
+                        None => ui::empty_state(
+                            p,
+                            crate::auto_ui::EMPTY_NOTICE,
+                            "This capture does not contain automatic profiler data.",
+                        ),
+                    },
                 },
             },
         }
         });
+        if let Some(np) = auto_nav {
+            self.page = np;
+        }
         // A frame link on the Hot paths page opens that (owner, frame) on the Frames page.
         if let (Some((owner, frame)), Some(d)) = (nav, self.doc.clone()) {
             if let (Some(a), Some(ix)) = (d.analysis(), d.frames.as_ref()) {

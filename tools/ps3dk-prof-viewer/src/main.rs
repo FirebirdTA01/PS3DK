@@ -41,9 +41,17 @@ fn main() -> eframe::Result<()> {
         Page::Waits
     } else if args.iter().any(|a| a == "--page=fifo") {
         Page::Fifo
+    } else if args.iter().any(|a| a == "--page=auto" || a == "--page=automatic") {
+        Page::Automatic
     } else {
         Page::Overview
     };
+    let theme_light = args.iter().any(|a| a == "--light" || a == "--theme=light");
+    let theme_dark = args.iter().any(|a| a == "--dark" || a == "--theme=dark");
+    let screenshot = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--screenshot=").map(PathBuf::from))
+        .or_else(|| std::env::var_os("VIEWER_SCREENSHOT_TO").map(PathBuf::from));
     // The Frames page graph mode (for screenshots and bug reports).
     let graph = args.iter().find_map(|a| match a.strip_prefix("--graph=")? {
         "bars" => Some(ps3dk_prof_viewer::graphs::GraphMode::Bars),
@@ -74,8 +82,14 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             ui::install(&cc.egui_ctx);
+            if theme_light {
+                cc.egui_ctx.set_theme(egui::ThemePreference::Light);
+            } else if theme_dark {
+                cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+            }
             let mut app = App::new(open);
             app.page = page;
+            app.screenshot = screenshot;
             if let Some(g) = graph {
                 app.frames.mode = g;
             }
