@@ -375,10 +375,21 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
     }
     if group_header(p, st, 5, "AUTO presentation (frame aggregates)", pal) {
         p.add(egui::Label::new(egui::RichText::new(ta::PRESENTATION_NOTICE).small().color(pal.text_muted)).wrap());
+        let observed = v.report.frames.iter().filter(|f| f.presentation.is_some()).count();
+        if observed == 0 {
+            p.label("No presentation observations in any frame");
+        } else {
+            p.label(format!("observations in {observed} of {} frames", v.report.frames.len()));
+        }
         // Aggregate rows follow the same visible frames; there are no fabricated
-        // time positions or widths for these observations.
+        // time positions or widths. The summary counts the whole capture, and
+        // an explicit zero-valued observation is retained alongside nonzero data.
         let visible: Vec<_> = v.report.frames.iter().filter(|f|
-            st.tl.rel(f.tb_end) >= st.view.t0 && st.tl.rel(f.tb_begin) <= st.view.t0 + st.view.dt).collect();
+            f.presentation.is_some() && st.tl.rel(f.tb_end) >= st.view.t0
+                && st.tl.rel(f.tb_begin) <= st.view.t0 + st.view.dt).collect();
+        if observed != 0 && visible.is_empty() {
+            p.label("No presentation observations in the visible window");
+        }
         for f in visible.iter().take(128) {
             p.horizontal_top(|p| {
                 p.add_sized([LABEL_W - ui::SPACE_SM, 20.0], egui::Label::new(format!("Frame {} / owner {}", f.frame, f.owner)));

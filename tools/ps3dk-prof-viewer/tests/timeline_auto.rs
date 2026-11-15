@@ -207,3 +207,89 @@ fn auto_lanes_keep_navigation_and_collapse_state() {
     assert!(!st.auto_drawn.verdict.is_empty());
     assert_eq!(st.view, zoom);
 }
+
+fn presentation_section_text(v: &ps3dk_prof_viewer::auto::AutoView) -> Vec<String> {
+    use eframe::egui::{self, Pos2, RawInput, Rect, Shape, Vec2};
+    use ps3dk_prof_viewer::timeline_ui::{draw_with_auto, TimelineState};
+    fn texts(shape: &Shape, out: &mut Vec<String>) {
+        match shape {
+            Shape::Text(t) => out.push(t.galley.job.text.clone()),
+            Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, out)),
+            _ => {}
+        }
+    }
+    let doc = fixture("console-r2");
+    let a = doc.analysis().unwrap();
+    let mut st = TimelineState::new(a);
+    st.collapsed[..5].fill(true);
+    let ctx = egui::Context::default();
+    ps3dk_ui::install(&ctx);
+    let mut result = Vec::new();
+    for _ in 0..2 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1400.0, 1200.0))),
+            ..Default::default()
+        };
+        let output = ctx.run(input, |ctx| {
+            draw_with_auto(ctx, &doc.foreign_tl, a, Some(v), &mut st, &mut None)
+        });
+        result.clear();
+        for shape in output.shapes {
+            texts(&shape.shape, &mut result);
+        }
+    }
+    result
+}
+
+#[test]
+fn presentation_section_none_is_one_line_without_frame_rows() {
+    let doc = fixture("console-r2");
+    let shown = presentation_section_text(doc.auto.as_ref().unwrap());
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|s| *s == "No presentation observations in any frame")
+            .count(),
+        1
+    );
+    assert!(!shown.iter().any(|s| s.starts_with("Frame ")));
+    assert!(shown
+        .iter()
+        .any(|s| s == timeline_auto::PRESENTATION_NOTICE));
+}
+
+#[test]
+fn presentation_section_some_counts_all_frames_and_shows_only_observed_rows() {
+    use ps3dk_prof::auto_rsx::{Cadence, Presentation};
+    let doc = fixture("console-r2");
+    let mut v = doc.auto.as_ref().unwrap().clone();
+    v.report.frames[1].presentation = Some(Presentation {
+        flip_wait: Some((123, 7)),
+        flip_wait_timeouts: 2,
+        flip_wait_spanning: 3,
+        cadence: None,
+        legacy_polls: None,
+    });
+    // An explicitly recorded zero is data, not a missing observation.
+    v.report.frames[3].presentation = Some(Presentation {
+        flip_wait: Some((0, 0)),
+        flip_wait_timeouts: 0,
+        flip_wait_spanning: 0,
+        cadence: Some(Cadence::default()),
+        legacy_polls: None,
+    });
+    let shown = presentation_section_text(&v);
+    assert!(shown.iter().any(|s| s == "observations in 2 of 120 frames"));
+    let rows: Vec<_> = shown
+        .iter()
+        .filter(|s| s.starts_with("Frame "))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(rows, ["Frame 1 / owner 1", "Frame 3 / owner 1"]);
+    assert!(!shown
+        .iter()
+        .any(|s| s.starts_with("No presentation observations")));
+    assert!(shown
+        .iter()
+        .any(|s| s == timeline_auto::PRESENTATION_NOTICE));
+}
