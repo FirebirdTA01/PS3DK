@@ -109,14 +109,21 @@ def main():
     src = (INC_DIR / "main.c").read_text(encoding="utf-8")
     calls = re.findall(r"a2p_deadline_expired\(elapsed\)", src)
     if len(calls) != 5:
-        sys.exit(f"FAIL: expected 5 deadline checkpoints in main.c, found {len(calls)}")
+        sys.exit(f"FAIL: expected 5 direct deadline checkpoints in main.c, found {len(calls)}")
+    waits = re.findall(r"a2p_wait_decision\(passed, elapsed\)", src)
+    if len(waits) != 2:
+        sys.exit(f"FAIL: expected both label waits to use a2p_wait_decision, found {len(waits)}")
+    for name in ("done-label-wait", "readback-wait"):
+        at = src.find("at=" + name)
+        if at < 0 or "a2p_wait_decision(passed, elapsed)" not in src[max(0, at - 400):at]:
+            sys.exit(f"FAIL: the {name} abort is not decided by a2p_wait_decision (deadline before label)")
     if re.search(r"[<>]=?\s*A2P_SESSION_LIMIT_US", src):
         sys.exit("FAIL: main.c compares against A2P_SESSION_LIMIT_US outside the helper")
     names = sorted(re.findall(r"A2P_ABORT deadline elapsed_us=%llu at=([a-z-]+)", src))
-    want = sorted(["done-label-wait", "pre-readback", "pre-trial", "readback-wait", "warmup"])
+    want = sorted(["done-label-wait", "final", "pre-poison", "pre-readback", "pre-trial", "readback-wait", "warmup"])
     if names != want:
         sys.exit(f"FAIL: deadline checkpoint names {names} != {want}")
-    print("PASS: main.c has exactly the five deadline checkpoints, all through a2p_deadline_expired")
+    print("PASS: main.c deadline checkpoints: 5 direct (warmup, pre-trial, pre-poison, pre-readback, final) and 2 label waits through a2p_wait_decision")
     print("a2p-probe-test: PASS")
     return 0
 

@@ -171,14 +171,19 @@ static void crumb(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static int wait_readback(uint32_t serial)
 {
     for (uint32_t i = 0; i < POLLS; ++i) {
-        if (cellGcmIsLabelPassed(READBACK_LABEL, serial))
-            return 0;
 #ifdef LABEL_REUSE_HEAVY
+        int passed = cellGcmIsLabelPassed(READBACK_LABEL, serial);
         uint64_t elapsed = a2p_elapsed_us();
-        if (a2p_deadline_expired(elapsed)) {
+        int decision = a2p_wait_decision(passed, elapsed);
+        if (decision == A2P_WAIT_EXPIRED) {
             crumb("A2P_ABORT deadline elapsed_us=%llu at=readback-wait", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }
+        if (decision == A2P_WAIT_DONE)
+            return 0;
+#else
+        if (cellGcmIsLabelPassed(READBACK_LABEL, serial))
+            return 0;
 #endif
         usleep(5);
     }
@@ -436,12 +441,16 @@ static int run_probe_trial(CellGcmContextData *ctx,
 
     /* Poll completion label */
     uint32_t polls = 0;
-    while (!cellGcmIsLabelPassed(DONE_LABEL, serial)) {
+    for (;;) {
+        int passed = cellGcmIsLabelPassed(DONE_LABEL, serial);
         elapsed = a2p_elapsed_us();
-        if (a2p_deadline_expired(elapsed)) {
+        int decision = a2p_wait_decision(passed, elapsed);
+        if (decision == A2P_WAIT_EXPIRED) {
             crumb("A2P_ABORT deadline elapsed_us=%llu at=done-label-wait", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }
+        if (decision == A2P_WAIT_DONE)
+            break;
         if (++polls > SPIN_POLLS + POLLS) {
             crumb("A2P_FAIL done-label wait mode=%s poison=%s trial=%u label=0x%08x serial=%u",
                   get_mode_str(mode), get_poison_str(poison_kind), trial,
@@ -452,6 +461,13 @@ static int run_probe_trial(CellGcmContextData *ctx,
             usleep(5);
     }
     uint32_t seen_val = *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL);
+
+    /* Check deadline before the poison transition */
+    elapsed = a2p_elapsed_us();
+    if (a2p_deadline_expired(elapsed)) {
+        crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-poison", (unsigned long long)elapsed);
+        return A2P_RC_DEADLINE;
+    }
 
     /* Poison write: publication order is label seen -> poison written -> fence */
     if (mode != MODE_REFERENCE && poison_kind != POISON_NONE) {
@@ -612,6 +628,8 @@ int main(void)
 
 #ifdef LABEL_REUSE_HEAVY
     g_session_start_us = (uint64_t)sys_time_get_system_time();
+    crumb("A2P_SESSION session=%llu (crumb file is append-only; this run's lines follow)",
+          (unsigned long long)g_session_start_us);
     crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u "
           "deadline_limit_us=%llu deadline_mode=cooperative elapsed_us=%llu",
           VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES,
@@ -731,6 +749,14 @@ int main(void)
                          &res_back_t, "backend", t_verdict, sizeof t_verdict);
 
     /* Overall verdict evaluation */
+    /* Final checkpoint: a session that ran past its budget never reports DONE */
+    {
+        uint64_t elapsed = a2p_elapsed_us();
+        if (a2p_deadline_expired(elapsed)) {
+            crumb("A2P_ABORT deadline elapsed_us=%llu at=final", (unsigned long long)elapsed);
+            return A2P_RC_DEADLINE;
+        }
+    }
     char overall[1024];
     if (strcmp(v_verdict, "invalid") == 0 || strcmp(i_verdict, "invalid") == 0 || strcmp(t_verdict, "invalid") == 0) {
         snprintf(overall, sizeof overall, "invalid (subtest failed preconditions: vertex=%s index=%s texture=%s)",
@@ -748,8 +774,10 @@ int main(void)
         snprintf(overall, sizeof overall, "inconclusive (command control not caught in >= 8/32; note: 0/32 is not a zero-risk bound)");
     }
     crumb("A2P VERDICT overall %s", overall);
-    crumb("A2P_END elapsed_us=%llu", (unsigned long long)a2p_elapsed_us());
-    crumb("A2P DONE elapsed_us=%llu", (unsigned long long)a2p_elapsed_us());
+    crumb("A2P_END session=%llu elapsed_us=%llu", (unsigned long long)g_session_start_us,
+          (unsigned long long)a2p_elapsed_us());
+    crumb("A2P DONE session=%llu elapsed_us=%llu", (unsigned long long)g_session_start_us,
+          (unsigned long long)a2p_elapsed_us());
     return 0;
 
 #else /* Light variant (LABEL_REUSE_HEAVY not defined) — exact origin/main implementation */

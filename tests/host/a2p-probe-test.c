@@ -601,6 +601,29 @@ static void test_deadline_boundary(void)
     printf("PASS: deadline boundary: limit - 1 continues, limit and beyond expire\n");
 }
 
+static void test_wait_decision_deadline_first(void)
+{
+    /* Both waits (done-label and readback) decide through a2p_wait_decision. */
+    assert(a2p_wait_decision(0, 0) == A2P_WAIT_CONTINUE);
+    assert(a2p_wait_decision(1, 0) == A2P_WAIT_DONE);
+    assert(a2p_wait_decision(1, A2P_SESSION_LIMIT_US - 1u) == A2P_WAIT_DONE);
+    /* expired AND label already passed: the deadline wins, the completion is not accepted */
+    assert(a2p_wait_decision(1, A2P_SESSION_LIMIT_US) == A2P_WAIT_EXPIRED);
+    assert(a2p_wait_decision(0, A2P_SESSION_LIMIT_US) == A2P_WAIT_EXPIRED);
+    assert(a2p_wait_decision(1, UINT64_MAX) == A2P_WAIT_EXPIRED);
+    /* The last measured trial: a series loop whose final wait sees the label passed after expiry must stop
+     * with the deadline, never count the trial. Modelled with the decision the real wait makes. */
+    unsigned accepted = 0, aborted = 0;
+    for (unsigned trial = 0; trial < 32u; ++trial) {
+        uint64_t now = trial == 31u ? A2P_SESSION_LIMIT_US : (uint64_t)trial * 1000000u;
+        int d = a2p_wait_decision(1, now);
+        if (d == A2P_WAIT_EXPIRED) { aborted = 1; break; }
+        accepted++;
+    }
+    assert(accepted == 31u && aborted == 1u);
+    printf("PASS: wait decision tests the deadline first: expired with the label passed is EXPIRED, incl. last trial\n");
+}
+
 int main(void)
 {
     test_neg_poison_under_vertex();
@@ -615,6 +638,7 @@ int main(void)
     test_abort_wrong_behaviour_detected();
     test_abort_deadline_fake_clock();
     test_deadline_boundary();
+    test_wait_decision_deadline_first();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 

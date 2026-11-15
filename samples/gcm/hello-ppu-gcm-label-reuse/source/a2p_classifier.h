@@ -49,6 +49,16 @@ static inline int a2p_deadline_expired(uint64_t elapsed_us)
     return elapsed_us >= A2P_SESSION_LIMIT_US;
 }
 
+/* One poll of a bounded label wait.  The deadline is tested FIRST: an expired budget wins even when the label has
+ * already passed, so a completion observed after expiry is never accepted (no poison, no readback, no DONE). */
+enum { A2P_WAIT_CONTINUE = 0, A2P_WAIT_DONE = 1, A2P_WAIT_EXPIRED = 2 };
+static inline int a2p_wait_decision(int label_passed, uint64_t elapsed_us)
+{
+    if (a2p_deadline_expired(elapsed_us))
+        return A2P_WAIT_EXPIRED;
+    return label_passed ? A2P_WAIT_DONE : A2P_WAIT_CONTINUE;
+}
+
 enum {
     A2P_POISON_NONE = 0,
     A2P_POISON_VERTEX,
