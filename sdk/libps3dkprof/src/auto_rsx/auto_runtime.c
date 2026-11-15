@@ -916,6 +916,22 @@ static uint32_t foreign_begin(gpp_ctx *ctx,const ps3tc_auto_call *call,uint64_t 
     return 0;
 }
 
+/* Outside a capture window: a covered draw written into a tracked segment build is not timed, but the build keeps
+ * its accounting, as a visit refused for a reason other than room: a later CALL of the build inside a window then
+ * gets a whole-CALL bracket or counts these draws as unrepresented, never as a build with no draws.  Nothing else
+ * (no row count, no record, no report pair). */
+static void unobserved_build(gpp_ctx *ctx,const ps3tc_auto_call *call)
+{
+    auto_capture *a;
+    auto_segment *s;
+    if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active ||
+       a->segment_active) return;
+    s=segment_find(a,ctx);
+    if(!(s && s->open && !s->external)) s=external_writer(a,ctx);
+    if(!s) return;
+    history_add(&s->visits,1);history_add(&s->refused,1);history_add(&s->other_refused,1);
+}
+
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
@@ -923,6 +939,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     if(!p_window_gate(g_prof)) {
         /* no draw timing outside a capture window; a stopped owner still acknowledges the stop here */
         if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
+        else unobserved_build(ctx,call);
         return 0;
     }
     auto_capture *a=owner_capture(ctx,1);

@@ -62,8 +62,8 @@ typedef struct ps3dk_prof_capture_info {
     uint32_t id;           /* the current (or last) window's id; 0 before the first */
     uint32_t kind;         /* PS3DK_PROF_WINDOW_* */
     uint32_t windows;      /* windows opened so far */
-    uint32_t refused;      /* BEGINs refused (EBUSY) */
-    uint32_t reserved;
+    uint32_t refused;      /* BEGINs refused (EBUSY or EFULL) */
+    uint32_t queue_full;   /* of them EFULL: no room to record the window's BEGIN and END (the drainer is behind) */
     uint64_t first_frame;  /* the open window's first frame */
     uint64_t frames;       /* frames recorded in the open window so far */
     const char *name;      /* the window's name (the descriptor's string), NULL before the first */
@@ -203,12 +203,14 @@ int ps3dk_prof_drain(void);
 int ps3dk_prof_thread_begin(const char *name);
 void ps3dk_prof_thread_end(void);
 void ps3dk_prof_frame(void);
-/* Capture windows (see PS3DK_PROF_WINDOW_*), on the thread that marks frames: begin returns EBUSY (counted) while a
- * window is open or about to open, or for a SECTION in the frame the previous window ended in; EINVAL for a bad kind,
- * FRAMES(0) or a NULL name; ENOTINIT before init; ESTOPPED after shutdown began. end closes the window (MANUAL and
- * FRAMES after the current frame, SECTION and WHOLE now; one not yet open is cancelled); EINVAL without one, EPERM
- * from another thread. capture_state copies the slot. capture_seal is ps3dk_prof_shutdown with the open window
- * closed with reason SEAL instead of SHUTDOWN. */
+/* Capture windows (see PS3DK_PROF_WINDOW_*).  A window belongs to the thread that marks frames, whichever thread
+ * begins it; one begun before any frame mark is adopted by the first thread that marks one.  begin returns EBUSY
+ * (counted) while a window is open or about to open, or for a SECTION in the frame the previous window ended in;
+ * EFULL (counted, nothing opens) when the drainer is too far behind to record the window's BEGIN and END; EINVAL for
+ * a bad kind, FRAMES(0) or a NULL name; ENOTINIT before init; ESTOPPED after shutdown began. end closes the window
+ * (MANUAL and FRAMES after the current frame, SECTION and WHOLE now; one not yet open is cancelled), from the owning
+ * frame thread or the thread that began it; EINVAL without one, EPERM from any other thread. capture_state copies the
+ * slot. capture_seal is ps3dk_prof_shutdown with the open window closed with reason SEAL instead of SHUTDOWN. */
 int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t frames);
 int ps3dk_prof_capture_end(void);
 int ps3dk_prof_capture_state(ps3dk_prof_capture_info *out);

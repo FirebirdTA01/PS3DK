@@ -56,11 +56,17 @@ enum { C_WINDOW_BEGIN = 41, C_WINDOW_END = 42, P_WINQ = 16 };
 /* A queued window record: the owner side builds it, the drainer writes it once its name descriptor is declared. */
 typedef struct p_winrec { uint32_t type, desc; uint8_t b[32]; } p_winrec;
 /* The window slot (one window at a time), under window_lock. state: 0 idle, 1 opens at the next frame boundary,
- * 2 open, 3 closes at the next frame boundary. */
+ * 2 open, 3 closes at the next frame boundary.
+ * Owner: the thread that marks frames (owner_slot1 + owner_inc, its incarnation), never merely the opener. A window
+ * begun before any thread marked a frame (or after the frame thread retired) has owner 0 and is adopted by the first
+ * thread that marks one. frame_slot1 + frame_inc name the established frame thread (the last one that marked a frame,
+ * cleared when it retires). opener_inc is the opener's incarnation (0 unregistered): the opener may also end it.
+ * reserved: queue records still owed by the current window (its BEGIN and END), taken at admission, so a window
+ * that is admitted can always record both and one that cannot is refused (EFULL, queue_full). */
 typedef struct p_window {
-    uint32_t state, id, desc, kind, n, owner_slot1, seal;
-    uint64_t first, prev_last;
-    uint32_t have_prev, opened, refused, dropped;
+    uint32_t state, id, desc, kind, n, owner_slot1, owner_inc, opener_inc, frame_slot1, frame_inc, seal;
+    uint64_t first, prev_last, owner_last;   /* owner_last: the retired owner's frame in progress */
+    uint32_t have_prev, opened, refused, queue_full, dropped, reserved;
     const char *name;
 } p_window;
 
@@ -313,7 +319,8 @@ static inline int p_window_gate(const prof *p)
 #define p_window_frame ps3dk_prof__window_frame
 #define p_window_shutdown ps3dk_prof__window_shutdown
 #define p_window_drain ps3dk_prof__window_drain
-void p_window_frame(prof *p, uint32_t slot1, uint64_t fid); /* the owner's frame boundary, before AUTO sees it */
+void p_window_frame(prof *p, uint32_t slot1, uint32_t inc, uint64_t fid); /* a frame boundary, before AUTO sees it */
+void p_window_retire(prof *p, uint32_t inc); /* a retiring thread: no longer the frame thread or a window's owner */
 void p_window_shutdown(prof *p);                            /* at the shutdown claim: closes an open window */
 void p_window_drain(prof *p, uint32_t declared);            /* drainer: queued records whose descriptor is declared */
 

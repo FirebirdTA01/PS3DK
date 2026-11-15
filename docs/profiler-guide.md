@@ -340,9 +340,17 @@ in its `main`.
 
 One window is open at a time: a BEGIN while a window is open, or about to open at the next frame boundary, returns
 `PS3DK_PROF_EBUSY` and is counted. Windows never share a frame, so a `PS3DK_PROF_SECTION` or
-`PS3DK_PROF_CAPTURE_WHOLE_RUN()` in the frame the previous window ended in is refused the same way. Call the macros on
-the thread that marks frames (`ps3dk_prof_frame`, or the flips AUTO observes); `PS3DK_PROF_CAPTURE_WHOLE_RUN()` and a
-`PS3DK_PROF_SECTION` may also be called right after init, before that thread is registered. At shutdown an open window
+`PS3DK_PROF_CAPTURE_WHOLE_RUN()` in the frame the previous window ended in is refused the same way. A window belongs to
+the thread that marks frames (`ps3dk_prof_frame`, or the flips AUTO observes), whichever thread begins it: a window
+begun before any frame mark (for example `PS3DK_PROF_CAPTURE_WHOLE_RUN()` right after init, on the initialization
+thread) is adopted by the first thread that marks a frame, and its frames are that thread's. END is accepted from the
+owning frame thread or from the thread that began the window, `PS3DK_PROF_EPERM` from any other. If the frame thread
+exits with a window open, the window keeps that thread's last frame until another thread marks one. Window records
+wait in a small queue for the drainer; when the drainer is so far behind that a new window's begin and end records
+would not fit, BEGIN returns `PS3DK_PROF_EFULL`, nothing opens, and `ps3dk_prof_capture_state` counts it in
+`queue_full`. A CALL segment built while no window was open is never taken as a build without draws: its draws are
+counted as untimed, so a CALL of it inside a window is timed as a whole CALL or reported with unrepresented draws.
+At shutdown an open window
 is closed with reason SHUTDOWN, or SEAL when the capture ends through `PS3DK_PROF_AUTO_SEAL()` or
 `ps3dk_prof_capture_seal()`. The calls are inert when profiling is off; they are live in a `PS3DK_PROF` build and in a
 `PS3_PROF_AUTO` build.

@@ -690,6 +690,7 @@ void ps3dk_prof_thread_end(void)
     }
     s = &p->slots[t->slot1 - 1];
     cb = s->cb;
+    p_window_retire(p, t->incarnation);   /* a retiring frame thread hands an open window to the next one */
     HOOK(before_live_to_retiring);
     if (p_lock(p, &p->thread_mutex) == 0) {   /* allowed after the latch too (E1) */
         s->state = SLOT_RETIRING;
@@ -890,7 +891,7 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
-    p_window_frame(p, t->slot1, fid);   /* a window opens or closes here, before AUTO sees the frame */
+    p_window_frame(p, t->slot1, t->incarnation, fid);   /* a window opens or closes here, before AUTO sees it */
 #ifdef PS3DK_PROF_WITH_AUTO
     p_auto_frame(fid,tb);
 #endif
@@ -930,11 +931,15 @@ static void win_unlock(prof *p) { __atomic_store_n(&p->window_lock, 0u, __ATOMIC
 static void w_le16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); }
 static void w_le32(uint8_t *b, uint32_t v) { for (unsigned i = 0; i < 4; i++) b[i] = (uint8_t)(v >> (8 * i)); }
 static void w_le64(uint8_t *b, uint64_t v) { for (unsigned i = 0; i < 8; i++) b[i] = (uint8_t)(v >> (8 * i)); }
-/* Under window_lock: queue one record for the drainer (dropped and counted when the queue is full). */
+/* Under window_lock: queue one record for the drainer.  Admission reserved room for it (win.reserved), so the
+ * full-queue branch is unreachable; it only counts, and never leaves an END without its BEGIN (both are reserved
+ * together). */
 static void win_push(prof *p, uint32_t type, uint32_t desc, const uint8_t b[32])
 {
     uint32_t w = p->winq_w, r = LD_ACQ(&p->winq_r);
     p_winrec *e;
+    if (p->win.reserved)
+        p->win.reserved--;
     if (w - r >= P_WINQ) {
         p->win.dropped++;
         return;
@@ -983,19 +988,34 @@ static void win_open(prof *p, uint64_t first)
     win_begin_record(p);
     ST_REL(&p->window_open, 1u);
 }
-/* The frame in progress on the window owner's thread (0 before its first frame). */
-static uint64_t win_current(prof *p)
+/* The frame in progress on a thread (0 before its first frame). */
+static uint64_t slot_current(prof *p, uint32_t slot1)
 {
-    uint64_t cf = p->win.owner_slot1 ? LD_ACQ(&p->slots[p->win.owner_slot1 - 1].cb->current_frame) : 0;
+    uint64_t cf = slot1 ? LD_ACQ(&p->slots[slot1 - 1].cb->current_frame) : 0;
     return cf ? cf - 1 : 0;
 }
+/* the owner's frame in progress; after the owner retired (until a thread adopts the window), its last one */
+static uint64_t win_current(prof *p)
+{
+    return p->win.owner_slot1 ? slot_current(p, p->win.owner_slot1) : p->win.owner_last;
+}
+/* Under window_lock: queue room for a new window's BEGIN and END beside what is queued and still owed. */
+static int win_room(prof *p)
+{
+    uint32_t used = p->winq_w - LD_ACQ(&p->winq_r);
+    return used + p->win.reserved + 2u <= P_WINQ;
+}
 
-void p_window_frame(prof *p, uint32_t slot1, uint64_t fid)
+void p_window_frame(prof *p, uint32_t slot1, uint32_t inc, uint64_t fid)
 {
     win_lock(p);
-    if (!p->win.owner_slot1 && p->win.state == 2)
-        p->win.owner_slot1 = slot1;   /* an immediate window opened off-thread: the frame-marking thread owns it */
-    if (p->win.owner_slot1 == slot1) {
+    p->win.frame_slot1 = slot1;   /* the established frame thread */
+    p->win.frame_inc = inc;
+    if (!p->win.owner_slot1 && p->win.state != 0) {
+        p->win.owner_slot1 = slot1;   /* no frame owner yet: the first thread that marks a frame owns the window */
+        p->win.owner_inc = inc;
+    }
+    if (p->win.owner_slot1 == slot1 && p->win.owner_inc == inc) {
         if (p->win.state == 1) {
             win_open(p, fid);
         } else if (p->win.state == 3) {
@@ -1010,10 +1030,28 @@ void p_window_frame(prof *p, uint32_t slot1, uint64_t fid)
 void p_window_shutdown(prof *p)
 {
     win_lock(p);
-    if (p->win.state == 2 || p->win.state == 3)
+    if (p->win.state == 2 || p->win.state == 3) {
         win_close(p, p->win.seal ? 4 : 3, win_current(p));
-    else if (p->win.state == 1)
+    } else if (p->win.state == 1) {
         p->win.state = 0;   /* never opened: nothing to record */
+        p->win.reserved = 0;
+    }
+    win_unlock(p);
+}
+
+void p_window_retire(prof *p, uint32_t inc)
+{
+    if (!inc)
+        return;
+    win_lock(p);
+    if (p->win.frame_inc == inc)
+        p->win.frame_slot1 = p->win.frame_inc = 0;
+    if (p->win.owner_inc == inc) {
+        p->win.owner_last = slot_current(p, p->win.owner_slot1);
+        p->win.owner_slot1 = p->win.owner_inc = 0;   /* the next thread that marks a frame adopts the window */
+    }
+    if (p->win.opener_inc == inc)
+        p->win.opener_inc = 0;
     win_unlock(p);
 }
 
@@ -1041,7 +1079,7 @@ int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t fram
         if (!t->slot1 && !immediate)
             return PS3DK_PROF_ETHREAD;
     }
-    s = t->slot1 ? &p->slots[t->slot1 - 1] : NULL;
+    s = t->slot1 ? &p->slots[t->slot1 - 1] : NULL;   /* the opener's slot: descriptors only, never the owner */
     /* a whole-run window is unnamed: no descriptor (name_desc 0xffffffff), so it costs the application none */
     if (kind == PS3DK_PROF_WINDOW_WHOLE)
         idx = 0xffffffffu;
@@ -1051,8 +1089,16 @@ int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t fram
     if (p->win.state != 0) {
         p->win.refused++;
         rc = PS3DK_PROF_EBUSY;
+    } else if (!win_room(p)) {
+        /* no room to record both its BEGIN and its END (the drainer is behind): nothing opens */
+        p->win.refused++;
+        p->win.queue_full++;
+        rc = PS3DK_PROF_EFULL;
     } else {
-        uint64_t cf = s ? LD_ACQ(&s->cb->current_frame) : 0, now = cf ? cf - 1 : 0;
+        /* the owner is the established frame thread, whoever opens the window; with none yet, the first thread that
+         * marks a frame adopts it (p_window_frame) */
+        uint32_t owner = p->win.frame_slot1, owner_inc = p->win.frame_inc;
+        uint64_t now = slot_current(p, owner);
         int immediate = kind == PS3DK_PROF_WINDOW_SECTION || kind == PS3DK_PROF_WINDOW_WHOLE;
         /* windows never share a frame: an immediate window in the frame the previous one ended in waits for none */
         if (immediate && p->win.have_prev && now <= p->win.prev_last) {
@@ -1063,7 +1109,11 @@ int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t fram
             p->win.desc = idx;
             p->win.kind = kind;
             p->win.n = frames;
-            p->win.owner_slot1 = t->slot1;
+            p->win.owner_slot1 = owner;
+            p->win.owner_inc = owner_inc;
+            p->win.owner_last = now;
+            p->win.opener_inc = t->incarnation;
+            p->win.reserved = 2u;
             p->win.name = name ? name->name : "whole run";
             if (immediate)
                 win_open(p, now);
@@ -1085,10 +1135,12 @@ int ps3dk_prof_capture_end(void)
     win_lock(p);
     if (p->win.state == 0 || p->win.state == 3) {
         rc = PS3DK_PROF_EINVAL;
-    } else if (p->win.owner_slot1 != t->slot1) {
-        rc = PS3DK_PROF_EPERM;
+    } else if (!(p->win.owner_slot1 && p->win.owner_slot1 == t->slot1 && p->win.owner_inc == t->incarnation) &&
+               !(p->win.opener_inc == t->incarnation && (p->win.opener_inc || !p->win.owner_slot1))) {
+        rc = PS3DK_PROF_EPERM;   /* neither the frame thread that owns it nor its opener */
     } else if (p->win.state == 1) {
         p->win.state = 0;   /* not yet open: cancelled, nothing recorded */
+        p->win.reserved = 0;
     } else if (p->win.kind == PS3DK_PROF_WINDOW_SECTION || p->win.kind == PS3DK_PROF_WINDOW_WHOLE) {
         win_close(p, 1, win_current(p));
     } else {
@@ -1112,6 +1164,7 @@ int ps3dk_prof_capture_state(ps3dk_prof_capture_info *out)
     out->kind = p->win.kind;
     out->windows = p->win.opened;
     out->refused = p->win.refused;
+    out->queue_full = p->win.queue_full;
     out->name = p->win.name;
     if (p->win.state == 2 || p->win.state == 3) {
         uint64_t cf = p->win.owner_slot1 ? LD_ACQ(&p->slots[p->win.owner_slot1 - 1].cb->current_frame) : 0;

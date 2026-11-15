@@ -270,7 +270,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone flips present spanning fifofail fifopre fifopost; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue flips present spanning fifofail fifopre fifopost; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -292,6 +292,9 @@ jobs:
           for mutant in window-gate-off frames-off-by-one; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windows --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowprebuild --mutant prebuild-silent --out "$RUNNER_TEMP/auto-runtime-prebuild-silent-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowhandoff --mutant owner-is-opener --out "$RUNNER_TEMP/auto-runtime-owner-is-opener-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowqueue --mutant queue-unreserved --out "$RUNNER_TEMP/auto-runtime-queue-unreserved-mutant"
           for mutant in tag-silent tag-at-call range-end-silent; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case tags --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done

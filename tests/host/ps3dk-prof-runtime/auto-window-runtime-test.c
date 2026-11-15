@@ -14,10 +14,23 @@
  *            through ps3dk_prof_capture_seal, SEAL (mode 1).
  * TEST_WINDOW_MODE 2 (windowwhole): CAPTURE_WHOLE_RUN, then frames 0-4 each with a zone and a clear: one window
  *   holding every frame's records, as the earlier always-on capture held them.
- * TEST_WINDOW_MODE 4 (windownone): no trigger: five frame marks and nothing heavy. */
+ * TEST_WINDOW_MODE 4 (windownone): no trigger: five frame marks and nothing heavy.
+ * TEST_WINDOW_MODE 5 (windowprebuild): a segment built while no window is open, and one whose build crosses the
+ *   window's opening boundary, keep their draw accounting; each CALL inside the window gets a whole-CALL bracket or
+ *   counts its draws as unrepresented, never zero.
+ * TEST_WINDOW_MODE 6 (windowhandoff): WHOLE_RUN opened on a REGISTERED thread that never marks frames; a render
+ *   thread marking five frames owns the window: its state shows the frames and its END succeeds.
+ * TEST_WINDOW_MODE 7 (windowhandoffu): the same opened on an unregistered thread (immediate windows never register
+ *   their opener); the render thread retires without ending it, and the opener's END closes it at the render
+ *   thread's last frame.
+ * TEST_WINDOW_MODE 8 (windowqueue): with the drainer held, eight windows fill the record queue; the ninth BEGIN is
+ *   refused EFULL (counted, nothing opens); after the drain catches up a window opens and closes normally, so the
+ *   capture never holds a WINDOW_END without its BEGIN. */
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <ps3dk/prof.h>
 #include <ps3dk/prof_auto.h>
 #include "prof_internal.h"
@@ -49,7 +62,7 @@ void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,i
 
 
 /* One clear (6 words) through the ring; returns whether it was timed. */
-static int clear(void)
+__attribute__((unused)) static int clear(void)
 {
     ps3tc_auto_call call={3,5,0,3,0,0,0,0xf3u};
     uint32_t ticket=ps3dk_prof__auto_begin((void *)&context,&call,0x1234);
@@ -58,7 +71,7 @@ static int clear(void)
     return ticket!=0;
 }
 /* One zone; returns whether it was recorded (a non-INERT handle). */
-static int zone(void)
+__attribute__((unused)) static int zone(void)
 {
     ps3dk_prof_zone z=PS3DK_PROF_ZONE_BEGIN("work");
     int live=z.kind==1;
@@ -74,6 +87,42 @@ static void complete(void)
     for(unsigned n=1040;n<2048;n++) st64(&reports[n][0],1000+10*n);
     st32(&labels[247],frontier);
 }
+
+#if TEST_WINDOW_MODE==5
+void ps3dk_prof__auto_test_segment_history(const void *,uint32_t[4]);
+void ps3dk_prof__auto_test_unrepresented(uint32_t[3]);
+void ps3dk_prof__auto_test_call_brackets(uint64_t[2]);
+#endif
+#if TEST_WINDOW_MODE==6 || TEST_WINDOW_MODE==7
+/* the render thread: five frame marks; in mode 6 it ends the window, in mode 7 it retires leaving it open */
+static uint64_t render_frames,render_first;
+static int render_end=1;
+static void *render_thread(void *unused)
+{
+    (void)unused;
+    for(unsigned i=0;i<5;i++) ps3dk_prof_frame();
+    assert(state()==2);
+    render_frames=st.frames;render_first=st.first_frame;
+#if TEST_WINDOW_MODE==6
+    render_end=PS3DK_PROF_CAPTURE_END();
+#endif
+    ps3dk_prof_thread_end();
+    return NULL;
+}
+#if TEST_WINDOW_MODE==7
+/* an unregistered opener: begins WHOLE_RUN, then ends it once the render thread has gone */
+static int opened,go,opener_end=1;
+static void *opener_thread(void *unused)
+{
+    (void)unused;
+    assert(g_tls.slot1==0 && PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && g_tls.slot1==0);
+    __atomic_store_n(&opened,1,__ATOMIC_RELEASE);
+    while(!__atomic_load_n(&go,__ATOMIC_ACQUIRE)) {struct timespec ts={0,100000};nanosleep(&ts,NULL);}
+    opener_end=PS3DK_PROF_CAPTURE_END();
+    return NULL;
+}
+#endif
+#endif
 
 int main(void) {
     context=(gpp_ctx){words,words+16384,words,NULL};
@@ -130,6 +179,95 @@ int main(void) {
     }
     complete();
     puts("AUTO no window PASS");
+#elif TEST_WINDOW_MODE==5
+    {
+        uint32_t sw[128],sw2[128],h[4],u[3],u0;
+        uint64_t b[2],b0;
+        gpp_ctx key={sw,sw+128,sw,NULL},key2={sw2,sw2+128,sw2,NULL};
+        ps3tc_auto_call op={3,5,0,3,0,0,0,0xf3u};
+        ps3dk_prof_frame(); /* frame 0: no window */
+        ps3dk_prof__auto_segment_open((void *)&key);
+        assert(!ps3dk_prof__auto_begin((void *)&key,&op,0));key.current+=6;
+        ps3dk_prof__auto_segment_close((void *)&key);
+        ps3dk_prof__auto_test_segment_history(&key,h);
+        assert(h[0]==1 && h[1]==1);   /* the untimed draw is a refused visit of the build */
+        /* a build that crosses the opening boundary: one draw before the window, one inside it */
+        ps3dk_prof__auto_segment_open((void *)&key2);
+        assert(!ps3dk_prof__auto_begin((void *)&key2,&op,0));key2.current+=6;
+        assert(PS3DK_PROF_CAPTURE_BEGIN("calls")==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 1: open */
+        assert(state()==2);
+        {
+            uint32_t ticket=ps3dk_prof__auto_begin((void *)&key2,&op,0);
+            for(unsigned n=0;n<6;n++) *key2.current++=0xab000000u+n;
+            ps3dk_prof__auto_end((void *)&key2,ticket);
+        }
+        ps3dk_prof__auto_segment_close((void *)&key2);
+        ps3dk_prof__auto_test_segment_history(&key2,h);
+        assert(h[0]==2 && h[1]==1);
+        /* each CALL inside the window: a bracket or unrepresented draws, never an empty build */
+        gpp_ctx *calls[2]={&key,&key2};
+        for(unsigned c=0;c<2;c++) {
+            ps3dk_prof__auto_test_unrepresented(u);ps3dk_prof__auto_test_call_brackets(b);u0=u[0];b0=b[0];
+            ps3dk_prof__auto_segment_call_begin((void *)&context,(void *)calls[c]);context.current+=5;
+            ps3dk_prof__auto_segment_call((void *)&context,(void *)calls[c]);
+            ps3dk_prof__auto_test_unrepresented(u);ps3dk_prof__auto_test_call_brackets(b);
+            assert(b[0]>b0 || u[0]>u0);
+        }
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        ps3dk_prof_frame();
+    }
+    complete();
+    puts("AUTO pre-window segment build PASS");
+#elif TEST_WINDOW_MODE==6 || TEST_WINDOW_MODE==7
+    {
+        pthread_t t;
+#if TEST_WINDOW_MODE==6
+        assert(!zone() && g_tls.slot1!=0);   /* the opener is registered (here by the AUTO attach) and marks no frame */
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && state()==2);
+        assert(pthread_create(&t,NULL,render_thread,NULL)==0 && pthread_join(t,NULL)==0);
+        assert(render_frames==5 && render_first==0);
+        assert(render_end==PS3DK_PROF_OK && state()==0);
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EINVAL);
+#else
+        pthread_t o;
+        assert(pthread_create(&o,NULL,opener_thread,NULL)==0);
+        while(!__atomic_load_n(&opened,__ATOMIC_ACQUIRE)) {struct timespec ts={0,100000};nanosleep(&ts,NULL);}
+        assert(state()==2);
+        assert(pthread_create(&t,NULL,render_thread,NULL)==0 && pthread_join(t,NULL)==0);
+        assert(render_frames==5 && render_first==0);
+        assert(render_end==1 && state()==2);   /* the render thread retired without ending it */
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EPERM);   /* neither its frame thread nor its opener */
+        __atomic_store_n(&go,1,__ATOMIC_RELEASE);
+        assert(pthread_join(o,NULL)==0);
+        assert(opener_end==PS3DK_PROF_OK && state()==0);   /* the opener ended it */
+#endif
+    }
+    complete();
+    puts("AUTO window frame-thread handoff PASS");
+#elif TEST_WINDOW_MODE==8
+    {
+        uint32_t expected=0;
+        unsigned i;
+        while(!CAS_ACQREL(&g_prof->drain_busy,&expected,1u)) expected=0;   /* a drainer that is behind */
+        for(i=0;i<8;i++) {
+            ps3dk_prof_frame();
+            assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        }
+        ps3dk_prof_frame();
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_EFULL);
+        assert(state()==0 && st.queue_full==1 && st.refused==1 && st.windows==8 && !zone() && !clear());
+        ST_REL(&g_prof->drain_busy,0u);
+        for(i=0;i<5000 && LD_ACQ(&g_prof->winq_r)!=LD_ACQ(&g_prof->winq_w);i++) {
+            struct timespec ts={0,1000000};
+            nanosleep(&ts,NULL);
+        }
+        assert(LD_ACQ(&g_prof->winq_r)==LD_ACQ(&g_prof->winq_w));
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && zone());
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+    }
+    complete();
+    puts("AUTO window queue PASS");
 #else
     {
         assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK);
