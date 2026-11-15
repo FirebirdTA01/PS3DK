@@ -196,6 +196,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-plain" --mutants
           python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-address" --sanitize
 
+      - name: Report ring host model
+        run: |
+          bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-plain" --mutants
+          bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-address" --sanitize
+
       - name: Automatic RSX initialization, wire and queue controls
         run: |
           python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
