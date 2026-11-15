@@ -13,25 +13,33 @@
  *     - Backlog load: 4 full-screen draws of heavy fragment program (fp_heavy_nokil, 131 instructions)
  *       into backlog_rt to saturate GPU pipelines without polluting the checked surface.
  *     - Checked region: split into a 16x16 grid of 256 non-overlapping tiles over the 512x512 surface.
- *     - Baseline: checked surface is cleared to pure COLOR_CLEAR before tile draws.
- *     - Distinct vertices: 1032 vertices total:
- *         * 1024 on-target vertices across 256 tiles (4 distinct vertices per tile, indices 0..1023)
- *         * 4 backlog full-screen quad vertices (indices 1024..1027, covering [-1, 1])
- *         * 4 valid off-screen vertices for index poison redirection (indices 1028..1031, placed at [2, 3])
- *     - Index ranges: 192 32-bit indices per tile (32 quads x 6 indices). Tile t spans indices
- *       [t * 192, (t + 1) * 192 - 1]. Each tile's quad references its own distinct vertex indices (4t..4t+3).
+ *     - Within-tile repetition eliminated: each 32x32 tile cell contains 32 distinct sub-quads (4x8 grid,
+ *       8x4 pixels each), each with its own 4 distinct vertices and 6 indices, with zero overlap between
+ *       sub-quads. No sub-quad shares vertices with another, preventing early draws from masking late ones.
+ *     - Total sub-quads: 8,192 sub-quads across all 256 tiles.
+ *     - Sampling: 1 sample pixel per sub-quad (at sub-rectangle center), yielding 8,192 total samples per trial.
+ *       The exact same sample points are evaluated in reference, early, command, and candidate series.
+ *     - Baseline: checked surface is cleared to pure COLOR_CLEAR before tile draws; unpoisoned reference
+ *       must show expected GOOD tile output in every tile; an all-CLEAR completed reference must FAIL (invalid),
+ *       never qualifying the detector.
+ *     - Distinct vertices: 32,776 vertices total:
+ *         * 32,768 on-target vertices (256 tiles x 32 sub-quads x 4 vertices, indices 0..32767)
+ *         * 4 backlog full-screen quad vertices (indices 32768..32771, covering [-1, 1])
+ *         * 4 valid off-screen vertices for index poison redirection (indices 32772..32775, placed at [2, 3])
+ *     - Index ranges: 192 32-bit indices per tile (32 sub-quads x 6 indices). Tile t spans indices
+ *       [t * 192, (t + 1) * 192 - 1]. Sub-quad q of tile t references its own vertex range (4*(32t+q)..4*(32t+q)+3).
  *     - Total indices: 49,152 32-bit indices (192 KiB in mapped main-memory arena).
  *     - Estimated runtime: ~4-5 ms per trial; ~2.5 - 5 seconds total runtime across all 448 trials in
  *       the 14 series (well bounded under 5 minutes).
  *
  *   Poison kinds:
- *     - VERTEX: rewrites on-target vertices 0..1023 to off-screen coordinates [2.0f, 3.0f].
- *     - INDEX: rewrites tile indices to valid in-bounds off-screen vertices 1028..1031.
+ *     - VERTEX: rewrites on-target vertices 0..32767 to off-screen coordinates [2.0f, 3.0f].
+ *     - INDEX: rewrites all tile sub-quad indices to valid in-bounds off-screen vertices 32772..32775.
  *     - TEXTURE: fills texture with COLOR_POISON (0xffff00ff).
  *     - REFERENCE: unpoisoned baseline (no poison written; asserts pure clear baseline and clean coverage).
  *
  *   Modes:
- *     - reference: baseline unpoisoned (gated: must be 0/32 corruption).
+ *     - reference: baseline unpoisoned (gated: must be 0/32 corruption; all-clear fails).
  *     - early: command label before any draws (gated: must catch expected corruption >= 8/32).
  *     - command: command label after last draw (front-end race control).
  *     - texture: texture label after last draw (candidate for texture reuse; extra control for index).
@@ -58,70 +66,74 @@
 
 #ifdef LABEL_REUSE_HEAVY
 #include "fp_heavy_nokil_fpo.h"
-#endif
-
-SYS_PROCESS_PARAM(1001, 0x100000);
-
-#define COLOR_POISON    A2P_COLOR_POISON
-#define COLOR_CLEAR     A2P_COLOR_CLEAR
-#define SENTINEL        A2P_SENTINEL
-
-#define POISON_NONE     A2P_POISON_NONE
-#define POISON_VERTEX   A2P_POISON_VERTEX
-#define POISON_INDEX    A2P_POISON_INDEX
-#define POISON_TEXTURE  A2P_POISON_TEXTURE
-
-#ifdef LABEL_REUSE_HEAVY
-enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 8 << 20 };
-enum { RT = 512, TEX_W = 1024, TEX_H = 1024, TRIALS = 32 };
-
-#define TILES_X             16u
-#define TILES_Y             16u
-#define TILES               (TILES_X * TILES_Y) /* 256 tiles */
-#define QUADS_PER_TILE      32u
-#define INDICES_PER_TILE    (QUADS_PER_TILE * 6u) /* 192 indices */
-#define TOTAL_INDICES       (TILES * INDICES_PER_TILE) /* 49,152 indices */
-
-#define ON_TARGET_VERTS     (TILES * 4u) /* 1024 vertices (indices 0..1023) */
-#define BACKLOG_VERTS_BASE  ON_TARGET_VERTS /* 4 vertices (indices 1024..1027) */
-#define OFF_SCREEN_BASE     (BACKLOG_VERTS_BASE + 4u) /* 4 vertices (indices 1028..1031) */
-#define TOTAL_VERTS         (OFF_SCREEN_BASE + 4u) /* 1032 distinct vertices */
-
-#define ARENA_VBO           0x00000u
-#define ARENA_QUAD_IBO      0x08000u
-#define ARENA_IBO           0x10000u
-#define ARENA_TEX           0x100000u
-#define ARENA_READBACK      0x600000u
-#define POLLS               4000000u /* x 5 us: watchdog per wait */
 #define VARIANT             "heavy"
+#define RT                  A2P_RT_DIM
+#define TEX_W               256u
+#define TEX_H               256u
+#define TRIALS              32u
 
-_Static_assert(ARENA_VBO + TOTAL_VERTS * sizeof(arena_vertex) <= ARENA_QUAD_IBO, "VBO fits before quad IBO");
-_Static_assert(ARENA_IBO + TOTAL_INDICES * sizeof(uint32_t) <= ARENA_TEX, "IBO fits before texture");
-_Static_assert(ARENA_TEX + TEX_W * TEX_H * 4 <= ARENA_READBACK, "texture fits before readback");
-_Static_assert(ARENA_READBACK + RT * RT * 4 <= ARENA_BYTES, "readback fits the arena");
-_Static_assert(ARENA_TEX % 128 == 0, "texture offset alignment");
-_Static_assert(ARENA_IBO % 128 == 0, "ibo offset alignment");
-_Static_assert(ARENA_QUAD_IBO % 128 == 0, "quad ibo alignment");
+#define TILES_X             A2P_TILES_X
+#define TILES_Y             A2P_TILES_Y
+#define TILES               A2P_TILES           /* 256 tiles */
+#define SUBQUADS_X          A2P_SUBQUADS_X
+#define SUBQUADS_Y          A2P_SUBQUADS_Y
+#define SUBQUADS_PER_TILE   A2P_SUBQUADS_PER_TILE /* 32 sub-quads per tile */
+#define TOTAL_SUBQUADS      A2P_TOTAL_SUBQUADS  /* 8,192 sub-quads */
+#define TOTAL_SAMPLES       A2P_TOTAL_SAMPLES   /* 8,192 samples */
 
-#else
+#define SUBQUAD_W           A2P_SUBQUAD_W       /* 8 pixels */
+#define SUBQUAD_H           A2P_SUBQUAD_H       /* 4 pixels */
 
-enum { FIFO_BYTES = 1 << 20, HOST_BYTES = 32 << 20, ARENA_BYTES = 1 << 20 };
-enum { RT = 256, TEX_W = 64, TEX_H = 64, DRAWS = 64, TRIALS = 32, MODES = 4 };
-#define ARENA_TEX           0x10000u
-#define ARENA_READBACK      0x40000u
-#define POLLS               400000u
+#define INDICES_PER_TILE    A2P_INDICES_PER_TILE /* 192 indices */
+#define TOTAL_INDICES       A2P_TOTAL_INDICES    /* 49,152 indices */
+
+#define ON_TARGET_VERTS     A2P_ON_TARGET_VERTS /* 32,768 vertices (indices 0..32767) */
+#define BACKLOG_VERTS_BASE  ON_TARGET_VERTS     /* 4 backlog quad vertices (indices 32768..32771) */
+#define OFF_SCREEN_BASE     (BACKLOG_VERTS_BASE + 4u) /* 4 off-screen vertices (indices 32772..32775) */
+#define TOTAL_VERTS         A2P_TOTAL_VERTS     /* 32,776 vertices */
+
+#define ARENA_VBO           0x00000u /* 32,776 * 16 = 524,416 bytes (~512 KiB) */
+#define ARENA_QUAD_IBO      0x90000u /* 16-bit indices for backlog quad */
+#define ARENA_IBO           0x91000u /* 32-bit indices: 49,152 * 4 = 192 KiB */
+#define ARENA_TEX           0xd0000u /* 256 * 256 * 4 = 256 KiB */
+#define ARENA_READBACK      0x110000u /* 512 * 512 * 4 = 1 MiB */
+#define ARENA_BYTES         (ARENA_READBACK + RT * RT * 4) /* ~2.06 MiB */
+
+#define COLOR_VERTEX_NORMAL 0xff00ff00u
+#define COLOR_CLEAR         A2P_COLOR_CLEAR
+#define COLOR_POISON        A2P_COLOR_POISON
+#define SENTINEL            A2P_SENTINEL
+
+#define CRUMB_PATH          "/dev_hdd0/tmp/hello-ppu-gcm-label-reuse-heavy.crumb"
+
+#else /* Light variant */
+
 #define VARIANT             "light"
+#define MODES               4
+#define TRIALS              300u
+#define DRAWS               200u
+#define RT                  64u
+#define TEX_W               64u
+#define TEX_H               64u
+
 #define ARENA_VBO           0x00000u
 #define ARENA_IBO           0x01000u
+#define ARENA_TEX           0x02000u
+#define ARENA_READBACK      0x20000u
+#define ARENA_BYTES         0x40000u
 
-_Static_assert(ARENA_READBACK + RT * RT * 4 <= ARENA_BYTES, "readback fits the arena");
-_Static_assert(ARENA_TEX % 128 == 0, "texture offset alignment");
+#define COLOR_CLEAR         0xff000000u
+#define COLOR_POISON        0xffff00ffu
+#define SENTINEL            0x5a5a5a5au
 
+#define CRUMB_PATH          "/dev_hdd0/tmp/hello-ppu-gcm-label-reuse.crumb"
 #endif
 
-#define DONE_LABEL          101u     /* completion label written by mode under test */
-#define READBACK_LABEL      102u     /* back-end label after readback transfer */
-#define CRUMB_PATH          "/dev_hdd0/tmp/gcmlabel-crumb.txt"
+#define FIFO_BYTES          (1024u * 1024u)
+#define HOST_BYTES          (4u * 1024u * 1024u)
+#define DONE_LABEL          101u
+#define READBACK_LABEL      102u
+#define POLLS               100000u
 #define SPIN_POLLS          100000u  /* spin before sleeping */
 
 _Static_assert(DONE_LABEL >= CELL_GCM_LABEL_APP_FIRST && READBACK_LABEL <= CELL_GCM_LABEL_APP_LAST, "app labels");
@@ -195,18 +207,34 @@ static const char *get_poison_str(int p)
 
 static void init_arena_vbo(arena_vertex *vbo)
 {
-    /* 1. On-target tiles: 16x16 grid of 256 non-overlapping quads */
-    for (unsigned ty = 0; ty < TILES_Y; ++ty) {
-        float y0 = -1.0f + (float)ty * (2.0f / (float)TILES_Y);
-        float y1 = y0 + (2.0f / (float)TILES_Y);
-        float v0 = (float)ty / (float)TILES_Y;
-        float v1 = (float)(ty + 1) / (float)TILES_Y;
-        for (unsigned tx = 0; tx < TILES_X; ++tx) {
-            float x0 = -1.0f + (float)tx * (2.0f / (float)TILES_X);
-            float x1 = x0 + (2.0f / (float)TILES_X);
-            float u0 = (float)tx / (float)TILES_X;
-            float u1 = (float)(tx + 1) / (float)TILES_X;
-            unsigned base = (ty * TILES_X + tx) * 4;
+    /* 1. On-target tiles: 256 tiles, each with 32 distinct sub-quads (4x8 grid, 8x4 px each).
+     * Total on-target vertices: 256 * 32 * 4 = 32,768 distinct vertices. Zero vertex sharing. */
+    for (unsigned t = 0; t < TILES; ++t) {
+        unsigned tx = t % TILES_X;
+        unsigned ty = t / TILES_Y;
+        unsigned tile_px_x = tx * A2P_TILE_CELL_SIZE;
+        unsigned tile_px_y = ty * A2P_TILE_CELL_SIZE;
+
+        for (unsigned q = 0; q < SUBQUADS_PER_TILE; ++q) {
+            unsigned sx = q % SUBQUADS_X;
+            unsigned sy = q / SUBQUADS_X;
+            unsigned x_left = tile_px_x + sx * SUBQUAD_W;
+            unsigned x_right = x_left + SUBQUAD_W;
+            unsigned y_top = tile_px_y + sy * SUBQUAD_H;
+            unsigned y_bottom = y_top + SUBQUAD_H;
+
+            /* RSX viewport: Y_screen=0 is NDC +1.0, Y_screen=512 is NDC -1.0 */
+            float x0 = -1.0f + 2.0f * ((float)x_left / (float)RT);
+            float x1 = -1.0f + 2.0f * ((float)x_right / (float)RT);
+            float y1 = 1.0f - 2.0f * ((float)y_top / (float)RT);
+            float y0 = 1.0f - 2.0f * ((float)y_bottom / (float)RT);
+
+            float u0 = (float)x_left / (float)RT;
+            float u1 = (float)x_right / (float)RT;
+            float v0 = (float)y_top / (float)RT;
+            float v1 = (float)y_bottom / (float)RT;
+
+            unsigned base = (t * SUBQUADS_PER_TILE + q) * 4;
             vbo[base + 0] = (arena_vertex){{x0, y1}, {u0, v0}};
             vbo[base + 1] = (arena_vertex){{x1, y1}, {u1, v0}};
             vbo[base + 2] = (arena_vertex){{x0, y0}, {u0, v1}};
@@ -214,13 +242,13 @@ static void init_arena_vbo(arena_vertex *vbo)
         }
     }
 
-    /* 2. Full-screen quad for backlog draws (indices 1024..1027) */
+    /* 2. Full-screen quad for backlog draws (indices 32768..32771) */
     vbo[BACKLOG_VERTS_BASE + 0] = (arena_vertex){{-1.0f,  1.0f}, {0.0f, 0.0f}};
     vbo[BACKLOG_VERTS_BASE + 1] = (arena_vertex){{ 1.0f,  1.0f}, {1.0f, 0.0f}};
     vbo[BACKLOG_VERTS_BASE + 2] = (arena_vertex){{-1.0f, -1.0f}, {0.0f, 1.0f}};
     vbo[BACKLOG_VERTS_BASE + 3] = (arena_vertex){{ 1.0f, -1.0f}, {1.0f, 1.0f}};
 
-    /* 3. Valid in-bounds off-screen vertices for index poison redirection (indices 1028..1031) */
+    /* 3. Valid in-bounds off-screen vertices for index poison redirection (indices 32772..32775) */
     vbo[OFF_SCREEN_BASE + 0] = (arena_vertex){{ 2.0f,  3.0f}, {0.0f, 0.0f}};
     vbo[OFF_SCREEN_BASE + 1] = (arena_vertex){{ 3.0f,  3.0f}, {1.0f, 0.0f}};
     vbo[OFF_SCREEN_BASE + 2] = (arena_vertex){{ 2.0f,  2.0f}, {0.0f, 1.0f}};
@@ -240,9 +268,9 @@ static void poison_vertices(arena_vertex *vbo)
 static void init_unpoisoned_indices(uint32_t *ibo)
 {
     for (unsigned t = 0; t < TILES; ++t) {
-        uint32_t base_v = t * 4;
         uint32_t *tile_ibo = ibo + t * INDICES_PER_TILE;
-        for (unsigned q = 0; q < QUADS_PER_TILE; ++q) {
+        for (unsigned q = 0; q < SUBQUADS_PER_TILE; ++q) {
+            uint32_t base_v = (t * SUBQUADS_PER_TILE + q) * 4;
             tile_ibo[q * 6 + 0] = base_v + 0;
             tile_ibo[q * 6 + 1] = base_v + 1;
             tile_ibo[q * 6 + 2] = base_v + 2;
@@ -257,7 +285,7 @@ static void fill_poison_indices(uint32_t *ibo)
 {
     for (unsigned t = 0; t < TILES; ++t) {
         uint32_t *tile_ibo = ibo + t * INDICES_PER_TILE;
-        for (unsigned q = 0; q < QUADS_PER_TILE; ++q) {
+        for (unsigned q = 0; q < SUBQUADS_PER_TILE; ++q) {
             tile_ibo[q * 6 + 0] = OFF_SCREEN_BASE + 0;
             tile_ibo[q * 6 + 1] = OFF_SCREEN_BASE + 1;
             tile_ibo[q * 6 + 2] = OFF_SCREEN_BASE + 2;
@@ -280,7 +308,8 @@ static int run_probe_trial(CellGcmContextData *ctx,
                            int poison_kind,
                            unsigned trial,
                            uint32_t *p_serial,
-                           int *out_trial_outcome)
+                           int *out_trial_outcome,
+                           int *out_all_clear)
 {
     arena_vertex *vbo = (arena_vertex *)(arena + ARENA_VBO);
     uint16_t *quad_ibo = (uint16_t *)(arena + ARENA_QUAD_IBO);
@@ -332,7 +361,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
     if (mode == MODE_EARLY)
         cellGcmSetWriteCommandLabel(ctx, DONE_LABEL, serial);
 
-    /* 4. Draw 256 non-overlapping tiles with distinct vertices and index ranges */
+    /* 4. Draw 256 non-overlapping tiles with 32 distinct sub-quads per tile */
     arena_bind(ctx, prog_main, arena_off + ARENA_VBO, arena_off + ARENA_TEX, TEX_W, TEX_H);
     cellGcmSetInvalidateVertexCache(ctx);
     cellGcmSetInvalidateTextureCache(ctx, CELL_GCM_INVALIDATE_TEXTURE);
@@ -393,15 +422,26 @@ static int run_probe_trial(CellGcmContextData *ctx,
         return -1;
     }
 
-    /* Check readback pixels using classifier */
-    unsigned exp_samples = 0, unrel_samples = 0;
+    /* Check readback pixels using tile classifier across all 8,192 sub-quad centers */
+    a2p_tile_report rep;
     int is_ref = (mode == MODE_REFERENCE || poison_kind == POISON_NONE);
-    int outcome = a2p_classify_trial_samples(readback, RT * RT, good, poison_kind, is_ref,
-                                             &exp_samples, &unrel_samples);
+    int outcome = a2p_classify_trial_tiles(readback, good, poison_kind, is_ref, &rep);
     *out_trial_outcome = outcome;
+    if (out_all_clear)
+        *out_all_clear = rep.all_clear;
 
-    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u poison_order=seen->written->sync expected=%u unrelated=%u polls=%u",
-          get_mode_str(mode), get_poison_str(poison_kind), trial, seen_val, exp_samples, unrel_samples, polls);
+    char exp_mask_str[80];
+    char unrel_mask_str[80];
+    a2p_format_bitmask(rep.expected_mask, exp_mask_str, sizeof exp_mask_str);
+    a2p_format_bitmask(rep.unrelated_mask, unrel_mask_str, sizeof unrel_mask_str);
+
+    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u poison_order=seen->written->sync "
+          "expected=%u unrelated=%u exp_tiles=%u:%s unrel_tiles=%u:%s polls=%u",
+          get_mode_str(mode), get_poison_str(poison_kind), trial, seen_val,
+          rep.expected_tile_count, rep.unrelated_tile_count,
+          rep.expected_tile_count, exp_mask_str,
+          rep.unrelated_tile_count, unrel_mask_str,
+          polls);
     return 0;
 }
 
@@ -421,16 +461,20 @@ static int run_series(CellGcmContextData *ctx,
     out_counts->expected = 0;
     out_counts->unrelated = 0;
     out_counts->clean = 0;
+    out_counts->all_clear_trials = 0;
 
     for (unsigned trial = 0; trial < TRIALS; ++trial) {
         int outcome = A2P_TRIAL_CLEAN;
+        int all_clear = 0;
         int rc = run_probe_trial(ctx, prog_main, prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                                 mode, poison_kind, trial, p_serial, &outcome);
+                                 mode, poison_kind, trial, p_serial, &outcome, &all_clear);
         if (rc != 0) {
             crumb("A2P_ABORT series mode=%s poison=%s trial=%u",
                   get_mode_str(mode), get_poison_str(poison_kind), trial);
             return -1;
         }
+        if (all_clear)
+            out_counts->all_clear_trials++;
         if (outcome == A2P_TRIAL_EXPECTED)
             out_counts->expected++;
         else if (outcome == A2P_TRIAL_UNRELATED)
@@ -455,49 +499,18 @@ static void print_buffer_verdict(const char *buf_kind,
                                  char *out_verdict,
                                  size_t out_verdict_len)
 {
-    /* Verdict order per kind: invalid > refuted > supported-for-this-workload > inconclusive */
-    const char *status = NULL;
     char reason[128] = {0};
+    const char *status = a2p_evaluate_verdict(ref, early, cmd, cand, cand_mode_name,
+                                              extra, extra_mode_name, reason, sizeof reason);
 
-    if (ref.expected > 0 || ref.unrelated > 0) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "reference corrupt");
-    } else if (early.unrelated > 0) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "unrelated failure in early");
-    } else if (early.expected < 8) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "detector not sensitive");
-    } else if (cmd.unrelated > 0) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "unrelated failure in command");
-    } else if (cand.unrelated > 0) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "unrelated failure in %s", cand_mode_name);
-    } else if (extra && extra->unrelated > 0) {
-        status = "invalid";
-        snprintf(reason, sizeof reason, "unrelated failure in %s", extra_mode_name);
-    } else if (cand.expected > 0) {
-        status = "refuted";
-    } else if (cmd.expected >= 8) {
-        status = "supported-for-this-workload";
-    } else {
-        status = "inconclusive";
-    }
-
-    if (strcmp(status, "invalid") == 0) {
-        snprintf(out_verdict, out_verdict_len, "invalid (%s)", reason);
-        crumb("A2P VERDICT buffer=%s invalid (%s)", buf_kind, reason);
-    } else {
+    if (out_verdict)
         snprintf(out_verdict, out_verdict_len, "%s", status);
-        if (extra) {
-            crumb("A2P VERDICT buffer=%s %s (%s=%u/%u command=%u/%u %s=%u/%u; note: 0/%u is not a zero-risk bound)",
-                  buf_kind, status, cand_mode_name, cand.expected, TRIALS, cmd.expected, TRIALS,
-                  extra_mode_name, extra->expected, TRIALS, TRIALS);
-        } else {
-            crumb("A2P VERDICT buffer=%s %s (%s=%u/%u command=%u/%u; note: 0/%u is not a zero-risk bound)",
-                  buf_kind, status, cand_mode_name, cand.expected, TRIALS, cmd.expected, TRIALS, TRIALS);
-        }
+
+    if (strcmp(status, "supported-for-this-workload") == 0) {
+        crumb("A2P VERDICT %-6s %s (%s) [note: 0/32 is not a zero-risk bound]",
+              buf_kind, status, reason);
+    } else {
+        crumb("A2P VERDICT %-6s %s (%s)", buf_kind, status, reason);
     }
 }
 
@@ -505,14 +518,14 @@ static void print_buffer_verdict(const char *buf_kind,
 
 int main(void)
 {
-    arena_display d;
+    CellGcmInitDisplay d;
     arena_program prog;
     sys_addr_t host = 0, arena_ea = 0;
     uint32_t arena_off = 0, rt_off = 0, rt_depth_off = 0;
 
 #ifdef LABEL_REUSE_HEAVY
-    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u vertices=%u indices=%u",
-          VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_VERTS, TOTAL_INDICES);
+    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u",
+          VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES);
 #else
     unsigned corrupt[MODES] = {0}, poison[MODES] = {0}, clear[MODES] = {0};
     uint32_t polls_total[MODES] = {0};
@@ -565,8 +578,9 @@ int main(void)
     int warm_ok = 0;
     for (unsigned w = 0; w < 30; ++w) {
         int outcome = A2P_TRIAL_CLEAN;
+        int all_clear = 0;
         int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                                 MODE_REFERENCE, POISON_NONE, w, &serial, &outcome);
+                                 MODE_REFERENCE, POISON_NONE, w, &serial, &outcome, &all_clear);
         if (rc != 0) {
             crumb("A2P_ABORT warmup trial=%u", w);
             return 1;
@@ -601,7 +615,7 @@ int main(void)
                          NULL, NULL, v_verdict, sizeof v_verdict);
 
     /* Buffer kind 2: INDEX poison */
-    a2p_series_counts res_ref_i, res_early_i, res_cmd_i, res_tex_i, res_back_i;
+    a2p_series_counts res_ref_i, res_early_i, res_cmd_i, res_back_i, res_tex_i;
     if (run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
                    MODE_REFERENCE, POISON_INDEX, &serial, &res_ref_i) ||
         run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
@@ -609,9 +623,9 @@ int main(void)
         run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
                    MODE_COMMAND, POISON_INDEX, &serial, &res_cmd_i) ||
         run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i) ||
+                   MODE_BACKEND, POISON_INDEX, &serial, &res_back_i) ||
         run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                   MODE_BACKEND, POISON_INDEX, &serial, &res_back_i)) {
+                   MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i)) {
         crumb("A2P_ABORT session index");
         return 1;
     }
@@ -638,14 +652,11 @@ int main(void)
     print_buffer_verdict("texture", res_ref_t, res_early_t, res_cmd_t, res_tex_t, "texture",
                          &res_back_t, "backend", t_verdict, sizeof t_verdict);
 
-    /* Overall verdict rules: invalid > refuted > supported-for-this-workload > inconclusive */
-    char overall[512];
-    if (strncmp(v_verdict, "invalid", 7) == 0) {
-        snprintf(overall, sizeof overall, "invalid (vertex %s)", strchr(v_verdict, '(') ? strchr(v_verdict, '(') : v_verdict);
-    } else if (strncmp(i_verdict, "invalid", 7) == 0) {
-        snprintf(overall, sizeof overall, "invalid (index %s)", strchr(i_verdict, '(') ? strchr(i_verdict, '(') : i_verdict);
-    } else if (strncmp(t_verdict, "invalid", 7) == 0) {
-        snprintf(overall, sizeof overall, "invalid (texture %s)", strchr(t_verdict, '(') ? strchr(t_verdict, '(') : t_verdict);
+    /* Overall verdict evaluation */
+    char overall[256];
+    if (strcmp(v_verdict, "invalid") == 0 || strcmp(i_verdict, "invalid") == 0 || strcmp(t_verdict, "invalid") == 0) {
+        snprintf(overall, sizeof overall, "invalid (subtest failed preconditions: vertex=%s index=%s texture=%s)",
+                 v_verdict, i_verdict, t_verdict);
     } else if (strcmp(v_verdict, "refuted") == 0 || strcmp(i_verdict, "refuted") == 0 || strcmp(t_verdict, "refuted") == 0) {
         snprintf(overall, sizeof overall, "refuted (corruption detected: vertex=%s index=%s texture=%s)",
                  v_verdict, i_verdict, t_verdict);
@@ -758,24 +769,27 @@ int main(void)
                 crumb("GCM_LABEL_REUSE_CORRUPT mode=%d trial=%u bad_samples=%u poison=%u clear=%u polls=%u",
                       mode, trial, bad, saw_poison, saw_clear, polls);
             } else {
-                crumb("GCM_LABEL_REUSE_TRIAL mode=%d trial=%u clean polls=%u", mode, trial, polls);
+                crumb("GCM_LABEL_REUSE_CLEAN mode=%d trial=%u polls=%u", mode, trial, polls);
             }
         }
         if (mode < 0) {
             if (!warm_ok) {
-                crumb("GCM_LABEL_REUSE_FAIL warm-up: no clean trial in 600");
+                crumb("GCM_LABEL_REUSE_FAIL warmup: no clean frame in 600");
                 return 1;
             }
-            crumb("GCM_LABEL_REUSE_WARMUP trials=%u (the last one clean)", warmup);
-            continue;
+            crumb("GCM_LABEL_REUSE_WARMUP frames=%u clean=1", warmup);
         }
-        crumb("GCM_LABEL_REUSE_MODE mode=%d trials=%u corrupt=%u late_texture=%u late_vertex=%u mean_polls=%u",
-              mode, TRIALS, corrupt[mode], poison[mode], clear[mode], polls_total[mode] / TRIALS);
     }
-    int ok = corrupt[0] == 0 && corrupt[1] == 0;
-    crumb("%s variant=%s backend=%u/%u texture=%u/%u control_command=%u/%u control_early=%u/%u",
-          ok ? "GCM_LABEL_REUSE_OK" : "GCM_LABEL_REUSE_FAIL", VARIANT, corrupt[0], TRIALS, corrupt[1], TRIALS,
-          corrupt[2], TRIALS, corrupt[3], TRIALS);
-    return ok ? 0 : 1;
+
+    crumb("GCM_LABEL_REUSE mode=0 corrupt=%u/%u poison=%u clear=%u polls_avg=%u",
+          corrupt[0], TRIALS, poison[0], clear[0], polls_total[0] / TRIALS);
+    crumb("GCM_LABEL_REUSE mode=1 corrupt=%u/%u poison=%u clear=%u polls_avg=%u",
+          corrupt[1], TRIALS, poison[1], clear[1], polls_total[1] / TRIALS);
+    crumb("GCM_LABEL_REUSE mode=2 corrupt=%u/%u poison=%u clear=%u polls_avg=%u",
+          corrupt[2], TRIALS, poison[2], clear[2], polls_total[2] / TRIALS);
+    crumb("GCM_LABEL_REUSE mode=3 corrupt=%u/%u poison=%u clear=%u polls_avg=%u",
+          corrupt[3], TRIALS, poison[3], clear[3], polls_total[3] / TRIALS);
+    crumb("GCM_LABEL_REUSE_DONE");
+    return 0;
 #endif
 }

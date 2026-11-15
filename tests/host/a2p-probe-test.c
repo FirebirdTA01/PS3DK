@@ -76,9 +76,11 @@ typedef struct {
     unsigned reset;
     unsigned rewritten;
     int outcome_to_report;
+    int all_clear_to_report;
 } fake_trial_state;
 
-static int fake_trial_fn(void *user_ctx, int mode, int poison_kind, unsigned trial, int *out_trial_outcome)
+static int fake_trial_fn(void *user_ctx, int mode, int poison_kind, unsigned trial,
+                         int *out_trial_outcome, int *out_all_clear)
 {
     (void)mode;
     (void)poison_kind;
@@ -92,32 +94,14 @@ static int fake_trial_fn(void *user_ctx, int mode, int poison_kind, unsigned tri
     s->reset++;
     s->rewritten++;
     *out_trial_outcome = s->outcome_to_report;
+    if (out_all_clear)
+        *out_all_clear = s->all_clear_to_report;
     return 0;
 }
 
-/* Negative test 6: reference trial with multiple bad samples counts as exactly ONE failed trial in series */
+/* Negative test 6: reference trial with bad samples counts as exactly ONE failed trial in series */
 static void test_reference_counted_once(void)
 {
-    uint32_t good = 0xff112233u;
-    uint32_t samples[100];
-    for (int i = 0; i < 100; ++i) {
-        if (i < 50)
-            samples[i] = A2P_COLOR_CLEAR;
-        else if (i < 70)
-            samples[i] = A2P_COLOR_POISON;
-        else if (i < 80)
-            samples[i] = A2P_SENTINEL;
-        else
-            samples[i] = good;
-    }
-    unsigned exp_samples = 0, unrel_samples = 0;
-    int trial_outcome = a2p_classify_trial_samples(samples, 100, good, A2P_POISON_NONE, 1,
-                                                   &exp_samples, &unrel_samples);
-    assert(trial_outcome == A2P_TRIAL_UNRELATED);
-    assert(exp_samples == 0);
-    assert(unrel_samples == 80);
-
-    /* In a 32-trial series where trial 0 has these 80 bad samples and trials 1..31 are clean */
     fake_trial_state s;
     memset(&s, 0, sizeof s);
     s.fail_at_trial = 999; /* no abort */
@@ -140,7 +124,7 @@ static void test_reference_counted_once(void)
     assert(counts.clean == 31);
     assert(counts.unrelated == 0);
 
-    printf("PASS: reference trial with 80 non-good samples counts once as unrelated trial\n");
+    printf("PASS: reference trial with bad samples counts once as unrelated trial\n");
 }
 
 /* Abort path test: on -1, stop immediately; nothing submitted, reset or rewritten after failure */
@@ -167,6 +151,117 @@ static void test_abort_immediate_stop(void)
     printf("PASS: abort path stops immediately at trial 7: no subsequent trials called or rewritten\n");
 }
 
+/* Per-tile classification test: 256 tiles, each with 32 distinct sub-quads (8192 sample points) */
+static void test_per_tile_classification(void)
+{
+    size_t total_px = (size_t)A2P_RT_DIM * A2P_RT_DIM;
+    uint32_t *buf = (uint32_t *)malloc(total_px * sizeof(uint32_t));
+    assert(buf != NULL);
+
+    uint32_t good = 0xff112233u;
+
+    /* Fill all 8192 sub-quad sample points with good colour */
+    for (size_t i = 0; i < total_px; ++i)
+        buf[i] = A2P_COLOR_CLEAR;
+
+    for (unsigned t = 0; t < A2P_TILES; ++t) {
+        for (unsigned q = 0; q < A2P_SUBQUADS_PER_TILE; ++q) {
+            size_t off = a2p_subquad_sample_offset(t, q);
+            buf[off] = good;
+        }
+    }
+
+    /* 1. All clean test */
+    a2p_tile_report rep;
+    int outcome = a2p_classify_trial_tiles(buf, good, A2P_POISON_INDEX, 0, &rep);
+    assert(outcome == A2P_TRIAL_CLEAN);
+    assert(rep.clean_tile_count == 256);
+    assert(rep.expected_tile_count == 0);
+    assert(rep.unrelated_tile_count == 0);
+    assert(rep.all_clear == 0);
+
+    char mask_str[80];
+    a2p_format_bitmask(rep.expected_mask, mask_str, sizeof mask_str);
+    assert(strcmp(mask_str, "0000000000000000000000000000000000000000000000000000000000000000") == 0);
+
+    /* 2. Expected corruption in tiles 0, 42, 255 (set sub-quad center to CLEAR under INDEX poison) */
+    buf[a2p_subquad_sample_offset(0, 5)] = A2P_COLOR_CLEAR;
+    buf[a2p_subquad_sample_offset(42, 12)] = A2P_COLOR_CLEAR;
+    buf[a2p_subquad_sample_offset(255, 31)] = A2P_COLOR_CLEAR;
+
+    outcome = a2p_classify_trial_tiles(buf, good, A2P_POISON_INDEX, 0, &rep);
+    assert(outcome == A2P_TRIAL_EXPECTED);
+    assert(rep.expected_tile_count == 3);
+    assert(rep.unrelated_tile_count == 0);
+    assert(rep.clean_tile_count == 253);
+    assert((rep.expected_mask[0 / 32] & (1u << (0 % 32))) != 0);
+    assert((rep.expected_mask[42 / 32] & (1u << (42 % 32))) != 0);
+    assert((rep.expected_mask[255 / 32] & (1u << (255 % 32))) != 0);
+
+    /* 3. Unrelated corruption in tile 10 (unknown colour in sub-quad 1) */
+    buf[a2p_subquad_sample_offset(10, 1)] = 0xff998877u;
+    outcome = a2p_classify_trial_tiles(buf, good, A2P_POISON_INDEX, 0, &rep);
+    assert(outcome == A2P_TRIAL_UNRELATED);
+    assert(rep.unrelated_tile_count == 1);
+    assert(rep.expected_tile_count == 3);
+    assert((rep.unrelated_mask[10 / 32] & (1u << (10 % 32))) != 0);
+
+    free(buf);
+    printf("PASS: per-tile classification: clean, expected bitmask, unrelated sub-quad corruption\n");
+}
+
+/* Explicit test: an all-CLEAR completed reference must be classified as INVALID */
+static void test_all_clear_reference_invalid(void)
+{
+    size_t total_px = (size_t)A2P_RT_DIM * A2P_RT_DIM;
+    uint32_t *buf = (uint32_t *)malloc(total_px * sizeof(uint32_t));
+    assert(buf != NULL);
+
+    /* Buffer is pure A2P_COLOR_CLEAR */
+    for (size_t i = 0; i < total_px; ++i)
+        buf[i] = A2P_COLOR_CLEAR;
+
+    uint32_t good = 0xff112233u;
+    a2p_tile_report rep;
+
+    /* Classify in reference mode (is_reference = 1, poison_kind = A2P_POISON_NONE) */
+    int outcome = a2p_classify_trial_tiles(buf, good, A2P_POISON_NONE, 1, &rep);
+
+    /* Assert trial level classification */
+    assert(rep.all_clear == 1);
+    assert(outcome == A2P_TRIAL_UNRELATED); /* MUST NOT be clean, MUST NOT be expected */
+    assert(rep.clean_tile_count == 0);
+    assert(rep.unrelated_tile_count == 256);
+    for (unsigned w = 0; w < A2P_MASK_WORDS; ++w)
+        assert(rep.unrelated_mask[w] == 0xffffffffu);
+
+    /* Simulate 32-trial reference series where every trial was all-clear */
+    fake_trial_state s;
+    memset(&s, 0, sizeof s);
+    s.fail_at_trial = 999;
+    s.outcome_to_report = A2P_TRIAL_UNRELATED;
+    s.all_clear_to_report = 1;
+
+    a2p_series_counts ref_counts;
+    unsigned failed_trial = 0;
+    int rc = a2p_run_series_loop(&s, 0, A2P_POISON_NONE, 32, fake_trial_fn, &ref_counts, &failed_trial);
+    assert(rc == 0);
+    assert(ref_counts.clean == 0);
+    assert(ref_counts.unrelated == 32);
+    assert(ref_counts.all_clear_trials == 32);
+
+    /* Evaluate verdict for reference series: MUST be classified invalid */
+    a2p_series_counts dummy_counts = { .expected = 32, .unrelated = 0, .clean = 0, .all_clear_trials = 0 };
+    char reason[128] = {0};
+    const char *verdict = a2p_evaluate_verdict(ref_counts, dummy_counts, dummy_counts, dummy_counts,
+                                               "backend", NULL, NULL, reason, sizeof reason);
+    assert(strcmp(verdict, "invalid") == 0);
+    assert(strcmp(reason, "reference all-clear") == 0);
+
+    free(buf);
+    printf("PASS: all-CLEAR completed reference classified invalid (asserted explicitly)\n");
+}
+
 int main(void)
 {
     test_neg_poison_under_vertex();
@@ -177,6 +272,8 @@ int main(void)
     test_pos_expected_controls();
     test_reference_counted_once();
     test_abort_immediate_stop();
+    test_per_tile_classification();
+    test_all_clear_reference_invalid();
 
     printf("ALL A2P PROBE TESTS PASSED\n");
     return 0;
