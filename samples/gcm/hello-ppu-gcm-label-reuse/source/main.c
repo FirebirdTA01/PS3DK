@@ -553,6 +553,25 @@ static int run_probe_trial(CellGcmContextData *ctx,
     if (out_all_clear)
         *out_all_clear = rep.all_clear;
 
+    /* Debug: for first failing reference trial in a test series, print first 8 failing samples */
+    static int s_first_series_ref_fail_printed = 0;
+    if (is_ref && poison_kind != POISON_NONE && outcome != A2P_TRIAL_CLEAN && !s_first_series_ref_fail_printed) {
+        s_first_series_ref_fail_printed = 1;
+        crumb("A2P_SERIES_REF_FAIL mode=%s poison=%s trial=%u good=0x%08x (rgb=0x%06x) all_clear=%d (first 8 failing samples follow)",
+              get_mode_str(mode), get_poison_str(poison_kind), trial, good, good & 0x00ffffffu, rep.all_clear);
+        unsigned printed = 0;
+        for (unsigned t = 0; t < TILES && printed < 8; ++t) {
+            for (unsigned q = 0; q < SUBQUADS_PER_TILE && printed < 8; ++q) {
+                size_t off = a2p_subquad_sample_offset(t, q);
+                uint32_t pix = readback[off];
+                if ((pix & 0x00ffffffu) != (good & 0x00ffffffu)) {
+                    crumb("A2P_SERIES_REF_FAIL_SAMPLE #%u: tile=%u subquad=%u obs=0x%06x exp_good=0x%06x (full_obs=0x%08x full_good=0x%08x)",
+                          printed++, t, q, pix & 0x00ffffffu, good & 0x00ffffffu, pix, good);
+                }
+            }
+        }
+    }
+
     char exp_mask_str[80];
     char unrel_mask_str[80];
     a2p_format_bitmask(rep.expected_mask, exp_mask_str, sizeof exp_mask_str);
