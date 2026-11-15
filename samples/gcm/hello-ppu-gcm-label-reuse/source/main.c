@@ -10,8 +10,8 @@
  * Under LABEL_REUSE_HEAVY (A2 label probe):
  *   Workload and Geometry:
  *     - Target: 512x512 checked surface (rt), plus separate local-memory backlog surface (backlog_rt).
- *     - Backlog load: 4 full-screen draws of heavy fragment program (fp_heavy_nokil, 131 instructions)
- *       into backlog_rt to saturate GPU pipelines without polluting the checked surface.
+ *     - Backlog load: 32 full-screen draws of heavy fragment program (fp_heavy_nokil, 131 instructions)
+ *       into backlog_rt to saturate GPU pipelines without polluting the checked surface (~100 ms RSX time per trial).
  *     - Checked region: split into a 16x16 grid of 256 non-overlapping tiles over the 512x512 surface.
  *     - Within-tile repetition eliminated: each 32x32 tile cell contains 32 distinct sub-quads (4x8 grid,
  *       8x4 pixels each), each with its own 4 distinct vertices and 6 indices, with zero overlap between
@@ -35,8 +35,16 @@
  *       the recorded A2P_BEGIN point, encompassing setup, warm-up, and all trial series. The deadline bound is
  *       cooperative: a blocking GCM callback, flush, or file I/O can delay the next check. Expiry is terminal:
  *       halts immediately with exit code 3 without subsequent draws, label resets, buffer rewrites, or readbacks.
- *     - Estimated runtime (unmeasured): ~4-5 ms per trial; ~2.5 - 5 seconds total runtime across all 448 trials
- *       in the 14 series (unmeasured, cooperative wall-clock bound 180 s).
+ *     - Estimated runtime: ~100 ms whole-session average per trial (~45 s across all 448 trials in the 14 series
+ *       plus warm-up; cooperative monotonic wall-clock bound 180 s).
+ *     - Measured window observation: per-trial timestamp reports at command and back-end label points
+ *       (indices 512 and 513) and PPU timebase when command label was seen. A measured command-vs-back-end gap
+ *       with no corruption is an observation, not proof that all fetches finished early (observation latency,
+ *       cache or reuse effects and workload sensitivity remain alternatives); print the gap as measured and
+ *       draw no conclusion from it in the output.
+ *     - Observation wording rule: 'command control not caught' is the observation; never write that the workload
+ *       'did not let the command label pass while fetches were pending'. A session elapsed time divided by the
+ *       trial count is a whole-session average, not GPU time per trial.
  *
  *   Poison kinds:
  *     - VERTEX: rewrites on-target vertices 0..32767 to off-screen coordinates [2.0f, 3.0f].
@@ -79,6 +87,26 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define TEX_W               256u
 #define TEX_H               256u
 #define TRIALS              32u
+#define BACKLOG_PASSES      A2P_BACKLOG_PASSES
+
+#ifdef __powerpc__
+static inline uint64_t a2p_read_timebase(void)
+{
+    unsigned long long tb;
+    __asm__ __volatile__(
+        "1:\n\t"
+        "mftb  %[tb]\n\t"
+        "cmpwi 7,%[tb],0\n\t"
+        "beq-  7,1b"
+        : [tb] "=r"(tb) : : "cr7");
+    return (uint64_t)tb;
+}
+#else
+static inline uint64_t a2p_read_timebase(void)
+{
+    return 0;
+}
+#endif
 
 #define TILES_X             A2P_TILES_X
 #define TILES_Y             A2P_TILES_Y
@@ -125,6 +153,8 @@ _Static_assert(ARENA_USED_BYTES <= ARENA_ALLOC_BYTES, "used extent fits in alloc
 _Static_assert((ARENA_ALLOC_BYTES % (1024u * 1024u)) == 0, "ARENA_ALLOC_BYTES must be 1 MiB multiple");
 _Static_assert((FIFO_BYTES % (1024u * 1024u)) == 0, "FIFO_BYTES must be 1 MiB multiple");
 _Static_assert((HOST_BYTES % (1024u * 1024u)) == 0, "HOST_BYTES must be 1 MiB multiple");
+_Static_assert(A2P_REPORT_TS_CMD >= 512u && A2P_REPORT_TS_CMD <= 1023u, "app report index cmd");
+_Static_assert(A2P_REPORT_TS_BACKEND >= 512u && A2P_REPORT_TS_BACKEND <= 1023u, "app report index backend");
 
 #include <sys/sys_time.h>
 
@@ -351,7 +381,8 @@ static int run_probe_trial(CellGcmContextData *ctx,
                            unsigned trial,
                            uint32_t *p_serial,
                            int *out_trial_outcome,
-                           int *out_all_clear)
+                           int *out_all_clear,
+                           uint64_t *out_gap_us)
 {
     /* Check deadline before trial */
     uint64_t elapsed = a2p_elapsed_us();
@@ -387,8 +418,8 @@ static int run_probe_trial(CellGcmContextData *ctx,
     *(volatile uint32_t *)cellGcmGetLabelAddress(READBACK_LABEL) = 0u;
     uint32_t serial = ++(*p_serial);
 
-    /* 1. Backlog draws: 4 full-screen draws of heavy fragment program (fp_heavy_nokil)
-     * into a SEPARATE backlog surface to saturate pipelines without touching checked target */
+    /* 1. Backlog draws: BACKLOG_PASSES full-screen draws of heavy fragment program (fp_heavy_nokil)
+     * into a SEPARATE backlog surface to saturate pipelines without touching checked target (~100 ms RSX time) */
     arena_set_target(ctx, backlog_rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
     cellGcmSetVertexProgram(ctx, prog_heavy->vp, prog_heavy->vp_ucode);
     cellGcmSetVertexDataArray(ctx, (uint8_t)prog_heavy->position_index, 0, (uint8_t)sizeof(arena_vertex), 2,
@@ -401,7 +432,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
                               (uint32_t)offsetof(arena_vertex, uv));
     cellGcmSetFragmentProgram(ctx, prog_heavy->fp, prog_heavy->fp_offset);
     cellGcmSetInvalidateVertexCache(ctx);
-    for (unsigned h = 0; h < 4; ++h) {
+    for (unsigned h = 0; h < BACKLOG_PASSES; ++h) {
         cellGcmSetDrawIndexArray(ctx, CELL_GCM_PRIMITIVE_TRIANGLES, 6, CELL_GCM_DRAW_INDEX_ARRAY_TYPE_16,
                                  CELL_GCM_LOCATION_MAIN, arena_off + ARENA_QUAD_IBO);
     }
@@ -413,8 +444,10 @@ static int run_probe_trial(CellGcmContextData *ctx,
     cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
 
     /* 3. Emit early label if MODE_EARLY */
-    if (mode == MODE_EARLY)
+    if (mode == MODE_EARLY) {
+        cellGcmSetTimeStamp(ctx, A2P_REPORT_TS_CMD);
         cellGcmSetWriteCommandLabel(ctx, DONE_LABEL, serial);
+    }
 
     /* 4. Draw 256 non-overlapping tiles with 32 distinct sub-quads per tile */
     arena_bind(ctx, prog_main, arena_off + ARENA_VBO, arena_off + ARENA_TEX, TEX_W, TEX_H);
@@ -428,19 +461,30 @@ static int run_probe_trial(CellGcmContextData *ctx,
                                  CELL_GCM_LOCATION_MAIN, tile_ibo_off);
     }
 
-    /* 5. Issue completion label for mode under test */
+    /* 5. Issue completion label for mode under test and measurement timestamps */
+    cellGcmSetTimeStamp(ctx, A2P_REPORT_TS_CMD);
     if (mode == MODE_BACKEND || mode == MODE_REFERENCE)
         cellGcmSetWriteBackEndLabel(ctx, DONE_LABEL, serial);
     else if (mode == MODE_TEXTURE)
         cellGcmSetWriteTextureLabel(ctx, DONE_LABEL, serial);
     else if (mode == MODE_COMMAND)
         cellGcmSetWriteCommandLabel(ctx, DONE_LABEL, serial);
+    cellGcmSetTimeStamp(ctx, A2P_REPORT_TS_BACKEND);
 
     /* Publish draw commands and DONE_LABEL; readback transfer is deferred until after poison rewrite */
     cellGcmFlush(ctx);
 
-    /* Poll completion label */
+    /* Check deadline before label wait and poison */
+    elapsed = a2p_elapsed_us();
+    if (a2p_deadline_expired(elapsed)) {
+        crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-poison", (unsigned long long)elapsed);
+        return A2P_RC_DEADLINE;
+    }
+
+    /* Poll completion label. The deadline is tested first on each poll via a2p_wait_decision().
+     * On pass, poison immediately with no intervening work. */
     uint32_t polls = 0;
+    uint64_t seen_tb = 0;
     for (;;) {
         int passed = cellGcmIsLabelPassed(DONE_LABEL, serial);
         elapsed = a2p_elapsed_us();
@@ -449,8 +493,21 @@ static int run_probe_trial(CellGcmContextData *ctx,
             crumb("A2P_ABORT deadline elapsed_us=%llu at=done-label-wait", (unsigned long long)elapsed);
             return A2P_RC_DEADLINE;
         }
-        if (decision == A2P_WAIT_DONE)
+        if (decision == A2P_WAIT_DONE) {
+            seen_tb = a2p_read_timebase();
+            /* Immediate poison write: no intervening work between pass and poison write */
+            if (mode != MODE_REFERENCE && poison_kind != POISON_NONE) {
+                if (poison_kind == POISON_VERTEX) {
+                    poison_vertices(vbo);
+                } else if (poison_kind == POISON_INDEX) {
+                    fill_poison_indices(ibo);
+                } else if (poison_kind == POISON_TEXTURE) {
+                    arena_fill(tex, TEX_W * TEX_H, COLOR_POISON);
+                }
+            }
+            __asm__ __volatile__("sync" ::: "memory");
             break;
+        }
         if (++polls > SPIN_POLLS + POLLS) {
             crumb("A2P_FAIL done-label wait mode=%s poison=%s trial=%u label=0x%08x serial=%u",
                   get_mode_str(mode), get_poison_str(poison_kind), trial,
@@ -461,25 +518,6 @@ static int run_probe_trial(CellGcmContextData *ctx,
             usleep(5);
     }
     uint32_t seen_val = *(volatile uint32_t *)cellGcmGetLabelAddress(DONE_LABEL);
-
-    /* Check deadline before the poison transition */
-    elapsed = a2p_elapsed_us();
-    if (a2p_deadline_expired(elapsed)) {
-        crumb("A2P_ABORT deadline elapsed_us=%llu at=pre-poison", (unsigned long long)elapsed);
-        return A2P_RC_DEADLINE;
-    }
-
-    /* Poison write: publication order is label seen -> poison written -> fence */
-    if (mode != MODE_REFERENCE && poison_kind != POISON_NONE) {
-        if (poison_kind == POISON_VERTEX) {
-            poison_vertices(vbo);
-        } else if (poison_kind == POISON_INDEX) {
-            fill_poison_indices(ibo);
-        } else if (poison_kind == POISON_TEXTURE) {
-            arena_fill(tex, TEX_W * TEX_H, COLOR_POISON);
-        }
-    }
-    __asm__ __volatile__("sync" ::: "memory");
 
     /* Check deadline before readback */
     elapsed = a2p_elapsed_us();
@@ -503,6 +541,12 @@ static int run_probe_trial(CellGcmContextData *ctx,
         return rb_rc;
     }
 
+    uint64_t ts_cmd = cellGcmGetTimeStamp(A2P_REPORT_TS_CMD);
+    uint64_t ts_backend = cellGcmGetTimeStamp(A2P_REPORT_TS_BACKEND);
+    uint64_t gap_us = (ts_backend >= ts_cmd) ? (ts_backend - ts_cmd) / 1000ULL : 0;
+    if (out_gap_us)
+        *out_gap_us = gap_us;
+
     /* Check readback pixels using tile classifier across all 8,192 sub-quad centers */
     a2p_tile_report rep;
     int is_ref = (mode == MODE_REFERENCE || poison_kind == POISON_NONE);
@@ -516,9 +560,10 @@ static int run_probe_trial(CellGcmContextData *ctx,
     a2p_format_bitmask(rep.expected_mask, exp_mask_str, sizeof exp_mask_str);
     a2p_format_bitmask(rep.unrelated_mask, unrel_mask_str, sizeof unrel_mask_str);
 
-    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u poison_order=seen->written->sync "
+    crumb("A2P_TRIAL mode=%s poison=%s trial=%u label_seen=%u seen_tb=%llu gap_us=%llu poison_order=seen->written->sync "
           "expected=%u unrelated=%u exp_tiles=%u:%s unrel_tiles=%u:%s polls=%u",
           get_mode_str(mode), get_poison_str(poison_kind), trial, seen_val,
+          (unsigned long long)seen_tb, (unsigned long long)gap_us,
           rep.expected_tile_count, rep.unrelated_tile_count,
           rep.expected_tile_count, exp_mask_str,
           rep.unrelated_tile_count, unrel_mask_str,
@@ -536,16 +581,21 @@ typedef struct {
     uint32_t backlog_rt_off;
     uint32_t rt_depth_off;
     uint32_t *p_serial;
+    uint64_t gaps[TRIALS];
 } a2p_series_ctx;
 
 static int a2p_trial_callback(void *user_ctx, int mode, int poison_kind, unsigned trial,
                               int *out_trial_outcome, int *out_all_clear)
 {
     a2p_series_ctx *c = (a2p_series_ctx *)user_ctx;
-    return run_probe_trial(c->ctx, c->prog_main, c->prog_heavy, c->arena, c->arena_off,
-                           c->rt_off, c->backlog_rt_off, c->rt_depth_off,
-                           mode, poison_kind, trial, c->p_serial,
-                           out_trial_outcome, out_all_clear);
+    uint64_t trial_gap = 0;
+    int rc = run_probe_trial(c->ctx, c->prog_main, c->prog_heavy, c->arena, c->arena_off,
+                             c->rt_off, c->backlog_rt_off, c->rt_depth_off,
+                             mode, poison_kind, trial, c->p_serial,
+                             out_trial_outcome, out_all_clear, &trial_gap);
+    if (trial < TRIALS)
+        c->gaps[trial] = trial_gap;
+    return rc;
 }
 
 static int run_series(CellGcmContextData *ctx,
@@ -570,7 +620,8 @@ static int run_series(CellGcmContextData *ctx,
         .rt_off = rt_off,
         .backlog_rt_off = backlog_rt_off,
         .rt_depth_off = rt_depth_off,
-        .p_serial = p_serial
+        .p_serial = p_serial,
+        .gaps = {0}
     };
 
     unsigned failed_trial = 0;
@@ -583,10 +634,11 @@ static int run_series(CellGcmContextData *ctx,
         }
         return rc;
     }
+    a2p_gap_stats gap_stats = a2p_compute_gap_stats(sctx.gaps, TRIALS);
     char summary_line[256];
     a2p_format_series_summary(summary_line, sizeof summary_line,
                               get_mode_str(mode), get_poison_str(poison_kind),
-                              out_counts, TRIALS, a2p_elapsed_us());
+                              out_counts, TRIALS, a2p_elapsed_us(), &gap_stats);
     crumb("%s", summary_line);
     return 0;
 }
@@ -631,8 +683,10 @@ int main(void)
     crumb("A2P_SESSION session=%llu (crumb file is append-only; this run's lines follow)",
           (unsigned long long)g_session_start_us);
     crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u "
+          "backlog_passes=%u estimated_session_s=~46s (whole-session average ~100 ms per trial) "
           "deadline_limit_us=%llu deadline_mode=cooperative elapsed_us=%llu",
           VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES,
+          (unsigned)A2P_BACKLOG_PASSES,
           (unsigned long long)A2P_SESSION_LIMIT_US,
           (unsigned long long)a2p_elapsed_us());
 
@@ -675,7 +729,7 @@ int main(void)
         int outcome = A2P_TRIAL_CLEAN;
         int all_clear = 0;
         int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
-                                 MODE_REFERENCE, POISON_NONE, w, &serial, &outcome, &all_clear);
+                                 MODE_REFERENCE, POISON_NONE, w, &serial, &outcome, &all_clear, NULL);
         if (rc != 0) {
             crumb("A2P_ABORT warmup trial=%u", w);
             return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;

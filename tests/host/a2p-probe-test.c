@@ -401,7 +401,7 @@ static void test_abort_deadline_fake_clock(void)
 
     /* Elapsed per-series reporting verification */
     char summary[256];
-    a2p_format_series_summary(summary, sizeof summary, "backend", "vertex", &counts, 32, 12345678ULL);
+    a2p_format_series_summary(summary, sizeof summary, "backend", "vertex", &counts, 32, 12345678ULL, NULL);
     assert(strstr(summary, "A2P mode=backend poison=vertex expected=0/32 unrelated=0/32 clean=1/32 elapsed_us=12345678") != NULL);
 
     printf("PASS: cooperative monotonic deadline: all checkpoints, exact boundaries (limit and limit-1), and per-series elapsed reporting\n");
@@ -624,6 +624,51 @@ static void test_wait_decision_deadline_first(void)
     printf("PASS: wait decision tests the deadline first: expired with the label passed is EXPIRED, incl. last trial\n");
 }
 
+static void test_gap_stats_computation(void)
+{
+    /* Application report index reservations */
+    assert(A2P_REPORT_TS_CMD >= 512u && A2P_REPORT_TS_CMD <= 1023u);
+    assert(A2P_REPORT_TS_BACKEND >= 512u && A2P_REPORT_TS_BACKEND <= 1023u);
+    assert(A2P_REPORT_TS_CMD != A2P_REPORT_TS_BACKEND);
+
+    /* 1. Empty / 0 count */
+    a2p_gap_stats s0 = a2p_compute_gap_stats(NULL, 0);
+    assert(s0.min_us == 0 && s0.max_us == 0 && s0.median_us == 0);
+
+    /* 2. Single element */
+    uint64_t one[] = {12345ULL};
+    a2p_gap_stats s1 = a2p_compute_gap_stats(one, 1);
+    assert(s1.min_us == 12345ULL && s1.max_us == 12345ULL && s1.median_us == 12345ULL);
+
+    /* 3. Two elements */
+    uint64_t two[] = {100ULL, 200ULL};
+    a2p_gap_stats s2 = a2p_compute_gap_stats(two, 2);
+    assert(s2.min_us == 100ULL && s2.max_us == 200ULL && s2.median_us == 150ULL);
+
+    /* 4. Three elements (odd) */
+    uint64_t three[] = {300ULL, 100ULL, 200ULL};
+    a2p_gap_stats s3 = a2p_compute_gap_stats(three, 3);
+    assert(s3.min_us == 100ULL && s3.max_us == 300ULL && s3.median_us == 200ULL);
+
+    /* 5. 32 elements (full series) unsorted */
+    uint64_t series[32];
+    for (unsigned i = 0; i < 32; ++i)
+        series[i] = (uint64_t)((31 - i) * 1000u); /* 31000 down to 0 */
+    a2p_gap_stats s32 = a2p_compute_gap_stats(series, 32);
+    assert(s32.min_us == 0);
+    assert(s32.max_us == 31000ULL);
+    /* Middle two in sorted 0..31000 are 15000 and 16000 -> median 15500 */
+    assert(s32.median_us == 15500ULL);
+
+    /* 6. Formatting with gap stats */
+    a2p_series_counts counts = { .expected = 0, .unrelated = 0, .clean = 32, .all_clear_trials = 0 };
+    char summary[256];
+    a2p_format_series_summary(summary, sizeof summary, "command", "vertex", &counts, 32, 5000000ULL, &s32);
+    assert(strstr(summary, "gap_us_median=15500 gap_us_min=0 gap_us_max=31000") != NULL);
+
+    printf("PASS: gap stats computation: min, max, median, odd/even counts, and series summary formatting\n");
+}
+
 int main(void)
 {
     test_neg_poison_under_vertex();
@@ -639,6 +684,7 @@ int main(void)
     test_abort_deadline_fake_clock();
     test_deadline_boundary();
     test_wait_decision_deadline_first();
+    test_gap_stats_computation();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 

@@ -35,6 +35,9 @@
 #define A2P_COLOR_CLEAR         0xff000000u
 #define A2P_COLOR_POISON        0xffff00ffu
 #define A2P_SENTINEL            0x5a5a5a5au
+#define A2P_BACKLOG_PASSES      32u
+#define A2P_REPORT_TS_CMD       512u
+#define A2P_REPORT_TS_BACKEND   513u
 /* Monotonic session deadline: 180 s wall-clock budget starting at A2P_BEGIN (including setup and warm-up).
  * The bound is cooperative: a blocking GCM callback, flush, or file I/O can delay the next check.
  * Expiry is terminal: stops immediately, preventing any further draws, resets, rewrites, or readbacks.
@@ -315,14 +318,76 @@ static inline const char *a2p_evaluate_verdict(a2p_series_counts ref,
     return "inconclusive";
 }
 
-/* Format the per-series summary line with elapsed cooperative runtime */
+typedef struct {
+    uint64_t min_us;
+    uint64_t max_us;
+    uint64_t median_us;
+} a2p_gap_stats;
+
+/* Pure helper: compute min, max and median of timestamp gaps across trials.
+ * A measured command-vs-back-end gap with no corruption is an observation, not proof that all fetches
+ * finished early (observation latency, cache or reuse effects and workload sensitivity remain alternatives);
+ * gaps are reported as measured with no conclusions drawn. */
+static inline a2p_gap_stats a2p_compute_gap_stats(const uint64_t *gaps, unsigned count)
+{
+    a2p_gap_stats stats = {0, 0, 0};
+    if (count == 0 || !gaps)
+        return stats;
+
+    uint64_t min_v = gaps[0];
+    uint64_t max_v = gaps[0];
+    for (unsigned i = 1; i < count; ++i) {
+        if (gaps[i] < min_v) min_v = gaps[i];
+        if (gaps[i] > max_v) max_v = gaps[i];
+    }
+    stats.min_us = min_v;
+    stats.max_us = max_v;
+
+    uint64_t sorted[64];
+    unsigned n = count > 64 ? 64 : count;
+    for (unsigned i = 0; i < n; ++i)
+        sorted[i] = gaps[i];
+
+    for (unsigned i = 1; i < n; ++i) {
+        uint64_t key = sorted[i];
+        int j = (int)i - 1;
+        while (j >= 0 && sorted[j] > key) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = key;
+    }
+
+    if (n % 2 == 1) {
+        stats.median_us = sorted[n / 2];
+    } else {
+        stats.median_us = (sorted[n / 2 - 1] + sorted[n / 2]) / 2ULL;
+    }
+    return stats;
+}
+
+/* Format the per-series summary line with elapsed cooperative runtime and optional gap stats */
 static inline int a2p_format_series_summary(char *buf, size_t buflen,
                                             const char *mode_str,
                                             const char *poison_str,
                                             const a2p_series_counts *counts,
                                             unsigned trials,
-                                            uint64_t elapsed_us)
+                                            uint64_t elapsed_us,
+                                            const a2p_gap_stats *gap_stats)
 {
+    if (gap_stats) {
+        return snprintf(buf, buflen,
+                        "A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u "
+                        "gap_us_median=%llu gap_us_min=%llu gap_us_max=%llu elapsed_us=%llu",
+                        mode_str, poison_str,
+                        counts->expected, trials,
+                        counts->unrelated, trials,
+                        counts->clean, trials,
+                        (unsigned long long)gap_stats->median_us,
+                        (unsigned long long)gap_stats->min_us,
+                        (unsigned long long)gap_stats->max_us,
+                        (unsigned long long)elapsed_us);
+    }
     return snprintf(buf, buflen,
                     "A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u elapsed_us=%llu",
                     mode_str, poison_str,
