@@ -129,8 +129,9 @@ typedef struct auto_wire_frame {
     uint32_t label_runs;        /* u32@384: complete runs */
     uint32_t label_broken;      /* u32@388: runs ended by a gap over the bound, another label or a flip-wait scope */
     uint32_t label_spanning;    /* u32@392: runs that crossed a boundary of this frame (charged to neither) */
-    uint32_t label_index;       /* u32@396: the complete runs' label + 1; 0 none, 0xffffffff several or unknown */
-    uint64_t label_cadence;     /* u64@400: summed bounded gaps of the complete runs; u64@408 reserved zero */
+    uint32_t label_index;       /* u32@396: the complete runs' label + 1; 0 none, 0xffffffff several */
+    uint64_t label_cadence;     /* u64@400: summed bounded gaps of the complete runs, over every label */
+    uint64_t label_one;         /* u64@408: the largest total of any ONE label's complete runs (never a sum) */
     /* timed-range block at 416 (TAG): u64@416/424/432 covered ARRAY/INDEX/CLEAR visits left untimed because timing
      * was limited to timed ranges and none was open (counted in visited, not observed, not in the ten exclusions);
      * u32@440 AUTO ranges refused in this frame (depth, no pair, no room, a segment build, another frame); u32@444

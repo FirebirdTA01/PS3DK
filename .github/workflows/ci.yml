@@ -292,7 +292,7 @@ jobs:
           for mutant in tag-silent tag-at-call range-end-silent; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case tags --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
-          for mutant in label-silent label-switch-silent; do
+          for mutant in label-silent label-switch-silent label-stride-4 label-sum label-unknown-run; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case labels --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case segments --mutant one-record-chunks --out "$RUNNER_TEMP/auto-runtime-one-record-chunks-mutant"

@@ -1178,7 +1178,21 @@ void ps3dk_prof__auto_flip_status_end(uint64_t before,uint32_t status)
 /* Label-poll cadence (cellGcmIsLabelPassed / cellGcmIsLabelValuePassed in a PS3_PROF_AUTO unit): the flip-status
  * cadence rules for one label at a time. A poll of another label, a gap over the bound or a flip-wait scope ends the
  * open run as broken; a passed poll closes it as complete. Like flip-status cadence it shows how often the owner
- * looked, not that it had nothing else to do. label is the index, or 0xffffffff when the address is not a label. */
+ * looked, not that it had nothing else to do. label is the index, or 0xffffffff when the address is not a label slot:
+ * such a poll has no identity, so it ends an open run as broken and never starts or completes one. Cadence is kept per
+ * label within the row: label_one is the largest one-label total, the only value the reader's polling share uses. */
+static void label_credit(auto_capture *a,auto_wire_frame *f,uint32_t id,uint64_t ticks)
+{
+    uint32_t i;
+    if(a->label_row!=f->frame+1u) {a->label_row=f->frame+1u;a->label_n=0;}
+    for(i=0;i<a->label_n && a->label_id[i]!=id;i++) {}
+    if(i==a->label_n) {
+        if(i==AUTO_LABEL_TRACK) return; /* not credited: never merged into another label's total */
+        a->label_id[i]=id;a->label_sum[i]=0;a->label_n++;
+    }
+    add64(&a->label_sum[i],ticks);
+    if(a->label_sum[i]>f->label_one) f->label_one=a->label_sum[i];
+}
 static void label_close(auto_capture *a,int complete)
 {
     auto_wire_frame *f=&a->coverage.live;
@@ -1187,9 +1201,10 @@ static void label_close(auto_capture *a,int complete)
     if(a->label_spanning) add32(&f->label_spanning);
     else if(!complete) add32(&f->label_broken);
     else {
-        uint32_t id=a->label_at==0xffffffffu ? 0xffffffffu:a->label_at+1u;
+        uint32_t id=a->label_at+1u;
         add32(&f->label_runs);add64(&f->label_cadence,a->label_ticks);
         f->label_index=!f->label_index || f->label_index==id ? id:0xffffffffu;
+        label_credit(a,f,id,a->label_ticks);
     }
 }
 static int label_gap(auto_capture *a,uint64_t before)
@@ -1210,6 +1225,7 @@ void ps3dk_prof__auto_label_poll_end(uint64_t before,uint32_t label,int passed)
     auto_capture *a;
     if(!before || !(a=owner_capture(NULL,0)) || a->flip_wait_open) return;
     if(a->label_open && a->label_at!=label) label_close(a,0);
+    if(label==0xffffffffu) return; /* no identity: no run */
     if(!passed) {
         if(a->label_open && !label_gap(a,before)) label_close(a,0);
         if(!a->label_open) {a->label_open=1;a->label_spanning=0;a->label_ticks=0;a->label_at=label;}
@@ -1331,12 +1347,12 @@ void ps3dk_prof__auto_test_unrepresented_preset(uint32_t v)
 {
     if(capture && capture->coverage.active) capture->coverage.live.segment_unrepresented=v;
 }
-/* Owner thread only: the open row's label-poll block (runs, broken, spanning, label + 1, ticks). */
-void ps3dk_prof__auto_test_label(uint64_t out[5])
+/* Owner thread only: the open row's label-poll block (runs, broken, spanning, label + 1, ticks, one-label ticks). */
+void ps3dk_prof__auto_test_label(uint64_t out[6])
 {
     const auto_wire_frame *f=capture && capture->coverage.active ? &capture->coverage.live:NULL;
     out[0]=f ? f->label_runs:0;out[1]=f ? f->label_broken:0;out[2]=f ? f->label_spanning:0;
-    out[3]=f ? f->label_index:0;out[4]=f ? f->label_cadence:0;
+    out[3]=f ? f->label_index:0;out[4]=f ? f->label_cadence:0;out[5]=f ? f->label_one:0;
 }
 /* Owner thread only: whole-CALL brackets begun, and CALLs that needed one and got none. */
 void ps3dk_prof__auto_test_call_brackets(uint64_t out[2])

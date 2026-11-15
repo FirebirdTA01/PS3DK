@@ -194,10 +194,11 @@ static inline int ps3tc_gcm_label_passed(const volatile uint32_t *label, uint32_
 static inline int cellGcmIsLabelValuePassed(const volatile uint32_t *label, uint32_t target)
 {
 #ifdef PS3TC_GCM_LABEL_POLL_OBSERVED
-    /* the label index when the address is in the label area (observation only) */
+    /* the label index when the address is a label slot (observation only): GCM labels are 16 bytes apart; any other
+     * address has no identity (0xffffffff), and the profiler never forms a polling run from it */
     uintptr_t base = (uintptr_t)cellGcmGetLabelAddress(0), at = (uintptr_t)label;
-    uint32_t index = at >= base && at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?
-                     (uint32_t)((at - base) / 4u) : 0xffffffffu;
+    uint32_t index = at >= base && at < base + 16u * CELL_GCM_LABEL_COUNT && !((at - base) & 15u) ?
+                     (uint32_t)((at - base) / 16u) : 0xffffffffu;
     return ps3tc_gcm_label_passed(label, target, index);
 #else
     return ps3tc_gcm_label_passed(label, target, 0xffffffffu);

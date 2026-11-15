@@ -9,6 +9,9 @@
 #include "auto_clock.h"
 #include "../rsx/gpu_port_gcm.h"
 #include <ps3dk/prof_auto.h>
+
+/* labels whose complete-run cadence one coverage row tracks separately (label_one); later labels are not credited */
+#define AUTO_LABEL_TRACK 8u
 #if !defined(PS3DK_PROF_WITH_SPU) || !defined(PS3DK_PROF_WITH_FIFO)
 #error "automatic RSX observation requires the extension and FIFO provider"
 #endif
@@ -123,6 +126,10 @@ typedef struct auto_capture {
     /* owner only: label-poll cadence, the same rules for cellGcmIsLabelPassed reads of one label (label_at) */
     uint32_t label_open, label_spanning, label_at;
     uint64_t label_last, label_ticks;
+    /* owner only: the open row's per-label totals of complete runs (label_row = its frame + 1; at most
+     * AUTO_LABEL_TRACK labels, later ones are not credited) */
+    uint64_t label_row, label_sum[AUTO_LABEL_TRACK];
+    uint32_t label_n, label_id[AUTO_LABEL_TRACK];
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;
