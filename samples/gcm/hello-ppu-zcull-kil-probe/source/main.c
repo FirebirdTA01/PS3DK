@@ -7,9 +7,9 @@
  * Note on ZPASS Pixel Counting in Emulation vs Hardware:
  *   cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_TRUE) and cellGcmSetClearReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT)
  *   are invoked unconditionally across all test cases (both zcull=off and zcull=on).
- *   In RPCS3 emulation, ZPASS report reads 0 in every zcull-off case and 14,745,600 with zcull-on.
- *   On physical PS3 hardware, ZPASS pixel count reports count passing fragments regardless of whether
- *   Zcull acceleration is active. The zpass_enabled=1 state is printed per case.
+ *   In RPCS3 emulation, ZPASS report reads 0 in every zcull-off case and 14,745,600 with zcull-on;
+ *   expected on hardware, to be measured (counting passing fragments regardless of whether Zcull is active).
+ *   The zpass_enabled=1 state is printed per case.
  */
 
 #include <stdint.h>
@@ -546,7 +546,7 @@ static int run_case(CellGcmContextData *ctx,
 		       zcull_on ? "on" : "off",
 		       median->zpass,
 		       median->zpass / 16u,
-		       (!zcull_on && median->zpass == 0) ? " [RPCS3 emulator reads 0 when zcull=off; on hardware ZPASS counts passing samples regardless of Zcull state]" : "");
+		       (!zcull_on && median->zpass == 0) ? " [RPCS3 emulator reads 0 when zcull=off; expected on hardware, to be measured]" : "");
 	}
 	return 0;
 }
