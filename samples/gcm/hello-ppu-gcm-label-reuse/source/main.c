@@ -129,13 +129,13 @@ static inline uint64_t a2p_read_timebase(void)
 #define TOTAL_VERTS         A2P_TOTAL_VERTS     /* 32,776 vertices */
 
 #define ARENA_VBO           0x000000u /* 32,776 * 16 = 524,416 bytes (~512 KiB) */
-#define ARENA_QUAD_IBO      0x090000u /* 16-bit indices for backlog quad (12 bytes) */
-#define ARENA_IBO           0x0a0000u /* 32-bit indices: 49,152 * 4 = 192 KiB */
-#define ARENA_TEX           0x0e0000u /* 256 * 256 * 4 = 256 KiB */
-#define ARENA_READBACK      0x120000u /* 512 * 512 * 4 = 1 MiB */
-#define ARENA_USED_BYTES    (ARENA_READBACK + RT * RT * 4) /* 0x220000 = 2,228,224 bytes (~2.125 MiB) */
-/* gcm_host_buffer_alloc requires 1 MiB multiples; round used extent up to next 1 MiB multiple (3 MiB) */
-#define ARENA_ALLOC_BYTES   (3u * 1024u * 1024u)
+#define ARENA_QUAD_IBO      0x080100u /* 16-bit indices for backlog quad (12 bytes) */
+#define ARENA_IBO           0x080180u /* 32-bit indices: 49,152 * 4 = 192 KiB */
+#define ARENA_TEX           0x0c0000u /* 256 * 256 * 4 = 256 KiB (ends at 0x100000) */
+#define ARENA_READBACK      0x100000u /* 512 * 512 * 4 = 1 MiB (Page 1: 0x100000..0x200000) */
+#define ARENA_USED_BYTES    (ARENA_READBACK + RT * RT * 4) /* 0x200000 = 2,097,152 bytes (2 MiB) */
+/* gcm_host_buffer_alloc requires 1 MiB multiples; used extent is exactly 2 MiB */
+#define ARENA_ALLOC_BYTES   (2u * 1024u * 1024u)
 #define ARENA_BYTES         ARENA_ALLOC_BYTES
 
 #define FIFO_BYTES          (1u * 1024u * 1024u)
@@ -432,7 +432,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
                               (uint32_t)offsetof(arena_vertex, uv));
     cellGcmSetFragmentProgram(ctx, prog_heavy->fp, prog_heavy->fp_offset);
     cellGcmSetInvalidateVertexCache(ctx);
-    for (unsigned h = 0; h < BACKLOG_PASSES; ++h) {
+    for (unsigned h = 0; h < (mode == MODE_REFERENCE && poison_kind == POISON_NONE ? 0 : BACKLOG_PASSES); ++h) {
         cellGcmSetDrawIndexArray(ctx, CELL_GCM_PRIMITIVE_TRIANGLES, 6, CELL_GCM_DRAW_INDEX_ARRAY_TYPE_16,
                                  CELL_GCM_LOCATION_MAIN, arena_off + ARENA_QUAD_IBO);
     }
@@ -450,9 +450,9 @@ static int run_probe_trial(CellGcmContextData *ctx,
     }
 
     /* 4. Draw 256 non-overlapping tiles with 32 distinct sub-quads per tile */
-    arena_bind(ctx, prog_main, arena_off + ARENA_VBO, arena_off + ARENA_TEX, TEX_W, TEX_H);
     cellGcmSetInvalidateVertexCache(ctx);
     cellGcmSetInvalidateTextureCache(ctx, CELL_GCM_INVALIDATE_TEXTURE);
+    arena_bind(ctx, prog_main, arena_off + ARENA_VBO, arena_off + ARENA_TEX, TEX_W, TEX_H);
 
     for (unsigned t = 0; t < TILES; ++t) {
         uint32_t tile_ibo_off = arena_off + ARENA_IBO + t * INDICES_PER_TILE * (uint32_t)sizeof(uint32_t);
