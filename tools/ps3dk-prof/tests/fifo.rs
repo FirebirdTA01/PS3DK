@@ -41,9 +41,9 @@ fn flag_gate_full_and_partial_headers() {
         let c = reader::read(&base(flags).bytes()[..13]).unwrap();
         assert!(c.fifo.is_some(), "partial flags {flags}");
     }
-    // an unknown high flag bit refuses (byte 13 value 1 is bit 8, COUNTERS, which combines with bit 6)
+    // an unknown high flag bit refuses (byte 13 values 1 and 2 are bit 8 COUNTERS and bit 9 WINDOWS)
     let mut b = base(65).bytes();
-    b[13] = 2;
+    b[13] = 4;
     assert_eq!(reader::read(&b).unwrap_err().rule, Rule::FileFlagsNonzero);
     // flag-clear partial diagnostics are unchanged
     let e = reader::read(&base(2).bytes()[..13]).unwrap_err();

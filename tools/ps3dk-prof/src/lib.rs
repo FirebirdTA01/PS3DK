@@ -38,13 +38,16 @@ pub mod report;
 pub mod rsx_capture;
 pub mod spu_ticks;
 pub mod waits;
+pub mod windows;
 
 pub use analysis::{
     compare, compare_with, load, load_file, load_prefix, AbResult, AbRow, Analysis, Attribution, CompareOptions,
     Comparison, ComparisonKind, FrameElapsed, LaneView, Outcome, SpanView, SpansN, TokenOutcome,
     TokenRef, PrefixAcceptance, Work, ZoneStats,
 };
-pub use model::{Capture, Incomplete, Malformed, Metric, Rule, Verdict};
+pub use model::{
+    Capture, CaptureWindow, Incomplete, Malformed, Metric, Rule, Verdict, WindowKind, WindowReason, WindowSource,
+};
 
 pub mod arcs;
 pub mod companions;
