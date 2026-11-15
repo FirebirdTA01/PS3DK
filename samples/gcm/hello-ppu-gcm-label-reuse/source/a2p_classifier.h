@@ -43,6 +43,12 @@ enum {
     A2P_POISON_TEXTURE
 };
 
+/* Convenience aliases for source compatibility */
+#define POISON_NONE    A2P_POISON_NONE
+#define POISON_VERTEX  A2P_POISON_VERTEX
+#define POISON_INDEX   A2P_POISON_INDEX
+#define POISON_TEXTURE A2P_POISON_TEXTURE
+
 enum {
     A2P_SAMPLE_GOOD = 0,
     A2P_SAMPLE_EXPECTED,
@@ -127,12 +133,18 @@ static inline size_t a2p_subquad_sample_offset(unsigned tile_index, unsigned sub
 /* Classify all 256 tiles across the 512x512 surface.
  * Each tile is evaluated over its 32 distinct sub-rectangles (8192 total samples).
  *
- * Outcome logic:
+ * Tile mask rules:
+ *   - A tile holding unrelated samples is set in unrelated_mask.
+ *   - A tile holding expected samples is set in expected_mask.
+ *   - A tile holding BOTH is set in BOTH masks.
+ *   - A tile with neither is clean.
+ *
+ * Trial outcome logic:
  *   - If is_reference:
  *       Every tile must be clean (all 32 sub-rectangles GOOD).
  *       An all-CLEAR reference or any non-good sub-rectangle returns A2P_TRIAL_UNRELATED.
  *   - If not reference:
- *       Any unrelated sub-rectangle marks the tile and trial as A2P_TRIAL_UNRELATED.
+ *       Any unrelated sub-rectangle marks the trial as A2P_TRIAL_UNRELATED (invalid priority).
  *       Else if expected sub-rectangles > 0 returns A2P_TRIAL_EXPECTED.
  *       Else returns A2P_TRIAL_CLEAN.
  */
@@ -165,13 +177,16 @@ static inline int a2p_classify_trial_tiles(const volatile uint32_t *readback,
         unsigned word = t / 32u;
         uint32_t bit = 1u << (t % 32u);
 
+        /* Set in BOTH masks if both types of corruption exist in the tile */
         if (tile_unrel) {
             report->unrelated_mask[word] |= bit;
             report->unrelated_tile_count++;
-        } else if (tile_exp) {
+        }
+        if (tile_exp) {
             report->expected_mask[word] |= bit;
             report->expected_tile_count++;
-        } else {
+        }
+        if (!tile_unrel && !tile_exp) {
             report->clean_tile_count++;
         }
     }
@@ -289,6 +304,41 @@ static inline int a2p_run_series_loop(void *user_ctx, int mode, int poison_kind,
             if (out_failed_trial)
                 *out_failed_trial = t;
             return -1; /* Immediate abort */
+        }
+        if (all_clear)
+            out_counts->all_clear_trials++;
+        if (outcome == A2P_TRIAL_EXPECTED)
+            out_counts->expected++;
+        else if (outcome == A2P_TRIAL_UNRELATED)
+            out_counts->unrelated++;
+        else
+            out_counts->clean++;
+    }
+    return 0;
+}
+
+/* Mutant series loop: flawed implementation that ignores trial errors and continues.
+ * Used exclusively by host testing to verify that mutant behavior is detected and rejected.
+ */
+static inline int a2p_run_series_loop_mutant_continue(void *user_ctx, int mode, int poison_kind, unsigned trials,
+                                                      a2p_trial_runner_fn trial_fn,
+                                                      a2p_series_counts *out_counts,
+                                                      unsigned *out_failed_trial)
+{
+    out_counts->expected = 0;
+    out_counts->unrelated = 0;
+    out_counts->clean = 0;
+    out_counts->all_clear_trials = 0;
+
+    for (unsigned t = 0; t < trials; ++t) {
+        int outcome = A2P_TRIAL_CLEAN;
+        int all_clear = 0;
+        int rc = trial_fn(user_ctx, mode, poison_kind, t, &outcome, &all_clear);
+        if (rc != 0) {
+            if (out_failed_trial)
+                *out_failed_trial = t;
+            /* MUTANT: continues after failure instead of aborting */
+            continue;
         }
         if (all_clear)
             out_counts->all_clear_trials++;

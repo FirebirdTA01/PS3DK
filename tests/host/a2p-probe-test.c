@@ -151,6 +151,42 @@ static void test_abort_immediate_stop(void)
     printf("PASS: abort path stops immediately at trial 7: no subsequent trials called or rewritten\n");
 }
 
+/* Mutant abort test: verify that a flawed series loop that continues after failure is caught */
+static void test_abort_mutant_caught(void)
+{
+    fake_trial_state s_mutant;
+    memset(&s_mutant, 0, sizeof s_mutant);
+    s_mutant.fail_at_trial = 7;
+    s_mutant.outcome_to_report = A2P_TRIAL_CLEAN;
+
+    a2p_series_counts counts_mutant;
+    unsigned failed_trial_mutant = 0;
+
+    int mutant_rc = a2p_run_series_loop_mutant_continue(&s_mutant, 0, A2P_POISON_VERTEX, 32,
+                                                       fake_trial_fn, &counts_mutant, &failed_trial_mutant);
+    /* The mutant failed to stop: it returned 0 and executed all 32 trials */
+    assert(mutant_rc == 0);
+    assert(s_mutant.calls == 32);
+    assert(s_mutant.submitted == 31);
+
+    /* The real loop must catch the error and halt at trial 7 with rc == -1 */
+    fake_trial_state s_real;
+    memset(&s_real, 0, sizeof s_real);
+    s_real.fail_at_trial = 7;
+    s_real.outcome_to_report = A2P_TRIAL_CLEAN;
+
+    a2p_series_counts counts_real;
+    unsigned failed_trial_real = 0;
+    int real_rc = a2p_run_series_loop(&s_real, 0, A2P_POISON_VERTEX, 32,
+                                     fake_trial_fn, &counts_real, &failed_trial_real);
+    assert(real_rc == -1);
+    assert(failed_trial_real == 7);
+    assert(s_real.calls == 8);
+    assert(s_real.submitted == 7);
+
+    printf("PASS: mutant series loop (continue-on-failure) caught and rejected by abort test\n");
+}
+
 /* Per-tile classification test: 256 tiles, each with 32 distinct sub-quads (8192 sample points) */
 static void test_per_tile_classification(void)
 {
@@ -206,8 +242,18 @@ static void test_per_tile_classification(void)
     assert(rep.expected_tile_count == 3);
     assert((rep.unrelated_mask[10 / 32] & (1u << (10 % 32))) != 0);
 
+    /* 4. Dual corruption in tile 20: holding BOTH expected and unrelated sub-quad samples */
+    buf[a2p_subquad_sample_offset(20, 2)] = A2P_COLOR_CLEAR; /* expected under INDEX */
+    buf[a2p_subquad_sample_offset(20, 3)] = 0xff887766u;     /* unrelated unknown colour */
+    outcome = a2p_classify_trial_tiles(buf, good, A2P_POISON_INDEX, 0, &rep);
+    /* Tile 20 MUST be set in BOTH masks */
+    assert((rep.expected_mask[20 / 32] & (1u << (20 % 32))) != 0);
+    assert((rep.unrelated_mask[20 / 32] & (1u << (20 % 32))) != 0);
+    /* Trial outcome must maintain invalid priority */
+    assert(outcome == A2P_TRIAL_UNRELATED);
+
     free(buf);
-    printf("PASS: per-tile classification: clean, expected bitmask, unrelated sub-quad corruption\n");
+    printf("PASS: per-tile classification: clean, expected bitmask, unrelated, and dual-mask tile\n");
 }
 
 /* Explicit test: an all-CLEAR completed reference must be classified as INVALID */
@@ -272,6 +318,7 @@ int main(void)
     test_pos_expected_controls();
     test_reference_counted_once();
     test_abort_immediate_stop();
+    test_abort_mutant_caught();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 
