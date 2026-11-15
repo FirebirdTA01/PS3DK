@@ -34,6 +34,8 @@ static CellGcmContextData *ctx;
 static volatile CellGcmControl *control;
 static uint64_t session_start;
 static uint32_t serial, reference_serial;
+static volatile uint32_t *gate_label;
+static uint32_t gate_highest;
 static int idle = 1;
 static volatile uint32_t *reports;
 static volatile uint8_t *arena;
@@ -57,10 +59,20 @@ static void log_line(const char *fmt, ...) {
     FILE *f = fopen("/dev_hdd0/tmp/report-ring-probe.crumb", "a");
     if (f) { fprintf(f, "%s\n", line); if (!fflush(f)) (void)fsync(fileno(f)); fclose(f); }
 }
+static unsigned release_gates(void) {
+    /* LABEL_GATE is the only PPU-owned RSX wait. Batches start idle, so only
+     * one target can be outstanding. Keep the highest target even after a
+     * normal release: every abort may safely repeat this PPU-only store. */
+    if (!gate_highest) return 0;
+    *gate_label = gate_highest;
+    sync_memory();
+    return 1;
+}
 static void recovery_required(const char *where) __attribute__((noreturn));
 static void recovery_required(const char *where) {
-    log_line("RRP_RECOVERY_REQUIRED session=%"PRIu64" elapsed=%"PRIu64" at=%s no_retry=1 no_normal_exit=1",
-             session_start, elapsed_us(), where);
+    unsigned released = release_gates();
+    log_line("RRP_RECOVERY_REQUIRED session=%"PRIu64" elapsed=%"PRIu64" at=%s gates_released=%u no_retry=1 no_normal_exit=1",
+             session_start, elapsed_us(), where, released);
     /* Terminal operator recovery state, explicitly outside measurement waits.
      * Do not return, exitspawn, free mapped buffers, or issue any GPU command.
      * An injected run-hook watchdog can still override this at its own timeout. */
@@ -200,7 +212,11 @@ static int trial(unsigned claim, unsigned negative, unsigned pairs, unsigned tri
         case RRP_COPY_BAD: copy_reports(DEST0, poison_offset, pairs); break;
         case RRP_PUBLISH: backend_gate(LABEL_PUBLISH, publication); break;
         case RRP_EARLY: cellGcmSetWriteCommandLabel(ctx, LABEL_PUBLISH, publication); idle = 0; break;
-        case RRP_GATE: cellGcmSetWaitLabel(ctx, LABEL_GATE, gate); break;
+        case RRP_GATE:
+            /* Arm cleanup BEFORE queuing the wait, including uncertain emit. */
+            gate_highest = gate;
+            cellGcmSetWaitLabel(ctx, LABEL_GATE, gate);
+            break;
         }
     }
     emit_final(&final, &ref);
@@ -210,8 +226,7 @@ static int trial(unsigned claim, unsigned negative, unsigned pairs, unsigned tri
      * never repair evidence of early publication or missing CPU visibility. */
     snapshot(immediate, arena+DEST0, bytes);
     if (claim == RRP_B2 && negative) {
-        *(volatile uint32_t *)cellGcmGetLabelAddress(LABEL_GATE) = gate;
-        sync_memory();
+        (void)release_gates();
     }
     await_final(final, ref);
     snapshot(settled, arena+DEST0, bytes);
@@ -247,9 +262,10 @@ static int reports_addressable(const CellGcmConfig *cfg) {
     return 1;
 }
 static int end_run(int rc, const char *reason) {
+    unsigned released = release_gates();
     if (!idle) quiet();
-    log_line("RRP_END session=%"PRIu64" rc=%d reason=%s idle=1 elapsed=%"PRIu64,
-             session_start, rc, reason, elapsed_us());
+    log_line("RRP_END session=%"PRIu64" rc=%d reason=%s gates_released=%u idle=1 elapsed=%"PRIu64,
+             session_start, rc, reason, released, elapsed_us());
     /* No frees: GCM mappings remain owned until process teardown. No flips or
      * zcull bindings are issued by this probe, so none need retirement here. */
     return rc;
@@ -260,7 +276,10 @@ int main(int argc, const char **argv) {
     log_line("RRP_BEGIN session=%"PRIu64" trials=%u lengths=1,7,126 deadline_us=%"PRIu64,
              session_start, RRP_TRIALS, RRP_SESSION_US);
     void *host = memalign(1024*1024, HOST_HEAP_SIZE);
-    if (!host || !init_rsx(host)) { log_line("RRP_SETUP_FAILED init"); return 3; }
+    if (!host || !init_rsx(host)) {
+        unsigned released = release_gates();
+        log_line("RRP_SETUP_FAILED init gates_released=%u", released); return 3;
+    }
     ctx = CELL_GCM_CURRENT; control = cellGcmGetControlRegister();
     if (!ctx || !control) recovery_required("missing-context");
     for (unsigned label = LABEL_REPORT; label <= LABEL_FINAL; ++label)
@@ -268,6 +287,7 @@ int main(int argc, const char **argv) {
     sync_memory();
     for (unsigned label = LABEL_REPORT; label <= LABEL_FINAL; ++label)
         if (*(volatile uint32_t *)cellGcmGetLabelAddress((uint8_t)label)) recovery_required("label-reset");
+    gate_label = (volatile uint32_t *)cellGcmGetLabelAddress(LABEL_GATE);
     uint32_t initial_ref = control->ref;
     reference_serial = initial_ref == UINT32_MAX ? 0 : initial_ref;
     init_shaders(); init_geometry();

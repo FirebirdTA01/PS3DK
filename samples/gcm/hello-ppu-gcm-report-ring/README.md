@@ -102,8 +102,16 @@ zcull bindings pending. No mapped memory is freed by the sample. Exit codes:
 0 = every series supported for this workload; 1 = refuted; 2 = inconclusive or
 address unavailable; 3 = setup/reference/deadline failure with an idle exit.
 
-On a publication/final-fence timeout or an uncertain pending state, print
-`RRP_RECOVERY_REQUIRED`. Issue no further GPU commands, free nothing, never
+Before every abort, deadline exit or recovery transition, release every
+PPU-owned RSX wait with a PPU memory store and `sync`, before logging or draining.
+The sole such label is 113 (`LABEL_GATE`): its highest queued target is recorded
+before emitting the wait. Batches start idle, so only one target is outstanding;
+repeating the latest store is safe. `gates_released=N` counts labels stored, not
+proof of GPU completion. This prevents the B2 control's own wait from stranding
+the RSX if publication times out. It cannot recover a DMA fault or hang.
+
+On a publication/final-fence timeout or an uncertain pending state, release the
+gate as above, then print `RRP_RECOVERY_REQUIRED`. Issue no further GPU commands, free nothing, never
 return or exitspawn, and do not retry. The process remains in a terminal operator
 recovery state; its sleep loop is deliberately outside measurement. There is
 no approved GPU-quiesce fallback.
@@ -124,7 +132,9 @@ local-memory addresses, trial starts/results, per-length verdicts, and either
 
 Use the normal PPU CMake toolchain; the probe supports ILP32 and LP64 builds.
 No installed SDK files are modified. Run `bash tests/host/report-ring-probe-test.sh`
-for the pure logic, three named mutants, setup-copy check and source guards.
+for the pure logic, four named mutants, setup-copy check and source guards.
+The abort regression compiles the actual release, recovery and exit functions
+with platform stubs and checks queued-gate stores before logging or final drain.
 The test is registered in CI. The reviewed launch packet separately seals the
 source, SDK inputs, shaders, tools, hook, ELF/SELF and emulator evidence.
 

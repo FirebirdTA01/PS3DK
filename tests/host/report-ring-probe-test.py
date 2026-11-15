@@ -24,6 +24,82 @@ def function(text, name):
     return text[match.start():end]
 
 
+def abort_functions(src):
+    def body(name):
+        start = re.search(r'static (?:unsigned|void|int) ' + name + r'\([^\n]*\) \{', src)
+        assert start, 'missing abort gate function: ' + name
+        end, depth = src.index('{', start.start()) + 1, 1
+        while depth:
+            depth += (src[end] == '{') - (src[end] == '}')
+            end += 1
+        return src[start.start():end]
+    release = body('release_gates')
+    recovery = body('recovery_required')
+    ending = body('end_run')
+    assert recovery.index('release_gates()') < recovery.index('log_line(')
+    assert ending.index('release_gates()') < ending.index('quiet()')
+    assert src.index('gate_highest = gate;') < src.index('cellGcmSetWaitLabel(ctx, LABEL_GATE, gate)')
+    assert 'gate_label = (volatile uint32_t *)cellGcmGetLabelAddress(LABEL_GATE)' in src
+    return release, recovery, ending
+
+
+def check_abort_paths(src, out):
+    release, recovery, ending = abort_functions(src)
+    prefix = r'''#include <stdint.h>
+#include <inttypes.h>
+#include <setjmp.h>
+#include <stdio.h>
+static volatile uint32_t word, *gate_label;
+static uint32_t gate_highest;
+static int idle, failed, syncs;
+static uint64_t session_start;
+static jmp_buf terminal;
+static uint64_t elapsed_us(void) { return 120000001; }
+static void sync_memory(void) { ++syncs; }
+static void observe(void) {
+    if (gate_highest && (word != gate_highest || !syncs)) failed = 1;
+}
+#define log_line(...) (observe(), (void)printf(__VA_ARGS__), (void)putchar('\n'))
+static void quiet(void) { observe(); idle = 1; }
+static int usleep(unsigned n) { (void)n; longjmp(terminal, 1); }
+'''
+    # Compile the actual recovery and exit bodies, replacing only platform calls.
+    # The queued gate must be released before logging or attempting final drain.
+    suffix = r'''
+int main(void) {
+    (void)session_start; (void)elapsed_us;
+    for (unsigned target = 0; target <= 21; target += 7) {
+        gate_label = target ? &word : 0; gate_highest = target;
+        word = target ? target-1 : 99; syncs = failed = 0;
+        if (!setjmp(terminal)) recovery_required("abort-with-gate");
+        if (failed || (target && word != target)) goto fail;
+        word = target ? target-1 : 99; syncs = failed = 0; idle = 0;
+        if (end_run(3, "deadline") != 3 || failed || !idle) goto fail;
+    }
+    puts("abort paths release queued gate before logging/draining PASS");
+    return 0;
+fail:
+    puts("ASSERTION: abort_releases_queued_gate"); return 1;
+}
+'''
+    for mutant in (False, True):
+        tested = release.replace('*gate_label = gate_highest;', '(void)gate_label;') if mutant else release
+        assert not mutant or tested != release
+        source = out / ('abort-mutant.c' if mutant else 'abort.c')
+        source.write_text(prefix + tested + recovery + ending + suffix)
+        binary = source.with_suffix('')
+        subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + [
+            '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
+            str(source), '-o', str(binary)], check=True)
+        run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=10)
+        if mutant:
+            assert run.returncode == 1 and run.stdout.strip().endswith('ASSERTION: abort_releases_queued_gate'), run
+            print('KILLED abort_releases_queued_gate')
+        else:
+            assert run.returncode == 0, run.stdout + run.stderr
+            print(run.stdout.strip())
+
+
 def main():
     baseline = (ROOT / 'samples/gcm/hello-ppu-cellgcm-state-tour/source/main.c').read_text(encoding='utf-8')
     copied = (SAMPLE / 'source/state_tour_setup.h').read_text(encoding='utf-8')
@@ -54,6 +130,7 @@ def main():
     assert '= 0;\n    sync_memory();\n    for (unsigned label' in src
     with tempfile.TemporaryDirectory(prefix='report-ring-probe-') as scratch:
         out = Path(scratch)
+        check_abort_paths(src, out)
         for mutant, assertion in ((0, None), (1, 'deadline_before_completed_label'),
                                   (2, 'no_control_no_support'), (3, 'translated_offset_mismatch')):
             binary = out / f'probe-{mutant}'
