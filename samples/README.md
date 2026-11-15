@@ -182,6 +182,7 @@ the published v0.26.0 FIFO-sizing caveat.
 | `hello-ppu-dbgfont` | `cellDbgFont*` on-screen text overlay demo over a clear-loop background: multi-size / multi-colour text grid covering the whole screen, animated pulsing + drifting strings, per-frame counter | **green** (RPCS3 runtime test pending) |
 | `hello-ppu-gcm-label-reuse` | A2 label reuse probe (light): verifies memory safety when reusing vertex/texture buffers after completion labels | **green** |
 | `hello-ppu-gcm-label-reuse-heavy` | A2 label probe (heavy): index, vertex, and texture poison across early, command-label, and back-end completion modes under pipeline-saturating workload | **builds** (hardware measurement probe) |
+| `hello-ppu-gcm-report-ring` | Guarded report-copy feasibility probe derived from the state tour; independent report-before-copy, copy-before-reuse, addressability and publication controls; requires a reviewed launch packet | **builds** (RPCS3 baseline and addressability refusal checked; hardware unmeasured) |
 
 ## sysutil/
 

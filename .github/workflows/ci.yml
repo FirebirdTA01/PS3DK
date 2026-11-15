@@ -765,6 +765,9 @@ jobs:
       - name: Test A2 label probe classifier and abort path
         run: bash tests/host/a2p-probe-test.sh
 
+      - name: Test report-ring probe controls and setup provenance
+        run: bash tests/host/report-ring-probe-test.sh
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
