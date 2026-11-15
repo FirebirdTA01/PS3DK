@@ -45,6 +45,9 @@
  *     - Observation wording rule: 'command control not caught' is the observation; never write that the workload
  *       'did not let the command label pass while fetches were pending'. A session elapsed time divided by the
  *       trial count is a whole-session average, not GPU time per trial.
+ *     - Emulation note: RPCS3 tracks texture rewrites through its own page protection rather than the invalidate,
+ *       and r2 also fails warm-up in RPCS3, so RPCS3 cannot validate this probe family and the stale-texture
+ *       reference failure under emulation is most likely the emulator (inferred; r2 drew clean references on silicon).
  *
  *   Poison kinds:
  *     - VERTEX: rewrites on-target vertices 0..32767 to off-screen coordinates [2.0f, 3.0f].
