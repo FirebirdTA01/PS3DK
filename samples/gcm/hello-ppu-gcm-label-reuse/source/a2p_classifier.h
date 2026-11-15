@@ -35,7 +35,11 @@
 #define A2P_COLOR_CLEAR         0xff000000u
 #define A2P_COLOR_POISON        0xffff00ffu
 #define A2P_SENTINEL            0x5a5a5a5au
-#define A2P_SESSION_LIMIT_US    (180ULL * 1000000ULL) /* 180 s session deadline in microseconds */
+/* Monotonic session deadline: 180 s wall-clock budget starting at A2P_BEGIN (including setup and warm-up).
+ * The bound is cooperative: a blocking GCM callback, flush, or file I/O can delay the next check.
+ * Expiry is terminal: stops immediately, preventing any further draws, resets, rewrites, or readbacks.
+ */
+#define A2P_SESSION_LIMIT_US    (180ULL * 1000000ULL) /* 180 s cooperative session deadline in microseconds */
 #define A2P_RC_DEADLINE         3
 
 enum {
@@ -292,6 +296,23 @@ static inline const char *a2p_evaluate_verdict(a2p_series_counts ref,
     if (out_reason) snprintf(out_reason, out_reason_len, "command control caught %u/32 (< 8/32 threshold)",
                              cmd.expected);
     return "inconclusive";
+}
+
+/* Format the per-series summary line with elapsed cooperative runtime */
+static inline int a2p_format_series_summary(char *buf, size_t buflen,
+                                            const char *mode_str,
+                                            const char *poison_str,
+                                            const a2p_series_counts *counts,
+                                            unsigned trials,
+                                            uint64_t elapsed_us)
+{
+    return snprintf(buf, buflen,
+                    "A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u elapsed_us=%llu",
+                    mode_str, poison_str,
+                    counts->expected, trials,
+                    counts->unrelated, trials,
+                    counts->clean, trials,
+                    (unsigned long long)elapsed_us);
 }
 
 /* Function pointer type for trial runner in series */

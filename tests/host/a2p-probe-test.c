@@ -80,6 +80,8 @@ typedef struct {
     uint64_t fake_now_us;
     uint64_t deadline_us;
     uint64_t step_per_trial_us;
+    int trigger_checkpoint; /* 0: pre-trial, 1: done-label-wait, 2: pre-readback, 3: readback-wait */
+    unsigned trigger_at_trial;
     const char *deadline_at;
 } fake_trial_state;
 
@@ -201,7 +203,9 @@ static int fake_trial_clock_fn(void *user_ctx, int mode, int poison_kind, unsign
     fake_trial_state *s = (fake_trial_state *)user_ctx;
     s->calls++;
 
-    /* 1. Check deadline before trial */
+    /* 1. Checkpoint: pre-trial */
+    if (s->trigger_checkpoint == 0 && trial == s->trigger_at_trial)
+        s->fake_now_us = s->deadline_us;
     if (s->fake_now_us >= s->deadline_us) {
         s->deadline_at = "pre-trial";
         return A2P_RC_DEADLINE;
@@ -210,9 +214,11 @@ static int fake_trial_clock_fn(void *user_ctx, int mode, int poison_kind, unsign
     s->submitted++;
 
     /* Advance clock to simulate execution up to completion label wait loop */
-    s->fake_now_us += s->step_per_trial_us / 2;
+    s->fake_now_us += s->step_per_trial_us / 3;
 
-    /* 2. Check deadline inside bounded wait loop */
+    /* 2. Checkpoint: inside wait loop (done-label-wait) */
+    if (s->trigger_checkpoint == 1 && trial == s->trigger_at_trial)
+        s->fake_now_us = s->deadline_us;
     if (s->fake_now_us >= s->deadline_us) {
         s->deadline_at = "done-label-wait";
         return A2P_RC_DEADLINE;
@@ -222,9 +228,22 @@ static int fake_trial_clock_fn(void *user_ctx, int mode, int poison_kind, unsign
     s->rewritten++;
 
     /* Advance clock to simulate execution up to readback */
-    s->fake_now_us += s->step_per_trial_us / 2;
+    s->fake_now_us += s->step_per_trial_us / 3;
 
-    /* 3. Check deadline before readback / inside readback wait */
+    /* 3. Checkpoint: pre-readback */
+    if (s->trigger_checkpoint == 2 && trial == s->trigger_at_trial)
+        s->fake_now_us = s->deadline_us;
+    if (s->fake_now_us >= s->deadline_us) {
+        s->deadline_at = "pre-readback";
+        return A2P_RC_DEADLINE;
+    }
+
+    /* Advance clock to simulate execution inside readback wait */
+    s->fake_now_us += s->step_per_trial_us / 3;
+
+    /* 4. Checkpoint: inside readback wait (readback-wait) */
+    if (s->trigger_checkpoint == 3 && trial == s->trigger_at_trial)
+        s->fake_now_us = s->deadline_us;
     if (s->fake_now_us >= s->deadline_us) {
         s->deadline_at = "readback-wait";
         return A2P_RC_DEADLINE;
@@ -236,56 +255,156 @@ static int fake_trial_clock_fn(void *user_ctx, int mode, int poison_kind, unsign
     return 0;
 }
 
-/* Deadline abort test: a fake clock that crosses the limit mid-series stops loop immediately with nothing after it */
+/* Simulate warm-up loop with cooperative deadline check */
+static int simulate_warmup(fake_trial_state *s, unsigned max_warmup, unsigned trip_at_w)
+{
+    for (unsigned w = 0; w < max_warmup; ++w) {
+        if (w == trip_at_w)
+            s->fake_now_us = s->deadline_us;
+        if (s->fake_now_us >= s->deadline_us) {
+            s->deadline_at = "warmup";
+            return A2P_RC_DEADLINE;
+        }
+        int outcome = A2P_TRIAL_CLEAN;
+        int all_clear = 0;
+        int rc = fake_trial_clock_fn(s, 0, A2P_POISON_NONE, w, &outcome, &all_clear);
+        if (rc != 0)
+            return rc;
+        if (outcome == A2P_TRIAL_CLEAN)
+            return 0;
+    }
+    return 1;
+}
+
+/* Deadline test: covers expiry at EACH checkpoint, exact boundaries (limit and limit-1), and per-series reporting */
 static void test_abort_deadline_fake_clock(void)
 {
-    /* Case 1: Deadline crossed inside wait loop mid-trial (at trial 7) */
-    fake_trial_state s;
-    memset(&s, 0, sizeof s);
-    s.fail_at_trial = 999;
-    s.outcome_to_report = A2P_TRIAL_CLEAN;
-    s.deadline_us = A2P_SESSION_LIMIT_US;
-    s.fake_now_us = 0;
-    /* 25 seconds per trial: trial 7 advances from 175s to 187.5s in wait loop */
-    s.step_per_trial_us = 25000000ULL;
-
     a2p_series_counts counts;
     unsigned failed_trial = 0;
 
-    int rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
-    assert(rc == A2P_RC_DEADLINE);
-    assert(failed_trial == 7);
-    assert(strcmp(s.deadline_at, "done-label-wait") == 0);
-    /* Only trials 0..7 were called; trials 8..31 were never called */
-    assert(s.calls == 8);
-    /* Trial 7 submitted before wait loop, but was aborted before reset or rewrite */
-    assert(s.submitted == 8);
-    assert(s.reset == 7);
-    assert(s.rewritten == 7);
-    assert(counts.clean == 7);
-    assert(counts.expected == 0);
-    assert(counts.unrelated == 0);
-
-    /* Case 2: Deadline crossed before trial begins (pre-trial at trial 0) */
+    /* Checkpoint 1: Expiry before a trial (pre-trial at trial 4) */
+    fake_trial_state s;
     memset(&s, 0, sizeof s);
-    s.fail_at_trial = 999;
     s.outcome_to_report = A2P_TRIAL_CLEAN;
     s.deadline_us = A2P_SESSION_LIMIT_US;
-    s.fake_now_us = A2P_SESSION_LIMIT_US; /* already at deadline */
+    s.fake_now_us = 0;
     s.step_per_trial_us = 1000000ULL;
-    failed_trial = 999;
+    s.trigger_checkpoint = 0;
+    s.trigger_at_trial = 4;
+    int rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 4);
+    assert(strcmp(s.deadline_at, "pre-trial") == 0);
+    assert(s.calls == 5);     /* trials 0..4 called; trials 5..31 never called */
+    assert(s.submitted == 4); /* trial 4 halted before submission */
+    assert(s.reset == 4);
+    assert(s.rewritten == 4);
+    assert(counts.clean == 4);
 
+    /* Checkpoint 2: Expiry inside wait loop (done-label-wait at trial 4) */
+    memset(&s, 0, sizeof s);
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = 0;
+    s.step_per_trial_us = 1000000ULL;
+    s.trigger_checkpoint = 1;
+    s.trigger_at_trial = 4;
+    failed_trial = 0;
+    rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 4);
+    assert(strcmp(s.deadline_at, "done-label-wait") == 0);
+    assert(s.calls == 5);
+    assert(s.submitted == 5); /* trial 4 submitted before wait loop */
+    assert(s.reset == 4);     /* halted in wait loop before reset or rewrite */
+    assert(s.rewritten == 4);
+    assert(counts.clean == 4);
+
+    /* Checkpoint 3: Expiry before readback (pre-readback at trial 4) */
+    memset(&s, 0, sizeof s);
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = 0;
+    s.step_per_trial_us = 1000000ULL;
+    s.trigger_checkpoint = 2;
+    s.trigger_at_trial = 4;
+    failed_trial = 0;
+    rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 4);
+    assert(strcmp(s.deadline_at, "pre-readback") == 0);
+    assert(s.calls == 5);
+    assert(s.submitted == 5);
+    assert(s.reset == 5);
+    assert(s.rewritten == 5);
+    assert(counts.clean == 4);
+
+    /* Checkpoint 4: Expiry inside readback wait (readback-wait at trial 4) */
+    memset(&s, 0, sizeof s);
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = 0;
+    s.step_per_trial_us = 1000000ULL;
+    s.trigger_checkpoint = 3;
+    s.trigger_at_trial = 4;
+    failed_trial = 0;
+    rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(failed_trial == 4);
+    assert(strcmp(s.deadline_at, "readback-wait") == 0);
+    assert(s.calls == 5);
+    assert(s.submitted == 5);
+    assert(s.reset == 5);
+    assert(s.rewritten == 5);
+    assert(counts.clean == 4);
+
+    /* Checkpoint 5: Expiry during warm-up (at warm-up trial 3) */
+    memset(&s, 0, sizeof s);
+    s.outcome_to_report = A2P_TRIAL_UNRELATED; /* shader compiling, keep warming up until trip */
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = 0;
+    s.trigger_checkpoint = -1;
+    rc = simulate_warmup(&s, 30, 3);
+    assert(rc == A2P_RC_DEADLINE);
+    assert(strcmp(s.deadline_at, "warmup") == 0);
+    assert(s.calls == 3); /* trials 0, 1, 2 ran; trial 3 never ran */
+    assert(s.submitted == 3);
+
+    /* Exact boundary test: elapsed == limit (must expire with code 3) */
+    memset(&s, 0, sizeof s);
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = A2P_SESSION_LIMIT_US; /* elapsed == limit */
+    s.trigger_checkpoint = -1;
+    failed_trial = 0;
     rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 32, fake_trial_clock_fn, &counts, &failed_trial);
     assert(rc == A2P_RC_DEADLINE);
     assert(failed_trial == 0);
     assert(strcmp(s.deadline_at, "pre-trial") == 0);
     assert(s.calls == 1);
     assert(s.submitted == 0);
-    assert(s.reset == 0);
-    assert(s.rewritten == 0);
-    assert(counts.clean == 0);
 
-    printf("PASS: fake clock crossing deadline mid-series stops loop immediately with nothing after it\n");
+    /* Exact boundary test: elapsed == limit - 1 (must NOT expire; succeeds) */
+    memset(&s, 0, sizeof s);
+    s.outcome_to_report = A2P_TRIAL_CLEAN;
+    s.deadline_us = A2P_SESSION_LIMIT_US;
+    s.fake_now_us = A2P_SESSION_LIMIT_US - 1; /* limit - 1 */
+    s.step_per_trial_us = 0; /* clock frozen at limit - 1 */
+    s.trigger_checkpoint = -1;
+    failed_trial = 0;
+    rc = a2p_run_series_loop(&s, 0, A2P_POISON_VERTEX, 1, fake_trial_clock_fn, &counts, &failed_trial);
+    assert(rc == 0);
+    assert(counts.clean == 1);
+    assert(s.calls == 1);
+    assert(s.submitted == 1);
+    assert(s.reset == 1);
+    assert(s.rewritten == 1);
+
+    /* Elapsed per-series reporting verification */
+    char summary[256];
+    a2p_format_series_summary(summary, sizeof summary, "backend", "vertex", &counts, 32, 12345678ULL);
+    assert(strstr(summary, "A2P mode=backend poison=vertex expected=0/32 unrelated=0/32 clean=1/32 elapsed_us=12345678") != NULL);
+
+    printf("PASS: cooperative monotonic deadline: all checkpoints, exact boundaries (limit and limit-1), and per-series elapsed reporting\n");
 }
 
 /* Eight-fetch max semantics test:

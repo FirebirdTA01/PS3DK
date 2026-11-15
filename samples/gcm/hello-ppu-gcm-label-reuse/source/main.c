@@ -31,8 +31,12 @@
  *     - Index ranges: 192 32-bit indices per tile (32 sub-quads x 6 indices). Tile t spans indices
  *       [t * 192, (t + 1) * 192 - 1]. Sub-quad q of tile t references its own vertex range (4*(32t+q)..4*(32t+q)+3).
  *     - Total indices: 49,152 32-bit indices (192 KiB in mapped main-memory arena).
+ *     - Monotonic session deadline: 180 s wall-clock budget (A2P_SESSION_LIMIT_US = 180,000,000 us) starting at
+ *       the recorded A2P_BEGIN point, encompassing setup, warm-up, and all trial series. The deadline bound is
+ *       cooperative: a blocking GCM callback, flush, or file I/O can delay the next check. Expiry is terminal:
+ *       halts immediately with exit code 3 without subsequent draws, label resets, buffer rewrites, or readbacks.
  *     - Estimated runtime (unmeasured): ~4-5 ms per trial; ~2.5 - 5 seconds total runtime across all 448 trials
- *       in the 14 series (unmeasured, bounded under 5 minutes).
+ *       in the 14 series (unmeasured, cooperative wall-clock bound 180 s).
  *
  *   Poison kinds:
  *     - VERTEX: rewrites on-target vertices 0..32767 to off-screen coordinates [2.0f, 3.0f].
@@ -563,11 +567,11 @@ static int run_series(CellGcmContextData *ctx,
         }
         return rc;
     }
-    uint64_t elapsed_us = a2p_elapsed_us();
-    crumb("A2P mode=%s poison=%s expected=%u/%u unrelated=%u/%u clean=%u/%u elapsed_us=%llu",
-          get_mode_str(mode), get_poison_str(poison_kind),
-          out_counts->expected, TRIALS, out_counts->unrelated, TRIALS, out_counts->clean, TRIALS,
-          (unsigned long long)elapsed_us);
+    char summary_line[256];
+    a2p_format_series_summary(summary_line, sizeof summary_line,
+                              get_mode_str(mode), get_poison_str(poison_kind),
+                              out_counts, TRIALS, a2p_elapsed_us());
+    crumb("%s", summary_line);
     return 0;
 }
 
@@ -608,8 +612,10 @@ int main(void)
 
 #ifdef LABEL_REUSE_HEAVY
     g_session_start_us = (uint64_t)sys_time_get_system_time();
-    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u elapsed_us=%llu",
+    crumb("A2P_BEGIN variant=%s target=%ux%u texture=%ux%u tiles=%u subquads=%u vertices=%u indices=%u samples=%u "
+          "deadline_limit_us=%llu deadline_mode=cooperative elapsed_us=%llu",
           VARIANT, RT, RT, TEX_W, TEX_H, TILES, TOTAL_SUBQUADS, TOTAL_VERTS, TOTAL_INDICES, TOTAL_SAMPLES,
+          (unsigned long long)A2P_SESSION_LIMIT_US,
           (unsigned long long)a2p_elapsed_us());
 
     if (gcm_host_buffer_alloc(HOST_BYTES, &host) || cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host) ||
