@@ -29,10 +29,12 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 
 #define SCREEN_W            1280
 #define SCREEN_H            720
+#define ZCULL_W             1280
+#define ZCULL_H             768                  /* 64-aligned height covering 720 target */
 #define COLOR_PITCH         (SCREEN_W * 8u)      /* FP16: 8 bytes/px */
 #define COLOR_SIZE          (COLOR_PITCH * SCREEN_H)
 #define DEPTH_PITCH         (SCREEN_W * 4u)      /* Z24S8: 4 bytes/px */
-#define DEPTH_SIZE          (DEPTH_PITCH * SCREEN_H)
+#define DEPTH_SIZE          (DEPTH_PITCH * ZCULL_H)
 
 #define CB_SIZE             0x40000
 #define HOST_HEAP_SIZE      (8 * 1024 * 1024)
@@ -234,30 +236,37 @@ static void bind_quad_vb(CellGcmContextData *ctx, uint32_t vb_offset)
 	cellGcmSetVertexAttribInputMask(ctx, (uint16_t)(1u << g_position_attr));
 }
 
-static void configure_zcull(CellGcmContextData *ctx, int zcull_on)
+static int configure_zcull(CellGcmContextData *ctx, int zcull_on)
 {
 	if (zcull_on) {
-		cellGcmBindZcull(0,
-		                 g_depth_offset,
-		                 SCREEN_W,
-		                 SCREEN_H,
-		                 0,
-		                 CELL_GCM_ZCULL_Z24S8,
-		                 CELL_GCM_SURFACE_CENTER_1,
-		                 CELL_GCM_ZCULL_LESS,
-		                 CELL_GCM_ZCULL_LONES,
-		                 CELL_GCM_SCULL_SFUNC_ALWAYS,
-		                 0,
-		                 0xff);
+		int32_t rc = cellGcmBindZcull(0,
+		                              g_depth_offset,
+		                              ZCULL_W,
+		                              ZCULL_H,
+		                              0,
+		                              CELL_GCM_ZCULL_Z24S8,
+		                              CELL_GCM_SURFACE_CENTER_1,
+		                              CELL_GCM_ZCULL_LESS,
+		                              CELL_GCM_ZCULL_LONES,
+		                              CELL_GCM_SCULL_SFUNC_ALWAYS,
+		                              0,
+		                              0xff);
+		printf("cellGcmBindZcull rc=%d\n", (int)rc);
+		if (rc != 0) {
+			printf("ERROR: cellGcmBindZcull failed rc=%d\n", (int)rc);
+			return (int)rc;
+		}
 		cellGcmSetZcullEnable(ctx, CELL_GCM_TRUE, CELL_GCM_TRUE);
 		cellGcmSetZcullControl(ctx, CELL_GCM_ZCULL_LESS, CELL_GCM_ZCULL_LONES);
 		cellGcmSetZcullLimit(ctx, 0x80, 0x180);
 		cellGcmSetZcullStatsEnable(ctx, CELL_GCM_TRUE);
 	} else {
-		cellGcmUnbindZcull(0);
+		int32_t rc = cellGcmUnbindZcull(0);
+		printf("cellGcmUnbindZcull rc=%d\n", (int)rc);
 		cellGcmSetZcullEnable(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
 		cellGcmSetZcullStatsEnable(ctx, CELL_GCM_FALSE);
 	}
+	return 0;
 }
 
 static void clear_surface(CellGcmContextData *ctx, int zcull_on)
@@ -274,6 +283,7 @@ static void clear_surface(CellGcmContextData *ctx, int zcull_on)
 
 static void draw_occluder(CellGcmContextData *ctx)
 {
+	cellGcmSetDepthMask(ctx, CELL_GCM_TRUE);
 	cellGcmSetFragmentProgram(ctx, g_fp_flat, g_fp_flat_offset);
 	static const float s_flat_color[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
 	if (g_param_flat_color) {
@@ -285,19 +295,22 @@ static void draw_occluder(CellGcmContextData *ctx)
 	cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 }
 
-static void run_case_rep(CellGcmContextData *ctx,
-                         int is_occluded,
-                         int is_kil,
-                         int zcull_on,
-                         uint64_t *out_ticks,
-                         uint32_t *out_zpass,
-                         uint32_t *out_zs0,
-                         uint32_t *out_zs1,
-                         uint32_t *out_zs2,
-                         uint32_t *out_zs3)
+static int run_case_rep(CellGcmContextData *ctx,
+                        int is_occluded,
+                        int is_kil,
+                        int zcull_on,
+                        uint64_t *out_ticks,
+                        uint32_t *out_zpass,
+                        uint32_t *out_zs0,
+                        uint32_t *out_zs1,
+                        uint32_t *out_zs2,
+                        uint32_t *out_zs3)
 {
 	bind_surface(ctx);
-	configure_zcull(ctx, zcull_on);
+	int zcull_rc = configure_zcull(ctx, zcull_on);
+	if (zcull_rc != 0) {
+		return zcull_rc;
+	}
 	clear_surface(ctx, zcull_on);
 
 	if (is_occluded) {
@@ -314,6 +327,12 @@ static void run_case_rep(CellGcmContextData *ctx,
 	}
 
 	bind_quad_vb(ctx, g_vb_far_offset);
+
+	/* Turn depth write OFF for the 16 heavy draws, keeping depth test LESS.
+	 * This prevents draw 0 from writing depth (0.75f) and causing draws 1..15
+	 * to fail the LESS test, allowing all 16 visible draws to pass while
+	 * occluded draws are still rejected against the occluder's depth (0.25f). */
+	cellGcmSetDepthMask(ctx, CELL_GCM_FALSE);
 
 	cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_TRUE);
 	cellGcmSetClearReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT);
@@ -370,6 +389,7 @@ static void run_case_rep(CellGcmContextData *ctx,
 		*out_zs2 = 0;
 		*out_zs3 = 0;
 	}
+	return 0;
 }
 
 typedef struct {
@@ -385,13 +405,21 @@ static void run_case(CellGcmContextData *ctx,
 {
 	rep_result_t results[3];
 	for (int r = 0; r < 3; ++r) {
-		run_case_rep(ctx, is_occluded, is_kil, zcull_on,
-		             &results[r].ticks,
-		             &results[r].zpass,
-		             &results[r].zs[0],
-		             &results[r].zs[1],
-		             &results[r].zs[2],
-		             &results[r].zs[3]);
+		int rc = run_case_rep(ctx, is_occluded, is_kil, zcull_on,
+		                      &results[r].ticks,
+		                      &results[r].zpass,
+		                      &results[r].zs[0],
+		                      &results[r].zs[1],
+		                      &results[r].zs[2],
+		                      &results[r].zs[3]);
+		if (rc != 0) {
+			printf("ZKP case=%s-%s zcull=%s ABORTED: bind failed rc=%d\n",
+			       is_occluded ? "O" : "V",
+			       is_kil ? "kil" : "nokil",
+			       zcull_on ? "on" : "off",
+			       rc);
+			return;
+		}
 	}
 
 	/* Sort results by ticks to select the median (index 1) */
@@ -413,6 +441,14 @@ static void run_case(CellGcmContextData *ctx,
 	       (unsigned long long)median->ticks,
 	       median->zpass,
 	       median->zs[0], median->zs[1], median->zs[2], median->zs[3]);
+
+	if (!is_occluded) {
+		printf("ZPASS V case=%s-%s zcull=%s: total=%u per_draw=%u (expected ~921600 per draw x 16 visible = 14745600)\n",
+		       is_kil ? "kil" : "nokil",
+		       zcull_on ? "on" : "off",
+		       median->zpass,
+		       median->zpass / 16u);
+	}
 }
 
 int main(int argc, const char **argv)
