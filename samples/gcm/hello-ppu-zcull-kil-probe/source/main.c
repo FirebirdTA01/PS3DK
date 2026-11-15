@@ -50,6 +50,9 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define REPORT_ZCULL_STATS2 517u
 #define REPORT_ZCULL_STATS3 518u
 
+#define REPORT_SENTINEL_U32 0xDEADBEEFu
+#define REPORT_SENTINEL_U64 0xDEADBEEFDEADBEEFULL
+
 static uint32_t *g_color;
 static uint32_t  g_color_offset;
 static uint32_t *g_depth;
@@ -345,14 +348,33 @@ static int run_case_rep(CellGcmContextData *ctx,
 	 * occluded draws are still rejected against the occluder's depth (0.25f). */
 	cellGcmSetDepthMask(ctx, CELL_GCM_FALSE);
 
-	/* Zero timestamps and report memory for this rep so stale values from previous
-	 * reps cannot be read back. */
+	/* Write sentinel values into report slots before each case so a stale
+	 * slot or a fence passing prematurely without RSX report write is caught. */
 	CellGcmReportData *rd_start = cellGcmGetReportDataAddressLocation(REPORT_TS_START, CELL_GCM_LOCATION_LOCAL);
 	CellGcmReportData *rd_end   = cellGcmGetReportDataAddressLocation(REPORT_TS_END, CELL_GCM_LOCATION_LOCAL);
 	CellGcmReportData *rd_zpass = cellGcmGetReportDataAddressLocation(REPORT_ZPASS, CELL_GCM_LOCATION_LOCAL);
-	if (rd_start) rd_start->timer = 0;
-	if (rd_end)   rd_end->timer   = 0;
-	if (rd_zpass) rd_zpass->value = 0;
+	if (rd_start) {
+		rd_start->timer = REPORT_SENTINEL_U64;
+		rd_start->value = REPORT_SENTINEL_U32;
+	}
+	if (rd_end) {
+		rd_end->timer = REPORT_SENTINEL_U64;
+		rd_end->value = REPORT_SENTINEL_U32;
+	}
+	if (rd_zpass) {
+		rd_zpass->timer = REPORT_SENTINEL_U64;
+		rd_zpass->value = REPORT_SENTINEL_U32;
+	}
+	if (zcull_on) {
+		CellGcmReportData *rd0 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS0, CELL_GCM_LOCATION_LOCAL);
+		CellGcmReportData *rd1 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS1, CELL_GCM_LOCATION_LOCAL);
+		CellGcmReportData *rd2 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS2, CELL_GCM_LOCATION_LOCAL);
+		CellGcmReportData *rd3 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS3, CELL_GCM_LOCATION_LOCAL);
+		if (rd0) { rd0->timer = REPORT_SENTINEL_U64; rd0->value = REPORT_SENTINEL_U32; }
+		if (rd1) { rd1->timer = REPORT_SENTINEL_U64; rd1->value = REPORT_SENTINEL_U32; }
+		if (rd2) { rd2->timer = REPORT_SENTINEL_U64; rd2->value = REPORT_SENTINEL_U32; }
+		if (rd3) { rd3->timer = REPORT_SENTINEL_U64; rd3->value = REPORT_SENTINEL_U32; }
+	}
 	__asm__ volatile("sync" ::: "memory");
 
 	cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_TRUE);
@@ -384,21 +406,23 @@ static int run_case_rep(CellGcmContextData *ctx,
 		return -1;
 	}
 
-	uint64_t t_start = 0;
-	uint64_t t_end   = 0;
-	for (int n = 0; n < 2000; ++n) {
-		t_start = rd_start ? rd_start->timer : 0;
-		t_end   = rd_end   ? rd_end->timer   : 0;
-		if (t_start != 0 && t_end != 0 && t_end >= t_start)
-			break;
-		usleep(100);
+	/* Treat any report slot still holding the sentinel as not written (error) */
+	uint64_t t_start = rd_start ? rd_start->timer : REPORT_SENTINEL_U64;
+	uint64_t t_end   = rd_end   ? rd_end->timer   : REPORT_SENTINEL_U64;
+	uint32_t zpass   = rd_zpass ? rd_zpass->value : REPORT_SENTINEL_U32;
+
+	if (t_start == REPORT_SENTINEL_U64 || t_end == REPORT_SENTINEL_U64) {
+		printf("ERROR: timestamp report not written by RSX (holds sentinel)\n");
+		return -1;
 	}
-
-	uint32_t zpass = rd_zpass ? rd_zpass->value : 0;
-
 	if (t_start == 0 || t_end == 0 || t_end < t_start) {
 		printf("ERROR: zero or invalid timestamp readback t_start=%llu t_end=%llu\n",
 		       (unsigned long long)t_start, (unsigned long long)t_end);
+		return -1;
+	}
+
+	if (zpass == REPORT_SENTINEL_U32) {
+		printf("ERROR: zpass report not written by RSX (holds sentinel)\n");
 		return -1;
 	}
 
@@ -410,10 +434,17 @@ static int run_case_rep(CellGcmContextData *ctx,
 		CellGcmReportData *rd1 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS1, CELL_GCM_LOCATION_LOCAL);
 		CellGcmReportData *rd2 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS2, CELL_GCM_LOCATION_LOCAL);
 		CellGcmReportData *rd3 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS3, CELL_GCM_LOCATION_LOCAL);
-		*out_zs0 = rd0 ? rd0->value : 0;
-		*out_zs1 = rd1 ? rd1->value : 0;
-		*out_zs2 = rd2 ? rd2->value : 0;
-		*out_zs3 = rd3 ? rd3->value : 0;
+		if (!rd0 || rd0->value == REPORT_SENTINEL_U32 ||
+		    !rd1 || rd1->value == REPORT_SENTINEL_U32 ||
+		    !rd2 || rd2->value == REPORT_SENTINEL_U32 ||
+		    !rd3 || rd3->value == REPORT_SENTINEL_U32) {
+			printf("ERROR: zcull stats report still holds sentinel\n");
+			return -1;
+		}
+		*out_zs0 = rd0->value;
+		*out_zs1 = rd1->value;
+		*out_zs2 = rd2->value;
+		*out_zs3 = rd3->value;
 	} else {
 		*out_zs0 = 0;
 		*out_zs1 = 0;
@@ -518,10 +549,16 @@ int main(int argc, const char **argv)
 		return 1;
 	}
 
-	/* Initialize fence label memory to 0 with sync before any RSX fence is checked */
+	/* Reset fence label memory to 0 with sync and confirm before any GPU work */
 	volatile uint32_t *label_addr = (volatile uint32_t *)cellGcmGetLabelAddress(GCM_FENCE_LABEL);
 	*label_addr = 0;
 	__asm__ volatile("sync" ::: "memory");
+	if (*label_addr != 0) {
+		printf("ERROR: label %u failed to zero (read 0x%08x)\n", GCM_FENCE_LABEL, *label_addr);
+		cellSysutilUnregisterCallback(0);
+		free(host_addr);
+		return 1;
+	}
 
 	/* Initial unbind to guarantee clean zcull hardware state */
 	cellGcmUnbindZcull(0);
