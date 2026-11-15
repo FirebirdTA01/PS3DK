@@ -118,8 +118,11 @@ fn ops_w(list: &[AOp], width: u32) -> Chunk {
         }
         b.u32(o.r0).u32(o.reports.0).u32(o.reports.1).u32(o.serials.0).u32(o.serials.1).u32(o.generation).u32(o.r1)
             .u64(o.published);
-        if width == 144 {
+        if width >= 144 {
             b.u64(o.tail.0).u32(o.tail.1).u16(o.tail.2).u16(o.tail.3);
+        }
+        if width == 160 {
+            b.u32(0).u32(0).u32(0).u32(0); // tag, fp_offset, depth, reserved
         }
     }
     chunk(35, b.0)
@@ -1657,12 +1660,19 @@ fn busy_frame(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32)>, masks
         b.u32(l.runs).u32(l.broken).u32(l.spanning).u32(index).u64(l.ticks).u64(0);
         cov.payload.extend_from_slice(&b.0);
     }
+    if masks & 512 != 0 {
+        cov.payload.extend_from_slice(&[0; 32]); // timed-range block: nothing outside, no range refused
+    }
+    let width = if masks & 512 != 0 { 160 } else { 144 };
     let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
-        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), cov];
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, width), cov];
     rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
     rest.push(status(1, status_for(n, 1, 9, 2 * n)));
     let mut cfg = brk_cfg();
     cfg.words[4] = masks;
+    if masks & 512 != 0 {
+        cfg.words[13] = 160;
+    }
     brk_file(cfg, rest)
 }
 fn busy_read(f: File) -> ps3dk_prof::auto_rsx::FrameView {
@@ -1749,4 +1759,117 @@ fn polling_shares_in_json() {
     ps3dk_prof::auto_rsx::write_json(&mut out, &r).unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert!(v["frames"][0].get("cadence_share").is_none());
+}
+
+// ---- tags, AUTO ranges and timed-range limits (CONFIG masks 1023/11) ---------------------------------------------
+
+fn cli(args: &[&str]) -> (i32, Vec<u8>) {
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(args).output().unwrap();
+    (o.status.code().unwrap_or(-1), o.stdout)
+}
+fn fixture_path(name: &str) -> String {
+    format!("{}/tests/fixtures/auto/{name}.prof", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The host runtime's tags capture (auto-runtime-test.py --case tags): per frame and per tag, records, merged busy
+/// time and the draws its CALL brackets ran untimed; per range name, the ranges and their exact raw time.
+#[test]
+fn by_tag_on_the_runtime_capture() {
+    let r = reader::read(&fixture("tags")).expect("reads");
+    let b = ps3dk_prof::auto_rsx::by_tag(&r);
+    assert!(b.tagged && b.frames.len() == 2);
+    let f0 = &b.frames[0];
+    let row = |t: u32| f0.tags.get(&t).cloned().unwrap_or_default();
+    // tag 0xa: one ring clear and part 0's two draws (built under 0xa, recorded at the CALL); every interval 10 ticks
+    assert_eq!((row(0xa).ops, row(0xa).busy_raw), (3, 30));
+    assert_eq!((row(0xb).ops, row(0xb).busy_raw), (1, 10));
+    // tag 0xc: no draw of its own, the whole-CALL bracket of part 0 (its refused draw)
+    assert_eq!((row(0xc).ops, row(0xc).busy_raw, row(0xc).untimed_in_calls), (0, 10, 1));
+    assert_eq!((f0.untimed, f0.unrepresented), (1, 1));
+    assert_eq!(f0.ranges.get("pass").map(|r| (r.count, r.raw)), Some((4, 40)));
+    assert_eq!(f0.ranges.get("outer").map(|r| r.count), Some(1));
+    let f1 = &b.frames[1];
+    assert_eq!(f1.untimed, 3, "three draws outside the timed ranges");
+    let s = ps3dk_prof::auto_rsx::range_summary(&b);
+    assert_eq!(s.get("pass"), Some(&(2, 13, 130, 65)));
+    let t = ps3dk_prof::auto_rsx::tag_summary(&b);
+    assert_eq!(t.get(&0xe), Some(&(1, 3, 40, 40)));
+    let (code, out) = cli(&["auto", "--by-tag", "--json", &fixture_path("tags")]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["tagged"], true);
+    assert_eq!(v["summary"]["ranges"].as_array().unwrap().len(), 3);
+    // an older capture has no tags: a named refusal, exit 1
+    let (code, out) = cli(&["auto", "--by-tag", &fixture_path("segments")]);
+    assert_eq!(code, 1);
+    assert!(String::from_utf8_lossy(&out).starts_with("no tags"));
+}
+
+/// `auto --ops` names tag and fp_offset (and RANGE depth) only for 1023/11 records; `auto --json` names the new
+/// exclusion reason and the refused ranges only for 1023/11 rows.
+#[test]
+fn tags_in_ops_and_json() {
+    let (code, out) = cli(&["auto", "--ops", &fixture_path("tags")]);
+    assert_eq!(code, 0);
+    let text = String::from_utf8_lossy(&out).to_string();
+    assert!(text.lines().nth(1).unwrap().ends_with("args tag fp_offset"), "{text}");
+    assert!(text.lines().any(|l| l.contains(" RANGE ")), "{text}");
+    let (_, out) = cli(&["auto", "--ops", "--json", &fixture_path("tags")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let ops = v["ops"].as_array().unwrap();
+    assert!(ops.iter().any(|o| o["kind"] == "CALL" && o["tag"] == 0xc && o["fp_offset"] == 0x1000));
+    assert!(ops.iter().any(|o| o["kind"] == "RANGE" && o["depth"] == 4));
+    let (_, out) = cli(&["auto", "--ops", &fixture_path("segments")]);
+    assert!(!String::from_utf8_lossy(&out).contains("fp_offset"));
+    let (_, out) = cli(&["auto", "--ops", "--json", &fixture_path("segments")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(v["ops"].as_array().unwrap().iter().all(|o| o.get("tag").is_none()));
+    let (_, out) = cli(&["auto", "--json", &fixture_path("tags")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["frames"][1]["outside_timed_range"]["clear"], 3);
+    assert_eq!(v["frames"][1]["ranges_refused"], 10);
+    assert_eq!(v["frames"][0]["ranges_refused"], 3);
+}
+
+/// One busy_frame (1023/11) with `outside` more CLEAR visits left untimed outside the timed ranges.
+fn outside_frame(outside: u64, visits_too: bool) -> File {
+    let mut f = busy_frame(&[(6000, 36_000)], Blk { runs: 1, ticks: 30_000, ..Blk::default() }, None, 1023);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let row = &mut f.chunks[at].payload;
+    if visits_too {
+        let v = u64::from_le_bytes(row[64 + 2 * 96..64 + 2 * 96 + 8].try_into().unwrap()) + outside;
+        row[64 + 2 * 96..64 + 2 * 96 + 8].copy_from_slice(&v.to_le_bytes());
+    }
+    row[432..440].copy_from_slice(&outside.to_le_bytes());
+    f
+}
+
+/// Draws left untimed outside the timed ranges are untimed for the bounded rule like the other untimed draws; the
+/// row must still reconcile (visited = observed + exclusions + outside).
+#[test]
+fn outside_timed_draws_are_untimed() {
+    let f = busy_read(outside_frame(0, true));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy polling"), "{}", f.reason);
+    let f = busy_read(outside_frame(2, true));
+    assert_eq!(f.outside_timed, [0, 0, 2]);
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("2 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    assert!(reader::read(&outside_frame(2, false).bytes()).is_err(), "outside visits must be counted as visits");
+}
+
+/// RANGE records are a 1023/11 kind with fixed rules; tags are only read from 160-byte records.
+#[test]
+fn range_records_are_checked() {
+    let base = reader::read(&fixture("tags")).expect("reads");
+    let inv = base.auto.as_ref().unwrap();
+    let ranges: Vec<_> = inv.ops.iter().filter(|o| o.kind == 6).collect();
+    assert_eq!(ranges.len(), 15);
+    assert!(ranges.iter().all(|o| (1..=4).contains(&o.depth) && o.args[0] >= 1 && o.args[1] <= 1 && o.tag == Some(0xd)));
+    assert!(inv.ops.iter().filter(|o| o.kind != 6).all(|o| o.depth == 0));
+    // a RANGE under 255/11 is refused (kind 6 is unknown there)
+    let mut f = busy_frame(&[(6000, 36_000)], Blk::default(), None, 255);
+    let at = f.chunks.iter().position(|c| c.ty == 35).unwrap();
+    f.chunks[at].payload[16 + 144 + 12] = 6;
+    assert!(reader::read(&f.bytes()).is_err());
 }

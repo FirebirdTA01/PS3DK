@@ -322,7 +322,55 @@ frame and increments unassociated visits, even if the core's last frame token
 still names the closed frame. Observed counts require both markers to have been
 emitted; device readback disposition remains the separate OPS result.
 
-## STATUS, type 37
+## Tags, AUTO ranges and timed ranges (CONFIG 1023/11)
+
+Kind mask bit 512 TAG widens OPS records to 160 bytes and COVERAGE rows to 448.
+Older masks keep their widths and rules.
+
+| OPS offset | Type | Field |
+|---|---|---|
+| 144 | u32 | tag current at the record's claim: a ring draw at issue, a segment draw at its BUILD (it keeps its builder's tag), a whole-CALL record at the CALL, a RANGE at its BEGIN, a FRAME mark at the mark |
+| 148 | u32 | the fragment-program offset last bound by `cellGcmSetFragmentProgram` on the record's context (the attached ring, or the part being built for a segment draw); 0 if none seen |
+| 152 | u32 | RANGE only: nesting depth 1..4; zero otherwise |
+| 156 | u32 | zero |
+
+`PS3DK_PROF_AUTO_TAG(t)` sets the owner thread's current tag (inert on other
+threads and without PS3_PROF_AUTO). The fragment-program seam is the SDK's
+`cellGcmSetFragmentProgram` (<cell/gcm/gcm_cg_bridge.h>): in a PS3_PROF_AUTO
+unit it reports the offset after its FP_ADDRESS write. Other ways of binding a
+program (raw FP_ADDRESS writes, PSL1GHT `rsxLoadFragmentProgramLocation`) are not
+seen, and the field keeps the last offset the seam saw.
+
+OPS kind 6 RANGE: `PS3DK_PROF_AUTO_RANGE_BEGIN(name)` writes a timestamp report
+into the attached ring (2 words, current room, no callback) from a reserve of 16
+report pairs; `PS3DK_PROF_AUTO_RANGE_END()` writes the end report, commits the
+record and the operation-label release that completes it (6 words). TOKEN is the
+frame of both ends; args[0] is the name descriptor index + 1 (scope 2), args[1]
+1 for a timed range. A range is refused, counted in its row (u32@440) and leaves
+no record when it is deeper than 4, has no pair, no room or no frame, begins
+while a segment build is open, or ends in another frame than it began (its pair
+is then quarantined: the begin report is in the ring). Its RSX time is the exact
+span of its own pair, independent of per-draw timing.
+
+Report pairs: covered draws and FRAME marks stop when only the unheld parts of
+the two reserves are free (32 for whole-CALL brackets, 16 for ranges; a quarter
+and an eighth of a small pool). Each class holds at most its own reserve.
+
+Timed ranges: `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY()` limits per-draw timing to
+covered draws inside a range begun with `PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED`
+(nested ranges inside it included). The others are covered but deliberately
+untimed: COVERAGE u64@416/424/432 count them per kind (exclusion reason
+"outside timed range", counted in visited, not in the ten exclusion columns:
+visited = observed + exclusions + outside). The bounded verdict rules treat them
+like other untimed draws. Without the call every covered draw is timed as before.
+
+`ps3dk-prof auto --by-tag [--json]` prints per frame and per tag the covered
+records, their timed RSX busy time (merged raw intervals of those records and of
+the tag's whole-CALL brackets) and the draws those brackets ran without a
+record, per range name the ranges and their raw time, and a whole-window
+summary (sum, median per frame). Untimed ring draws carry no record and so no
+tag; they are counted per frame only.
+
 
 Fixed 128 bytes: schema u16 at 0, flags u16 at 2, instance u32 at 4. Fifteen u64
 fields from offset 8 are: last admitted id, admitted, operations written,

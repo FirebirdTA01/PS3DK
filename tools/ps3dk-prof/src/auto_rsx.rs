@@ -27,11 +27,17 @@ pub const CONFIG_BYTES: usize = 160;
 pub const OP_BYTES: u32 = 128;
 /// OPS record width of the build-frame writer (CONFIG masks 63/11): the 128-byte record plus the build tail.
 pub const OP_BYTES_BUILD: u32 = 144;
+/// OPS record width of the tag writer (1023/11): the build record plus u32@144 tag, u32@148 fp_offset, u32@152 RANGE
+/// depth, u32@156 zero.
+pub const OP_BYTES_TAG: u32 = 160;
 pub const FRAME_BYTES: usize = 352;
 /// COVERAGE rows of the presentation writer (CONFIG masks 31/11): the 352-byte row plus a presentation block.
 pub const FRAME_BYTES_PRESENT: usize = 384;
 /// COVERAGE rows of the label-poll writer (511/11): a label-poll cadence block at 384.
 pub const FRAME_BYTES_LABEL: usize = 416;
+/// COVERAGE rows of the tag writer (1023/11): the timed-range block at 416 (u64 x3 visits left untimed outside timed
+/// ranges per kind, u32@440 AUTO ranges refused, u32@444 zero).
+pub const FRAME_BYTES_TAG: usize = 448;
 pub const STATUS_BYTES: usize = 128;
 pub const CLOCK_BYTES: usize = 96;
 /// Schema 1: the first sixteen reports of the lease are clock anchors.
@@ -78,6 +84,11 @@ pub const MASKS_CALL: (u32, u32) = (255, 11);
 /// cellGcmIsLabelPassed / cellGcmIsLabelValuePassed reads on the owner thread; like flip-status cadence they show how
 /// often the owner looked, not that it waited.
 pub const MASKS_LABEL: (u32, u32) = (511, 11);
+/// The tag writer: kind mask bit 512 TAG on top of 511/11 (OPS kind 6 RANGE, 160-byte OPS records, 448-byte rows).
+pub const MASKS_TAG: (u32, u32) = (1023, 11);
+/// An AUTO-owned range (TAG): its own report pair from PS3DK_PROF_AUTO_RANGE_BEGIN to _END in the ring.  TOKEN is
+/// the frame of both ends; args[0] the name descriptor index + 1, args[1] 1 for a timed range; depth 1..4.
+pub const KIND_RANGE: u16 = 6;
 /// Build tail flag: the draw was admitted while a coverage frame was open (else build owner and frame are zero).
 pub const OP_BUILD_KNOWN: u16 = 1;
 pub const OP_TOKEN: u16 = 1;
@@ -241,9 +252,13 @@ impl Attached {
     pub fn call_bracket(&self) -> bool {
         self.kind_mask & 128 != 0
     }
+    /// Tags, fragment-program offsets, AUTO ranges and timed-range limits (CONFIG 1023/11).
+    pub fn tagged(&self) -> bool {
+        self.kind_mask & 512 != 0
+    }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
-        if self.build_frames() { OP_BYTES_BUILD } else { OP_BYTES }
+        if self.tagged() { OP_BYTES_TAG } else if self.build_frames() { OP_BYTES_BUILD } else { OP_BYTES }
     }
 }
 impl Config {
@@ -291,6 +306,12 @@ pub struct Op {
     /// SEGMENT records of a 63/11 capture: the (owner, frame) whose coverage row counted this draw when it was built,
     /// None when no frame was open then (and always None for other records and older captures).
     pub build: Option<(u32, u64)>,
+    /// 1023/11: the tag current at the record's claim (a segment draw: at its build; a CALL record: at the CALL; a
+    /// RANGE: at its BEGIN) and the last fragment-program offset set on its context (0 none); None before 1023/11.
+    pub tag: Option<u32>,
+    pub fp_offset: Option<u32>,
+    /// RANGE only: nesting depth 1..4 (0 otherwise).
+    pub depth: u32,
 }
 impl Op {
     pub fn raw_valid(&self) -> bool {
@@ -331,6 +352,10 @@ pub struct Coverage {
     /// 511/11 rows: the label-poll cadence block (runs, broken, spanning, bounded-gap ticks) and the complete runs'
     /// label + 1 (0 none, 0xffffffff several or unknown).
     pub label_polls: Option<(Cadence, u32)>,
+    /// 1023/11 rows: covered ARRAY/INDEX/CLEAR visits left untimed because timing was limited to timed ranges and
+    /// none was open (exclusion reason "outside timed range"), and the AUTO ranges refused in this frame.
+    pub outside_timed: [u64; 3],
+    pub ranges_refused: u32,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -565,7 +590,7 @@ impl Reader {
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
                     && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET && (kinds, forms) != MASKS_CALL
-                    && (kinds, forms) != MASKS_LABEL
+                    && (kinds, forms) != MASKS_LABEL && (kinds, forms) != MASKS_TAG
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -583,7 +608,8 @@ impl Reader {
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
                 let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET
-                    || (kinds, forms) == MASKS_CALL || (kinds, forms) == MASKS_LABEL { OP_BYTES_BUILD } else { OP_BYTES };
+                    || (kinds, forms) == MASKS_CALL || (kinds, forms) == MASKS_LABEL { OP_BYTES_BUILD }
+                    else if (kinds, forms) == MASKS_TAG { OP_BYTES_TAG } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
@@ -671,8 +697,13 @@ impl Reader {
             let generation = c.u32()?;
             let r1 = c.u32()?;
             let published = c.u64()?;
-            let (build_frame, build_owner, build_flags, build_reserved) = if stride == OP_BYTES_BUILD {
+            let (build_frame, build_owner, build_flags, build_reserved) = if stride >= OP_BYTES_BUILD {
                 (c.u64()?, c.u32()?, c.u16()?, c.u16()?)
+            } else {
+                (0, 0, 0, 0)
+            };
+            let (tag, fp_offset, depth, r4) = if stride == OP_BYTES_TAG {
+                (c.u32()?, c.u32()?, c.u32()?, c.u32()?)
             } else {
                 (0, 0, 0, 0)
             };
@@ -714,8 +745,18 @@ impl Reader {
                 return bad(r, format!("{at}: build frame {build_frame} after its CALL frame {frame}"));
             }
             let frame_kind = kind == KIND_FRAME && cfg.frames_marked();
-            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind && !call_kind {
+            let range_kind = kind == KIND_RANGE && cfg.tagged();
+            if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind && !call_kind && !range_kind {
                 return bad(r, format!("{at}: kind {kind}"));
+            }
+            if r4 != 0 || (depth != 0) != range_kind {
+                return bad(r, format!("{at}: depth {depth} reserved {r4} (a depth only on a RANGE)"));
+            }
+            if range_kind && (segment_op || build_known || flags & OP_TOKEN == 0 || args[0] == 0 || args[1] > 1
+                || args[2..].iter().any(|&a| a != 0) || !(1..=4).contains(&depth))
+            {
+                return bad(r, format!("{at}: RANGE needs a token, no SEGMENT flag or build tail, a descriptor, a timed \
+                    flag 0 or 1 and depth 1..4"));
             }
             if call_kind && (segment_op || flags & OP_TOKEN == 0 || args[0] == 0 || args[1] > args[0] || args[2] == 0
                 || args[3] == 0 || args[4] > args[1] || args[5] | args[6] != 0 || build_known != (args[4] != 0))
@@ -763,6 +804,7 @@ impl Reader {
                 KIND_INDEX => &[2, 3, 4, 5],
                 KIND_FRAME => &[],
                 KIND_CALL => &[1, 2, 3, 4],
+                KIND_RANGE => &[1],
                 _ => &[6],
             };
             if (1..7).any(|j| !used.contains(&j) && args[j] != 0) {
@@ -816,6 +858,9 @@ impl Reader {
                 segment: if segment_op { r0 } else { 0 },
                 call: if segment_op { r1 } else { 0 },
                 build: build_known.then_some((build_owner, build_frame)),
+                tag: cfg.tagged().then_some(tag),
+                fp_offset: cfg.tagged().then_some(fp_offset),
+                depth,
             });
         }
         c.done()
@@ -824,8 +869,8 @@ impl Reader {
     fn coverage(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::AutoCoverage;
         let cfg = self.attached().clone();
-        let width = if cfg.label_polls() { FRAME_BYTES_LABEL } else if cfg.presentation_scopes() { FRAME_BYTES_PRESENT }
-            else { FRAME_BYTES };
+        let width = if cfg.tagged() { FRAME_BYTES_TAG } else if cfg.label_polls() { FRAME_BYTES_LABEL }
+            else if cfg.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
         if payload.len() != width {
             return bad(r, format!("AUTO_COVERAGE is {} bytes, not {width}", payload.len()));
         }
@@ -868,7 +913,18 @@ impl Reader {
             label.ticks = c.u64()?;
             r3 = c.u64()?;
         }
+        let (mut outside, mut ranges_refused, mut r5) = ([0u64; 3], 0u32, 0u32);
+        if cfg.tagged() {
+            for v in outside.iter_mut() {
+                *v = c.u64()?;
+            }
+            ranges_refused = c.u32()?;
+            r5 = c.u32()?;
+        }
         c.done()?;
+        if r5 != 0 {
+            return bad(r, format!("AUTO coverage frame {owner}/{frame}: reserved u32@444 {r5}"));
+        }
         let at = format!("AUTO coverage frame {owner}/{frame}");
         if r3 != 0 || (label.runs == 0) != (label_index == 0) || (label_index > 256 && label_index != u32::MAX)
             || (label.runs == 0 && label.ticks != 0)
@@ -922,7 +978,7 @@ impl Reader {
         }
         if flags & FR_SATURATED == 0 {
             for (k, row) in rows.iter().enumerate() {
-                let sum = row[1..].iter().try_fold(0u64, |a, &b| a.checked_add(b));
+                let sum = row[1..].iter().try_fold(outside[k], |a, &b| a.checked_add(b));
                 if sum != Some(row[0]) {
                     return bad(r, format!("{at}: {} visited {} is not observed plus exclusions", KINDS[k], row[0]));
                 }
@@ -941,7 +997,8 @@ impl Reader {
             flip_wait_spanning: scope_spanning, flip_wait_timeouts: timeouts, cadence,
             legacy_polls: (present && !scopes).then_some((r0, r1)),
             segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
-            label_polls: cfg.label_polls().then_some((label, label_index)) });
+            label_polls: cfg.label_polls().then_some((label, label_index)),
+            outside_timed: outside, ranges_refused });
         Ok(())
     }
 
@@ -1355,6 +1412,9 @@ pub struct FrameView {
     pub presentation: Option<Presentation>,
     /// 511/11: label-poll cadence and its label + 1 (see MASKS_LABEL), None for older writers.
     pub label_polls: Option<(Cadence, u32)>,
+    /// 1023/11: visits left untimed outside timed ranges (ARRAY, INDEX, CLEAR) and AUTO ranges refused in the frame.
+    pub outside_timed: [u64; 3],
+    pub ranges_refused: u32,
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1381,6 +1441,8 @@ pub struct Report {
     pub build_frames: bool,
     /// 255/11 and later: the busy-time polling rule applies and frames report their polling shares.
     pub busy_rule: bool,
+    /// 1023/11: tags, ranges and timed-range limits are recorded.
+    pub tagged: bool,
     pub state: String,
     pub config: Option<Config>,
     pub status: Option<Status>,
@@ -1488,6 +1550,7 @@ pub fn analyze(cap: &Capture) -> Report {
     // The causal polling rule needs RSX busy time with whole-CALL brackets (255/11 and later).
     let busy_rule = attached.call_bracket();
     rep.busy_rule = busy_rule;
+    rep.tagged = attached.tagged();
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
     let map = qualify(inv);
@@ -1556,6 +1619,8 @@ pub fn analyze(cap: &Capture) -> Report {
             call_brackets: calls.len() as u64,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             label_polls: f.label_polls,
+            outside_timed: f.outside_timed,
+            ranges_refused: f.ranges_refused,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
                 flip_wait_timeouts: f.flip_wait_timeouts,
@@ -1646,6 +1711,14 @@ pub fn analyze(cap: &Capture) -> Report {
             } else {
                 0
             };
+            // 1023/11: visits deliberately left untimed outside the timed ranges are untimed draws like the others
+            let outside = f.outside_timed.iter().fold(0u64, |a, &b| a.saturating_add(b));
+            if outside != 0 {
+                if !bounded_rule {
+                    return Err(format!("{outside} covered operation(s) untimed outside timed ranges"));
+                }
+                untimed = untimed.saturating_add(outside);
+            }
             if call_excl > untimed {
                 return Err(format!("CALL brackets name {call_excl} draw(s) refused while building in this frame, \
                     above its {untimed} untimed exclusion(s)"));
@@ -2009,6 +2082,11 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if f.call_brackets != 0 {
             v["call_brackets"] = json!(f.call_brackets);
         }
+        if r.tagged {
+            // the exclusion reason "outside timed range", per kind, and the refused AUTO ranges
+            v["outside_timed_range"] = json!({"array":f.outside_timed[0],"index":f.outside_timed[1],"clear":f.outside_timed[2]});
+            v["ranges_refused"] = json!(f.ranges_refused);
+        }
         if r.busy_rule {
             // 255/11 and later: polling shares of the frame interval (complete runs only), as observed numbers
             let d = f.tb_end.saturating_sub(f.tb_begin);
@@ -2104,7 +2182,7 @@ pub fn op_rows(cap: &Capture, frame: Option<u64>) -> Vec<OpRow> {
     let valid = |o: &Op| o.raw_valid() && o.raw_end >= o.raw_begin;
     let mut by_token: BTreeMap<(u32, u64), Vec<usize>> = BTreeMap::new();
     for (i, o) in ops.iter().enumerate() {
-        if let (true, Some(t), false) = (valid(o), o.token(), o.kind == KIND_CALL) { by_token.entry(t).or_default().push(i); }
+        if let (true, Some(t), false) = (valid(o), o.token(), o.kind == KIND_CALL || o.kind == KIND_RANGE) { by_token.entry(t).or_default().push(i); }
     }
     let mut gaps: Vec<Option<u64>> = vec![None; ops.len()];
     for idx in by_token.values_mut() {
@@ -2128,6 +2206,7 @@ fn op_kind_name(kind: u16) -> &'static str {
         KIND_CLEAR => "CLEAR",
         KIND_FRAME => "FRAME",
         KIND_CALL => "CALL",
+        KIND_RANGE => "RANGE",
         _ => "KIND?",
     }
 }
@@ -2147,14 +2226,21 @@ positions (it includes RSX-side waits between them), not the isolated cost of on
 /// `auto --ops` text: one line per record, then (with a frame) the per-kind sums.
 pub fn write_ops_text<W: std::io::Write>(out: &mut W, rows: &[OpRow], frame: Option<u64>) -> std::io::Result<()> {
     writeln!(out, "{OPS_NOTE}")?;
-    writeln!(out, "id frame kind flags interval gap raw_begin raw_end segment call caller args")?;
+    // 1023/11 records also carry a tag and a fragment-program offset: two more columns, only then
+    let tagged = rows.iter().any(|r| r.op.tag.is_some());
+    writeln!(out, "id frame kind flags interval gap raw_begin raw_end segment call caller args{}",
+        if tagged { " tag fp_offset" } else { "" })?;
     for r in rows {
         let o = &r.op;
         let fr = o.token().map_or("-".into(), |t| t.1.to_string());
-        writeln!(out, "{} {} {} {} {} {} {} {} {} {} {:#x} {}", o.id, fr, op_kind_name(o.kind), op_flag_names(o.flags),
+        let extra = match (o.tag, o.fp_offset) {
+            (Some(t), Some(f)) => format!(" {t:#x} {f:#x}"),
+            _ => String::new(),
+        };
+        writeln!(out, "{} {} {} {} {} {} {} {} {} {} {:#x} {}{}", o.id, fr, op_kind_name(o.kind), op_flag_names(o.flags),
             r.interval.map_or("-".into(), |x| x.to_string()), r.gap.map_or("-".into(), |x| x.to_string()),
             o.raw_begin, o.raw_end, o.segment, o.call, o.caller,
-            o.args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","))?;
+            o.args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(","), extra)?;
     }
     if let Some(f) = frame {
         let mut sums: BTreeMap<&str, (u64, u64, u64)> = BTreeMap::new();
@@ -2178,13 +2264,191 @@ pub fn write_ops_json<W: std::io::Write>(out: &mut W, rows: &[OpRow], frame: Opt
     use serde_json::json;
     let ops: Vec<serde_json::Value> = rows.iter().map(|r| {
         let o = &r.op;
-        json!({"id":o.id,"frame":o.token().map(|t| t.1),"owner":o.token().map(|t| t.0),"kind":op_kind_name(o.kind),
+        let mut v = json!({"id":o.id,"frame":o.token().map(|t| t.1),"owner":o.token().map(|t| t.0),"kind":op_kind_name(o.kind),
             "flags":o.flags,"flag_names":op_flag_names(o.flags),"interval":r.interval,"gap":r.gap,
             "raw_begin":o.raw_begin,"raw_end":o.raw_end,"tb_before":o.tb_before,"tb_after":o.tb_after,
             "caller":o.caller,"args":o.args,"segment":o.segment,"call":o.call,
-            "build_frame":o.build.map(|b| b.1)})
+            "build_frame":o.build.map(|b| b.1)});
+        if let (Some(t), Some(f)) = (o.tag, o.fp_offset) {
+            v["tag"] = json!(t);
+            v["fp_offset"] = json!(f);
+            if o.kind == KIND_RANGE { v["depth"] = json!(o.depth); }
+        }
+        v
     }).collect();
     let v = json!({"schema":1,"note":OPS_NOTE,"frame":frame,"ops":ops});
+    serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
+    writeln!(out)
+}
+
+// ---- auto --by-tag (1023/11) -----------------------------------------------------------------------------------
+
+/// One tag's share of one frame: covered records (draws and clears) recorded under that tag in the frame's execution
+/// population, their timed RSX busy time (merged raw intervals of those records and of the whole-CALL brackets
+/// recorded under the tag, overlaps merged), and the draws the tag's CALL brackets executed without a record of
+/// their own.  Untimed ring draws carry no record and so no tag: they are counted per frame only.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagRow {
+    pub ops: u64,
+    pub busy_raw: u64,
+    pub untimed_in_calls: u64,
+}
+/// One AUTO range name's RSX time in one frame: completed ranges and the sum of their raw spans (exact: the range's
+/// own report pair, independent of per-draw timing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RangeRow {
+    pub count: u64,
+    pub raw: u64,
+}
+#[derive(Debug, Clone, Default)]
+pub struct TagFrame {
+    pub owner: u32,
+    pub frame: u64,
+    /// covered visits the row counted untimed (untimed-only exclusions and outside timed ranges), by where they were
+    /// counted (the building frame for segment draws)
+    pub untimed: u64,
+    /// segment draws CALLs in this frame executed without a record of their own (COVERAGE u32@380); a draw refused
+    /// while building in this frame and CALLed here is counted in both
+    pub unrepresented: u32,
+    pub tags: BTreeMap<u32, TagRow>,
+    pub ranges: BTreeMap<String, RangeRow>,
+}
+#[derive(Debug, Clone, Default)]
+pub struct ByTag {
+    pub tagged: bool,
+    pub frames: Vec<TagFrame>,
+}
+
+fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
+    iv.sort_unstable();
+    let (mut sum, mut cur): (u64, Option<(u64, u64)>) = (0, None);
+    for (b, e) in iv {
+        cur = match cur {
+            Some((cb, ce)) if b <= ce => Some((cb, ce.max(e))),
+            Some((cb, ce)) => { sum = sum.saturating_add(ce - cb); Some((b, e)) }
+            None => Some((b, e)),
+        };
+    }
+    if let Some((cb, ce)) = cur { sum = sum.saturating_add(ce - cb); }
+    sum
+}
+
+/// Per frame and per tag, from the capture's records and rows (no verdict).
+pub fn by_tag(cap: &Capture) -> ByTag {
+    let Some(inv) = cap.auto.as_ref() else { return ByTag::default() };
+    let tagged = matches!(&inv.config, Some(Config::Attached(a)) if a.tagged());
+    let mut out = ByTag { tagged, frames: Vec::new() };
+    if !tagged {
+        return out;
+    }
+    let timed = |o: &Op| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0 && o.raw_end >= o.raw_begin;
+    for f in &inv.frames {
+        let key = (f.owner, f.frame);
+        let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
+        let mut tf = TagFrame { owner: f.owner, frame: f.frame, ..TagFrame::default() };
+        let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
+        tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
+        tf.unrepresented = f.segment_unrepresented;
+        let mut intervals: BTreeMap<u32, Vec<(u64, u64)>> = BTreeMap::new();
+        for o in &mine {
+            let tag = o.tag.unwrap_or(0);
+            if o.covered() {
+                tf.tags.entry(tag).or_default().ops += 1;
+                if timed(o) { intervals.entry(tag).or_default().push((o.raw_begin, o.raw_end)); }
+            } else if o.kind == KIND_CALL && timed(o) {
+                let row = tf.tags.entry(tag).or_default();
+                row.untimed_in_calls = row.untimed_in_calls.saturating_add(u64::from(o.args[1]));
+                intervals.entry(tag).or_default().push((o.raw_begin, o.raw_end));
+            } else if o.kind == KIND_RANGE && timed(o) {
+                let name = cap.descriptors.get(&(o.args[0] - 1)).map_or_else(|| format!("descriptor {}", o.args[0] - 1),
+                    |d| d.name.clone());
+                let r = tf.ranges.entry(name).or_default();
+                r.count += 1;
+                r.raw = r.raw.saturating_add(o.raw_end - o.raw_begin);
+            }
+        }
+        for (tag, iv) in intervals {
+            tf.tags.entry(tag).or_default().busy_raw = merged(iv);
+        }
+        out.frames.push(tf);
+    }
+    out
+}
+
+fn median(mut v: Vec<u64>) -> u64 {
+    if v.is_empty() { return 0; }
+    v.sort_unstable();
+    let n = v.len();
+    if n % 2 == 1 { v[n / 2] } else { v[n / 2 - 1] / 2 + v[n / 2] / 2 + (v[n / 2 - 1] % 2 + v[n / 2] % 2) / 2 }
+}
+
+/// Whole-window summary per tag: (frames seen, op sum, busy sum, busy median per frame over the frames it appears in).
+pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64)> {
+    let mut per: BTreeMap<u32, Vec<&TagRow>> = BTreeMap::new();
+    for f in &b.frames {
+        for (t, r) in &f.tags { per.entry(*t).or_default().push(r); }
+    }
+    per.into_iter().map(|(t, rows)| {
+        let ops = rows.iter().fold(0u64, |a, r| a.saturating_add(r.ops));
+        let busy = rows.iter().fold(0u64, |a, r| a.saturating_add(r.busy_raw));
+        (t, (rows.len() as u64, ops, busy, median(rows.iter().map(|r| r.busy_raw).collect())))
+    }).collect()
+}
+/// Whole-window summary per range name: (frames seen, ranges, raw sum, raw median per frame).
+pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64)> {
+    let mut per: BTreeMap<String, Vec<&RangeRow>> = BTreeMap::new();
+    for f in &b.frames {
+        for (n, r) in &f.ranges { per.entry(n.clone()).or_default().push(r); }
+    }
+    per.into_iter().map(|(n, rows)| {
+        let count = rows.iter().fold(0u64, |a, r| a.saturating_add(r.count));
+        let raw = rows.iter().fold(0u64, |a, r| a.saturating_add(r.raw));
+        (n, (rows.len() as u64, count, raw, median(rows.iter().map(|r| r.raw).collect())))
+    }).collect()
+}
+
+pub const BY_TAG_NOTE: &str = "raw RSX report-timestamp ticks; busy = merged timed intervals of the tag's records and \
+whole-CALL brackets (gaps between them not counted); untimed ring draws carry no tag and are counted per frame only; \
+range time is each range's own report pair";
+
+pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::Result<()> {
+    if !b.tagged {
+        return writeln!(out, "no tags: the capture's writer does not record them (CONFIG before 1023/11)");
+    }
+    writeln!(out, "{BY_TAG_NOTE}")?;
+    for f in &b.frames {
+        writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
+        for (t, r) in &f.tags {
+            writeln!(out, "  tag {t:#x}: ops {} busy {} untimed in CALL brackets {}", r.ops, r.busy_raw, r.untimed_in_calls)?;
+        }
+        for (n, r) in &f.ranges {
+            writeln!(out, "  range {n}: {} x, {} ticks", r.count, r.raw)?;
+        }
+    }
+    writeln!(out, "summary")?;
+    for (t, (n, ops, busy, med)) in tag_summary(b) {
+        writeln!(out, "  tag {t:#x}: {n} frame(s), ops {ops}, busy sum {busy}, median per frame {med}")?;
+    }
+    for (name, (n, count, raw, med)) in range_summary(b) {
+        writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}")?;
+    }
+    Ok(())
+}
+
+pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::Result<()> {
+    use serde_json::json;
+    let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| json!({
+        "owner": f.owner, "frame": f.frame, "untimed": f.untimed, "unrepresented": f.unrepresented,
+        "tags": f.tags.iter().map(|(t, r)| json!({"tag": t, "ops": r.ops, "busy_raw": r.busy_raw,
+            "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
+        "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
+    })).collect();
+    let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med))| json!({
+        "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med})).collect();
+    let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med))| json!({
+        "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med})).collect();
+    let v = json!({"schema": 1, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
+        "summary": {"tags": tags, "ranges": ranges}});
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }

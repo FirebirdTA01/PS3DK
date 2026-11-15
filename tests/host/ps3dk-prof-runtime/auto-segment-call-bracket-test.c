@@ -90,10 +90,10 @@ int main(void) {
     /* fully represented: no bracket, the release only */
     part(0);assert(clear(&port));close_part(0);
     call(0,0,4);brackets(0,0);
-    /* draws take every pair but the reserve: 504 - 32 - the mark - part 0's draw */
+    /* draws take every pair but the reserves: 504 - 32 (CALL) - 16 (ranges) - the mark - part 0's draw */
     part(1);
     while(clear(&port)) timed++;
-    assert(timed==504u-32u-2u);
+    assert(timed==504u-32u-16u-2u);
     close_part(1);
     call(1,2,6);brackets(1,0);
     /* no ring room for the bracket: none begun, and the refused-only build releases nothing */

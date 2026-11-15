@@ -46,6 +46,37 @@ typedef struct ps3dk_prof_auto_options {
  * ps3dk_prof_shutdown(): EPERM on another thread, EBUSY inside a profiler callback, EALREADY when already shut down,
  * so calling it on every exit path is safe; it never waits on the RSX (pending draws are recorded incomplete, pending
  * clock anchors get one last poll). Zero and no call when PS3_PROF_AUTO is off. */
+/* Attribution and AUTO-owned ranges (owner thread; inert elsewhere and without PS3_PROF_AUTO):
+ *  PS3DK_PROF_AUTO_TAG(t)              every later operation records tag t (a segment draw: the tag at its build;
+ *                                      a whole-CALL record: the tag at the CALL);
+ *  PS3DK_PROF_AUTO_RANGE_BEGIN(name)   a range timed by its own report pair in the ring: the RSX time between BEGIN
+ *  PS3DK_PROF_AUTO_RANGE_END()         and END, independent of per-draw timing. Nesting to depth 4; deeper, a
+ *                                      range inside a segment build, one whose END falls in another frame, or one
+ *                                      without a pair from the range reserve (16) is refused and counted;
+ *  PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name)  the same, and its covered draws get per-draw pairs while
+ *  PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() limits per-draw timing to timed ranges (draws outside them are covered but
+ *                                      untimed, reason "outside timed range"); without it every draw is timed. */
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+void ps3dk_prof_auto_tag(uint32_t tag);
+void ps3dk_prof_auto_timing(uint32_t mode);
+int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc, uint32_t timed);
+int ps3dk_prof_auto_range_end(void);
+#define PS3DK_PROF_AUTO__RANGE(name, timed) \
+    do { static ps3dk_prof_desc ps3dk_prof__r = {(name), "", __FILE__, (uint32_t)__LINE__, 2u, 0u, 0u}; \
+         (void)ps3dk_prof_auto_range_begin(&ps3dk_prof__r, (timed)); } while (0)
+#define PS3DK_PROF_AUTO_TAG(t) ps3dk_prof_auto_tag((uint32_t)(t))
+#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) PS3DK_PROF_AUTO__RANGE(name, 0u)
+#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) PS3DK_PROF_AUTO__RANGE(name, 1u)
+#define PS3DK_PROF_AUTO_RANGE_END() ((void)ps3dk_prof_auto_range_end())
+#define PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() ps3dk_prof_auto_timing(1u)
+#else
+#define PS3DK_PROF_AUTO_TAG(t) ((void)sizeof(t))
+#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) ((void)sizeof(name))
+#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) ((void)sizeof(name))
+#define PS3DK_PROF_AUTO_RANGE_END() ((void)0)
+#define PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() ((void)0)
+#endif
+
 #if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
 int ps3dk_prof_shutdown(void);
 #define PS3DK_PROF_AUTO_SEAL() ps3dk_prof_shutdown()

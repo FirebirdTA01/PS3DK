@@ -25,8 +25,13 @@ const USAGE: &str = "usage:
                              check, 1 when automatic observation is absent, unavailable or refused
   ps3dk-prof auto --ops [--frame N] [--json] <file>
                              every retained AUTO operation record in emission order: kind, flags,
-                             reached-marker interval and gap (raw RSX ticks), args; per-kind sums with
-                             --frame; 1 when the capture has no automatic observation
+                             reached-marker interval and gap (raw RSX ticks), args (and tag, fp_offset
+                             with 1023/11); per-kind sums with --frame; 1 when the capture has no
+                             automatic observation
+  ps3dk-prof auto --by-tag [--json] <file>
+                             per frame and per tag: records, timed RSX busy (merged intervals) and the
+                             draws its CALL brackets ran untimed; AUTO range time per name; a whole-
+                             window summary; 1 without automatic observation or without tags
   ps3dk-prof export --frame N | --frames A..B <in.prof> <out.prof>
                              write one frame or a frame range of a capture as a standalone .prof
   ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
@@ -399,6 +404,7 @@ fn counters(args: &[String]) -> ExitCode {
 
 fn auto(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--ops") { return auto_ops(args); }
+    if args.iter().any(|a| a == "--by-tag") { return auto_by_tag(args); }
     let (json, path) = match args {
         [path] if !path.starts_with('-') => (false, path),
         [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
@@ -456,6 +462,37 @@ fn auto_ops(args: &[String]) -> ExitCode {
                 else { ps3dk_prof::auto_rsx::write_ops_text(&mut out, &rows, frame) };
             if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
             ExitCode::SUCCESS
+        }
+    }
+}
+
+/// `auto --by-tag [--json] <file>`: per frame and per tag, op count, timed RSX busy and untimed draws, and AUTO range
+/// time per name; then a whole-window summary. Exit 1 without automatic observation or without tags (before 1023/11).
+fn auto_by_tag(args: &[String]) -> ExitCode {
+    let (mut json, mut flag, mut path) = (false, false, None);
+    for a in args {
+        match a.as_str() {
+            "--json" if !json => json = true,
+            "--by-tag" if !flag => flag = true,
+            p if !p.starts_with('-') && path.is_none() => path = Some(p.to_string()),
+            _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+        }
+    }
+    let Some(path) = path else { eprintln!("{USAGE}"); return ExitCode::from(3) };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            if a.capture.auto.is_none() { eprintln!("ps3dk-prof: no automatic RSX observation in {path}"); return ExitCode::from(1); }
+            let b = ps3dk_prof::auto_rsx::by_tag(&a.capture);
+            let mut out = std::io::stdout().lock();
+            let result = if json { ps3dk_prof::auto_rsx::write_by_tag_json(&mut out, &b) }
+                else { ps3dk_prof::auto_rsx::write_by_tag_text(&mut out, &b) };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            if b.tagged { ExitCode::SUCCESS } else { ExitCode::from(1) }
         }
     }
 }

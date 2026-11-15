@@ -66,20 +66,38 @@ static void limits(void)
 static void reserved(void)
 {
     auto_queue_entry *e;
-    assert(auto_queue_init(&q,entries,4,4) && q.free_pairs==4 && q.reserve==0);
-    q.reserve=2;
+    assert(auto_queue_init(&q,entries,4,4) && q.free_pairs==4 && !q.cap[1] && !q.cap[2]);
+    auto_queue_set_reserve(&q,AUTO_PAIR_CALL,2);
     e=auto_queue_claim(&q); assert(e); auto_queue_commit(&q);
     assert(auto_queue_take_pair(&q)>=0 && q.free_pairs==2);
     assert(!auto_queue_claim(&q) && q.refusal==AUTO_QUEUE_REPORTS);
     assert(auto_queue_take_pair(&q)<0 && q.refusal==AUTO_QUEUE_REPORTS);
     assert(auto_queue_take_reserved_pair(&q)>=0 && auto_queue_take_reserved_pair(&q)>=0 && q.free_pairs==0);
     assert(auto_queue_take_reserved_pair(&q)<0 && q.refusal==AUTO_QUEUE_REPORTS);
-    assert(auto_queue_ack(&q,1,1,1) && q.free_pairs==1);   /* completed: free again */
-    assert(auto_queue_take_reserved_pair(&q)>=0 && q.free_pairs==0);
+    assert(auto_queue_ack(&q,1,1,1) && q.free_pairs==1);   /* completed: free again (a draw pair) */
+    assert(auto_queue_take_reserved_pair(&q)<0);           /* the class holds its cap */
+    assert(auto_queue_claim(&q)); auto_queue_commit(&q);   /* the reserve is fully held: class 0 may take it */
+    /* two reserves: class 0 leaves both unheld parts; each class stays within its own cap; a completed class pair
+     * returns to its reserve, a quarantined one does not */
+    assert(auto_queue_init(&q,entries,4,6));
+    auto_queue_set_reserve(&q,AUTO_PAIR_CALL,2);auto_queue_set_reserve(&q,AUTO_PAIR_RANGE,2);
+    assert(auto_queue_take_pair(&q)>=0 && auto_queue_take_pair(&q)>=0 && auto_queue_take_pair(&q)<0);
+    assert(auto_queue_take_class_pair(&q,AUTO_PAIR_RANGE)>=0 && q.held[2]==1);
+    assert(auto_queue_take_pair(&q)<0);                     /* 3 free, 3 still reserved */
+    assert(auto_queue_take_class_pair(&q,AUTO_PAIR_RANGE)>=0 && auto_queue_take_class_pair(&q,AUTO_PAIR_RANGE)<0);
+    {
+        int r=auto_queue_take_class_pair(&q,AUTO_PAIR_CALL);
+        assert(r>=0);
+        e=auto_queue_claim_held(&q,(uint32_t)r,0); assert(e); auto_queue_commit(&q);
+        assert(auto_queue_ack(&q,e->op.id,1,1) && q.held[1]==0 && q.free_pairs==2);
+    }
+    assert(auto_queue_take_class_pair(&q,0)<0 && auto_queue_take_class_pair(&q,3)<0);
     assert(auto_queue_init(&q,entries,4,1));
     e=auto_queue_claim(&q); assert(e); auto_queue_commit(&q);
     assert(auto_queue_ack(&q,1,0,1) && q.free_pairs==0);   /* quarantined: still charged */
     assert(auto_queue_take_reserved_pair(&q)<0);
+    auto_queue_set_reserve(&q,AUTO_PAIR_CALL,1);
+    assert(auto_queue_take_reserved_pair(&q)<0);           /* a reserve without a free pair */
 }
 
 static void *producer(void *unused)
