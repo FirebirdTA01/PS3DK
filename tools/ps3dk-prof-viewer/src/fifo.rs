@@ -6,10 +6,10 @@ use ps3dk_prof::{fifo as reader, Capture};
 pub const TITLE: &str = "FIFO wrap waits (PPU clock)";
 pub const CAPTION: &str = "PPU timebase wall time of the GCM context owner inside the two-phase FIFO wrap, including \
 scheduling and observer cost. Not GPU busy or idle time; frame tokens are owner association, not GPU execution frames.";
-pub const RSX_STATUS: &str = "RSX execution busy/idle: UNKNOWN (no mechanism in this capture measures it).";
+pub const RSX_STATUS: &str = "RSX execution busy/idle from FIFO wrap records: UNKNOWN; see Automatic for available AUTO evidence.";
 pub const NOT_ENABLED: &str = "Not recorded by the FIFO wrap observer (not zero): register samples, prepared/published \
-bytes, supply-gap views. RSX-reached markers come from AUTO RSX records when the capture has them; this viewer does \
-not show those records ('ps3dk-prof auto' does).";
+bytes, supply-gap views. RSX-reached markers come from AUTO RSX records when the capture has them; see the Automatic \
+page or 'ps3dk-prof auto'.";
 pub const PAINT_BARS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +34,7 @@ impl Bar {
 pub struct Row {
     pub wrap_id: u64,
     pub text: String,
+    pub display: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,6 +57,16 @@ fn ticks(t: u64, f: Option<u64>) -> String {
     match f.filter(|&f| f != 0) {
         Some(f) => format!("{t} ticks (approx {:.3} ms)", t as f64 * 1000.0 / f as f64),
         None => format!("{t} ticks"),
+    }
+}
+
+fn phase_short(p: &reader::Phase, f: Option<u64>) -> String {
+    match p {
+        reader::Phase::Complete { min, max, .. } => {
+            let tb = crate::model::TimeBase { freq_hz: f };
+            format!("COMPLETE approx {}..{}", tb.short_ticks((*min).into()), tb.short_ticks((*max).into()))
+        }
+        _ => phase_text(p, f),
     }
 }
 
@@ -111,6 +122,10 @@ impl FifoView {
             }
             v.rows.push(Row {
                 wrap_id: w.wrap_id,
+                display: format!("wrap {} token {}: phase 1 {}; phase 2 {}; outer {}{}", w.wrap_id,
+                    w.token.map_or("NONE".into(), |(o, fr)| format!("{o}/{fr}")), phase_short(&w.phase1, f),
+                    phase_short(&w.phase2, f), phase_short(&w.outer, f),
+                    if w.entered && !w.completed { " (entered, not completed)" } else { "" }),
                 text: format!("wrap {} token {}: phase 1 {}; phase 2 {}; outer {}{}", w.wrap_id,
                     w.token.map_or("NONE".into(), |(o, fr)| format!("{o}/{fr}")), phase_text(&w.phase1, f),
                     phase_text(&w.phase2, f), phase_text(&w.outer, f),

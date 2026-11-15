@@ -46,14 +46,14 @@ fn row_cells(g: &mut egui::Ui, r: &FRow) {
     });
     g.label(&r.calls);
     // Self is the sort key (as in the CLI) and the emphasised column; inclusive is shown beside it.
-    g.label(egui::RichText::new(&r.self_time).strong());
+    g.label(egui::RichText::new(&r.self_time).strong()).on_hover_text(&r.self_time_exact);
     let frac = r.self_pct.map_or(0.0, |p| (p / 100.0) as f32);
     g.add(
         egui::ProgressBar::new(frac.clamp(0.0, 1.0))
             .desired_width(90.0)
             .text(pct(r.self_pct)),
     );
-    g.label(&r.incl);
+    g.label(&r.incl).on_hover_text(&r.incl_exact);
     g.label(pct(r.incl_pct));
     g.label(&r.flags);
     g.end_row();
@@ -158,7 +158,7 @@ pub fn draw(p: &mut egui::Ui, a: &Analysis, st: &mut HotState, slot: &FuncSlot) 
         p.add(egui::Label::new(l).wrap());
     }
     for l in &v.selection_lines {
-        p.add(egui::Label::new(l).wrap());
+        p.add(egui::Label::new(l).wrap()).on_hover_text(&v.elapsed_exact);
     }
     if let Some(n) = &v.notice {
         ui::field_message(p, ui::Tone::Warning, n);

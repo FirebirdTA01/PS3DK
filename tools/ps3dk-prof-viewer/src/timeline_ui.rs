@@ -231,6 +231,11 @@ pub fn draw_with_auto(
                     "No usable clock: the ruler and durations are in timebase ticks.",
                 );
             }
+            if st.tl.tracks.is_empty() {
+                ui::field_message(p, ui::Tone::Neutral, "No PPU timeline lanes: no thread records are present in this capture.");
+            } else if a.capture.spans.is_empty() {
+                ui::field_message(p, ui::Tone::Neutral, "No PPU zones recorded: only the available frame markers can be shown.");
+            }
             st.track_areas.clear();
             toolbar(p, st, tb, &*selected);
             let before = st.view;
@@ -318,6 +323,15 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
             ui::field_message(p, ui::Tone::Neutral, &format!("Showing the first {} visible bars; {} later visible bars are not painted. Zoom in to inspect them.", ta::PAINT_CAP, layout.omitted[lane]));
         }
         let bars = if lane == 0 { &layout.verdict } else { &layout.busy };
+        if bars.is_empty() {
+            let why = if lane == 0 {
+                if v.report.frames.is_empty() { "No AUTO coverage rows retained." }
+                else if layout.unplaced_frames == v.report.frames.len() { "No AUTO frame has a valid placement token and interval." }
+                else { "No AUTO frame intervals in the visible window." }
+            } else if v.busy.bars.is_empty() { "No mapped timed intervals retained." }
+            else { "No mapped RSX intervals in the visible window." };
+            ui::field_message(p, ui::Tone::Neutral, why);
+        }
         let (rect, _) = p.allocate_exact_size(Vec2::new(LABEL_W + width, 38.0), Sense::hover());
         let area = Rect::from_min_max(Pos2::new(rect.left() + LABEL_W, rect.top()), rect.max);
         st.auto_areas[lane] = Some(area);
@@ -354,7 +368,8 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
             if let Some(b) = bars.iter().rev().find(|b| x >= b.left && x <= b.right.max(b.left + 1.0)) {
                 let text = if lane == 0 {
                     let f = &v.report.frames[b.index];
-                    format!("Frame {} (owner {}) | {}\n{}\nPPU interval: {}..{} ticks", f.frame, f.owner, f.verdict.key(), f.reason, f.tb_begin, f.tb_end)
+                    format!("Frame {} (owner {}) | {}\n{}\n{}\nInterval: {}\nPPU interval: {}..{} ticks", f.frame, f.owner, f.verdict.key(), f.verdict.explanation(), f.reason,
+                        v.format_ms(f.tb_end.saturating_sub(f.tb_begin)), f.tb_begin, f.tb_end)
                 } else {
                     let b = &v.busy.bars[b.index];
                     format!("Frame {} (owner {}) | {} operation(s)\nRSX raw interval: {}..{}\nPPU begin: {}..{} ticks\nPPU end: {}..{} ticks\nConditional on the capture clock map; includes RSX waits.",
@@ -393,7 +408,8 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
         for f in visible.iter().take(128) {
             p.horizontal_top(|p| {
                 p.add_sized([LABEL_W - ui::SPACE_SM, 20.0], egui::Label::new(format!("Frame {} / owner {}", f.frame, f.owner)));
-                p.add(egui::Label::new(ta::presentation_text(f)).wrap());
+                p.add(egui::Label::new(ta::presentation_short(f, TimeBase { freq_hz: Some(v.tb_freq) })).wrap())
+                    .on_hover_text(ta::presentation_text(f));
             });
         }
         if visible.len() > 128 {
@@ -442,7 +458,7 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
             Some(ms) => format_ms(ms),
             None => format!("{:.0} ticks", st.view.dt),
         };
-        p.label(egui::RichText::new(format!("Window {span}")).strong());
+        p.label(egui::RichText::new(format!("Window {span}")).strong()).on_hover_text(tb.ticks_f(st.view.dt));
         if let Some((name, tag)) = selected {
             p.add_space(ui::SPACE_LG);
             let label = if tag.is_empty() {
@@ -464,7 +480,8 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
 }
 
 fn draw_ruler(p: &mut egui::Ui, st: &TimelineState, tb: TimeBase, width: f32, pal: &ui::Palette) {
-    let (rect, _) = p.allocate_exact_size(Vec2::new(LABEL_W + width, RULER_H), Sense::hover());
+    let (rect, response) = p.allocate_exact_size(Vec2::new(LABEL_W + width, RULER_H), Sense::hover());
+    response.on_hover_text(format!("Offsets from capture start {} PPU ticks; shown offset {}..{} ticks", st.tl.start, st.view.t0, st.view.t0 + st.view.dt));
     let painter = p.painter_at(rect);
     let x0 = rect.left() + LABEL_W;
     painter.line_segment(
@@ -483,13 +500,15 @@ fn draw_ruler(p: &mut egui::Ui, st: &TimelineState, tb: TimeBase, width: f32, pa
             ],
             Stroke::new(1.0_f32, pal.text_faint),
         );
-        painter.text(
-            Pos2::new(x + 3.0, rect.top() + 2.0),
-            Align2::LEFT_TOP,
+        let galley = painter.layout_no_wrap(
             label,
             FontId::proportional(11.0),
             pal.text_muted,
         );
+        // Keep the final tick, but never clip the unit off its label at the viewport edge.
+        if x + 3.0 + galley.size().x <= rect.right() {
+            painter.galley(Pos2::new(x + 3.0, rect.top() + 2.0), galley, pal.text_muted);
+        }
     }
 }
 

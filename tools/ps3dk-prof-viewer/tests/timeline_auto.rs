@@ -132,6 +132,10 @@ fn presentation_annotations_are_aggregates_without_positions() {
         legacy_polls: None,
     });
     let text = timeline_auto::presentation_text(f);
+    let short = timeline_auto::presentation_short(f, ps3dk_prof_viewer::model::TimeBase { freq_hz: Some(1_000_000) });
+    assert!(short.contains("0.123 ms / 7 scope(s)") && short.contains("0.456 ms / 11 run(s)"), "{short}");
+    assert!(!short.contains("ticks"));
+    assert_eq!(timeline_auto::presentation_short(f, ps3dk_prof_viewer::model::TimeBase { freq_hz: None }), text);
     assert!(text.contains("123 ticks / 7 scope(s); 2 timeout(s), 3 spanning"));
     assert!(text.contains("456 ticks / 11 run(s); 4 broken, 5 spanning"));
     assert_eq!(
@@ -209,6 +213,10 @@ fn auto_lanes_keep_navigation_and_collapse_state() {
 }
 
 fn presentation_section_text(v: &ps3dk_prof_viewer::auto::AutoView) -> Vec<String> {
+    auto_section_text(v, false)
+}
+
+fn auto_section_text(v: &ps3dk_prof_viewer::auto::AutoView, show_all: bool) -> Vec<String> {
     use eframe::egui::{self, Pos2, RawInput, Rect, Shape, Vec2};
     use ps3dk_prof_viewer::timeline_ui::{draw_with_auto, TimelineState};
     fn texts(shape: &Shape, out: &mut Vec<String>) {
@@ -221,7 +229,8 @@ fn presentation_section_text(v: &ps3dk_prof_viewer::auto::AutoView) -> Vec<Strin
     let doc = fixture("console-r2");
     let a = doc.analysis().unwrap();
     let mut st = TimelineState::new(a);
-    st.collapsed[..5].fill(true);
+    st.collapsed[..3].fill(true);
+    if !show_all { st.collapsed[3..5].fill(true); }
     let ctx = egui::Context::default();
     ps3dk_ui::install(&ctx);
     let mut result = Vec::new();
@@ -292,4 +301,16 @@ fn presentation_section_some_counts_all_frames_and_shows_only_observed_rows() {
     assert!(shown
         .iter()
         .any(|s| s == timeline_auto::PRESENTATION_NOTICE));
+}
+
+#[test]
+fn empty_auto_lanes_explain_missing_retained_records() {
+    let doc = fixture("console-r2");
+    let mut v = doc.auto.as_ref().unwrap().clone();
+    v.report.frames.clear();
+    v.busy.bars.clear();
+    v.busy.notice = None;
+    let shown = auto_section_text(&v, true);
+    assert!(shown.iter().any(|s| s == "No AUTO coverage rows retained."));
+    assert!(shown.iter().any(|s| s == "No mapped timed intervals retained."));
 }

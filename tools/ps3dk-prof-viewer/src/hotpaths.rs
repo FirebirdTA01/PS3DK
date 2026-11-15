@@ -32,7 +32,9 @@ pub struct RowView {
     pub depth: usize,
     pub hot: bool,
     pub exclusive: String,
+    pub exclusive_exact: String,
     pub inclusive: String,
+    pub inclusive_exact: String,
     /// Exclusive as a share of the lane's retained exclusive total (display only); None when the total is 0.
     pub share: Option<f64>,
     pub counts: String,
@@ -45,7 +47,7 @@ pub struct RowView {
 pub enum LaneKind {
     Refused(String),
     CountsOnly { reasons: String, population: String },
-    Paths { lines: Vec<String>, rows: Vec<RowView>, more: Option<String> },
+    Paths { lines: Vec<String>, totals_exact: String, rows: Vec<RowView>, more: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,8 +120,10 @@ fn row(a: &Analysis, tb: TimeBase, i: usize, r: &PathRow, total: u128, hot: usiz
         leaf: leaf(a, &r.key),
         depth: r.key.descs.len(),
         hot: i < hot,
-        exclusive: tb.ticks(r.exclusive),
-        inclusive: tb.ticks(r.inclusive),
+        exclusive: tb.short_ticks(r.exclusive),
+        exclusive_exact: tb.ticks(r.exclusive),
+        inclusive: tb.short_ticks(r.inclusive),
+        inclusive_exact: tb.ticks(r.inclusive),
         share: (total > 0).then(|| r.exclusive as f64 * 100.0 / total as f64),
         counts: counts_text(&r.counts),
         links,
@@ -146,8 +150,8 @@ pub fn build(a: &Analysis, p: &PathMap) -> HotView {
                     format!("deeper than the depth cap: {too_deep} spans (in no path and no total)"),
                     format!(
                         "retained totals (eligible spans in a path): exclusive {}, inclusive {}",
-                        tb.ticks(*retained_exclusive),
-                        tb.ticks(*retained_inclusive)
+                        tb.short_ticks(*retained_exclusive),
+                        tb.short_ticks(*retained_inclusive)
                     ),
                     match hot {
                         Hot::Top(k) => format!(
@@ -164,7 +168,7 @@ pub fn build(a: &Analysis, p: &PathMap) -> HotView {
                 let shown: Vec<RowView> =
                     rows.iter().take(ROW_LIMIT).enumerate().map(|(i, r)| row(a, tb, i, r, *retained_exclusive, k)).collect();
                 let more = (rows.len() > ROW_LIMIT).then(|| format!("{} more paths (ranked below these)", rows.len() - ROW_LIMIT));
-                LaneKind::Paths { lines, rows: shown, more }
+                LaneKind::Paths { lines, totals_exact: format!("exclusive {} | inclusive {}", tb.ticks(*retained_exclusive), tb.ticks(*retained_inclusive)), rows: shown, more }
             }
         };
         lanes.push(LaneHot { incarnation: l.incarnation, kind });
