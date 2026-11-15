@@ -160,6 +160,27 @@ fn card_available_width(ui: &egui::Ui) -> f32 {
     (ui.available_width() - card_right_pad - 4.0).max(60.0).min(visible_w)
 }
 
+fn fact_row<F>(ui: &mut egui::Ui, label: &str, add_value: F)
+where
+    F: FnOnce(&mut egui::Ui),
+{
+    ui.horizontal_top(|row| {
+        row.allocate_ui_with_layout(
+            egui::vec2(180.0, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |l| {
+                l.set_max_width(180.0);
+                l.label(RichText::new(label).strong());
+            },
+        );
+        row.add_space(ui::SPACE_MD);
+        row.vertical(|v| {
+            add_value(v);
+        });
+    });
+    ui.add_space(ui::SPACE_SM);
+}
+
 fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &ui::Palette) {
     ui::card(p, |c| {
         let card_w = card_available_width(c);
@@ -172,127 +193,99 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         );
         c.add_space(ui::SPACE_XS);
 
-        let title_col_w = (card_w * 0.38).clamp(110.0, 180.0);
-        let val_w = (card_w - title_col_w - ui::SPACE_LG - 8.0).max(80.0);
-
-        egui::Grid::new("auto_capture_facts_grid")
-            .num_columns(2)
-            .spacing([ui::SPACE_LG, ui::SPACE_MD])
-            .show(c, |g| {
-                // Clock map state
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Clock map").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        match &v.report.map {
-                            Some(MapState::Qualified(m)) => {
-                                let text = format!(
-                                    "QUALIFIED · {} anchors, PPU/RSX slope [{}/{}, {}/{}], decisive hold-outs odd {} even {}",
-                                    m.anchors,
-                                    m.slope_lo.num,
-                                    m.slope_lo.den,
-                                    m.slope_hi.num,
-                                    m.slope_hi.den,
-                                    m.decisive.0,
-                                    m.decisive.1
-                                );
-                                drawn.map_state = "QUALIFIED".to_string();
-                                ui::badge(h, "QUALIFIED", ui::Tone::Success);
-                                h.add_space(ui::SPACE_XS);
-                                h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
-                            }
-                            Some(MapState::Unqualified(why)) => {
-                                drawn.map_state = format!("UNQUALIFIED ({why})");
-                                ui::badge(h, "UNQUALIFIED", ui::Tone::Warning);
-                                h.add_space(ui::SPACE_XS);
-                                let text = format!("AUTO_CLOCK_UNQUALIFIED: {why} (raw RSX ticks only)");
-                                h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
-                            }
-                            None => {
-                                drawn.map_state = "NO MAP".to_string();
-                                ui::badge(h, "NO MAP", ui::Tone::Neutral);
-                                h.add_space(ui::SPACE_XS);
-                                let text = "No clock anchors recorded";
-                                h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                            }
-                        }
-                    },
-                );
-                g.end_row();
-
-                // Final vs Provisional
-                drawn.is_final = v.is_final();
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Capture state").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        if v.is_final() {
-                            ui::badge(h, "FINAL", ui::Tone::Success);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "Closed with complete stop / finalization";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        } else {
-                            ui::badge(h, "PROVISIONAL", ui::Tone::Warning);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "Provisional snapshot / open session";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        }
-                    },
-                );
-                g.end_row();
-
-                // Ops dropped
-                let dropped = v.ops_dropped();
-                drawn.ops_dropped = dropped;
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Ops dropped past ceiling").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        if dropped > 0 {
-                            ui::badge(h, &format!("{dropped} DROPPED"), ui::Tone::Warning);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "Operations parsed but not retained past operation ceiling";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        } else {
-                            ui::badge(h, "0 DROPPED", ui::Tone::Success);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "All operations retained within ceiling";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        }
-                    },
-                );
-                g.end_row();
-
-                // Frame marks missed
-                let lost = v.frames_lost();
-                drawn.frames_lost = lost;
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Frame marks missed").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        if lost > 0 {
-                            ui::badge(h, &format!("{lost} LOST"), ui::Tone::Danger);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "Missed frame boundary markers (frames_lost)";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        } else {
-                            ui::badge(h, "0 LOST", ui::Tone::Success);
-                            h.add_space(ui::SPACE_XS);
-                            let text = "No missed frame boundaries";
-                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                        }
-                    },
-                );
-                g.end_row();
+        // Clock map state
+        fact_row(c, "Clock map", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                match &v.report.map {
+                    Some(MapState::Qualified(m)) => {
+                        let text = format!(
+                            "QUALIFIED · {} anchors, PPU/RSX slope [{}/{}, {}/{}], decisive hold-outs odd {} even {}",
+                            m.anchors,
+                            m.slope_lo.num,
+                            m.slope_lo.den,
+                            m.slope_hi.num,
+                            m.slope_hi.den,
+                            m.decisive.0,
+                            m.decisive.1
+                        );
+                        drawn.map_state = "QUALIFIED".to_string();
+                        ui::badge(h, "QUALIFIED", ui::Tone::Success);
+                        h.add_space(ui::SPACE_XS);
+                        h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
+                    }
+                    Some(MapState::Unqualified(why)) => {
+                        drawn.map_state = format!("UNQUALIFIED ({why})");
+                        ui::badge(h, "UNQUALIFIED", ui::Tone::Warning);
+                        h.add_space(ui::SPACE_XS);
+                        let text = format!("AUTO_CLOCK_UNQUALIFIED: {why} (raw RSX ticks only)");
+                        h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
+                    }
+                    None => {
+                        drawn.map_state = "NO MAP".to_string();
+                        ui::badge(h, "NO MAP", ui::Tone::Neutral);
+                        h.add_space(ui::SPACE_XS);
+                        let text = "No clock anchors recorded";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                    }
+                }
             });
+        });
+
+        // Final vs Provisional
+        drawn.is_final = v.is_final();
+        fact_row(c, "Capture state", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                if v.is_final() {
+                    ui::badge(h, "FINAL", ui::Tone::Success);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "Closed with complete stop / finalization";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                } else {
+                    ui::badge(h, "PROVISIONAL", ui::Tone::Warning);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "Provisional snapshot / open session";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                }
+            });
+        });
+
+        // Ops dropped
+        let dropped = v.ops_dropped();
+        drawn.ops_dropped = dropped;
+        fact_row(c, "Ops dropped past ceiling", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                if dropped > 0 {
+                    ui::badge(h, &format!("{dropped} DROPPED"), ui::Tone::Warning);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "Operations parsed but not retained past operation ceiling";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                } else {
+                    ui::badge(h, "0 DROPPED", ui::Tone::Success);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "All operations retained within ceiling";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                }
+            });
+        });
+
+        // Frame marks missed
+        let lost = v.frames_lost();
+        drawn.frames_lost = lost;
+        fact_row(c, "Frame marks missed", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                if lost > 0 {
+                    ui::badge(h, &format!("{lost} LOST"), ui::Tone::Danger);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "Missed frame boundary markers (frames_lost)";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                } else {
+                    ui::badge(h, "0 LOST", ui::Tone::Success);
+                    h.add_space(ui::SPACE_XS);
+                    let text = "No missed frame boundaries";
+                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                }
+            });
+        });
     });
 }
 
@@ -471,96 +464,68 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
             return;
         }
 
-        let title_col_w = (card_w * 0.38).clamp(110.0, 180.0);
-        let val_w = (card_w - title_col_w - ui::SPACE_LG - 8.0).max(80.0);
-
-        egui::Grid::new("auto_steady_summary_grid")
-            .num_columns(2)
-            .spacing([ui::SPACE_LG, ui::SPACE_MD])
-            .show(c, |g| {
-                // Verdict mix
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Verdict mix").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        h.label(format!("{} frames: ", summary.frame_count));
-                        for (verdict, count) in &summary.verdict_counts {
-                            let pct = summary.mix_pct(*verdict);
-                            ui::badge(h, &format!("{}: {} ({:.1}%)", verdict.key(), count, pct), verdict_tone(*verdict));
-                            h.add_space(ui::SPACE_XS);
-                        }
-                    },
-                );
-                g.end_row();
-
-                // Median Frame Interval
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Median Frame Interval").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        let interval_text = summary
-                            .median_interval_ms()
-                            .map_or("none".into(), |ms| format!("{ms:.3} ms"));
-                        let interval_ticks_tip = summary
-                            .median_interval_ticks
-                            .map_or(String::new(), |t| format!("{t} PPU ticks"));
-                        h.label(&interval_text).on_hover_text(interval_ticks_tip);
-                    },
-                );
-                g.end_row();
-
-                // Median RSX Span
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Median RSX Span").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        let span_text = if let Some(ms) = summary.median_span_ms() {
-                            format!("{ms:.3} ms")
-                        } else if let Some(raw) = summary.median_span_raw_ticks {
-                            format!("{raw} raw ticks (unmapped)")
-                        } else {
-                            "-".into()
-                        };
-                        let span_tip = format!(
-                            "PPU ticks: {}, raw ticks: {}",
-                            summary.median_span_ppu_ticks.map_or("-".into(), |t| t.to_string()),
-                            summary.median_span_raw_ticks.map_or("-".into(), |t| t.to_string())
-                        );
-                        h.label(&span_text).on_hover_text(span_tip);
-                    },
-                );
-                g.end_row();
-
-                // Median RSX Busy
-                g.add_sized([title_col_w, 18.0], egui::Label::new(RichText::new("Median RSX Busy").strong()).wrap());
-                g.allocate_ui_with_layout(
-                    egui::vec2(val_w, 0.0),
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |h| {
-                        h.set_max_width(val_w);
-                        let busy_text = if let Some(ms) = summary.median_busy_ms() {
-                            format!("{ms:.3} ms")
-                        } else if let Some(raw) = summary.median_busy_raw_ticks {
-                            format!("{raw} raw ticks (unmapped)")
-                        } else {
-                            "-".into()
-                        };
-                        let busy_tip = format!(
-                            "PPU ticks: {}, raw ticks: {}",
-                            summary.median_busy_ppu_ticks.map_or("-".into(), |t| t.to_string()),
-                            summary.median_busy_raw_ticks.map_or("-".into(), |t| t.to_string())
-                        );
-                        h.label(&busy_text).on_hover_text(busy_tip);
-                    },
-                );
-                g.end_row();
+        // Verdict mix
+        fact_row(c, "Verdict mix", |v_ui| {
+            v_ui.horizontal_wrapped(|h| {
+                h.label(format!("{} frames: ", summary.frame_count));
+                for (verdict, count) in &summary.verdict_counts {
+                    let pct = summary.mix_pct(*verdict);
+                    ui::badge(h, &format!("{}: {} ({:.1}%)", verdict.key(), count, pct), verdict_tone(*verdict));
+                    h.add_space(ui::SPACE_XS);
+                }
             });
+        });
+
+        // Median Frame Interval
+        fact_row(c, "Median Frame Interval", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                let interval_text = summary
+                    .median_interval_ms()
+                    .map_or("none".into(), |ms| format!("{ms:.3} ms"));
+                let interval_ticks_tip = summary
+                    .median_interval_ticks
+                    .map_or(String::new(), |t| format!("{t} PPU ticks"));
+                h.label(&interval_text).on_hover_text(interval_ticks_tip);
+            });
+        });
+
+        // Median RSX Span
+        fact_row(c, "Median RSX Span", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                let span_text = if let Some(ms) = summary.median_span_ms() {
+                    format!("{ms:.3} ms")
+                } else if let Some(raw) = summary.median_span_raw_ticks {
+                    format!("{raw} raw ticks (unmapped)")
+                } else {
+                    "-".into()
+                };
+                let span_tip = format!(
+                    "PPU ticks: {}, raw ticks: {}",
+                    summary.median_span_ppu_ticks.map_or("-".into(), |t| t.to_string()),
+                    summary.median_span_raw_ticks.map_or("-".into(), |t| t.to_string())
+                );
+                h.label(&span_text).on_hover_text(span_tip);
+            });
+        });
+
+        // Median RSX Busy
+        fact_row(c, "Median RSX Busy", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                let busy_text = if let Some(ms) = summary.median_busy_ms() {
+                    format!("{ms:.3} ms")
+                } else if let Some(raw) = summary.median_busy_raw_ticks {
+                    format!("{raw} raw ticks (unmapped)")
+                } else {
+                    "-".into()
+                };
+                let busy_tip = format!(
+                    "PPU ticks: {}, raw ticks: {}",
+                    summary.median_busy_ppu_ticks.map_or("-".into(), |t| t.to_string()),
+                    summary.median_busy_raw_ticks.map_or("-".into(), |t| t.to_string())
+                );
+                h.label(&busy_text).on_hover_text(busy_tip);
+            });
+        });
     });
 }
 
