@@ -10,7 +10,7 @@
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
@@ -85,6 +85,7 @@ typedef struct auto_wire_config {
     uint32_t reason;
     int32_t application_rc;
     uint8_t mechanism[32], binding[32];
+    uint32_t call_pairs, range_pairs; /* TAG: u32@160 whole-CALL reserve, u32@164 range reserve; u64@168 zero */
 } auto_wire_config;
 
 typedef struct auto_wire_op {

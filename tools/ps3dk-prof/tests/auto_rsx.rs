@@ -64,6 +64,12 @@ impl ACfg {
         b.u64(self.freq).u64(self.allocated).u64(self.ceiling).u32(self.premise).u32(self.lease);
         b.0.extend_from_slice(&[0x2a; 32]);
         b.0.extend_from_slice(&[0x63; 32]);
+        if self.flags == 0 && self.words[4] == 1023 {
+            // the tag writer's reserves: whole-CALL 32, ranges 16 (504 pairs), then zero
+            let pairs = self.words[10];
+            let (call, ranges) = if pairs >= 128 { (32, 16) } else { (pairs / 4, pairs / 8) };
+            b.u32(call).u32(ranges).u64(0);
+        }
         chunk(34, b.0)
     }
 }
@@ -1960,4 +1966,44 @@ fn raw_to_ppu_bounds_from_anchors() {
     // certain overlap: a busy interval mapped inward, intersected with the scope
     let o = ps3dk_prof::auto_rsx::certain_overlap(&inv.clocks, &m, &[(6000, 36_000)], &[(20_000, 70_000)]);
     assert!((49_900..=50_000).contains(&o), "{o}");
+}
+
+/// 1023/11 CONFIG names its two report-pair reserves; the range reserve is the default or an option leaving 64 pairs
+/// for draws; other widths and masks are refused.
+#[test]
+fn config_names_the_reserves() {
+    let f = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    let r = reader::read(&f.bytes()).expect("reads");
+    let a = r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().clone();
+    assert_eq!(a.reserves, Some((32, 16)));
+    let set = |f: &mut File, ranges: u32| {
+        let at = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+        f.chunks[at].payload[164..168].copy_from_slice(&ranges.to_le_bytes());
+    };
+    let mut g = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    set(&mut g, 32);
+    let r = reader::read(&g.bytes()).expect("a range reserve of 32 reads");
+    assert_eq!(r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().reserves, Some((32, 32)));
+    let rep = analyze(&r);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &rep).unwrap();
+    assert!(String::from_utf8_lossy(&out).contains("report-pair reserves: 32 for whole-CALL brackets, 32 for AUTO ranges"));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut out, &rep).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["config"]["range_pairs"], 32);
+    set(&mut g, 504 - 32 - 64 + 1);
+    assert!(reader::read(&g.bytes()).is_err(), "a range reserve leaving fewer than 64 pairs");
+    // the 176-byte CONFIG only with 1023/11, and 1023/11 only with it
+    let mut h = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    let at = h.chunks.iter().position(|c| c.ty == 34).unwrap();
+    h.chunks[at].payload.truncate(160);
+    assert!(reader::read(&h.bytes()).is_err());
+    let mut h = busy_frame(&[(6000, 36_000)], Blk::default(), None, 511);
+    let at = h.chunks.iter().position(|c| c.ty == 34).unwrap();
+    h.chunks[at].payload.extend_from_slice(&[0; 16]);
+    assert!(reader::read(&h.bytes()).is_err());
+    // older masks: no reserves
+    let r = reader::read(&busy_frame(&[(6000, 36_000)], Blk::default(), None, 511).bytes()).expect("reads");
+    assert_eq!(r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().reserves, None);
 }

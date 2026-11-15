@@ -353,8 +353,14 @@ is then quarantined: the begin report is in the ring). Its RSX time is the exact
 span of its own pair, independent of per-draw timing.
 
 Report pairs: covered draws and FRAME marks stop when only the unheld parts of
-the two reserves are free (32 for whole-CALL brackets, 16 for ranges; a quarter
-and an eighth of a small pool). Each class holds at most its own reserve.
+the two reserves are free (32 for whole-CALL brackets, a quarter of a small
+pool; for ranges the default 16, an eighth of a small pool). Each class holds at
+most its own reserve. `ps3dk_prof_auto_options.range_pairs` (the 36-byte struct;
+the earlier 32-byte one is still accepted and takes the default) sets the range
+reserve: 0 is the default, and the attach refuses a size that leaves fewer than
+64 pairs for draws and FRAME marks after both reserves. The 1023/11 CONFIG is
+176 bytes and names both: u32@160 the whole-CALL reserve, u32@164 the range
+reserve, u64@168 zero (zero in a refused CONFIG).
 
 Timed ranges: `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY()` limits per-draw timing to
 covered draws inside a range begun with `PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED`

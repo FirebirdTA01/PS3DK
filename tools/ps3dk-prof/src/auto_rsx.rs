@@ -24,6 +24,8 @@ pub const CHUNK_AUTO_STATUS: u32 = 37;
 pub const CHUNK_AUTO_CLOCK: u32 = 38;
 
 pub const CONFIG_BYTES: usize = 160;
+/// CONFIG of the tag writer (1023/11): u32@160 whole-CALL reserve, u32@164 range reserve, u64@168 zero.
+pub const CONFIG_BYTES_TAG: usize = 176;
 pub const OP_BYTES: u32 = 128;
 /// OPS record width of the build-frame writer (CONFIG masks 63/11): the 128-byte record plus the build tail.
 pub const OP_BYTES_BUILD: u32 = 144;
@@ -220,6 +222,8 @@ pub struct Attached {
     pub ceiling: u64,
     pub mechanism: [u8; 32],
     pub binding: [u8; 32],
+    /// 1023/11: report pairs kept for whole-CALL brackets and for AUTO ranges.
+    pub reserves: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,8 +536,8 @@ impl Reader {
         if self.result.config.is_some() {
             return bad(r, "a second AUTO_CONFIG (one instance per capture)");
         }
-        if payload.len() != CONFIG_BYTES {
-            return bad(r, format!("AUTO_CONFIG is {} bytes, not {CONFIG_BYTES}", payload.len()));
+        if payload.len() != CONFIG_BYTES && payload.len() != CONFIG_BYTES_TAG {
+            return bad(r, format!("AUTO_CONFIG is {} bytes, not {CONFIG_BYTES} or {CONFIG_BYTES_TAG}", payload.len()));
         }
         let mut c = Cursor::new(payload, "AUTO_CONFIG");
         let schema = c.u16()?;
@@ -552,6 +556,8 @@ impl Reader {
         mechanism.copy_from_slice(c.take(32)?);
         let mut binding = [0u8; 32];
         binding.copy_from_slice(c.take(32)?);
+        let wide = payload.len() == CONFIG_BYTES_TAG;
+        let (call_pairs, range_pairs, r6) = if wide { (c.u32()?, c.u32()?, c.u64()?) } else { (0, 0, 0) };
         c.done()?;
         if schema != 1 {
             return bad(r, format!("AUTO_CONFIG schema {schema}"));
@@ -574,6 +580,7 @@ impl Reader {
                     || w[6..].iter().any(|&x| x != 0)
                     || allocated | ceiling != 0
                     || premise | lease != 0
+                    || call_pairs | range_pairs != 0 || r6 != 0
                 {
                     return bad(r, "REFUSED AUTO_CONFIG carries a field other than reason, return code, frequency and digests");
                 }
@@ -616,6 +623,19 @@ impl Reader {
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
+                // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
+                // is the default (16, an eighth of a small pool) or an option that leaves 64 pairs for draws
+                if wide != ((kinds, forms) == MASKS_TAG) {
+                    return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
+                }
+                if wide {
+                    let call = if pairs >= 128 { 32 } else { pairs / 4 };
+                    let default = if pairs >= 128 { 16 } else { pairs / 8 };
+                    let max = pairs.saturating_sub(call + 64);
+                    if r6 != 0 || call_pairs != call || (range_pairs != default && range_pairs > max) {
+                        return bad(r, format!("AUTO_CONFIG reserves CALL {call_pairs} ranges {range_pairs} for {pairs} pairs"));
+                    }
+                }
                 if ceiling == 0 || ceiling > MAX_ALLOCATION || allocated == 0 || allocated > ceiling {
                     return bad(r, format!("AUTO_CONFIG allocated {allocated} / ceiling {ceiling}"));
                 }
@@ -648,6 +668,7 @@ impl Reader {
                     ceiling,
                     mechanism,
                     binding,
+                    reserves: wide.then_some((call_pairs, range_pairs)),
                 })));
                 Ok(())
             }
@@ -2044,6 +2065,11 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             a.clock_label, a.metadata, a.frame_capacity, a.allocated, a.ceiling, hex(&a.mechanism), hex(&a.binding))?,
         None => writeln!(out, "no AUTO_CONFIG")?,
     }
+    if let Some(Config::Attached(a)) = &r.config {
+        if let Some((call, ranges)) = a.reserves {
+            writeln!(out, "report-pair reserves: {call} for whole-CALL brackets, {ranges} for AUTO ranges")?;
+        }
+    }
     if let Some(s) = &r.status {
         let fields: Vec<String> = STATUS_FIELDS.iter().zip(s.counters.iter()).map(|(n, v)| format!("{n} {v}")).collect();
         writeln!(out, "status flags {:#x}: {}", s.flags, fields.join(", "))?;
@@ -2139,6 +2165,13 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             "ceiling":a.ceiling,"mechanism":hex(&a.mechanism),"binding":hex(&a.binding)}),
         None => serde_json::Value::Null,
     };
+    let mut config = config;
+    if let Some(Config::Attached(a)) = &r.config {
+        if let Some((call, ranges)) = a.reserves {
+            config["call_pairs"] = json!(call);
+            config["range_pairs"] = json!(ranges);
+        }
+    }
     let status = r.status.as_ref().map(|s| {
         let mut o = serde_json::Map::new();
         o.insert("flags".into(), json!(s.flags));

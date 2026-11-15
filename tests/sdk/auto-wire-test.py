@@ -22,14 +22,14 @@ int main(void) {
     c.instance=1; c.domain=1026; c.epoch=1; c.owner=7; c.generation=1;
     c.report_first=1024; c.report_count=1024; c.op_label=239; c.clock_label=238;
     c.pairs=504; c.metadata=1024; c.frames=256;
-    c.frequency=79800000; c.allocated=262144; c.ceiling=2097152;
+    c.frequency=79800000; c.allocated=262144; c.ceiling=2097152; c.call_pairs=32; c.range_pairs=16;
     for(i=0;i<32;i++) { c.mechanism[i]=(uint8_t)i; c.binding[i]=(uint8_t)(255-i); }
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if (auto_encode_config(b,159,&c)!=0 || memcmp(b,before,sizeof b)) return 2;
-    n=auto_encode_config(b,sizeof b,&c); if(n!=160 || put(n)) return 3;
+    if (auto_encode_config(b,175,&c)!=0 || memcmp(b,before,sizeof b)) return 2;
+    n=auto_encode_config(b,sizeof b,&c); if(n!=176 || put(n)) return 3;
     for(i=1;i<=10;i++) {
         c.reason=i; c.application_rc=-42;
-        n=auto_encode_config(b,sizeof b,&c); if(n!=160 || put(n)) return 4;
+        n=auto_encode_config(b,sizeof b,&c); if(n!=176 || put(n)) return 4;
     }
     c.reason=11; memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_config(b,sizeof b,&c)!=0 || memcmp(b,before,sizeof b)) return 15;
@@ -113,12 +113,13 @@ def main():
         print('short-config KILLED: short buffer modified'); return
     assert run.returncode == 0, ('writer/short-buffer control', run.returncode)
     chunks = []
-    c = bytearray(160)
+    c = bytearray(176)
     struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,1023,11,1024,1024,239,238,504,1024,256,160,
                      79800000,262144,2097152,3,1)
-    c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
+    c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); struct.pack_into('<II',c,160,32,16)
+    chunks.append(bytes(c))
     for reason in range(1,11):
-        c=bytearray(160)
+        c=bytearray(176)
         struct.pack_into('<HHI',c,0,1,1,1); struct.pack_into('<Ii',c,24,reason,-42)
         struct.pack_into('<Q',c,64,79800000)
         c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))

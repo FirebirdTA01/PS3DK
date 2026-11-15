@@ -27,6 +27,7 @@ size_t auto_encode_config(uint8_t *b, size_t cap, const auto_wire_config *c)
         le32(b+40,c->op_label); le32(b+44,c->clock_label);
         le32(b+48,c->pairs); le32(b+52,c->metadata); le32(b+56,c->frames); le32(b+60,AUTO_OP_BYTES);
         le64(b+72,c->allocated); le64(b+80,c->ceiling); le32(b+88,3); le32(b+92,1);
+        le32(b+160,c->call_pairs); le32(b+164,c->range_pairs);
     }
     return AUTO_CONFIG_BYTES;
 }

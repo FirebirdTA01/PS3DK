@@ -3,6 +3,7 @@
 #include "../fifo/fifo_internal.h"
 #include "../rsx/gpu_internal.h"
 #include <string.h>
+#include <stddef.h>
 
 /* The core admits one capture per process. CONFIG remains mutable only through
  * the owner-side initialization/override window; its encoder cannot freeze it.
@@ -40,14 +41,26 @@ static int defaults_reserved(const ps3dk_prof_auto_options *o)
            profiler_reports(o->report_first,o->report_count);
 }
 
+/* The two reserves for a pool of `pairs`: whole-CALL brackets (32, a quarter of a small pool) and AUTO ranges (the
+ * option, or 16 / an eighth of a small pool). 0 when an explicit range reserve leaves fewer than 64 pairs. */
+static uint32_t call_pairs(uint32_t pairs) {return pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u;}
+static int range_pairs(const ps3dk_prof_auto_options *o,uint32_t *out)
+{
+    uint32_t pairs=(o->report_count-16)/2,call=call_pairs(pairs);
+    if(o->size<sizeof *o || !o->range_pairs) {*out=pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u;return 1;}
+    if(pairs<call+64u || o->range_pairs>pairs-call-64u) return 0;
+    *out=o->range_pairs;
+    return 1;
+}
 static int layout(const ps3dk_prof_auto_options *o, size_t *records, size_t *frames, size_t *total)
 {
     uint64_t n;
-    if(o->size!=sizeof *o || o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
+    uint32_t ranges;
+    if((o->size!=sizeof *o && o->size!=offsetof(ps3dk_prof_auto_options,range_pairs)) || o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
        o->report_first>2048-o->report_count || !label_valid(o->operation_label) ||
        !label_valid(o->clock_label) || o->operation_label==o->clock_label ||
        !o->metadata_records || o->metadata_records>1024 || !o->frame_records || o->frame_records>256 ||
-       !o->max_bytes || o->max_bytes>2097152) return 0;
+       !o->max_bytes || o->max_bytes>2097152 || !range_pairs(o,&ranges)) return 0;
     /* Every multiplier is bounded above before these widened expressions.
      * Include padding in the published allocation, not just symbol payloads. */
     n=((uint64_t)sizeof(auto_capture)+127u)&~UINT64_C(127);
@@ -142,8 +155,10 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
                           o->metadata_records,(o->report_count-16)/2);
     {
         uint32_t pairs=(o->report_count-16)/2;
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_CALL,pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u);
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_RANGE,pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u);
+        uint32_t ranges=0;
+        (void)range_pairs(o,&ranges);   /* validated by layout */
+        auto_queue_set_reserve(&next->operations,AUTO_PAIR_CALL,call_pairs(pairs));
+        auto_queue_set_reserve(&next->operations,AUTO_PAIR_RANGE,ranges);
     }
     for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
     next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
@@ -172,6 +187,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     config.report_first=o->report_first;config.report_count=o->report_count;
     config.op_label=o->operation_label;config.clock_label=o->clock_label;
     config.pairs=(o->report_count-16)/2;config.metadata=o->metadata_records;config.frames=o->frame_records;
+    config.call_pairs=call_pairs(config.pairs);(void)range_pairs(o,&config.range_pairs);
     config.allocated=bytes;config.ceiling=o->max_bytes;
     capture=next;
     if(initial) {
@@ -1621,6 +1637,11 @@ int ps3dk_prof_auto_range_end(void)
     return 1;
 }
 #ifdef PS3DK_PROF_TEST_HOOKS
+/* The capture's two reserves (whole-CALL brackets, ranges). */
+void ps3dk_prof__auto_test_reserves(uint32_t out[2])
+{
+    out[0]=capture ? capture->operations.cap[AUTO_PAIR_CALL]:0;out[1]=capture ? capture->operations.cap[AUTO_PAIR_RANGE]:0;
+}
 /* Owner thread only: ranges committed and refused, the open depth, and the tag. */
 void ps3dk_prof__auto_test_ranges(uint64_t out[4])
 {

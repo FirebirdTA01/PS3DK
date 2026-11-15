@@ -742,7 +742,8 @@ if operations:
     raise SystemExit(0)
 assert [k for k,b in auto]==[34,37], 'AUTO_NO_INIT_CONFIG_STATUS'
 config,status=auto[0][1],auto[1][1]
-assert len(config)==160 and len(status)==128
+assert len(config)==176 and len(status)==128
+assert struct.unpack_from('<IIQ',config,160)[2]==0
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
     assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,1023,11)
@@ -774,7 +775,14 @@ else:
     assert struct.unpack_from('<HHI',config)==(1,1,1)
     assert struct.unpack_from('<Ii',config,24)==(8 if a.case=='fifofail' else 10,0)
     assert config[8:24]==bytes(16) and config[32:64]==bytes(32) and config[72:96]==bytes(24)
-assert config[96:128]==bytes([42])+bytes(31) and config[128:]==bytes([99])+bytes(31)
+assert config[96:128]==bytes([42])+bytes(31) and config[128:160]==bytes([99])+bytes(31)
+# the tag writer's reserves (u32@160 whole-CALL, u32@164 ranges; refused CONFIGs carry none): an attached capture of
+# the default pool keeps 32 and 16
+if struct.unpack_from('<H',config,2)[0]==0:
+    pairs=struct.unpack_from('<I',config,48)[0]
+    assert struct.unpack_from('<IIQ',config,160)==((32,16,0) if pairs>=128 else (pairs//4,pairs//8,0)),config[160:]
+else:
+    assert config[160:]==bytes(16)
 clocks=[b for k,b in chunks if k==2];assert len(clocks)==1
 assert struct.unpack_from('<Q',config,64)[0]==struct.unpack_from('<Q',clocks[0],12)[0]>0
 assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(120)
