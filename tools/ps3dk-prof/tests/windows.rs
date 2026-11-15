@@ -755,3 +755,33 @@ fn window_zone_summary_restricted_to_window_frame_range() {
     assert!(rep_w2.contains("W(owner 1, frame 1, lane 1): 50"), "w2 contains frame 1 work");
     assert!(!rep_w2.contains("W(owner 1, frame 0"), "w2 must NOT contain frame 0 work");
 }
+
+/// Zones with no frame (a run without frame marks): with exactly one window they are that window's (heavy data is
+/// recorded only inside a window); with several windows they cannot be placed and are in none.
+#[test]
+fn frameless_zones_belong_to_the_only_window() {
+    let build = |windows: &[(u32, u32, u64)]| {
+        let mut s = scenario(vec![lane(1, seqd(0, vec![begin(0, 0, 0, 110, 1), bparent(0, 0, 0), end(0, 0, 0, 120, 1)]))]);
+        s.descs = vec![desc(0, "frameless", "")];
+        let mut f = s.file();
+        f.flags |= FLAG_WINDOWS;
+        let trailer = f.chunks.pop().unwrap();
+        for &(id, name_desc, first) in windows {
+            f.chunks.push(chunk(CHUNK_WINDOW_BEGIN, window_begin_payload(id, name_desc, first, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0)));
+            f.chunks.push(chunk(CHUNK_WINDOW_END, window_end_payload(id, WINDOW_REASON_END, first)));
+        }
+        f.chunks.push(trailer);
+        match ps3dk_prof::load(&f.bytes()) {
+            Outcome::Analysed(a) => a,
+            Outcome::Malformed(m) => panic!("fixture malformed: {m:?}"),
+        }
+    };
+    let one = build(&[(1, u32::MAX, 0)]);
+    let rep = ps3dk_prof::report::render_window(&one, &one.capture.windows[0]);
+    assert!(rep.contains("frameless: 1 instances"), "{rep}");
+    let two = build(&[(1, u32::MAX, 0), (2, u32::MAX, 1)]);
+    for w in &two.capture.windows {
+        let rep = ps3dk_prof::report::render_window(&two, w);
+        assert!(!rep.contains("frameless:"), "window {}: {rep}", w.id);
+    }
+}

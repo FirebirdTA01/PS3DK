@@ -317,6 +317,7 @@ static inline int p_window_gate(const prof *p)
     return __atomic_load_n(&p->window_open, __ATOMIC_ACQUIRE) != 0;
 }
 #define p_window_frame ps3dk_prof__window_frame
+#define p_window_retire ps3dk_prof__window_retire
 #define p_window_shutdown ps3dk_prof__window_shutdown
 #define p_window_drain ps3dk_prof__window_drain
 void p_window_frame(prof *p, uint32_t slot1, uint32_t inc, uint64_t fid); /* a frame boundary, before AUTO sees it */
