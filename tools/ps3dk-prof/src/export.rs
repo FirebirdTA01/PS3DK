@@ -334,6 +334,24 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             }
         }
 
+        // If no non-GAP records survive, drop any writer GAPs as well so the lane is fully dropped.
+        // Also strip any leading/trailing GAPs so the lane starts and ends on real sequenced records.
+        if let Some(first_non_gap_idx) = kept_records.iter().position(|r| r.kind != KIND_GAP) {
+            let last_non_gap_idx = kept_records.iter().rposition(|r| r.kind != KIND_GAP).unwrap();
+            for rec in &kept_records[..first_non_gap_idx] {
+                kept_record_keys.remove(&(inc, rec.seq));
+            }
+            for rec in &kept_records[last_non_gap_idx + 1..] {
+                kept_record_keys.remove(&(inc, rec.seq));
+            }
+            kept_records = kept_records[first_non_gap_idx..=last_non_gap_idx].to_vec();
+        } else {
+            for rec in &kept_records {
+                kept_record_keys.remove(&(inc, rec.seq));
+            }
+            kept_records.clear();
+        }
+
         let writer_written = lane.written;
         if kept_records.is_empty() {
             export_lanes.insert(
@@ -349,8 +367,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             records_dropped_total += writer_written;
         } else {
             let first_seq = kept_records.first().unwrap().seq;
-            let last_rec = kept_records.last().unwrap();
-            let last_seq = if last_rec.kind == KIND_GAP { last_rec.c } else { last_rec.seq };
+            let last_seq = kept_records.last().unwrap().seq;
             let kept = kept_records.iter().filter(|r| r.kind != KIND_GAP).count() as u64;
             let dropped_by_export = writer_written - kept;
 
