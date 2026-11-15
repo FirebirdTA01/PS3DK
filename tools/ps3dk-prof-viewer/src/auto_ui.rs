@@ -110,6 +110,10 @@ pub struct RenderedRow {
     pub span_text: String,
     pub busy_text: String,
     pub reason: String,
+    pub excluded_text: String,
+    pub exclusions: Vec<(&'static str, &'static str, u64)>,
+    pub call_covered_text: Option<String>,
+    pub presentation_text: String,
 }
 
 /// What the page drew on the last repaint (used in headless tests).
@@ -176,7 +180,7 @@ fn auto_badge_with_sense(ui: &mut egui::Ui, text: &str, tone: ui::Tone, sense: S
     let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
     let (rect, response) = ui.allocate_exact_size(total_size, sense);
     if ui.is_rect_visible(rect) {
-        ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0, outline));
+        ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0_f32, outline));
         let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
         ui.painter().galley(text_pos, galley, color);
     }
@@ -207,6 +211,20 @@ fn auto_card_header(ui: &mut egui::Ui, title: &str, subtitle: Option<&str>, trai
 
 fn bounds_ms((lo, hi): (f64, f64)) -> String {
     if lo == hi { format!("{lo:.3} ms") } else { format!("{lo:.3}..{hi:.3} ms") }
+}
+
+fn metric_text(v: &AutoView, mapped: Option<(u64, u64)>, raw: Option<u64>) -> String {
+    match (mapped, raw) {
+        (Some((lo, hi)), _) => bounds_ms((v.ticks_to_ms(lo), v.ticks_to_ms(hi))),
+        (_, Some(t)) => format!("{t} raw"),
+        _ => "-".into(),
+    }
+}
+fn metric_tip(mapped: Option<(u64, u64)>, raw: Option<u64>) -> String {
+    match mapped {
+        Some((lo, hi)) => format!("Raw: {} RSX ticks | PPU: {lo}..{hi} ticks", raw.map_or("-".into(), |t| t.to_string())),
+        None => "Unmapped clock: raw RSX ticks only".into(),
+    }
 }
 
 /// Draws the Automatic page. Returns Some(Page) if an interaction requested a page change.
@@ -752,49 +770,16 @@ fn draw_frames_table(
                             // Interval
                             let interval_ms = v.frame_interval_ms(f);
                             let interval_ticks = AutoView::frame_interval_ticks(f);
-                            g.label(format!("{interval_ms:.3} ms"))
-                                .on_hover_text(format!("{interval_ticks} PPU ticks"));
+                            let interval_text = format!("{interval_ms:.3} ms");
+                            g.label(&interval_text).on_hover_text(format!("{interval_ticks} PPU ticks"));
 
-                            // RSX Span
-                            if let Some((lo, hi)) = f.rsx_span_ppu {
-                                let lo_ms = v.ticks_to_ms(lo);
-                                let hi_ms = v.ticks_to_ms(hi);
-                                let span_text = if lo == hi {
-                                    format!("{lo_ms:.3} ms")
-                                } else {
-                                    format!("{lo_ms:.3}..{hi_ms:.3} ms")
-                                };
-                                let raw = f.rsx_span_raw.unwrap_or(0);
-                                g.label(span_text)
-                                    .on_hover_text(format!("Raw: {raw} RSX ticks | PPU: {lo}..{hi} ticks"));
-                            } else if let Some(raw) = f.rsx_span_raw {
-                                g.label(format!("{raw} raw"))
-                                    .on_hover_text("Unmapped clock: raw RSX ticks only");
-                            } else {
-                                g.label("-");
-                            }
-
-                            // RSX Busy
-                            if let Some((lo, hi)) = f.rsx_busy_ppu {
-                                let lo_ms = v.ticks_to_ms(lo);
-                                let hi_ms = v.ticks_to_ms(hi);
-                                let busy_text = if lo == hi {
-                                    format!("{lo_ms:.3} ms")
-                                } else {
-                                    format!("{lo_ms:.3}..{hi_ms:.3} ms")
-                                };
-                                let raw = f.rsx_busy_raw.unwrap_or(0);
-                                g.label(busy_text)
-                                    .on_hover_text(format!("Raw: {raw} RSX ticks | PPU: {lo}..{hi} ticks"));
-                            } else if let Some(raw) = f.rsx_busy_raw {
-                                g.label(format!("{raw} raw"))
-                                    .on_hover_text("Unmapped clock: raw RSX ticks only");
-                            } else {
-                                g.label("-");
-                            }
+                            let span_text = metric_text(v, f.rsx_span_ppu, f.rsx_span_raw);
+                            g.label(&span_text).on_hover_text(metric_tip(f.rsx_span_ppu, f.rsx_span_raw));
+                            let busy_text = metric_text(v, f.rsx_busy_ppu, f.rsx_busy_raw);
+                            g.label(&busy_text).on_hover_text(metric_tip(f.rsx_busy_ppu, f.rsx_busy_raw));
 
                             // Flip-Wait / Poll shares
-                            if let Some(share) = presentation_share(f) {
+                            let presentation_text = if let Some(share) = presentation_share(f) {
                                 let mut parts = Vec::new();
                                 if let Some(pct) = share.flip_wait_pct {
                                     parts.push(format!("flip-wait: {pct:.1}%"));
@@ -815,37 +800,35 @@ fn draw_frames_table(
                                     share.cadence_ticks.map_or("-".into(), |t| t.to_string()),
                                     share.cadence_runs.map_or("-".into(), |r| r.to_string())
                                 );
-                                g.label(summary_str).on_hover_text(tooltip);
+                                g.label(&summary_str).on_hover_text(tooltip);
+                                summary_str
                             } else {
                                 g.label("-");
-                            }
+                                "-".into()
+                            };
 
-                            // Excluded
                             let ex_total: u64 = f.excluded.iter().sum();
-                            if ex_total > 0 {
-                                let breakdown = exclusions_breakdown(f);
-                                let tip_lines: Vec<String> = breakdown
-                                    .iter()
-                                    .map(|(k, r, c)| format!("{k}: {c} ({r})"))
-                                    .collect();
-                                g.label(RichText::new(format!("{ex_total}")).color(pal.warning))
-                                    .on_hover_text(tip_lines.join("\n"));
-                            } else {
-                                g.label("0");
-                            }
+                            let excluded_text = ex_total.to_string();
+                            let exclusions = exclusions_breakdown(f);
+                            let tip_lines: Vec<String> = exclusions.iter()
+                                .map(|(k, r, c)| format!("{k}: {c} ({r})")).collect();
+                            let text = RichText::new(&excluded_text);
+                            g.label(if ex_total > 0 { text.color(pal.warning) } else { text })
+                                .on_hover_text(tip_lines.join("\n"));
 
-                            // Call Covered
-                            if show_call_covered {
-                                if f.call_covered > 0 {
-                                    g.label(format!("{}", f.call_covered));
-                                } else {
-                                    g.label("-");
-                                }
-                            }
-
-                            // Reason
+                            let call_covered_text = show_call_covered.then(|| {
+                                if f.call_covered > 0 { f.call_covered.to_string() } else { "-".into() }
+                            });
+                            if let Some(text) = &call_covered_text { g.label(text); }
                             g.add_sized([reason_col_w, 18.0], egui::Label::new(&f.reason).truncate())
                                 .on_hover_text(&f.reason);
+                            // Retain exactly the strings handed to the widgets, not a second
+                            // independently formatted report that tests could accidentally bless.
+                            drawn.rendered_frame_rows.push(RenderedRow {
+                                frame: f.frame, verdict: f.verdict.key().into(), interval_text,
+                                span_text, busy_text, reason: f.reason.clone(), excluded_text,
+                                exclusions, call_covered_text, presentation_text,
+                            });
 
                             g.end_row();
                         }
