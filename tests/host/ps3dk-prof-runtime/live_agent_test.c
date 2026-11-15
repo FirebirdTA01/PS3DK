@@ -392,6 +392,31 @@ static void case_end_drain_cancel(void)
     cl_free(c);
 }
 
+static void case_end_drain_peer_fin(void)
+{
+    w_open();
+    w_append(1000);
+    w_close();
+    publish(1000, 1, 0);
+    live_config cfg = test_cfg();
+    cfg.send_timeout_us = 10000000;
+    uint16_t port = start_agent(cfg);
+    client *c = cl_open(port);
+    cl_pump(c, 2000, NULL);
+    CHECK(c->end && cl_wait_closed(c, 2000) && c->close_error == 0);
+    uint64_t t0 = now_us();
+    CHECK(shutdown(c->fd, SHUT_WR) == 0); /* peer FIN, not the drain timeout */
+    client *next = cl_open(port);
+    cl_pump(next, 1000, NULL);
+    CHECK(next->end && !next->busy);
+    CHECK(now_us() - t0 < 1000000);
+    CHECK(cl_wait_closed(next, 1000) && next->close_error == 0);
+    CHECK(drops(LIVE_DROP_END) == 2 && drops(LIVE_DROP_STALLED) == 0);
+    cl_free(c);
+    cl_free(next);
+    CHECK(live_agent_stop(&g_agent, 1000000, 1000000) == LIVE_OK);
+}
+
 static void case_late_join(void)
 {
     w_open();
@@ -884,6 +909,7 @@ static const struct named cases[] = {
     {"end-with-unread-ping", case_end_with_unread_ping},
     {"end-drain-deadline", case_end_drain_deadline},
     {"end-drain-cancel", case_end_drain_cancel},
+    {"end-drain-peer-fin", case_end_drain_peer_fin},
     {"late-join", case_late_join},
     {"grow-wait", case_grow_wait},
     {"failed-final", case_failed_final},
