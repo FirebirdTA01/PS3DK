@@ -1,2 +1,3 @@
 # Explicit repository CI exclusions: repository test path|board id|reason
-# Bare paths and empty reasons refuse. No tests are currently excluded.
+# Bare paths and empty reasons refuse.
+tests/host/ps3dk-prof-spu-int/i3b-test.py | t_d7e478d7 | Requires a Windows SDK with SPU exe tools, WSL Ubuntu, and historical pre-squash aa994ba3; hosted CI has no runner providing all three. Run manually on Windows.
