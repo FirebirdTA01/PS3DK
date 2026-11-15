@@ -48,13 +48,14 @@ if command -v "$cxx" >/dev/null 2>&1; then
 fi
 
 # PS3_PROF_AUTO: each query is reported once as a label poll with its index (0xffffffff for an address outside the
-# label area) and its result, in C and C++; without PS3TC_PROF_AUTO the header references no hook.
+# label area or off a label slot; labels are 16 bytes apart) and its result, in C and C++; without PS3TC_PROF_AUTO
+# the header references no hook.
 cat > "$tmp/seam.c" <<'EOS'
 #define PS3TC_GCM_LABELS_NO_GCM 1
 #include <stdint.h>
 #include <stdio.h>
-static uint32_t l[256], outside;
-static uint32_t *cellGcmGetLabelAddress(uint8_t i) { return &l[i]; }
+static uint32_t l[256 * 4], outside;   /* the label area: label i at base + 16 i */
+static uint32_t *cellGcmGetLabelAddress(uint8_t i) { return &l[i * 4]; }
 #include <cell/gcm/ps3tc_gcm_labels.h>
 #ifdef PS3TC_PROF_AUTO
 #ifdef __cplusplus
@@ -74,10 +75,12 @@ void ps3dk_prof__auto_label_poll_end(uint64_t b, uint32_t label, int passed)
 int main(void)
 {
     int ok = 1;
-    l[70] = 4; ok &= !cellGcmIsLabelPassed(70, 5) && SEEN(1u, 70u, 0);
-    l[70] = 5; ok &= cellGcmIsLabelPassed(70, 5) && SEEN(2u, 70u, 1);
-    l[9] = 7; ok &= cellGcmIsLabelValuePassed(&l[9], 7) && SEEN(3u, 9u, 1);
-    outside = 1; ok &= !cellGcmIsLabelValuePassed(&outside, 2) && SEEN(4u, 0xffffffffu, 0);
+    l[70 * 4] = 4; ok &= !cellGcmIsLabelPassed(70, 5) && SEEN(1u, 70u, 0);
+    l[70 * 4] = 5; ok &= cellGcmIsLabelPassed(70, 5) && SEEN(2u, 70u, 1);
+    l[9 * 4] = 7; ok &= cellGcmIsLabelValuePassed(&l[9 * 4], 7) && SEEN(3u, 9u, 1);
+    l[90 * 4] = 7; ok &= cellGcmIsLabelValuePassed(&l[90 * 4], 7) && SEEN(4u, 90u, 1);
+    l[9 * 4 + 1] = 7; ok &= cellGcmIsLabelValuePassed(&l[9 * 4 + 1], 7) && SEEN(5u, 0xffffffffu, 1);
+    outside = 1; ok &= !cellGcmIsLabelValuePassed(&outside, 2) && SEEN(6u, 0xffffffffu, 0);
     puts(ok ? "seam ok" : "seam FAIL");
     return ok ? 0 : 1;
 }
