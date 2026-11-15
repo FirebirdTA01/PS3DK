@@ -212,8 +212,8 @@ for rel in sources:
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,new).encode())
     elif a.mutant=='no-call-reserve' and rel=='auto_rsx/auto_queue.c':
         # covered draws may take the pairs kept for whole-CALL brackets
-        code=source.read_text();old='int auto_queue_take_pair(auto_queue *q) {return take_pair(q,q->reserve);}';assert code.count(old)==1
-        source=out/'auto_queue.c';source.write_bytes(code.replace(old,'int auto_queue_take_pair(auto_queue *q) {return take_pair(q,0);}').encode())
+        code=source.read_text();old='    return keep;\n}';assert code.count(old)==1
+        source=out/'auto_queue.c';source.write_bytes(code.replace(old,'    (void)keep;return 0;\n}').encode())
     elif a.mutant in ('tag-silent','tag-at-call','range-end-silent') and rel=='auto_rsx/auto_runtime.c':
         # tags not recorded on ring and segment draws; a segment draw's tag taken at its CALL; no end report
         old,new={'tag-silent':('    e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;\n    if(a->coverage.active) {e->op.flags=1;',
