@@ -1317,6 +1317,8 @@ pub struct FrameView {
     pub segment_unrepresented: u32,
     /// 255/11: whole-CALL brackets with valid timestamps recorded for this frame (in its span).
     pub call_brackets: u64,
+    /// 255/11: the draws that CALL brackets timed as a block (subtracted from segment_unrepresented for the verdict).
+    pub call_covered: u64,
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
@@ -1344,6 +1346,8 @@ pub struct Report {
     pub ops_dropped: u64,
     /// The capture's CONFIG is 63/11 (segment records carry their build frame).
     pub build_frames: bool,
+    /// The capture's CONFIG is 255/11 (whole-CALL brackets timed as blocks).
+    pub call_bracket: bool,
     pub state: String,
     pub config: Option<Config>,
     pub status: Option<Status>,
@@ -1448,6 +1452,7 @@ pub fn analyze(cap: &Capture) -> Report {
     // exact rules and output.
     let bounded_rule = attached.clock_bracket();
     rep.build_frames = build;
+    rep.call_bracket = attached.call_bracket();
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
     let map = qualify(inv);
@@ -1514,6 +1519,7 @@ pub fn analyze(cap: &Capture) -> Report {
             },
             segment_unrepresented: f.segment_unrepresented,
             call_brackets: calls.len() as u64,
+            call_covered: call_unrep,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
@@ -1847,8 +1853,13 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
         if r.build_frames {
-            writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
-                builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
+            if r.call_bracket {
+                writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
+                    builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.call_covered, f.segment_abandoned)?;
+            } else {
+                writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
+                    builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
+            }
         }
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
@@ -1937,6 +1948,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["recorded"] = json!(f.recorded);
             v["segment_imports"] = json!(f.segment_imports);
             v["segment_unrepresented"] = json!(f.segment_unrepresented);
+            if r.call_bracket {
+                v["call_covered"] = json!(f.call_covered);
+            }
             v["segment_abandoned"] = json!(f.segment_abandoned);
         }
         if f.call_brackets != 0 {
