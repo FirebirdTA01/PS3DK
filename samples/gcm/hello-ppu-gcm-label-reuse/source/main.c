@@ -376,6 +376,7 @@ static int run_probe_trial(CellGcmContextData *ctx,
                            uint32_t rt_off,
                            uint32_t backlog_rt_off,
                            uint32_t rt_depth_off,
+                           uint32_t backlog_rt_depth_off,
                            int mode,
                            int poison_kind,
                            unsigned trial,
@@ -417,8 +418,11 @@ static int run_probe_trial(CellGcmContextData *ctx,
     uint32_t serial = ++(*p_serial);
 
     /* 1. Backlog draws: BACKLOG_PASSES full-screen draws of heavy fragment program (fp_heavy_nokil)
-     * into a SEPARATE backlog surface to saturate pipelines without touching checked target (~100 ms RSX time) */
-    arena_set_target(ctx, backlog_rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
+     * into a SEPARATE backlog surface to saturate pipelines without touching checked target (~100 ms RSX time).
+     * Backlog surface uses its own separate depth buffer; depth test and depth write are explicitly disabled. */
+    arena_set_target(ctx, backlog_rt_off, RT * 4, backlog_rt_depth_off, RT * 2, RT, RT);
+    cellGcmSetDepthTestEnable(ctx, GCM_FALSE);
+    cellGcmSetDepthMask(ctx, GCM_FALSE);
     cellGcmSetVertexProgram(ctx, prog_heavy->vp, prog_heavy->vp_ucode);
     cellGcmSetVertexDataArray(ctx, (uint8_t)prog_heavy->position_index, 0, (uint8_t)sizeof(arena_vertex), 2,
                               CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_MAIN,
@@ -435,11 +439,16 @@ static int run_probe_trial(CellGcmContextData *ctx,
                                  CELL_GCM_LOCATION_MAIN, arena_off + ARENA_QUAD_IBO);
     }
 
-    /* 2. Switch to checked render target; issue COMMANDED baseline clear to pure COLOR_CLEAR before tile draws
+    /* 2. Switch to checked render target; issue COMMANDED baseline clear to pure COLOR_CLEAR
+     * including CELL_GCM_CLEAR_Z plus color on the checked surface before tile draws.
+     * Depth test and depth write are explicitly disabled for tile draws.
      * (commanded baseline, not a verified observation; no drain or readback inside race window). */
     arena_set_target(ctx, rt_off, RT * 4, rt_depth_off, RT * 2, RT, RT);
+    cellGcmSetDepthTestEnable(ctx, GCM_FALSE);
+    cellGcmSetDepthMask(ctx, GCM_FALSE);
     cellGcmSetClearColor(ctx, COLOR_CLEAR);
-    cellGcmSetClearSurface(ctx, GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+    cellGcmSetClearDepthStencil(ctx, 0xffffff00);
+    cellGcmSetClearSurface(ctx, CELL_GCM_CLEAR_Z | CELL_GCM_CLEAR_R | CELL_GCM_CLEAR_G | CELL_GCM_CLEAR_B | CELL_GCM_CLEAR_A);
 
     /* 3. Emit early label if MODE_EARLY */
     if (mode == MODE_EARLY) {
@@ -597,6 +606,7 @@ typedef struct {
     uint32_t rt_off;
     uint32_t backlog_rt_off;
     uint32_t rt_depth_off;
+    uint32_t backlog_rt_depth_off;
     uint32_t *p_serial;
     uint64_t gaps[TRIALS];
 } a2p_series_ctx;
@@ -607,7 +617,7 @@ static int a2p_trial_callback(void *user_ctx, int mode, int poison_kind, unsigne
     a2p_series_ctx *c = (a2p_series_ctx *)user_ctx;
     uint64_t trial_gap = 0;
     int rc = run_probe_trial(c->ctx, c->prog_main, c->prog_heavy, c->arena, c->arena_off,
-                             c->rt_off, c->backlog_rt_off, c->rt_depth_off,
+                             c->rt_off, c->backlog_rt_off, c->rt_depth_off, c->backlog_rt_depth_off,
                              mode, poison_kind, trial, c->p_serial,
                              out_trial_outcome, out_all_clear, &trial_gap);
     if (trial < TRIALS)
@@ -623,6 +633,7 @@ static int run_series(CellGcmContextData *ctx,
                       uint32_t rt_off,
                       uint32_t backlog_rt_off,
                       uint32_t rt_depth_off,
+                      uint32_t backlog_rt_depth_off,
                       int mode,
                       int poison_kind,
                       uint32_t *p_serial,
@@ -637,6 +648,7 @@ static int run_series(CellGcmContextData *ctx,
         .rt_off = rt_off,
         .backlog_rt_off = backlog_rt_off,
         .rt_depth_off = rt_depth_off,
+        .backlog_rt_depth_off = backlog_rt_depth_off,
         .p_serial = p_serial,
         .gaps = {0}
     };
@@ -714,10 +726,11 @@ int main(void)
     }
     CellGcmContextData *ctx = CELL_GCM_CURRENT;
     void *rt = arena_local_alloc(&d, 64, RT * RT * 4), *rtz = arena_local_alloc(&d, 64, RT * RT * 2);
-    void *backlog_rt = arena_local_alloc(&d, 64, RT * RT * 4);
-    uint32_t backlog_rt_off = 0;
-    if (!rt || !rtz || !backlog_rt || cellGcmAddressToOffset(rt, &rt_off) ||
+    void *backlog_rt = arena_local_alloc(&d, 64, RT * RT * 4), *backlog_rtz = arena_local_alloc(&d, 64, RT * RT * 2);
+    uint32_t backlog_rt_off = 0, backlog_rt_depth_off = 0;
+    if (!rt || !rtz || !backlog_rt || !backlog_rtz || cellGcmAddressToOffset(rt, &rt_off) ||
         cellGcmAddressToOffset(rtz, &rt_depth_off) || cellGcmAddressToOffset(backlog_rt, &backlog_rt_off) ||
+        cellGcmAddressToOffset(backlog_rtz, &backlog_rt_depth_off) ||
         gcm_host_buffer_alloc(ARENA_BYTES, &arena_ea) ||
         cellGcmMapMainMemory((const void *)(uintptr_t)arena_ea, ARENA_BYTES, &arena_off) ||
         arena_program_init(&d, &prog, arena_vp_vpo, arena_fp_fpo)) {
@@ -756,7 +769,7 @@ int main(void)
         }
         int outcome = A2P_TRIAL_CLEAN;
         int all_clear = 0;
-        int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        int rc = run_probe_trial(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                                  MODE_REFERENCE, POISON_NONE, w, &serial, &outcome, &all_clear, NULL);
         if (rc != 0) {
             crumb("A2P_ABORT warmup trial=%u", w);
@@ -777,13 +790,13 @@ int main(void)
     /* Buffer kind 1: VERTEX poison */
     a2p_series_counts res_ref_v, res_early_v, res_cmd_v, res_back_v;
     int rc;
-    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_REFERENCE, POISON_VERTEX, &serial, &res_ref_v)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_EARLY, POISON_VERTEX, &serial, &res_early_v)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_COMMAND, POISON_VERTEX, &serial, &res_cmd_v)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_BACKEND, POISON_VERTEX, &serial, &res_back_v)) != 0) {
         crumb("A2P_ABORT session vertex");
         return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
@@ -794,15 +807,15 @@ int main(void)
 
     /* Buffer kind 2: INDEX poison */
     a2p_series_counts res_ref_i, res_early_i, res_cmd_i, res_back_i, res_tex_i;
-    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_REFERENCE, POISON_INDEX, &serial, &res_ref_i)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_EARLY, POISON_INDEX, &serial, &res_early_i)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_COMMAND, POISON_INDEX, &serial, &res_cmd_i)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_BACKEND, POISON_INDEX, &serial, &res_back_i)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_TEXTURE, POISON_INDEX, &serial, &res_tex_i)) != 0) {
         crumb("A2P_ABORT session index");
         return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
@@ -813,15 +826,15 @@ int main(void)
 
     /* Buffer kind 3: TEXTURE poison */
     a2p_series_counts res_ref_t, res_early_t, res_cmd_t, res_tex_t, res_back_t;
-    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+    if ((rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_REFERENCE, POISON_TEXTURE, &serial, &res_ref_t)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_EARLY, POISON_TEXTURE, &serial, &res_early_t)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_COMMAND, POISON_TEXTURE, &serial, &res_cmd_t)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_TEXTURE, POISON_TEXTURE, &serial, &res_tex_t)) != 0 ||
-        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off,
+        (rc = run_series(ctx, &prog, &prog_heavy, arena, arena_off, rt_off, backlog_rt_off, rt_depth_off, backlog_rt_depth_off,
                          MODE_BACKEND, POISON_TEXTURE, &serial, &res_back_t)) != 0) {
         crumb("A2P_ABORT session texture");
         return rc == A2P_RC_DEADLINE ? A2P_RC_DEADLINE : 1;
