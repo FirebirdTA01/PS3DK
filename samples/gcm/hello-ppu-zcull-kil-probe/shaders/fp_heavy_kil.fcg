@@ -1,0 +1,12 @@
+/* Zcull/KIL probe — heavy-kil fragment: identical to fp_heavy_nokil, plus a trailing discard on a uniform cutoff (app sets it to never trigger, so both programs do the same work). */
+void main(
+    float2   in_uv       : TEXCOORD0,
+    uniform  float cutoff,
+    out float4 out_color : COLOR)
+{
+    float4 p = float4(in_uv, 0.5, 1.0);        /* identical loop body to fp_heavy_nokil */
+    for (int i = 0; i < 64; ++i)
+        p = p * float4(0.75, 0.75, 0.75, 0.75) + float4(0.10, 0.05, 0.15, 0.10);
+    if (p.w < cutoff) discard;                 /* KIL after the full loop; never fires in the probe */
+    out_color = p;
+}

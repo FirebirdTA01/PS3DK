@@ -180,6 +180,7 @@ the published v0.26.0 FIFO-sizing caveat.
 | `hello-ppu-cellgcm-quad` | Textured quad.  4-vertex triangle strip, 64×64 procedural checker texture uploaded to RSX local memory, `cellGcmSetTexture` + sampler filter / address / control setup, fragment program with a `sampler2D` uniform bound to TEXUNIT0 | **green** (RPCS3 runtime test pending) |
 | `hello-ppu-cellgcm-sysmenu` | Spinning triangle that pauses when the XMB system menu opens: the PPU freezes the rotation angle and overlays an animated "PAUSED" text strip (drifts + pulses via `cellDbgFont`); CLOSE resumes normal rendering, EXITGAME exits cleanly | **green** (RPCS3 runtime test pending) |
 | `hello-ppu-dbgfont` | `cellDbgFont*` on-screen text overlay demo over a clear-loop background: multi-size / multi-colour text grid covering the whole screen, animated pulsing + drifting strings, per-frame counter | **green** (RPCS3 runtime test pending) |
+| `hello-ppu-zcull-kil-probe` | Characterisation probe for RSX Zcull and KIL interaction: renders 1280×720 FP16 colour + Z24S8 depth across eight cases (visible vs occluded, heavy nokil vs heavy kil, zcull on vs off) measuring RSX ticks, ZPASS pixel count, and ZCULL_STATS reports; prints median ticks across three runs and `ZKP DONE` | **builds** (hardware measurement probe) |
 
 ## sysutil/
 

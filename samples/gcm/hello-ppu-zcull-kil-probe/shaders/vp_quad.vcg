@@ -1,0 +1,9 @@
+/* Zcull/KIL probe — full-screen quad vertex program: pass NDC position (depth from input z) through and emit its xy as TEXCOORD0. */
+void main(
+    float4 in_position : POSITION,
+    out float4 out_position : POSITION,
+    out float2 out_uv      : TEXCOORD0)
+{
+    out_position = in_position;
+    out_uv       = in_position.xy;
+}
