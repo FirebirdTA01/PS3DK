@@ -28,6 +28,9 @@
 #include <ppu-lv2.h>
 #include <ppu-types.h>
 #include <Cg/cg.h>
+#ifndef PS3DK_PROF
+#define PS3DK_PROF 1
+#endif
 #include <ps3dk/prof.h>
 #include <ps3dk/prof_auto.h>
 
@@ -281,6 +284,17 @@ static int submit_flip(CellGcmContextData *ctx)
     return 1;
 }
 
+static void print_phase_banner(char phase)
+{
+    ps3dk_prof_token tok = PS3DK_PROF_FRAME_TOKEN();
+    if (tok.owner == 0) {
+        printf("hello-ppu-prof-auto-verdicts: phase %c profiler token has no owner\n", phase);
+        abort();
+    }
+    printf("AUTOVERDICT phase %c frame=%llu\n", phase, (unsigned long long)tok.frame);
+    fflush(stdout);
+}
+
 int main(void)
 {
     sys_addr_t host_addr = 0;
@@ -317,8 +331,7 @@ int main(void)
     }
 
     /* ---- Phase A: RSX-bound (frames 0..59) ---- */
-    printf("AUTOVERDICT phase A frame=%llu\n", (unsigned long long)PS3DK_PROF_FRAME_TOKEN().frame);
-    fflush(stdout);
+    print_phase_banner('A');
 
     for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
         if (cellSysutilCheckCallback() != 0) break;
@@ -334,8 +347,7 @@ int main(void)
      * interval multiples (~33.3 ms / 2 vsyncs), avoiding PPU work vs presentation
      * pacing ambiguity in profiler analysis. */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_HSYNC);
-    printf("AUTOVERDICT phase B frame=%llu\n", (unsigned long long)PS3DK_PROF_FRAME_TOKEN().frame);
-    fflush(stdout);
+    print_phase_banner('B');
 
     for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
         if (cellSysutilCheckCallback() != 0) break;
@@ -351,8 +363,7 @@ int main(void)
 
     /* ---- Phase C: Pacing (frames 120..179) ---- */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_VSYNC);
-    printf("AUTOVERDICT phase C frame=%llu\n", (unsigned long long)PS3DK_PROF_FRAME_TOKEN().frame);
-    fflush(stdout);
+    print_phase_banner('C');
 
     for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
         if (cellSysutilCheckCallback() != 0) break;
@@ -364,8 +375,7 @@ int main(void)
 
     /* ---- Phase D: RSX-bound waiting by flip polling (frames 180..239) ---- */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_HSYNC);
-    printf("AUTOVERDICT phase D frame=%llu\n", (unsigned long long)PS3DK_PROF_FRAME_TOKEN().frame);
-    fflush(stdout);
+    print_phase_banner('D');
 
     for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
         if (cellSysutilCheckCallback() != 0) break;
@@ -386,8 +396,7 @@ int main(void)
     *label_addr = 0;
     __asm__ volatile("sync" ::: "memory");
 
-    printf("AUTOVERDICT phase E frame=%llu\n", (unsigned long long)PS3DK_PROF_FRAME_TOKEN().frame);
-    fflush(stdout);
+    print_phase_banner('E');
 
     uint32_t label_v = 0;
 

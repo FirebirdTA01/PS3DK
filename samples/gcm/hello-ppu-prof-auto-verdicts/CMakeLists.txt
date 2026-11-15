@@ -14,6 +14,7 @@ include(ps3-self)
 
 add_executable(hello-ppu-prof-auto-verdicts source/main.c)
 target_compile_features(hello-ppu-prof-auto-verdicts PRIVATE c_std_11)
+target_compile_definitions(hello-ppu-prof-auto-verdicts PRIVATE PS3DK_PROF=1)
 
 target_link_libraries(hello-ppu-prof-auto-verdicts PRIVATE
     gcm_cmd gcm_sys io sysutil sysutil_stub sysmodule rt lv2 m
