@@ -19,6 +19,7 @@ samples/gcm/hello-ppu-gcm-label-reuse/shaders/arena_fp.fcg
 samples/gcm/hello-ppu-gcm-label-reuse-heavy/shaders/arena_fp.fcg
 samples/gcm/hello-ppu-gcm-main-arena/shaders/arena_fp.fcg
 samples/gcm/hello-ppu-gcm-zcull-clip-border/shaders/fpshader.fcg
+samples/gcm/hello-ppu-prof-auto-verdicts/shaders/fpshader.fcg
 samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg
 samples/toolchain/hello-psgl-blend/shaders/fp_red.fcg
 samples/toolchain/hello-psgl-cg-binary/shaders/tintfp.fcg

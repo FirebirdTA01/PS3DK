@@ -1,0 +1,18 @@
+/* hello-ppu-prof-auto-verdicts — fragment program.
+ *
+ * Heavy fragment calculation with a loop of trigonometric and polynomial
+ * operations to produce an RSX-bound workload when drawn over full-screen quads.
+ */
+void main(
+    float2 in_uv    : TEXCOORD0,
+    float4 in_color : COLOR,
+    out float4 out_color : COLOR)
+{
+    float4 c = in_color;
+    float2 p = in_uv;
+    for (int i = 0; i < 24; ++i) {
+        p = frac(p * 1.618f + float2(0.13f, 0.17f));
+        c = sin(c * 1.414f + float4(p.x, p.y, p.x * p.y, 1.0f));
+    }
+    out_color = c;
+}
