@@ -47,6 +47,28 @@ extern "C" {
 #define PS3DK_PROF_ENET           (-18)  /* live: the listener could not be created */
 #define PS3DK_PROF_ETIMEDOUT      (-19)  /* live stop: the agent did not finish in time; call stop again */
 
+/* Capture windows: the profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO RSX timing, draw report
+ * pairs, AUTO ranges) unless a window is open. Frame marks and clock anchors run all the time, so a window keeps the
+ * run-wide frame numbering and a qualified clock map. One window at a time; a capture with no window holds no heavy
+ * data. */
+#define PS3DK_PROF_WINDOW_MANUAL   1u   /* CAPTURE_BEGIN / CAPTURE_END: opens at the next frame boundary, closes after the
+                                         * current frame */
+#define PS3DK_PROF_WINDOW_FRAMES   2u   /* CAPTURE_FRAMES(name, n): closes itself after n frames (reason COUNT) */
+#define PS3DK_PROF_WINDOW_SECTION  3u   /* SECTION(name): begins and ends at its call sites */
+#define PS3DK_PROF_WINDOW_WHOLE    4u   /* CAPTURE_WHOLE_RUN(): an unnamed MANUAL window (no descriptor) open from the
+                                         * call to shutdown */
+typedef struct ps3dk_prof_capture_info {
+    uint32_t state;        /* 0 none, 1 opens at the next frame boundary, 2 open, 3 closes at the next boundary */
+    uint32_t id;           /* the current (or last) window's id; 0 before the first */
+    uint32_t kind;         /* PS3DK_PROF_WINDOW_* */
+    uint32_t windows;      /* windows opened so far */
+    uint32_t refused;      /* BEGINs refused (EBUSY) */
+    uint32_t reserved;
+    uint64_t first_frame;  /* the open window's first frame */
+    uint64_t frames;       /* frames recorded in the open window so far */
+    const char *name;      /* the window's name (the descriptor's string), NULL before the first */
+} ps3dk_prof_capture_info;
+
 #define PS3DK_PROF_MODE_APP     1u
 #define PS3DK_PROF_MODE_THREAD  2u
 
@@ -181,6 +203,16 @@ int ps3dk_prof_drain(void);
 int ps3dk_prof_thread_begin(const char *name);
 void ps3dk_prof_thread_end(void);
 void ps3dk_prof_frame(void);
+/* Capture windows (see PS3DK_PROF_WINDOW_*), on the thread that marks frames: begin returns EBUSY (counted) while a
+ * window is open or about to open, or for a SECTION in the frame the previous window ended in; EINVAL for a bad kind,
+ * FRAMES(0) or a NULL name; ENOTINIT before init; ESTOPPED after shutdown began. end closes the window (MANUAL and
+ * FRAMES after the current frame, SECTION and WHOLE now; one not yet open is cancelled); EINVAL without one, EPERM
+ * from another thread. capture_state copies the slot. capture_seal is ps3dk_prof_shutdown with the open window
+ * closed with reason SEAL instead of SHUTDOWN. */
+int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t frames);
+int ps3dk_prof_capture_end(void);
+int ps3dk_prof_capture_state(ps3dk_prof_capture_info *out);
+int ps3dk_prof_capture_seal(void);
 ps3dk_prof_token ps3dk_prof_frame_token(void);
 ps3dk_prof_zone ps3dk_prof_zone_begin(ps3dk_prof_desc *desc, ps3dk_prof_token token);
 void ps3dk_prof_zone_end(ps3dk_prof_zone *zone);
@@ -269,6 +301,48 @@ static inline void ps3dk_prof__cleanup(ps3dk_prof_zone *z) { ps3dk_prof_zone_end
 
 #endif
 
+/* ---- capture windows: live in a PS3DK_PROF unit and in a PS3_PROF_AUTO unit, inert otherwise ------------- */
+#if (defined(PS3DK_PROF) && PS3DK_PROF) || (defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO)
+/* (also declared above for PS3DK_PROF units; a PS3_PROF_AUTO unit sees them only here) */
+int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t frames);
+int ps3dk_prof_capture_end(void);
+int ps3dk_prof_capture_state(ps3dk_prof_capture_info *out);
+int ps3dk_prof_capture_seal(void);
+#define PS3DK_PROF__WDESC(var, nm) \
+    static ps3dk_prof_desc var = {(nm), "", __FILE__, (uint32_t)__LINE__, 1u, 0u, 0u}
+#define PS3DK_PROF__CAPTURE(name, kind, n)                                              \
+    (__extension__({                                                                    \
+        PS3DK_PROF__WDESC(ps3dk_prof__w, name);                                        \
+        ps3dk_prof_capture_begin(&ps3dk_prof__w, (kind), (uint32_t)(n));               \
+    }))
+#define PS3DK_PROF_CAPTURE_BEGIN(name) PS3DK_PROF__CAPTURE(name, PS3DK_PROF_WINDOW_MANUAL, 0u)
+#define PS3DK_PROF_CAPTURE_FRAMES(name, n) PS3DK_PROF__CAPTURE(name, PS3DK_PROF_WINDOW_FRAMES, (n))
+#define PS3DK_PROF_CAPTURE_WHOLE_RUN() ps3dk_prof_capture_begin((ps3dk_prof_desc *)0, PS3DK_PROF_WINDOW_WHOLE, 0u)
+#define PS3DK_PROF_CAPTURE_END() ps3dk_prof_capture_end()
+#define PS3DK_PROF_CAPTURE_STATE(out) ps3dk_prof_capture_state(out)
+
+#ifndef __cplusplus
+/* A scoped window: the cleanup ends it only when its begin succeeded. */
+static inline void ps3dk_prof__section_cleanup(int *rc)
+{
+    if (*rc == PS3DK_PROF_OK)
+        (void)ps3dk_prof_capture_end();
+}
+#define PS3DK_PROF_SECTION(name)                                                                \
+    PS3DK_PROF__WDESC(PS3DK_PROF__CAT(ps3dk_prof__sd, __LINE__), name);                         \
+    int PS3DK_PROF__CAT(ps3dk_prof__s, __LINE__) __attribute__((cleanup(ps3dk_prof__section_cleanup))) = \
+        ps3dk_prof_capture_begin(&PS3DK_PROF__CAT(ps3dk_prof__sd, __LINE__), PS3DK_PROF_WINDOW_SECTION, 0u)
+#endif
+
+#else
+#define PS3DK_PROF_CAPTURE_BEGIN(name) ((void)sizeof(name), PS3DK_PROF_OK)
+#define PS3DK_PROF_CAPTURE_FRAMES(name, n) ((void)sizeof(name), (void)sizeof(n), PS3DK_PROF_OK)
+#define PS3DK_PROF_CAPTURE_WHOLE_RUN() (PS3DK_PROF_OK)
+#define PS3DK_PROF_CAPTURE_END() (PS3DK_PROF_OK)
+#define PS3DK_PROF_CAPTURE_STATE(out) ((void)sizeof(out), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_SECTION(name) ((void)sizeof(name))
+#endif
+
 #ifdef __cplusplus
 }
 
@@ -294,6 +368,28 @@ private:
     ::ps3dk_prof::zone_guard PS3DK_PROF__CAT(ps3dk_prof__g, __LINE__)(                          \
         &PS3DK_PROF__CAT(ps3dk_prof__d, __LINE__), (tok))
 #define PS3DK_PROF_ZONE(name) PS3DK_PROF_ZONE_FOR(name, PS3DK_PROF_TOKEN_NONE)
+
+#endif
+#if (defined(PS3DK_PROF) && PS3DK_PROF) || (defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO)
+namespace ps3dk_prof {
+/* Ends its window at scope exit when its begin succeeded. Neither copyable nor movable. */
+class section_guard {
+public:
+    explicit section_guard(ps3dk_prof_desc *d) : rc_(ps3dk_prof_capture_begin(d, PS3DK_PROF_WINDOW_SECTION, 0u)) {}
+    ~section_guard() { if (rc_ == PS3DK_PROF_OK) (void)ps3dk_prof_capture_end(); }
+    section_guard(const section_guard &) = delete;
+    section_guard &operator=(const section_guard &) = delete;
+    section_guard(section_guard &&) = delete;
+    section_guard &operator=(section_guard &&) = delete;
+    int status() const { return rc_; }
+
+private:
+    int rc_;
+};
+} /* namespace ps3dk_prof */
+#define PS3DK_PROF_SECTION(name)                                                                \
+    PS3DK_PROF__WDESC(PS3DK_PROF__CAT(ps3dk_prof__sd, __LINE__), name);                         \
+    ::ps3dk_prof::section_guard PS3DK_PROF__CAT(ps3dk_prof__sg, __LINE__)(&PS3DK_PROF__CAT(ps3dk_prof__sd, __LINE__))
 #endif
 #endif /* __cplusplus */
 

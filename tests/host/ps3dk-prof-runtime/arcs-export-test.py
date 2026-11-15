@@ -9,6 +9,10 @@ import struct
 import subprocess
 import zlib
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('out', type=Path)
 p.add_argument('--reader', required=True, type=Path)
@@ -49,7 +53,7 @@ files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_v
                            'hooks/arcs.c', 'core/prof_arcs_stream.c']]
 files.append(a.red_stub.resolve() if a.red_stub else src / 'core/prof_arcs_export.c')
 exe = out / 'export'
-r = run('compile', [os.environ.get('CC', 'cc'), *flags, *files, here / 'arcs_export_test.c', '-o', exe])
+r = run('compile', [os.environ.get('CC', 'cc'), *flags, *files, here / 'arcs_export_test.c', *WHOLE_RUN, '-o', exe])
 assert r.returncode == 0, r.stderr.decode()
 cases = ['normal', 'thread', 'reuse', 'empty', 'short', 'before', 'unregistered', 'unknown', 'acked', 'no-runtime',
          'timing-write', 'timing-flush', 'timing-close', 'join', 'output-header', 'output-body',

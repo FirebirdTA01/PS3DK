@@ -457,7 +457,7 @@ static uint32_t desc_register(prof *p, cblock *cb, ring *rg, ps3dk_prof_desc *d)
 out:
     ST_REL(&d->state, st);           /* then the call site */
     p_unlock(p, &p->desc_mutex);
-    if (code)
+    if (code && cb)
         regerr(cb, rg, code, d->name, nl, tag, tl, id);   /* outside the mutex; c = the id it would have had */
     return st;
 }
@@ -755,6 +755,8 @@ ps3dk_prof_zone ps3dk_prof_zone_begin(ps3dk_prof_desc *desc, ps3dk_prof_token to
         p_observe_stop(p);
         return h;
     }
+    if (!p_window_gate(p))
+        return h;              /* no zone outside a capture window (an INERT handle, END does nothing) */
     s = &p->slots[t->slot1 - 1];
     cb = s->cb;
     rg = s->rg;
@@ -888,6 +890,7 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
+    p_window_frame(p, t->slot1, fid);   /* a window opens or closes here, before AUTO sees the frame */
 #ifdef PS3DK_PROF_WITH_AUTO
     p_auto_frame(fid,tb);
 #endif
@@ -913,6 +916,221 @@ ps3dk_prof_token ps3dk_prof_frame_token(void)
         tok.frame = cf - 1;
     }
     return tok;
+}
+
+/* ---- capture windows (file_flags bit 9) --------------------------------------------------------------------------- */
+
+static void win_lock(prof *p)
+{
+    uint32_t z = 0;
+    while (!__atomic_compare_exchange_n(&p->window_lock, &z, 1u, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+        z = 0;
+}
+static void win_unlock(prof *p) { __atomic_store_n(&p->window_lock, 0u, __ATOMIC_RELEASE); }
+static void w_le16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); }
+static void w_le32(uint8_t *b, uint32_t v) { for (unsigned i = 0; i < 4; i++) b[i] = (uint8_t)(v >> (8 * i)); }
+static void w_le64(uint8_t *b, uint64_t v) { for (unsigned i = 0; i < 8; i++) b[i] = (uint8_t)(v >> (8 * i)); }
+/* Under window_lock: queue one record for the drainer (dropped and counted when the queue is full). */
+static void win_push(prof *p, uint32_t type, uint32_t desc, const uint8_t b[32])
+{
+    uint32_t w = p->winq_w, r = LD_ACQ(&p->winq_r);
+    p_winrec *e;
+    if (w - r >= P_WINQ) {
+        p->win.dropped++;
+        return;
+    }
+    e = &p->winq[w % P_WINQ];
+    e->type = type;
+    e->desc = desc;
+    memcpy(e->b, b, 32);
+    ST_REL(&p->winq_w, w + 1u);
+}
+static void win_begin_record(prof *p)
+{
+    uint8_t b[32] = {0};
+    w_le16(b, 1);
+    w_le32(b + 4, p->win.id);
+    w_le32(b + 8, p->win.desc);
+    w_le64(b + 12, p->win.first);
+    b[20] = 1; /* source APP */
+    b[21] = (uint8_t)(p->win.kind == PS3DK_PROF_WINDOW_WHOLE ? PS3DK_PROF_WINDOW_MANUAL : p->win.kind);
+    if (p->win.kind == PS3DK_PROF_WINDOW_FRAMES)
+        w_le32(b + 24, p->win.n);
+    win_push(p, C_WINDOW_BEGIN, p->win.desc, b);
+}
+/* Under window_lock: the END record, the gate closed, the slot idle. reason: 1 END, 2 COUNT, 3 SHUTDOWN, 4 SEAL. */
+static void win_close(prof *p, uint32_t reason, uint64_t last)
+{
+    uint8_t b[32] = {0};
+    if (last < p->win.first)
+        last = p->win.first;
+    w_le16(b, 1);
+    w_le32(b + 4, p->win.id);
+    b[8] = (uint8_t)reason;
+    w_le64(b + 12, last);
+    win_push(p, C_WINDOW_END, 0, b);
+    ST_REL(&p->window_open, 0u);
+    p->win.state = 0;
+    p->win.prev_last = last;
+    p->win.have_prev = 1;
+}
+/* Under window_lock: the window opens with `first` as its first frame. */
+static void win_open(prof *p, uint64_t first)
+{
+    p->win.first = first;
+    p->win.state = 2;
+    p->win.opened++;
+    win_begin_record(p);
+    ST_REL(&p->window_open, 1u);
+}
+/* The frame in progress on the window owner's thread (0 before its first frame). */
+static uint64_t win_current(prof *p)
+{
+    uint64_t cf = p->win.owner_slot1 ? LD_ACQ(&p->slots[p->win.owner_slot1 - 1].cb->current_frame) : 0;
+    return cf ? cf - 1 : 0;
+}
+
+void p_window_frame(prof *p, uint32_t slot1, uint64_t fid)
+{
+    win_lock(p);
+    if (!p->win.owner_slot1 && p->win.state == 2)
+        p->win.owner_slot1 = slot1;   /* an immediate window opened off-thread: the frame-marking thread owns it */
+    if (p->win.owner_slot1 == slot1) {
+        if (p->win.state == 1) {
+            win_open(p, fid);
+        } else if (p->win.state == 3) {
+            win_close(p, 1, fid ? fid - 1 : 0);
+        } else if (p->win.state == 2 && p->win.kind == PS3DK_PROF_WINDOW_FRAMES && fid - p->win.first >= p->win.n) {
+            win_close(p, 2, p->win.first + p->win.n - 1);
+        }
+    }
+    win_unlock(p);
+}
+
+void p_window_shutdown(prof *p)
+{
+    win_lock(p);
+    if (p->win.state == 2 || p->win.state == 3)
+        win_close(p, p->win.seal ? 4 : 3, win_current(p));
+    else if (p->win.state == 1)
+        p->win.state = 0;   /* never opened: nothing to record */
+    win_unlock(p);
+}
+
+int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t frames)
+{
+    tls_state *t = &g_tls;
+    prof *p = ready();
+    slot *s;
+    uint32_t idx;
+    int rc = PS3DK_PROF_OK;
+    if (!p)
+        return PS3DK_PROF_ENOTINIT;
+    if ((!name && kind != PS3DK_PROF_WINDOW_WHOLE) || kind < PS3DK_PROF_WINDOW_MANUAL || kind > PS3DK_PROF_WINDOW_WHOLE ||
+        (kind == PS3DK_PROF_WINDOW_FRAMES) != (frames != 0) || t->in_drain || t->acked || t->retired)
+        return PS3DK_PROF_EINVAL;
+    if (LD_ACQ(&p->stop_latch))
+        return PS3DK_PROF_ESTOPPED;
+    {
+        int immediate = kind == PS3DK_PROF_WINDOW_SECTION || kind == PS3DK_PROF_WINDOW_WHOLE;
+        /* a window that opens at a frame boundary belongs to the thread marking frames; an immediate one may be
+         * opened from a thread that is not registered (right after init): the first thread that marks a frame
+         * then owns it */
+        if (!t->slot1 && !immediate && auto_register(p) != 0)   /* an immediate window never registers its caller */
+            return PS3DK_PROF_EFULL;
+        if (!t->slot1 && !immediate)
+            return PS3DK_PROF_ETHREAD;
+    }
+    s = t->slot1 ? &p->slots[t->slot1 - 1] : NULL;
+    /* a whole-run window is unnamed: no descriptor (name_desc 0xffffffff), so it costs the application none */
+    if (kind == PS3DK_PROF_WINDOW_WHOLE)
+        idx = 0xffffffffu;
+    else if (!desc_index(p, s ? s->cb : NULL, s ? s->rg : NULL, name, &idx))
+        return PS3DK_PROF_EINVAL;
+    win_lock(p);
+    if (p->win.state != 0) {
+        p->win.refused++;
+        rc = PS3DK_PROF_EBUSY;
+    } else {
+        uint64_t cf = s ? LD_ACQ(&s->cb->current_frame) : 0, now = cf ? cf - 1 : 0;
+        int immediate = kind == PS3DK_PROF_WINDOW_SECTION || kind == PS3DK_PROF_WINDOW_WHOLE;
+        /* windows never share a frame: an immediate window in the frame the previous one ended in waits for none */
+        if (immediate && p->win.have_prev && now <= p->win.prev_last) {
+            p->win.refused++;
+            rc = PS3DK_PROF_EBUSY;
+        } else {
+            p->win.id++;
+            p->win.desc = idx;
+            p->win.kind = kind;
+            p->win.n = frames;
+            p->win.owner_slot1 = t->slot1;
+            p->win.name = name ? name->name : "whole run";
+            if (immediate)
+                win_open(p, now);
+            else
+                p->win.state = 1;
+        }
+    }
+    win_unlock(p);
+    return rc;
+}
+
+int ps3dk_prof_capture_end(void)
+{
+    tls_state *t = &g_tls;
+    prof *p = ready();
+    int rc = PS3DK_PROF_OK;
+    if (!p)
+        return PS3DK_PROF_ENOTINIT;
+    win_lock(p);
+    if (p->win.state == 0 || p->win.state == 3) {
+        rc = PS3DK_PROF_EINVAL;
+    } else if (p->win.owner_slot1 != t->slot1) {
+        rc = PS3DK_PROF_EPERM;
+    } else if (p->win.state == 1) {
+        p->win.state = 0;   /* not yet open: cancelled, nothing recorded */
+    } else if (p->win.kind == PS3DK_PROF_WINDOW_SECTION || p->win.kind == PS3DK_PROF_WINDOW_WHOLE) {
+        win_close(p, 1, win_current(p));
+    } else {
+        p->win.state = 3;   /* after the current frame */
+    }
+    win_unlock(p);
+    return rc;
+}
+
+int ps3dk_prof_capture_state(ps3dk_prof_capture_info *out)
+{
+    prof *p = ready();
+    if (!out)
+        return PS3DK_PROF_EINVAL;
+    memset(out, 0, sizeof *out);
+    if (!p)
+        return PS3DK_PROF_ENOTINIT;
+    win_lock(p);
+    out->state = p->win.state;
+    out->id = p->win.id;
+    out->kind = p->win.kind;
+    out->windows = p->win.opened;
+    out->refused = p->win.refused;
+    out->name = p->win.name;
+    if (p->win.state == 2 || p->win.state == 3) {
+        uint64_t cf = p->win.owner_slot1 ? LD_ACQ(&p->slots[p->win.owner_slot1 - 1].cb->current_frame) : 0;
+        out->first_frame = p->win.first;
+        out->frames = cf > p->win.first ? cf - p->win.first : 0;
+    }
+    win_unlock(p);
+    return PS3DK_PROF_OK;
+}
+
+int ps3dk_prof_capture_seal(void)
+{
+    prof *p = ready();
+    if (p) {
+        win_lock(p);
+        p->win.seal = 1;
+        win_unlock(p);
+    }
+    return ps3dk_prof_shutdown();
 }
 
 /* ---- setters and init (E3, F3, r2 3.3) ---------------------------------------------------------------------------- */

@@ -55,6 +55,18 @@ BOOLEAN = {'final_present', 'sink_dead', 'exhausted', 'not_quiesced', 'preexisti
 SCALARS = BOOLEAN | {'exit', 'events', 'lost', 'final_state', 'brackets', 'domains', 'loss-chunks', 'unresolved_frames'}
 MULTI = {'loss'}
 KNOWN = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+# capture-window records (WINDOW_BEGIN 41, WINDOW_END 42): accepted only as fixed 32-byte schema-1 payloads, contents
+# not decoded here; every other unknown type is still refused
+WINDOW = {41, 42}
+
+
+def window_chunk(t, p):
+    """True for a well-formed window record; raises Bad for a malformed one; False for any other type."""
+    if t not in WINDOW:
+        return False
+    if len(p) != 32 or struct.unpack_from('<H', p, 0)[0] != 1:
+        raise Bad(f'window chunk {t}: {len(p)} bytes, schema {struct.unpack_from("<H", p, 0)[0] if len(p) >= 2 else None}')
+    return True
 GPU_IDS = range(1026, 1090)
 
 
@@ -136,6 +148,8 @@ def check(base, exp):
     descs, threads, doms = {}, set(), {}
     brackets = 0
     for t, p in frames(open(base + '.prof', 'rb').read(), bool(exp.get('sink_dead'))):
+        if window_chunk(t, p):
+            continue
         if t not in KNOWN:
             raise Bad(f'unknown chunk {t}')
         if t == 3:
@@ -263,7 +277,24 @@ def check(base, exp):
     return bad
 
 
+def selftest():
+    """The window types are accepted only well-formed; an unknown type next to them (43) is still refused."""
+    good = bytes([1, 0]) + bytes(30)
+    ok = window_chunk(41, good) and window_chunk(42, good)
+    for t, p in ((41, bytes([1, 0]) + bytes(29)), (42, bytes([2, 0]) + bytes(30))):
+        try:
+            window_chunk(t, p)
+            ok = False
+        except Bad:
+            pass
+    ok = ok and not window_chunk(43, good) and 43 not in KNOWN
+    print('checker selftest: ' + ('PASS window 41/42 accepted only well-formed, 43 still unknown' if ok else 'FAIL'))
+    return 0 if ok else 1
+
+
 def main():
+    if sys.argv[1:] == ['--selftest']:
+        return selftest()
     ap = argparse.ArgumentParser()
     ap.add_argument('dir')
     ap.add_argument('--suite', required=True, choices=sorted(INVENTORY))

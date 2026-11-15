@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser()
 p.add_argument("out", type=Path)
 p.add_argument("--reader", required=True, type=Path)
@@ -75,7 +79,7 @@ exe = out / "lifecycle"
 link = ["-no-pie"] if a.sanitize else []
 build([cxx, "-std=c++17", *flags, *cxx_priority, "-DPS3PROF_HOST_EXIT_MODEL",
        root / "tests/host/ps3dk-prof-runtime/auto_lifecycle.cpp",
-       "-Wl,-u,__ps3dk_prof_startup_anchor", archive, *link, "-o", exe], "link")
+       "-Wl,-u,__ps3dk_prof_startup_anchor", *WHOLE_RUN, archive, *link, "-o", exe], "link")
 
 results = []
 for mode in ["normal", "exit", "unregistered", "open", "abandoned", "immediate", "quick"]:

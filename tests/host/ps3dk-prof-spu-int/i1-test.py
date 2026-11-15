@@ -18,6 +18,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument('out', type=Path)
 p.add_argument('--base', type=Path, required=True, help='root of the extracted base tree (contains sdk/)')
@@ -60,7 +64,9 @@ def build(label, r, extra, spu, test_src, links):
             if (lib / 'rsx/gpu_port_gcm.c').exists():  # P3.3 R4a: the runtime prepares the GCM port
                 srcs += [lib / 'rsx/gpu_port_gcm.c']
     exe = d / 'exe'
-    r_ = subprocess.run([cc, *flags, *map(str, srcs), '-o', str(exe), *links], capture_output=True, text=True)
+    # the whole-run helper only for a tree that has capture windows (the base tree predates them)
+    whole = WHOLE_RUN if 'ps3dk_prof_capture_begin' in (r / 'sdk/include/ps3dk/prof.h').read_text() else []
+    r_ = subprocess.run([cc, *flags, *map(str, srcs), *whole, '-o', str(exe), *links], capture_output=True, text=True)
     (d / 'build.log').write_text(r_.stdout + r_.stderr)
     if r_.returncode != 0:
         raise SystemExit(f'build {label} failed:\n{r_.stderr[:3000]}')

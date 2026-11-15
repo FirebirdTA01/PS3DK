@@ -2,6 +2,10 @@
 """Run production wait core, retaining all command and capture receipts."""
 import argparse,json,os,shutil,subprocess
 from pathlib import Path
+
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--out',type=Path,required=True);p.add_argument('--reader',required=True)
 p.add_argument('--baseline',action='store_true');p.add_argument('--sanitize',choices=['address','thread'])
@@ -54,7 +58,7 @@ if not a.baseline:
     bound=sum(row['bytes'] for row in stack_rows);assert bound>0
     (out/'stack-inventory.json').write_text(json.dumps(dict(bound=bound,rows=stack_rows,scope='host finite-path conservative sum; excludes external libc, instrumentation runtime and future adapters'),indent=2))
     flags+=['-DPS3DK_PROF_WAIT_STACK_BYTES='+str(bound)]
-r=run('compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_test.c'),'-Wl,--wrap=pthread_mutex_lock','-o',out/'test'])
+r=run('compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_test.c'),*WHOLE_RUN,'-Wl,--wrap=pthread_mutex_lock','-o',out/'test'])
 assert r.returncode==0,r.stderr.decode()
 if a.sanitize=='thread':
     for label,extra,expected in [('race-negative',[],66),('race-locked',['-DRACE_CTL_LOCKED'],0)]:
@@ -78,7 +82,7 @@ for case in ['normal','short','open','nested','lost-begin','both-lost','internal
     passed+=ok;print(case, 'PASS' if ok else 'FAIL',r.stdout.decode().strip(),flush=True)
 print(f'cases=7 passed={passed} failed={7-passed} baseline={a.baseline}',flush=True)
 if not a.baseline:
-    rr=run('race-compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_race_test.c'),'-o',out/'race'])
+    rr=run('race-compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_race_test.c'),*WHOLE_RUN,'-o',out/'race'])
     assert rr.returncode==0,rr.stderr.decode()
     for case in ['stop-10','stop-11','stop-12','stop-20','stop-21','stop-22','stop-30','stop-live','unregistered','counter-retry','capacity','preexisting','auto','cross-actor','stress','publication']:
         cap=out/(case+'.prof');r=run(case,[out/'race',case,cap]);assert r.returncode==0,r.stderr.decode()
@@ -104,7 +108,7 @@ if not a.baseline:
             s=next(x for x in d['coverage'] if x['actor']==2)['summary']
             assert s['attempted_seq']==4000 and s['published']+s['dropped']==4000,s
         print(case,'PASS',r.stdout.decode().strip(),flush=True)
-    rr=run('life-compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_lifecycle_test.c'),'-o',out/'life'])
+    rr=run('life-compile',[os.environ.get('CC','cc'),*flags,*files,Path(__file__).with_name('waits_lifecycle_test.c'),*WHOLE_RUN,'-o',out/'life'])
     assert rr.returncode==0,rr.stderr.decode()
     for case in ['config','defaults','wrap','reuse','stale','cookie','sequence-ceiling','invalid','lost-return','sink-zero','sink-over','sink-error','subset-saturated']:
         cap=out/(case+'.prof');r=run(case,[out/'life',case,cap]);assert r.returncode==0,r.stderr.decode()

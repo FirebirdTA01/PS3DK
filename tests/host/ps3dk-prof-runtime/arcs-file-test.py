@@ -7,6 +7,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('out', type=Path)
 p.add_argument('--sanitize', action='store_true')
@@ -80,7 +84,7 @@ if a.reader:
                'core/prof_arcs_stream.c', 'core/prof_arcs_export.c', 'core/prof_arcs_file.c']
     r = run('integration-compile', [os.environ.get('CC', 'cc'), *flags,
             '-DPS3DK_PROF=1', '-DPS3DK_PROF_WITH_ARCS=1', '-DPS3DK_PROF_TEST_HOOKS',
-            *[src / s for s in sources], here / 'arcs_file_integration.c', '-o', exe])
+            *[src / s for s in sources], here / 'arcs_file_integration.c', *WHOLE_RUN, '-o', exe])
     assert r.returncode == 0, r.stderr.decode()
     cases = ['normal', 'thread', 'reuse', 'unregistered', 'unknown', 'corrupt', 'truncated',
              'extra', 'preflight', 'flush-fail', 'output-close', 'spool-close']

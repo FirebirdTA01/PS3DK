@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SPU order records in a capture written by the real runtime (spu-ticks slice delta D3.1-D3.4), decoded here
-independently of the reader: file_flags must be 7; every SPU_ORDER chunk (type 18) is n = 1, or n = 2 holding
+independently of the reader: file_flags must be 0x207 (7 plus the capture-windows bit 9); every SPU_ORDER chunk (type 18) is n = 1, or n = 2 holding
 DRAINED then DRAIN_TB with the same lane and events_through; and every declared SPU lane has exactly one
 LANE_CREATED before its other order records, at least one DRAINED + DRAIN_TB pair, and exactly one ORDER_FINAL in the
 chunk immediately before the DOMAIN_FINAL chunk that finalizes the lane, whose records_emitted equals the lane's
@@ -11,8 +11,8 @@ import sys
 data = open(sys.argv[1], 'rb').read()
 bad = []
 flags = struct.unpack_from('<I', data, 12)[0]
-if flags != 7:
-    bad.append(f'file_flags {flags:#x}, want 0x7')
+if flags != 0x207:
+    bad.append(f'file_flags {flags:#x}, want 0x207')
 pos, chunks = 16, []
 while pos + 16 <= len(data):
     ty, ln, _ = struct.unpack_from('<IIQ', data, pos)

@@ -65,6 +65,7 @@
 
 #include "vpshader_vpo.h"
 #include "fpshader_fpo.h"
+#include <ps3dk/prof.h>   /* capture windows: PS3DK_PROF_CAPTURE_WHOLE_RUN (inert unless profiled) */
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -916,6 +917,8 @@ static void g15_renderenable(CellGcmContextData *ctx)
 int main(int argc, const char **argv)
 {
 	(void)argc; (void)argv;
+	/* a profiled build (PS3DK_PROF or PS3_PROF_AUTO) records nothing until a window opens: record the whole run */
+	(void)PS3DK_PROF_CAPTURE_WHOLE_RUN();
 
 	printf("hello-ppu-cellgcm-state-tour: native cellGcm state tour\n");
 

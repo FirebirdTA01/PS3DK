@@ -51,6 +51,19 @@ extern const uint32_t ps3dk_prof_sdk_version_len;
 
 enum { K_BEGIN = 1, K_BEGIN_PARENT = 2, K_END = 3, K_FRAME = 4, K_GAP = 5, K_REGERR = 6 };
 enum { C_HEADER = 1, C_CLOCKS = 2, C_DESCRIPTORS = 3, C_THREADS = 4, C_RECORDS = 5, C_TRAILER = 6, C_RETIRED = 7 };
+/* Capture windows (file_flags bit 9): WINDOW_BEGIN / WINDOW_END, 32-byte payloads. */
+enum { C_WINDOW_BEGIN = 41, C_WINDOW_END = 42, P_WINQ = 16 };
+/* A queued window record: the owner side builds it, the drainer writes it once its name descriptor is declared. */
+typedef struct p_winrec { uint32_t type, desc; uint8_t b[32]; } p_winrec;
+/* The window slot (one window at a time), under window_lock. state: 0 idle, 1 opens at the next frame boundary,
+ * 2 open, 3 closes at the next frame boundary. */
+typedef struct p_window {
+    uint32_t state, id, desc, kind, n, owner_slot1, seal;
+    uint64_t first, prev_last;
+    uint32_t have_prev, opened, refused, dropped;
+    const char *name;
+} p_window;
+
 enum { ST_RETIRED = 1, ST_ACKED = 2, ST_NOT_QUIESCED = 3 };       /* final-entry states (section 6) */
 enum { ZK_INERT = 0, ZK_PUSHED = 1, ZK_REFUSED = 2, ZK_SPENT = 3 }; /* zone handle kinds */
 
@@ -284,7 +297,25 @@ typedef struct prof {
     char workload_tag[P_STR_MAX + 1];
     uint32_t app_len, build_id_len, flags_len, workload_tag_len;
     uint64_t fnv_build;         /* FNV-1a-64 state after (build_id, 0x00): the shared prefix of every descriptor id */
+    /* Capture windows: nothing heavy is recorded outside a window. window_open: the gate, read with acquire on every
+     * heavy record path; window_lock: a spin word over win and the queue head. */
+    uint32_t window_open, window_lock;
+    p_window win;
+    p_winrec winq[P_WINQ];
+    uint32_t winq_w, winq_r;    /* atomic: owner side publishes w, the drainer releases r */
 } prof;
+
+/* 1 when heavy records may be written: only while a capture window is open. */
+static inline int p_window_gate(const prof *p)
+{
+    return __atomic_load_n(&p->window_open, __ATOMIC_ACQUIRE) != 0;
+}
+#define p_window_frame ps3dk_prof__window_frame
+#define p_window_shutdown ps3dk_prof__window_shutdown
+#define p_window_drain ps3dk_prof__window_drain
+void p_window_frame(prof *p, uint32_t slot1, uint64_t fid); /* the owner's frame boundary, before AUTO sees it */
+void p_window_shutdown(prof *p);                            /* at the shutdown claim: closes an open window */
+void p_window_drain(prof *p, uint32_t declared);            /* drainer: queued records whose descriptor is declared */
 
 /* Thread-local producer state (r2 section 3; erratum 2 F1). */
 typedef struct tls_state {

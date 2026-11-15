@@ -36,7 +36,11 @@ int ob_prof_init(void)
     ext.gpu_domains_max = 1;
     ext.gpu_report_slots_max = OB_GPU_REPORT_COUNT;
     int rc = ps3dk_prof_set_sink_path("/dev_hdd0/tmp");
-    return rc ? rc : ps3dk_prof_init_ex(&cfg, &ext);
+    if (!rc)
+        rc = ps3dk_prof_init_ex(&cfg, &ext);
+    if (!rc)
+        (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* capture windows: record the whole run */
+    return rc;
 }
 
 static int s_init(void *c)

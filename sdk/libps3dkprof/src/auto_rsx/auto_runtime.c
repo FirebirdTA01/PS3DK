@@ -719,7 +719,7 @@ void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring,struct _gcmCtx
     gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
     uintptr_t cur,end;
     int pair;
-    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !p_window_gate(g_prof) || !(a=owner_capture(NULL,1))) return;
     if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;
     c=auto_config_read(&configuration);
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
@@ -920,6 +920,11 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     if(!ctx || !p_ready()) return 0;
+    if(!p_window_gate(g_prof)) {
+        /* no draw timing outside a capture window; a stopped owner still acknowledges the stop here */
+        if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
+        return 0;
+    }
     auto_capture *a=owner_capture(ctx,1);
     const auto_wire_config *c;
     auto_queue_entry *e;
@@ -1062,9 +1067,19 @@ void p_auto_owner_retire(void)
     }
 }
 
+static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame);
 void p_auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
+    if(a && !p_window_gate(g_prof)) {
+        /* outside a window: the previous window's last row closes, clock anchors keep their cadence so the next
+         * window's map qualifies, and no row or FRAME mark opens */
+        if(!a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
+            if(a->coverage.active) (void)close_frame(a,a->coverage.owner,a->coverage.live.frame);
+            if(frame%8u==0) sample_clock(a,frame);
+        }
+        return;
+    }
     if(a && !a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
         int flip=a->in_flip_frame!=0;
         if(!flip) a->explicit_seen=1; /* an explicit call takes precedence from here on */
@@ -1561,6 +1576,11 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
     uintptr_t cur,end;
     int pair;
     if(!desc || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;
+    if(!p_window_gate(g_prof)) {   /* outside a window: refused, still pushed so END stays balanced */
+        if(a->range_depth<AUTO_RANGE_DEPTH) {memset(&a->ranges[a->range_depth],0,sizeof a->ranges[0]);a->range_depth++;}
+        else a->range_excess++;
+        return 0;
+    }
     if(a->range_depth>=AUTO_RANGE_DEPTH) {a->range_excess++;range_refuse(a);return 0;}
     r=&a->ranges[a->range_depth++];
     memset(r,0,sizeof *r);

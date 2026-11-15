@@ -16,12 +16,12 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
-                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent','label-silent','label-switch-silent','tag-silent','tag-at-call','range-end-silent'])
+                                  'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent','label-silent','label-switch-silent','tag-silent','tag-at-call','range-end-silent','window-gate-off','frames-off-by-one'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -30,7 +30,7 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
                           'poll-wait':'present','poll-scope-cadence':'present',
                           'boundary-cadence':'spanning','boundary-scope':'spanning',
-                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested','no-call-reserve':'callbracket','bracket-silent':'callbracket','label-silent':'labels','label-switch-silent':'labels','tag-silent':'tags','tag-at-call':'tags','range-end-silent':'tags'}[a.mutant] and not a.sanitize
+                          'replay-silent':'segbuild','recall-silent':'segbuild','moved-draw-silent':'segbuild','nested-silent':'segnested','no-call-reserve':'callbracket','bracket-silent':'callbracket','label-silent':'labels','label-switch-silent':'labels','tag-silent':'tags','tag-at-call':'tags','range-end-silent':'tags','window-gate-off':'windows','frames-off-by-one':'windows'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -80,7 +80,9 @@ def run(name,cmd,cwd=out):
                   'bracket-silent':b'context.current==a+before',
                   'label-silent':b'l[0]==1 && l[1]==0 && l[3]==71',
                   'label-switch-silent':b'l[0]==2 && l[1]==2 && l[3]==0xffffffffu',
-                  'range-end-silent':b'context.current==w0+6'}[a.mutant]
+                  'range-end-silent':b'context.current==w0+6',
+                  'window-gate-off':b'!zone() && !clear() && state()==0',
+                  'frames-off-by-one':b'state()==0 && !zone() && !clear()'}[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -98,7 +100,7 @@ if operations or a.case in ('stop','stopvisit'):
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -110,6 +112,8 @@ if a.case=='flips':
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
 if a.case in ('extsegments','segbuild','segnested','callbracket','tags'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('windows','windowseal','windowwhole','windownone'):
+    flags+=['-DTEST_WINDOW_MODE='+str({'windows':0,'windowseal':1,'windowwhole':2,'windownone':4}[a.case])]
 if a.case=='labels' and a.sanitize=='thread':
     # the header's host-only ordering fence (cellGcmReadLabelOrdered) is a seq_cst fence, which GCC warns about under
     # TSan; the runtime under test has no fence of its own
@@ -214,6 +218,12 @@ for rel in sources:
         # covered draws may take the pairs kept for whole-CALL brackets
         code=source.read_text();old='    return keep;\n}';assert code.count(old)==1
         source=out/'auto_queue.c';source.write_bytes(code.replace(old,'    (void)keep;return 0;\n}').encode())
+    elif a.mutant in ('window-gate-off','frames-off-by-one') and rel=='core/prof_core.c':
+        # zones recorded outside a window; a FRAMES(n) window held one frame too long
+        old,new={'window-gate-off':('    if (!p_window_gate(p))\n        return h;','    if (0)\n        return h;'),
+                 'frames-off-by-one':('fid - p->win.first >= p->win.n','fid - p->win.first > p->win.n')}[a.mutant]
+        code=source.read_text();assert code.count(old)==1,a.mutant
+        source=out/'prof_core.c';source.write_bytes(code.replace(old,new).encode())
     elif a.mutant in ('tag-silent','tag-at-call','range-end-silent') and rel=='auto_rsx/auto_runtime.c':
         # tags not recorded on ring and segment draws; a segment draw's tag taken at its CALL; no end report
         old,new={'tag-silent':('    e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;\n    if(a->coverage.active) {e->op.flags=1;',
@@ -256,6 +266,11 @@ for rel in sources:
         replacement='if(!ticket || LD_ACQ(&g_prof->stop_latch)) return;' if a.mutant=='reject-late-end' else 'if(!auto_config_can_admit(&configuration))'
         assert code.count(old)==1
         code=code.replace(old,replacement)
+        if a.mutant=='ignore-global-stop':
+            # the visit outside a capture window acknowledges the stop on its own path: ignored there too
+            gate='        if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);\n'
+            assert code.count(gate)==1
+            code=code.replace(gate,'')
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
     run('compile-'+source.stem,[cc,*flags,'-c',source,'-o',obj]);objects.append(obj)
 run('archive-members',['ar','rcsD',out/'members.a',*objects])
@@ -308,13 +323,17 @@ if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capa
 if a.case=='segmetatail':application=Path(__file__).with_name('auto-segment-metadata-tail-test.c').read_text()
 if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-frame-test.c').read_text()
 if a.case=='segnested':application=Path(__file__).with_name('auto-segment-call-in-bracket-test.c').read_text()
+if a.case in ('windows','windowseal','windowwhole','windownone'):application=Path(__file__).with_name('auto-window-runtime-test.c').read_text()
 if a.case=='tags':application=Path(__file__).with_name('auto-tag-runtime-test.c').read_text()
 if a.case=='labels':application=Path(__file__).with_name('auto-label-poll-runtime-test.c').read_text()
 if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
-run('link',[cc,*flags,out/'main.c',out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
+# every case but the window API ones records through a whole-run window opened right after init (the shared helper)
+whole_run=[] if a.case in ('windows','windowseal','windowwhole','windownone') else [
+    root/'tests/host/ps3dk-prof-common/prof_whole_run.c','-Wl,--wrap=ps3dk_prof_init','-Wl,--wrap=ps3dk_prof_init_ex']
+run('link',[cc,*flags,out/'main.c',out/'bridge.c',*whole_run,'-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
 cmd=[out/'app']
 if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
@@ -344,6 +363,9 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO segment CALL inside a draw bracket PASS\n' if a.case=='segnested'
                        else b'AUTO whole-CALL brackets: 454 timed draws, 32 brackets from the reserve, the 33rd refused PASS\n' if a.case=='callbracket'
                        else b'AUTO tags, fragment programs, ranges and timed ranges PASS\n' if a.case=='tags'
+                       else b'AUTO capture windows PASS\n' if a.case in ('windows','windowseal')
+                       else b'AUTO whole-run window PASS\n' if a.case=='windowwhole'
+                       else b'AUTO no window PASS\n' if a.case=='windownone'
                        else b'AUTO label-poll cadence PASS\n' if a.case=='labels'
                        else b'AUTO flip-driven frames PASS\n' if a.case=='flips'
                        else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
@@ -353,7 +375,8 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
 files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
 data=files[0].read_bytes()
 assert data[:8]==b'PS3DKPRF'
-assert struct.unpack_from('<HHI',data,8)==(1,0,195)
+# file_flags: 195 plus bit 9 (capture windows) on every capture
+assert struct.unpack_from('<HHI',data,8)==(1,0,195|512),struct.unpack_from('<HHI',data,8)
 pos=16;sequence=0;chunks=[]
 while pos<len(data):
     assert len(data)-pos>=20
@@ -448,6 +471,59 @@ if a.case=='callbracket':
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     assert fields[1]&1024,('SEGMENT_REPLAY',fields[1])
     print('real capture: 32 whole-CALL records with their build frames, replay latched PASS')
+    raise SystemExit(0)
+if a.case in ('windows','windowseal','windowwhole','windownone'):
+    # the WINDOW records (chunks 41/42), the zone and frame records (chunk 5), the AUTO records and rows
+    wins=[]
+    for k,b in chunks:
+        if k==41:
+            assert len(b)==32 and struct.unpack_from('<HH',b)==(1,0)
+            wid,desc,first=struct.unpack_from('<IIQ',b,4);src,kind=b[20],b[21];n=struct.unpack_from('<I',b,24)[0]
+            assert src==1 and b[22:24]==bytes(2) and b[28:]==bytes(4)
+            wins.append(['B',wid,first,kind,n])
+        elif k==42:
+            assert len(b)==32 and struct.unpack_from('<HH',b)==(1,0) and b[9:12]==bytes(3) and b[20:]==bytes(12)
+            wid,=struct.unpack_from('<I',b,4);last,=struct.unpack_from('<Q',b,12)
+            wins.append(['E',wid,b[8],last])
+    kinds={}
+    zone_frames=[]
+    for k,b in chunks:
+        if k!=5:continue
+        n=struct.unpack_from('<I',b,4)[0]
+        for i in range(n):
+            r=b[8+32*i:8+32*(i+1)]
+            kinds[r[0]]=kinds.get(r[0],0)+1
+    ops=[];rows=[]
+    for k,b in auto:
+        if k==35:
+            for i in range(struct.unpack_from('<I',b,8)[0]):
+                q=b[16+OP*i:16+OP*(i+1)]
+                ops.append((struct.unpack_from('<H',q,12)[0],struct.unpack_from('<Q',q,16)[0],struct.unpack_from('<H',q,14)[0]))
+        if k==36:rows.append(struct.unpack_from('<Q',b,16)[0])
+    frames=kinds.get(4,0)
+    if a.case in ('windows','windowseal'):
+        end_reason=4 if a.case=='windowseal' else 3
+        assert wins==[['B',1,1,1,0],['E',1,1,1],['B',2,3,2,3],['E',2,2,5],['B',3,6,3,0],['E',3,1,6],
+                      ['B',4,8,1,0],['E',4,end_reason,8]],wins
+        # every frame mark is kept (run-wide numbering); zones only inside windows: frames 1 (two), 3, 4, 5, 6, 8
+        assert frames==9 and kinds.get(1,0)==7 and kinds.get(3,0)==7,kinds
+        # AUTO: rows and FRAME marks only for frames a window held from their boundary; draws only inside windows
+        assert rows==[1,3,4,5,8],rows
+        clears=[o for o in ops if o[0]==3]
+        assert len(clears)==7,ops
+        assert {o[1] for o in clears if o[2]&1}=={1,3,4,5,8} and sum(1 for o in clears if not o[2]&1)==1,clears
+        print('real capture: windows at frame boundaries, FRAMES(3), SECTION, EBUSY and the '+('SEAL' if a.case=='windowseal' else 'SHUTDOWN')+' close; nothing heavy outside PASS')
+    elif a.case=='windownone':
+        # no trigger: no window, no zone, no AUTO row or draw record; the frame marks are kept
+        assert wins==[] and frames==5 and not kinds.get(1) and not kinds.get(3),(wins,kinds)
+        assert rows==[] and not any(o[0] in (1,2,3,4) for o in ops),(rows,ops)
+        print('real capture: no trigger, 5 frame marks and nothing heavy PASS')
+    else:
+        assert wins==[["B",1,0,1,0],["E",1,3,4]],wins
+        # the same heavy records with and without the whole-run window
+        assert frames==5 and kinds.get(1,0)==5 and kinds.get(3,0)==5,kinds
+        assert rows==[0,1,2,3,4] and sum(1 for o in ops if o[0]==3)==5,(rows,ops)
+        print('real capture: the whole-run window holds 5 frames, 5 zones and 5 timed clears PASS')
     raise SystemExit(0)
 if a.case=='tags':
     config=[b for k,b in auto if k==34][0]
@@ -687,7 +763,9 @@ if a.case in ('stop','stopvisit'):
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     active=int(a.case=='stop')
     assert fields[:3]==(1,11 if active else 1,1),fields
-    assert fields[3:]==(active,active,0,0,active,0,0,1,0,0,0,0,0,0,active),fields
+    # capture windows: the stopped visit comes after shutdown closed the whole-run window, so it is not counted (no
+    # unassociated visit); the in-flight draw of 'stop' was admitted inside the window
+    assert fields[3:]==(active,active,0,0,active,0,0,active,0,0,0,0,0,0,active),fields
     assert chunks[-1][0]==6
     print('real capture: '+a.case+' owner acknowledgement and retained-resource accounting PASS')
     raise SystemExit(0)

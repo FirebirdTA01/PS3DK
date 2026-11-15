@@ -388,6 +388,7 @@ static void dr_start(prof *p)
     if (p->ext_flags)
         head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
 #endif
+    head[13] |= 2;   /* file_flags bit 9: capture windows (chunks 41, 42); heavy data only inside them */
     if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
@@ -492,6 +493,24 @@ static void declare_descs(prof *p, uint32_t upto)
     }
     list_close(p, &cnt);
     d->desc_emitted = upto;
+}
+
+/* Capture windows: every queued record in order, up to the first BEGIN whose name descriptor is not declared yet. */
+void p_window_drain(prof *p, uint32_t declared)
+{
+    uint32_t r = p->winq_r;
+    while (r != LD_ACQ(&p->winq_w)) {
+        const p_winrec *e = &p->winq[r % P_WINQ];
+        unsigned i;
+        if (e->type == C_WINDOW_BEGIN && e->desc != 0xffffffffu && e->desc >= declared)
+            break;
+        enc_begin(p, e->type);
+        for (i = 0; i < 32; i++)
+            enc_u8(p, e->b[i]);
+        enc_end(p);
+        r++;
+        ST_REL(&p->winq_r, r);
+    }
 }
 
 /* Step 3: one ring up to w, whole publications only (r2 7).  A boundary that fails validation is library-internal
@@ -639,6 +658,7 @@ int p_drain_once(prof *p)
     if (declare_threads(p) != 0)
         goto lockfail;
     declare_descs(p, LD_ACQ(&p->desc_count));
+    p_window_drain(p, d->desc_emitted);
     HOOK(drainer_after_tables);
 
     /* 3. Records up to the snapshot. */
@@ -853,6 +873,7 @@ int p_quiesce_freeze_seal(prof *p)
         }
         enc_threads(p, d->tscratch, nt);
         declare_descs(p, fd);
+        p_window_drain(p, d->desc_emitted);
         for (i = 0; i < d->nfront; i++)
             if (!d->front[i].done)
                 drain_ring(p, d->front[i].slot, d->front[i].incarnation, d->front[i].widx);
@@ -1099,6 +1120,7 @@ int ps3dk_prof_shutdown(void)
     if (!CAS_ACQREL(&p->shutdown_once, &z, 1u))
         return PS3DK_PROF_EALREADY;
     HOOK(after_shutdown_claim);   /* claimed: shutdown has begun, the stop latch is not yet set */
+    p_window_shutdown(p);         /* an open window ends here (SHUTDOWN, or SEAL from ps3dk_prof_capture_seal) */
 #ifdef PS3DK_PROF_WITH_SPU
     {
         /* Capture RSX frame (S2, R40): the stopper sets STOP right after the claim, before the seal */

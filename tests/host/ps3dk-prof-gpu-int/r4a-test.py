@@ -32,6 +32,10 @@ import subprocess
 import sys
 import zlib
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('out', type=Path)
 ap.add_argument('--reader', type=Path, required=True)
@@ -92,7 +96,7 @@ def build(d, src, mode_c, san, extra=(), harness=None):
                               'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
                               'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c')] + [harness or here / 'r4a_int.c']
     exe = d / 'r4a'
-    r = run([cc, *flags, *srcs, '-o', exe], d / 'build.log')
+    r = run([cc, *flags, *srcs, *WHOLE_RUN, '-o', exe], d / 'build.log')
     return exe if r is not None and r.returncode == 0 else None
 
 

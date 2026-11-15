@@ -82,7 +82,8 @@ int ps3dk_prof_auto_range_end(void);
 
 #if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
 int ps3dk_prof_shutdown(void);
-#define PS3DK_PROF_AUTO_SEAL() ps3dk_prof_shutdown()
+/* ps3dk_prof_shutdown, closing an open capture window with reason SEAL */
+#define PS3DK_PROF_AUTO_SEAL() ps3dk_prof_capture_seal()
 #else
 #define PS3DK_PROF_AUTO_SEAL() 0
 #endif

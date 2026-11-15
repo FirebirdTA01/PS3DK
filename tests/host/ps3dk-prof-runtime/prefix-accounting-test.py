@@ -66,6 +66,10 @@ if not a.sanitize and not a.red_stub:
             assert re.search(rb'^[0-9a-f]+ T ps3dk_prof__finalization$', r.stdout, re.M), r.stdout.decode()
     print('disabled linkage tests=2 pass=2 fail=0', flush=True)
 import zlib
+
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
 cases = ['normal', 'short1', 'short7', 'zeros', 'zero-limit', 'overcount', 'partial',
          'trailer-fail', 'flush-fail', 'close-fail', 'thread', 'join-fail', 'late', 'unregistered',
          'length-overflow', 'chunk-overflow', 'eintr', 'observe', 'refused']
@@ -77,7 +81,7 @@ def run_arcs():
         files.append(a.red_stub.resolve())
     exe = out / 'prefix'
     r = run('compile', [os.environ.get('CC', 'cc'), *flags, *files,
-                        Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])
+                        Path(__file__).with_name('prefix_accounting_test.c'), *WHOLE_RUN, '-o', exe])
     assert r.returncode == 0, r.stderr.decode()
     if a.sanitize == 'thread':
         # Prove that the same compiler/options/wrapper detects a real race AND
@@ -153,7 +157,7 @@ def run_core():
     core_files = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c']]
     exe = out / 'prefix-core'
     r = run('core-compile', [os.environ.get('CC', 'cc'), *core_flags, *core_files,
-                             Path(__file__).with_name('prefix_accounting_test.c'), '-o', exe])
+                             Path(__file__).with_name('prefix_accounting_test.c'), *WHOLE_RUN, '-o', exe])
     assert r.returncode == 0, r.stderr.decode()
     passed = 0
     for name in CORE_CASES:

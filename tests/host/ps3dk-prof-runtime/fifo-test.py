@@ -15,6 +15,10 @@ pinned in a GPU call), the realistic held state: the owner holds no profiler mut
 import argparse, json, os, shutil, struct, subprocess, zlib
 from pathlib import Path
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--sanitize', choices=['address', 'thread'])
@@ -101,7 +105,7 @@ for name, argv in [('ar-members', ['ar', 'rcsD', out / 'members.a', *objs[:-1]])
 for name, argv in [('compile-identity', [cc, *base, '-c', out / 'prof_identity.c', '-o', out / 'prof_identity.o']),
                    ('ar-final', ['ar', 'rcsD', out / 'libps3dkprof_ext_fifo.a', *objs[:-1], out / 'prof_identity.o']),
                    ('verify-identity', ['python3', '-I', '-B', digest, 'verify', out / 'libps3dkprof_ext_fifo.a', *ident]),
-                   ('link', [cc, *base, objs[-1], out / 'libps3dkprof_ext_fifo.a', '-o', out / 'fifo_test'])]:
+                   ('link', [cc, *base, objs[-1], *WHOLE_RUN, out / 'libps3dkprof_ext_fifo.a', '-o', out / 'fifo_test'])]:
     r = run(name, argv)
     assert r.returncode == 0, (name, r.stdout.decode() + r.stderr.decode())
 
@@ -113,7 +117,7 @@ def decode(path):
     b = path.read_bytes()
     assert b[:8] == b'PS3DKPRF', 'magic'
     major, minor, flags = struct.unpack_from('<HHI', b, 8)
-    assert (major, minor) == (1, 0) and flags == 64 | 3, (major, minor, flags)  # bits 0, 1 and 6
+    assert (major, minor) == (1, 0) and flags == 64 | 3 | 512, (major, minor, flags)  # bits 0, 1, 6 and 9 (capture windows)
     pos, seq, cap = 16, 0, dict(order=[], config=None, events=[], status=[], threads={}, torn=False, freq=None)
     while pos < len(b):
         if len(b) - pos < 20:
@@ -322,7 +326,7 @@ def t_app():
     capf, so = go('app')
     assert 'app attach rc=-1 instance=0' in so, so
     b = capf.read_bytes()
-    assert struct.unpack_from('<I', b, 12)[0] == 64 | 3
+    assert struct.unpack_from('<I', b, 12)[0] == 64 | 3 | 512   # bit 9: capture windows
 
 
 def t_nogpu():

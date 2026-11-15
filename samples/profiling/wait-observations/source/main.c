@@ -172,6 +172,7 @@ int main(void) {
     if (pthread_create(&thread, NULL, worker, NULL)) return 2;
     if (await_worker_entered()) return 2;
     if (ps3dk_prof_set_sink_path("/dev_hdd0/tmp") || ps3dk_prof_init(&cfg)) return 2;
+    (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* capture windows: record the whole run */
     if (ps3dk_prof_get_capture_record(&capture)) return 2;
 #if WAIT_OBSERVED
     /* The observed init path already registered this caller as "init". */

@@ -33,6 +33,8 @@ step() { # name expected-rc command...
 mkdir -p "$O/inc/ps3dk" && cp "$W/sdk/include/ps3dk/prof.h" "$O/inc/ps3dk/prof.h"
 PROFH="-I$O/inc -I$CORE -I$PAL -pthread -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS"
 LIB="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c"
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window after every successful init
+WHOLE_RUN="$W/tests/host/ps3dk-prof-common/prof_whole_run.c -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex"
 ppu_build() { # out sanitizer-flags
     local objs=()
     for s in $LIB; do $CC $BASE $2 $PROFH -DPS3DK_PROF=1 -c "$s" -o "$1.$(basename "$s").o" || return 1; objs+=("$1.$(basename "$s").o"); done
@@ -41,7 +43,7 @@ ppu_build() { # out sanitizer-flags
     $CC $BASE $2 $PROFH -DPS3DK_PROF=0 -c "$B/source/bench_ppu_off.c" -o "$1.off.o" || return 1
     $CC $BASE $2 $PROFH -DPS3DK_PROF=1 "$B/common/ob_cases.c" "$B/common/ob_sched.c" "$B/common/ob_csv.c" \
         "$B/common/ob_io.c" "$H/test_ob_ppu.c" \
-        "$1.on.o" "$1.off.o" "${objs[@]}" -o "$1" || return 1
+        "$1.on.o" "$1.off.o" "${objs[@]}" $PROFH $WHOLE_RUN -o "$1" || return 1
 }
 step build-ob-ppu 0 ppu_build "$O/test_ob_ppu" ""
 step build-ob-ppu-san 0 ppu_build "$O/test_ob_ppu-san" "$SAN"
@@ -65,7 +67,7 @@ RTSRC="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c
     $SPU/psp_elf.c $SPU/psp_host_emul.c $RSX/gpu_runtime.c $RSX/prg.c $RSX/gpu_port_gcm.c $RSX/rsxcap.c"
 GSRC="$B/common/ob_gpu_run.c $B/common/ob_rsx.c $B/common/ob_sched.c $B/common/ob_io.c $B/common/ob_teardown.c"
 step build-ob-gpu-rt 0 $CC $BASE $SAN $PROFH -DPS3DK_PROF=1 -DPS3DK_PROF_WITH_SPU -I"$SPU" -I"$RSX" $RTSRC $GSRC \
-    "$H/test_ob_gpu_rt.c" -o "$O/test_ob_gpu_rt"
+    "$H/test_ob_gpu_rt.c" $WHOLE_RUN -o "$O/test_ob_gpu_rt"
 mkdir "$O/gpu-rt"
 for c in prod min under old; do
     mkdir "$O/gpu-rt/$c"
