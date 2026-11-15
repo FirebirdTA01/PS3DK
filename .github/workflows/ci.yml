@@ -122,7 +122,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      # These legacy drivers invoke rustc with the reader's target/debug/deps.
+      # Cargo 1.100 moved dependencies into per-package build directories.
+      # Keep the validated layout until their checker builds are Cargo targets;
+      # the main Rust build/test job continues to cover current stable.
+      - uses: dtolnay/rust-toolchain@1.99.0
       - name: Build the reader and its oracle library
         working-directory: tools
         run: cargo build -p ps3dk-prof
