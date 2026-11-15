@@ -3167,7 +3167,9 @@ static void c_ckpt_lock_fault_stops_hook(void)
     CHECK(wsnap_same(0, &s) && dom_same(0, &d0, 0), "no MARK, no draw BEGIN: no GPU word, seq or ticket");
     CHECK(outcome_is(C1, RSXCAP_O_ABANDONED, RSXCAP_R_STOPPING), "TERMINAL(ABANDONED, stopping)");
     CHECK(Q(C1).end.ckpt_missing == 0 && Q(C1).end.hooks == 4096, "not a missing checkpoint; the draw not counted");
-    expect_open(1);
+    /* Whole-chunk prefix acceptance is independent of the partial RSX capture:
+     * keep the exact missing-END/FINAL and UNKNOWN-block assertions below. */
+    expect_open(0);
     expect_cap(C1, "PARTIAL: missing END, reason unknown (no domain FINAL); block 0 UNKNOWN", 4096, 0);
     finish_faulted(0);
 }

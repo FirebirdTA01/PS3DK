@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check tracked shell/PowerShell test inventories against CI run commands.
+"""Check shell/PowerShell tests and the listed legacy profiler suites against CI.
 
 Recognize explicit bash, powershell/pwsh -File and python commands inside
 single-line or literal-block run entries, never mentions in comments/titles.
@@ -14,7 +14,23 @@ import shlex
 import subprocess
 import sys
 
-TEST_PATH = r"[A-Za-z0-9_/-]+-test\.(?:sh|ps1)"
+# These older profiler drivers predate the shell-test naming convention.
+# Keep them in the checked inventory so dropping a CI row cannot silently
+# return them to manual-only coverage.
+PROFILER_SUITES = {
+    "tests/host/ps3dk-prof-gpu-int/r2-test.py",
+    "tests/host/ps3dk-prof-gpu-int/r4a-test.py",
+    "tests/host/ps3dk-prof-rsxcap/s2-test.py",
+    "tests/host/ps3dk-prof-spu-int/i1-test.py",
+    "tests/host/ps3dk-prof-spu-int/i2-test.py",
+    "tests/host/ps3dk-prof-spu-int/i3b-test.py",
+    "tests/host/ps3dk-prof-runtime/live-e2e-test.py",
+    "tests/host/ps3dk-prof-profile/run-profile-tests.sh",
+    "samples/profiling/ext-probe/host-tests/e1-build.sh",
+    "samples/profiling/overhead-bench/host-tests/run-host.sh",
+}
+TEST_PATH = r"(?:[A-Za-z0-9_/-]+-test\.(?:sh|ps1)|" + "|".join(
+    re.escape(p) for p in sorted(PROFILER_SUITES)) + ")"
 SELF = "tests/ci-test-list-test.py"
 
 
@@ -132,6 +148,13 @@ def check(inventory, workflow, exclusion_text, minimum=60):
 
 
 def self_check():
+    for suite in PROFILER_SUITES:
+        command = "python3" if suite.endswith(".py") else "bash"
+        workflow = f"  run: {command} {suite} out\n  run: python3 {SELF}\n"
+        errors, _, _ = check({suite}, workflow, "", minimum=1)
+        assert not errors, (suite, errors)
+        errors, _, _ = check({suite}, f"  run: python3 {SELF}\n", "", minimum=1)
+        assert errors == [f"CI invocation missing: {suite}"], (suite, errors)
     good = "tests/shader-compiler/good-test.sh"
     missing = "tests/shader-compiler/missing-test.sh"
     own_command = f"        run: python3 {SELF}\n"
@@ -180,7 +203,8 @@ def self_check():
 
 
 def tracked_inventory(root):
-    args = ["git", "-C", str(root), "ls-files", "--", "*-test.sh", "*-test.ps1"]
+    patterns = ["*-test.sh", "*-test.ps1", *sorted(PROFILER_SUITES)]
+    args = ["git", "-C", str(root), "ls-files", "--", *patterns]
     run = subprocess.run(args, capture_output=True, text=True)
     if run.returncode and (root / ".git").is_file():
         pointer = (root / ".git").read_text().strip()
@@ -191,10 +215,12 @@ def tracked_inventory(root):
             if sys.platform == "linux" and re.match(r"^[A-Za-z]:[/\\]", gitdir):
                 gitdir = subprocess.check_output(["wslpath", "-u", gitdir], text=True).strip()
                 run = subprocess.run(["git", "--git-dir=" + gitdir, "--work-tree=" + str(root),
-                                      "ls-files", "--", "*-test.sh", "*-test.ps1"], capture_output=True, text=True)
+                                      "ls-files", "--", *patterns], capture_output=True, text=True)
     if run.returncode:
         raise RuntimeError("cannot enumerate tracked tests: " + run.stderr.strip())
     paths = set(run.stdout.splitlines())
+    if PROFILER_SUITES - paths:
+        raise RuntimeError("listed profiler suites not tracked: " + ", ".join(sorted(PROFILER_SUITES - paths)))
     absent = sorted(path for path in paths if not (root / path).is_file())
     if absent:
         raise RuntimeError("tracked tests absent from disk: " + ", ".join(absent))
