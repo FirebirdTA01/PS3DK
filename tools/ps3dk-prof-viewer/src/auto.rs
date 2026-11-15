@@ -35,9 +35,22 @@ impl AutoView {
         self.report.status.as_ref().map_or(false, |s| s.is_final())
     }
 
-    /// Missed frame marks: counter 6 ("frames_lost") in the status row.
-    pub fn frames_lost(&self) -> u64 {
+    /// Whether any RSX frame boundary marks were missed by the writer (status flag ST_FRAME_MARK_MISSED=128).
+    pub fn frame_marks_missed(&self) -> bool {
+        self.report
+            .status
+            .as_ref()
+            .is_some_and(|s| s.flags & auto_rsx::ST_FRAME_MARK_MISSED != 0)
+    }
+
+    /// Coverage records lost to ring buffer capacity (counter 6, "lost" in coverage rows).
+    pub fn coverage_rows_lost(&self) -> u64 {
         self.report.status.as_ref().map_or(0, |s| s.counters[6])
+    }
+
+    /// Legacy alias for coverage_rows_lost.
+    pub fn frames_lost(&self) -> u64 {
+        self.coverage_rows_lost()
     }
 
     /// Operations dropped past the retention ceiling.
@@ -113,7 +126,7 @@ impl AutoView {
     }
 }
 
-/// Computes the median of an unsigned 64-bit integer slice.
+/// Computes the median of an unsigned 64-bit integer slice using overflow-safe arithmetic.
 pub fn median_of(mut list: Vec<u64>) -> Option<u64> {
     if list.is_empty() {
         return None;
@@ -123,7 +136,7 @@ pub fn median_of(mut list: Vec<u64>) -> Option<u64> {
     if n % 2 == 1 {
         Some(list[n / 2])
     } else {
-        Some((list[n / 2 - 1] + list[n / 2]) / 2)
+        Some(((u128::from(list[n / 2 - 1]) + u128::from(list[n / 2])) / 2) as u64)
     }
 }
 
@@ -135,12 +148,12 @@ pub struct SteadySummary {
     pub verdict_counts: [(Verdict, usize); 5],
     /// Median frame interval in PPU ticks
     pub median_interval_ticks: Option<u64>,
-    /// Median RSX span in PPU ticks (when clock map is qualified)
-    pub median_span_ppu_ticks: Option<u64>,
+    /// Median RSX span in PPU ticks as (median_lo, median_hi) when clock map is qualified
+    pub median_span_ppu_ticks: Option<(u64, u64)>,
     /// Median RSX span in raw ticks
     pub median_span_raw_ticks: Option<u64>,
-    /// Median RSX busy in PPU ticks (when clock map is qualified)
-    pub median_busy_ppu_ticks: Option<u64>,
+    /// Median RSX busy in PPU ticks as (median_lo, median_hi) when clock map is qualified
+    pub median_busy_ppu_ticks: Option<(u64, u64)>,
     /// Median RSX busy in raw ticks
     pub median_busy_raw_ticks: Option<u64>,
     pub tb_freq: u64,
@@ -177,20 +190,22 @@ impl SteadySummary {
             .collect();
         let median_interval_ticks = median_of(intervals);
 
-        let spans_ppu: Vec<u64> = frames
-            .iter()
-            .filter_map(|f| f.rsx_span_ppu.map(|(lo, hi)| (lo + hi) / 2))
-            .collect();
-        let median_span_ppu_ticks = median_of(spans_ppu);
+        let spans_ppu_lo: Vec<u64> = frames.iter().filter_map(|f| f.rsx_span_ppu.map(|(lo, _)| lo)).collect();
+        let spans_ppu_hi: Vec<u64> = frames.iter().filter_map(|f| f.rsx_span_ppu.map(|(_, hi)| hi)).collect();
+        let median_span_ppu_ticks = match (median_of(spans_ppu_lo), median_of(spans_ppu_hi)) {
+            (Some(lo), Some(hi)) => Some((lo, hi)),
+            _ => None,
+        };
 
         let spans_raw: Vec<u64> = frames.iter().filter_map(|f| f.rsx_span_raw).collect();
         let median_span_raw_ticks = median_of(spans_raw);
 
-        let busy_ppu: Vec<u64> = frames
-            .iter()
-            .filter_map(|f| f.rsx_busy_ppu.map(|(lo, hi)| (lo + hi) / 2))
-            .collect();
-        let median_busy_ppu_ticks = median_of(busy_ppu);
+        let busy_ppu_lo: Vec<u64> = frames.iter().filter_map(|f| f.rsx_busy_ppu.map(|(lo, _)| lo)).collect();
+        let busy_ppu_hi: Vec<u64> = frames.iter().filter_map(|f| f.rsx_busy_ppu.map(|(_, hi)| hi)).collect();
+        let median_busy_ppu_ticks = match (median_of(busy_ppu_lo), median_of(busy_ppu_hi)) {
+            (Some(lo), Some(hi)) => Some((lo, hi)),
+            _ => None,
+        };
 
         let busy_raw: Vec<u64> = frames.iter().filter_map(|f| f.rsx_busy_raw).collect();
         let median_busy_raw_ticks = median_of(busy_raw);
@@ -230,16 +245,20 @@ impl SteadySummary {
             .map(|t| (t as f64 / self.tb_freq as f64) * 1000.0)
     }
 
-    /// Median RSX span in milliseconds (mapped).
-    pub fn median_span_ms(&self) -> Option<f64> {
-        self.median_span_ppu_ticks
-            .map(|t| (t as f64 / self.tb_freq as f64) * 1000.0)
+    /// Median RSX span in milliseconds as (lo, hi).
+    pub fn median_span_ms(&self) -> Option<(f64, f64)> {
+        self.median_span_ppu_ticks.map(|(lo, hi)| (
+            (lo as f64 / self.tb_freq as f64) * 1000.0,
+            (hi as f64 / self.tb_freq as f64) * 1000.0,
+        ))
     }
 
-    /// Median RSX busy in milliseconds (mapped).
-    pub fn median_busy_ms(&self) -> Option<f64> {
-        self.median_busy_ppu_ticks
-            .map(|t| (t as f64 / self.tb_freq as f64) * 1000.0)
+    /// Median RSX busy in milliseconds as (lo, hi).
+    pub fn median_busy_ms(&self) -> Option<(f64, f64)> {
+        self.median_busy_ppu_ticks.map(|(lo, hi)| (
+            (lo as f64 / self.tb_freq as f64) * 1000.0,
+            (hi as f64 / self.tb_freq as f64) * 1000.0,
+        ))
     }
 }
 

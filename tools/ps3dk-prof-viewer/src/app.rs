@@ -234,8 +234,10 @@ impl App {
             self.rsx = crate::rsx_ui::RsxState::default();
             self.waits = crate::waits_ui::WaitState::default();
             self.auto = crate::auto_ui::AutoState::default();
+            self.auto.reset(doc.auto.as_ref());
+        } else {
+            self.auto.refresh(doc.auto.as_ref());
         }
-        self.auto.reset(doc.auto.as_ref());
         self.doc = Some(doc);
     }
 

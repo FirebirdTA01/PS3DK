@@ -271,13 +271,15 @@ pub fn card_header(
 ) {
     let p = Palette::of(ui);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(title).text_style(title_style()).strong().color(p.text));
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(RichText::new(title).text_style(title_style()).strong().color(p.text));
+            if let Some(subtitle) = subtitle {
+                ui.label(RichText::new(subtitle).small().color(p.text_muted));
+            }
+        });
         ui.with_layout(Layout::right_to_left(Align::Min), trailing);
     });
-    if let Some(subtitle) = subtitle {
-        ui.add_space(2.0);
-        ui.add(egui::Label::new(RichText::new(subtitle).small().color(p.text_muted)).wrap());
-    }
     ui.add_space(SPACE_SM);
 }
 
@@ -347,7 +349,7 @@ pub fn field_message(ui: &mut Ui, tone: Tone, text: &str) {
         Tone::Neutral => p.text_faint,
         other => other.color(&p),
     };
-    ui.add(egui::Label::new(RichText::new(text).small().color(color)).wrap());
+    ui.label(RichText::new(text).small().color(color));
 }
 
 /// A pill-shaped label.  Use it for short states ("unsaved", "speculative")
@@ -366,19 +368,15 @@ pub fn badge(ui: &mut Ui, text: &str, tone: Tone) -> Response {
             (fill, color.gamma_multiply(0.45), color)
         }
     };
-    let font_id = FontId::proportional(11.5);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id, color);
-    let text_size = galley.size();
-    let pad_x = 7.0;
-    let pad_y = 2.0;
-    let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
-    let (rect, response) = ui.allocate_exact_size(total_size, Sense::click());
-    if ui.is_rect_visible(rect) {
-        ui.painter().rect(rect, Rounding::same(9.0), fill, stroke(1.0, outline));
-        let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
-        ui.painter().galley(text_pos, galley, color);
-    }
-    response
+    Frame::none()
+        .fill(fill)
+        .stroke(stroke(1.0, outline))
+        .rounding(Rounding::same(9.0))
+        .inner_margin(Margin::symmetric(7.0, 1.0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(11.5).color(color));
+        })
+        .response
 }
 
 /// A centred message for a page with nothing on it yet.
@@ -395,19 +393,15 @@ pub fn empty_state(ui: &mut Ui, title: &str, body: &str) {
 /// A keyboard shortcut drawn as a key cap.
 pub fn kbd(ui: &mut Ui, keys: &str) -> Response {
     let p = Palette::of(ui);
-    let font_id = FontId::monospace(11.0);
-    let galley = ui.painter().layout_no_wrap(keys.to_string(), font_id, p.text_muted);
-    let text_size = galley.size();
-    let pad_x = 5.0;
-    let pad_y = 1.0;
-    let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(16.0));
-    let (rect, response) = ui.allocate_exact_size(total_size, Sense::hover());
-    if ui.is_rect_visible(rect) {
-        ui.painter().rect(rect, Rounding::same(4.0), p.surface_alt, stroke(1.0, p.border_strong));
-        let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
-        ui.painter().galley(text_pos, galley, p.text_muted);
-    }
-    response
+    Frame::none()
+        .fill(p.surface_alt)
+        .stroke(stroke(1.0, p.border_strong))
+        .rounding(Rounding::same(4.0))
+        .inner_margin(Margin::symmetric(5.0, 0.0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(keys).monospace().size(11.0).color(p.text_muted));
+        })
+        .response
 }
 
 // ---------------------------------------------------------------------------

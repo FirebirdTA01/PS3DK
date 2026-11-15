@@ -66,6 +66,48 @@ impl AutoState {
             self.steady_end = 0;
         }
     }
+
+    /// Reconciles state after a live snapshot refresh (fresh = false), preserving
+    /// active selection and customized steady range while clamping to valid bounds.
+    pub fn refresh(&mut self, v: Option<&AutoView>) {
+        let Some(view) = v else {
+            self.selected_frame = None;
+            return;
+        };
+        if view.report.frames.is_empty() {
+            self.selected_frame = None;
+            self.steady_start = 0;
+            self.steady_end = 0;
+            return;
+        }
+        let (first, last) = view.frame_range();
+        if let Some(sel) = self.selected_frame {
+            if !view.report.frames.iter().any(|f| f.frame == sel) {
+                self.selected_frame = None;
+            }
+        }
+        if self.steady_customized {
+            self.steady_start = self.steady_start.clamp(first, last);
+            self.steady_end = self.steady_end.clamp(first, last);
+            if self.steady_start > self.steady_end {
+                self.steady_start = self.steady_end;
+            }
+        } else {
+            self.steady_start = first;
+            self.steady_end = last;
+        }
+    }
+}
+
+/// A frame row as rendered in the frames table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderedRow {
+    pub frame: u64,
+    pub verdict: String,
+    pub interval_text: String,
+    pub span_text: String,
+    pub busy_text: String,
+    pub reason: String,
 }
 
 /// What the page drew on the last repaint (used in headless tests).
@@ -76,11 +118,16 @@ pub struct Drawn {
     pub map_state: String,
     pub is_final: bool,
     pub ops_dropped: u64,
-    pub frames_lost: u64,
+    pub frame_marks_missed: bool,
+    pub coverage_rows_lost: u64,
     pub verdict_strip_cells: usize,
     pub steady_frame_count: usize,
     pub steady_mix: Vec<(Verdict, usize)>,
+    pub steady_median_interval_ms: Option<f64>,
+    pub steady_median_span_ppu_ticks: Option<(u64, u64)>,
+    pub steady_median_busy_ppu_ticks: Option<(u64, u64)>,
     pub table_rows: usize,
+    pub rendered_frame_rows: Vec<RenderedRow>,
     pub selected_frame: Option<u64>,
     pub jumped_timeline: Option<(u64, u64)>,
 }
@@ -107,6 +154,60 @@ pub fn verdict_tone(v: Verdict) -> ui::Tone {
     }
 }
 
+/// Pill-shaped badge styled like ps3dk_ui::badge, but with hover-only sense and no internal wrapping.
+pub fn auto_badge(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+    let p = ui::Palette::of(ui);
+    let (fill, outline, color) = match tone {
+        ui::Tone::Neutral => (p.surface_alt, p.border, p.text_muted),
+        ui::Tone::Accent => (p.accent.gamma_multiply(0.18), p.accent.gamma_multiply(0.55), p.accent),
+        tone => {
+            let color = tone.color(&p);
+            let fill = color.gamma_multiply(0.18);
+            (fill, color.gamma_multiply(0.45), color)
+        }
+    };
+    let font_id = egui::FontId::proportional(11.5);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id, color);
+    let text_size = galley.size();
+    let pad_x = 7.0;
+    let pad_y = 1.0;
+    let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
+    let (rect, response) = ui.allocate_exact_size(total_size, egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0, outline));
+        let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
+        ui.painter().galley(text_pos, galley, color);
+    }
+    response
+}
+
+/// Clickable pill-shaped badge for interactive filters.
+pub fn auto_badge_clickable(ui: &mut egui::Ui, text: &str, tone: ui::Tone) -> egui::Response {
+    let p = ui::Palette::of(ui);
+    let (fill, outline, color) = match tone {
+        ui::Tone::Neutral => (p.surface_alt, p.border, p.text_muted),
+        ui::Tone::Accent => (p.accent.gamma_multiply(0.18), p.accent.gamma_multiply(0.55), p.accent),
+        tone => {
+            let color = tone.color(&p);
+            let fill = color.gamma_multiply(0.18);
+            (fill, color.gamma_multiply(0.45), color)
+        }
+    };
+    let font_id = egui::FontId::proportional(11.5);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id, color);
+    let text_size = galley.size();
+    let pad_x = 7.0;
+    let pad_y = 1.0;
+    let total_size = egui::vec2(text_size.x + pad_x * 2.0, (text_size.y + pad_y * 2.0).max(18.0));
+    let (rect, response) = ui.allocate_exact_size(total_size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect(rect, egui::Rounding::same(9.0), fill, egui::Stroke::new(1.0, outline));
+        let text_pos = egui::pos2(rect.min.x + pad_x, rect.min.y + (rect.height() - text_size.y) * 0.5);
+        ui.painter().galley(text_pos, galley, color);
+    }
+    response
+}
+
 /// Draws the Automatic page. Returns Some(Page) if an interaction requested a page change.
 pub fn page(
     p: &mut egui::Ui,
@@ -116,7 +217,6 @@ pub fn page(
     drawn: &mut Drawn,
 ) -> Option<Page> {
     *drawn = Drawn::default();
-    drawn.selected_frame = st.selected_frame;
     let pal = ui::Palette::of(p);
 
     ui::page_header(p, TITLE, CAPTION);
@@ -128,11 +228,27 @@ pub fn page(
         return None;
     }
 
-    let (min_frame, max_frame) = v.frame_range();
-    if !st.steady_customized {
-        st.steady_start = min_frame;
-        st.steady_end = max_frame;
+    if v.report.frames.is_empty() {
+        st.steady_start = 0;
+        st.steady_end = 0;
+        st.selected_frame = None;
+    } else {
+        let (min_frame, max_frame) = v.frame_range();
+        if st.selected_frame.is_some_and(|sel| !v.report.frames.iter().any(|f| f.frame == sel)) {
+            st.selected_frame = None;
+        }
+        if !st.steady_customized {
+            st.steady_start = min_frame;
+            st.steady_end = max_frame;
+        } else {
+            st.steady_start = st.steady_start.clamp(min_frame, max_frame);
+            st.steady_end = st.steady_end.clamp(min_frame, max_frame);
+            if st.steady_start > st.steady_end {
+                st.steady_start = st.steady_end;
+            }
+        }
     }
+    drawn.selected_frame = st.selected_frame;
 
     // ── 1. CAPTURE FACTS ───────────────────────────────────────────────
     draw_capture_facts(p, v, drawn, &pal);
