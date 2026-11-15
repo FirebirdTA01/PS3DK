@@ -18,6 +18,7 @@
 #include <sys/process.h>
 #include <cell/gcm.h>
 #include <cell/gcm/ps3tc_gcm_labels.h>
+#include <cell/sysutil.h>
 #include <Cg/cg.h>
 
 #include "vp_quad_vpo.h"
@@ -62,6 +63,15 @@ static void *local_align(uint32_t align, uint32_t size)
 	void *p = (void *)(uintptr_t)g_local_heap;
 	g_local_heap += sz;
 	return p;
+}
+
+static volatile int g_quit_requested = 0;
+static void on_sysutil(uint64_t status, uint64_t param, void *userdata)
+{
+	(void)param;
+	(void)userdata;
+	if (status == CELL_SYSUTIL_REQUEST_EXITGAME)
+		g_quit_requested = 1;
 }
 
 static uint32_t g_fence_counter = 1;
@@ -227,6 +237,7 @@ static void bind_surface(CellGcmContextData *ctx)
 	cellGcmSetShadeModel(ctx, GCM_SHADE_MODEL_SMOOTH);
 
 	cellGcmSetVertexProgram(ctx, g_vp, g_vp_ucode);
+	cellGcmSetReportLocation(ctx, CELL_GCM_LOCATION_LOCAL);
 }
 
 static void bind_quad_vb(CellGcmContextData *ctx, uint32_t vb_offset)
@@ -237,37 +248,39 @@ static void bind_quad_vb(CellGcmContextData *ctx, uint32_t vb_offset)
 	cellGcmSetVertexAttribInputMask(ctx, (uint16_t)(1u << g_position_attr));
 }
 
-static int configure_zcull(CellGcmContextData *ctx, int zcull_on)
+static int bind_zcull_hardware(void)
+{
+	int32_t rc = cellGcmBindZcull(0,
+	                              g_depth_offset,
+	                              ZCULL_W,
+	                              ZCULL_H,
+	                              0,
+	                              CELL_GCM_ZCULL_Z24S8,
+	                              CELL_GCM_SURFACE_CENTER_1,
+	                              CELL_GCM_ZCULL_LESS,
+	                              CELL_GCM_ZCULL_LONES,
+	                              CELL_GCM_SCULL_SFUNC_ALWAYS,
+	                              0,
+	                              0xff);
+	printf("cellGcmBindZcull rc=%d\n", (int)rc);
+	if (rc != 0) {
+		printf("ERROR: cellGcmBindZcull failed rc=%d\n", (int)rc);
+		return (int)rc;
+	}
+	return 0;
+}
+
+static void configure_zcull_state(CellGcmContextData *ctx, int zcull_on)
 {
 	if (zcull_on) {
-		int32_t rc = cellGcmBindZcull(0,
-		                              g_depth_offset,
-		                              ZCULL_W,
-		                              ZCULL_H,
-		                              0,
-		                              CELL_GCM_ZCULL_Z24S8,
-		                              CELL_GCM_SURFACE_CENTER_1,
-		                              CELL_GCM_ZCULL_LESS,
-		                              CELL_GCM_ZCULL_LONES,
-		                              CELL_GCM_SCULL_SFUNC_ALWAYS,
-		                              0,
-		                              0xff);
-		printf("cellGcmBindZcull rc=%d\n", (int)rc);
-		if (rc != 0) {
-			printf("ERROR: cellGcmBindZcull failed rc=%d\n", (int)rc);
-			return (int)rc;
-		}
 		cellGcmSetZcullEnable(ctx, CELL_GCM_TRUE, CELL_GCM_TRUE);
 		cellGcmSetZcullControl(ctx, CELL_GCM_ZCULL_LESS, CELL_GCM_ZCULL_LONES);
 		cellGcmSetZcullLimit(ctx, 0x80, 0x180);
 		cellGcmSetZcullStatsEnable(ctx, CELL_GCM_TRUE);
 	} else {
-		int32_t rc = cellGcmUnbindZcull(0);
-		printf("cellGcmUnbindZcull rc=%d\n", (int)rc);
 		cellGcmSetZcullEnable(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
 		cellGcmSetZcullStatsEnable(ctx, CELL_GCM_FALSE);
 	}
-	return 0;
 }
 
 static void clear_surface(CellGcmContextData *ctx, int zcull_on)
@@ -308,10 +321,7 @@ static int run_case_rep(CellGcmContextData *ctx,
                         uint32_t *out_zs3)
 {
 	bind_surface(ctx);
-	int zcull_rc = configure_zcull(ctx, zcull_on);
-	if (zcull_rc != 0) {
-		return zcull_rc;
-	}
+	configure_zcull_state(ctx, zcull_on);
 	clear_surface(ctx, zcull_on);
 
 	if (is_occluded) {
@@ -335,13 +345,20 @@ static int run_case_rep(CellGcmContextData *ctx,
 	 * occluded draws are still rejected against the occluder's depth (0.25f). */
 	cellGcmSetDepthMask(ctx, CELL_GCM_FALSE);
 
+	/* Zero timestamps and report memory for this rep so stale values from previous
+	 * reps cannot be read back. */
+	CellGcmReportData *rd_start = cellGcmGetReportDataAddressLocation(REPORT_TS_START, CELL_GCM_LOCATION_LOCAL);
+	CellGcmReportData *rd_end   = cellGcmGetReportDataAddressLocation(REPORT_TS_END, CELL_GCM_LOCATION_LOCAL);
+	CellGcmReportData *rd_zpass = cellGcmGetReportDataAddressLocation(REPORT_ZPASS, CELL_GCM_LOCATION_LOCAL);
+	if (rd_start) rd_start->timer = 0;
+	if (rd_end)   rd_end->timer   = 0;
+	if (rd_zpass) rd_zpass->value = 0;
+	__asm__ volatile("sync" ::: "memory");
+
 	cellGcmSetZpassPixelCountEnable(ctx, CELL_GCM_TRUE);
 	cellGcmSetClearReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT);
 	if (zcull_on) {
 		cellGcmSetClearReport(ctx, CELL_GCM_ZCULL_STATS);
-		cellGcmSetClearReport(ctx, CELL_GCM_ZCULL_STATS1);
-		cellGcmSetClearReport(ctx, CELL_GCM_ZCULL_STATS2);
-		cellGcmSetClearReport(ctx, CELL_GCM_ZCULL_STATS3);
 	}
 
 	cellGcmSetTimeStamp(ctx, REPORT_TS_START);
@@ -353,7 +370,6 @@ static int run_case_rep(CellGcmContextData *ctx,
 
 	cellGcmSetTimeStamp(ctx, REPORT_TS_END);
 
-	cellGcmSetReportLocation(ctx, CELL_GCM_LOCATION_LOCAL);
 	cellGcmSetReport(ctx, CELL_GCM_ZPASS_PIXEL_CNT, REPORT_ZPASS);
 	if (zcull_on) {
 		cellGcmSetReport(ctx, CELL_GCM_ZCULL_STATS, REPORT_ZCULL_STATS0);
@@ -368,14 +384,26 @@ static int run_case_rep(CellGcmContextData *ctx,
 		return -1;
 	}
 
-	CellGcmReportData *rd_start = cellGcmGetReportDataAddressLocation(REPORT_TS_START, CELL_GCM_LOCATION_LOCAL);
-	CellGcmReportData *rd_end   = cellGcmGetReportDataAddressLocation(REPORT_TS_END, CELL_GCM_LOCATION_LOCAL);
-	CellGcmReportData *rd_zpass = cellGcmGetReportDataAddressLocation(REPORT_ZPASS, CELL_GCM_LOCATION_LOCAL);
+	uint64_t t_start = 0;
+	uint64_t t_end   = 0;
+	for (int n = 0; n < 2000; ++n) {
+		t_start = rd_start ? rd_start->timer : 0;
+		t_end   = rd_end   ? rd_end->timer   : 0;
+		if (t_start != 0 && t_end != 0 && t_end >= t_start)
+			break;
+		usleep(100);
+	}
 
-	uint64_t t_start = rd_start ? rd_start->timer : 0;
-	uint64_t t_end   = rd_end   ? rd_end->timer   : 0;
-	*out_ticks = (t_end >= t_start) ? (t_end - t_start) : 0;
-	*out_zpass = rd_zpass ? rd_zpass->value : 0;
+	uint32_t zpass = rd_zpass ? rd_zpass->value : 0;
+
+	if (t_start == 0 || t_end == 0 || t_end < t_start) {
+		printf("ERROR: zero or invalid timestamp readback t_start=%llu t_end=%llu\n",
+		       (unsigned long long)t_start, (unsigned long long)t_end);
+		return -1;
+	}
+
+	*out_ticks = t_end - t_start;
+	*out_zpass = zpass;
 
 	if (zcull_on) {
 		CellGcmReportData *rd0 = cellGcmGetReportDataAddressLocation(REPORT_ZCULL_STATS0, CELL_GCM_LOCATION_LOCAL);
@@ -408,6 +436,8 @@ static int run_case(CellGcmContextData *ctx,
 {
 	rep_result_t results[3];
 	for (int r = 0; r < 3; ++r) {
+		if (cellSysutilCheckCallback() != 0 || g_quit_requested)
+			return -1;
 		int rc = run_case_rep(ctx, is_occluded, is_kil, zcull_on,
 		                      &results[r].ticks,
 		                      &results[r].zpass,
@@ -420,7 +450,7 @@ static int run_case(CellGcmContextData *ctx,
 			       is_occluded ? "O" : "V",
 			       is_kil ? "kil" : "nokil",
 			       zcull_on ? "on" : "off",
-			       (rc == -1) ? "fence timeout" : "bind failed",
+			       (rc == -1) ? "fence timeout" : "error",
 			       rc);
 			return rc;
 		}
@@ -447,7 +477,7 @@ static int run_case(CellGcmContextData *ctx,
 	       median->zs[0], median->zs[1], median->zs[2], median->zs[3]);
 
 	if (!is_occluded) {
-		printf("ZPASS V case=%s-%s zcull=%s: total=%u per_draw=%u (expected ~921600 per draw x 16 visible = 14745600)\n",
+		printf("ZPASS V case=%s zcull=%s: total=%u per_draw=%u (expected ~921600 per draw x 16 visible = 14745600)\n",
 		       is_kil ? "kil" : "nokil",
 		       zcull_on ? "on" : "off",
 		       median->zpass,
@@ -471,46 +501,85 @@ int main(int argc, const char **argv)
 		return 1;
 	}
 
+	if (cellSysutilRegisterCallback(0, on_sysutil, NULL) != 0) {
+		printf("cellSysutilRegisterCallback failed\n");
+		free(host_addr);
+		return 1;
+	}
+
 	init_shaders();
 	init_geometry();
 
 	CellGcmContextData *ctx = CELL_GCM_CURRENT;
 	if (!ctx) {
 		printf("no gcm context\n");
+		cellSysutilUnregisterCallback(0);
 		free(host_addr);
 		return 1;
 	}
 
+	/* Initialize fence label memory to 0 with sync before any RSX fence is checked */
+	volatile uint32_t *label_addr = (volatile uint32_t *)cellGcmGetLabelAddress(GCM_FENCE_LABEL);
+	*label_addr = 0;
+	__asm__ volatile("sync" ::: "memory");
+
+	/* Initial unbind to guarantee clean zcull hardware state */
+	cellGcmUnbindZcull(0);
+
 	int failed = 0;
 
-	/* 8 cases:
-	 * V-nokil off, on
-	 * V-kil   off, on
-	 * O-nokil off, on
-	 * O-kil   off, on
-	 */
-	if (run_case(ctx, 0, 0, 0) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 0, 0, 1) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 0, 1, 0) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 0, 1, 1) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 1, 0, 0) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 1, 0, 1) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 1, 1, 0) != 0) { failed = 1; goto exit_block; }
-	if (run_case(ctx, 1, 1, 1) != 0) { failed = 1; goto exit_block; }
+	/* ---- Block 1: zcull=off (4 cases) ---- */
+	if (run_case(ctx, 0, 0, 0) != 0) { failed = 1; goto exit_block; } /* V-nokil off */
+	if (run_case(ctx, 0, 1, 0) != 0) { failed = 1; goto exit_block; } /* V-kil   off */
+	if (run_case(ctx, 1, 0, 0) != 0) { failed = 1; goto exit_block; } /* O-nokil off */
+	if (run_case(ctx, 1, 1, 0) != 0) { failed = 1; goto exit_block; } /* O-kil   off */
+
+	/* ---- Block 2: zcull=on (4 cases, bound once) ---- */
+	if (bind_zcull_hardware() != 0) { failed = 1; goto exit_block; }
+	if (run_case(ctx, 0, 0, 1) != 0) { failed = 1; goto exit_block; } /* V-nokil on */
+	if (run_case(ctx, 0, 1, 1) != 0) { failed = 1; goto exit_block; } /* V-kil   on */
+	if (run_case(ctx, 1, 0, 1) != 0) { failed = 1; goto exit_block; } /* O-nokil on */
+	if (run_case(ctx, 1, 1, 1) != 0) { failed = 1; goto exit_block; } /* O-kil   on */
 
 exit_block:
-	/* Exit block: always run before 'ZKP DONE' */
+	/* Step 1: Unbind Zcull */
 	cellGcmSetZcullStatsEnable(ctx, CELL_GCM_FALSE);
 	cellGcmSetZcullEnable(ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
 	cellGcmSetInvalidateZcull(ctx);
-	if (!wait_rsx(ctx)) {
-		printf("ZKP exit: RSX not idle\n");
-		failed = 1;
-	}
-	printf("cellGcmUnbindZcull rc=%d\n", (int)cellGcmUnbindZcull(0));
+	int rc = (int)cellGcmUnbindZcull(0);
+	printf("ZKP EXIT unbind rc=%d\n", rc);
+	fflush(stdout);
 
-	printf("ZKP DONE\n");
+	/* Step 2: Fresh label value written with cellGcmSetWriteBackEndLabel, bounded 2 s fence */
+	uint32_t exit_target = g_fence_counter++;
+	cellGcmSetWriteBackEndLabel(ctx, GCM_FENCE_LABEL, exit_target);
+	cellGcmFlush(ctx);
+	int fence_ok = 0;
+	for (int n = 0; n < 2000; ++n) {
+		if (cellGcmIsLabelPassed(GCM_FENCE_LABEL, exit_target)) {
+			fence_ok = 1;
+			break;
+		}
+		usleep(1000);
+	}
+	printf("ZKP EXIT fence=%s\n", fence_ok ? "ok" : "timeout");
+	fflush(stdout);
+
+	/* Step 3: cellGcmFinish */
+	cellGcmFinish(ctx, 0);
+
+	/* Step 4: Unregister sysutil callback */
+	cellSysutilUnregisterCallback(0);
+
+	/* Step 5: print clean exit */
+	if (!fence_ok || failed) {
+		free(host_addr);
+		return 1;
+	}
+
+	printf("ZKP EXIT clean\n");
+	fflush(stdout);
 
 	free(host_addr);
-	return failed ? 1 : 0;
+	return 0;
 }
