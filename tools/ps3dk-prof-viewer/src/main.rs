@@ -60,7 +60,20 @@ fn main() -> eframe::Result<()> {
         "map" => Some(ps3dk_prof_viewer::graphs::GraphMode::VerdictMap),
         _ => None,
     });
-    let size = if args.iter().any(|a| a == "--min-size") {
+    let width_px = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--width-px=").and_then(|w| w.parse::<f32>().ok()));
+    let width = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--width=").and_then(|w| w.parse::<f32>().ok()))
+        .or_else(|| width_px.map(|px| px / 1.5));
+    let height = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--height=").and_then(|h| h.parse::<f32>().ok()))
+        .unwrap_or(780.0);
+    let size = if let Some(w) = width {
+        [w, height]
+    } else if args.iter().any(|a| a == "--min-size") {
         [860.0, 540.0]
     } else {
         [1240.0, 780.0]

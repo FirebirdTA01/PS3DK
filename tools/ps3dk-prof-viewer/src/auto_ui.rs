@@ -165,57 +165,62 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         );
         c.add_space(ui::SPACE_XS);
 
+        let avail_w = c.available_width().max(60.0);
+        let col2_max_w = (avail_w - 220.0).max(120.0);
+
         egui::Grid::new("auto_capture_facts_grid")
             .num_columns(2)
             .spacing([ui::SPACE_LG, ui::SPACE_SM])
             .show(c, |g| {
                 // Clock map state
                 g.label(RichText::new("Clock map").strong());
-                match &v.report.map {
-                    Some(MapState::Qualified(m)) => {
-                        let text = format!(
-                            "QUALIFIED · {} anchors, PPU/RSX slope [{}/{}, {}/{}], decisive hold-outs odd {} even {}",
-                            m.anchors,
-                            m.slope_lo.num,
-                            m.slope_lo.den,
-                            m.slope_hi.num,
-                            m.slope_hi.den,
-                            m.decisive.0,
-                            m.decisive.1
-                        );
-                        drawn.map_state = "QUALIFIED".to_string();
-                        g.horizontal(|h| {
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
+                    match &v.report.map {
+                        Some(MapState::Qualified(m)) => {
+                            let text = format!(
+                                "QUALIFIED · {} anchors, PPU/RSX slope [{}/{}, {}/{}], decisive hold-outs odd {} even {}",
+                                m.anchors,
+                                m.slope_lo.num,
+                                m.slope_lo.den,
+                                m.slope_hi.num,
+                                m.slope_hi.den,
+                                m.decisive.0,
+                                m.decisive.1
+                            );
+                            drawn.map_state = "QUALIFIED".to_string();
                             ui::badge(h, "QUALIFIED", ui::Tone::Success);
-                            h.label(text);
-                        });
-                    }
-                    Some(MapState::Unqualified(why)) => {
-                        drawn.map_state = format!("UNQUALIFIED ({why})");
-                        g.horizontal(|h| {
+                            h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
+                        }
+                        Some(MapState::Unqualified(why)) => {
+                            drawn.map_state = format!("UNQUALIFIED ({why})");
                             ui::badge(h, "UNQUALIFIED", ui::Tone::Warning);
-                            h.label(format!("AUTO_CLOCK_UNQUALIFIED: {why} (raw RSX ticks only)"));
-                        });
-                    }
-                    None => {
-                        drawn.map_state = "NO MAP".to_string();
-                        g.horizontal(|h| {
+                            let text = format!("AUTO_CLOCK_UNQUALIFIED: {why} (raw RSX ticks only)");
+                            h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
+                        }
+                        None => {
+                            drawn.map_state = "NO MAP".to_string();
                             ui::badge(h, "NO MAP", ui::Tone::Neutral);
-                            h.label("No clock anchors recorded");
-                        });
+                            let text = "No clock anchors recorded";
+                            h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                        }
                     }
-                }
+                });
                 g.end_row();
 
                 // Final vs Provisional
                 g.label(RichText::new("Capture state").strong());
                 drawn.is_final = v.is_final();
-                g.horizontal(|h| {
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
                     if v.is_final() {
                         ui::badge(h, "FINAL", ui::Tone::Success);
-                        h.label("Closed with complete stop / finalization");
+                        let text = "Closed with complete stop / finalization";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     } else {
                         ui::badge(h, "PROVISIONAL", ui::Tone::Warning);
-                        h.label("Provisional snapshot / open session");
+                        let text = "Provisional snapshot / open session";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     }
                 });
                 g.end_row();
@@ -224,13 +229,16 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
                 g.label(RichText::new("Ops dropped past ceiling").strong());
                 let dropped = v.ops_dropped();
                 drawn.ops_dropped = dropped;
-                g.horizontal(|h| {
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
                     if dropped > 0 {
                         ui::badge(h, &format!("{dropped} DROPPED"), ui::Tone::Warning);
-                        h.label("Operations parsed but not retained past operation ceiling");
+                        let text = "Operations parsed but not retained past operation ceiling";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     } else {
                         ui::badge(h, "0 DROPPED", ui::Tone::Success);
-                        h.label("All operations retained within ceiling");
+                        let text = "All operations retained within ceiling";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     }
                 });
                 g.end_row();
@@ -239,13 +247,16 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
                 g.label(RichText::new("Frame marks missed").strong());
                 let lost = v.frames_lost();
                 drawn.frames_lost = lost;
-                g.horizontal(|h| {
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
                     if lost > 0 {
                         ui::badge(h, &format!("{lost} LOST"), ui::Tone::Danger);
-                        h.label("Missed frame boundary markers (frames_lost)");
+                        let text = "Missed frame boundary markers (frames_lost)";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     } else {
                         ui::badge(h, "0 LOST", ui::Tone::Success);
-                        h.label("No missed frame boundaries");
+                        let text = "No missed frame boundaries";
+                        h.add(egui::Label::new(text).wrap()).on_hover_text(text);
                     }
                 });
                 g.end_row();
@@ -290,7 +301,7 @@ fn draw_verdict_strip(
         });
         c.add_space(ui::SPACE_SM);
 
-        // Horizontal strip of frame cells
+        // Strip of frame cells scaled and wrapped to fit panel width
         let frame_count = v.report.frames.len();
         drawn.verdict_strip_cells = frame_count;
         if frame_count == 0 {
@@ -298,62 +309,77 @@ fn draw_verdict_strip(
             return;
         }
 
-        let cell_w = 20.0f32;
-        let cell_h = 28.0f32;
-        let total_w = cell_w * frame_count as f32;
+        let avail_w = c.available_width().max(60.0);
+        let min_cell_w = 6.0f32;
+        let max_cell_w = 20.0f32;
+        let pref_cell_w = 14.0f32;
+        let cell_h = 24.0f32;
+        let gap = 2.0f32;
 
-        egui::ScrollArea::horizontal()
-            .id_salt("auto_verdict_strip_scroll")
-            .show(c, |strip_ui| {
-                let (rect, _) = strip_ui.allocate_exact_size(Vec2::new(total_w, cell_h), Sense::hover());
-                let painter = strip_ui.painter_at(rect);
+        // Can all frames fit on 1 row with at least min_cell_w?
+        let single_row_w = (avail_w - (frame_count.saturating_sub(1) as f32 * gap)) / frame_count as f32;
+        let (cols_per_row, cell_w) = if single_row_w >= min_cell_w {
+            (frame_count, single_row_w.min(max_cell_w))
+        } else {
+            let cols = ((avail_w + gap) / (pref_cell_w + gap)).floor().max(1.0) as usize;
+            let actual_w = ((avail_w - (cols.saturating_sub(1) as f32 * gap)) / cols as f32).clamp(min_cell_w, max_cell_w);
+            (cols, actual_w)
+        };
 
-                for (idx, f) in v.report.frames.iter().enumerate() {
-                    let x0 = rect.left() + idx as f32 * cell_w;
-                    let cell_rect = Rect::from_min_size(Pos2::new(x0 + 1.0, rect.top() + 1.0), Vec2::new(cell_w - 2.0, cell_h - 2.0));
-                    let color = verdict_color(f.verdict, pal);
-                    let is_sel = st.selected_frame == Some(f.frame);
+        let num_rows = (frame_count + cols_per_row - 1) / cols_per_row;
+        let total_h = num_rows as f32 * cell_h + num_rows.saturating_sub(1) as f32 * gap;
 
-                    painter.rect_filled(cell_rect, 2.0, color);
+        let (rect, _) = c.allocate_exact_size(Vec2::new(avail_w, total_h), Sense::hover());
+        let painter = c.painter_at(rect);
 
-                    if is_sel {
-                        painter.rect_stroke(cell_rect.expand(1.0), 3.0, Stroke::new(2.0_f32, pal.text));
-                    }
+        for (idx, f) in v.report.frames.iter().enumerate() {
+            let row = idx / cols_per_row;
+            let col = idx % cols_per_row;
+            let x0 = rect.left() + col as f32 * (cell_w + gap);
+            let y0 = rect.top() + row as f32 * (cell_h + gap);
+            let cell_rect = Rect::from_min_size(Pos2::new(x0, y0), Vec2::new(cell_w, cell_h));
+            let color = verdict_color(f.verdict, pal);
+            let is_sel = st.selected_frame == Some(f.frame);
 
-                    // Interactive response for click and hover tooltip
-                    let resp = strip_ui.allocate_rect(cell_rect, Sense::click());
-                    let interval_ms = v.frame_interval_ms(f);
-                    let interval_ticks = AutoView::frame_interval_ticks(f);
+            painter.rect_filled(cell_rect, 2.0, color);
 
-                    resp.clone().on_hover_ui(|tip| {
-                        tip.label(RichText::new(format!("Frame #{} (owner {})", f.frame, f.owner)).strong());
-                        ui::badge(tip, f.verdict.key(), verdict_tone(f.verdict));
-                        tip.label(RichText::new(&f.reason).italics());
-                        tip.add_space(ui::SPACE_XS);
-                        tip.label(format!("Interval: {:.3} ms ({} PPU ticks)", interval_ms, interval_ticks));
-                        if let Some((lo, hi)) = f.rsx_span_ppu {
-                            tip.label(format!("RSX Span: {:.3}..{:.3} ms ({} raw ticks)", v.ticks_to_ms(lo), v.ticks_to_ms(hi), f.rsx_span_raw.unwrap_or(0)));
-                        } else if let Some(raw) = f.rsx_span_raw {
-                            tip.label(format!("RSX Span: {raw} raw ticks (unmapped)"));
-                        }
-                        if let Some((lo, hi)) = f.rsx_busy_ppu {
-                            tip.label(format!("RSX Busy: {:.3}..{:.3} ms ({} raw ticks)", v.ticks_to_ms(lo), v.ticks_to_ms(hi), f.rsx_busy_raw.unwrap_or(0)));
-                        } else if let Some(raw) = f.rsx_busy_raw {
-                            tip.label(format!("RSX Busy: {raw} raw ticks (unmapped)"));
-                        }
-                        let ex_count: u64 = f.excluded.iter().sum();
-                        if ex_count > 0 {
-                            tip.label(format!("Excluded: {} draws", ex_count));
-                        }
-                    });
+            if is_sel {
+                painter.rect_stroke(cell_rect.expand(1.0), 3.0, Stroke::new(2.0_f32, pal.text));
+            }
 
-                    if resp.clicked() {
-                        st.select_and_jump(Some(f.frame), v, timeline.as_deref_mut());
-                        drawn.selected_frame = Some(f.frame);
-                        drawn.jumped_timeline = Some((f.tb_begin, f.tb_end));
-                    }
+            // Interactive response using interact so it doesn't advance cursor
+            let resp = c.interact(cell_rect, c.id().with(("auto_strip_cell", idx)), Sense::click());
+            let interval_ms = v.frame_interval_ms(f);
+            let interval_ticks = AutoView::frame_interval_ticks(f);
+
+            resp.clone().on_hover_ui(|tip| {
+                tip.label(RichText::new(format!("Frame #{} (owner {})", f.frame, f.owner)).strong());
+                ui::badge(tip, f.verdict.key(), verdict_tone(f.verdict));
+                tip.label(RichText::new(&f.reason).italics());
+                tip.add_space(ui::SPACE_XS);
+                tip.label(format!("Interval: {:.3} ms ({} PPU ticks)", interval_ms, interval_ticks));
+                if let Some((lo, hi)) = f.rsx_span_ppu {
+                    tip.label(format!("RSX Span: {:.3}..{:.3} ms ({} raw ticks)", v.ticks_to_ms(lo), v.ticks_to_ms(hi), f.rsx_span_raw.unwrap_or(0)));
+                } else if let Some(raw) = f.rsx_span_raw {
+                    tip.label(format!("RSX Span: {raw} raw ticks (unmapped)"));
+                }
+                if let Some((lo, hi)) = f.rsx_busy_ppu {
+                    tip.label(format!("RSX Busy: {:.3}..{:.3} ms ({} raw ticks)", v.ticks_to_ms(lo), v.ticks_to_ms(hi), f.rsx_busy_raw.unwrap_or(0)));
+                } else if let Some(raw) = f.rsx_busy_raw {
+                    tip.label(format!("RSX Busy: {raw} raw ticks (unmapped)"));
+                }
+                let ex_count: u64 = f.excluded.iter().sum();
+                if ex_count > 0 {
+                    tip.label(format!("Excluded: {} draws", ex_count));
                 }
             });
+
+            if resp.clicked() {
+                st.select_and_jump(Some(f.frame), v, timeline.as_deref_mut());
+                drawn.selected_frame = Some(f.frame);
+                drawn.jumped_timeline = Some((f.tb_begin, f.tb_end));
+            }
+        }
     });
 }
 
@@ -370,7 +396,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
         let (min_frame, max_frame) = v.frame_range();
 
         // Range input controls
-        c.horizontal(|h| {
+        c.horizontal_wrapped(|h| {
             h.label("Range:");
             let start_resp = h.add(egui::DragValue::new(&mut st.steady_start).range(min_frame..=st.steady_end).prefix("Frame "));
             h.label("to");
@@ -397,6 +423,9 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
             return;
         }
 
+        let avail_w = c.available_width().max(60.0);
+        let col2_max_w = (avail_w - 220.0).max(120.0);
+
         egui::Grid::new("auto_steady_summary_grid")
             .num_columns(2)
             .spacing([ui::SPACE_LG, ui::SPACE_SM])
@@ -404,6 +433,7 @@ fn draw_steady_range_summary(p: &mut egui::Ui, v: &AutoView, st: &mut AutoState,
                 // Verdict mix
                 g.label(RichText::new("Verdict mix").strong());
                 g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
                     h.label(format!("{} frames: ", summary.frame_count));
                     for (verdict, count) in &summary.verdict_counts {
                         let pct = summary.mix_pct(*verdict);
@@ -480,7 +510,7 @@ fn draw_frames_table(
         c.add_space(ui::SPACE_XS);
 
         // Filter buttons
-        c.horizontal(|h| {
+        c.horizontal_wrapped(|h| {
             h.label("Filter by verdict:");
             for filter_option in [
                 VerdictFilter::All,
@@ -512,9 +542,11 @@ fn draw_frames_table(
 
         // Table headers with sort toggling
         let num_cols = if show_call_covered { 9 } else { 8 };
+        let reason_col_w = (c.available_width() - 650.0).clamp(180.0, 360.0);
 
         egui::ScrollArea::horizontal()
             .id_salt("auto_table_scroll")
+            .auto_shrink([false, false])
             .show(c, |t_ui| {
                 egui::Grid::new("auto_frames_table_grid")
                     .num_columns(num_cols)
@@ -661,7 +693,7 @@ fn draw_frames_table(
                             }
 
                             // Reason
-                            g.add(egui::Label::new(&f.reason).truncate())
+                            g.add_sized([reason_col_w, 18.0], egui::Label::new(&f.reason).truncate())
                                 .on_hover_text(&f.reason);
 
                             g.end_row();
@@ -689,7 +721,10 @@ fn draw_frame_detail(
 ) -> Option<Page> {
     let mut next_page = None;
     ui::card(p, |d| {
-        d.horizontal(|h| {
+        let avail_w = d.available_width().max(60.0);
+        let col2_max_w = (avail_w - 200.0).max(120.0);
+
+        d.horizontal_wrapped(|h| {
             h.label(RichText::new(format!("FRAME #{} DETAIL", f.frame)).strong());
             ui::badge(h, f.verdict.key(), verdict_tone(f.verdict));
             h.add_space(ui::SPACE_LG);
@@ -704,7 +739,7 @@ fn draw_frame_detail(
         });
         d.add_space(ui::SPACE_XS);
 
-        d.label(RichText::new(&f.reason).italics());
+        d.add(egui::Label::new(RichText::new(&f.reason).italics()).wrap()).on_hover_text(&f.reason);
         d.add_space(ui::SPACE_XS);
 
         egui::Grid::new("auto_frame_detail_grid")
@@ -716,13 +751,17 @@ fn draw_frame_detail(
                 g.end_row();
 
                 g.label("PPU Timebase:");
-                g.label(format!(
+                let tb_text = format!(
                     "begin: {} · end: {} ({} ticks, {:.3} ms)",
                     f.tb_begin,
                     f.tb_end,
                     f.tb_end.saturating_sub(f.tb_begin),
                     v.frame_interval_ms(f)
-                ));
+                );
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
+                    h.add(egui::Label::new(&tb_text).wrap()).on_hover_text(&tb_text);
+                });
                 g.end_row();
 
                 g.label("RSX Frame Marks:");
@@ -734,7 +773,11 @@ fn draw_frame_detail(
                 let mapped_marks = f.rsx_frame_ppu.map_or(String::new(), |(a, b)| {
                     format!(" · PPU: {a}..{b} ticks ({:.3}..{:.3} ms)", v.ticks_to_ms(a), v.ticks_to_ms(b))
                 });
-                g.label(format!("{raw_marks}{mapped_marks}"));
+                let marks_text = format!("{raw_marks}{mapped_marks}");
+                g.horizontal_wrapped(|h| {
+                    h.set_max_width(col2_max_w);
+                    h.add(egui::Label::new(&marks_text).wrap()).on_hover_text(&marks_text);
+                });
                 g.end_row();
 
                 if let Some(fw) = f.fifo_wait {
@@ -755,22 +798,27 @@ fn draw_frame_detail(
         if !breakdown.is_empty() {
             d.add_space(ui::SPACE_XS);
             ui::section_label(d, "EXCLUDED DRAWS");
-            egui::Grid::new("auto_frame_exclusions_grid")
-                .num_columns(3)
-                .striped(true)
-                .spacing([ui::SPACE_LG, ui::SPACE_XS])
-                .show(d, |g| {
-                    g.label(RichText::new("Kind").strong());
-                    g.label(RichText::new("Reason").strong());
-                    g.label(RichText::new("Excluded Count").strong());
-                    g.end_row();
+            egui::ScrollArea::horizontal()
+                .id_salt("auto_frame_exclusions_scroll")
+                .auto_shrink([false, false])
+                .show(d, |ed_ui| {
+                    egui::Grid::new("auto_frame_exclusions_grid")
+                        .num_columns(3)
+                        .striped(true)
+                        .spacing([ui::SPACE_LG, ui::SPACE_XS])
+                        .show(ed_ui, |g| {
+                            g.label(RichText::new("Kind").strong());
+                            g.label(RichText::new("Reason").strong());
+                            g.label(RichText::new("Excluded Count").strong());
+                            g.end_row();
 
-                    for (kind, reason, count) in breakdown {
-                        g.label(kind);
-                        g.label(reason);
-                        g.label(RichText::new(format!("{count}")).color(pal.warning));
-                        g.end_row();
-                    }
+                            for (kind, reason, count) in breakdown {
+                                g.label(kind);
+                                g.label(reason);
+                                g.label(RichText::new(format!("{count}")).color(pal.warning));
+                                g.end_row();
+                            }
+                        });
                 });
         }
     });
