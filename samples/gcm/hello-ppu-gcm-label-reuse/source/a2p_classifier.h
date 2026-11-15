@@ -77,13 +77,26 @@ typedef struct {
     unsigned all_clear_trials;
 } a2p_series_counts;
 
+/* Compute component-wise max in 24-bit RGB space (derived from the 8-fetch fragment shader max() semantics) */
+static inline uint32_t a2p_color_max_rgb(uint32_t c1, uint32_t c2)
+{
+    uint32_t r1 = (c1 >> 16) & 0xffu, g1 = (c1 >> 8) & 0xffu, b1 = c1 & 0xffu;
+    uint32_t r2 = (c2 >> 16) & 0xffu, g2 = (c2 >> 8) & 0xffu, b2 = c2 & 0xffu;
+    uint32_t rm = r1 > r2 ? r1 : r2;
+    uint32_t gm = g1 > g2 ? g1 : g2;
+    uint32_t bm = b1 > b2 ? b1 : b2;
+    return (rm << 16) | (gm << 8) | bm;
+}
+
 /* Classify a single pixel sample.
  * Exact 24-bit RGB comparison (ignoring alpha).
  * Sentinel is always UNRELATED.
  * If rgb == good_rgb: always GOOD.
  * Otherwise, the non-good sample lands in EXACTLY ONE bucket:
  *   - For vertex or index poison (and not reference): A2P_COLOR_CLEAR is EXPECTED, all others UNRELATED.
- *   - For texture poison (and not reference): A2P_COLOR_POISON is EXPECTED, all others UNRELATED.
+ *   - For texture poison (and not reference): exact pure A2P_COLOR_POISON and the derived mixed value
+ *     (per-channel max(GOOD, POISON) from the 8-fetch fragment shader max() semantics) are EXPECTED,
+ *     all others UNRELATED.
  *   - For reference (or POISON_NONE): no poison expected, all non-good are UNRELATED.
  */
 static inline int a2p_classify_sample(uint32_t pixel, uint32_t good, int poison_kind, int is_reference)
@@ -106,7 +119,9 @@ static inline int a2p_classify_sample(uint32_t pixel, uint32_t good, int poison_
     }
 
     if (poison_kind == A2P_POISON_TEXTURE) {
-        if (rgb == (A2P_COLOR_POISON & 0x00ffffffu))
+        uint32_t poison_rgb = A2P_COLOR_POISON & 0x00ffffffu;
+        uint32_t mixed_rgb = a2p_color_max_rgb(good_rgb, poison_rgb);
+        if (rgb == poison_rgb || rgb == mixed_rgb)
             return A2P_SAMPLE_EXPECTED;
         return A2P_SAMPLE_UNRELATED;
     }
@@ -317,13 +332,13 @@ static inline int a2p_run_series_loop(void *user_ctx, int mode, int poison_kind,
     return 0;
 }
 
-/* Mutant series loop: flawed implementation that ignores trial errors and continues.
- * Used exclusively by host testing to verify that mutant behavior is detected and rejected.
+/* Deliberately flawed series loop: ignores trial errors and continues.
+ * Used exclusively by host testing to verify that wrong behaviour (continuing after error) is detected and rejected.
  */
-static inline int a2p_run_series_loop_mutant_continue(void *user_ctx, int mode, int poison_kind, unsigned trials,
-                                                      a2p_trial_runner_fn trial_fn,
-                                                      a2p_series_counts *out_counts,
-                                                      unsigned *out_failed_trial)
+static inline int a2p_run_series_loop_flawed_continue(void *user_ctx, int mode, int poison_kind, unsigned trials,
+                                                     a2p_trial_runner_fn trial_fn,
+                                                     a2p_series_counts *out_counts,
+                                                     unsigned *out_failed_trial)
 {
     out_counts->expected = 0;
     out_counts->unrelated = 0;
@@ -337,7 +352,7 @@ static inline int a2p_run_series_loop_mutant_continue(void *user_ctx, int mode, 
         if (rc != 0) {
             if (out_failed_trial)
                 *out_failed_trial = t;
-            /* MUTANT: continues after failure instead of aborting */
+            /* Flawed continue: continues after failure instead of aborting */
             continue;
         }
         if (all_clear)

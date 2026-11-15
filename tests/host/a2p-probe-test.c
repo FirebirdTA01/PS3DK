@@ -151,23 +151,23 @@ static void test_abort_immediate_stop(void)
     printf("PASS: abort path stops immediately at trial 7: no subsequent trials called or rewritten\n");
 }
 
-/* Mutant abort test: verify that a flawed series loop that continues after failure is caught */
-static void test_abort_mutant_caught(void)
+/* Verification that a series loop exhibiting wrong behaviour (continuing after error) is detected and rejected */
+static void test_abort_wrong_behaviour_detected(void)
 {
-    fake_trial_state s_mutant;
-    memset(&s_mutant, 0, sizeof s_mutant);
-    s_mutant.fail_at_trial = 7;
-    s_mutant.outcome_to_report = A2P_TRIAL_CLEAN;
+    fake_trial_state s_flawed;
+    memset(&s_flawed, 0, sizeof s_flawed);
+    s_flawed.fail_at_trial = 7;
+    s_flawed.outcome_to_report = A2P_TRIAL_CLEAN;
 
-    a2p_series_counts counts_mutant;
-    unsigned failed_trial_mutant = 0;
+    a2p_series_counts counts_flawed;
+    unsigned failed_trial_flawed = 0;
 
-    int mutant_rc = a2p_run_series_loop_mutant_continue(&s_mutant, 0, A2P_POISON_VERTEX, 32,
-                                                       fake_trial_fn, &counts_mutant, &failed_trial_mutant);
-    /* The mutant failed to stop: it returned 0 and executed all 32 trials */
-    assert(mutant_rc == 0);
-    assert(s_mutant.calls == 32);
-    assert(s_mutant.submitted == 31);
+    int flawed_rc = a2p_run_series_loop_flawed_continue(&s_flawed, 0, A2P_POISON_VERTEX, 32,
+                                                       fake_trial_fn, &counts_flawed, &failed_trial_flawed);
+    /* The flawed loop failed to stop: it returned 0 and executed all 32 trials */
+    assert(flawed_rc == 0);
+    assert(s_flawed.calls == 32);
+    assert(s_flawed.submitted == 31);
 
     /* The real loop must catch the error and halt at trial 7 with rc == -1 */
     fake_trial_state s_real;
@@ -184,7 +184,70 @@ static void test_abort_mutant_caught(void)
     assert(s_real.calls == 8);
     assert(s_real.submitted == 7);
 
-    printf("PASS: mutant series loop (continue-on-failure) caught and rejected by abort test\n");
+    printf("PASS: abort test detects and rejects continue-on-failure loop behaviour\n");
+}
+
+/* Eight-fetch max semantics test:
+ * Fragment program arena_fp combines eight texture fetches with component-wise max().
+ * A partially late texture read mixes GOOD and POISON fetches, so the pixel is max(GOOD, POISON)
+ * per channel, not pure ff00ff.
+ * Requirements:
+ *   - all-good -> GOOD
+ *   - all-poison -> expected (for texture)
+ *   - mixed max(GOOD, POISON) -> expected for texture
+ *   - same mixed value under VERTEX and INDEX poison -> unrelated
+ *   - other colours -> unrelated
+ */
+static void test_texture_eight_fetch_max_semantics(void)
+{
+    /* Concrete case: texture EARLY trial 0, GOOD=0xff3a4760 */
+    uint32_t good = 0xff3a4760u;
+    uint32_t good_rgb = good & 0x00ffffffu; /* 0x003a4760 */
+    uint32_t poison = A2P_COLOR_POISON;     /* 0xffff00ff */
+    uint32_t poison_rgb = poison & 0x00ffffffu; /* 0x00ff00ff */
+    uint32_t mixed_rgb = a2p_color_max_rgb(good_rgb, poison_rgb); /* 0x00ff47ff */
+    assert(mixed_rgb == 0x00ff47ffu);
+
+    /* 1. All-good (all 8 fetches read GOOD) -> GOOD across all modes */
+    assert(a2p_classify_sample(good, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_GOOD);
+    assert(a2p_classify_sample(good_rgb, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_GOOD);
+    assert(a2p_classify_sample(good, good, A2P_POISON_VERTEX, 0) == A2P_SAMPLE_GOOD);
+    assert(a2p_classify_sample(good, good, A2P_POISON_INDEX, 0) == A2P_SAMPLE_GOOD);
+    assert(a2p_classify_sample(good, good, A2P_POISON_NONE, 1) == A2P_SAMPLE_GOOD);
+
+    /* 2. All-poison (all 8 fetches read POISON) -> expected for texture, unrelated for others */
+    assert(a2p_classify_sample(poison, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_EXPECTED);
+    assert(a2p_classify_sample(poison_rgb, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_EXPECTED);
+    assert(a2p_classify_sample(poison, good, A2P_POISON_VERTEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(poison, good, A2P_POISON_INDEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(poison, good, A2P_POISON_NONE, 1) == A2P_SAMPLE_UNRELATED);
+
+    /* 3. Mixed max(GOOD, POISON) -> expected for texture (simulating 1..7 poison fetches) */
+    for (int k = 1; k <= 7; ++k) {
+        uint32_t simulated = good_rgb;
+        for (int f = 0; f < k; ++f)
+            simulated = a2p_color_max_rgb(simulated, poison_rgb);
+        assert(simulated == mixed_rgb);
+        assert(a2p_classify_sample(simulated, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_EXPECTED);
+        assert(a2p_classify_sample(0xff000000u | simulated, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_EXPECTED);
+    }
+
+    /* 4. Same mixed value under VERTEX and INDEX poison -> unrelated */
+    assert(a2p_classify_sample(mixed_rgb, good, A2P_POISON_VERTEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(mixed_rgb, good, A2P_POISON_INDEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(mixed_rgb, good, A2P_POISON_NONE, 1) == A2P_SAMPLE_UNRELATED);
+
+    /* 5. Other colours -> unrelated across all modes */
+    uint32_t unknown1 = 0xff123456u;
+    uint32_t unknown2 = 0xff4700ffu; /* subtle variation: R=ff, G=47, B=ff vs B=00 */
+    assert(a2p_classify_sample(unknown1, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(unknown1, good, A2P_POISON_VERTEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(unknown1, good, A2P_POISON_INDEX, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(unknown2, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(A2P_SENTINEL, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_UNRELATED);
+    assert(a2p_classify_sample(A2P_COLOR_CLEAR, good, A2P_POISON_TEXTURE, 0) == A2P_SAMPLE_UNRELATED);
+
+    printf("PASS: eight-fetch max semantics: all-good, all-poison, mixed expected for texture, unrelated for vertex/index/reference\n");
 }
 
 /* Per-tile classification test: 256 tiles, each with 32 distinct sub-quads (8192 sample points) */
@@ -316,9 +379,10 @@ int main(void)
     test_neg_sentinel();
     test_neg_unknown_colour();
     test_pos_expected_controls();
+    test_texture_eight_fetch_max_semantics();
     test_reference_counted_once();
     test_abort_immediate_stop();
-    test_abort_mutant_caught();
+    test_abort_wrong_behaviour_detected();
     test_per_tile_classification();
     test_all_clear_reference_invalid();
 
