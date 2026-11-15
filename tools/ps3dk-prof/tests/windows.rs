@@ -618,3 +618,77 @@ fn open_at_end_with_no_frames_reported_as_0_frames() {
 
     let _ = std::fs::remove_file(&tmp);
 }
+
+#[test]
+fn window_zone_summary_restricted_to_window_frame_range() {
+    let mut s = scenario(vec![lane(
+        1,
+        seqd(
+            0,
+            vec![
+                frame(0, 100, 0),
+                begin(0, 0, 0, 110, 1),
+                bparent(0, 0, 0),
+                end(0, 0, 0, 120, 1),
+                begin(0, 1, 0, 130, 2),
+                bparent(0, 0, 0),
+                end(0, 1, 0, 140, 2),
+                frame(0, 200, 1),
+                begin(0, 2, 0, 210, 3),
+                bparent(0, 0, 0),
+                end(0, 2, 0, 230, 3),
+                begin(0, 1, 0, 240, 4),
+                bparent(0, 0, 0),
+                end(0, 1, 0, 270, 4),
+                frame(0, 300, 2),
+            ],
+        ),
+    )]);
+    s.descs = vec![
+        desc(0, "only_w1", ""),
+        desc(1, "shared_zone", ""),
+        desc(2, "only_w2", ""),
+    ];
+    let mut f = s.file();
+    f.flags |= FLAG_WINDOWS;
+    let trailer = f.chunks.pop().unwrap();
+    for c in [
+        chunk(CHUNK_WINDOW_BEGIN, window_begin_payload(1, 0, 0, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0)),
+        chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_END, 0)),
+        chunk(CHUNK_WINDOW_BEGIN, window_begin_payload(2, 2, 1, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0)),
+        chunk(CHUNK_WINDOW_END, window_end_payload(2, WINDOW_REASON_END, 1)),
+    ] {
+        f.chunks.push(c);
+    }
+    f.chunks.push(trailer);
+
+    let a = match ps3dk_prof::load(&f.bytes()) {
+        Outcome::Analysed(a) => a,
+        Outcome::Malformed(m) => panic!("fixture malformed: {m:?}"),
+    };
+    assert_eq!(a.capture.windows.len(), 2);
+
+    // Window 1 report checks
+    let rep_w1 = ps3dk_prof::report::render_window(&a, &a.capture.windows[0]);
+    println!("--- Window 1 Report ---\n{rep_w1}");
+    assert!(rep_w1.contains("only_w1: 1 instances"), "w1 has only_w1");
+    assert!(rep_w1.contains("shared_zone: 1 instances"), "w1 has shared_zone");
+    assert!(rep_w1.contains("total 10 | min 10 | max 10 | mean 10"), "shared_zone in w1 has dur 10");
+    assert!(!rep_w1.contains("only_w2:"), "w1 zones must NOT contain only_w2");
+    assert!(rep_w1.contains("owner 1 frame 0: 100"), "w1 contains frame 0 elapsed");
+    assert!(!rep_w1.contains("owner 1 frame 1:"), "w1 must NOT contain frame 1 elapsed");
+    assert!(rep_w1.contains("W(owner 1, frame 0, lane 1): 20"), "w1 contains frame 0 work");
+    assert!(!rep_w1.contains("W(owner 1, frame 1"), "w1 must NOT contain frame 1 work");
+
+    // Window 2 report checks
+    let rep_w2 = ps3dk_prof::report::render_window(&a, &a.capture.windows[1]);
+    println!("--- Window 2 Report ---\n{rep_w2}");
+    assert!(rep_w2.contains("only_w2: 1 instances"), "w2 has only_w2");
+    assert!(rep_w2.contains("shared_zone: 1 instances"), "w2 has shared_zone");
+    assert!(rep_w2.contains("total 30 | min 30 | max 30 | mean 30"), "shared_zone in w2 has dur 30");
+    assert!(!rep_w2.contains("only_w1:"), "w2 zones must NOT contain only_w1");
+    assert!(rep_w2.contains("owner 1 frame 1: 100"), "w2 contains frame 1 elapsed");
+    assert!(!rep_w2.contains("owner 1 frame 0:"), "w2 must NOT contain frame 0 elapsed");
+    assert!(rep_w2.contains("W(owner 1, frame 1, lane 1): 50"), "w2 contains frame 1 work");
+    assert!(!rep_w2.contains("W(owner 1, frame 0"), "w2 must NOT contain frame 0 work");
+}
