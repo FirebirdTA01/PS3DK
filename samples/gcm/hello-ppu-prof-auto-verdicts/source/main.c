@@ -405,11 +405,39 @@ int main(void)
         submit_flip(ctx);
     }
 
-    cellGcmFinish(ctx, 0);
+    /* Exit sequence: ensure RSX and display state are clean */
+    /* 1. Bounded wait, at most 2 s, polling cellGcmGetFlipStatus() == 0 with usleep(1000) */
+    for (int n = 0; cellGcmGetFlipStatus() != 0 && n < 2000; n++) {
+        usleep(1000);
+    }
+
+    /* 2. FRESH label value written with cellGcmSetWriteBackEndLabel, bounded 2 s fence */
+    int fence_ok = 0;
+    label_v++;
+    cellGcmSetWriteBackEndLabel(ctx, LABEL_PHASE_E, label_v);
+    cellGcmFlush(ctx);
+    for (int n = 0; n < 2000; n++) {
+        if (cellGcmIsLabelPassed(LABEL_PHASE_E, label_v)) {
+            fence_ok = 1;
+            break;
+        }
+        usleep(1000);
+    }
+    printf("AUTOVERDICT EXIT fence=%s\n", fence_ok ? "ok" : "timeout");
+    fflush(stdout);
+
+    /* 3. Unregister the sysutil callback */
     cellSysutilUnregisterCallback(0);
 
-    /* Seal automatic profiler capture before process return */
+    /* 4. Seal automatic profiler capture before process return */
     PS3DK_PROF_AUTO_SEAL();
 
+    /* 5. Print 'AUTOVERDICT EXIT clean' last */
+    if (!fence_ok) {
+        return 1;
+    }
+
+    printf("AUTOVERDICT EXIT clean\n");
+    fflush(stdout);
     return 0;
 }
