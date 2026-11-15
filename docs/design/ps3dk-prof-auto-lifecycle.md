@@ -57,8 +57,8 @@ support claims.
 | Destructor calls an exit route recursively | Remaining cleanup abandoned | Visibly incomplete; no normal retirement notification |
 | Normal return from main | Finalization after user destructors | Eligible for complete only after the final drain |
 | `exit` inside instrumented code | Normal process cleanup, but no return from that frame | Incomplete/censored for open spans even if a final trailer is written |
-| `abort`, `_exit`, raw process-exit syscall | No guaranteed final drain | Missing trailer/torn tail is incomplete; no artifact means no capture, not a zero-work success |
-| `quick_exit` | Does not run the normal fini path | Incomplete/no capture; no normal-finalization claim |
+| `abort`, `_exit`, raw process-exit syscall | No guaranteed final drain | The file sink's file always holds the file header, HEADER and CLOCKS (written by the init thread before init returns). It reads COMPLETE with `ending: NO-TRAILER` if a drain wrote events before the exit, otherwise INCOMPLETE "no events recorded (ended before the first drain)", exit 1; never header-only and never refused. No artifact means no capture, not a zero-work success |
+| `quick_exit` | Does not run the normal fini path; the profiler's `at_quick_exit` handler (registered by a successful init) runs one last drain | COMPLETE with `ending: NO-TRAILER`: the records published before `quick_exit` are drained, no trailer is written and no normal finalization is claimed. The handler runs once and claims the shutdown, so a later shutdown is EALREADY. It skips when the caller is inside the drainer (the drain thread, a sink callback), when a shutdown already began, or when `drain_busy` cannot be taken within its bound (500 tries 100 us apart) while another pass runs; the file is then left as it is (the `_exit` row) |
 | sysutil exit-game callback | Depends on the application's exit path | Normal main return may complete; `exit`, raw process exit or abandoned workers follow the corresponding rows above |
 
 The existing format expresses an unacknowledged producer with a `NOT_QUIESCED`

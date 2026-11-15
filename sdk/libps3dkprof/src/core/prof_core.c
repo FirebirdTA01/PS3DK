@@ -26,6 +26,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* C11 <stdlib.h>; declared here so a pre-C11 -std still links the handler (newlib and glibc both provide it). */
+int at_quick_exit(void (*func)(void));
+
 prof *g_prof;
 uint32_t g_gate;
 _Thread_local tls_state g_tls;
@@ -1434,6 +1437,7 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
         ST_REL(&g_gate, (uint32_t)(terminal ? G_TERMINAL : G_UNINIT));
         return rc;   /* the capture record stays unpublished */
     }
+    p_drain_prologue(&g_storage);   /* the file sink's start step, before publication (prof_drain.c dr_start) */
     publish_capture_record(&g_storage);
     g_prof = &g_storage;
 #ifdef PS3DK_PROF_WITH_AUTO
@@ -1444,6 +1448,9 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
     (void)thread_begin_impl(&g_storage,"init");
 #endif
     ST_REL(&g_storage.start_gate, 1u);        /* then open the start gate */
+    /* quick_exit: one last drain (prof_drain.c p_quick_exit_drain).  One capture per process, so this registers once;
+     * a registration failure leaves quick_exit as before (whatever the drainer last wrote). */
+    (void)at_quick_exit(p_quick_exit_drain);
     return PS3DK_PROF_OK;
 }
 

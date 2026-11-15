@@ -160,7 +160,7 @@ typedef struct snap {
 } snap;
 
 typedef struct drainer {
-    int started;                /* file header, HEADER and CLOCKS written */
+    int started;                /* the start step ran: file header, HEADER, CLOCKS (and PROFILE) written or failed */
     uint64_t chunk_seq;
     uint8_t *buf;               /* one chunk: 16 + P_CHUNK_CAP + 4 bytes, allocated at init */
     size_t pos;                 /* bytes of the current chunk payload */
@@ -314,6 +314,8 @@ typedef struct tls_state {
 #define p_observe_stop ps3dk_prof__observe_stop
 #define p_drain_once ps3dk_prof__drain_once
 #define p_drain_main ps3dk_prof__drain_main
+#define p_drain_prologue ps3dk_prof__drain_prologue
+#define p_quick_exit_drain ps3dk_prof__quick_exit_drain
 #define p_quiesce_freeze_seal ps3dk_prof__quiesce_freeze_seal
 #define p_fnv ps3dk_prof__fnv
 #define p_crc32_init ps3dk_prof__crc32_init
@@ -336,6 +338,8 @@ int p_ready(void);
 void p_observe_stop(prof *p);
 int p_drain_once(prof *p);
 void *p_drain_main(void *arg);
+void p_drain_prologue(prof *p);
+void p_quick_exit_drain(void);
 int p_quiesce_freeze_seal(prof *p);
 uint64_t p_fnv(uint64_t h, const void *data, size_t n);
 void p_crc32_init(void);

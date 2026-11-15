@@ -219,8 +219,10 @@ pub fn load(bytes: &[u8]) -> Outcome {
 /// cut short) holds captured data, and is COMPLETE; the ending is named by [`Analysis::prefix`] (the cut, the chunks
 /// kept, a torn final chunk dropped), never a verdict.  Genuine incompleteness stays INCOMPLETE (a TRAILER that
 /// reports NOT_QUIESCED, SEQ_LIMIT or SINK_ERROR, or a file with no event chunk at all) and anything that breaks a
-/// rule inside the kept prefix stays MALFORMED.  [`load`] is unchanged: it is the strict transport verdict, which a
-/// FINAL companion pair still needs.
+/// rule inside the kept prefix stays MALFORMED.  A file with no TRAILER whose kept prefix is otherwise clean but
+/// holds metadata only is read, not refused: INCOMPLETE with the single reason [`Incomplete::NoEvents`] (the process
+/// ended before the first drain).  [`load`] is unchanged: it is the strict transport verdict, which a FINAL
+/// companion pair still needs.
 pub fn load_file(bytes: &[u8]) -> Outcome {
     match load(bytes) {
         Outcome::Analysed(a) if a.verdict != Verdict::Complete => match load_prefix(bytes) {
@@ -228,7 +230,13 @@ pub fn load_file(bytes: &[u8]) -> Outcome {
                 p.verdict = Verdict::Complete;
                 Outcome::Analysed(Box::new(p))
             }
-            Err(_) => Outcome::Analysed(a),
+            Err(_) => match metadata_only(bytes) {
+                Some(mut m) => {
+                    m.verdict = Verdict::Incomplete(vec![Incomplete::NoEvents]);
+                    Outcome::Analysed(Box::new(m))
+                }
+                None => Outcome::Analysed(a),
+            },
         },
         other => other,
     }
@@ -289,6 +297,23 @@ fn prefix_cut(bytes: &[u8]) -> Result<(usize, u64, u64), String> {
 /// entry") are relaxed; GAP, CLOCK_ANOMALY and every observed final-entry loss stay.  `verdict` stays the strict
 /// INCOMPLETE verdict; acceptance is in [`Analysis::prefix`].  Open spans stay censored and the last frame's end
 /// stays unknown: nothing is closed at the cut.
+/// The analysis of a file that ended without a TRAILER before any event chunk: the prefix rules of [`load_prefix`]
+/// hold (at most a torn final chunk after the last whole one; the strict reasons are only `NoTrailer` and
+/// `MissingFinalEntry`) except that no whole chunk holds events.  `None` for anything else.
+fn metadata_only(bytes: &[u8]) -> Option<Analysis> {
+    let (cut, _, data) = prefix_cut(bytes).ok()?;
+    if data != 0 {
+        return None;
+    }
+    let cap = reader::read(&bytes[..cut]).ok()?;
+    if !cap.incomplete.contains(&Incomplete::NoTrailer)
+        || cap.incomplete.iter().any(|r| !matches!(r, Incomplete::NoTrailer | Incomplete::MissingFinalEntry(_)))
+    {
+        return None;
+    }
+    analyze(cap).ok()
+}
+
 pub fn load_prefix(bytes: &[u8]) -> Result<Analysis, String> {
     let (cut, chunks, data) = prefix_cut(bytes)?;
     if data == 0 {
