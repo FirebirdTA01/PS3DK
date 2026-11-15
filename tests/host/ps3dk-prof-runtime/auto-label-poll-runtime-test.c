@@ -7,14 +7,19 @@
  *  - a larger gap, a poll of another label or a flip-wait scope ends the run as broken;
  *  - polls inside a flip-wait scope are not label cadence;
  *  - a run across a frame boundary is charged to neither frame;
- *  - the row names the complete runs' label + 1, or 0xffffffff for several (or an address outside the label area). */
+ *  - the row names the complete runs' label + 1, or 0xffffffff for several;
+ *  - the label area has the real 16-byte stride: an address outside it or off a label slot has no identity, ends an
+ *    open run as broken and forms no run of its own;
+ *  - cadence is kept per label: u64@408 is the largest one-label total, never a sum across labels. */
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-static uint32_t app_labels[256], outside;
-static uint32_t *cellGcmGetLabelAddress(uint8_t index) {return &app_labels[index];}
+/* the GCM label area: label i at base + 16 i (four words per label slot) */
+static uint32_t app_labels[256*4], outside;
+static uint32_t *cellGcmGetLabelAddress(uint8_t index) {return &app_labels[index*4u];}
+#define LABEL(i) app_labels[(i)*4u]
 #define PS3TC_GCM_LABELS_NO_GCM 1
 #include <cell/gcm/ps3tc_gcm_labels.h>
 #include <ps3dk/prof.h>
@@ -46,7 +51,7 @@ static void complete(gpp_ctx *ctx,uint32_t clock_serial) {
 static void flush(gpp_ctx *ctx) {assert(ctx==&context);complete(ctx,++anchors);}
 static const gpp_dev device={report,label,flush,ld64,st64,ld32,st32};
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
-void ps3dk_prof__auto_test_label(uint64_t out[5]);
+void ps3dk_prof__auto_test_label(uint64_t out[6]);
 
 static uint64_t clock_base,clock_reads,clock_advance;
 static uint64_t fake_clock(void)
@@ -67,8 +72,10 @@ static void clear(void)
     ps3dk_prof__auto_end((void *)&context,ticket);
 }
 /* one query of label i for target 5: pending while the label is below it */
-static void poll(uint8_t i,int passed) {app_labels[i]=passed ? 5:4;assert(cellGcmIsLabelPassed(i,5)==passed);}
-static uint64_t l[5];
+static void poll(uint8_t i,int passed) {LABEL(i)=passed ? 5:4;assert(cellGcmIsLabelPassed(i,5)==passed);}
+/* one query through the address form */
+static void at(uint32_t *w,int passed) {*w=passed ? 5:4;assert(cellGcmIsLabelValuePassed(w,5)==passed);}
+static uint64_t l[6];
 static void row(void) {ps3dk_prof__auto_test_label(l);}
 
 int main(void) {
@@ -85,7 +92,7 @@ int main(void) {
     for(unsigned i=0;i<40;i++) {poll(70,0);elapse(MS/2);}
     poll(70,1);
     row();
-    assert(l[0]==1 && l[1]==0 && l[3]==71 && l[4]>=20*MS && l[4]<21*MS);
+    assert(l[0]==1 && l[1]==0 && l[3]==71 && l[4]>=20*MS && l[4]<21*MS && l[5]==l[4]);
     /* 10 ms of work between two polls: broken */
     poll(70,0);elapse(10*MS);poll(70,1);
     row();
@@ -94,14 +101,15 @@ int main(void) {
     poll(70,0);poll(80,0);poll(80,1);
     row();
     assert(l[0]==2 && l[1]==2 && l[3]==0xffffffffu);
+    /* two labels: the one-label total is label 70's run alone, never the sum with label 80's */
+    assert(l[5]>=20*MS && l[5]<21*MS && l[5]<l[4]);
 
-    /* frame 1: the address form names its label; an address outside the label area is a label of its own
-     * (unknown); polls inside a flip-wait scope are not label cadence */
+    /* frame 1: the address form names its label (16-byte stride); polls inside a flip-wait scope are not label
+     * cadence */
     flip();clear();
-    app_labels[90]=4;assert(!cellGcmIsLabelValuePassed(&app_labels[90],5));
-    app_labels[90]=5;assert(cellGcmIsLabelValuePassed(&app_labels[90],5));
+    at(&LABEL(90),0);at(&LABEL(90),1);
     row();
-    assert(l[0]==1 && l[3]==91);
+    assert(l[0]==1 && l[3]==91 && l[5]==l[4]);
     {
         uint64_t scope=ps3dk_prof__auto_flip_wait_begin();
         assert(scope);
@@ -110,10 +118,19 @@ int main(void) {
     }
     row();
     assert(l[0]==1 && l[1]==0);
-    outside=4;assert(!cellGcmIsLabelValuePassed(&outside,5));
-    outside=5;assert(cellGcmIsLabelValuePassed(&outside,5));
+    /* the review case: a pending pointer query of label 90, then a passed one of label 91, is a label switch */
+    at(&LABEL(90),0);at(&LABEL(91),1);
     row();
-    assert(l[0]==2 && l[3]==0xffffffffu);
+    assert(l[0]==1 && l[1]==1 && l[3]==91);
+    /* an address outside the label area, or inside it off a label slot, has no identity: no run */
+    at(&outside,0);at(&outside,1);
+    at(&LABEL(90)+1,0);at(&LABEL(90)+1,1);
+    row();
+    assert(l[0]==1 && l[1]==1 && l[3]==91);
+    /* an unidentified poll ends an open run as broken */
+    at(&LABEL(90),0);at(&outside,0);at(&LABEL(90),1);
+    row();
+    assert(l[0]==1 && l[1]==2 && l[3]==91);
 
     /* frame 1 -> 2: a pending run across the boundary is charged to neither frame */
     poll(70,0);

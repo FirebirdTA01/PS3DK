@@ -1648,8 +1648,12 @@ fn call_brackets_are_checked() {
 // ---- busy-time polling rule and label-poll cadence (CONFIG masks 255/11, 511/11) -----------------------------------
 
 /// One frame (PPU 10000..110000) with frame marks at RSX 5000..45000, one timed clear per `clears` interval (raw), no
-/// FIFO wait, no flip-wait scope, the flip-status cadence block `flip` and (511/11) the label-poll block `label`.
+/// FIFO wait, no flip-wait scope, the flip-status cadence block `flip` and (511/11) the label-poll block `label`
+/// (its one-label total is the whole cadence for one label; `busy_frame_labels` names it).
 fn busy_frame(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32)>, masks: u32) -> File {
+    busy_frame_labels(clears, flip, label.map(|(b, l)| (b, l, b.ticks)), masks)
+}
+fn busy_frame_labels(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32, u64)>, masks: u32) -> File {
     let mut list = vec![mark(1, 0, 1, 5000)];
     for (i, &c) in clears.iter().enumerate() {
         list.push(op(i as u64 + 2, 0, c));
@@ -1661,9 +1665,9 @@ fn busy_frame(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32)>, masks
     x.flags |= 64;
     let mut cov = coverage_p(&x, &flip);
     if masks & 256 != 0 {
-        let (l, index) = label.unwrap_or_default();
+        let (l, index, one) = label.unwrap_or_default();
         let mut b = Buf::default();
-        b.u32(l.runs).u32(l.broken).u32(l.spanning).u32(index).u64(l.ticks).u64(0);
+        b.u32(l.runs).u32(l.broken).u32(l.spanning).u32(index).u64(l.ticks).u64(one);
         cov.payload.extend_from_slice(&b.0);
     }
     if masks & 512 != 0 {
@@ -1731,20 +1735,43 @@ fn label_polling_counts_with_busy_time() {
     let f = busy_read(busy_frame(&[(6000, 36_000)], Blk::default(), label, 511));
     assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
     assert!(f.reason.contains("polled a label for >= 30000 ticks"), "{}", f.reason);
-    assert_eq!(f.label_polls.map(|(c, l)| (c.runs, c.ticks, l)), Some((1, 30_000, 71)));
+    assert_eq!(f.label_polls.map(|(c, l, one)| (c.runs, c.ticks, l, one)), Some((1, 30_000, 71, 30_000)));
     // the same label polling with short busy time: UNKNOWN with the observation
     let f = busy_read(busy_frame(&[(6000, 6001), (36_000, 36_001)], Blk::default(), label, 511));
     assert_eq!(f.verdict, Verdict::Unknown, "{}", f.reason);
     assert!(f.reason.contains("30000 (labels)"), "{}", f.reason);
-    // malformed blocks: a label without runs, runs without a label, a label above 256, reserved bytes
+    // malformed blocks: a label without runs, runs without a label, a label above 256
     for (b, l) in [(Blk::default(), 5), (polls(10), 0), (polls(10), 300)] {
         assert!(reader::read(&busy_frame(&[(6000, 36_000)], Blk::default(), Some((b, l)), 511).bytes()).is_err(), "{l}");
+    }
+    // the one-label total: equal to the cadence for one label; for several, at least two runs and at most the sum
+    let two = Blk { runs: 2, ticks: 30_000, ..Blk::default() };
+    for (b, l, one) in [(polls(30_000), 71, 29_999), (polls(30_000), 71, 30_001), (two, u32::MAX, 30_001),
+                        (polls(30_000), u32::MAX, 30_000)] {
+        let f = busy_frame_labels(&[(6000, 36_000)], Blk::default(), Some((b, l, one)), 511);
+        assert!(reader::read(&f.bytes()).is_err(), "{l:#x} {one}");
     }
     // 255/11 rows are 384 bytes: a 416-byte row is refused, and the reverse
     let mut f = busy_frame(&[(6000, 36_000)], Blk::default(), None, 255);
     let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
     f.chunks[at].payload.extend_from_slice(&[0; 32]);
     assert!(reader::read(&f.bytes()).is_err());
+}
+
+/// The review counterexample: two complete runs on DIFFERENT labels, 15000 ticks each in a 100000-tick frame, with
+/// RSX busy time over half the frame and no FIFO wait.  No one label reaches the quarter-frame share, so the frame is not
+/// RSX-bound; the one-label total decides, never the sum across labels.
+#[test]
+fn label_cadence_is_never_summed_across_labels() {
+    let two = Blk { runs: 2, ticks: 30_000, ..Blk::default() };
+    let f = busy_read(busy_frame_labels(&[(6000, 36_000)], Blk::default(), Some((two, u32::MAX, 15_000)), 511));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.contains("15000 (labels)"), "{}", f.reason);
+    assert_eq!(f.label_polls.map(|(c, l, one)| (c.ticks, l, one)), Some((30_000, u32::MAX, 15_000)));
+    // several labels where ONE of them meets the share on its own: RSX-bound, named by that label's total
+    let f = busy_read(busy_frame_labels(&[(6000, 36_000)], Blk::default(), Some((two, u32::MAX, 25_000)), 511));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.contains("polled a label for >= 25000 ticks"), "{}", f.reason);
 }
 
 /// 255/11 and later report each frame's polling shares in auto --json.
@@ -1759,6 +1786,7 @@ fn polling_shares_in_json() {
     assert_eq!(fr["cadence_share"].as_f64(), Some(0.124), "{fr}");
     assert_eq!(fr["label_cadence_share"].as_f64(), Some(0.25), "{fr}");
     assert_eq!(fr["label_polling"]["label"], 70, "{fr}");
+    assert_eq!(fr["label_polling"]["one_label_ticks"], 25_000, "{fr}");
     // older masks: no shares
     let r = analyze(&reader::read(&busy_frame(&[(6000, 36_000)], polls(12_400), None, 127).bytes()).expect("reads"));
     let mut out = Vec::new();
