@@ -324,7 +324,7 @@ emitted; device readback disposition remains the separate OPS result.
 
 ## Tags, AUTO ranges and timed ranges (CONFIG 1023/11)
 
-Kind mask bit 512 TAG widens OPS records to 160 bytes and COVERAGE rows to 448.
+Kind mask bit 512 TAG widens OPS records to 160 bytes and COVERAGE rows to 480.
 Older masks keep their widths and rules.
 
 | OPS offset | Type | Field |
@@ -363,6 +363,11 @@ untimed: COVERAGE u64@416/424/432 count them per kind (exclusion reason
 "outside timed range", counted in visited, not in the ten exclusion columns:
 visited = observed + exclusions + outside). The bounded verdict rules treat them
 like other untimed draws. Without the call every covered draw is timed as before.
+
+The flip-wait scope block at 448 (u64 begin/end PPU ticks of the first two
+flip-wait scopes counted at u32@12, zero for unrecorded ones) places the owner's
+blocked flip waits. With more than two scopes in a frame the block does not
+describe them all, and the reader does not use it.
 
 `ps3dk-prof auto --by-tag [--json]` prints per frame and per tag the covered
 records, their timed RSX busy time (merged raw intervals of those records and of
@@ -571,6 +576,7 @@ RSX reached-marker span (first operation begin to last end of the execution popu
 | UNKNOWN: "presentation attribution unavailable: a flip-wait scope spans a frame boundary" (or "... flip-status polling spans a frame boundary") | W = 0 and S < D/2 without such a P, and a spanning scope (or run) touched the row |
 | UNKNOWN: "presentation polling observed; waiting not established" | W = 0 and S < D/2 without such a P, with polling cadence (complete or broken runs) or 15/11 poll intervals |
 | UNKNOWN: "RSX not limiting; PPU work vs presentation pacing not distinguished" | W = 0 and S < D/2 with no presentation evidence |
+| RSX-bound candidate (busy flip wait, 1023/11) | W = 0, B >= D/2 (lower bound), and the blocked flip-wait time that certainly overlaps RSX busy time, O, is >= 3/4 of the scopes' elapsed time and >= D/4 |
 | RSX-bound candidate (busy polling, 255/11 and later) | W = 0, RSX busy time B >= D/2 (lower bound), complete polling cadence of flip status or of a label >= D/4 (no run or flip-wait scope across a boundary of the frame) |
 | UNKNOWN with an observation (255/11 and later) | S >= D/2 but not decided above: the reason prints B and both cadences, labelled "observation, not a verdict" |
 | mixed candidate | 0 < W < D/4 and S >= D/2 |
@@ -581,7 +587,15 @@ RSX busy time B (127/11 and later) is the union of the execution population's
 timed intervals (records, and with 255/11 whole-CALL brackets), overlaps merged,
 on the PPU clock: unlike S it does not count the gaps where the RSX waited for
 the PPU to submit, so a long span over a few short operations is not busy time.
-The two cadences are compared with D/4 separately, never added: a loop that
+O maps each timed interval of the execution population (records and
+whole-CALL brackets) to PPU time through the nearest VALID clock anchor on each
+side and the qualified map's slope bounds, keeping only its inner bound (latest
+possible start, earliest possible end), and intersects the result with the
+recorded scopes. Without a qualified map, with more than two scopes, or with a
+scope across a frame boundary, O is unavailable. A wait that mostly continues
+after the RSX's last timed operation fails the 3/4 test: it is pacing evidence,
+not RSX evidence, and keeps the PACING path. The two cadences and O are compared
+with their shares separately, never added: a loop that
 polls both would count the same time twice. JSON (255/11 and later) reports each
 frame's `cadence_share` and `label_cadence_share` (complete-run ticks over D).
 Frames are flip- or submission-delimited intervals, not presented frames.

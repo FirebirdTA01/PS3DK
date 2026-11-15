@@ -1661,7 +1661,7 @@ fn busy_frame(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32)>, masks
         cov.payload.extend_from_slice(&b.0);
     }
     if masks & 512 != 0 {
-        cov.payload.extend_from_slice(&[0; 32]); // timed-range block: nothing outside, no range refused
+        cov.payload.extend_from_slice(&[0; 64]); // timed-range block and flip-wait scope block: empty
     }
     let width = if masks & 512 != 0 { 160 } else { 144 };
     let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
@@ -1872,4 +1872,92 @@ fn range_records_are_checked() {
     let at = f.chunks.iter().position(|c| c.ty == 35).unwrap();
     f.chunks[at].payload[16 + 144 + 12] = 6;
     assert!(reader::read(&f.bytes()).is_err());
+}
+
+// ---- blocked flip waits as RSX-bound evidence (CONFIG masks 1023/11) ----------------------------------------------
+
+/// busy_frame (no FIFO wait, no polling) with one flip-wait scope at PPU `scope` recorded in the row (count and ticks
+/// at 12/56, the scope block at 448 under 1023/11), and optionally with anchors that cannot qualify a map.
+fn flip_frame(clears: &[(u64, u64)], scope: (u64, u64), masks: u32, anchored: bool) -> File {
+    let mut f = busy_frame(clears, Blk::default(), None, masks);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let row = &mut f.chunks[at].payload;
+    row[12..16].copy_from_slice(&1u32.to_le_bytes());
+    row[56..64].copy_from_slice(&(scope.1 - scope.0).to_le_bytes());
+    if masks & 512 != 0 {
+        row[448..456].copy_from_slice(&scope.0.to_le_bytes());
+        row[456..464].copy_from_slice(&scope.1.to_le_bytes());
+    }
+    if !anchored {
+        // the same nine anchors all at one coordinate: fewer than four distinct, so the map does not qualify
+        let mut k = 0;
+        for c in f.chunks.iter_mut().filter(|c| c.ty == 38) {
+            k += 1;
+            let mut a = anchor(k, 1000, (1999, 2001));
+            a.labels = (0, 2 * a.id);
+            *c = clock(&a);
+        }
+    }
+    f
+}
+
+/// RSX busy through a blocked flip wait is RSX-bound evidence; a wait that mostly continues after the RSX finished
+/// is not (pacing when the RSX was short, as today); without a qualified clock map the evidence is unusable.
+#[test]
+fn blocked_flip_wait_needs_certain_rsx_overlap() {
+    // the anchors map raw x to PPU ~2x: a clear at raw 6000..36000 is busy at PPU ~12000..72000 (60% of 100000)
+    // phase A: blocked 20000..70000 while the RSX is busy throughout
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy flip wait: RSX busy time >= "), "{}", f.reason);
+    // the RSX finishes early (busy ~12000) and the wait runs on to the flip: PACING as today
+    let f = busy_read(flip_frame(&[(6000, 12_000)], (26_000, 100_000), 1023, true));
+    assert_eq!(f.verdict, Verdict::Pacing, "{}", f.reason);
+    // RSX busy 60% of the frame, the wait mostly after it ended (12000 of 48000 overlap): not RSX-bound
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (60_000, 108_000), 1023, true));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // overlap just below 3/4 of the scope: not RSX-bound; at 3/4 or more: RSX-bound
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (40_000, 84_000), 1023, true)); // 32000 of 44000: 73%
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (40_000, 80_000), 1023, true)); // 32000 of 40000: 80%
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // a blocked wait with short busy time: UNKNOWN
+    let f = busy_read(flip_frame(&[(6000, 6001), (36_000, 36_001)], (20_000, 70_000), 1023, true));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // no qualified clock map: the evidence is unusable, the frame UNKNOWN as today
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, false));
+    assert_eq!(f.verdict, Verdict::Unknown, "{}", f.reason);
+    assert!(f.reason.contains("clock map unqualified"), "{}", f.reason);
+    // older masks: no scope block, no flip-wait rule (today's verdict)
+    let old = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 511, true));
+    assert_eq!(old.verdict, Verdict::Unknown, "{}", old.reason);
+    assert!(old.reason.starts_with("unresolved: FIFO wait >= 0"), "{}", old.reason);
+}
+
+/// The scope block must describe the row's scopes: inside the frame, in order, summing to the row's ticks.
+#[test]
+fn flip_wait_scope_block_is_checked() {
+    assert!(reader::read(&flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true).bytes()).is_ok());
+    let mut f = flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    f.chunks[at].payload[56..64].copy_from_slice(&40_000u64.to_le_bytes()); // ticks disagree with the scope
+    assert!(reader::read(&f.bytes()).is_err());
+    let f = flip_frame(&[(6000, 36_000)], (5_000, 70_000), 1023, true); // begins before the frame
+    assert!(reader::read(&f.bytes()).is_err());
+}
+
+/// The inner PPU bound of a raw timestamp comes from the nearest anchors and contains the anchor's own bracket.
+#[test]
+fn raw_to_ppu_bounds_from_anchors() {
+    let r = reader::read(&flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true).bytes()).expect("reads");
+    let inv = r.auto.as_ref().unwrap();
+    let MapState::Qualified(m) = ps3dk_prof::auto_rsx::qualify(inv) else { panic!("qualified") };
+    // anchor 1 is raw 1000 at PPU [1999, 2001]
+    assert_eq!(ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, 1000), Some((1999, 2001)));
+    let (lo, hi) = ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, 26_000).unwrap();
+    assert!(lo <= 52_000 && 52_000 <= hi && hi - lo < 100, "{lo}..{hi}");
+    assert_eq!(ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, u64::MAX), None);
+    // certain overlap: a busy interval mapped inward, intersected with the scope
+    let o = ps3dk_prof::auto_rsx::certain_overlap(&inv.clocks, &m, &[(6000, 36_000)], &[(20_000, 70_000)]);
+    assert!((49_900..=50_000).contains(&o), "{o}");
 }

@@ -36,8 +36,9 @@ pub const FRAME_BYTES_PRESENT: usize = 384;
 /// COVERAGE rows of the label-poll writer (511/11): a label-poll cadence block at 384.
 pub const FRAME_BYTES_LABEL: usize = 416;
 /// COVERAGE rows of the tag writer (1023/11): the timed-range block at 416 (u64 x3 visits left untimed outside timed
-/// ranges per kind, u32@440 AUTO ranges refused, u32@444 zero).
-pub const FRAME_BYTES_TAG: usize = 448;
+/// ranges per kind, u32@440 AUTO ranges refused, u32@444 zero) and the flip-wait scope block at 448 (u64 begin/end PPU
+/// ticks of the first two flip-wait scopes, zero when not recorded).
+pub const FRAME_BYTES_TAG: usize = 480;
 pub const STATUS_BYTES: usize = 128;
 pub const CLOCK_BYTES: usize = 96;
 /// Schema 1: the first sixteen reports of the lease are clock anchors.
@@ -356,6 +357,8 @@ pub struct Coverage {
     /// none was open (exclusion reason "outside timed range"), and the AUTO ranges refused in this frame.
     pub outside_timed: [u64; 3],
     pub ranges_refused: u32,
+    /// 1023/11 rows: the owner PPU ticks [begin, end] of the first two flip-wait scopes (of `flip_waits`).
+    pub flip_wait_at: Option<Vec<(u64, u64)>>,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -921,9 +924,29 @@ impl Reader {
             ranges_refused = c.u32()?;
             r5 = c.u32()?;
         }
+        let mut scope_at = [(0u64, 0u64); 2];
+        if cfg.tagged() {
+            for v in scope_at.iter_mut() {
+                *v = (c.u64()?, c.u64()?);
+            }
+        }
         c.done()?;
         if r5 != 0 {
             return bad(r, format!("AUTO coverage frame {owner}/{frame}: reserved u32@444 {r5}"));
+        }
+        // the first min(scopes, 2) entries are the recorded scopes, in order, inside the frame; the rest are zero; with
+        // at most two scopes their elapsed times are the row's flip-wait ticks
+        let recorded = (r0 as usize).min(2);
+        if cfg.tagged() {
+            let inside = |&(b, e): &(u64, u64)| b <= e && b >= tb_begin && (flags & FR_OPEN != 0 || e <= tb_end);
+            let ordered = recorded < 2 || scope_at[0].1 <= scope_at[1].0;
+            let sum = scope_at[..recorded].iter().try_fold(0u64, |a, &(b, e)| a.checked_add(e - b.min(e)));
+            if !scope_at[..recorded].iter().all(inside) || scope_at[recorded..].iter().any(|&x| x != (0, 0)) || !ordered
+                || (r0 <= 2 && sum != Some(r1))
+            {
+                return bad(r, format!("AUTO coverage frame {owner}/{frame}: flip-wait scope block {scope_at:?} for {r0} \
+                    scope(s) of {r1} ticks"));
+            }
         }
         let at = format!("AUTO coverage frame {owner}/{frame}");
         if r3 != 0 || (label.runs == 0) != (label_index == 0) || (label_index > 256 && label_index != u32::MAX)
@@ -998,7 +1021,8 @@ impl Reader {
             legacy_polls: (present && !scopes).then_some((r0, r1)),
             segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
             label_polls: cfg.label_polls().then_some((label, label_index)),
-            outside_timed: outside, ranges_refused });
+            outside_timed: outside, ranges_refused,
+            flip_wait_at: cfg.tagged().then(|| scope_at[..recorded].to_vec()) });
         Ok(())
     }
 
@@ -1524,6 +1548,57 @@ fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>, untimed_ok:
     Ok(())
 }
 
+/// Certain PPU bounds of a raw RSX timestamp from the nearest VALID anchor on each side and the qualified map's slope
+/// bounds: (earliest, latest) possible PPU tick. None outside the map's support or without an anchor.
+pub fn raw_to_ppu_bounds(anchors: &[Anchor], m: &Map, x: u64) -> Option<(u64, u64)> {
+    if i128::from(x) < m.fmin || i128::from(x) > m.fmax {
+        return None;
+    }
+    let below = anchors.iter().filter(|a| a.flags == CK_VALID && a.raw <= x).max_by_key(|a| a.raw);
+    let above = anchors.iter().filter(|a| a.flags == CK_VALID && a.raw >= x).min_by_key(|a| a.raw);
+    let (mut lo, mut hi): (Option<BigInt>, Option<BigInt>) = (None, None);
+    let tighten = |lo: &mut Option<BigInt>, hi: &mut Option<BigInt>, l: BigInt, h: BigInt| {
+        if lo.as_ref().is_none_or(|v| &l > v) { *lo = Some(l); }
+        if hi.as_ref().is_none_or(|v| &h < v) { *hi = Some(h); }
+    };
+    if let Some(a) = below {
+        let dx = x - a.raw;
+        tighten(&mut lo, &mut hi, BigInt::from(a.tb_before) + floor_mul(dx, &m.slope_lo),
+            BigInt::from(a.tb_after) + ceil_mul(dx, &m.slope_hi));
+    }
+    if let Some(a) = above {
+        let dx = a.raw - x;
+        tighten(&mut lo, &mut hi, BigInt::from(a.tb_before) - ceil_mul(dx, &m.slope_hi),
+            BigInt::from(a.tb_after) - floor_mul(dx, &m.slope_lo));
+    }
+    match (lo, hi) {
+        (Some(l), Some(h)) if l <= h && !l.is_negative() => Some((sat(&l), sat(&h))),
+        _ => None,
+    }
+}
+
+/// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
+/// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
+pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
+    let mut iv: Vec<(u64, u64)> = busy.iter().filter_map(|&(b, e)| {
+        let (_, start) = raw_to_ppu_bounds(anchors, m, b)?;
+        let (end, _) = raw_to_ppu_bounds(anchors, m, e)?;
+        (start < end).then_some((start, end))
+    }).collect();
+    iv.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::new();
+    for (b, e) in iv {
+        match merged.last_mut() {
+            Some(l) if b <= l.1 => l.1 = l.1.max(e),
+            _ => merged.push((b, e)),
+        }
+    }
+    scopes.iter().fold(0u64, |acc, &(sb, se)| merged.iter().fold(acc, |a, &(b, e)| {
+        let (lo, hi) = (b.max(sb), e.min(se));
+        if lo < hi { a.saturating_add(hi - lo) } else { a }
+    }))
+}
+
 pub fn analyze(cap: &Capture) -> Report {
     let Some(inv) = cap.auto.as_ref() else {
         return Report { state: "UNSUPPORTED".into(), ..Report::default() };
@@ -1673,6 +1748,17 @@ pub fn analyze(cap: &Capture) -> Report {
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
+        // 1023/11: blocked flip-wait time that certainly overlaps RSX busy time: (overlap, scopes' elapsed), None when
+        // unusable (no scope, more than two, the map unqualified, or a timed record not raw-valid)
+        let flip_overlap = match (&f.flip_wait_at, &map) {
+            (Some(at), MapState::Qualified(m)) if !at.is_empty() && at.len() == f.flip_waits as usize
+                && f.flip_wait_spanning == 0 && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) => {
+                let busy: Vec<(u64, u64)> = timed_set.iter().map(|o| (o.raw_begin, o.raw_end)).collect();
+                let elapsed = at.iter().fold(0u64, |a, &(b, e)| a.saturating_add(e - b));
+                Some((certain_overlap(&inv.clocks, m, &busy, at), elapsed))
+            }
+            _ => None,
+        };
         let label_cadence = v.label_polls.map(|(c, _)| c);
         let mut bounds = None;
         v.reason = (|| -> Result<(Verdict, String), String> {
@@ -1831,9 +1917,20 @@ pub fn analyze(cap: &Capture) -> Report {
             let polled = flip_polled.max(label_polled);
             let polled_kind = if flip_polled >= label_polled { "flip status" } else { "a label" };
             let busy_long = busy_lo.is_some_and(|b| share(b, d, RSX_SPAN_SHARE));
+            // the blocked flip wait counts as waiting evidence only where the RSX was certainly busy: at least 3/4 of
+            // the scopes' elapsed time and at least WAIT_SHARE of the frame (a wait that continues after the RSX's
+            // last timed operation is pacing, not RSX, evidence)
+            let flip_blocked = match flip_overlap {
+                Some((o, e)) if u128::from(o) * 4 >= u128::from(e) * 3 && share(o, d, WAIT_SHARE) => Some((o, e)),
+                _ => None,
+            };
             let out = (|| -> Result<(Verdict, String), String> { if waited && rsx_long {
                 Ok((Verdict::RsxBound, format!("fetch: owner waited >= {w} of {d} PPU ticks in FIFO wraps; RSX \
                     reached-marker span >= {} ticks", span.0)))
+            } else if let (true, 0, true, Some((o, e))) = (busy_rule, w, busy_long, flip_blocked) {
+                Ok((Verdict::RsxBound, format!("busy flip wait: RSX busy time >= {} of {d} PPU ticks while the owner \
+                    was blocked in flip-wait scopes for >= {o} ticks of certain RSX busy time ({e} ticks elapsed); no \
+                    FIFO wait", busy_lo.unwrap_or(0))))
             } else if busy_rule && w == 0 && busy_long && share(polled, d, WAIT_SHARE) {
                 Ok((Verdict::RsxBound, format!("busy polling: RSX busy time >= {} of {d} PPU ticks while the owner polled {polled_kind} for >= {polled} ticks in complete runs; no FIFO wait", busy_lo.unwrap_or(0))))
             } else if w == 0 && rsx_short {

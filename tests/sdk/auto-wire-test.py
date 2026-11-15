@@ -51,10 +51,11 @@ int main(void) {
     f.flip_wait_timeouts=12; f.segment_unrepresented=13;
     f.label_runs=14; f.label_broken=15; f.label_spanning=16; f.label_index=17; f.label_cadence=18;
     f.outside_timed[0]=19; f.outside_timed[1]=20; f.outside_timed[2]=21; f.ranges_refused=22;
+    f.flip_wait_at[0][0]=23; f.flip_wait_at[0][1]=24; f.flip_wait_at[1][0]=25; f.flip_wait_at[1][1]=26;
     for(i=0;i<3;i++) for(j=0;j<12;j++) f.counts[i][j]=1000+i*100+j;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if(auto_encode_frame(b,447,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
-    n=auto_encode_frame(b,sizeof b,&f); if(n!=448 || put(n)) return 10;
+    if(auto_encode_frame(b,479,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
+    n=auto_encode_frame(b,sizeof b,&f); if(n!=480 || put(n)) return 10;
     for(i=0;i<15;i++) counts[i]=UINT64_C(0x1020304050607080)+i;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_status(b,127,1,49,counts)!=0 || memcmp(b,before,sizeof b)) return 11;
@@ -126,9 +127,9 @@ def main():
     struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2)
     struct.pack_into('<I',op,108,0x31); struct.pack_into('<I',op,132,0x32)
     struct.pack_into('<QIHH',op,144,0x1112131415161718,7,1,0); struct.pack_into('<3I',op,160,0x41,0x42,3); chunks.append(bytes(op))
-    f=bytearray(448); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
+    f=bytearray(480); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
     struct.pack_into('<4IQII',f,352,7,8,9,10,11,12,13)
-    struct.pack_into('<4IQ',f,384,14,15,16,17,18); struct.pack_into('<3QI',f,416,19,20,21,22)
+    struct.pack_into('<4IQ',f,384,14,15,16,17,18); struct.pack_into('<3QI',f,416,19,20,21,22); struct.pack_into('<4Q',f,448,23,24,25,26)
     struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12))); chunks.append(bytes(f))
     chunks.append(struct.pack('<HHI15Q',1,49,1,*(0x1020304050607080+i for i in range(15))))
     chunks.append(struct.pack('<HH7I4Q2IQIIQ',1,1,1,1,3,0,1026,3,5,6,7,8,8,3,3,16,7,0,9))

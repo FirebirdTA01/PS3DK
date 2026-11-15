@@ -10,7 +10,7 @@
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=448,
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
@@ -42,8 +42,8 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * rows: a label-poll cadence block at 384, see auto_wire_frame), and TAG=512
  * (160-byte OPS records: u32@144 tag current at the record's claim, u32@148 the
  * fragment-program offset last set on its context, u32@152 a RANGE's nesting
- * depth, u32@156 zero; OPS kind 6 RANGE; 448-byte COVERAGE rows with the
- * timed-range block at 416). A reader that knows only 7/15, 15/11, 31/11,
+ * depth, u32@156 zero; OPS kind 6 RANGE; 480-byte COVERAGE rows with the
+ * timed-range block at 416 and the flip-wait scope block at 448). A reader that knows only 7/15, 15/11, 31/11,
  * 63/11, 127/11, 255/11 or 511/11 refuses 1023/11 at CONFIG. */
 enum { AUTO_KIND_MASK=1023, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
@@ -136,6 +136,10 @@ typedef struct auto_wire_frame {
      * zero */
     uint64_t outside_timed[3];
     uint32_t ranges_refused;
+    /* flip-wait scope block at 448 (TAG): the owner PPU ticks [begin, end] of the first two flip-wait scopes counted
+     * at 12 (u64@448/456 and u64@464/472); zero for scopes not recorded. With more than two scopes in the frame the
+     * reader cannot place the others and does not use the block. */
+    uint64_t flip_wait_at[2][2];
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
 } auto_wire_frame;
 

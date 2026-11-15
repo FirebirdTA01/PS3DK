@@ -405,7 +405,7 @@ if a.case=='segbuild':
     assert seg==[(67,1,1,1,(0,owner,1,0)),(67,1,6,2,(0,owner,1,0)),(67,1,6,2,(1,owner,1,0)),
                  (64|4|16,0,7,0,(2,owner,1,0))],seg
     assert all(r['tail']==(0,0,0,0) for r in records if not r['flags']&64)
-    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==448 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==480 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep==[0,3,0xffffffff],unrep
     rflags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -418,7 +418,7 @@ if a.case=='segbuild':
 if a.case=='segnested':
     config=[b for k,b in auto if k==34][0]
     assert struct.unpack_from('<2I',config,24)==(1023,11)
-    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==448 for b in rows)
+    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==480 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
@@ -483,7 +483,7 @@ if a.case=='tags':
     # inner then outer, the four nested ranges unwinding, nine ranges of the reserve in frame 1, all tag 0xd
     assert [x[:3] for x in rng]==[(0,2,0),(0,1,0),(0,4,0),(0,3,0),(0,2,0),(0,1,0)]+[(1,1,0)]*9,rng
     assert all(x[3]==0xd for x in rng),rng
-    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==448 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==480 for b in rows)
     tail=[struct.unpack_from('<3QII',b,416) for b in rows]
     assert tail[0]==(0,0,0,3,0),tail[0]
     # the boundary range, seven ranges past the reserve, and the timed and inner ranges once it is spent
@@ -494,7 +494,7 @@ if a.case=='labels':
     config=[b for k,b in auto if k==34][0]
     assert struct.unpack_from('<2I',config,24)==(1023,11)
     rows=[b for k,b in auto if k==36]
-    assert len(rows)>=3 and all(len(b)==448 for b in rows),[len(b) for b in rows]
+    assert len(rows)>=3 and all(len(b)==480 for b in rows),[len(b) for b in rows]
     block=[struct.unpack_from('<4IQQ',b,384) for b in rows[:3]]
     # frame 0: two complete runs (labels 70 and 80: several), two broken; frame 1: two complete (label 90 and an
     # address outside the label area), one spanning; frame 2: one spanning run, nothing complete
@@ -565,7 +565,7 @@ if a.case=='segments':
     assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
     for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
-        assert len(b)==448 and struct.unpack_from('<H',b,2)[0]==3|64
+        assert len(b)==480 and struct.unpack_from('<H',b,2)[0]==3|64
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
@@ -580,7 +580,7 @@ if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
     assert struct.unpack_from('<2I',config,24)==(1023,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
-    assert all(len(b)==448 for b in rows)
+    assert all(len(b)==480 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
     assert flags==[1|2|32|64]*19+[1|2|16|32|64,1|2|16|64,1|2|64],flags # flip rows; flip 19 closed OPEN by the explicit call
     # hand-written polls are polling cadence, never flip-wait scopes: one complete run per flip frame
@@ -612,7 +612,7 @@ if a.case in ('present','spanning'):
     assert struct.unpack_from('<2I',config,24)==(1023,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
-    assert len(rows)==n and all(len(b)==448 for b in rows),[len(b) for b in rows]
+    assert len(rows)==n and all(len(b)==480 for b in rows),[len(b) for b in rows]
     assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(n))
     MS=1000000
     def present(b):
@@ -629,6 +629,12 @@ if a.case in ('present','spanning'):
         assert r[1]['scopes']==0 and r[1]['runs']==1 and 20*MS<=r[1]['cadence']<21*MS,r[1]
         assert (r[2]['scopes'],r[2]['timeouts'],r[2]['runs'],r[2]['broken'])==(2,1,0,1) and 23*MS<=r[2]['ticks']<25*MS,r[2]
         assert all(x['spanning']==0 and x['scope_spanning']==0 for x in r),r
+        # the flip-wait scope block at 448: where frame 2's two scopes ran, inside the frame, in order, their elapsed
+        # times summing to the row's ticks; no scope, no block
+        at=struct.unpack_from('<4Q',rows[2],448);fb,fe=struct.unpack_from('<2Q',rows[2],24)
+        assert fb<=at[0]<=at[1]<=at[2]<=at[3]<=fe and (at[1]-at[0])+(at[3]-at[2])==r[2]['ticks'],(at,fb,fe)
+        assert 20*MS<=at[1]-at[0]<21*MS,at
+        assert all(struct.unpack_from('<4Q',b,448)==(0,0,0,0) for b in rows[:2])
         fields=struct.unpack_from('<HHI15Q',auto[-1][1])
         assert fields[1]==1|256,fields
         print('real capture: flip-wait scopes counted once, polling cadence and two-poll intervals never a wait PASS')
@@ -713,7 +719,7 @@ if operations:
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
         for i,b in enumerate(rows):
-            assert len(b)==448 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
+            assert len(b)==480 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
             assert struct.unpack_from('<Q',b,16)[0]==i
             assert struct.unpack_from('<Q',b,24)[0]<=struct.unpack_from('<Q',b,32)[0]
             assert not any(struct.unpack_from('<24Q',b,64))

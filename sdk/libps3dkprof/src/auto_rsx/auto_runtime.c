@@ -1221,6 +1221,10 @@ void ps3dk_prof__auto_flip_wait_end(uint64_t scope,int32_t rc)
     if(!a->coverage.active) return;
     if(a->flip_wait_spanning) {add32(&a->coverage.live.flip_wait_spanning);return;} /* charged to neither */
     if(after<a->flip_wait_since) return;
+    if(a->coverage.live.flip_waits<2) {  /* where the first two scopes ran, for the reader's overlap with RSX busy */
+        a->coverage.live.flip_wait_at[a->coverage.live.flip_waits][0]=a->flip_wait_since;
+        a->coverage.live.flip_wait_at[a->coverage.live.flip_waits][1]=after;
+    }
     add32(&a->coverage.live.flip_waits);add64(&a->coverage.live.flip_wait,after-a->flip_wait_since);
     if(rc) add32(&a->coverage.live.flip_wait_timeouts);
 }

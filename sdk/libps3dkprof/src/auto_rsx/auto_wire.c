@@ -72,6 +72,8 @@ size_t auto_encode_frame(uint8_t *b, size_t cap, const auto_wire_frame *f)
     le32(b+396,f->label_index); le64(b+400,f->label_cadence);
     le64(b+416,f->outside_timed[0]); le64(b+424,f->outside_timed[1]); le64(b+432,f->outside_timed[2]);
     le32(b+440,f->ranges_refused);
+    le64(b+448,f->flip_wait_at[0][0]); le64(b+456,f->flip_wait_at[0][1]);
+    le64(b+464,f->flip_wait_at[1][0]); le64(b+472,f->flip_wait_at[1][1]);
     return AUTO_FRAME_BYTES;
 }
 
