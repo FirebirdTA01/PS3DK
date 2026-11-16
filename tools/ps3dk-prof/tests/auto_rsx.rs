@@ -926,6 +926,47 @@ fn flip_frames_and_frame_source() {
     assert_eq!(e.rule, Rule::AutoStatus);
 }
 
+/// Regression for EMP run 13 / t_5ee47202: a capture that has rows but no
+/// STATUS chunk (unsealed) must not read "frames delimited by: NONE" merely
+/// because STATUS bits are absent; the row flags are the source of truth.
+#[test]
+fn unsealed_flip_delimited_capture_regress_from_none() {
+    // A coverage row with the FR_FLIP (32) bit set. No STATUS chunk.
+    let mut x = row(0, (10, 20), 0);
+    x.flags |= 32;
+    let captured = reader::read(&seg_file(vec![coverage(&x)]).bytes()).expect("reads");
+    let r = analyze(&captured);
+    assert!(r.status.is_none(), "fixture has no STATUS chunk");
+    assert_eq!(r.frames[0].flags & 32, 32, "row FR_FLIP bit preserved");
+    let src = ps3dk_prof::auto_rsx::frame_source(&r);
+    assert!(src.starts_with("FLIP (from frame rows"), "{src}");
+    assert!(!src.starts_with("NONE"), "regression: unsealed flip-delimited capture reads FLIP, got {src}");
+    // The row is also not lost: analyze still carries it.
+    assert_eq!(r.frames.len(), 1);
+}
+
+/// No STATUS: the rows decide. Flip and non-flip rows read MIXED, non-flip rows
+/// only read EXPLICIT (a row exists only for a delimited frame), and no rows
+/// read NONE. None of these may claim the STATUS-based wording.
+#[test]
+fn unsealed_mixed_explicit_and_empty_frame_source() {
+    let mut flip_row = row(0, (10, 20), 0);
+    flip_row.flags |= 32;
+    let not_flip = row(1, (20, 30), 0);
+    let r = analyze(&reader::read(&seg_file(vec![coverage(&flip_row), coverage(&not_flip)]).bytes()).expect("reads"));
+    assert!(r.status.is_none());
+    let src = ps3dk_prof::auto_rsx::frame_source(&r);
+    assert!(src.starts_with("MIXED (from frame rows"), "{src}");
+    assert_eq!(r.frames.len(), 2);
+    let r = analyze(&reader::read(&seg_file(vec![coverage(&not_flip)]).bytes()).expect("reads"));
+    let src = ps3dk_prof::auto_rsx::frame_source(&r);
+    assert!(src.starts_with("EXPLICIT (from frame rows"), "{src}");
+    let r = analyze(&reader::read(&seg_file(vec![ops(&[op(1, 0, (100, 110))])]).bytes()).expect("reads"));
+    assert!(r.status.is_none() && r.frames.is_empty());
+    let src = ps3dk_prof::auto_rsx::frame_source(&r);
+    assert!(src.starts_with("NONE") && src.ends_with("capture status unavailable)"), "{src}");
+}
+
 #[test]
 fn second_console_capture() {
     // flip frames, a qualified map, and the shutdown-closed final frame: no PPU-bound, the final frame named

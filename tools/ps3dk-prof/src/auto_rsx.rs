@@ -2124,13 +2124,27 @@ pub const SCOPE: &str = "Reached-marker intervals between two RSX command-stream
 clears, including dependencies and pipeline effects between them: not isolated draw cost, not utilization, not GPU \
 busy time. Frame tokens identify submission, not GPU execution containment.";
 
-/// What delimited the capture's frames, from STATUS (FLIP, EXPLICIT, both, or none seen).
-pub fn frame_source(r: &Report) -> &'static str {
-    match r.status.as_ref().map(|s| s.flags & (ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT)) {
-        Some(f) if f == ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT => "MIXED (flips until the first explicit ps3dk_prof_frame)",
-        Some(ST_FRAMES_FLIP) => "FLIP",
-        Some(ST_FRAMES_EXPLICIT) => "EXPLICIT",
-        _ => "NONE (no flip or explicit frame seen: operations unassociated)",
+/// What delimited the capture's frames, preferring the final STATUS bits (FLIP, EXPLICIT, both, or none seen).
+/// Returns a String: the fallback when STATUS is absent (unsealed / provisional capture) derives the delimiter from
+/// the retained frame rows' own flags and says so, so an unsealed flip-delimited capture no longer reads NONE.
+pub fn frame_source(r: &Report) -> String {
+    if let Some(s) = r.status.as_ref() {
+        return match s.flags & (ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT) {
+            f if f == ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT => "MIXED (flips until the first explicit ps3dk_prof_frame)".into(),
+            ST_FRAMES_FLIP => "FLIP".into(),
+            ST_FRAMES_EXPLICIT => "EXPLICIT".into(),
+            _ => "NONE (no flip or explicit frame seen: operations unassociated)".into(),
+        };
+    }
+    // No final STATUS (unsealed or provisional). Derive the delimiter from the retained frame rows: every row is a
+    // delimited frame, flip-opened rows carry FR_FLIP and the others were opened by an explicit ps3dk_prof_frame
+    // (writers that predate FR_FLIP are refused at read time). Say that the rows, not STATUS, are the source.
+    let flips = r.frames.iter().filter(|f| f.flags & FR_FLIP != 0).count();
+    match (r.frames.len(), flips) {
+        (0, _) => "NONE (no frame row retained: operations unassociated; capture status unavailable)".into(),
+        (n, f) if f == n => "FLIP (from frame rows; capture status unavailable)".into(),
+        (_, 0) => "EXPLICIT (from frame rows; capture status unavailable)".into(),
+        _ => "MIXED (from frame rows: flip and explicit frames; capture status unavailable)".into(),
     }
 }
 
