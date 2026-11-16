@@ -771,6 +771,9 @@ jobs:
       - name: Test B0 report-copy packet and controls
         run: python3 tests/host/report-copy-b0-test.py
 
+      - name: Test report-copy ordering packets and controls
+        run: python3 tests/host/report-copy-ordering-test.py
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
