@@ -505,7 +505,7 @@ fn frames(args: &[String]) -> ExitCode {
                 for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
                     println!("  owner {} frame {}: {}", f.owner, f.frame, f.value);
                 }
-            } else if a.capture.windows_flag {
+            } else if a.capture.windows_flag && !a.capture.windows.is_empty() {
                 for w in &a.capture.windows {
                     let status_note = if w.incomplete { " (incomplete)" } else { "" };
                     println!(
@@ -579,11 +579,13 @@ fn report_cmd(args: &[String]) -> ExitCode {
                     return ExitCode::from(3);
                 };
                 print!("{}", report::render_window(&a, w));
-            } else if a.capture.windows_flag {
+            } else if a.capture.windows_flag && !a.capture.windows.is_empty() {
                 for w in &a.capture.windows {
                     print!("{}", report::render_window(&a, w));
                 }
             } else {
+                // no window recorded (none opened, or the run ended before one reached the file): the whole capture,
+                // so the verdict is always printed
                 print!("{}", report::render(&a));
             }
             verdict_code(&a)
@@ -646,7 +648,7 @@ fn auto(args: &[String]) -> ExitCode {
                 } else {
                     ps3dk_prof::auto_rsx::write_text_window(&mut out, &r, w)
                 }
-            } else if a.capture.windows_flag {
+            } else if a.capture.windows_flag && !a.capture.windows.is_empty() {
                 if json {
                     let mut win_arr = Vec::new();
                     for w in &a.capture.windows {

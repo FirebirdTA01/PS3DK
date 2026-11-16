@@ -719,7 +719,7 @@ void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring,struct _gcmCtx
     gpp_ctx *ctx=(gpp_ctx *)(void *)ring;
     uintptr_t cur,end;
     int pair;
-    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,1))) return;
+    if(!ring || !segment || !p_ready() || g_tls.in_gpu || !p_window_gate(g_prof) || !(a=owner_capture(NULL,1))) return;
     if(!(s=segment_find(a,segment)) || s->called || s->bracket || !s->refused) return;
     c=auto_config_read(&configuration);
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
@@ -777,6 +777,21 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         /* this build was already executed: the CALL replays it, report writes included */
         if(s->reports) ST_REL(&a->segment_replay,1u);
         (void)auto_frames_unrepresented(&a->coverage,s->visits);return;
+    }
+    if(!p_window_gate(g_prof)) {
+        /* A CALL while no capture window is open (an immediate window ended earlier in this frame): it gets no
+         * in-window execution token and emits nothing.  Its build is accounted as executed without a record: a
+         * bracket begun for it is quarantined, its draws count as unrepresented, and the build is dropped, which
+         * records it as a dropped build and quarantines every report pair its embedded timestamp writes target,
+         * so neither this CALL nor a later replay can make stale data qualify.  The build counts as called, so a
+         * later CALL of it is a replay: its draws are unrepresented and, when it holds timestamp writes, the capture's
+         * replay latch is set. */
+        if(s->bracket) {auto_queue_quarantine_pair(&a->operations,s->bracket_pair);ST_REL(&a->segment_quarantine,1u);}
+        s->bracket=0;
+        s->called=1;
+        lost=s->count;history_add(&lost,s->refused);
+        (void)auto_frames_unrepresented(&a->coverage,lost ? lost:1u);
+        segment_drop(a,s);return;
     }
     s->called=1;
     bracket=s->bracket;s->bracket=0;
@@ -916,10 +931,32 @@ static uint32_t foreign_begin(gpp_ctx *ctx,const ps3tc_auto_call *call,uint64_t 
     return 0;
 }
 
+/* Outside a capture window: a covered draw written into a tracked segment build is not timed, but the build keeps
+ * its accounting, as a visit refused for a reason other than room: a later CALL of the build inside a window then
+ * gets a whole-CALL bracket or counts these draws as unrepresented, never as a build with no draws.  Nothing else
+ * (no row count, no record, no report pair). */
+static void unobserved_build(gpp_ctx *ctx,const ps3tc_auto_call *call)
+{
+    auto_capture *a;
+    auto_segment *s;
+    if(!call || call->kind<1 || call->kind>3 || g_tls.in_gpu || !(a=owner_capture(NULL,1)) || a->active ||
+       a->segment_active) return;
+    s=segment_find(a,ctx);
+    if(!(s && s->open && !s->external)) s=external_writer(a,ctx);
+    if(!s) return;
+    history_add(&s->visits,1);history_add(&s->refused,1);history_add(&s->other_refused,1);
+}
+
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     if(!ctx || !p_ready()) return 0;
+    if(!p_window_gate(g_prof)) {
+        /* no draw timing outside a capture window; a stopped owner still acknowledges the stop here */
+        if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
+        else unobserved_build(ctx,call);
+        return 0;
+    }
     auto_capture *a=owner_capture(ctx,1);
     const auto_wire_config *c;
     auto_queue_entry *e;
@@ -1062,9 +1099,19 @@ void p_auto_owner_retire(void)
     }
 }
 
+static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame);
 void p_auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
+    if(a && !p_window_gate(g_prof)) {
+        /* outside a window: the previous window's last row closes, clock anchors keep their cadence so the next
+         * window's map qualifies, and no row or FRAME mark opens */
+        if(!a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
+            if(a->coverage.active) (void)close_frame(a,a->coverage.owner,a->coverage.live.frame);
+            if(frame%8u==0) sample_clock(a,frame);
+        }
+        return;
+    }
     if(a && !a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
         int flip=a->in_flip_frame!=0;
         if(!flip) a->explicit_seen=1; /* an explicit call takes precedence from here on */
@@ -1577,6 +1624,11 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
     uintptr_t cur,end;
     int pair;
     if(!desc || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;
+    if(!p_window_gate(g_prof)) {   /* outside a window: refused, still pushed so END stays balanced */
+        if(a->range_depth<AUTO_RANGE_DEPTH) {memset(&a->ranges[a->range_depth],0,sizeof a->ranges[0]);a->range_depth++;}
+        else a->range_excess++;
+        return 0;
+    }
     if(a->range_depth>=AUTO_RANGE_DEPTH) {a->range_excess++;range_refuse(a);return 0;}
     r=&a->ranges[a->range_depth++];
     memset(r,0,sizeof *r);

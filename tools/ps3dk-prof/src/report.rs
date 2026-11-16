@@ -602,14 +602,8 @@ pub fn render_window(a: &Analysis, w: &crate::model::CaptureWindow) -> String {
     }
 
     let _ = writeln!(o, "\nspans:");
-    for (s, v) in cap.spans.iter().zip(&a.spans) {
-        let in_window = match v.attribution.claim() {
-            Some((_, f)) => w.contains_frame(f),
-            None => match s.frame_context {
-                FrameContext::Frame(f) => w.contains_frame(f),
-                _ => false,
-            },
-        };
+    for (i, (s, v)) in cap.spans.iter().zip(&a.spans).enumerate() {
+        let in_window = a.span_in_window(s, i, w);
         if !in_window {
             continue;
         }

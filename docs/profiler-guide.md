@@ -14,7 +14,7 @@ The `PS3DK_PROF` interface in `<ps3dk/prof.h>` is PPU-only: an SPU translation u
 | `ps3dk-prof` | Command-line checker (`check`) and reporter (`report`) for a captured file. |
 | `ps3dk-prof-viewer` | GUI viewer: overview, timeline, frames, zones, hot paths, live sessions, and full-frame snapshots. |
 
-A run produces one capture. A capture is read back, validated, and displayed. The viewer's "Capture full frame" feature takes a snapshot of one frame of the capture. "Capture RSX frame" is PLANNED (section 5).
+A run produces one capture. A capture is read back, validated, and displayed. The viewer's "Capture full frame" feature takes a snapshot of one frame of the capture. "Capture RSX frame" is PLANNED (section 6).
 
 ---
 
@@ -54,6 +54,12 @@ Link the ordinary PS3DK runtime libraries your app already uses alongside it (th
 `ps3dk_prof_config` fields and their ranges (see `<ps3dk/prof.h>` for the complete list and error codes): `mode`, `max_threads` (1..1024), `max_descriptors` (1..65536, one per zone site), `ring_records` (power of two, 512..1048576), `drain_interval_us` (1000..1000000, THREAD mode), `drain_stack_bytes` (16 KiB..1 MiB, THREAD mode), `quiesce_timeout_us` (0..60000000), `auto_register` (`0` default / `1`), `app` (1..32 characters of `[A-Za-z0-9_-]`, names the default capture file), `build_id`, `flags`, `workload_tag`, and a `reserved` that must stay `0`.
 
 `ps3dk_prof_config_defaults(&cfg)` starts `cfg` from a valid default start (see `<ps3dk/prof.h>` for the exact values). Set `cfg.mode` and `cfg.app` explicitly before calling `ps3dk_prof_init`.
+
+### 2.3a Capture windows
+
+The profiler records nothing heavy until the application opens a capture window. An application with no trigger
+produces a capture with no windows and no heavy data; one line after init (`PS3DK_PROF_CAPTURE_WHOLE_RUN();`) records
+the whole run. See section 5.
 
 ### 2.4 Init, read the capture record, drain, shutdown
 
@@ -340,13 +346,97 @@ The **Capture full frame** button on the app bar:
 
 ---
 
-## 5. Capture RSX frame (PLANNED)
+## 5. Capture windows
+
+### 5.1 Why windows
+
+The profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO draw timing, CALL brackets and AUTO
+ranges) unless a capture window is open. Frame marks and clock anchors keep running outside windows, so frame numbers
+stay run-wide. An app with no trigger produces a capture with no windows and no heavy data.
+
+Apps built on this SDK need their own trigger. A sample built through the console run hook still runs its own trigger
+in its `main`.
+
+### 5.2 Opening and closing windows
+
+One window is open at a time: a BEGIN while a window is open, or about to open at the next frame boundary, returns
+`PS3DK_PROF_EBUSY` and is counted. Windows never share a frame, so a `PS3DK_PROF_SECTION` or
+`PS3DK_PROF_CAPTURE_WHOLE_RUN()` in the frame the previous window ended in is refused the same way. A window belongs to
+the thread that marks frames (`ps3dk_prof_frame`, or the flips AUTO observes), whichever thread begins it: a window
+begun before any frame mark (for example `PS3DK_PROF_CAPTURE_WHOLE_RUN()` right after init, on the initialization
+thread) is adopted by the first thread that marks a frame, and its frames are that thread's. END is accepted from the
+owning frame thread or from the thread that began the window, `PS3DK_PROF_EPERM` from any other. If the frame thread
+exits with a window open, the window keeps that thread's last frame until another thread marks one. Window records
+wait in a small queue for the drainer; when the drainer is so far behind that a new window's begin and end records
+would not fit, BEGIN returns `PS3DK_PROF_EFULL`, nothing opens, and `ps3dk_prof_capture_state` counts it in
+`queue_full`. A CALL segment built while no window was open is never taken as a build without draws: its draws are
+counted as untimed, so a CALL of it inside a window is timed as a whole CALL or reported with unrepresented draws. A CALL made after its window closed (a `PS3DK_PROF_SECTION` or `PS3DK_PROF_CAPTURE_WHOLE_RUN()` ended earlier in the frame) records nothing and counts its draws as unrepresented; calling that build again later is a replay and is never timed.
+At shutdown an open window
+is closed with reason SHUTDOWN, or SEAL when the capture ends through `PS3DK_PROF_AUTO_SEAL()` or
+`ps3dk_prof_capture_seal()`. The calls are inert when profiling is off; they are live in a `PS3DK_PROF` build and in a
+`PS3_PROF_AUTO` build.
+
+- `PS3DK_PROF_CAPTURE_BEGIN(name)` / `PS3DK_PROF_CAPTURE_END()` open a window at the next frame boundary and close it
+  after the current frame. `PS3DK_PROF_CAPTURE_END()` on a window that has not opened yet cancels it; without a window
+  it returns `PS3DK_PROF_EINVAL`.
+
+  ```c
+  PS3DK_PROF_CAPTURE_BEGIN("level-2");
+  /* ...the frames in between are recorded... */
+  PS3DK_PROF_CAPTURE_END();
+  ```
+
+- `PS3DK_PROF_CAPTURE_FRAMES(name, n)` opens a window at the next frame boundary that closes itself after n frames (end
+  reason COUNT); n = 0 is refused with `PS3DK_PROF_EINVAL`.
+
+  ```c
+  PS3DK_PROF_CAPTURE_FRAMES("level-2", 120);
+  ```
+
+- `PS3DK_PROF_SECTION(name)` is scoped (a C cleanup attribute, a C++ guard): it begins where it is declared and ends
+  where its enclosing block ends.
+
+  ```c
+  {
+      PS3DK_PROF_SECTION("boss-fight");
+      /* ...the work to record... */
+  }   /* the section ends here */
+  ```
+
+- `PS3DK_PROF_CAPTURE_WHOLE_RUN()` opens one window from the call to shutdown: the whole-run behaviour of earlier SDKs
+  in one line after init. The window is unnamed (listed as "whole run") and uses none of the app's descriptors.
+
+  ```c
+  PS3DK_PROF_CAPTURE_WHOLE_RUN();
+  ```
+
+- `ps3dk_prof_capture_state(&info)` (or `PS3DK_PROF_CAPTURE_STATE(&info)`) copies the window slot: state (none, opening
+  at the next boundary, open, closing after this frame), id, kind, name, first frame, frames so far, windows opened and
+  BEGINs refused.
+
+### 5.3 Reading windows
+
+One `.prof` per run holds every window. `ps3dk-prof windows <file>` lists them (id, name, source, kind, frames, end
+reason). `report`, `frames`, `auto` and `export` take `--window <id|name>` and by default report each window
+separately; `ps3dk-prof export --window <id|name>` writes one window as its own file. A window still open at the end of
+a capture is reported as open at end of capture.
+
+### 5.4 Limits
+
+- SPU lane records and function paths are not gated by windows.
+- A `PS3DK_PROF_SECTION` that opens mid-frame records its draws but has no AUTO row or verdict for that frame.
+
+---
+
+## 6. Capture RSX frame (PLANNED)
 
 A **Capture RSX frame** button next to **Capture full frame** is planned: it will time the supported draw calls of one frame on an RSX domain (safe-form array, index and inline draws and surface clears, from PSL1GHT `rsx*` and cell-style GCM callers), each only when it can be timed safely.  Other calls (the `Unsafe` forms, immediate mode, calls that do not fit the current command-buffer segment or are refused) are counted, not timed, and leave the capture PARTIAL, as can a per-frame draw cap or lost data.  It is a supported-draw timing, not a full frame acquisition.  It is planned to be opted into at build time by linking a hooked `librsx_prof.a` (with the extension archive) instead of `librsx.a`; that archive is not shipped by the normal SDK build described here.
 
 **Status: partial implementation, follow-up feature.** The reader and RSX frames page can inspect supported capture markers already present in a file, and runtime support exists. The live request/button integration and draw-hook packaging are not an available end-to-end capture workflow in this SDK tree. Names, flags and libraries may change before release.
 
-### 5.1 Automatic RSX observation (`PS3_PROF_AUTO`, beta)
+### 6.1 Automatic RSX observation (`PS3_PROF_AUTO`, beta)
+
+AUTO data (coverage rows, frame marks, draw timing, CALL brackets and ranges) is recorded only inside a capture window (section 5): an AUTO build needs its own trigger, such as `PS3DK_PROF_CAPTURE_WHOLE_RUN();` at the start of `main`.
 
 A separate, opt-in build mode that needs no profiler code in the application: configure with the SDK's PPU CMake toolchain file and `-DPS3_PROF_AUTO=ON`. It needs an SDK prefix that also holds the separately built and sealed AUTO providers: a normal SDK install does not create them. Build them with `make -C sdk/libgcm_cmd install-auto` and then `make -C sdk/libps3dkprof install-auto-package`, against the same headers and toolchain as the rest of the prefix; `PS3_PROF_AUTO_ROOT` names a different prefix that holds them. That one option then selects the automatic providers for every executable in the project (`libgcm_cmd_prof_auto.a` and `libps3dkprof_auto.a`, replacing `gcm_cmd` and `ps3dkprof_ext` where the project links them and added where it does not, both ABIs; `libps3dkprof_ext_live.a` only when the application itself links `ps3dkprof_ext_live`, never added automatically), checks them against the sealed `prof-auto.json` in `ppu/lib` (or `ppu/lib/lp64`), writes a link map and a pre-link identity object (`cmake/ps3-prof-auto-identity.py`), and refuses the configure or link when anything does not match. The identity's build binding covers every file the linker opens for that link (objects, `-l` archives, the driver's startup files and default libraries, linker scripts), found by running the driver's final linker command once with `--verbose` before the real link, together with that final command. A linker response file anywhere in it, or a specs file that `%include`s another, is refused. It does not cover the linker's internal default script, toolchain contents beyond the files the linker opens, or files an LTO plugin reads itself. After the link, `<map>.identity.json` records the ELF's sha256 next to the binding (`packaged=false`); the signed SELF is not bound automatically. It needs CMake 3.21 or newer with Ninja or Makefiles, and it cannot be combined with `PS3_PROF_WAITS`.
 
@@ -364,7 +454,7 @@ Status: beta. The runtime, the reader and CLI, the identity binding, provider se
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 ### Verdict words
 

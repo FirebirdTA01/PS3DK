@@ -143,6 +143,7 @@ int main(void)
         puts("PROBE_RESULT FAIL profiler init");
         return 1;
     }
+    (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* capture windows: record the whole run */
     atomic_store(&g_eligible, 1);
     pthread_t t;
     if (!PROBE_CONTROL && pthread_create(&t, NULL, reader, NULL) != 0) {

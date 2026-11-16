@@ -30,6 +30,10 @@ import subprocess
 import sys
 import zlib
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('out', type=Path)
 ap.add_argument('--reader', type=Path, required=True)
@@ -82,7 +86,7 @@ def build(d, src_root, extra):
     srcs = [s / f for f in ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/psp_ppu.c',
                             'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
                             'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c')] + [here / 'gpu_int.c']
-    r = run([cc, *flags, *srcs, '-o', d / 'gpu'], d / 'build.log')
+    r = run([cc, *flags, *srcs, *WHOLE_RUN, '-o', d / 'gpu'], d / 'build.log')
     return r is not None and r.returncode == 0
 
 
@@ -164,6 +168,11 @@ def oracle(cap, suite, log):
 
 san_env = dict(os.environ, UBSAN_OPTIONS='halt_on_error=1', ASAN_OPTIONS='detect_leaks=0')
 plain_cap = None
+
+# 0: the checker's own window-chunk rules (41/42 accepted, malformed refused, 43 still unknown)
+o = run([sys.executable, '-I', here / 'gpu_oracle.py', '--selftest'], out / 'oracle-selftest.log')
+row('checker selftest: window chunks', o is not None and o.returncode == 0,
+    (o.stdout.strip().splitlines() or [''])[-1] if o else '')
 
 # 1-3: every case, plain and asan
 for v, extra in (('plain', []), ('asan', ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'])):

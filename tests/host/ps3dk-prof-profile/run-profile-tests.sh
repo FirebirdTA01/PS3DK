@@ -13,6 +13,8 @@ R=$(cd "$H/../../.." && pwd)
 S=$R/sdk/libps3dkprof/src
 CC=${CC:-cc}
 bad=0
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window after every successful init
+WHOLE_RUN="$R/tests/host/ps3dk-prof-common/prof_whole_run.c -I$R/sdk/include -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex"
 : > "$O/SUMMARY.txt"
 step() { # name want command...
     local name=$1 want=$2
@@ -51,7 +53,7 @@ link() { # exe mode expect_hook expect_live stub-flags archive
     $CC $FL $( [ "$2" = profile ] && echo -DPS3DK_PROF_WITH_PROFILE ) -DEXPECT_HOOK="$3" -DEXPECT_LIVE="$4" \
         "$H/profile_writer.c" -c -o "$1.o" || return 1
     $CC $FL $5 -c "$H/hook_stub.c" -o "$1.stub.o" || return 1
-    $CC -pthread "$1.o" "$1.stub.o" "$6" -o "$1"
+    $CC -pthread "$1.o" "$1.stub.o" "$6" $WHOLE_RUN -o "$1"
 }
 step link-a 0 link "$O/pw-a" profile 0 0 "" "$O/obj-profile/final.a"
 step link-b 0 link "$O/pw-b" profile 1 0 "-DSTUB_HOOK" "$O/obj-profile/final.a"
@@ -89,7 +91,7 @@ order_build() {
     python3 -I -B "$R/sdk/libps3dkprof/tools/archive_digest.py" emit "$D/members.a" --id SPU-HOST --premises 1689         --kinds 2 > "$D/prof_identity.c" || return 1
     $CC $FL -DPS3DK_PROF_WITH_PROFILE -c "$D/prof_identity.c" -o "$D/prof_identity.o" || return 1
     $CC $FL -DPS3DK_PROF_WITH_PROFILE -DPS3DK_PROF_TEST_HOOKS -c "$I2/i2_test.c" -o "$D/i2_test.o" || return 1
-    $CC -pthread "$D"/*.o -o "$O/i2-order" $WRAP
+    $CC -pthread "$D"/*.o $WHOLE_RUN -o "$O/i2-order" $WRAP
 }
 step build-order 0 order_build
 mkdir "$O/cap-order"

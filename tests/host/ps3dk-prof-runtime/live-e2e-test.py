@@ -7,6 +7,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('out', type=Path, help='a new directory for the build and logs')
 p.add_argument('--runs', type=int, default=3)
@@ -34,7 +38,7 @@ cc = [os.environ.get('CC', 'cc'), '-std=c11', '-O2', '-g', '-Wall', '-Wextra', '
       '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS', '-I', inc.parent, '-I', src / 'core',
       '-I', src / 'pal', '-I', src / 'live', src / 'core/prof_core.c', src / 'core/prof_drain.c', src / 'core/prof_version.c',
       src / 'pal/pal_host.c', src / 'live/live_agent.c', src / 'live/live_os_host.c', src / 'live/live_api.c',
-      Path(__file__).parent / 'live_api_serve.c', '-o', api_serve]
+      Path(__file__).parent / 'live_api_serve.c', *WHOLE_RUN, '-o', api_serve]
 r = subprocess.run([str(x) for x in cc], capture_output=True, text=True)
 if r.returncode != 0:
     raise SystemExit('api serve compile failed:\n' + r.stderr)

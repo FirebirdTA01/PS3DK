@@ -192,18 +192,23 @@ impl Analysis {
     pub fn zone(&self, name: &str) -> Option<&ZoneStats> {
         self.zones.iter().find(|z| z.name == name)
     }
+    /// The zone statistics of the spans in window `w` (see [`Analysis::span_in_window`]).
     pub fn window_zones(&self, w: &crate::model::CaptureWindow) -> Vec<ZoneStats> {
         let valid = |inc: u32| self.lane_valid(inc);
-        zone_stats_filtered(&self.capture, &valid, |s, i| {
-            let v = &self.spans[i];
-            match v.attribution.claim() {
-                Some((_, f)) => w.contains_frame(f),
-                None => match s.frame_context {
-                    FrameContext::Frame(f) => w.contains_frame(f),
-                    _ => false,
-                },
-            }
-        })
+        zone_stats_filtered(&self.capture, &valid, |s, i| self.span_in_window(s, i, w))
+    }
+    /// Whether span `i` belongs to window `w`: by its attributed frame, else its frame context.  A span with neither
+    /// belongs to the window only when the capture has exactly one window: heavy data is recorded only inside a
+    /// window, so that window holds it (a whole-run window over a run without frame marks); with several windows it
+    /// cannot be placed and is in none.
+    pub fn span_in_window(&self, s: &Span, i: usize, w: &crate::model::CaptureWindow) -> bool {
+        match self.spans[i].attribution.claim() {
+            Some((_, f)) => w.contains_frame(f),
+            None => match s.frame_context {
+                FrameContext::Frame(f) => w.contains_frame(f),
+                _ => self.capture.windows.len() == 1,
+            },
+        }
     }
     pub fn work_for(&self, owner: u32, frame: u64, lane: u32) -> Option<&Metric<u128>> {
         self.work.iter().find(|w| w.owner == owner && w.frame == frame && w.lane == lane).map(|w| &w.value)

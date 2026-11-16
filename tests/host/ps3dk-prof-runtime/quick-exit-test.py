@@ -68,7 +68,13 @@ mdir.mkdir()
 sources = [mdir / "prof_core.c", mdir / "prof_drain.c", lib / "core/prof_version.c", lib / "pal/pal_host.c",
            root / "tests/host/ps3dk-prof-runtime/quick_exit_app.c"]
 exe = out / "quick-exit"
-b = subprocess.run([cc, *flags, *map(str, sources), "-o", str(exe)], capture_output=True, text=True)
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init (a tree with
+# the capture API records nothing heavy without one)
+whole_run = []
+if "ps3dk_prof_capture_begin" in (root / "sdk/include/ps3dk/prof.h").read_text():
+    whole_run = [str(root / "tests/host/ps3dk-prof-common/prof_whole_run.c"),
+                 "-Wl,--wrap=ps3dk_prof_init", "-Wl,--wrap=ps3dk_prof_init_ex"]
+b = subprocess.run([cc, *flags, *map(str, sources), *whole_run, "-o", str(exe)], capture_output=True, text=True)
 (out / "build.log").write_text(b.stdout + b.stderr)
 if b.returncode:
     print("FAIL build (build.log)")

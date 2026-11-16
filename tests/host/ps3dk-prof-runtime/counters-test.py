@@ -21,6 +21,10 @@ drain discards the emission error must fail.  --lock-only runs just these cases 
 import argparse, json, os, shutil, struct, subprocess, sys
 from pathlib import Path
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "sdk/libps3dkprof/src"
 
@@ -40,7 +44,7 @@ def build(out, counters, cc):
         files += sorted((SRC / "counters").glob("*.c"))
     if os.environ.get("SANITIZE"):
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-ftls-model=local-exec"]
-    cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_test.c")), "-o", str(exe)]
+    cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_test.c")), *WHOLE_RUN, "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     (out / (exe.name + ".compile.txt")).write_text(" ".join(cmd) + "\n" + r.stdout + r.stderr)
     if r.returncode:
@@ -123,7 +127,7 @@ def build_lock(out, cc, src, name):
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-ftls-model=local-exec"]
     files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
     files += sorted((src / "counters").glob("*.c"))
-    cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_lock_test.c")), "-o", str(exe)]
+    cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_lock_test.c")), *WHOLE_RUN, "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     (out / (name + ".compile.txt")).write_text(" ".join(cmd) + "\n" + r.stdout + r.stderr)
     if r.returncode:
@@ -272,8 +276,9 @@ def main():
     f0, d0, r0 = zones(caps[False].read_bytes())
     f1, d1, r1 = zones(caps[True].read_bytes())
     d4 = []
-    if f0 != 0 or f1 != 256:
-        d4.append(f"file_flags default={f0:#x} counters={f1:#x} (want 0 and 0x100)")
+    # bit 9 (capture windows, 0x200) is set on every capture
+    if f0 != 0x200 or f1 != 0x300:
+        d4.append(f"file_flags default={f0:#x} counters={f1:#x} (want 0x200 and 0x300)")
     if d0 != d1 or not {"wait.rsx_label", "drain.retired", "wait.spu_job"} <= set(d0):
         d4.append(f"zone names differ: {d0} vs {d1}")
     if r0 != r1 or not r0:

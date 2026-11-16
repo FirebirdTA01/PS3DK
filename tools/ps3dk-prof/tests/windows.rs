@@ -9,7 +9,7 @@ use std::process::Command;
 
 use ps3dk_prof::model::{
     CHUNK_WINDOW_BEGIN, CHUNK_WINDOW_END, FLAG_WINDOWS,
-    WINDOW_KIND_FRAMES, WINDOW_KIND_MANUAL,
+    WINDOW_KIND_FRAMES, WINDOW_KIND_MANUAL, WINDOW_KIND_SECTION,
     WINDOW_REASON_COUNT, WINDOW_REASON_END, WINDOW_SOURCE_APP, WINDOW_SOURCE_LIVE,
 };
 use ps3dk_prof::{reader, Outcome, Rule, WindowKind, WindowReason, WindowSource};
@@ -619,6 +619,69 @@ fn open_at_end_with_no_frames_reported_as_0_frames() {
     let _ = std::fs::remove_file(&tmp);
 }
 
+// ---- captures written by the runtime (auto-runtime-test.py --case windows / windowwhole / windowlegacy) -----------
+
+fn runtime_fixture(name: &str) -> String {
+    format!("{}/tests/fixtures/auto/{name}.prof", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The runtime's triggered capture: four windows at frame boundaries (MANUAL, FRAMES(3), SECTION, MANUAL closed by the
+/// capture's end), and per-window AUTO frames only inside them.
+#[test]
+fn runtime_windows_capture_reads() {
+    let bytes = std::fs::read(runtime_fixture("windows")).unwrap();
+    let cap = reader::read(&bytes).expect("reads");
+    let w: Vec<_> = cap.windows.iter().map(|w| (w.id, w.name.clone(), w.first_frame, w.last_frame, w.kind, w.reason)).collect();
+    assert_eq!(w, vec![
+        (1, "first".to_string(), 1, Some(1), WindowKind::Manual, WindowReason::End),
+        (2, "three".to_string(), 3, Some(5), WindowKind::Frames(3), WindowReason::Count),
+        (3, "sect".to_string(), 6, Some(6), WindowKind::Section, WindowReason::End),
+        (4, "tail".to_string(), 8, Some(8), WindowKind::Manual, WindowReason::Shutdown),
+    ]);
+    let (code, out, _) = run_cmd(&["auto", "--window", "2", "--json", &runtime_fixture("windows")]);
+    assert!(code.is_some());
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let frames: Vec<u64> = v["frames"].as_array().unwrap().iter().map(|f| f["frame"].as_u64().unwrap()).collect();
+    assert_eq!(frames, vec![3, 4, 5], "{out}");
+    let (_, out, _) = run_cmd(&["windows", &runtime_fixture("windows")]);
+    assert!(out.contains("window 2: \"three\" source app kind frames(3) frames 3..5 reason count"), "{out}");
+}
+
+/// CAPTURE_WHOLE_RUN: one window from the call (before frame 0) to shutdown, holding every frame.
+#[test]
+fn runtime_whole_run_window() {
+    let whole = reader::read(&std::fs::read(runtime_fixture("window-whole")).unwrap()).expect("reads");
+    assert_eq!(whole.windows.len(), 1);
+    assert_eq!((whole.windows[0].first_frame, whole.windows[0].last_frame, whole.windows[0].reason),
+        (0, Some(4), WindowReason::Shutdown));
+    let a = ps3dk_prof::auto_rsx::analyze(&whole);
+    assert_eq!(a.frames.iter().map(|f| f.frame).collect::<Vec<_>>(), vec![0, 1, 2, 3, 4]);
+}
+
+/// name_desc 0xFFFFFFFF is the unnamed whole-run window: accepted for an application MANUAL window (named "whole
+/// run", no descriptor needed), refused for any other kind or source.
+#[test]
+fn unnamed_window_only_for_app_manual() {
+    let file = |source: u8, kind: u8, n: u32, reason: u8| base_file(
+        vec![
+            chunk(CHUNK_WINDOW_BEGIN, window_begin_payload(1, u32::MAX, 0, source, kind, n)),
+            chunk(CHUNK_WINDOW_END, window_end_payload(1, reason, 4)),
+        ],
+        FLAG_WINDOWS,
+    );
+    let cap = reader::read(&file(WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0, WINDOW_REASON_END).bytes()).expect("unnamed APP MANUAL");
+    assert_eq!(cap.windows.len(), 1);
+    assert_eq!((cap.windows[0].name.as_str(), cap.windows[0].name_desc), ("whole run", u32::MAX));
+    for (source, kind, n, reason) in [
+        (WINDOW_SOURCE_LIVE, WINDOW_KIND_MANUAL, 0, WINDOW_REASON_END),
+        (WINDOW_SOURCE_APP, WINDOW_KIND_FRAMES, 5, WINDOW_REASON_COUNT),
+        (WINDOW_SOURCE_APP, WINDOW_KIND_SECTION, 0, WINDOW_REASON_END),
+    ] {
+        assert_eq!(reader::read(&file(source, kind, n, reason).bytes()).unwrap_err().rule, Rule::Windows,
+            "source {source} kind {kind}");
+    }
+}
+
 #[test]
 fn window_zone_summary_restricted_to_window_frame_range() {
     let mut s = scenario(vec![lane(
@@ -691,4 +754,53 @@ fn window_zone_summary_restricted_to_window_frame_range() {
     assert!(!rep_w2.contains("owner 1 frame 0:"), "w2 must NOT contain frame 0 elapsed");
     assert!(rep_w2.contains("W(owner 1, frame 1, lane 1): 50"), "w2 contains frame 1 work");
     assert!(!rep_w2.contains("W(owner 1, frame 0"), "w2 must NOT contain frame 0 work");
+}
+
+/// Zones with no frame (a run without frame marks): with exactly one window they are that window's (heavy data is
+/// recorded only inside a window); with several windows they cannot be placed and are in none.
+#[test]
+fn frameless_zones_belong_to_the_only_window() {
+    let build = |windows: &[(u32, u32, u64)]| {
+        let mut s = scenario(vec![lane(1, seqd(0, vec![begin(0, 0, 0, 110, 1), bparent(0, 0, 0), end(0, 0, 0, 120, 1)]))]);
+        s.descs = vec![desc(0, "frameless", "")];
+        let mut f = s.file();
+        f.flags |= FLAG_WINDOWS;
+        let trailer = f.chunks.pop().unwrap();
+        for &(id, name_desc, first) in windows {
+            f.chunks.push(chunk(CHUNK_WINDOW_BEGIN, window_begin_payload(id, name_desc, first, WINDOW_SOURCE_APP, WINDOW_KIND_MANUAL, 0)));
+            f.chunks.push(chunk(CHUNK_WINDOW_END, window_end_payload(id, WINDOW_REASON_END, first)));
+        }
+        f.chunks.push(trailer);
+        match ps3dk_prof::load(&f.bytes()) {
+            Outcome::Analysed(a) => a,
+            Outcome::Malformed(m) => panic!("fixture malformed: {m:?}"),
+        }
+    };
+    let one = build(&[(1, u32::MAX, 0)]);
+    let rep = ps3dk_prof::report::render_window(&one, &one.capture.windows[0]);
+    assert!(rep.contains("frameless: 1 instances"), "{rep}");
+    let two = build(&[(1, u32::MAX, 0), (2, u32::MAX, 1)]);
+    for w in &two.capture.windows {
+        let rep = ps3dk_prof::report::render_window(&two, w);
+        assert!(!rep.contains("frameless:"), "window {}: {rep}", w.id);
+    }
+}
+
+/// A capture with file_flags bit 9 but no window chunk (none opened, or the run ended before one reached the file):
+/// report, frames and auto print the whole capture, so the verdict is always shown, never an empty output.
+#[test]
+fn windowed_capture_without_a_window_reports_the_whole_capture() {
+    let mut s = scenario(vec![lane(1, Vec::new())]);
+    s.trailer = false;
+    let mut f = s.file();
+    f.flags |= FLAG_WINDOWS;
+    let path = temp_prof("no-window");
+    std::fs::write(&path, f.bytes()).unwrap();
+    let p = path.to_string_lossy().into_owned();
+    let (code, out, _) = run_cmd(&["report", &p]);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(out.contains("verdict: INCOMPLETE: no events recorded (ended before the first drain)"), "{out}");
+    let (_, out, _) = run_cmd(&["frames", &p]);
+    assert!(!out.trim().is_empty(), "frames printed nothing");
+    let _ = std::fs::remove_file(&path);
 }

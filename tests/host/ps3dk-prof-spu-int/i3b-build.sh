@@ -4,6 +4,7 @@
 W=$(cd "$(dirname "$0")/../../.." && pwd); S=${2:-$W/sdk/libps3dkprof/src}; T=$W/tests/host/ps3dk-prof-spu-int
 O=$1; mkdir -p $O/inc/ps3dk || exit 2; cp $W/sdk/include/ps3dk/prof.h $O/inc/ps3dk/
 F="-std=c11 -O1 -g -pthread -Wall -Wextra -Werror -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS -DPS3DK_PROF_WITH_SPU -I$O/inc -I$S/core -I$S/pal -I$S/spu -I$S/rsx"
+# capture windows: the shared whole-run helper is linked into the harness (prof_whole_run.c)
 rc=0
 for v in plain asan; do
   X=; [ $v = asan ] && X="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
@@ -17,6 +18,6 @@ for v in plain asan; do
   awk '{print $3" old_"$3}' $O/old-$v.nm > $O/old-$v.syms || rc=1
   [ -s $O/old-$v.syms ] || rc=1
   objcopy --redefine-syms=$O/old-$v.syms $O/old-$v.o $O/old-ren-$v.o || rc=1
-  cc $F $X $S/core/prof_core.c $S/core/prof_drain.c $S/core/prof_version.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $T/i3b_table.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
+  cc $F $X $W/tests/host/ps3dk-prof-common/prof_whole_run.c -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex $S/core/prof_core.c $S/core/prof_drain.c $S/core/prof_version.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $T/i3b_table.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
 done
 echo "i3b build rc=$rc"; exit $rc

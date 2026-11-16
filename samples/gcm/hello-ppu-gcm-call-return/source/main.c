@@ -26,6 +26,7 @@
 #include "../../common/gcm_segment_display.h"
 #include "../../common/gcm_segment_labels.h"
 #include "../../common/gcm_segment_crumb.h"
+#include <ps3dk/prof.h>   /* capture windows: PS3DK_PROF_CAPTURE_WHOLE_RUN (inert unless profiled) */
 
 #if defined(GCM_SEG_VARIANT_LOCAL)
 #define VARIANT "local"
@@ -331,6 +332,8 @@ int main(void)
     PhaseStats st = {.name = VARIANT};
     const char *outcome = "-";
     (void)seg; (void)config;
+    /* a profiled build (PS3DK_PROF or PS3_PROF_AUTO) records nothing until a window opens: record the whole run */
+    (void)PS3DK_PROF_CAPTURE_WHOLE_RUN();
 
     seg_crumb_open("hello-ppu-gcm-call-return-" VARIANT);
     if (gcm_host_buffer_alloc(HOST_BYTES, &host) != 0 ||

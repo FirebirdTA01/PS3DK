@@ -12,6 +12,9 @@ use crate::model::{
 };
 use crate::wire::Cursor;
 
+/// WINDOW_BEGIN name_desc of an unnamed window (CAPTURE_WHOLE_RUN): no descriptor is declared for it.
+pub const WINDOW_UNNAMED: u32 = u32::MAX;
+
 pub const SCHEMA: u16 = 1;
 
 #[derive(Debug, Clone)]
@@ -93,11 +96,18 @@ impl Reader {
                 );
             }
         }
-        let desc = cap.descriptors.get(&name_desc).ok_or_else(|| Malformed {
-            rule: Rule::Windows,
-            detail: format!("window {id}: undeclared name descriptor {name_desc}"),
-        })?;
-        let name = desc.name.clone();
+        // name_desc u32::MAX: an unnamed window (CAPTURE_WHOLE_RUN), which takes no descriptor; only MANUAL
+        let name = if name_desc == WINDOW_UNNAMED {
+            if kind_raw != WINDOW_KIND_MANUAL || source_raw != WINDOW_SOURCE_APP {
+                return malformed(Rule::Windows, format!("window {id}: unnamed window of kind {kind_raw} source {source_raw}                     (only an application MANUAL window may be unnamed)"));
+            }
+            "whole run".to_string()
+        } else {
+            cap.descriptors.get(&name_desc).ok_or_else(|| Malformed {
+                rule: Rule::Windows,
+                detail: format!("window {id}: undeclared name descriptor {name_desc}"),
+            })?.name.clone()
+        };
 
         let source = match source_raw {
             WINDOW_SOURCE_APP => WindowSource::App,

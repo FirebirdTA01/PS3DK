@@ -6,6 +6,10 @@ import argparse, json, os, shutil, struct, subprocess, zlib
 from collections import defaultdict
 from pathlib import Path
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--sanitize', choices=['address', 'thread'])
@@ -95,7 +99,7 @@ o = out / 'work.o'
 r = run('compile-work', [cc, *base, '-finstrument-functions', '-fno-optimize-sibling-calls', '-c',
                          here / 'func_work.c', '-o', o])
 assert r.returncode == 0, r.stderr.decode()
-r = run('link', [cc, *base, o, *objs, '-o', out / 'func_test'])
+r = run('link', [cc, *base, '-fno-instrument-functions', o, *objs, *WHOLE_RUN, '-o', out / 'func_test'])
 assert r.returncode == 0, r.stderr.decode()
 # The library is never instrumented: no hook call may appear in any library object.
 for obj in libobjs:
@@ -117,7 +121,7 @@ def decode(path):
     assert b[:8] == b'PS3DKPRF', 'magic'
     major, minor, flags = struct.unpack_from('<HHI', b, 8)
     # bit 5 alone; with the extension also bits 0 (domain extensions), 1 (PROFILE record) and 2 (SPU order records)
-    assert (major, minor) == (1, 0) and flags == (39 if a.ext else 32), (major, minor, flags)
+    assert (major, minor) == (1, 0) and flags == (39 if a.ext else 32) | 512, (major, minor, flags)  # bit 9: capture windows
     pos, seq, chunks = 16, 0, []
     while pos < len(b):
         typ, ln, s = struct.unpack_from('<IIQ', b, pos)
@@ -169,7 +173,8 @@ def decode(path):
             assert s0 == 1 and r == 0 and fl < 4
             cap['status'].append(dict(flags=fl, req=req, unreg=un, noactor=na))
         else:
-            assert typ <= 7 or (a.ext and typ <= 26), typ   # the extension's own chunks are not decoded here
+            # the extension's own chunks and the capture-window records (41, 42) are not decoded here
+            assert typ <= 7 or typ in (41, 42) or (a.ext and typ <= 26), typ
     assert cap['status'] and cap['status'][-1]['flags'] & 1 and sum(s['flags'] & 1 for s in cap['status']) == 1
     # Per incarnation: definitions before use, consecutive intervals, contiguous ticks, at most one terminal chunk.
     per = defaultdict(lambda: dict(nodes={}, last=0, cut=None, term=0, totals=defaultdict(lambda: [0, 0, 0]),

@@ -91,6 +91,8 @@ int ps3dk_prof_counter(const char *name, int64_t value)
         return PS3DK_PROF_ENOTSUP;
     if (LD_ACQ(&p->stop_latch))
         return PS3DK_PROF_ESTOPPED;
+    if (!p_window_gate(p))
+        return PS3DK_PROF_OK;   /* triggered capture: no sample outside a window */
     if (pal_mutex_lock(&c->mu) != 0)
         return PS3DK_PROF_EBUSY;
     if (c->frozen) {

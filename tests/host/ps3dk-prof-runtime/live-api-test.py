@@ -11,6 +11,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('out', type=Path, help='a new directory for the builds')
 a = p.parse_args()
@@ -39,7 +43,7 @@ REPORTS = ['runtime error:', 'ERROR: AddressSanitizer', 'ERROR: LeakSanitizer', 
 failed = 0
 for label, extra in [('plain', []), ('sanitize', san)]:
     exe = out / f'live-api-{label}'
-    r = subprocess.run([cc, *base, *extra, *map(str, sources), '-o', str(exe)], capture_output=True, text=True)
+    r = subprocess.run([cc, *base, *extra, *map(str, sources), *WHOLE_RUN, '-o', str(exe)], capture_output=True, text=True)
     (out / f'{label}.compile.log').write_text(r.stderr)
     if r.returncode != 0:
         raise SystemExit(f'{label} compile failed:\n{r.stderr}')

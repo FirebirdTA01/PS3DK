@@ -181,6 +181,7 @@ int main(void)
     cfg.mode=PS3DK_PROF_MODE_APP;cfg.max_threads=1;cfg.max_descriptors=64;cfg.ring_records=512;
     if(ps3dk_prof_set_sink_path("/dev_hdd0/tmp") || PS3DK_PROF_INIT(&cfg)){puts("WORKLOAD_FAIL profiler-init");goto done;}
     prof_owned=1;
+    (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* capture windows: record the whole run */
     if(PS3DK_PROF_THREAD_BEGIN("main")){puts("WORKLOAD_FAIL profiler-thread");goto done;}
 #endif
     #if SAMPLE_FUNC_PATHS || SAMPLE_FUNC_FRAMES > 0

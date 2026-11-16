@@ -87,7 +87,8 @@ int main(int argc, char **argv)
     if (f)
         fclose(f);
     CHECK(len > 16 && memcmp(buf, "PS3DKPRF", 8) == 0, "magic");
-    CHECK(buf[12] == (profile ? 3 : 1) && buf[13] == 0 && buf[14] == 0 && buf[15] == 0, "file_flags byte 12 = %u",
+    /* byte 13 bit 1: file_flags bit 9, capture windows (every capture) */
+    CHECK(buf[12] == (profile ? 3 : 1) && buf[13] == 2 && buf[14] == 0 && buf[15] == 0, "file_flags byte 12 = %u",
           buf[12]);
     /* walk the chunks */
     size_t pos = 16, idx = 0, profile_at = (size_t)-1, profiles = 0;

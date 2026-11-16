@@ -33,6 +33,10 @@ import subprocess
 import sys
 import zlib
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('out', type=Path)
 ap.add_argument('--reader', type=Path, required=True)
@@ -97,7 +101,7 @@ def build(d, kind, san, src=lib, tdir=here):
         if san == 'tsan':
             fl.append('-DGPP_HOST_DEVMEM')  # every device-memory access an SC atomic (the R4a Mode C seam)
         harness = tdir / ('rsxcap_rt.c' if kind == 'rt' else 'rsxcap_contract.c')
-        cmd = [cc, *fl, *[src / s for s in RT_SRCS], harness, '-o', exe]
+        cmd = [cc, *fl, *[src / s for s in RT_SRCS], harness, *WHOLE_RUN, '-o', exe]
     r = run(cmd, d / f'build-{kind}.log', timeout=900)
     return exe if r is not None and r.returncode == 0 else None
 

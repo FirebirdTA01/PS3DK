@@ -190,7 +190,11 @@ build_variant() {
     "$CXX" -std=c++17 -O1 -g -pthread -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS "${inc[@]}" \
         "${warn[@]}" "${extra[@]}" -c "$here/rt_cxx.cpp" -o "$dir/rt_cxx.o" 2>"$dir/rt_cxx.log" ||
         { cat "$dir/rt_cxx.log"; return 1; }
-    "$CXX" -pthread "${extra[@]}" "${objs[@]}" "$dir/rt_cxx.o" -o "$dir/rt" 2>"$dir/link.log" ||
+    # the shared whole-run helper: every successful init opens a CAPTURE_WHOLE_RUN window (capture windows)
+    "$CC" "${cflags[@]}" -c "$root/tests/host/ps3dk-prof-common/prof_whole_run.c" -o "$dir/whole_run.o" \
+        2>"$dir/whole_run.log" || { cat "$dir/whole_run.log"; return 1; }
+    "$CXX" -pthread "${extra[@]}" "${objs[@]}" "$dir/rt_cxx.o" "$dir/whole_run.o" \
+        -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex -o "$dir/rt" 2>"$dir/link.log" ||
         { cat "$dir/link.log"; return 1; }
 }
 
@@ -361,7 +365,7 @@ else
 fi
 
 if [ "$lib_ok" = 1 ]; then
-    api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record ps3dk_prof_init \
+    api="ps3dk_prof_capture_begin ps3dk_prof_capture_end ps3dk_prof_capture_seal ps3dk_prof_capture_state ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record ps3dk_prof_init \
 ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
 ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # nm output goes to files first: under pipefail a `nm | grep -q` can exit 141 on an early match.
