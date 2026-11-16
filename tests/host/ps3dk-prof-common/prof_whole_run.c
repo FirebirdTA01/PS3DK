@@ -2,7 +2,10 @@
  * written before capture windows records through the same windowed path as a real application that asks for its
  * whole run. Linked with -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex (the explicit inits of a test and
  * the automatic init at startup alike). A test of the window API itself, or of an application with no trigger, does
- * not link it. */
+ * not link it.  It always needs the live window API, whatever flags the including test compiles it with. */
+#ifndef PS3DK_PROF
+#define PS3DK_PROF 1
+#endif
 #include <ps3dk/prof.h>
 
 #ifdef __cplusplus
