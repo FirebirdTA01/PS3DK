@@ -2075,6 +2075,45 @@ fn flip_wait_scope_block_is_checked() {
     assert!(reader::read(&f.bytes()).is_err());
 }
 
+/// Recorded PPU positions remain available even without an RSX clock map. Later
+/// scopes have aggregate time only; neither the report nor CLI invents positions.
+#[test]
+fn recorded_flip_wait_positions_in_json() {
+    let mut f = flip_frame(&[(6000, 36_000)], (20_000, 40_000), 1023, false);
+    let row = &mut f.chunks.iter_mut().find(|c| c.ty == 36).unwrap().payload;
+    row[12..16].copy_from_slice(&3u32.to_le_bytes());
+    row[56..64].copy_from_slice(&50_000u64.to_le_bytes());
+    row[464..472].copy_from_slice(&60_000u64.to_le_bytes());
+    row[472..480].copy_from_slice(&70_000u64.to_le_bytes());
+    row[384..388].copy_from_slice(&4u32.to_le_bytes());
+    row[388..392].copy_from_slice(&2u32.to_le_bytes());
+    row[392..396].copy_from_slice(&1u32.to_le_bytes());
+    row[396..400].copy_from_slice(&21u32.to_le_bytes()); // label 20
+    row[400..408].copy_from_slice(&12_345u64.to_le_bytes());
+    row[408..416].copy_from_slice(&12_345u64.to_le_bytes());
+    let capture = reader::read(&f.bytes()).unwrap();
+    assert_eq!(fixture("presentation-partial"),f.bytes(),"regenerate the screenshot/parity fixture from this wire builder");
+    let report = analyze(&capture);
+    assert_eq!(report.frames[0].flip_wait_at,capture.auto.as_ref().unwrap().frames[0].flip_wait_at);
+    let mut output = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut output, &report).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["frames"][0]["flip_wait_intervals"], serde_json::json!([
+        {"tb_begin":20_000,"tb_end":40_000}, {"tb_begin":60_000,"tb_end":70_000}
+    ]));
+    assert_eq!(json["frames"][0]["presentation"]["flip_wait"]["scopes"],3);
+    assert_eq!(json["frames"][0]["label_polling"]["label"],20);
+    let old = analyze(&reader::read(&flip_frame(&[(6000,36_000)],(20_000,40_000),511,false).bytes()).unwrap());
+    output.clear();
+    ps3dk_prof::auto_rsx::write_json(&mut output,&old).unwrap();
+    let old_json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(old_json["frames"][0].get("flip_wait_intervals").is_none());
+    if let Some(dir) = std::env::var_os("VIEWER_PRESENTATION_FIXTURE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(std::path::Path::new(&dir).join("presentation-partial.prof"),f.bytes()).unwrap();
+    }
+}
+
 /// The inner PPU bound of a raw timestamp comes from the nearest anchors and contains the anchor's own bracket.
 #[test]
 fn raw_to_ppu_bounds_from_anchors() {

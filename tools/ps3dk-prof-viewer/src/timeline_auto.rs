@@ -8,13 +8,22 @@ use ps3dk_prof::auto_rsx::{FrameView, FR_TOKEN};
 
 pub const PAINT_CAP: usize = 4096;
 pub const PRESENTATION_NOTICE: &str = "Flip-wait and polling positions are not recorded in this capture format. Per-frame aggregates only; polling cadence is observation, not waiting time.";
-// TODO (#128, #127): after the reader exposes recorded flip-wait scope begin/end
-// ticks, draw those actual intervals; add label-poll aggregate annotations.
+pub const RECORDED_PRESENTATION_NOTICE: &str = "Flip-wait bars use recorded PPU intervals (up to two scopes per frame). Polling positions are not recorded: flip-status and label cadence are aggregate observations, not waiting time.";
+
+pub fn presentation_notice(v: &AutoView) -> &'static str {
+    if v.report.tagged {
+        RECORDED_PRESENTATION_NOTICE
+    } else {
+        PRESENTATION_NOTICE
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bar {
     /// Index in the report's frames or the reader's merged busy intervals.
     pub index: usize,
+    /// Recorded scope index within the frame, only for flip-wait bars.
+    pub scope: Option<usize>,
     pub left: f64,
     pub right: f64,
     /// Only the interval inside both conservative endpoint bounds is solid.
@@ -25,8 +34,9 @@ pub struct Bar {
 pub struct Layout {
     pub verdict: Vec<Bar>,
     pub busy: Vec<Bar>,
+    pub flip_wait: Vec<Bar>,
     /// Visible bars omitted by the paint cap, per lane.
-    pub omitted: [usize; 2],
+    pub omitted: [usize; 3],
     pub unplaced_frames: usize,
 }
 
@@ -42,6 +52,12 @@ pub fn extent(v: &AutoView) -> Option<(u64, u64)> {
         .filter(|f| placed(f))
         .map(|f| (f.tb_begin, f.tb_end))
         .chain(v.busy.bars.iter().map(|b| (b.begin.0, b.end.1)))
+        .chain(
+            v.report
+                .frames
+                .iter()
+                .flat_map(|f| f.flip_wait_at.iter().flatten().copied()),
+        )
         .fold(None, |acc, (lo, hi)| {
             Some(acc.map_or((lo, hi), |(a, b): (u64, u64)| (a.min(lo), b.max(hi))))
         })
@@ -66,12 +82,23 @@ pub fn layout(v: &AutoView, tl: &Timeline, view: &View, width: f64) -> Layout {
         );
         Some(Bar {
             index,
+            scope: None,
             left: left.floor().max(0.0),
             right: right.ceil().min(width),
             core: (hi > lo).then_some((lo, hi)),
         })
     };
     for (i, f) in v.report.frames.iter().enumerate() {
+        for (scope, &(begin, end)) in f.flip_wait_at.iter().flatten().enumerate() {
+            if let Some(mut b) = bar(i, (begin, begin), (end, end)) {
+                b.scope = Some(scope);
+                if out.flip_wait.len() < PAINT_CAP {
+                    out.flip_wait.push(b);
+                } else {
+                    out.omitted[2] += 1;
+                }
+            }
+        }
         if !placed(f) {
             out.unplaced_frames += 1;
             continue;
@@ -106,27 +133,67 @@ pub fn presentation_short(f: &FrameView, tb: crate::model::TimeBase) -> String {
     presentation_with(f, |t| tb.short_ticks(t.into()))
 }
 
+/// A label-capable writer emits a zero block even in frames with no polls.
+pub fn has_observations(f: &FrameView) -> bool {
+    f.presentation.is_some()
+        || f.label_polls.is_some_and(|(c, label, one)| {
+            c.runs != 0
+                || c.ticks != 0
+                || c.broken != 0
+                || c.spanning != 0
+                || label != 0
+                || one != 0
+        })
+}
+
 fn presentation_with(f: &FrameView, time: impl Fn(u64) -> String) -> String {
-    let Some(p) = &f.presentation else {
+    if !has_observations(f) {
         return "No presentation observations".into();
-    };
+    }
     let mut parts = Vec::new();
-    if let Some((ticks, scopes)) = p.flip_wait {
-        parts.push(format!(
-            "flip-wait: {} / {scopes} scope(s); {} timeout(s), {} spanning",
-            time(ticks), p.flip_wait_timeouts, p.flip_wait_spanning
-        ));
+    if let Some(p) = &f.presentation {
+        if let Some((ticks, scopes)) = p.flip_wait {
+            parts.push(format!(
+                "flip-wait: {} / {scopes} scope(s); {} timeout(s), {} spanning",
+                time(ticks),
+                p.flip_wait_timeouts,
+                p.flip_wait_spanning
+            ));
+        }
+        if let Some(c) = p.cadence {
+            parts.push(format!(
+                "polling cadence: {} / {} run(s); {} broken, {} spanning",
+                time(c.ticks),
+                c.runs,
+                c.broken,
+                c.spanning
+            ));
+        }
+        if let Some((count, ticks)) = p.legacy_polls {
+            parts.push(format!(
+                "poll intervals: {} / {count} interval(s)",
+                time(ticks)
+            ));
+        }
+        if let (Some(at), Some((_, count))) = (&f.flip_wait_at, p.flip_wait) {
+            if count != 0 {
+                parts.push(format!(
+                    "recorded positions: {} of {count} completed scopes",
+                    at.len()
+                ));
+            }
+        }
     }
-    if let Some(c) = p.cadence {
-        parts.push(format!(
-            "polling cadence: {} / {} run(s); {} broken, {} spanning",
-            time(c.ticks), c.runs, c.broken, c.spanning
-        ));
-    }
-    if let Some((count, ticks)) = p.legacy_polls {
-        parts.push(format!(
-            "poll intervals: {} / {count} interval(s)", time(ticks)
-        ));
+    if let Some((c, label, one)) = f.label_polls.filter(|(c, l, o)| {
+        c.runs != 0 || c.ticks != 0 || c.broken != 0 || c.spanning != 0 || *l != 0 || *o != 0
+    }) {
+        let label = match label {
+            0 => "none".into(),
+            u32::MAX => "several".into(),
+            n => (n - 1).to_string(),
+        };
+        parts.push(format!("label polling: {} / {} run(s); {} broken, {} spanning; label {label}; largest one-label total {}",
+            time(c.ticks), c.runs, c.broken, c.spanning, time(one)));
     }
     parts.join(" | ")
 }
