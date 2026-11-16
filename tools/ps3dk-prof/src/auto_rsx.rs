@@ -2775,4 +2775,22 @@ mod tests {
         assert_eq!(med, 25, "median of [10,20,30,40] = (20+30)/2 = 25");
         assert_eq!(hi, 40, "p95 rank ceil(0.95*4)=4 → sorted[3] = 40");
     }
+
+    // Boundary cases: the rank is interior (p95 != max) so the nearest-rank index is
+    // actually exercised, not just "the largest value".
+    #[test]
+    fn p95_twenty_samples_picks_index_19_not_max() {
+        let v: Vec<u64> = (1..=20).collect(); // [1..20], max = 20
+        // rank = (95*20+99)/100 = 19 (1-based) → sorted[18] = 19
+        assert_eq!(p95(v.clone()), 19);
+        assert_ne!(p95(v), 20, "must not collapse to the max");
+    }
+
+    #[test]
+    fn p95_twentyone_samples_picks_index_20() {
+        let v: Vec<u64> = (1..=21).collect(); // [1..21], max = 21
+        // rank = (95*21+99)/100 = 20 (1-based) → sorted[19] = 20
+        assert_eq!(p95(v.clone()), 20);
+        assert_ne!(p95(v), 21, "must not collapse to the max");
+    }
 }

@@ -14,6 +14,33 @@ pub struct AutoView {
     pub busy: auto_rsx::BusyTimeline,
 }
 
+/// The Passes page view model: the reader's by-tag and per-range inventory and
+/// the whole-run summaries (`tag_summary` / `range_summary`). Numbers are never
+/// re-derived here; they come straight from `ps3dk_prof::auto_rsx`.
+#[derive(Debug, Clone, Default)]
+pub struct PassesView {
+    pub by: auto_rsx::ByTag,
+    /// Per tag: `(frames seen, ops, busy sum, busy median, busy p95)`.
+    pub tags: std::collections::BTreeMap<u32, (u64, u64, u64, u64, u64)>,
+    /// Per range name: `(frames seen, ranges, raw sum, raw median, raw p95)`.
+    pub ranges: std::collections::BTreeMap<String, (u64, u64, u64, u64, u64)>,
+}
+
+/// Builds the Passes page view from a capture via the reader only.
+pub fn passes_build(cap: &Capture) -> PassesView {
+    let by = auto_rsx::by_tag(cap);
+    let tags = auto_rsx::tag_summary(&by);
+    let ranges = auto_rsx::range_summary(&by);
+    PassesView { by, tags, ranges }
+}
+
+impl PassesView {
+    /// Whether a capture has any tagged AUTO data (CONFIG carries the tag feature).
+    pub fn has_tags(&self) -> bool {
+        self.by.tagged
+    }
+}
+
 impl AutoView {
     /// Builds the Automatic page view from a capture.
     pub fn build(cap: &Capture) -> AutoView {
