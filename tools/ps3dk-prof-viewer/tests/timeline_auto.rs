@@ -31,7 +31,7 @@ fn auto_lanes_match_reader_frames_and_mapped_intervals() {
         let drawn = timeline_auto::layout(v, &tl, &view, 1000.0);
         assert_eq!(drawn.verdict.len(), v.report.frames.len());
         assert_eq!(drawn.busy.len(), reader.bars.len());
-        assert_eq!(drawn.omitted, [0, 0]);
+        assert_eq!(drawn.omitted, [0, 0, 0]);
         for bar in &drawn.verdict {
             let f = &v.report.frames[bar.index];
             assert_eq!(
@@ -97,7 +97,7 @@ fn auto_lane_layout_keeps_small_deltas_at_large_origins_and_announces_cap() {
     v.report.frames.resize(timeline_auto::PAINT_CAP + 2, row);
     let drawn = timeline_auto::layout(&v, &tl, &view, 1000.0);
     assert_eq!(drawn.verdict.len(), timeline_auto::PAINT_CAP);
-    assert_eq!(drawn.omitted, [2, 0]);
+    assert_eq!(drawn.omitted, [2, 0, 0]);
     v.report.frames.clear();
     let empty = timeline_auto::layout(&v, &tl, &view, 1000.0);
     assert!(empty.verdict.is_empty() && empty.busy.is_empty());
@@ -132,10 +132,21 @@ fn presentation_annotations_are_aggregates_without_positions() {
         legacy_polls: None,
     });
     let text = timeline_auto::presentation_text(f);
-    let short = timeline_auto::presentation_short(f, ps3dk_prof_viewer::model::TimeBase { freq_hz: Some(1_000_000) });
-    assert!(short.contains("0.123 ms / 7 scope(s)") && short.contains("0.456 ms / 11 run(s)"), "{short}");
+    let short = timeline_auto::presentation_short(
+        f,
+        ps3dk_prof_viewer::model::TimeBase {
+            freq_hz: Some(1_000_000),
+        },
+    );
+    assert!(
+        short.contains("0.123 ms / 7 scope(s)") && short.contains("0.456 ms / 11 run(s)"),
+        "{short}"
+    );
     assert!(!short.contains("ticks"));
-    assert_eq!(timeline_auto::presentation_short(f, ps3dk_prof_viewer::model::TimeBase { freq_hz: None }), text);
+    assert_eq!(
+        timeline_auto::presentation_short(f, ps3dk_prof_viewer::model::TimeBase { freq_hz: None }),
+        text
+    );
     assert!(text.contains("123 ticks / 7 scope(s); 2 timeout(s), 3 spanning"));
     assert!(text.contains("456 ticks / 11 run(s); 4 broken, 5 spanning"));
     assert_eq!(
@@ -201,12 +212,12 @@ fn auto_lanes_keep_navigation_and_collapse_state() {
     let zoom = st.view;
     paint(&mut st, vec![]);
     assert_eq!(st.view, zoom);
-    st.collapsed[3..6].fill(true);
+    st.collapsed[3..7].fill(true);
     paint(&mut st, vec![]);
     assert!(st.auto_drawn.verdict.is_empty() && st.auto_drawn.busy.is_empty());
-    assert_eq!(st.auto_areas, [None, None]);
+    assert_eq!(st.auto_areas, [None, None, None]);
     assert_eq!(st.view, zoom);
-    st.collapsed[3..6].fill(false);
+    st.collapsed[3..7].fill(false);
     paint(&mut st, vec![]);
     assert!(!st.auto_drawn.verdict.is_empty());
     assert_eq!(st.view, zoom);
@@ -230,7 +241,10 @@ fn auto_section_text(v: &ps3dk_prof_viewer::auto::AutoView, show_all: bool) -> V
     let a = doc.analysis().unwrap();
     let mut st = TimelineState::new(a);
     st.collapsed[..3].fill(true);
-    if !show_all { st.collapsed[3..5].fill(true); }
+    if !show_all {
+        st.collapsed[3..5].fill(true);
+    }
+    st.collapsed[6] = true;
     let ctx = egui::Context::default();
     ps3dk_ui::install(&ctx);
     let mut result = Vec::new();
@@ -312,5 +326,177 @@ fn empty_auto_lanes_explain_missing_retained_records() {
     v.busy.notice = None;
     let shown = auto_section_text(&v, true);
     assert!(shown.iter().any(|s| s == "No AUTO coverage rows retained."));
-    assert!(shown.iter().any(|s| s == "No mapped timed intervals retained."));
+    assert!(shown
+        .iter()
+        .any(|s| s == "No mapped timed intervals retained."));
+}
+
+#[test]
+fn label_only_frames_show_aggregate_annotations_without_bars() {
+    use ps3dk_prof::auto_rsx::Cadence;
+    let doc = fixture("console-r2");
+    let mut v = doc.auto.as_ref().unwrap().clone();
+    let f = &mut v.report.frames[1];
+    assert!(f.presentation.is_none());
+    f.label_polls = Some((
+        Cadence {
+            ticks: 456,
+            runs: 7,
+            broken: 2,
+            spanning: 3,
+        },
+        21,
+        456,
+    ));
+    let text = timeline_auto::presentation_text(f);
+    assert!(
+        text.contains("label polling: 456 ticks / 7 run(s); 2 broken, 3 spanning"),
+        "{text}"
+    );
+    assert!(
+        text.contains("label 20; largest one-label total 456 ticks"),
+        "{text}"
+    );
+    let shown = presentation_section_text(&v);
+    assert!(
+        shown.iter().any(|s| s == "observations in 1 of 120 frames"),
+        "{shown:?}"
+    );
+    assert!(shown.iter().any(|s| s == "Frame 1 / owner 1"));
+    // Supporting the format alone is not an observation: all-zero label data
+    // must not reintroduce a row for every idle frame.
+    v.report.frames[2].label_polls = Some((Cadence::default(), 0, 0));
+    assert!(!presentation_section_text(&v)
+        .iter()
+        .any(|s| s == "Frame 2 / owner 1"));
+    v.report.frames[1].label_polls = Some((
+        Cadence {
+            ticks: 789,
+            runs: 11,
+            broken: 0,
+            spanning: 0,
+        },
+        u32::MAX,
+        456,
+    ));
+    assert!(timeline_auto::presentation_text(&v.report.frames[1])
+        .contains("label several; largest one-label total 456 ticks"));
+}
+
+#[test]
+fn recorded_scopes_keep_exact_positions_clipping_and_cap() {
+    let doc = fixture("console-r2");
+    let mut v = doc.auto.as_ref().unwrap().clone();
+    v.report.frames.truncate(1);
+    v.busy.bars.clear();
+    let origin = u64::MAX - 1000;
+    let f = &mut v.report.frames[0];
+    f.tb_begin = origin;
+    f.tb_end = origin + 100;
+    f.flip_wait_at = Some(vec![(origin + 10, origin + 30), (origin + 60, origin + 70)]);
+    let tl = Timeline {
+        start: origin,
+        end: origin + 100,
+        tracks: vec![],
+        has_data: true,
+        extra: None,
+    };
+    let view = View::fit(&tl);
+    let d = timeline_auto::layout(&v, &tl, &view, 1000.0);
+    assert_eq!(
+        d.flip_wait
+            .iter()
+            .map(|b| (b.index, b.scope, b.left, b.right))
+            .collect::<Vec<_>>(),
+        vec![(0, Some(0), 100.0, 300.0), (0, Some(1), 600.0, 700.0)]
+    );
+    let d = timeline_auto::layout(&v, &tl, &View { t0: 20.0, dt: 50.0 }, 500.0);
+    assert_eq!(
+        d.flip_wait
+            .iter()
+            .map(|b| (b.left, b.right))
+            .collect::<Vec<_>>(),
+        vec![(0.0, 100.0), (400.0, 500.0)]
+    );
+    assert!(
+        timeline_auto::layout(&v, &tl, &View { t0: 80.0, dt: 20.0 }, 500.0)
+            .flip_wait
+            .is_empty()
+    );
+    let f = v.report.frames[0].clone();
+    v.report.frames.resize(timeline_auto::PAINT_CAP / 2 + 1, f);
+    let d = timeline_auto::layout(&v, &tl, &view, 1000.0);
+    assert_eq!(d.flip_wait.len(), timeline_auto::PAINT_CAP);
+    assert_eq!(d.omitted[2], 2);
+    // OPEN frame boundaries can be unfinished; the completed scopes still have
+    // real PPU positions, and must extend the fit even without frame placement.
+    v.report.frames.truncate(1);
+    v.report.frames[0].tb_end = 0;
+    assert_eq!(timeline_auto::extent(&v), Some((origin + 10, origin + 70)));
+    assert_eq!(
+        timeline_auto::layout(&v, &tl, &view, 1000.0)
+            .flip_wait
+            .len(),
+        2
+    );
+    v.report.frames[0].flip_wait_at = None;
+    assert!(timeline_auto::layout(&v, &tl, &view, 1000.0)
+        .flip_wait
+        .is_empty());
+    v.report.frames[0].flip_wait_at = Some(vec![]);
+    assert!(timeline_auto::layout(&v, &tl, &view, 1000.0)
+        .flip_wait
+        .is_empty());
+}
+
+#[test]
+fn recorded_scope_lane_draws_navigates_and_explains_partial_data() {
+    use eframe::egui::{self, Event, Modifiers, MouseWheelUnit, Pos2, RawInput, Rect, Vec2};
+    use ps3dk_prof_viewer::timeline_ui::{draw_with_auto, TimelineState};
+    let doc = fixture("presentation-partial");
+    let a = doc.analysis().unwrap();
+    let v = doc.auto.as_ref().unwrap();
+    let text = timeline_auto::presentation_text(&v.report.frames[0]);
+    assert!(
+        text.contains("recorded positions: 2 of 3 completed scopes"),
+        "{text}"
+    );
+    assert!(timeline_auto::presentation_notice(v).contains("Polling positions are not recorded"));
+    let mut st = TimelineState::new(a);
+    let ctx = egui::Context::default();
+    ps3dk_ui::install(&ctx);
+    let mut time = 0.0;
+    let mut paint = |st: &mut TimelineState, events| {
+        time += 0.02;
+        let _ = ctx.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1400.0, 1100.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ctx| draw_with_auto(ctx, &doc.foreign_tl, a, Some(v), st, &mut None),
+        );
+    };
+    paint(&mut st, vec![]);
+    paint(&mut st, vec![]);
+    assert_eq!(st.auto_drawn.flip_wait.len(), 2);
+    let fit = st.view;
+    let pointer = st.auto_areas[2].unwrap().center();
+    paint(
+        &mut st,
+        vec![
+            Event::PointerMoved(pointer),
+            Event::MouseWheel {
+                unit: MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, 100.0),
+                modifiers: Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(st.view.dt < fit.dt);
+    st.collapsed[6] = true;
+    paint(&mut st, vec![Event::PointerGone]);
+    assert!(st.auto_drawn.flip_wait.is_empty());
+    assert!(st.auto_areas[2].is_none());
 }
