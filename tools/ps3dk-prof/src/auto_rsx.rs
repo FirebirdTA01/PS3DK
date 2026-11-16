@@ -1714,6 +1714,15 @@ pub fn raw_to_ppu_bounds(anchors: &[Anchor], m: &Map, x: u64) -> Option<(u64, u6
     }
 }
 
+/// Certain PPU-tick bounds (shortest, longest) of a raw RSX DURATION under a qualified map's slope bounds, the same
+/// conversion `analyze` applies to a frame's RSX busy time. None when the map is not qualified: no time is claimed.
+pub fn raw_duration_ppu_bounds(map: &MapState, raw: u64) -> Option<(u64, u64)> {
+    match map {
+        MapState::Qualified(m) => Some((sat(&floor_mul(raw, &m.slope_lo)), sat(&ceil_mul(raw, &m.slope_hi)))),
+        MapState::Unqualified(_) => None,
+    }
+}
+
 /// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
 /// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
 pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
