@@ -785,3 +785,22 @@ fn frameless_zones_belong_to_the_only_window() {
         assert!(!rep.contains("frameless:"), "window {}: {rep}", w.id);
     }
 }
+
+/// A capture with file_flags bit 9 but no window chunk (none opened, or the run ended before one reached the file):
+/// report, frames and auto print the whole capture, so the verdict is always shown, never an empty output.
+#[test]
+fn windowed_capture_without_a_window_reports_the_whole_capture() {
+    let mut s = scenario(vec![lane(1, Vec::new())]);
+    s.trailer = false;
+    let mut f = s.file();
+    f.flags |= FLAG_WINDOWS;
+    let path = temp_prof("no-window");
+    std::fs::write(&path, f.bytes()).unwrap();
+    let p = path.to_string_lossy().into_owned();
+    let (code, out, _) = run_cmd(&["report", &p]);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(out.contains("verdict: INCOMPLETE: no events recorded (ended before the first drain)"), "{out}");
+    let (_, out, _) = run_cmd(&["frames", &p]);
+    assert!(!out.trim().is_empty(), "frames printed nothing");
+    let _ = std::fs::remove_file(&path);
+}
