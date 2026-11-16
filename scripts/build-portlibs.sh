@@ -137,6 +137,15 @@ run_recipe() {
     )
 }
 
+# The ports' configure tests and example programs link a PPU executable, which
+# needs the libc and lv2 stub archives that build-cell-stub-archives.sh
+# installs.  Without them every recipe fails late with "cannot find -lc_stub",
+# so check before the first recipe runs.
+for stub in libc_stub.a liblv2_stub.a; do
+    [[ -e "$PS3DK/ppu/lib/$stub" ]] \
+        || die "$PS3DK/ppu/lib/$stub is missing. Run scripts/build-sdk.sh --headers-only and scripts/build-cell-stub-archives.sh before scripts/build-portlibs.sh."
+done
+
 mapfile -t RECIPES < <(discover_recipes "$@")
 if [[ ${#RECIPES[@]} -eq 0 ]]; then
     # Fatal, not a warning: die() inside $(discover_recipes ...) runs in a

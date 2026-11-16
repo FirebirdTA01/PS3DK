@@ -45,6 +45,21 @@ if $HEADERS_ONLY; then
     exit 0
 fi
 
+# The host tools go in BEFORE the SDK build: libdbgfont compiles its shaders
+# with rsx-cg-compiler during `make install` below, and install-host-tools.sh is
+# what builds and installs that compiler.  The host tools build from their own
+# sources and need nothing from the SDK build.
+if $INSTALL_HOST_TOOLS; then
+    say "building + installing host tools"
+    "$PS3_TOOLCHAIN_ROOT/scripts/install-host-tools.sh"
+else
+    say "skipping host tools (--no-host-tools)"
+    # Ask libdbgfont's own lookup (tools/rsx-cg-compiler/build, $PS3DEV/bin,
+    # $PS3DK/bin; not PATH), so this check cannot disagree with the build.
+    make -s -C "$PS3_TOOLCHAIN_ROOT/sdk/libdbgfont" rsx-cg-path >/dev/null 2>&1 \
+        || die "rsx-cg-compiler not found in tools/rsx-cg-compiler/build, \$PS3DEV/bin or \$PS3DK/bin, and --no-host-tools was given; run scripts/build-sdk.sh without --no-host-tools once (or scripts/install-host-tools.sh) to build it."
+fi
+
 say "building + installing SDK"
 # The SDK's own sublibs compile with -I../include AND -I$PS3DK/ppu/include, so
 # two copies of the libc wrapper headers (stdlib.h, sys/types.h, ...) sit on
@@ -101,13 +116,6 @@ say "installed sdk/assets/ICON0.PNG -> $PS3DEV/bin/ICON0.PNG"
 install -d "$PS3DK/sdk/assets"
 install -m 0644 "$icon_src" "$PS3DK/sdk/assets/ICON0.PNG"
 say "installed sdk/assets/ICON0.PNG -> $PS3DK/sdk/assets/ICON0.PNG"
-
-if $INSTALL_HOST_TOOLS; then
-    say "building + installing host tools"
-    "$PS3_TOOLCHAIN_ROOT/scripts/install-host-tools.sh"
-else
-    say "skipping host tools (--no-host-tools)"
-fi
 
 # Verify the installed GCM surface, now that BOTH halves of it exist.  The
 # archive checks need libgcm_sys.a (built by build-cell-stub-archives.sh) AND

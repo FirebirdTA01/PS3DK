@@ -544,17 +544,25 @@ source ./scripts/env.sh
 ./scripts/build-ppu-toolchain.sh --only binutils
 ./scripts/build-spu-toolchain.sh --only binutils
 
-# Full toolchain + PSL1GHT + portlibs + our SDK.
+# Full toolchain + PSL1GHT + SDK headers + stub archives + portlibs + SDK.
 #
 # ** Heads-up: this takes a while. **  Bootstrapping GCC+newlib twice
 # (once for PPU, once for SPU) is CPU-bound and is the bulk of the
-# wait.  Kick it off and go do something else.
-./scripts/build-ppu-toolchain.sh
-./scripts/build-spu-toolchain.sh
-./scripts/build-psl1ght.sh
-./scripts/build-portlibs.sh
+# wait.  Kick it off and go do something else.  The steps must run in
+# this order, and each one exits non-zero on failure, so chaining them
+# with && stops at the first failure.
+./scripts/build-spu-toolchain.sh &&
+./scripts/build-ppu-toolchain.sh &&
+./scripts/build-psl1ght.sh &&
+./scripts/build-sdk.sh --headers-only &&
+./scripts/build-cell-stub-archives.sh &&
+./scripts/build-portlibs.sh &&
 ./scripts/build-sdk.sh
 ```
+
+The final `build-sdk.sh` also builds and installs the host tools (`rsx-cg-compiler`, `sprxlinker`, `pkg`, the Rust
+tools) before the SDK libraries, because the SDK build compiles shaders with `rsx-cg-compiler`; it needs CMake, a host
+C/C++ compiler and Rust. `--no-host-tools` skips them for an SDK-only rebuild once they are installed.
 
 Both toolchain build scripts accept `--only <step>` and `--clean` to wipe intermediates before rebuilding. The PPU steps are binutils, gcc-newlib, gdb and symlinks; the SPU steps are binutils, gcc-newlib, symlinks and linker-script.
 
