@@ -961,10 +961,23 @@ fn unsealed_mixed_explicit_and_empty_frame_source() {
     let r = analyze(&reader::read(&seg_file(vec![coverage(&not_flip)]).bytes()).expect("reads"));
     let src = ps3dk_prof::auto_rsx::frame_source(&r);
     assert!(src.starts_with("EXPLICIT (from frame rows"), "{src}");
+    // An operation that names owner/frame 0 (TOKEN set) but no retained row: missing evidence, not "unassociated".
     let r = analyze(&reader::read(&seg_file(vec![ops(&[op(1, 0, (100, 110))])]).bytes()).expect("reads"));
-    assert!(r.status.is_none() && r.frames.is_empty());
+    assert!(r.status.is_none() && r.frames.is_empty() && r.ops_parsed == 1);
     let src = ps3dk_prof::auto_rsx::frame_source(&r);
-    assert!(src.starts_with("NONE") && src.ends_with("capture status unavailable)"), "{src}");
+    assert!(src.starts_with("UNAVAILABLE (no frame rows retained"), "{src}");
+    assert!(!src.contains("unassociated") && !src.starts_with("NONE"), "{src}");
+}
+
+/// An accepted older writer (CONFIG 7/15) never marks flip-opened rows, so without STATUS its unflagged rows
+/// cannot be called EXPLICIT.
+#[test]
+fn unsealed_old_writer_rows_are_unavailable_not_explicit() {
+    let not_flip = row(0, (10, 20), 0);
+    let r = analyze(&reader::read(&auto_file(vec![coverage(&not_flip)]).bytes()).expect("reads"));
+    assert!(r.status.is_none() && r.frames.len() == 1);
+    let src = ps3dk_prof::auto_rsx::frame_source(&r);
+    assert!(src.starts_with("UNAVAILABLE (capture status unavailable; this writer does not mark"), "{src}");
 }
 
 #[test]

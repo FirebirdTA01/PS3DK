@@ -2136,13 +2136,19 @@ pub fn frame_source(r: &Report) -> String {
             _ => "NONE (no flip or explicit frame seen: operations unassociated)".into(),
         };
     }
-    // No final STATUS (unsealed or provisional). Derive the delimiter from the retained frame rows: every row is a
-    // delimited frame, flip-opened rows carry FR_FLIP and the others were opened by an explicit ps3dk_prof_frame
-    // (writers that predate FR_FLIP are refused at read time). Say that the rows, not STATUS, are the source.
+    // No final STATUS (unsealed or provisional): derive the delimiter from the retained frame rows and say so. A row
+    // exists only for a delimited frame, and a writer whose rows can carry FR_FLIP (segment-covering CONFIGs: known
+    // row mask 127) marks every flip-opened row, so its unflagged rows were opened explicitly. Older accepted writers
+    // (CONFIG 7/15, known row mask 31) never mark FR_FLIP, so their rows cannot tell flip from explicit. No retained
+    // row is missing evidence, not proof that no frame was delimited: report UNAVAILABLE, never NONE.
+    let marks_flip = matches!(&r.config, Some(Config::Attached(a)) if a.segments_covered());
     let flips = r.frames.iter().filter(|f| f.flags & FR_FLIP != 0).count();
     match (r.frames.len(), flips) {
-        (0, _) => "NONE (no frame row retained: operations unassociated; capture status unavailable)".into(),
+        (0, _) => "UNAVAILABLE (no frame rows retained; capture status unavailable)".into(),
         (n, f) if f == n => "FLIP (from frame rows; capture status unavailable)".into(),
+        _ if !marks_flip => {
+            "UNAVAILABLE (capture status unavailable; this writer does not mark flip-opened frame rows)".into()
+        }
         (_, 0) => "EXPLICIT (from frame rows; capture status unavailable)".into(),
         _ => "MIXED (from frame rows: flip and explicit frames; capture status unavailable)".into(),
     }
