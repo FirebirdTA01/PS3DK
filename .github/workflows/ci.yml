@@ -106,6 +106,88 @@ jobs:
       - name: Run the ratchet over scripts/**/*.sh
         run: bash ci/shellcheck.sh
 
+  profiler-host-suites:
+    name: Profiler host suite (${{ matrix.suite }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [r2, r4a, s2, i1, i2, live-e2e, profile, ext-probe, overhead]
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # These legacy drivers invoke rustc with the reader's target/debug/deps.
+      # Cargo 1.100 moved dependencies into per-package build directories.
+      # Keep the validated layout until their checker builds are Cargo targets;
+      # the main Rust build/test job continues to cover current stable.
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Build the reader and its oracle library
+        working-directory: tools
+        run: cargo build -p ps3dk-prof
+      - name: R2 runtime and R1 core gates
+        if: matrix.suite == 'r2'
+        run: python3 tests/host/ps3dk-prof-gpu-int/r2-test.py "$RUNNER_TEMP/r2" --reader tools/target/debug/ps3dk-prof
+      - name: R4a GCM port
+        if: matrix.suite == 'r4a'
+        run: python3 tests/host/ps3dk-prof-gpu-int/r4a-test.py "$RUNNER_TEMP/r4a" --reader tools/target/debug/ps3dk-prof
+      # S2's reg group is a historical review packet: it requires an untracked
+      # r15 design hash and the original implementation diff, not a fresh tree.
+      # Execute all six portable groups here. R2/R1 and R4a run in their own
+      # matrix rows; the reader tests and wording gate also run elsewhere in CI.
+      - name: S2 executable groups
+        if: matrix.suite == 's2'
+        run: python3 tests/host/ps3dk-prof-rsxcap/s2-test.py "$RUNNER_TEMP/s2" --reader tools/target/debug/ps3dk-prof --rlib tools/target/debug/libps3dk_prof.rlib --only core,rt,tsan,ct,rd,mut
+      - name: I1 configuration and frozen v1 wire comparison
+        if: matrix.suite == 'i1'
+        run: |
+          mkdir "$RUNNER_TEMP/i1-base"
+          git archive 1d8668d4e6bdb9c544624e21eaf354a679815005 sdk | tar -x -C "$RUNNER_TEMP/i1-base"
+          python3 tests/host/ps3dk-prof-spu-int/i1-test.py "$RUNNER_TEMP/i1" --base "$RUNNER_TEMP/i1-base" --reader tools/target/debug/ps3dk-prof
+      - name: I2 SPU lane integration
+        if: matrix.suite == 'i2'
+        run: python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
+      - name: Live END close, deadlines and OS/API controls
+        if: matrix.suite == 'live-e2e'
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent"
+          python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent-address" --sanitize
+          python3 tests/host/ps3dk-prof-runtime/live-os-test.py "$RUNNER_TEMP/live-e2e/os"
+          python3 tests/host/ps3dk-prof-runtime/live-api-test.py "$RUNNER_TEMP/live-e2e/api"
+      - name: Live client against the real agent and runtime (three runs)
+        if: matrix.suite == 'live-e2e'
+        run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"
+      - name: Profile identity and archive pipeline
+        if: matrix.suite == 'profile'
+        run: bash tests/host/ps3dk-prof-profile/run-profile-tests.sh "$RUNNER_TEMP/profile" "$GITHUB_WORKSPACE/tools/target/debug/ps3dk-prof"
+      - name: E1 host probe builds
+        if: matrix.suite == 'ext-probe'
+        run: |
+          bash samples/profiling/ext-probe/host-tests/e1-build.sh "$RUNNER_TEMP/ext-probe" plain
+          bash samples/profiling/ext-probe/host-tests/e1-build.sh "$RUNNER_TEMP/ext-probe" asan
+          bash samples/profiling/ext-probe/host-tests/e1-build.sh "$RUNNER_TEMP/ext-probe" tsan
+      - name: Overhead benchmark host controls
+        if: matrix.suite == 'overhead'
+        run: bash samples/profiling/overhead-bench/host-tests/run-host.sh "$RUNNER_TEMP/overhead"
+      - name: Preserve suite receipts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: profiler-host-${{ matrix.suite }}
+          path: |
+            ${{ runner.temp }}/${{ matrix.suite }}/**/*.log
+            ${{ runner.temp }}/${{ matrix.suite }}/**/*.txt
+            ${{ runner.temp }}/${{ matrix.suite }}/**/*.stdout
+            ${{ runner.temp }}/${{ matrix.suite }}/**/*.stderr
+            ${{ runner.temp }}/${{ matrix.suite }}/**/*.json
+            ${{ runner.temp }}/${{ matrix.suite }}/**/RESULT
+          if-no-files-found: ignore
+
   rust-tools:
     name: Rust tools build + tests
     runs-on: ubuntu-26.04
@@ -196,6 +278,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-plain" --mutants
           python3 tests/host/ps3dk-prof-runtime/auto-host-model-suite-test.py --out "$RUNNER_TEMP/auto-rsx-address" --sanitize
 
+      - name: Report ring host model
+        run: |
+          bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-plain" --mutants
+          bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-address" --sanitize
+
       - name: Automatic RSX initialization, wire and queue controls
         run: |
           python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
@@ -270,7 +357,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue flips present spanning fifofail fifopre fifopost; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue flips present spanning fifofail fifopre fifopost seal; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -773,6 +860,9 @@ jobs:
 
       - name: Test GCM transfer data emitter words and negative controls
         run: bash tests/host/gcm-transfer-data-test.sh
+
+      - name: Test A2 label probe classifier and abort path
+        run: bash tests/host/a2p-probe-test.sh
 
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool

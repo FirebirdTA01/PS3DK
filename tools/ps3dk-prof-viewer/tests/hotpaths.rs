@@ -29,8 +29,11 @@ fn rows_hot_marker_and_frame_links() {
     .concat();
     let a = analysed(vec![lane(1, seqd(0, recs))]);
     let hv = build(&a, &paths(&a, &PathBudgets::default()));
-    let LaneKind::Paths { rows, lines, more } = &hv.lanes[0].kind else { panic!("{hv:?}") };
+    let LaneKind::Paths { rows, lines, more, .. } = &hv.lanes[0].kind else { panic!("{hv:?}") };
     assert!(more.is_none());
+    assert_eq!(rows[0].exclusive, "0.001 ms");
+    assert!(rows[0].exclusive_exact.ends_with("(70 ticks)"));
+    assert!(!rows[0].inclusive.contains("ticks"));
     assert_eq!(rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), vec!["zoneA", "zoneA > zoneB"]);
     // exclusive 70 vs 10: the top path alone holds 87.5% >= 80%
     assert!(rows[0].hot && !rows[1].hot);

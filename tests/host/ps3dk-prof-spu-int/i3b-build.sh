@@ -9,11 +9,15 @@ rc=0
 for v in plain asan; do
   X=; [ $v = asan ] && X="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
   # the committed psp_ppu.c, every defined global renamed old_* (the table-identity reference)
-  cc -std=c11 -O1 -g -Wall -Wextra $X -I$3 -I$S/spu -c $3/psp_ppu.c -o $O/old-$v.o || rc=1
+  cc -std=c11 -O1 -g -Wall -Wextra $X -I$3 -I$S/spu -c $3/psp_ppu.c -o $O/old-core-$v.o || exit 1
+  cc -std=c11 -O1 -g -Wall -Wextra -Werror $X -I$3 -I$S/spu -c $T/i3b_table.c -o $O/old-table-$v.o || exit 1
+  # Rename the adapter together with its implementation, including references
+  # between them; neither object ever sees the candidate's private layouts.
+  cc -r $O/old-core-$v.o $O/old-table-$v.o -o $O/old-$v.o || exit 1
   nm --defined-only -g $O/old-$v.o > $O/old-$v.nm || rc=1      # nm's own rc, not hidden by the pipe
   awk '{print $3" old_"$3}' $O/old-$v.nm > $O/old-$v.syms || rc=1
   [ -s $O/old-$v.syms ] || rc=1
   objcopy --redefine-syms=$O/old-$v.syms $O/old-$v.o $O/old-ren-$v.o || rc=1
-  cc $F $X $W/tests/host/ps3dk-prof-common/prof_whole_run.c -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex $S/core/prof_core.c $S/core/prof_drain.c $S/core/prof_version.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
+  cc $F $X $W/tests/host/ps3dk-prof-common/prof_whole_run.c -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex $S/core/prof_core.c $S/core/prof_drain.c $S/core/prof_version.c $S/pal/pal_host.c $S/spu/psp_ppu.c $S/spu/psp_spu.c $S/spu/ext_runtime.c $S/spu/psp_elf.c $S/spu/psp_host_emul.c $S/rsx/gpu_runtime.c $S/rsx/prg.c $S/rsx/gpu_port_gcm.c $T/i3b_host.c $T/i3b_table.c $O/old-ren-$v.o -o $O/i3b-$v || rc=1
 done
 echo "i3b build rc=$rc"; exit $rc

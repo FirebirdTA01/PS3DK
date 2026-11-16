@@ -98,6 +98,7 @@ pub const KIND_REGERR: u8 = 6;
 
 pub const FLAG_TOKEN: u16 = 1;
 pub const FLAG_TRUNCATED_AT_STOP: u16 = 1;
+pub const GAP_FLAG_EXPORT: u16 = 1;
 
 pub const STATE_RETIRED: u8 = 1;
 pub const STATE_ACKED: u8 = 2;
@@ -488,6 +489,7 @@ pub struct Lane {
     /// Sum of the GAP ranges, and the number of GAPs.
     pub gap_sum: u128,
     pub gap_count: u64,
+    pub export_gap_count: u64,
     pub clock_anomaly: bool,
     pub frames: Vec<FrameRecord>,
     pub regerr_records: u64,

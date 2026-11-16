@@ -53,7 +53,11 @@ pub fn page(p: &mut egui::Ui, a: &Analysis, v: &RsxView, st: &mut RsxState, draw
         "RSX frame captures found in this file, as the reader classified their markers. Raw RSX timestamps; no PPU time mapping on this page.",
     );
     if v.caps.captures.is_empty() && v.caps.not_analysed.is_empty() && v.caps.anomalies.is_empty() {
-        ui::field_message(p, ui::Tone::Neutral, "No RSX frame capture in this file.");
+        ui::field_message(p, ui::Tone::Neutral, if v.has_gpu {
+            "No RSX frame capture markers recorded: this file has an RSX source but no retained frame-capture request."
+        } else {
+            "No RSX frame captures: this file declares no RSX source."
+        });
         return;
     }
     egui::ScrollArea::vertical().id_salt("rsx-page").show(p, |p| {
@@ -138,7 +142,7 @@ fn selected(p: &mut egui::Ui, a: &Analysis, v: &RsxView, ci: usize, drawn: &mut 
         if let Some(o) = &drawn.omitted {
             ui::field_message(p, ui::Tone::Warning, o);
         } else {
-            p.label("No draws.");
+            p.label("No draw records retained for this RSX frame capture.");
         }
         return;
     }

@@ -1223,7 +1223,7 @@ fn process_records(
         if lane.pending_begin.is_some() && r.kind != KIND_BEGIN_PARENT {
             return malformed(Rule::BeginParentPlacement, format!("{}: BEGIN not followed by its BEGIN_PARENT", at()));
         }
-        check_fields(r, descriptors, declared).map_err(|rule| Malformed { rule, detail: at() })?;
+        check_fields(r, descriptors, declared, export).map_err(|rule| Malformed { rule, detail: at() })?;
 
         if r.kind == KIND_GAP {
             if lane.pending_gap.is_some() {
@@ -1243,14 +1243,18 @@ fn process_records(
             }
             lane.pending_gap = Some((r.b, r.c));
             lane.gap_sum += u128::from(r.c - r.b) + 1;
-            lane.gap_count += 1;
-            // Every span on the partial stack is AFFECTED; the base becomes UNKNOWN.
-            for &s in &lane.stack {
-                spans[s].affected = true;
+            if r.flags == GAP_FLAG_EXPORT {
+                lane.export_gap_count += 1;
+            } else {
+                lane.gap_count += 1;
+                // Every span on the partial stack is AFFECTED; the base becomes UNKNOWN.
+                for &s in &lane.stack {
+                    spans[s].affected = true;
+                }
+                lane.stack.clear();
+                lane.base_unknown = true;
+                lane.gap_since_frame = true;
             }
-            lane.stack.clear();
-            lane.base_unknown = true;
-            lane.gap_since_frame = true;
             if let Some(batch) = evidence.as_deref_mut() { batch.ppu_record(r, i as u32); }
             continue;
         }
@@ -1383,6 +1387,7 @@ fn check_fields(
     r: &RawRecord,
     descriptors: &BTreeMap<u32, Descriptor>,
     declared: &BTreeSet<u32>,
+    export: Option<&ExportRecord>,
 ) -> Result<(), Rule> {
     match r.kind {
         KIND_BEGIN => {
@@ -1425,7 +1430,14 @@ fn check_fields(
             if r.depth != 0 {
                 return Err(Rule::DepthOnNonSpanRecord);
             }
-            if r.a != 0 || r.flags != 0 {
+            if r.a != 0 {
+                return Err(Rule::RecordReserved);
+            }
+            if r.kind == KIND_GAP {
+                if r.flags != 0 && (export.is_none() || r.flags != GAP_FLAG_EXPORT) {
+                    return Err(Rule::RecordReserved);
+                }
+            } else if r.flags != 0 {
                 return Err(Rule::RecordReserved);
             }
         }

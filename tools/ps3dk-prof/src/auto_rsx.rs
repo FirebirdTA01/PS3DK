@@ -1251,6 +1251,9 @@ pub struct Map {
     pub slope_lo: Rat,
     pub slope_hi: Rat,
     pub decisive: (u64, u64),
+    // Keep the affine offset constraints too: duration slopes alone cannot
+    // place an operation on the absolute PPU timeline.
+    model: Box<clockmap::Model>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1337,7 +1340,91 @@ pub fn qualify(inv: &Inventory) -> MapState {
         slope_lo: model.slope_lo.clone(),
         slope_hi: hi,
         decisive: (decisive[0], decisive[1]),
+        model,
     }))
+}
+
+/// One union interval in an execution frame. Endpoint bounds are absolute PPU
+/// ticks, rounded outwards; no point estimate or extrapolation is supplied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusyInterval {
+    pub owner: u32,
+    pub frame: u64,
+    pub raw_begin: u64,
+    pub raw_end: u64,
+    pub begin: (u64, u64),
+    pub end: (u64, u64),
+    pub operations: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BusyTimeline {
+    pub bars: Vec<BusyInterval>,
+    /// Retained draw/CALL records not placed (invalid, unassociated, or outside
+    /// the map's support). FRAME marks are not busy operations.
+    pub omitted: u64,
+    pub notice: Option<&'static str>,
+}
+
+/// Map retained timed operations using the qualified model in this capture's
+/// report. The caller must pass the report from `analyze(cap)`. These reached
+/// marker intervals include RSX waits; they are not shader execution time.
+/// Unknown frame verdicts do not erase valid partial timing, but replay,
+/// resource conflicts, context resets and reader refusals invalidate placement.
+pub fn busy_timeline(cap: &Capture, report: &Report) -> BusyTimeline {
+    let mut result = BusyTimeline::default();
+    let Some(MapState::Qualified(map)) = &report.map else {
+        result.notice = Some("clock map not qualified: RSX lanes unavailable");
+        return result;
+    };
+    if report.refusal.is_some() || report.status.as_ref().is_some_and(|s|
+        s.flags & (ST_SEGMENT_REPLAY | ST_RESOURCE_CONFLICT | ST_CONTEXT_RESET) != 0)
+    {
+        result.notice = Some("RSX timing invalidated: busy intervals unavailable");
+        return result;
+    }
+    let Some(inv) = &cap.auto else { return result };
+    let mut intervals = Vec::new();
+    for op in inv.ops.iter().filter(|o| o.covered() || o.kind == KIND_CALL) {
+        let token = op.token();
+        if token.is_none() || !op.raw_valid() || op.flags & OP_CLOCK_INVALID != 0
+            || op.raw_end < op.raw_begin || i128::from(op.raw_begin) < map.fmin
+            || i128::from(op.raw_end) > map.fmax
+        {
+            result.omitted += 1;
+            continue;
+        }
+        let (owner, frame) = token.unwrap();
+        intervals.push((owner, frame, op.raw_begin, op.raw_end));
+    }
+    intervals.sort_unstable();
+    let mut merged: Vec<(u32, u64, u64, u64, u64)> = Vec::new();
+    for (owner, frame, begin, end) in intervals {
+        if let Some(last) = merged.last_mut().filter(|last|
+            (last.0, last.1) == (owner, frame) && begin <= last.3)
+        {
+            last.3 = last.3.max(end);
+            last.4 += 1;
+        } else {
+            merged.push((owner, frame, begin, end, 1));
+        }
+    }
+    let mut meter = Meter::new(clockmap::project_budget((merged.len() as u64).saturating_mul(2), map.anchors), Limit::Capture);
+    let project = |meter: &mut Meter, raw: u64| -> Option<(u64, u64)> {
+        let p = map.model.project(meter, i128::from(raw)).ok()?;
+        let (clockmap::End::At { value: lo, .. }, clockmap::End::At { value: hi, .. }) = (p.lo, p.hi) else { return None };
+        p.interpolated.then_some((lo.floor().to_u64()?, hi.ceil().to_u64()?))
+    };
+    for (owner, frame, raw_begin, raw_end, operations) in merged {
+        let (Some(begin), Some(end)) = (project(&mut meter, raw_begin), project(&mut meter, raw_end)) else {
+            result.bars.clear();
+            result.notice = Some("clock projection refused: RSX busy intervals unavailable");
+            return result;
+        };
+        result.bars.push(BusyInterval { owner, frame, raw_begin, raw_end, begin, end, operations });
+    }
+    result.bars.sort_unstable_by_key(|b| (b.begin.0, b.end.1, b.owner, b.frame));
+    result
 }
 
 fn floor_mul(x: u64, r: &Rat) -> BigInt {
@@ -1389,6 +1476,18 @@ pub enum Verdict {
     Unknown,
 }
 impl Verdict {
+    /// One-sentence UI definition, owned here beside the classifier and its thresholds.
+    /// A candidate is evidence for a classification, not proof of GPU occupancy or CPU work.
+    pub fn explanation(self) -> &'static str {
+        match self {
+            Self::RsxBound => "The owner waited in FIFO wraps for at least a quarter of the frame and the RSX reached-marker span covered at least half of it.",
+            Self::Pacing => "Flip-wait scopes covered at least a quarter of the frame, with no FIFO wait and an RSX reached-marker span below half the frame.",
+            Self::PpuBound => "A PPU-bound candidate needs positive PPU-busy evidence, which this capture family does not provide, so this class is not emitted.",
+            Self::Mixed => "The frame had some FIFO waiting and a long RSX reached-marker span, but the waiting was below the RSX-bound threshold.",
+            Self::Unknown => "The recorded evidence cannot distinguish a verdict; the frame reason identifies the missing, invalid or inconclusive evidence.",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Verdict::PpuBound => "PPU-bound candidate",
@@ -1456,6 +1555,8 @@ pub struct FrameView {
     pub segment_unrepresented: u32,
     /// 255/11: whole-CALL brackets with valid timestamps recorded for this frame (in its span).
     pub call_brackets: u64,
+    /// 255/11: the draws that CALL brackets timed as a block (subtracted from segment_unrepresented for the verdict).
+    pub call_covered: u64,
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
@@ -1493,6 +1594,8 @@ pub struct Report {
     pub busy_rule: bool,
     /// 1023/11: tags, ranges and timed-range limits are recorded.
     pub tagged: bool,
+    /// The capture's CONFIG is 255/11 (whole-CALL brackets timed as blocks).
+    pub call_bracket: bool,
     pub state: String,
     pub config: Option<Config>,
     pub status: Option<Status>,
@@ -1660,6 +1763,7 @@ pub fn analyze(cap: &Capture) -> Report {
     let busy_rule = attached.call_bracket();
     rep.busy_rule = busy_rule;
     rep.tagged = attached.tagged();
+    rep.call_bracket = attached.call_bracket();
     let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
     let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
     let map = qualify(inv);
@@ -1726,6 +1830,7 @@ pub fn analyze(cap: &Capture) -> Report {
             },
             segment_unrepresented: f.segment_unrepresented,
             call_brackets: calls.len() as u64,
+            call_covered: call_unrep,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             label_polls: f.label_polls,
             outside_timed: f.outside_timed,
@@ -2120,8 +2225,13 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
         if r.build_frames {
-            writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
-                builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
+            if r.call_bracket {
+                writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
+                    builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.call_covered, f.segment_abandoned)?;
+            } else {
+                writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, dropped \
+                    builds {}", f.records, f.recorded, f.segment_imports, f.segment_unrepresented, f.segment_abandoned)?;
+            }
         }
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
@@ -2235,6 +2345,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["recorded"] = json!(f.recorded);
             v["segment_imports"] = json!(f.segment_imports);
             v["segment_unrepresented"] = json!(f.segment_unrepresented);
+            if r.call_bracket {
+                v["call_covered"] = json!(f.call_covered);
+            }
             v["segment_abandoned"] = json!(f.segment_abandoned);
         }
         if f.call_brackets != 0 {

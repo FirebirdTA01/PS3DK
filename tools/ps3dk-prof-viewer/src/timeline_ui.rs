@@ -51,8 +51,12 @@ pub struct TimelineState {
     /// SPU premise for the SPU/RSX rows: assume no decrementer wrap (W32) instead of R64.
     pub w32: bool,
     pub show_extrapolated: bool,
-    /// Collapsed groups: PPU threads, SPU lanes, RSX domains.
-    pub collapsed: [bool; 3],
+    /// Collapsed groups: PPU, SPU, RSX domains, AUTO verdict, busy, presentation.
+    pub collapsed: [bool; 6],
+    pub auto_drawn: crate::timeline_auto::Layout,
+    pub auto_areas: [Option<Rect>; 2],
+    auto_extent: Option<(u64, u64)>,
+    last_axis_all: bool,
     /// The SPU/RSX rows drawn this frame (from the Document's cache, for the current W32).
     pub foreign: Option<Arc<FTimeline>>,
     /// The axis also covers the finite interpolated SPU/RSX bounds ("Fit all"), not only the PPU data.
@@ -96,7 +100,11 @@ impl TimelineState {
             fit_all: true,
             w32: false,
             show_extrapolated: true,
-            collapsed: [false; 3],
+            collapsed: [false; 6],
+            auto_drawn: Default::default(),
+            auto_areas: [None; 2],
+            auto_extent: None,
+            last_axis_all: false,
             foreign: None,
             axis_all: false,
             spu_iso: false,
@@ -113,7 +121,11 @@ impl TimelineState {
         }
         let v = slot.view(a, &self.tl, self.w32);
         if !self.tl.has_data {
-            let (s, e) = v.extent.unwrap_or((0, 0));
+            let (s, e) = match (v.extent, self.auto_extent) {
+                (Some((a, b)), Some((c, d))) => (a.min(c), b.max(d)),
+                (Some(x), None) | (None, Some(x)) => x,
+                (None, None) => (0, 0),
+            };
             if (self.tl.start, self.tl.end) != (s, e) {
                 self.tl.start = s;
                 self.tl.end = e;
@@ -122,11 +134,23 @@ impl TimelineState {
             }
         }
         // The widened axis: the interpolated SPU/RSX bounds only (never an unbounded or extrapolated extent).
-        let extra = if self.axis_all { v.interp_extent } else { None };
+        let foreign = if self.axis_all { v.interp_extent } else { None };
+        let automatic = self.auto_extent.map(|(lo, hi)| (self.tl.rel(lo), self.tl.rel(hi)));
+        let extra = match (foreign, automatic) {
+            (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+            (a, b) => a.or(b),
+        };
+        let axis_changed = self.axis_all != self.last_axis_all;
+        self.last_axis_all = self.axis_all;
         if self.tl.extra != extra {
             self.tl.extra = extra;
-            self.view = View::fit(&self.tl);
-            self.fit_all = true;
+            if self.fit_all || axis_changed {
+                self.view = View::fit(&self.tl);
+                self.fit_all = true;
+            } else {
+                if self.follow { self.view.t0 = self.tl.axis().1 - self.view.dt; }
+                self.view.clamp(&self.tl);
+            }
             self.box_from = None;
         }
         if self.spu_pick.as_ref().is_some_and(|k| !Arc::ptr_eq(&k.view, &v)) {
@@ -169,8 +193,23 @@ pub fn draw(
     st: &mut TimelineState,
     selected: &mut Option<ZoneKey>,
 ) {
+    draw_with_auto(ctx, slot, a, None, st, selected);
+}
+
+pub fn draw_with_auto(
+    ctx: &egui::Context,
+    slot: &tf::ForeignTimelineSlot,
+    a: &Analysis,
+    auto: Option<&crate::auto::AutoView>,
+    st: &mut TimelineState,
+    selected: &mut Option<ZoneKey>,
+) {
     let pal = ui::Palette::of_ctx(ctx);
     let tb = TimeBase::of(a);
+    let auto = auto.filter(|v| v.has_auto());
+    st.auto_extent = auto.and_then(crate::timeline_auto::extent);
+    st.auto_drawn = Default::default();
+    st.auto_areas = [None; 2];
     st.sync_foreign(slot, a);
     let labels = Labels::build(a);
     egui::CentralPanel::default()
@@ -191,6 +230,11 @@ pub fn draw(
                     ui::Tone::Warning,
                     "No usable clock: the ruler and durations are in timebase ticks.",
                 );
+            }
+            if st.tl.tracks.is_empty() {
+                ui::field_message(p, ui::Tone::Neutral, "No PPU timeline lanes: no thread records are present in this capture.");
+            } else if a.capture.spans.is_empty() {
+                ui::field_message(p, ui::Tone::Neutral, "No PPU zones recorded: only the available frame markers can be shown.");
             }
             st.track_areas.clear();
             toolbar(p, st, tb, &*selected);
@@ -219,6 +263,9 @@ pub fn draw(
                             p.add_space(ui::SPACE_XS);
                         }
                     }
+                    if let Some(v) = auto {
+                        draw_auto_lanes(p, v, st, width, &pal);
+                    }
                     if a.capture.ext.is_some() {
                         if let Some(n) = &fv.notice {
                             ui::field_message(p, ui::Tone::Warning, n);
@@ -243,6 +290,133 @@ pub fn draw(
                 st.fit_all = st.view == View::fit(&st.tl);
             }
         });
+}
+
+fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut TimelineState, width: f32, pal: &ui::Palette) {
+    use crate::timeline_auto as ta;
+    let mut layout = ta::layout(v, &st.tl, &st.view, width as f64);
+    let titles = [format!("AUTO verdicts ({} frames)", v.report.frames.len()),
+        format!("AUTO RSX busy ({} merged intervals)", v.busy.bars.len())];
+    for lane in 0..2 {
+        if !group_header(p, st, lane + 3, &titles[lane], pal) {
+            if lane == 0 { layout.verdict.clear(); } else { layout.busy.clear(); }
+            layout.omitted[lane] = 0;
+            continue;
+        }
+        if lane == 0 && layout.unplaced_frames != 0 {
+            ui::field_message(p, ui::Tone::Neutral, &format!("{} frame row(s) have no associated valid PPU interval.", layout.unplaced_frames));
+        }
+        if lane == 1 {
+            if let Some(notice) = v.busy.notice {
+                ui::field_message(p, ui::Tone::Neutral, notice);
+                continue;
+            }
+            p.add(egui::Label::new(egui::RichText::new("RSX reached-marker intervals, including RSX waits. Solid cores and uncertainty whiskers; no extrapolation.").small().color(pal.text_muted)).wrap());
+            if v.busy.omitted != 0 {
+                ui::field_message(p, ui::Tone::Neutral, &format!("{} retained operation(s) unavailable or outside clock-map support; not placed.", v.busy.omitted));
+            }
+            if v.ops_dropped() != 0 {
+                ui::field_message(p, ui::Tone::Neutral, &format!("{} operation(s) dropped by reader retention; this lane is partial.", v.ops_dropped()));
+            }
+        }
+        if layout.omitted[lane] != 0 {
+            ui::field_message(p, ui::Tone::Neutral, &format!("Showing the first {} visible bars; {} later visible bars are not painted. Zoom in to inspect them.", ta::PAINT_CAP, layout.omitted[lane]));
+        }
+        let bars = if lane == 0 { &layout.verdict } else { &layout.busy };
+        if bars.is_empty() {
+            let why = if lane == 0 {
+                if v.report.frames.is_empty() { "No AUTO coverage rows retained." }
+                else if layout.unplaced_frames == v.report.frames.len() { "No AUTO frame has a valid placement token and interval." }
+                else { "No AUTO frame intervals in the visible window." }
+            } else if v.busy.bars.is_empty() { "No mapped timed intervals retained." }
+            else { "No mapped RSX intervals in the visible window." };
+            ui::field_message(p, ui::Tone::Neutral, why);
+        }
+        let (rect, _) = p.allocate_exact_size(Vec2::new(LABEL_W + width, 38.0), Sense::hover());
+        let area = Rect::from_min_max(Pos2::new(rect.left() + LABEL_W, rect.top()), rect.max);
+        st.auto_areas[lane] = Some(area);
+        let resp = p.interact(area, p.id().with(("auto-lane", lane)), Sense::click_and_drag());
+        p.painter().text(rect.left_top() + Vec2::new(0.0, 10.0), Align2::LEFT_TOP,
+            if lane == 0 { "Frame verdict" } else { "Mapped RSX intervals" }, FontId::proportional(12.0), pal.text_muted);
+        let painter = p.painter_at(area);
+        painter.rect_filled(area, 2.0, pal.surface_alt);
+        for b in bars {
+            let left = area.left() + b.left as f32;
+            let right = area.left() + b.right as f32;
+            let color = if lane == 0 { crate::auto_ui::verdict_color(v.report.frames[b.index].verdict, pal) } else { pal.accent };
+            if lane == 0 {
+                let r = Rect::from_min_max(Pos2::new(left, area.top() + 6.0), Pos2::new(right.max(left + 1.0), area.bottom() - 6.0));
+                painter.rect_filled(r, 1.0, color);
+                if r.width() > 36.0 {
+                    p.painter_at(r.intersect(area)).text(r.center(), Align2::CENTER_CENTER,
+                        v.report.frames[b.index].frame.to_string(), FontId::proportional(11.0), pal.bg);
+                }
+            } else {
+                let mid = area.center().y;
+                painter.line_segment([Pos2::new(left, mid), Pos2::new(right.max(left + 1.0), mid)], Stroke::new(1.0_f32, color));
+                for x in [left, right] {
+                    painter.line_segment([Pos2::new(x, mid - 5.0), Pos2::new(x, mid + 5.0)], Stroke::new(1.0_f32, color));
+                }
+                if let Some((lo, hi)) = b.core {
+                    painter.rect_filled(Rect::from_min_max(Pos2::new(area.left() + lo as f32, mid - 9.0),
+                        Pos2::new(area.left() + hi as f32, mid + 9.0)), 1.0, color);
+                }
+            }
+        }
+        if let Some(pos) = resp.hover_pos() {
+            let x = f64::from(pos.x - area.left());
+            if let Some(b) = bars.iter().rev().find(|b| x >= b.left && x <= b.right.max(b.left + 1.0)) {
+                let text = if lane == 0 {
+                    let f = &v.report.frames[b.index];
+                    format!("Frame {} (owner {}) | {}\n{}\n{}\nInterval: {}\nPPU interval: {}..{} ticks", f.frame, f.owner, f.verdict.key(), f.verdict.explanation(), f.reason,
+                        v.format_ms(f.tb_end.saturating_sub(f.tb_begin)), f.tb_begin, f.tb_end)
+                } else {
+                    let b = &v.busy.bars[b.index];
+                    format!("Frame {} (owner {}) | {} operation(s)\nRSX raw interval: {}..{}\nPPU begin: {}..{} ticks\nPPU end: {}..{} ticks\nConditional on the capture clock map; includes RSX waits.",
+                        b.frame, b.owner, b.operations, b.raw_begin, b.raw_end, b.begin.0, b.begin.1, b.end.0, b.end.1)
+                };
+                resp.clone().on_hover_text(text);
+            }
+        }
+        if let (Some(from), Some(pos)) = (st.box_from, resp.interact_pointer_pos()) {
+            if resp.dragged() {
+                let x = (pos.x - area.left()).clamp(0.0, width);
+                let r = Rect::from_min_max(Pos2::new(area.left() + from.min(x), area.top()), Pos2::new(area.left() + from.max(x), area.bottom()));
+                painter.rect_filled(r, 0.0, pal.accent.gamma_multiply(0.2));
+            }
+        }
+        navigate(p, st, &resp, area, width);
+        p.add_space(ui::SPACE_XS);
+    }
+    if group_header(p, st, 5, "AUTO presentation (frame aggregates)", pal) {
+        p.add(egui::Label::new(egui::RichText::new(ta::PRESENTATION_NOTICE).small().color(pal.text_muted)).wrap());
+        let observed = v.report.frames.iter().filter(|f| f.presentation.is_some()).count();
+        if observed == 0 {
+            p.label("No presentation observations in any frame");
+        } else {
+            p.label(format!("observations in {observed} of {} frames", v.report.frames.len()));
+        }
+        // Aggregate rows follow the same visible frames; there are no fabricated
+        // time positions or widths. The summary counts the whole capture, and
+        // an explicit zero-valued observation is retained alongside nonzero data.
+        let visible: Vec<_> = v.report.frames.iter().filter(|f|
+            f.presentation.is_some() && st.tl.rel(f.tb_end) >= st.view.t0
+                && st.tl.rel(f.tb_begin) <= st.view.t0 + st.view.dt).collect();
+        if observed != 0 && visible.is_empty() {
+            p.label("No presentation observations in the visible window");
+        }
+        for f in visible.iter().take(128) {
+            p.horizontal_top(|p| {
+                p.add_sized([LABEL_W - ui::SPACE_SM, 20.0], egui::Label::new(format!("Frame {} / owner {}", f.frame, f.owner)));
+                p.add(egui::Label::new(ta::presentation_short(f, TimeBase { freq_hz: Some(v.tb_freq) })).wrap())
+                    .on_hover_text(ta::presentation_text(f));
+            });
+        }
+        if visible.len() > 128 {
+            ui::field_message(p, ui::Tone::Neutral, &format!("Showing the first 128 of {} visible frame aggregates. Zoom in to inspect later frames.", visible.len()));
+        }
+    }
+    st.auto_drawn = layout;
 }
 
 fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Option<ZoneKey>) {
@@ -284,7 +458,7 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
             Some(ms) => format_ms(ms),
             None => format!("{:.0} ticks", st.view.dt),
         };
-        p.label(egui::RichText::new(format!("Window {span}")).strong());
+        p.label(egui::RichText::new(format!("Window {span}")).strong()).on_hover_text(tb.ticks_f(st.view.dt));
         if let Some((name, tag)) = selected {
             p.add_space(ui::SPACE_LG);
             let label = if tag.is_empty() {
@@ -306,7 +480,8 @@ fn toolbar(p: &mut egui::Ui, st: &mut TimelineState, tb: TimeBase, selected: &Op
 }
 
 fn draw_ruler(p: &mut egui::Ui, st: &TimelineState, tb: TimeBase, width: f32, pal: &ui::Palette) {
-    let (rect, _) = p.allocate_exact_size(Vec2::new(LABEL_W + width, RULER_H), Sense::hover());
+    let (rect, response) = p.allocate_exact_size(Vec2::new(LABEL_W + width, RULER_H), Sense::hover());
+    response.on_hover_text(format!("Offsets from capture start {} PPU ticks; shown offset {}..{} ticks", st.tl.start, st.view.t0, st.view.t0 + st.view.dt));
     let painter = p.painter_at(rect);
     let x0 = rect.left() + LABEL_W;
     painter.line_segment(
@@ -325,13 +500,15 @@ fn draw_ruler(p: &mut egui::Ui, st: &TimelineState, tb: TimeBase, width: f32, pa
             ],
             Stroke::new(1.0_f32, pal.text_faint),
         );
-        painter.text(
-            Pos2::new(x + 3.0, rect.top() + 2.0),
-            Align2::LEFT_TOP,
+        let galley = painter.layout_no_wrap(
             label,
             FontId::proportional(11.0),
             pal.text_muted,
         );
+        // Keep the final tick, but never clip the unit off its label at the viewport edge.
+        if x + 3.0 + galley.size().x <= rect.right() {
+            painter.galley(Pos2::new(x + 3.0, rect.top() + 2.0), galley, pal.text_muted);
+        }
     }
 }
 
@@ -508,19 +685,8 @@ fn draw_track(
     handle_input(p, st, index, &resp, area, width, &draws, a, tb, selected);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_input(
-    p: &mut egui::Ui,
-    st: &mut TimelineState,
-    index: usize,
-    resp: &egui::Response,
-    area: Rect,
-    width: f32,
-    draws: &[crate::timeline::Draw],
-    a: &Analysis,
-    tb: TimeBase,
-    selected: &mut Option<ZoneKey>,
-) {
+/// Shared wheel, pan and box-zoom behavior for PPU and AUTO lanes.
+fn navigate(p: &mut egui::Ui, st: &mut TimelineState, resp: &egui::Response, area: Rect, width: f32) -> bool {
     let w = width as f64;
     // Wheel zooms here; the lane list's own scrolling must not also take it.
     if let Some(pos) = resp.hover_pos() {
@@ -565,8 +731,27 @@ fn handle_input(
     }
     if resp.double_clicked() {
         st.view = View::fit(&st.tl);
-        return;
+        return true;
     }
+
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_input(
+    p: &mut egui::Ui,
+    st: &mut TimelineState,
+    index: usize,
+    resp: &egui::Response,
+    area: Rect,
+    width: f32,
+    draws: &[crate::timeline::Draw],
+    a: &Analysis,
+    tb: TimeBase,
+    selected: &mut Option<ZoneKey>,
+) {
+    if navigate(p, st, resp, area, width) { return; }
+    let shift = p.input(|i| i.modifiers.shift);
 
     let Some(pos) = resp.hover_pos() else { return };
     let rel = pos.y - area.top() - TRACK_PAD;

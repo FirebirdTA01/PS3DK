@@ -310,6 +310,23 @@ static void poll_status(void)
     CHECK(close(q[0]) == 0 && close(q[1]) == 0);
 }
 
+static void write_half_close(void)
+{
+    int pair[2];
+    CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    CHECK(live_os_shutdown_write(pair[0]) == 0);
+    char bytes[8];
+    CHECK(read(pair[1], bytes, sizeof bytes) == 0);
+    CHECK(write(pair[1], "late", 4) == 4);
+    CHECK(live_os_recv(pair[0], bytes, sizeof bytes) == 4);
+    CHECK(memcmp(bytes, "late", 4) == 0);
+    CHECK(shutdown(pair[1], SHUT_WR) == 0);
+    CHECK(live_os_recv(pair[0], bytes, sizeof bytes) == LIVE_OS_CLOSED);
+    live_os_close(pair[0]);
+    live_os_close(pair[1]);
+    CHECK(live_os_shutdown_write(-1) == LIVE_OS_ERROR);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2) {
@@ -330,6 +347,8 @@ int main(int argc, char **argv)
     puts("PASS real_sockets");
     poll_status();
     puts("PASS poll_status");
+    write_half_close();
+    puts("PASS write_half_close");
     puts("live-os: PASS");
     return 0;
 }
