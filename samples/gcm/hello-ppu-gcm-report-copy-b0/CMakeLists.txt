@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.20)
+project(hello-ppu-gcm-report-copy-b0 C ASM)
+include(ps3-self)
+add_executable(hello-ppu-gcm-report-copy-b0 source/main.c)
+target_compile_features(hello-ppu-gcm-report-copy-b0 PRIVATE c_std_11)
+target_compile_options(hello-ppu-gcm-report-copy-b0 PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(hello-ppu-gcm-report-copy-b0 PRIVATE
+    gcm_cmd gcm_sys io sysutil sysutil_stub sysmodule rt lv2 m)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-report-copy-b0 ../hello-ppu-cellgcm-state-tour/shaders/vpshader.vcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-report-copy-b0 ../hello-ppu-cellgcm-state-tour/shaders/fpshader.fcg)
+ps3_add_self(hello-ppu-gcm-report-copy-b0)

@@ -768,6 +768,9 @@ jobs:
       - name: Test report-ring probe controls and setup provenance
         run: bash tests/host/report-ring-probe-test.sh
 
+      - name: Test B0 report-copy packet and controls
+        run: python3 tests/host/report-copy-b0-test.py
+
       # Positive/negative fixture test for TOC mid-entry relocation audit tool.
       - name: Test the TOC mid-entry relocation audit tool
         run: bash tests/host/toc-midentry-audit-test.sh
