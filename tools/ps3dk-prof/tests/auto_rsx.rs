@@ -1963,6 +1963,31 @@ fn by_tag_on_the_runtime_capture() {
     assert!(String::from_utf8_lossy(&out).starts_with("no tags"));
 }
 
+/// The by-tag JSON carries the frame-scoped `outside_timed_range` and `ranges_refused`
+/// (shape identical to `auto --json`'s frame objects) and they agree with the
+/// per-frame values `auto --json` emits for the same (owner, frame).
+#[test]
+fn by_tag_frame_fields_match_auto_json() {
+    let p = fixture_path("tags");
+    let by: serde_json::Value = serde_json::from_slice(&cli(&["auto", "--by-tag", "--json", &p]).1).unwrap();
+    let auto: serde_json::Value = serde_json::from_slice(&cli(&["auto", "--json", &p]).1).unwrap();
+    let auto_frames = auto["frames"].as_array().expect("auto frames");
+    let by_frames = by["frames"].as_array().expect("by-tag frames");
+    assert!(!by_frames.is_empty());
+    for bf in by_frames {
+        let key = (bf["owner"].as_u64().unwrap(), bf["frame"].as_u64().unwrap());
+        let af = auto_frames.iter().find(|a| {
+            (a["owner"].as_u64().unwrap(), a["frame"].as_u64().unwrap()) == key
+        }).unwrap_or_else(|| panic!("auto --json missing frame {key:?}"));
+        // outside_timed_range: same object shape ({array,index,clear})
+        assert_eq!(bf["outside_timed_range"], af["outside_timed_range"],
+            "outside_timed_range parity for frame {key:?}: {bf}");
+        // ranges_refused: same value
+        assert_eq!(bf["ranges_refused"], af["ranges_refused"],
+            "ranges_refused parity for frame {key:?}");
+    }
+}
+
 /// `auto --ops` names tag and fp_offset (and RANGE depth) only for 1023/11 records; `auto --json` names the new
 /// exclusion reason and the refused ranges only for 1023/11 rows.
 #[test]
@@ -2102,6 +2127,45 @@ fn flip_wait_scope_block_is_checked() {
     assert!(reader::read(&f.bytes()).is_err());
     let f = flip_frame(&[(6000, 36_000)], (5_000, 70_000), 1023, true); // begins before the frame
     assert!(reader::read(&f.bytes()).is_err());
+}
+
+/// Recorded PPU positions remain available even without an RSX clock map. Later
+/// scopes have aggregate time only; neither the report nor CLI invents positions.
+#[test]
+fn recorded_flip_wait_positions_in_json() {
+    let mut f = flip_frame(&[(6000, 36_000)], (20_000, 40_000), 1023, false);
+    let row = &mut f.chunks.iter_mut().find(|c| c.ty == 36).unwrap().payload;
+    row[12..16].copy_from_slice(&3u32.to_le_bytes());
+    row[56..64].copy_from_slice(&50_000u64.to_le_bytes());
+    row[464..472].copy_from_slice(&60_000u64.to_le_bytes());
+    row[472..480].copy_from_slice(&70_000u64.to_le_bytes());
+    row[384..388].copy_from_slice(&4u32.to_le_bytes());
+    row[388..392].copy_from_slice(&2u32.to_le_bytes());
+    row[392..396].copy_from_slice(&1u32.to_le_bytes());
+    row[396..400].copy_from_slice(&21u32.to_le_bytes()); // label 20
+    row[400..408].copy_from_slice(&12_345u64.to_le_bytes());
+    row[408..416].copy_from_slice(&12_345u64.to_le_bytes());
+    let capture = reader::read(&f.bytes()).unwrap();
+    assert_eq!(fixture("presentation-partial"),f.bytes(),"regenerate the screenshot/parity fixture from this wire builder");
+    let report = analyze(&capture);
+    assert_eq!(report.frames[0].flip_wait_at,capture.auto.as_ref().unwrap().frames[0].flip_wait_at);
+    let mut output = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut output, &report).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["frames"][0]["flip_wait_intervals"], serde_json::json!([
+        {"tb_begin":20_000,"tb_end":40_000}, {"tb_begin":60_000,"tb_end":70_000}
+    ]));
+    assert_eq!(json["frames"][0]["presentation"]["flip_wait"]["scopes"],3);
+    assert_eq!(json["frames"][0]["label_polling"]["label"],20);
+    let old = analyze(&reader::read(&flip_frame(&[(6000,36_000)],(20_000,40_000),511,false).bytes()).unwrap());
+    output.clear();
+    ps3dk_prof::auto_rsx::write_json(&mut output,&old).unwrap();
+    let old_json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(old_json["frames"][0].get("flip_wait_intervals").is_none());
+    if let Some(dir) = std::env::var_os("VIEWER_PRESENTATION_FIXTURE_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(std::path::Path::new(&dir).join("presentation-partial.prof"),f.bytes()).unwrap();
+    }
 }
 
 /// The inner PPU bound of a raw timestamp comes from the nearest anchors and contains the anchor's own bracket.

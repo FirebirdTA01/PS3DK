@@ -38,6 +38,8 @@ pub struct Document {
     pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
     /// Automatic RSX observation page view, computed ONCE here.
     pub auto: Option<crate::auto::AutoView>,
+    /// Passes page: the reader's by-tag/range inventory, computed ONCE here (never re-derived per repaint).
+    pub passes: crate::auto::PassesView,
     /// The RSX frames page (captures found in the data): built once, on first need.
     pub rsx: crate::rsx::RsxSlot,
 }
@@ -112,7 +114,7 @@ impl Document {
     // One construction path for file/live results and policy-controlled parser
     // results. It never accepts an index from another capture.
     pub(crate) fn from_outcome(path: PathBuf, size: usize, prefix_ok: bool, loaded: Outcome) -> Document {
-        let (state, ext, frames, hot, waits, fifo, auto) = match loaded {
+        let (state, ext, frames, hot, waits, fifo, auto, passes) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
@@ -123,6 +125,7 @@ impl Document {
                 None,
                 None,
                 None,
+                crate::auto::PassesView::default(),
             ),
             Outcome::Analysed(a) => {
                 let ext = ext_view(&a);
@@ -132,7 +135,8 @@ impl Document {
                 let waits = crate::waits::WaitsView::build(&a.capture, crate::waits::Budget::default());
                 let fifo = crate::fifo::FifoView::build(&a.capture);
                 let auto = Some(crate::auto::AutoView::build(&a.capture));
-                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo), auto)
+                let passes = crate::auto::passes_build(&a.capture);
+                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo), auto, passes)
             }
         };
         Document {
@@ -147,6 +151,7 @@ impl Document {
             waits,
             fifo,
             auto,
+            passes,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),

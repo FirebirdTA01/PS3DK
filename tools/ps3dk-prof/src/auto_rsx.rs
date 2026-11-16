@@ -1560,6 +1560,10 @@ pub struct FrameView {
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
+    /// 1023/11: validated PPU begin/end ticks of up to the first two completed
+    /// flip-wait scopes. None means the format did not record positions;
+    /// Some(empty) means it did, but no completed scope was recorded.
+    pub flip_wait_at: Option<Vec<(u64, u64)>>,
     /// 511/11: label-poll cadence, its label + 1 and the largest one-label total (see MASKS_LABEL), None for older
     /// writers.
     pub label_polls: Option<(Cadence, u32, u64)>,
@@ -1714,6 +1718,15 @@ pub fn raw_to_ppu_bounds(anchors: &[Anchor], m: &Map, x: u64) -> Option<(u64, u6
     }
 }
 
+/// Certain PPU-tick bounds (shortest, longest) of a raw RSX DURATION under a qualified map's slope bounds, the same
+/// conversion `analyze` applies to a frame's RSX busy time. None when the map is not qualified: no time is claimed.
+pub fn raw_duration_ppu_bounds(map: &MapState, raw: u64) -> Option<(u64, u64)> {
+    match map {
+        MapState::Qualified(m) => Some((sat(&floor_mul(raw, &m.slope_lo)), sat(&ceil_mul(raw, &m.slope_hi)))),
+        MapState::Unqualified(_) => None,
+    }
+}
+
 /// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
 /// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
 pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
@@ -1833,6 +1846,7 @@ pub fn analyze(cap: &Capture) -> Report {
             call_covered: call_unrep,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             label_polls: f.label_polls,
+            flip_wait_at: f.flip_wait_at.clone(),
             outside_timed: f.outside_timed,
             ranges_refused: f.ranges_refused,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
@@ -2374,6 +2388,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["call_brackets"] = json!(f.call_brackets);
         }
         if r.tagged {
+            v["flip_wait_intervals"] = json!(f.flip_wait_at.as_ref().map(|at| at.iter()
+                .map(|&(b,e)| json!({"tb_begin":b,"tb_end":e})).collect::<Vec<_>>()));
             // the exclusion reason "outside timed range", per kind, and the refused AUTO ranges
             v["outside_timed_range"] = json!({"array":f.outside_timed[0],"index":f.outside_timed[1],"clear":f.outside_timed[2]});
             v["ranges_refused"] = json!(f.ranges_refused);
@@ -2603,6 +2619,12 @@ pub struct TagFrame {
     pub unrepresented: u32,
     pub tags: BTreeMap<u32, TagRow>,
     pub ranges: BTreeMap<String, RangeRow>,
+    /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
+    /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
+    /// frame `outside_timed_range`).
+    pub outside_timed_range: [u64; 3],
+    /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
+    pub ranges_refused: u32,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
@@ -2636,7 +2658,7 @@ pub fn by_tag(cap: &Capture) -> ByTag {
     for f in &inv.frames {
         let key = (f.owner, f.frame);
         let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
-        let mut tf = TagFrame { owner: f.owner, frame: f.frame, ..TagFrame::default() };
+        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, ..TagFrame::default() };
         let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
         tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
         tf.unrepresented = f.segment_unrepresented;
@@ -2741,6 +2763,8 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     use serde_json::json;
     let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| json!({
         "owner": f.owner, "frame": f.frame, "untimed": f.untimed, "unrepresented": f.unrepresented,
+        "outside_timed_range": {"array": f.outside_timed_range[0], "index": f.outside_timed_range[1], "clear": f.outside_timed_range[2]},
+        "ranges_refused": f.ranges_refused,
         "tags": f.tags.iter().map(|(t, r)| json!({"tag": t, "ops": r.ops, "busy_raw": r.busy_raw,
             "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
         "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
@@ -2794,5 +2818,23 @@ mod tests {
         assert_eq!(busy, 100, "busy = 10+20+30+40");
         assert_eq!(med, 25, "median of [10,20,30,40] = (20+30)/2 = 25");
         assert_eq!(hi, 40, "p95 rank ceil(0.95*4)=4 → sorted[3] = 40");
+    }
+
+    // Boundary cases: the rank is interior (p95 != max) so the nearest-rank index is
+    // actually exercised, not just "the largest value".
+    #[test]
+    fn p95_twenty_samples_picks_index_19_not_max() {
+        let v: Vec<u64> = (1..=20).collect(); // [1..20], max = 20
+        // rank = (95*20+99)/100 = 19 (1-based) → sorted[18] = 19
+        assert_eq!(p95(v.clone()), 19);
+        assert_ne!(p95(v), 20, "must not collapse to the max");
+    }
+
+    #[test]
+    fn p95_twentyone_samples_picks_index_20() {
+        let v: Vec<u64> = (1..=21).collect(); // [1..21], max = 21
+        // rank = (95*21+99)/100 = 20 (1-based) → sorted[19] = 20
+        assert_eq!(p95(v.clone()), 20);
+        assert_ne!(p95(v), 21, "must not collapse to the max");
     }
 }
