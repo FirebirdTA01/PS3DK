@@ -8,10 +8,15 @@
 #define auto_encode_frame ps3dk_prof__auto_encode_frame
 #define auto_encode_status ps3dk_prof__auto_encode_status
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
+#define auto_encode_ops_ring ps3dk_prof__auto_encode_ops_ring
+#define auto_encode_frame_ring ps3dk_prof__auto_encode_frame_ring
+#define auto_encode_status_ring ps3dk_prof__auto_encode_status_ring
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
 enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
+enum { AUTO_CONFIG_RING_BYTES=216, AUTO_OP_RING_BYTES=176, AUTO_FRAME_RING_BYTES=528,
+       AUTO_STATUS_RING_BYTES=192, AUTO_KIND_RING_MASK=2047, AUTO_OP_RING=128 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
        AUTO_ALLOCATION_FAILED, AUTO_UNSUPPORTED_CONTEXT, AUTO_STOPPED, AUTO_NO_GCM_INIT };
@@ -86,6 +91,11 @@ typedef struct auto_wire_config {
     int32_t application_rc;
     uint8_t mechanism[32], binding[32];
     uint32_t call_pairs, range_pairs; /* TAG: u32@160 whole-CALL reserve, u32@164 range reserve; u64@168 zero */
+    /* REPORT_RING (2047/11), u32 fields at 176..208, u32@212=1 (owner draws only).
+     * pairs still names the entire local pool; legacy_pairs excludes the ring
+     * blocks. Metadata and raw-ring storage are independently bounded. */
+    uint32_t ring_bytes,ring_blocks,ring_pairs,ring_first,ring_label;
+    uint32_t ring_stride,ring_slots,metadata_stride,legacy_pairs;
 } auto_wire_config;
 
 typedef struct auto_wire_op {
@@ -103,6 +113,13 @@ typedef struct auto_wire_op {
     uint32_t tag;           /* TAG: the tag current at the claim (a segment draw: at its build) */
     uint32_t fp_offset;     /* TAG: the last cellGcmSetFragmentProgram offset on the record's context, 0 if none */
     uint32_t depth;         /* RANGE only: nesting depth 1..4 */
+    /* REPORT_RING tail at 160: zero for legacy local records. The serials of
+     * a ring record are 2*generation-1 / 2*generation on CONFIG's ring_label;
+     * report indices name its reusable local block, raw values its MAIN copy.
+     * state: 0 untouched app M2MF, 1 restored app state, 2 uncertain. */
+    uint32_t ring_generation,ring_slot;
+    uint16_t ring_ordinal,ring_local;
+    uint32_t ring_state;
 } auto_wire_op;
 
 typedef struct auto_wire_frame {
@@ -143,6 +160,7 @@ typedef struct auto_wire_frame {
      * reader cannot place the others and does not use the block. */
     uint64_t flip_wait_at[2][2];
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
+    uint64_t ring_full[3],ring_state[3]; /* REPORT_RING: at 480 and 504, disjoint extra exclusions */
 } auto_wire_frame;
 
 typedef struct auto_wire_clock {
@@ -162,4 +180,9 @@ size_t auto_encode_ops(uint8_t *, size_t, uint32_t, const auto_wire_op *, uint32
 size_t auto_encode_frame(uint8_t *, size_t, const auto_wire_frame *);
 size_t auto_encode_status(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15]);
 size_t auto_encode_clock(uint8_t *, size_t, const auto_wire_clock *);
+size_t auto_encode_ops_ring(uint8_t *, size_t, uint32_t, const auto_wire_op *, uint32_t);
+size_t auto_encode_frame_ring(uint8_t *, size_t, const auto_wire_frame *);
+/* Tail u64[8]: issued blocks, retired blocks, published label, held extents,
+ * copied bytes, untouched-state copies, restored-state copies, decoded words. */
+size_t auto_encode_status_ring(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15], const uint64_t [8]);
 #endif

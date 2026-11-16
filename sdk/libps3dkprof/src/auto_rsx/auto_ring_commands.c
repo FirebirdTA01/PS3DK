@@ -54,6 +54,28 @@ size_t auto_ring_copy_packet(uint32_t *p,uint32_t destination,uint32_t report,ui
     return 12;
 }
 
+static void barrier(uint32_t *p,uint32_t label,uint32_t value)
+{
+    p[0]=METHOD(0,0x1d6c,1);p[1]=16u*label;
+    p[2]=METHOD(0,0x1d70,1);
+    p[3]=(value&0xff00ff00u)|((value>>16)&255u)|((value&255u)<<16);
+    p[4]=METHOD(0,0x64,1);p[5]=16u*label;p[6]=METHOD(0,0x68,1);p[7]=value;
+}
+size_t auto_ring_flush_packet(uint32_t *p,size_t capacity,const auto_ring_shadow *s,uint32_t destination,
+                              uint32_t report,uint32_t bytes,uint32_t label,uint32_t generation)
+{
+    uint32_t copy[12],restore[AUTO_RING_RESTORE_WORDS];
+    if(!p || !s || !generation || generation>UINT32_MAX/2u-1u ||
+       !(label==64 || (label>=69 && label<=254))) return 0;
+    size_t n=auto_ring_restore(s,restore,AUTO_RING_RESTORE_WORDS);
+    if(n==SIZE_MAX || capacity<28u+n || !auto_ring_copy_packet(copy,destination,report,bytes)) return 0;
+    barrier(p,label,2u*generation-1u);
+    for(unsigned i=0;i<12;i++)p[8+i]=copy[i];
+    barrier(p+20,label,2u*generation);
+    for(size_t i=0;i<n;i++)p[28+i]=restore[i];
+    return 28u+n;
+}
+
 int auto_ring_tail_take(auto_ring_tail *t,uintptr_t begin,uintptr_t current,uintptr_t *end,
                         uint32_t credit,uint64_t requested)
 {

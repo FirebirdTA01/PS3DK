@@ -6,6 +6,7 @@
 #define auto_ring_shadow_scan ps3dk_prof__auto_ring_shadow_scan
 #define auto_ring_restore ps3dk_prof__auto_ring_restore
 #define auto_ring_copy_packet ps3dk_prof__auto_ring_copy_packet
+#define auto_ring_flush_packet ps3dk_prof__auto_ring_flush_packet
 #define auto_ring_tail_take ps3dk_prof__auto_ring_tail_take
 #define auto_ring_tail_release ps3dk_prof__auto_ring_tail_release
 
@@ -30,6 +31,11 @@ size_t auto_ring_restore(const auto_ring_shadow *,uint32_t *,size_t capacity);
 /* The tested 12-word M2MF packet, report DMA 0x66626660 -> MAIN 0xfeed0001.
  * Returns 0 without stores for invalid bounds, 12 otherwise. */
 size_t auto_ring_copy_packet(uint32_t *,uint32_t destination,uint32_t report,uint32_t bytes);
+/* Complete ordered flush plus application-state restore. All arguments and
+ * capacity are checked before the first store. Restore follows the publication
+ * wait, so it cannot change registers of a copy still executing. */
+size_t auto_ring_flush_packet(uint32_t *,size_t capacity,const auto_ring_shadow *,uint32_t destination,
+                              uint32_t report,uint32_t bytes,uint32_t label,uint32_t generation);
 
 typedef struct auto_ring_tail { uintptr_t begin,physical,visible; uint32_t active; } auto_ring_tail;
 /* Integer-address checks; runtime assigns the validated end back through its

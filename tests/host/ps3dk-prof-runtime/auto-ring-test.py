@@ -23,6 +23,8 @@ MUTANTS = {
     'lost-mode': ('commands', 'if(s->known&(1u<<i)) {', 'if(i>=2 && (s->known&(1u<<i))) {'),
     'lost-credit': ('commands', '*end=t->visible;', '*end=t->physical;'),
     'unknown-binding': ('commands', 'if(!m) {s->invalid=1;return 0;}', 'if(!m) {continue;}'),
+    'missing-gpu-wait': ('commands', 'p[6]=METHOD(0,0x68,1)', 'p[6]=METHOD(0,0x50,1)'),
+    'wrong-pre-copy-label': ('commands', 'barrier(p,label,2u*generation-1u);', 'barrier(p,label,2u*generation);'),
 }
 
 def main():
@@ -30,12 +32,17 @@ def main():
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--sanitize',choices=['none','address','thread'],default='none')
     p.add_argument('--mutants',action='store_true')
-    p.add_argument('--case',choices=['all','core','commands'],default='all')
+    p.add_argument('--case',choices=['all','core','commands','wire'],default='all')
     a=p.parse_args()
     a.out.mkdir(parents=True,exist_ok=False)
     records=[]
     def run(name,cmd,expected_failure=False):
-        r=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=45)
+        if a.sanitize=='thread' and not name.endswith('-build'):
+            # Match the existing AUTO queue/runtime TSan runners: deterministic
+            # mappings avoid WSL's sanitizer shadow-address collision. No retry.
+            cmd=['setarch','x86_64','-R',*cmd]
+        r=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=45,
+                         env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1:exitcode=66'))
         (a.out/(name+'.log')).write_text(r.stdout,encoding='utf-8')
         records.append(dict(name=name,cmd=list(map(str,cmd)),rc=r.returncode))
         (a.out/'steps.json').write_text(json.dumps(records,indent=2),encoding='utf-8')
@@ -51,10 +58,12 @@ def main():
         if a.sanitize!='none':
             cmd+=['-fno-omit-frame-pointer','-fno-sanitize-recover=all',
                   '-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread')]
-        cmd += [str(TEST/('auto-ring-'+kind+'-test.c')),str(source),'-o',str(exe)]
+        files=source if isinstance(source,list) else [source]
+        cmd += [str(TEST/('auto-ring-'+kind+'-test.c')),*map(str,files),'-o',str(exe)]
         run(name+'-build',cmd)
         return str(exe)
-    sources={'core':SRC/'auto_ring.c','commands':SRC/'auto_ring_commands.c'}
+    sources={'core':SRC/'auto_ring.c','commands':SRC/'auto_ring_commands.c',
+             'wire':[SRC/'auto_wire.c',SRC/'auto_queue.c']}
     for kind,source in sources.items():
         if a.case in ('all',kind):run(kind,[build(kind,kind,source)])
     if a.mutants:

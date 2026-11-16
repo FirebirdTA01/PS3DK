@@ -7,13 +7,40 @@
 _Static_assert(__atomic_always_lock_free(4,0), "AUTO queue needs inline 4-byte atomics");
 _Static_assert(__atomic_always_lock_free(8,0), "AUTO queue needs inline 8-byte atomics");
 
-int auto_queue_init(auto_queue *q, auto_queue_entry *entries, uint32_t capacity, uint32_t pairs)
+static int init(auto_queue *q, auto_queue_entry *entries, uint32_t capacity, uint32_t pairs, uint32_t limit)
 {
-    if(!q || !entries || !capacity || capacity>AUTO_METADATA_MAX || !pairs || pairs>AUTO_PAIRS_MAX) return 0;
+    if(!q || !entries || !capacity || capacity>limit || !pairs || pairs>AUTO_PAIRS_MAX) return 0;
     memset(q,0,sizeof *q);
     memset(entries,0,(size_t)capacity*sizeof *entries);
     q->entries=entries; q->capacity=capacity; q->pairs=pairs;
     q->next_id=1; q->next_serial=1; q->free_pairs=pairs;
+    return 1;
+}
+int auto_queue_init(auto_queue *q, auto_queue_entry *e, uint32_t n, uint32_t pairs)
+{ return init(q,e,n,pairs,AUTO_METADATA_MAX); }
+int auto_queue_init_wide(auto_queue *q, auto_queue_entry *e, uint32_t n, uint32_t pairs)
+{ return init(q,e,n,pairs,AUTO_METADATA_RING_MAX); }
+
+auto_queue_entry *auto_queue_claim_snapshot(auto_queue *q)
+{
+    q->refusal=AUTO_QUEUE_NONE;
+    if(ACQ(&q->stopped)) {q->refusal=AUTO_QUEUE_STOPPED;return NULL;}
+    if(q->claimed) {q->refusal=AUTO_QUEUE_REENTRY;return NULL;}
+    if(q->next_serial>UINT32_MAX-2u || q->next_id==UINT64_MAX) {q->refusal=AUTO_QUEUE_EXHAUSTED;return NULL;}
+    uint64_t w=RLX(&q->write_idx),r=ACQ(&q->read_idx);
+    if(w-r>=q->capacity) {q->refusal=AUTO_QUEUE_METADATA;return NULL;}
+    auto_queue_entry *e=&q->entries[w%q->capacity];
+    memset(e,0,sizeof *e);e->pair=UINT32_MAX;e->op.id=q->next_id++;
+    e->op.serial_begin=q->next_serial;e->op.serial_end=q->next_serial+1u;q->next_serial+=2u;
+    q->claimed=1;
+    return e;
+}
+int auto_queue_cancel_snapshot(auto_queue *q)
+{
+    if(!q->claimed) return 0;
+    auto_queue_entry *e=&q->entries[RLX(&q->write_idx)%q->capacity];
+    if(e->pair!=UINT32_MAX || e->op.id+1u!=q->next_id || e->op.serial_end+1u!=q->next_serial) return 0;
+    --q->next_id;q->next_serial-=2u;q->claimed=0;
     return 1;
 }
 
@@ -140,6 +167,7 @@ int auto_queue_ack(auto_queue *q, uint64_t id, int completed, int whole)
     const auto_queue_entry *e=auto_queue_peek(q);
     uint64_t r=RLX(&q->read_idx);
     if(!whole || !e || e->op.id!=id) return 0;
+    if(e->pair!=UINT32_MAX) {
     if(completed && !ACQ(&q->stopped)) {
         uint32_t cls=q->pair_class[e->pair];
         if(cls) __atomic_fetch_sub(&q->held[cls],1u,__ATOMIC_ACQ_REL);
@@ -148,6 +176,7 @@ int auto_queue_ack(auto_queue *q, uint64_t id, int completed, int whole)
     } else {
         REL(&q->pair_state[e->pair],2u);
     }
+    } /* snapshots own a MAIN extent; auto_ring_ack, not this queue, releases it */
     q->written++;
     REL(&q->read_idx,r+1u); /* no slot can change until sink acceptance and every read are finished */
     return 1;

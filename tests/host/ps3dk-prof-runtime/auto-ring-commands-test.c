@@ -37,7 +37,7 @@ static void execute(gpu *g,const uint32_t *p,size_t words) {
     }
 }
 static void split_transfer_bytes(void) {
-    auto_ring_shadow s={0};gpu g={0};uint32_t restore[AUTO_RING_RESTORE_WORDS],copy[12];
+    auto_ring_shadow s={0};gpu g={0};uint32_t restore[AUTO_RING_RESTORE_WORDS],copy[12],flush[AUTO_RING_FLUSH_WORDS];
     uint32_t mode[]={M(1,0x184,2),0xfeed0000,0xfeed0001};
     uint32_t format[]={M(1,0x314,5),16,32,8,2,0x101};
     uint32_t offset[]={M(1,0x30c,2),8,96,M(1,0x328,1),0};
@@ -52,6 +52,14 @@ static void split_transfer_bytes(void) {
     execute(&g,offset,5);
     assert(!memcmp(g.main+96,g.local+8,8));assert(!memcmp(g.main+128,g.local+24,8));
     assert(g.main[104]==0 && g.main[136]==0); /* original pitches and lengths */
+    size_t nf=auto_ring_flush_packet(flush,AUTO_RING_FLUSH_WORDS,&s,256,4,32,245,3);
+    assert(nf==28+n && flush[0]==M(0,0x1d6c,1) && flush[1]==245*16);
+    assert(flush[3]==0x00050000 && flush[6]==M(0,0x68,1) && flush[7]==5);
+    assert(flush[8]==M(1,0x184,2) && flush[23]==0x00060000 && flush[27]==6);
+    execute(&g,flush,nf);execute(&g,offset,5);
+    assert(!memcmp(g.main+96,g.local+8,8) && !memcmp(g.main+128,g.local+24,8));
+    memset(flush,0xa5,sizeof flush);
+    assert(!auto_ring_flush_packet(flush,nf-1,&s,256,4,32,245,3) && flush[0]==0xa5a5a5a5);
     /* The ordinary complete SetTransferData shape on both sides of a copy. */
     uint32_t transfer[]={M(1,0x184,2),0xfeed0001,0xfeed0000,
         M(1,0x30c,8),96,200,0,0,8,1,0x101,0};
