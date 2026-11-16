@@ -54,10 +54,10 @@ if $INSTALL_HOST_TOOLS; then
     "$PS3_TOOLCHAIN_ROOT/scripts/install-host-tools.sh"
 else
     say "skipping host tools (--no-host-tools)"
-    command -v rsx-cg-compiler >/dev/null 2>&1 \
-        || [[ -x "$PS3DEV/bin/rsx-cg-compiler" || -x "$PS3DK/bin/rsx-cg-compiler" \
-              || -x "$PS3_TOOLCHAIN_ROOT/tools/rsx-cg-compiler/build/rsx-cg-compiler" ]] \
-        || die "rsx-cg-compiler not found and --no-host-tools was given; run scripts/build-sdk.sh without --no-host-tools once (or scripts/install-host-tools.sh) to build it."
+    # Ask libdbgfont's own lookup (tools/rsx-cg-compiler/build, $PS3DEV/bin,
+    # $PS3DK/bin; not PATH), so this check cannot disagree with the build.
+    make -s -C "$PS3_TOOLCHAIN_ROOT/sdk/libdbgfont" rsx-cg-path >/dev/null 2>&1 \
+        || die "rsx-cg-compiler not found in tools/rsx-cg-compiler/build, \$PS3DEV/bin or \$PS3DK/bin, and --no-host-tools was given; run scripts/build-sdk.sh without --no-host-tools once (or scripts/install-host-tools.sh) to build it."
 fi
 
 say "building + installing SDK"
