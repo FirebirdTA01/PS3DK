@@ -1718,6 +1718,15 @@ pub fn raw_to_ppu_bounds(anchors: &[Anchor], m: &Map, x: u64) -> Option<(u64, u6
     }
 }
 
+/// Certain PPU-tick bounds (shortest, longest) of a raw RSX DURATION under a qualified map's slope bounds, the same
+/// conversion `analyze` applies to a frame's RSX busy time. None when the map is not qualified: no time is claimed.
+pub fn raw_duration_ppu_bounds(map: &MapState, raw: u64) -> Option<(u64, u64)> {
+    match map {
+        MapState::Qualified(m) => Some((sat(&floor_mul(raw, &m.slope_lo)), sat(&ceil_mul(raw, &m.slope_hi)))),
+        MapState::Unqualified(_) => None,
+    }
+}
+
 /// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
 /// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
 pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
@@ -2789,5 +2798,23 @@ mod tests {
         assert_eq!(busy, 100, "busy = 10+20+30+40");
         assert_eq!(med, 25, "median of [10,20,30,40] = (20+30)/2 = 25");
         assert_eq!(hi, 40, "p95 rank ceil(0.95*4)=4 → sorted[3] = 40");
+    }
+
+    // Boundary cases: the rank is interior (p95 != max) so the nearest-rank index is
+    // actually exercised, not just "the largest value".
+    #[test]
+    fn p95_twenty_samples_picks_index_19_not_max() {
+        let v: Vec<u64> = (1..=20).collect(); // [1..20], max = 20
+        // rank = (95*20+99)/100 = 19 (1-based) → sorted[18] = 19
+        assert_eq!(p95(v.clone()), 19);
+        assert_ne!(p95(v), 20, "must not collapse to the max");
+    }
+
+    #[test]
+    fn p95_twentyone_samples_picks_index_20() {
+        let v: Vec<u64> = (1..=21).collect(); // [1..21], max = 21
+        // rank = (95*21+99)/100 = 20 (1-based) → sorted[19] = 20
+        assert_eq!(p95(v.clone()), 20);
+        assert_ne!(p95(v), 21, "must not collapse to the max");
     }
 }

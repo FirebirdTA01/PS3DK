@@ -14,6 +14,54 @@ pub struct AutoView {
     pub busy: auto_rsx::BusyTimeline,
 }
 
+/// The Passes page view model: the reader's by-tag and per-range inventory and
+/// the whole-run summaries (`tag_summary` / `range_summary`). Numbers are never
+/// re-derived here; they come straight from `ps3dk_prof::auto_rsx`.
+#[derive(Debug, Clone, Default)]
+pub struct PassesView {
+    pub by: auto_rsx::ByTag,
+    /// Per tag: `(frames seen, ops, busy sum, busy median, busy p95)`.
+    pub tags: std::collections::BTreeMap<u32, (u64, u64, u64, u64, u64)>,
+    /// Per range name: `(frames seen, ranges, raw sum, raw median, raw p95)`.
+    pub ranges: std::collections::BTreeMap<String, (u64, u64, u64, u64, u64)>,
+    /// The capture's RSX clock map (reader-qualified or not); None without AUTO data.
+    pub map: Option<auto_rsx::MapState>,
+    /// PPU timebase frequency from the capture's clock record; None when absent.
+    pub tb_freq: Option<u64>,
+}
+
+/// Builds the Passes page view from a capture via the reader only.
+pub fn passes_build(cap: &Capture) -> PassesView {
+    let by = auto_rsx::by_tag(cap);
+    let tags = auto_rsx::tag_summary(&by);
+    let ranges = auto_rsx::range_summary(&by);
+    let map = cap.auto.as_ref().map(auto_rsx::qualify);
+    let tb_freq = cap.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0);
+    PassesView { by, tags, ranges, map, tb_freq }
+}
+
+impl PassesView {
+    /// Whether the capture's AUTO writer has the tag capability (CONFIG 1023/11).
+    pub fn has_tags(&self) -> bool {
+        self.by.tagged
+    }
+
+    /// A raw RSX duration as shown text and hover text. Milliseconds (3 decimals) only through the reader's
+    /// qualified clock map and the capture's own timebase; otherwise "unavailable" with the reason on hover.
+    pub fn duration(&self, raw: u64) -> (String, String) {
+        let bounds = self.map.as_ref().and_then(|m| auto_rsx::raw_duration_ppu_bounds(m, raw));
+        match (bounds, self.tb_freq) {
+            (Some((lo, hi)), Some(f)) => {
+                let ms = |t: u64| t as f64 / f as f64 * 1000.0;
+                let text = if lo == hi { format!("{:.3} ms", ms(lo)) } else { format!("{:.3}..{:.3} ms", ms(lo), ms(hi)) };
+                (text, format!("{raw} raw RSX ticks = {lo}..{hi} PPU ticks (clock map bounds)"))
+            }
+            (None, _) => ("unavailable".into(), format!("{raw} raw RSX ticks; the RSX clock map is not qualified, so no time is claimed")),
+            (_, None) => ("unavailable".into(), format!("{raw} raw RSX ticks; the capture has no PPU timebase record")),
+        }
+    }
+}
+
 impl AutoView {
     /// Builds the Automatic page view from a capture.
     pub fn build(cap: &Capture) -> AutoView {

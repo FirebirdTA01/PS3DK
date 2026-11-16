@@ -36,6 +36,8 @@ pub enum Page {
     Fifo,
     /// Automatic RSX observation (AUTO verdicts, busy/span, exclusions).
     Automatic,
+    /// RSX time attributed by tag and named range.
+    Passes,
     /// RSX frame captures found in the data.
     RsxFrames,
     /// One frame snapshot (`App::shown`).
@@ -649,6 +651,11 @@ impl eframe::App for App {
                         if ui::nav_item(side, self.page == Page::Automatic, "🤖", "Automatic", n).clicked() {
                             self.page = Page::Automatic;
                         }
+                        if self.doc.as_ref().is_some_and(|d| d.passes.has_tags())
+                            && ui::nav_item(side, self.page == Page::Passes, "🏷", "Passes", None).clicked()
+                        {
+                            self.page = Page::Passes;
+                        }
                     }
                     if let Some(n) = rsx_count {
                         if ui::nav_item(side, self.page == Page::RsxFrames, "🖼", crate::rsx_ui::TITLE, Some(n)).clicked() {
@@ -786,6 +793,9 @@ impl eframe::App for App {
                             "This capture does not contain automatic profiler data.",
                         ),
                     },
+                    Page::Passes => {
+                        crate::passes_ui::page(p, &d.passes, &mut crate::passes_ui::Drawn::default());
+                    }
                 },
             },
         }
