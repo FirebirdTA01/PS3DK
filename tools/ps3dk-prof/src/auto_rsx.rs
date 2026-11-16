@@ -2652,9 +2652,18 @@ fn median(mut v: Vec<u64>) -> u64 {
     let n = v.len();
     if n % 2 == 1 { v[n / 2] } else { v[n / 2 - 1] / 2 + v[n / 2] / 2 + (v[n / 2 - 1] % 2 + v[n / 2] % 2) / 2 }
 }
+/// Nearest-rank 95th percentile: the value at rank ceil(0.95 * n) (1-based) in the sorted list.
+/// Returns 0 for an empty list.
+fn p95(mut v: Vec<u64>) -> u64 {
+    if v.is_empty() { return 0; }
+    v.sort_unstable();
+    let n = v.len();
+    let rank = (95 * n + 99) / 100; // ceil(0.95 * n) with integer arithmetic
+    v[rank as usize - 1]
+}
 
-/// Whole-window summary per tag: (frames seen, op sum, busy sum, busy median per frame over the frames it appears in).
-pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64)> {
+/// Whole-window summary per tag: (frames seen, op sum, busy sum, busy median per frame, busy p95 per frame) over the frames it appears in.
+pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<u32, Vec<&TagRow>> = BTreeMap::new();
     for f in &b.frames {
         for (t, r) in &f.tags { per.entry(*t).or_default().push(r); }
@@ -2662,11 +2671,12 @@ pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64)> {
     per.into_iter().map(|(t, rows)| {
         let ops = rows.iter().fold(0u64, |a, r| a.saturating_add(r.ops));
         let busy = rows.iter().fold(0u64, |a, r| a.saturating_add(r.busy_raw));
-        (t, (rows.len() as u64, ops, busy, median(rows.iter().map(|r| r.busy_raw).collect())))
+        let vals: Vec<u64> = rows.iter().map(|r| r.busy_raw).collect();
+        (t, (rows.len() as u64, ops, busy, median(vals.clone()), p95(vals)))
     }).collect()
 }
-/// Whole-window summary per range name: (frames seen, ranges, raw sum, raw median per frame).
-pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64)> {
+/// Whole-window summary per range name: (frames seen, ranges, raw sum, raw median per frame, raw p95 per frame).
+pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<String, Vec<&RangeRow>> = BTreeMap::new();
     for f in &b.frames {
         for (n, r) in &f.ranges { per.entry(n.clone()).or_default().push(r); }
@@ -2674,7 +2684,8 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64)> {
     per.into_iter().map(|(n, rows)| {
         let count = rows.iter().fold(0u64, |a, r| a.saturating_add(r.count));
         let raw = rows.iter().fold(0u64, |a, r| a.saturating_add(r.raw));
-        (n, (rows.len() as u64, count, raw, median(rows.iter().map(|r| r.raw).collect())))
+        let vals: Vec<u64> = rows.iter().map(|r| r.raw).collect();
+        (n, (rows.len() as u64, count, raw, median(vals.clone()), p95(vals)))
     }).collect()
 }
 
@@ -2697,11 +2708,11 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         }
     }
     writeln!(out, "summary")?;
-    for (t, (n, ops, busy, med)) in tag_summary(b) {
-        writeln!(out, "  tag {t:#x}: {n} frame(s), ops {ops}, busy sum {busy}, median per frame {med}")?;
+    for (t, (n, ops, busy, med, hi)) in tag_summary(b) {
+        writeln!(out, "  tag {t:#x}: {n} frame(s), ops {ops}, busy sum {busy}, median per frame {med}, p95 per frame {hi}")?;
     }
-    for (name, (n, count, raw, med)) in range_summary(b) {
-        writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}")?;
+    for (name, (n, count, raw, med, hi)) in range_summary(b) {
+        writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}, p95 per frame {hi}")?;
     }
     Ok(())
 }
@@ -2714,12 +2725,54 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
             "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
         "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
     })).collect();
-    let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med))| json!({
-        "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med})).collect();
-    let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med))| json!({
-        "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med})).collect();
+    let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med, hi))| json!({
+        "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
+    let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({
+        "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med, "raw_p95": hi})).collect();
     let v = json!({"schema": 1, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
         "summary": {"tags": tags, "ranges": ranges}});
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one(tag: u32, busy_raw: u64) -> TagFrame {
+        let mut tags = BTreeMap::new();
+        tags.insert(tag, TagRow { ops: 1, busy_raw, untimed_in_calls: 0 });
+        TagFrame { owner: 1, frame: 0, tags, ..TagFrame::default() }
+    }
+
+    #[test]
+    fn p95_single_frame_matches_value() {
+        let b = ByTag { tagged: true, frames: vec![one(0xa, 42)] };
+        let s = tag_summary(&b);
+        assert_eq!(*s.get(&0xa).unwrap(), (1, 1, 42, 42, 42));
+    }
+
+    #[test]
+    fn p95_odd_count_picks_rank95() {
+        let frames: Vec<TagFrame> = vec![one(0xa, 40), one(0xa, 10), one(0xa, 30), one(0xa, 50), one(0xa, 20)];
+        let b = ByTag { tagged: true, frames };
+        let s = tag_summary(&b);
+        let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
+        assert_eq!((frames_n, ops), (5, 5), "5 frames, 1 op each");
+        assert_eq!(busy, 150, "busy = 10+20+30+40+50");
+        assert_eq!(med, 30, "median of [10,20,30,40,50] is 30");
+        assert_eq!(hi, 50, "p95 rank ceil(0.95*5)=5 → sorted[4] = 50");
+    }
+
+    #[test]
+    fn p95_even_count_picks_rank95() {
+        let frames: Vec<TagFrame> = vec![one(0xa, 30), one(0xa, 10), one(0xa, 40), one(0xa, 20)];
+        let b = ByTag { tagged: true, frames };
+        let s = tag_summary(&b);
+        let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
+        assert_eq!((frames_n, ops), (4, 4));
+        assert_eq!(busy, 100, "busy = 10+20+30+40");
+        assert_eq!(med, 25, "median of [10,20,30,40] = (20+30)/2 = 25");
+        assert_eq!(hi, 40, "p95 rank ceil(0.95*4)=4 → sorted[3] = 40");
+    }
 }
