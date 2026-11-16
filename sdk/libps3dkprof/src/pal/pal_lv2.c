@@ -64,6 +64,7 @@ int pal_mutex_lock(pal_mutex *m) {
 int pal_mutex_lock(pal_mutex *m) { return pthread_mutex_lock(m) == 0 ? 0 : -1; }
 #endif
 int pal_mutex_unlock(pal_mutex *m) { return pthread_mutex_unlock(m) == 0 ? 0 : -1; }
+int pal_mutex_trylock(pal_mutex *m) { return pthread_mutex_trylock(m) == 0 ? 0 : -1; }
 
 /* The APP owner: the checked LV2 thread id (plan 5.4, Q1), NOT librt pthread_self, whose table is PT_THREADS_MAX 32
  * and which can return 0.  Validity is the return code; SYS_PPU_THREAD_ID_INVALID is not used as a sentinel. */

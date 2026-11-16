@@ -281,6 +281,10 @@ pub enum Incomplete {
     NotQuiesced,
     SeqLimit,
     SinkError,
+    /// A file without a TRAILER whose whole chunks hold metadata only (HEADER, CLOCKS, tables): the process ended
+    /// before the first drain wrote an event chunk.  Set by [`crate::load_file`], alone, in place of the strict
+    /// reasons.
+    NoEvents,
 }
 
 impl fmt::Display for Incomplete {
@@ -292,6 +296,7 @@ impl fmt::Display for Incomplete {
             Incomplete::NotQuiesced => write!(f, "end_flags NOT_QUIESCED"),
             Incomplete::SeqLimit => write!(f, "end_flags SEQ_LIMIT"),
             Incomplete::SinkError => write!(f, "end_flags SINK_ERROR_BEFORE_TRAILER"),
+            Incomplete::NoEvents => write!(f, "no events recorded (ended before the first drain)"),
         }
     }
 }

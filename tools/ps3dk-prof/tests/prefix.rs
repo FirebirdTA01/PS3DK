@@ -142,6 +142,38 @@ fn metadata_alone_is_not_a_capture() {
     assert!(e.contains("none with events"), "{e}");
 }
 
+/// A file that ended before the first drain (HEADER, CLOCKS and tables, no event chunk, no TRAILER) is read, not
+/// refused: INCOMPLETE with the single NoEvents reason, also with a torn final chunk after the metadata.
+#[test]
+fn metadata_only_reads_incomplete_no_events() {
+    let mut s = scenario(vec![lane(1, Vec::new())]);
+    s.trailer = false;
+    let b = s.bytes();
+    let mut torn = b.clone();
+    torn.extend_from_slice(&5u32.to_le_bytes()); // a RECORDS chunk header cut after its type and length
+    torn.extend_from_slice(&64u32.to_le_bytes());
+    for (name, bytes) in [("whole", &b), ("torn", &torn)] {
+        match ps3dk_prof::load_file(bytes) {
+            Outcome::Analysed(a) => {
+                assert_eq!(a.verdict, Verdict::Incomplete(vec![ps3dk_prof::Incomplete::NoEvents]), "{name}");
+                assert!(a.prefix.is_none(), "{name}: not an accepted prefix");
+                assert_eq!(
+                    ps3dk_prof::report::verdict_text(&a),
+                    "INCOMPLETE: no events recorded (ended before the first drain)",
+                    "{name}"
+                );
+            }
+            Outcome::Malformed(m) => panic!("{name}: {m}"),
+        }
+    }
+    // the same metadata WITH a TRAILER keeps its strict verdict: NoEvents is only for a file that ended early
+    let mut t = scenario(vec![lane(1, Vec::new())]);
+    t.trailer = true;
+    if let Outcome::Analysed(a) = ps3dk_prof::load_file(&t.bytes()) {
+        assert!(!matches!(&a.verdict, Verdict::Incomplete(r) if r.contains(&ps3dk_prof::Incomplete::NoEvents)));
+    }
+}
+
 #[test]
 fn any_trailer_refuses_promotion() {
     // transport COMPLETE, SINK_ERROR, NOT_QUIESCED, SEQ_LIMIT: each has a TRAILER, so none is a prefix.
