@@ -68,6 +68,37 @@ fn cli_json(path: &std::path::Path) -> serde_json::Value {
     );
     serde_json::from_slice(&out.stdout).expect("CLI JSON")
 }
+
+#[test]
+fn presentation_positions_and_label_aggregates_match_real_cli() {
+    for name in ["presentation-partial","tags","console-r2"] {
+        let path=fixture_path(name);
+        let bytes=std::fs::read(&path).unwrap();
+        let doc=Document::from_bytes(path.clone(),&bytes);
+        let view=doc.auto.as_ref().unwrap();
+        let json=cli_json(&path);
+        let mut intervals=0;
+        for (f,j) in view.report.frames.iter().zip(json["frames"].as_array().unwrap()) {
+            match &f.flip_wait_at {
+                Some(at) => {
+                    intervals+=at.len();
+                    let expected:Vec<_>=j["flip_wait_intervals"].as_array().unwrap().iter()
+                        .map(|v|(v["tb_begin"].as_u64().unwrap(),v["tb_end"].as_u64().unwrap())).collect();
+                    assert_eq!(at,&expected);
+                }
+                None => assert!(j.get("flip_wait_intervals").is_none()),
+            }
+            if let Some((c,label,one))=f.label_polls {
+                let l=&j["label_polling"];
+                assert_eq!((c.runs as u64,c.ticks,c.broken as u64,c.spanning as u64,one),
+                    (l["runs"].as_u64().unwrap(),l["ticks"].as_u64().unwrap(),l["broken"].as_u64().unwrap(),l["spanning"].as_u64().unwrap(),l["one_label_ticks"].as_u64().unwrap()));
+                if label!=0 && label!=u32::MAX { assert_eq!(label as u64-1,l["label"].as_u64().unwrap()); }
+            }
+        }
+        if name=="presentation-partial" { assert_eq!(intervals,2); }
+        else { assert_eq!(intervals,0); }
+    }
+}
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(format!(
         "{}/../ps3dk-prof/tests/fixtures/auto/{name}.prof",

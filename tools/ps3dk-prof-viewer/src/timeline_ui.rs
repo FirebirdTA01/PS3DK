@@ -51,10 +51,10 @@ pub struct TimelineState {
     /// SPU premise for the SPU/RSX rows: assume no decrementer wrap (W32) instead of R64.
     pub w32: bool,
     pub show_extrapolated: bool,
-    /// Collapsed groups: PPU, SPU, RSX domains, AUTO verdict, busy, presentation.
-    pub collapsed: [bool; 6],
+    /// Collapsed groups: PPU, SPU, RSX domains, AUTO verdict, busy, aggregates, flip-wait.
+    pub collapsed: [bool; 7],
     pub auto_drawn: crate::timeline_auto::Layout,
-    pub auto_areas: [Option<Rect>; 2],
+    pub auto_areas: [Option<Rect>; 3],
     auto_extent: Option<(u64, u64)>,
     last_axis_all: bool,
     /// The SPU/RSX rows drawn this frame (from the Document's cache, for the current W32).
@@ -100,9 +100,9 @@ impl TimelineState {
             fit_all: true,
             w32: false,
             show_extrapolated: true,
-            collapsed: [false; 6],
+            collapsed: [false; 7],
             auto_drawn: Default::default(),
-            auto_areas: [None; 2],
+            auto_areas: [None; 3],
             auto_extent: None,
             last_axis_all: false,
             foreign: None,
@@ -209,7 +209,7 @@ pub fn draw_with_auto(
     let auto = auto.filter(|v| v.has_auto());
     st.auto_extent = auto.and_then(crate::timeline_auto::extent);
     st.auto_drawn = Default::default();
-    st.auto_areas = [None; 2];
+    st.auto_areas = [None; 3];
     st.sync_foreign(slot, a);
     let labels = Labels::build(a);
     egui::CentralPanel::default()
@@ -296,10 +296,11 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
     use crate::timeline_auto as ta;
     let mut layout = ta::layout(v, &st.tl, &st.view, width as f64);
     let titles = [format!("AUTO verdicts ({} frames)", v.report.frames.len()),
-        format!("AUTO RSX busy ({} merged intervals)", v.busy.bars.len())];
-    for lane in 0..2 {
-        if !group_header(p, st, lane + 3, &titles[lane], pal) {
-            if lane == 0 { layout.verdict.clear(); } else { layout.busy.clear(); }
+        format!("AUTO RSX busy ({} merged intervals)", v.busy.bars.len()),
+        format!("AUTO flip-wait ({} recorded scopes)", v.report.frames.iter().filter_map(|f| f.flip_wait_at.as_ref()).map(Vec::len).sum::<usize>())];
+    for lane in 0..3 {
+        if !group_header(p, st, [3,4,6][lane], &titles[lane], pal) {
+            match lane { 0 => layout.verdict.clear(), 1 => layout.busy.clear(), _ => layout.flip_wait.clear() }
             layout.omitted[lane] = 0;
             continue;
         }
@@ -319,15 +320,22 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
                 ui::field_message(p, ui::Tone::Neutral, &format!("{} operation(s) dropped by reader retention; this lane is partial.", v.ops_dropped()));
             }
         }
+        if lane == 2 {
+            p.add(egui::Label::new(egui::RichText::new("Completed PPU flip-wait scopes, including scheduling and polling. Only recorded positions are drawn; additional or frame-spanning scopes remain aggregate counts.").small().color(pal.text_muted)).wrap());
+        }
         if layout.omitted[lane] != 0 {
             ui::field_message(p, ui::Tone::Neutral, &format!("Showing the first {} visible bars; {} later visible bars are not painted. Zoom in to inspect them.", ta::PAINT_CAP, layout.omitted[lane]));
         }
-        let bars = if lane == 0 { &layout.verdict } else { &layout.busy };
+        let bars = match lane { 0 => &layout.verdict, 1 => &layout.busy, _ => &layout.flip_wait };
         if bars.is_empty() {
             let why = if lane == 0 {
                 if v.report.frames.is_empty() { "No AUTO coverage rows retained." }
                 else if layout.unplaced_frames == v.report.frames.len() { "No AUTO frame has a valid placement token and interval." }
                 else { "No AUTO frame intervals in the visible window." }
+            } else if lane == 2 {
+                if !v.report.tagged { "No flip-wait positions in this capture format; see frame aggregates below." }
+                else if !v.report.frames.iter().any(|f| f.flip_wait_at.as_ref().is_some_and(|a| !a.is_empty())) { "No completed flip-wait positions recorded." }
+                else { "No recorded flip-wait intervals in the visible window." }
             } else if v.busy.bars.is_empty() { "No mapped timed intervals retained." }
             else { "No mapped RSX intervals in the visible window." };
             ui::field_message(p, ui::Tone::Neutral, why);
@@ -337,14 +345,14 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
         st.auto_areas[lane] = Some(area);
         let resp = p.interact(area, p.id().with(("auto-lane", lane)), Sense::click_and_drag());
         p.painter().text(rect.left_top() + Vec2::new(0.0, 10.0), Align2::LEFT_TOP,
-            if lane == 0 { "Frame verdict" } else { "Mapped RSX intervals" }, FontId::proportional(12.0), pal.text_muted);
+            ["Frame verdict", "Mapped RSX intervals", "PPU flip-wait scopes"][lane], FontId::proportional(12.0), pal.text_muted);
         let painter = p.painter_at(area);
         painter.rect_filled(area, 2.0, pal.surface_alt);
         for b in bars {
             let left = area.left() + b.left as f32;
             let right = area.left() + b.right as f32;
-            let color = if lane == 0 { crate::auto_ui::verdict_color(v.report.frames[b.index].verdict, pal) } else { pal.accent };
-            if lane == 0 {
+            let color = match lane { 0 => crate::auto_ui::verdict_color(v.report.frames[b.index].verdict, pal), 1 => pal.accent, _ => pal.warning };
+            if lane != 1 {
                 let r = Rect::from_min_max(Pos2::new(left, area.top() + 6.0), Pos2::new(right.max(left + 1.0), area.bottom() - 6.0));
                 painter.rect_filled(r, 1.0, color);
                 if r.width() > 36.0 {
@@ -370,6 +378,12 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
                     let f = &v.report.frames[b.index];
                     format!("Frame {} (owner {}) | {}\n{}\n{}\nInterval: {}\nPPU interval: {}..{} ticks", f.frame, f.owner, f.verdict.key(), f.verdict.explanation(), f.reason,
                         v.format_ms(f.tb_end.saturating_sub(f.tb_begin)), f.tb_begin, f.tb_end)
+                } else if lane == 2 {
+                    let f = &v.report.frames[b.index];
+                    let scope = b.scope.expect("recorded scope index");
+                    let (begin,end) = f.flip_wait_at.as_ref().expect("recorded scopes")[scope];
+                    format!("Frame {} (owner {}), scope {}\nDuration: {}\nPPU interval: {begin}..{end} ticks ({} ticks)\nFlip-wait scope elapsed time, including scheduling and polling; not an RSX busy interval.",
+                        f.frame, f.owner, scope+1, v.format_ms(end-begin), end-begin)
                 } else {
                     let b = &v.busy.bars[b.index];
                     format!("Frame {} (owner {}) | {} operation(s)\nRSX raw interval: {}..{}\nPPU begin: {}..{} ticks\nPPU end: {}..{} ticks\nConditional on the capture clock map; includes RSX waits.",
@@ -389,8 +403,8 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
         p.add_space(ui::SPACE_XS);
     }
     if group_header(p, st, 5, "AUTO presentation (frame aggregates)", pal) {
-        p.add(egui::Label::new(egui::RichText::new(ta::PRESENTATION_NOTICE).small().color(pal.text_muted)).wrap());
-        let observed = v.report.frames.iter().filter(|f| f.presentation.is_some()).count();
+        p.add(egui::Label::new(egui::RichText::new(ta::presentation_notice(v)).small().color(pal.text_muted)).wrap());
+        let observed = v.report.frames.iter().filter(|f| ta::has_observations(f)).count();
         if observed == 0 {
             p.label("No presentation observations in any frame");
         } else {
@@ -400,7 +414,7 @@ fn draw_auto_lanes(p: &mut egui::Ui, v: &crate::auto::AutoView, st: &mut Timelin
         // time positions or widths. The summary counts the whole capture, and
         // an explicit zero-valued observation is retained alongside nonzero data.
         let visible: Vec<_> = v.report.frames.iter().filter(|f|
-            f.presentation.is_some() && st.tl.rel(f.tb_end) >= st.view.t0
+            ta::has_observations(f) && st.tl.rel(f.tb_end) >= st.view.t0
                 && st.tl.rel(f.tb_begin) <= st.view.t0 + st.view.dt).collect();
         if observed != 0 && visible.is_empty() {
             p.label("No presentation observations in the visible window");
