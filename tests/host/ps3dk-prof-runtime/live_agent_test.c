@@ -5,6 +5,7 @@
  * record is injected, as the runtime will publish it after close/join. */
 #define _GNU_SOURCE
 #include "live_agent.h"
+#include "live_os.h"
 #include "prof_test_hooks.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -95,7 +97,7 @@ typedef struct client {
     int fd;
     uint8_t *data;
     uint64_t len, cap;
-    int hello, end, busy, closed, pongs;
+    int hello, end, busy, closed, pongs, close_error;
     uint32_t busy_reason;
     uint8_t endp[LIVE_END_BYTES];
     uint64_t session;
@@ -211,6 +213,7 @@ static void cl_read(client *c, int ms, int (*stop_when)(client *), int past_end)
             continue;
         ssize_t n = recv(c->fd, c->rx + c->rx_len, sizeof c->rx - c->rx_len, 0);
         if (n <= 0) {
+            c->close_error = n < 0 ? errno : 0;
             c->closed = 1;
             break;
         }
@@ -285,6 +288,134 @@ static int has_hello(client *c) { return c->hello; }
 static int has_bytes_1m(client *c) { return c->len >= (1u << 20); }
 
 /* ---- cases ---------------------------------------------------------------- */
+
+/* Hold the agent after the kernel accepts END, before its close path. A PING
+ * is then confirmed unread in that socket, so an immediate close sends RST. */
+static atomic_int end_held, end_release, end_fd;
+static long hold_end_send(int fd, const void *buf, unsigned long n)
+{
+    long sent = send(fd, buf, n, MSG_NOSIGNAL);
+    if (n == LIVE_HDR_BYTES + LIVE_END_BYTES && live_get16(buf) == LIVE_T_END) {
+        CHECK(sent == (long)n);
+        atomic_store(&end_fd, fd);
+        atomic_store(&end_held, 1);
+        while (!atomic_load(&end_release))
+            pal_sleep_us(1000);
+    }
+    return sent;
+}
+
+static void case_end_with_unread_ping(void)
+{
+    w_open();
+    w_append(1000);
+    w_close();
+    publish(1000, 1, 0);
+    ps3dk_prof_test_live_os_hooks.send = hold_end_send;
+    client *c = cl_open(start_agent(test_cfg()));
+    cl_pump(c, 2000, NULL);
+    CHECK(c->end);
+    uint64_t until = now_us() + 2000000;
+    while (!atomic_load(&end_held) && now_us() < until)
+        pal_sleep_us(1000);
+    CHECK(atomic_load(&end_held));
+    cl_send(c->fd, LIVE_T_PING, 0, NULL, 0);
+    int queued = 0;
+    until = now_us() + 2000000;
+    while (queued < (int)LIVE_HDR_BYTES && now_us() < until) {
+        CHECK(ioctl(atomic_load(&end_fd), FIONREAD, &queued) == 0);
+        pal_sleep_us(1000);
+    }
+    CHECK(queued >= (int)LIVE_HDR_BYTES);
+    atomic_store(&end_release, 1);
+    CHECK(cl_wait_closed(c, 2000));
+    if (c->close_error)
+        fprintf(stderr, "close after END: %s\n", strerror(c->close_error));
+    CHECK(c->close_error == 0); /* FIN, never ECONNRESET after a valid END */
+    check_bytes(c, 1000);
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 1000000, 1000000) == LIVE_OK);
+}
+
+/* A peer that keeps its send side open cannot hold the agent after END.
+ * Input during the drain must not move its fixed deadline. */
+static void case_end_drain_deadline(void)
+{
+    w_open();
+    w_append(1000);
+    w_close();
+    publish(1000, 1, 0);
+    live_config cfg = test_cfg();
+    cfg.send_timeout_us = 100000;
+    uint16_t port = start_agent(cfg);
+    client *c = cl_open(port);
+    cl_pump(c, 2000, NULL);
+    CHECK(c->end && cl_wait_closed(c, 2000) && c->close_error == 0);
+    /* Do not close c's send side. The connection remains owned while the
+     * peer can still send, rather than disappearing as soon as FIN is sent. */
+    client *busy = cl_open(port);
+    CHECK(cl_wait_closed(busy, 2000) && busy->busy);
+    cl_free(busy);
+    uint8_t ping[LIVE_HDR_BYTES] = {0};
+    live_put16(ping, LIVE_T_PING);
+    uint64_t until = now_us() + 200000;
+    while (now_us() < until) {
+        (void)send(c->fd, ping, sizeof ping, MSG_NOSIGNAL);
+        pal_sleep_us(5000);
+    }
+    client *next = cl_open(port);
+    cl_pump(next, 2000, NULL);
+    CHECK(next->end && !next->busy); /* input did not extend the deadline */
+    CHECK(cl_wait_closed(next, 2000) && next->close_error == 0);
+    check_bytes(next, 1000);
+    CHECK(drops(LIVE_DROP_END) == 2); /* one completion per stream */
+    cl_free(next);
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 1000000, 1000000) == LIVE_OK);
+}
+
+static void case_end_drain_cancel(void)
+{
+    w_open();
+    w_append(1000);
+    w_close();
+    publish(1000, 1, 0);
+    live_config cfg = test_cfg();
+    cfg.send_timeout_us = 10000000;
+    client *c = cl_open(start_agent(cfg));
+    cl_pump(c, 2000, NULL);
+    CHECK(c->end && cl_wait_closed(c, 2000) && c->close_error == 0);
+    uint64_t t0 = now_us();
+    CHECK(live_agent_stop(&g_agent, 50000, 1000000) == LIVE_OK);
+    CHECK(now_us() - t0 < 500000); /* graceful stop wins over the drain limit */
+    CHECK(drops(LIVE_DROP_END) == 1 && drops(LIVE_DROP_CANCELLED) == 0);
+    cl_free(c);
+}
+
+static void case_end_drain_peer_fin(void)
+{
+    w_open();
+    w_append(1000);
+    w_close();
+    publish(1000, 1, 0);
+    live_config cfg = test_cfg();
+    cfg.send_timeout_us = 10000000;
+    uint16_t port = start_agent(cfg);
+    client *c = cl_open(port);
+    cl_pump(c, 2000, NULL);
+    CHECK(c->end && cl_wait_closed(c, 2000) && c->close_error == 0);
+    uint64_t t0 = now_us();
+    CHECK(shutdown(c->fd, SHUT_WR) == 0); /* peer FIN, not the drain timeout */
+    client *next = cl_open(port);
+    cl_pump(next, 1000, NULL);
+    CHECK(next->end && !next->busy);
+    CHECK(now_us() - t0 < 1000000);
+    CHECK(cl_wait_closed(next, 1000) && next->close_error == 0);
+    CHECK(drops(LIVE_DROP_END) == 2 && drops(LIVE_DROP_STALLED) == 0);
+    cl_free(c);
+    cl_free(next);
+    CHECK(live_agent_stop(&g_agent, 1000000, 1000000) == LIVE_OK);
+}
 
 static void case_late_join(void)
 {
@@ -498,23 +629,25 @@ static void case_reconnect_after_error(void)
 {
     w_open();
     w_append(50000);
-    w_close();
-    publish(50000, 1, 0);
     uint16_t port = start_agent(test_cfg());
     client *a = cl_open(port);
     cl_pump(a, 2000, has_hello);
     cl_send(a->fd, 99, 0, NULL, 0);
     CHECK(cl_wait_closed(a, 2000));
+    CHECK(!a->end && drops(LIVE_DROP_PROTOCOL) == 1);
+    cl_free(a);
+    w_close();
+    publish(50000, 1, 0);
     client *b = cl_open(port); /* the agent is back in LISTEN */
     cl_pump(b, 3000, NULL);
     CHECK(b->end);
     check_bytes(b, 50000); /* a new candidate from offset 0 */
+    CHECK(cl_wait_closed(b, 2000) && b->close_error == 0);
+    cl_free(b); /* acknowledge FIN before connecting the next viewer */
     client *late = cl_open(port); /* after a completed stream, still served */
     cl_pump(late, 3000, NULL);
     CHECK(late->end);
     check_bytes(late, 50000);
-    cl_free(a);
-    cl_free(b);
     cl_free(late);
     CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
 }
@@ -773,6 +906,10 @@ static void case_delivered_counts_sent_frames(void)
 
 struct named { const char *name; void (*fn)(void); };
 static const struct named cases[] = {
+    {"end-with-unread-ping", case_end_with_unread_ping},
+    {"end-drain-deadline", case_end_drain_deadline},
+    {"end-drain-cancel", case_end_drain_cancel},
+    {"end-drain-peer-fin", case_end_drain_peer_fin},
     {"late-join", case_late_join},
     {"grow-wait", case_grow_wait},
     {"failed-final", case_failed_final},

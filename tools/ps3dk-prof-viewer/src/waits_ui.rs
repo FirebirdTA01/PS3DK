@@ -1,5 +1,5 @@
 //! Virtualized automatic wait observations. No inference of blocked CPU time or causality.
-use crate::waits::{elapsed, operation, Key, WaitsView, CAPTION, COVERAGE, PAINT_ROWS};
+use crate::waits::{elapsed, elapsed_short, operation, Key, WaitsView, CAPTION, COVERAGE, PAINT_ROWS};
 use eframe::egui::{self, Rect};
 use ps3dk_ui as ui;
 
@@ -111,9 +111,10 @@ pub fn page(p: &mut egui::Ui, v: &WaitsView, st: &mut WaitState, d: &mut Drawn) 
                     let g = &v.groups[i];
                     let label = format!("{} / {} | {} retained, {} elapsed | min {}, max {} | OPEN {}, orphan {}, regressed {}, errors {}",
                         operation(g.key.0), site(g.key.1), g.calls, g.elapsed_samples,
-                        elapsed(g.min_ticks, frequency), elapsed(g.max_ticks, frequency),
+                        elapsed_short(g.min_ticks, frequency), elapsed_short(g.max_ticks, frequency),
                         g.open, g.orphan_returns, g.regressed, g.errors);
-                    let r = p.add(egui::Button::new(&label).selected(st.selected == Some(g.key)).truncate()).on_hover_text(label);
+                    let tip = format!("{label}\nmin {}, max {}", elapsed(g.min_ticks, frequency), elapsed(g.max_ticks, frequency));
+                    let r = p.add(egui::Button::new(&label).selected(st.selected == Some(g.key)).truncate()).on_hover_text(tip);
                     d.items.push((g.key, r.rect));
                     if r.clicked() { st.selected = Some(g.key); }
                     d.groups_built += 1;
@@ -123,7 +124,10 @@ pub fn page(p: &mut egui::Ui, v: &WaitsView, st: &mut WaitState, d: &mut Drawn) 
         if let Some(g) = st.selected.and_then(|key| v.group(key)) {
             ui::section_label(p, "RETAINED CALLS");
             p.label("Targets and sites are raw values; handle reuse and matching signals are unresolved. Frame attribution and dependency UNKNOWN.");
+            // Keep the wheel target as wide as the viewport even when compact time text
+            // makes a row narrower; egui otherwise shrinks the actual hit area.
             let scroll = egui::ScrollArea::vertical().id_salt(("wait-calls", g.key)).max_height(360.0)
+                .auto_shrink([false, false])
                 .show_rows(p, 24.0, g.rows.len(), |p, range| {
                     for i in range.take(PAINT_ROWS) {
                         let row = &v.rows[g.rows[i]];
@@ -131,8 +135,8 @@ pub fn page(p: &mut egui::Ui, v: &WaitsView, st: &mut WaitState, d: &mut Drawn) 
                         d.visible_calls.push((r.actor, r.call));
                         let result = if r.kind == 2 { format!("raw {} / API {}", r.raw_result, r.api_result) } else { "return UNKNOWN".into() };
                         let text = format!("actor {} call {}: {} | {} | raw target 0x{:x}, secondary 0x{:x}, raw timeout {} | {}",
-                            r.actor, r.call, row.state, elapsed(row.ticks, frequency), r.target, r.secondary, r.timeout, result);
-                        p.add(egui::Label::new(&text).truncate()).on_hover_text(text);
+                            r.actor, r.call, row.state, elapsed_short(row.ticks, frequency), r.target, r.secondary, r.timeout, result);
+                        p.add(egui::Label::new(&text).truncate()).on_hover_text(format!("{text}\n{}", elapsed(row.ticks, frequency)));
                         d.rows_built += 1;
                     }
                 });

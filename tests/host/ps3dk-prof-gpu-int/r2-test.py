@@ -122,6 +122,26 @@ def reader_one(prof, expect):
     bad = []
     if len(want) != 1 or str(r.returncode) != want[0]:
         bad.append(f'{prof.stem}: rc {r.returncode} want {want}')
+    missing_final = {'r2-completion-fail', 'r2-frame-thread-lock', 'r2-frame-thread-unlock',
+                     'r2-sink-fail-descriptors', 'r2-sink-fail-events', 'r2-sink-fail-final'}
+    final_written = {'r2-completion-unlock', 'r2-fault-detach-unlock', 'r2-fault-release-unlock',
+                     'r2-fault-seal-unlock'}
+    no_source = {'r2-frame-unlock-busy', 'r2-frame-unlock-invalid'}
+    if prof.stem in missing_final | final_written:
+        # Exit 0 accepts the whole-chunk prefix; it must not hide the source's
+        # incomplete structure or turn unknown GPU coverage into valid evidence.
+        for text in ('ending: NO-TRAILER', 'STRUCTURE INCOMPLETE',
+                     'RAW VALIDITY NOT VALID', 'COVERAGE UNKNOWN'):
+            if text not in r.stdout:
+                bad.append(f'{prof.stem}: missing {text!r}')
+        final_text = 'no DOMAIN_FINAL' if prof.stem in missing_final else 'open at FINAL'
+        if final_text not in r.stdout:
+            bad.append(f'{prof.stem}: missing {final_text!r}')
+    if prof.stem in no_source:
+        for text in ('ending: NO-TRAILER', 'domain extensions: 0 sources declared',
+                     'no SPU/RSX coverage is claimed'):
+            if text not in r.stdout:
+                bad.append(f'{prof.stem}: missing {text!r}')
     for l in lines:
         if l.startswith('unresolved_frames '):
             m = re.search(r'frames resolved \d+ unresolved (\d+)', r.stdout)

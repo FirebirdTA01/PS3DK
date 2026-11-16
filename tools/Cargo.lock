@@ -2234,6 +2234,7 @@ name = "ps3dk-prof-viewer"
 version = "0.0.0"
 dependencies = [
  "eframe",
+ "image",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2241,6 +2242,7 @@ dependencies = [
  "ps3dk-ui",
  "ps3dk-version",
  "rfd",
+ "serde_json",
 ]
 
 [[package]]

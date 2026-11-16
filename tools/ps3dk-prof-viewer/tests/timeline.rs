@@ -334,11 +334,10 @@ fn ruler_uses_time_with_a_clock_and_ticks_without() {
         1000.0,
         80.0,
     );
-    assert_eq!(marks[0].1, "+0.0 s");
-    assert_eq!(marks[1].1, "+0.1 s");
+    assert_eq!(marks[0].1, "+0.000 ms");
+    assert_eq!(marks[1].1, "+100.000 ms");
     assert!((marks[1].0 - 100.0).abs() < 1e-6);
-    // Ten seconds in, a few milliseconds wide: seconds, with the step's
-    // precision, not "+10000 ms".
+    // Ten seconds in, a few milliseconds wide: the same millisecond convention.
     let f = 79_800_000.0;
     let v = View {
         t0: 10.0 * f,
@@ -352,8 +351,8 @@ fn ruler_uses_time_with_a_clock_and_ticks_without() {
         1000.0,
         80.0,
     );
-    assert_eq!(marks[0].1, "+10.000 s");
-    assert_eq!(marks[1].1, "+10.002 s");
+    assert_eq!(marks[0].1, "+10000.000 ms");
+    assert_eq!(marks[1].1, "+10002.000 ms");
     let units: std::collections::BTreeSet<&str> = marks
         .iter()
         .map(|m| m.1.rsplit(' ').next().unwrap())

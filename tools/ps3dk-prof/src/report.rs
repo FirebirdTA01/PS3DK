@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::analysis::{AbResult, Analysis, Comparison, ComparisonKind};
+use crate::analysis::{AbResult, Analysis, Comparison, ComparisonKind, TokenRef};
 use crate::model::*;
 
 /// The first line of every comparison report: what kind of comparison it is.
@@ -457,6 +457,162 @@ pub fn render(a: &Analysis) -> String {
 
     let _ = writeln!(o, "\nspans:");
     for (s, v) in cap.spans.iter().zip(&a.spans) {
+        let name = cap.descriptors.get(&s.desc).map_or("?", |d| d.name.as_str());
+        let mut notes = Vec::new();
+        if s.is_open() {
+            notes.push("OPEN".to_string());
+        }
+        if s.truncated_at_stop {
+            notes.push("TRUNCATED_AT_STOP".to_string());
+        }
+        if s.affected {
+            notes.push("AFFECTED".to_string());
+        }
+        let dur = if s.is_censored() {
+            "duration unknown (censored)".to_string()
+        } else {
+            match (s.inclusive(), s.exclusive()) {
+                (Some(i), Some(x)) => format!("inclusive {i}, exclusive {x}"),
+                (Some(i), None) => format!("inclusive {i}, exclusive unavailable (a child's duration is unavailable)"),
+                (None, _) => "duration unavailable (CLOCK_ANOMALY: END before BEGIN)".to_string(),
+            }
+        };
+        let _ = writeln!(
+            o,
+            "  {} span {} {name} depth {}: {dur}; {}; {}{}",
+            s.incarnation,
+            s.span_id,
+            s.depth,
+            v.attribution,
+            v.spans_n,
+            if notes.is_empty() { String::new() } else { format!("; {}", notes.join(", ")) }
+        );
+    }
+    for line in extension_lines(cap) {
+        let _ = writeln!(o, "{line}");
+    }
+    o
+}
+
+pub fn render_window(a: &Analysis, w: &crate::model::CaptureWindow) -> String {
+    let mut o = String::new();
+    let _ = writeln!(
+        o,
+        "window {}: \"{}\" source {} kind {} {} reason {}",
+        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason
+    );
+    let cap = &a.capture;
+    let _ = writeln!(o, "verdict: {}", verdict_text(a));
+    if a.prefix.is_some() {
+        let _ = writeln!(o, "{ENDING_NO_TRAILER}");
+    }
+    if cap.minor_warning {
+        let _ = writeln!(o, "warning: minor version > 0; read as v1");
+    }
+    if let Some(status) = cap.dependency_status() {
+        let _ = writeln!(o, "{}", crate::dependencies::status_text(&status));
+    }
+    if let Some(evidence) = &cap.source_checkpoints {
+        o.push_str(&crate::source_checkpoints::report(evidence));
+    }
+    // Only files with file_flags bit 1 carry a PROFILE; every other file's report is unchanged.
+    if let Some(p) = &cap.profile {
+        let _ = writeln!(o, "{}", crate::profile::record_line(p));
+    }
+    if let Some(h) = &cap.header {
+        let _ = writeln!(
+            o,
+            "app {} | abi {} | sdk {} | compiler {} | workload {}",
+            h.app,
+            if h.abi == 1 { "ILP32" } else { "LP64" },
+            h.sdk_version,
+            h.compiler_identity,
+            h.workload_tag
+        );
+    }
+    match &cap.clock {
+        Some(c) => {
+            let _ = writeln!(o, "clock: PPU timebase {} Hz; durations below are in timebase ticks", c.freq_hz);
+        }
+        None => {
+            let _ = writeln!(o, "clock: unknown (no CLOCKS chunk)");
+        }
+    }
+
+    let _ = writeln!(o, "\nlanes:");
+    for (inc, lane) in &cap.lanes {
+        let view = &a.lanes[inc];
+        let name = lane.info.as_ref().map_or("", |i| i.name.as_str());
+        let status = if view.valid { "MEASUREMENT VALID".to_string() } else { format!("INVALID ({})", view.reasons.join(", ")) };
+        let lane_frames = lane.frames.iter().filter(|f| w.contains_frame(f.id)).count();
+        let _ = writeln!(o, "  {inc} {name}: {status}; {} records, {} frames", lane.written, lane_frames);
+    }
+    let valid: Vec<String> = a.lanes.values().filter(|l| l.valid).map(|l| l.incarnation.to_string()).collect();
+    let _ = writeln!(
+        o,
+        "scope: statistics, frame elapsed and W use only lanes [{}]",
+        if valid.is_empty() { "none".to_string() } else { valid.join(", ") }
+    );
+
+    let _ = writeln!(o, "\ndescriptors (as published):");
+    for d in cap.descriptors.values() {
+        let tag = if d.logical_tag.is_empty() { String::new() } else { format!(" [{}]", d.logical_tag) };
+        let _ = writeln!(
+            o,
+            "  index {} id {:#018x} scope {} {}:{} {}{tag}",
+            d.index, d.id, d.scope, d.file, d.line, d.name
+        );
+    }
+
+    let _ = writeln!(o, "\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
+    for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
+        let _ = writeln!(o, "  owner {} frame {}: {}", f.owner, f.frame, f.value);
+    }
+
+    let _ = writeln!(o, "\nattributed work, per lane:\n  {W_NOTE}");
+    for work in a.work.iter().filter(|work| w.contains_frame(work.frame)) {
+        let _ = writeln!(o, "  W(owner {}, frame {}, lane {}): {}", work.owner, work.frame, work.lane, work.value);
+    }
+
+    let _ = writeln!(o, "\nzones (valid lanes only):");
+    let win_zones = a.window_zones(w);
+    for z in &win_zones {
+        let tag = if z.logical_tag.is_empty() { String::new() } else { format!(" [{}]", z.logical_tag) };
+        let _ = writeln!(o, "  {}{tag}: {} instances", z.name, z.instances);
+        if let Some(label) = &z.label {
+            let _ = writeln!(o, "    {label}");
+        }
+        let _ = writeln!(
+            o,
+            "    total {} | min {} | max {} | mean {} | p50 {} | p90 {} | p99 {}",
+            z.total, z.min, z.max, z.mean, z.p50, z.p90, z.p99
+        );
+        if z.descriptors > 1 {
+            let _ = writeln!(o, "    duplicate logical key ({} descriptors): A/B refused", z.descriptors);
+        }
+    }
+
+    let tokens: Vec<&TokenRef> = a.tokens.iter().filter(|t| w.contains_frame(t.frame)).collect();
+    if !tokens.is_empty() {
+        let _ = writeln!(o, "\ntokens:");
+        for t in &tokens {
+            let s = &cap.spans[t.span];
+            let _ = writeln!(o, "  span {} of {}: frame {} of {}: {}", s.span_id, s.incarnation, t.frame, t.owner, t.outcome);
+        }
+    }
+
+    let _ = writeln!(o, "\nspans:");
+    for (s, v) in cap.spans.iter().zip(&a.spans) {
+        let in_window = match v.attribution.claim() {
+            Some((_, f)) => w.contains_frame(f),
+            None => match s.frame_context {
+                FrameContext::Frame(f) => w.contains_frame(f),
+                _ => false,
+            },
+        };
+        if !in_window {
+            continue;
+        }
         let name = cap.descriptors.get(&s.desc).map_or("?", |d| d.name.as_str());
         let mut notes = Vec::new();
         if s.is_open() {

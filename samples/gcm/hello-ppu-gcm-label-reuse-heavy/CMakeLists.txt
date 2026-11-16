@@ -11,6 +11,7 @@ target_compile_definitions(hello-ppu-gcm-label-reuse-heavy PRIVATE LABEL_REUSE_H
 target_link_libraries(hello-ppu-gcm-label-reuse-heavy PRIVATE gcm_cmd gcm_sys sysutil rt lv2 m)
 ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-label-reuse-heavy shaders/arena_vp.vcg)
 ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-label-reuse-heavy shaders/arena_fp.fcg)
+ps3_add_cg_shader_rsxcgc(hello-ppu-gcm-label-reuse-heavy shaders/fp_heavy_nokil.fcg)
 ps3_add_self(hello-ppu-gcm-label-reuse-heavy)
 ps3_add_pkg(hello-ppu-gcm-label-reuse-heavy
     APPID "GCML00002" CONTENTID "UP0001-GCML00002_00-PS3DKSAMPLES0000")

@@ -177,6 +177,7 @@ struct Shared {
     inner: Mutex<Inner>,
     wake: Condvar,
     cancel: AtomicBool,
+    stream: Mutex<Option<TcpStream>>,
 }
 
 /// Dropping a client requests a disconnect and returns at once: its threads
@@ -211,6 +212,7 @@ impl LiveClient {
             }),
             wake: Condvar::new(),
             cancel: AtomicBool::new(false),
+            stream: Mutex::new(None),
         });
         let s = shared.clone();
         let c = cfg.clone();
@@ -239,6 +241,9 @@ impl LiveClient {
     /// Asks the session to end; valid data that arrived is published as a capture that ended early.
     pub fn disconnect(&self) {
         self.shared.cancel.store(true, Ordering::SeqCst);
+        if let Some(s) = self.shared.stream.lock().unwrap().as_ref() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
         self.shared.wake.notify_all();
     }
 
@@ -305,8 +310,19 @@ fn run_worker(sh: &Shared, every: Duration) {
             sh.wake.notify_all();
             return;
         }
-        // Coalesce: whatever arrives during the pause is parsed once.
-        std::thread::sleep(every);
+        // Coalesce: whatever arrives during the pause is parsed once,
+        // waking promptly on disconnect or when the network finishes.
+        let pause_start = Instant::now();
+        let mut g = sh.inner.lock().unwrap();
+        while !sh.cancel.load(Ordering::SeqCst) && !g.net_done {
+            let elapsed = pause_start.elapsed();
+            if elapsed >= every {
+                break;
+            }
+            let rem = every - elapsed;
+            let (next_g, _) = sh.wake.wait_timeout(g, rem).unwrap();
+            g = next_g;
+        }
     }
 }
 
@@ -358,7 +374,14 @@ fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
     });
     match connected {
         Ok(mut stream) => {
+            if let Ok(clone) = stream.try_clone() {
+                *sh.stream.lock().unwrap() = Some(clone);
+            }
+            if sh.cancel.load(Ordering::SeqCst) {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
             stream_loop(sh, cfg, &mut stream, &mut r);
+            *sh.stream.lock().unwrap() = None;
             let _ = stream.shutdown(Shutdown::Both);
         }
         Err(e) => r.extra.push(format!("could not connect to {addr}: {e}")),
@@ -411,6 +434,11 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
             _ => {}
         }
         match stream.read(&mut buf) {
+            _ if sh.cancel.load(Ordering::SeqCst) => {
+                r.extra.push("disconnected by the user".into());
+                r.early = Some("disconnected by the user".into());
+                return;
+            }
             Ok(0) => {
                 let mut g = sh.inner.lock().unwrap();
                 r.clean_eof = matches!(g.session.state, LinkState::Ended(_));

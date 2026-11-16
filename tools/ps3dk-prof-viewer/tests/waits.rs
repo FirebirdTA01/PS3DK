@@ -76,6 +76,7 @@ fn groups_count_retained_calls_and_keep_unknown_elapsed_separate() {
         event(2, 4, 150, 0x1000),
         event(1, 5, 160, 0),
     ]);
+    common::harvest(&f.bytes());
     let v = view(&f, Budget::default());
     assert!(v.refusal.is_none());
     assert_eq!(v.rows.len(), 3);
@@ -308,6 +309,8 @@ fn waits_page_selects_real_groups_and_caps_visible_work() {
     assert!(d.rows_built > 0 && d.rows_built <= ps3dk_prof_viewer::waits::PAINT_ROWS);
     assert!(d.omitted > 0);
     assert!(d.status.contains("PROVISIONAL"));
+    // The compact time rows occupy less than half this viewport: the wheel
+    // must still work over its blank right-hand area.
     let pos = d.calls_rect.unwrap().center();
     frame(vec![Event::PointerMoved(pos)]);
     frame(vec![Event::MouseWheel {

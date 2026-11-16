@@ -16,10 +16,12 @@ use ps3dk_prof::{load_file, report, Outcome, Verdict};
 
 const USAGE: &str = "usage:
   ps3dk-prof check <file>    print the verdict
-  ps3dk-prof report <file>   print the verdict and the full report
+  ps3dk-prof report [--window <id|name>] <file>   print the verdict and the full report
+  ps3dk-prof windows <file>  list capture windows
+  ps3dk-prof frames [--window <id|name>] <file>   frame elapsed intervals
   ps3dk-prof waits [--json] <file>   API-call observations and explicit unknown dependencies
   ps3dk-prof counters [--json] <file>   named per-frame counters (exit status as check)
-  ps3dk-prof auto [--json] <file>    automatic RSX observation (file_flags bit 7): coverage, reached-marker
+  ps3dk-prof auto [--window <id|name>] [--json] <file>    automatic RSX observation (file_flags bit 7): coverage, reached-marker
                              intervals, the capture's own clock map and a per-frame verdict (PPU-bound,
                              RSX-bound, mixed, pacing or UNKNOWN with the missing input); exit status as
                              check, 1 when automatic observation is absent, unavailable or refused
@@ -32,7 +34,7 @@ const USAGE: &str = "usage:
                              per frame and per tag: records, timed RSX busy (merged intervals) and the
                              draws its CALL brackets ran untimed; AUTO range time per name; a whole-
                              window summary; 1 without automatic observation or without tags
-  ps3dk-prof export --frame N | --frames A..B <in.prof> <out.prof>
+  ps3dk-prof export --window W | --frame N | --frames A..B <in.prof> <out.prof>
                              write one frame or a frame range of a capture as a standalone .prof
   ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
                              phase 1 / phase 2 / outer elapsed bounds, OPEN and lost endpoints, entered
@@ -402,13 +404,228 @@ fn counters(args: &[String]) -> ExitCode {
     }
 }
 
+fn find_window<'a>(windows: &'a [ps3dk_prof::CaptureWindow], query: &str) -> Option<&'a ps3dk_prof::CaptureWindow> {
+    if let Ok(id) = query.parse::<u32>() {
+        if let Some(w) = windows.iter().find(|w| w.id == id) {
+            return Some(w);
+        }
+    }
+    windows.iter().find(|w| w.name == query)
+}
+
+fn windows(args: &[String]) -> ExitCode {
+    let path = match args {
+        [path] if !path.starts_with('-') => path,
+        _ => {
+            eprintln!("{USAGE}");
+            return ExitCode::from(3);
+        }
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            for w in &a.capture.windows {
+                let status_note = if w.incomplete { " (incomplete)" } else { "" };
+                println!(
+                    "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                    w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
+                );
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
+fn frames(args: &[String]) -> ExitCode {
+    let mut window_arg: Option<&str> = None;
+    let mut path: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--window" => {
+                if window_arg.is_some() {
+                    eprintln!("ps3dk-prof: --window given twice");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                window_arg = Some(v.as_str());
+                i += 1;
+            }
+            arg if !arg.starts_with('-') && path.is_none() => {
+                path = Some(arg);
+            }
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+        }
+        i += 1;
+    }
+    let Some(path) = path else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            if let Some(w_query) = window_arg {
+                let Some(w) = find_window(&a.capture.windows, w_query) else {
+                    eprintln!("ps3dk-prof: no window matching {w_query:?}");
+                    return ExitCode::from(3);
+                };
+                let status_note = if w.incomplete { " (incomplete)" } else { "" };
+                println!(
+                    "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                    w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
+                );
+                println!("\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
+                for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
+                    println!("  owner {} frame {}: {}", f.owner, f.frame, f.value);
+                }
+            } else if a.capture.windows_flag {
+                for w in &a.capture.windows {
+                    let status_note = if w.incomplete { " (incomplete)" } else { "" };
+                    println!(
+                        "window {}: \"{}\" source {} kind {} {} reason {}{}",
+                        w.id, w.name, w.source, w.kind, w.frames_desc(), w.reason, status_note
+                    );
+                    println!("\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
+                    for f in a.frames.iter().filter(|f| w.contains_frame(f.frame)) {
+                        println!("  owner {} frame {}: {}", f.owner, f.frame, f.value);
+                    }
+                }
+            } else {
+                println!("\nframe elapsed (FRAME k to FRAME k+1 of its owner):");
+                for f in &a.frames {
+                    println!("  owner {} frame {}: {}", f.owner, f.frame, f.value);
+                }
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
+fn report_cmd(args: &[String]) -> ExitCode {
+    let mut window_arg: Option<&str> = None;
+    let mut path: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--window" => {
+                if window_arg.is_some() {
+                    eprintln!("ps3dk-prof: --window given twice");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                window_arg = Some(v.as_str());
+                i += 1;
+            }
+            arg if !arg.starts_with('-') && path.is_none() => {
+                path = Some(arg);
+            }
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+        }
+        i += 1;
+    }
+    let Some(path) = path else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ps3dk-prof: {path}: {e}");
+            return ExitCode::from(3);
+        }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => {
+            println!("{m}");
+            ExitCode::from(2)
+        }
+        Outcome::Analysed(a) => {
+            if let Some(w_query) = window_arg {
+                let Some(w) = find_window(&a.capture.windows, w_query) else {
+                    eprintln!("ps3dk-prof: no window matching {w_query:?}");
+                    return ExitCode::from(3);
+                };
+                print!("{}", report::render_window(&a, w));
+            } else if a.capture.windows_flag {
+                for w in &a.capture.windows {
+                    print!("{}", report::render_window(&a, w));
+                }
+            } else {
+                print!("{}", report::render(&a));
+            }
+            verdict_code(&a)
+        }
+    }
+}
+
 fn auto(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--ops") { return auto_ops(args); }
     if args.iter().any(|a| a == "--by-tag") { return auto_by_tag(args); }
-    let (json, path) = match args {
-        [path] if !path.starts_with('-') => (false, path),
-        [flag, path] if flag == "--json" && !path.starts_with('-') => (true, path),
-        _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+    let mut json = false;
+    let mut window_arg: Option<&str> = None;
+    let mut path: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--window" => {
+                if window_arg.is_some() {
+                    eprintln!("ps3dk-prof: --window given twice");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                window_arg = Some(v.as_str());
+                i += 1;
+            }
+            arg if !arg.starts_with('-') && path.is_none() => {
+                path = Some(arg);
+            }
+            _ => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(3);
+            }
+        }
+        i += 1;
+    }
+    let Some(path) = path else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
     };
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -419,8 +636,45 @@ fn auto(args: &[String]) -> ExitCode {
         Outcome::Analysed(a) => {
             let r = ps3dk_prof::auto_rsx::analyze(&a.capture);
             let mut out = std::io::stdout().lock();
-            let result = if json { ps3dk_prof::auto_rsx::write_json(&mut out, &r) }
-                else { ps3dk_prof::auto_rsx::write_text(&mut out, &r) };
+            let result = if let Some(w_query) = window_arg {
+                let Some(w) = find_window(&a.capture.windows, w_query) else {
+                    eprintln!("ps3dk-prof: no window matching {w_query:?}");
+                    return ExitCode::from(3);
+                };
+                if json {
+                    ps3dk_prof::auto_rsx::write_json(&mut out, &r.filter_window(w))
+                } else {
+                    ps3dk_prof::auto_rsx::write_text_window(&mut out, &r, w)
+                }
+            } else if a.capture.windows_flag {
+                if json {
+                    let mut win_arr = Vec::new();
+                    for w in &a.capture.windows {
+                        let filt = r.filter_window(w);
+                        let mut buf = Vec::new();
+                        let _ = ps3dk_prof::auto_rsx::write_json(&mut buf, &filt);
+                        let mut val: serde_json::Value = serde_json::from_slice(&buf).unwrap_or(serde_json::Value::Null);
+                        if let serde_json::Value::Object(ref mut map) = val {
+                            map.insert("window_id".to_string(), serde_json::json!(w.id));
+                            map.insert("window_name".to_string(), serde_json::json!(w.name));
+                            map.insert("window_incomplete".to_string(), serde_json::json!(w.incomplete));
+                        }
+                        win_arr.push(val);
+                    }
+                    serde_json::to_writer_pretty(&mut out, &serde_json::json!({ "windows": win_arr }))
+                        .map_err(std::io::Error::other)
+                } else {
+                    let mut res = Ok(());
+                    for w in &a.capture.windows {
+                        res = ps3dk_prof::auto_rsx::write_text_window(&mut out, &r, w);
+                        if res.is_err() { break; }
+                    }
+                    res
+                }
+            } else {
+                if json { ps3dk_prof::auto_rsx::write_json(&mut out, &r) }
+                else { ps3dk_prof::auto_rsx::write_text(&mut out, &r) }
+            };
             if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
             let unavailable = !r.capability || r.refusal.is_some()
                 || !matches!(r.config, Some(ps3dk_prof::auto_rsx::Config::Attached(_)));
@@ -625,14 +879,27 @@ fn func_paths(rest: &[String]) -> ExitCode {
 fn export(args: &[String]) -> ExitCode {
     use std::ops::RangeInclusive;
     let mut frame_range: Option<RangeInclusive<u64>> = None;
+    let mut window_spec: Option<&str> = None;
     let mut in_path: Option<&str> = None;
     let mut out_path: Option<&str> = None;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--window" => {
+                if frame_range.is_some() || window_spec.is_some() {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                }
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{USAGE}");
+                    return ExitCode::from(3);
+                };
+                window_spec = Some(v.as_str());
+                i += 1;
+            }
             "--frame" => {
-                if frame_range.is_some() {
+                if frame_range.is_some() || window_spec.is_some() {
                     eprintln!("{USAGE}");
                     return ExitCode::from(3);
                 }
@@ -648,7 +915,7 @@ fn export(args: &[String]) -> ExitCode {
                 i += 1;
             }
             "--frames" => {
-                if frame_range.is_some() {
+                if frame_range.is_some() || window_spec.is_some() {
                     eprintln!("{USAGE}");
                     return ExitCode::from(3);
                 }
@@ -694,7 +961,39 @@ fn export(args: &[String]) -> ExitCode {
         i += 1;
     }
 
-    let (Some(range), Some(input), Some(output)) = (frame_range, in_path, out_path) else {
+    let (Some(input), Some(output)) = (in_path, out_path) else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(3);
+    };
+
+    let range = if let Some(r) = frame_range {
+        r
+    } else if let Some(w_query) = window_spec {
+        let bytes = match std::fs::read(input) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("ps3dk-prof: {input}: {e}");
+                return ExitCode::from(3);
+            }
+        };
+        match load_file(&bytes) {
+            Outcome::Malformed(m) => {
+                eprintln!("ps3dk-prof: {input}: MALFORMED: {m}");
+                return ExitCode::from(2);
+            }
+            Outcome::Analysed(a) => {
+                let Some(w) = find_window(&a.capture.windows, w_query) else {
+                    eprintln!("ps3dk-prof: export: no window matching {w_query:?}");
+                    return ExitCode::from(3);
+                };
+                let Some(last) = w.last_frame else {
+                    eprintln!("ps3dk-prof: export: window {w_query:?} has 0 frames");
+                    return ExitCode::from(3);
+                };
+                w.first_frame..=last
+            }
+        }
+    } else {
         eprintln!("{USAGE}");
         return ExitCode::from(3);
     };
@@ -728,6 +1027,15 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|c| c == "export") {
         return export(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "windows") {
+        return windows(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "frames") {
+        return frames(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "report") {
+        return report_cmd(&args[1..]);
     }
     if args.first().is_some_and(|c| c == "paths") && args.iter().any(|a| a == "--functions") {
         return func_paths(&args[1..]);
@@ -768,7 +1076,6 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         [cmd, path] if cmd == "check" => (false, path),
-        [cmd, path] if cmd == "report" => (true, path),
         [cmd, path] if cmd == "paths" => (false, path),
         [cmd, path] if cmd == "check-arcs" || cmd == "arcs-json" => (false, path),
         _ => {

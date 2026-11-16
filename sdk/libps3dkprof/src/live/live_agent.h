@@ -47,7 +47,7 @@ typedef struct live_config {
     uint8_t loopback_only;         /* bind 127.0.0.1 instead of every interface */
     uint8_t reserved;
     uint32_t poll_us;              /* 1000..1000000: wait between checks of the file and sockets */
-    uint32_t send_timeout_us;      /* 1000..60000000: no send progress for this long drops the viewer */
+    uint32_t send_timeout_us;      /* 1000..60000000: send stall, also the fixed post-END input-drain limit */
     uint32_t handshake_timeout_us; /* 1000..60000000: CLIENT_HELLO must arrive within this */
     uint32_t stack_bytes;          /* 16 KiB..1 MiB */
     uint64_t cap_bytes;            /* 1..2^40: bytes of capture served at most */
@@ -143,7 +143,10 @@ uint16_t live_agent_port(const live_agent *a);
  *   cancels: it closes the viewer without END. A partial download is never
  *   claimed as complete. A cancellation that is due when a blocking file
  *   call returns still cancels.
- * - Without a streaming viewer the thread exits at its next poll.
+ * - After END, the agent half-closes output and drains input until the
+ *   viewer closes, send_timeout_us elapses, or the graceful stop expires.
+ *   This avoids resetting a completed stream because a PING was in flight.
+ * - Without a streaming or draining viewer the thread exits at its next poll.
  * - The caller waits up to graceful_us + join_us in all, then joins.
  * Returns LIVE_OK (joined, stopped), LIVE_EINVAL (the deadline would
  * overflow; nothing changed), LIVE_ETIMEDOUT or LIVE_ECLOCK (still
