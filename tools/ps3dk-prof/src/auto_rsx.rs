@@ -2583,6 +2583,12 @@ pub struct TagFrame {
     pub unrepresented: u32,
     pub tags: BTreeMap<u32, TagRow>,
     pub ranges: BTreeMap<String, RangeRow>,
+    /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
+    /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
+    /// frame `outside_timed_range`).
+    pub outside_timed_range: [u64; 3],
+    /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
+    pub ranges_refused: u32,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
@@ -2616,7 +2622,7 @@ pub fn by_tag(cap: &Capture) -> ByTag {
     for f in &inv.frames {
         let key = (f.owner, f.frame);
         let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
-        let mut tf = TagFrame { owner: f.owner, frame: f.frame, ..TagFrame::default() };
+        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, ..TagFrame::default() };
         let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
         tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
         tf.unrepresented = f.segment_unrepresented;
@@ -2721,6 +2727,8 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     use serde_json::json;
     let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| json!({
         "owner": f.owner, "frame": f.frame, "untimed": f.untimed, "unrepresented": f.unrepresented,
+        "outside_timed_range": {"array": f.outside_timed_range[0], "index": f.outside_timed_range[1], "clear": f.outside_timed_range[2]},
+        "ranges_refused": f.ranges_refused,
         "tags": f.tags.iter().map(|(t, r)| json!({"tag": t, "ops": r.ops, "busy_raw": r.busy_raw,
             "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
         "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
