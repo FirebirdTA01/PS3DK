@@ -297,6 +297,12 @@ jobs:
           bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-plain" --mutants
           bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-address" --sanitize
 
+      - name: Report ring production primitives
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core" --mutants
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-address" --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-thread" --sanitize thread --case core
+
       - name: Automatic RSX initialization, wire and queue controls
         run: |
           python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
