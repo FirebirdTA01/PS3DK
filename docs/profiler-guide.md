@@ -303,15 +303,23 @@ Open a capture either by passing the file on the command line, or from inside th
 - **Zones** — named-zone statistics for PPU zones only, from PPU lanes that are MEASUREMENT VALID (`ps3dk-prof report` prints each lane's validity; spans on other lanes are excluded); SPU and RSX zones are not listed. Columns: Zone (name and tag), Instances, Completed, Censored, Total, Mean, p50, p90, p99 and Max (all durations inclusive), and Qualification. Percentiles use the usable completed duration samples and are refused when there are fewer than 20 of them. Unknown values sort last.
 - **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains. For a capture with automatic function paths, a **Source** selector switches between **Zones** and **Functions (automatic)**; the latter shows one thread's indented call tree (calls, inclusive, self, % of the selection's wall elapsed, row statuses) for the whole capture or one interval, with the counters and statuses above it, the LOST row apart from the tree, and **Load ELF symbols...** for names.
 
-AUTO captures also add three collapsible Timeline lanes below the PPU threads:
-frame verdicts, mapped RSX busy intervals, and presentation aggregates. Busy
+AUTO captures also add collapsible Timeline sections below the PPU threads:
+frame verdicts, mapped RSX busy intervals, recorded flip-wait scopes, and presentation aggregates. Busy
 intervals are the reader's union of retained draw/CALL intervals within each
 execution frame. They include RSX waits, so they are not shader execution time.
 Their solid cores lie inside the qualified clock map's endpoint bounds;
 whiskers show the outer bounds. Unqualified maps and invalidated timing have no
 busy bars, and intervals outside the map's support are not extrapolated.
-Flip-wait ticks/counts and polling cadence are per-frame annotations: this
-capture format does not record their positions, so it supplies no wait bars.
+Captures with recorded flip-wait positions (1023/11) show their first two completed
+scopes per frame at the recorded PPU timestamps, independently of RSX clock-map
+qualification. These scopes include scheduling and polling. The annotation names
+how many scopes have positions when the count exceeds two; no bars are invented
+for later or frame-spanning scopes. Older formats keep aggregate-only flip-wait
+annotations with a positions-unavailable notice. Flip-status and label-poll cadence
+remain per-frame observations, with run/broken/spanning counts and the largest
+one-label total; their positions are not recorded. Durations use ms with three
+decimals and raw ticks on hover. The reader's `auto --json` exposes the recorded
+positions as `flip_wait_intervals` (`tb_begin`/`tb_end`) for 1023/11 captures only.
 The lanes share Timeline zoom and pan. A notice identifies any visible bars or
 aggregate rows beyond the paint limit; zooming narrows the displayed population.
 

@@ -1560,6 +1560,10 @@ pub struct FrameView {
     pub segment_abandoned: u64,
     /// The frame's presentation evidence (FR_PRESENT rows), None when the writer observed none.
     pub presentation: Option<Presentation>,
+    /// 1023/11: validated PPU begin/end ticks of up to the first two completed
+    /// flip-wait scopes. None means the format did not record positions;
+    /// Some(empty) means it did, but no completed scope was recorded.
+    pub flip_wait_at: Option<Vec<(u64, u64)>>,
     /// 511/11: label-poll cadence, its label + 1 and the largest one-label total (see MASKS_LABEL), None for older
     /// writers.
     pub label_polls: Option<(Cadence, u32, u64)>,
@@ -1842,6 +1846,7 @@ pub fn analyze(cap: &Capture) -> Report {
             call_covered: call_unrep,
             segment_abandoned: abandoned.get(&(f.owner, f.frame)).copied().unwrap_or(0),
             label_polls: f.label_polls,
+            flip_wait_at: f.flip_wait_at.clone(),
             outside_timed: f.outside_timed,
             ranges_refused: f.ranges_refused,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
@@ -2363,6 +2368,8 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             v["call_brackets"] = json!(f.call_brackets);
         }
         if r.tagged {
+            v["flip_wait_intervals"] = json!(f.flip_wait_at.as_ref().map(|at| at.iter()
+                .map(|&(b,e)| json!({"tb_begin":b,"tb_end":e})).collect::<Vec<_>>()));
             // the exclusion reason "outside timed range", per kind, and the refused AUTO ranges
             v["outside_timed_range"] = json!({"array":f.outside_timed[0],"index":f.outside_timed[1],"clear":f.outside_timed[2]});
             v["ranges_refused"] = json!(f.ranges_refused);
