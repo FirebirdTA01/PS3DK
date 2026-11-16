@@ -39,12 +39,24 @@ int auto_frames_unrepresented(auto_frames *q,uint32_t n)
     return 1;
 }
 
+int auto_frames_outside(auto_frames *q,uint32_t kind)
+{
+    uint64_t *value;
+    if(!q->active || kind<1 || kind>3) return 0;
+    value=&q->live.outside_timed[kind-1];
+    if(*value==UINT64_MAX) {q->live.flags|=4;REL(&q->saturated,1u);}
+    else ++*value;
+    return 1;
+}
+
 int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,int open)
 {
     uint64_t w,r;
     if(!q->active || owner!=q->owner || frame!=q->live.frame) return 0;
     if(!(q->live.flags&4)) for(unsigned kind=0;kind<3;kind++) {
         uint64_t remaining=q->live.counts[kind][0];
+        if(q->live.outside_timed[kind]>remaining) return 0;
+        remaining-=q->live.outside_timed[kind];
         for(unsigned column=1;column<12;column++) {
             if(q->live.counts[kind][column]>remaining) return 0;
             remaining-=q->live.counts[kind][column];

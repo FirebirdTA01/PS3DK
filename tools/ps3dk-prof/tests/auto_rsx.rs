@@ -134,6 +134,12 @@ impl ACfg {
         b.u64(self.freq).u64(self.allocated).u64(self.ceiling).u32(self.premise).u32(self.lease);
         b.0.extend_from_slice(&[0x2a; 32]);
         b.0.extend_from_slice(&[0x63; 32]);
+        if self.flags == 0 && self.words[4] == 1023 {
+            // the tag writer's reserves: whole-CALL 32, ranges 16 (504 pairs), then zero
+            let pairs = self.words[10];
+            let (call, ranges) = if pairs >= 128 { (32, 16) } else { (pairs / 4, pairs / 8) };
+            b.u32(call).u32(ranges).u64(0);
+        }
         chunk(34, b.0)
     }
 }
@@ -188,8 +194,11 @@ fn ops_w(list: &[AOp], width: u32) -> Chunk {
         }
         b.u32(o.r0).u32(o.reports.0).u32(o.reports.1).u32(o.serials.0).u32(o.serials.1).u32(o.generation).u32(o.r1)
             .u64(o.published);
-        if width == 144 {
+        if width >= 144 {
             b.u64(o.tail.0).u32(o.tail.1).u16(o.tail.2).u16(o.tail.3);
+        }
+        if width == 160 {
+            b.u32(0).u32(0).u32(0).u32(0); // tag, fp_offset, depth, reserved
         }
     }
     chunk(35, b.0)
@@ -1731,12 +1740,19 @@ fn busy_frame_labels(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32, 
         b.u32(l.runs).u32(l.broken).u32(l.spanning).u32(index).u64(l.ticks).u64(one);
         cov.payload.extend_from_slice(&b.0);
     }
+    if masks & 512 != 0 {
+        cov.payload.extend_from_slice(&[0; 64]); // timed-range block and flip-wait scope block: empty
+    }
+    let width = if masks & 512 != 0 { 160 } else { 144 };
     let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
-        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 144), cov];
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, width), cov];
     rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
     rest.push(status(1, status_for(n, 1, 9, 2 * n)));
     let mut cfg = brk_cfg();
     cfg.words[4] = masks;
+    if masks & 512 != 0 {
+        cfg.words[13] = 160;
+    }
     brk_file(cfg, rest)
 }
 fn busy_read(f: File) -> ps3dk_prof::auto_rsx::FrameView {
@@ -1847,6 +1863,247 @@ fn polling_shares_in_json() {
     ps3dk_prof::auto_rsx::write_json(&mut out, &r).unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert!(v["frames"][0].get("cadence_share").is_none());
+}
+
+// ---- tags, AUTO ranges and timed-range limits (CONFIG masks 1023/11) ---------------------------------------------
+
+fn cli(args: &[&str]) -> (i32, Vec<u8>) {
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(args).output().unwrap();
+    (o.status.code().unwrap_or(-1), o.stdout)
+}
+fn fixture_path(name: &str) -> String {
+    format!("{}/tests/fixtures/auto/{name}.prof", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The host runtime's tags capture (auto-runtime-test.py --case tags): per frame and per tag, records, merged busy
+/// time and the draws its CALL brackets ran untimed; per range name, the ranges and their exact raw time.
+#[test]
+fn by_tag_on_the_runtime_capture() {
+    let r = reader::read(&fixture("tags")).expect("reads");
+    let b = ps3dk_prof::auto_rsx::by_tag(&r);
+    assert!(b.tagged && b.frames.len() == 2);
+    let f0 = &b.frames[0];
+    let row = |t: u32| f0.tags.get(&t).cloned().unwrap_or_default();
+    // tag 0xa: one ring clear and part 0's two draws (built under 0xa, recorded at the CALL); every interval 10 ticks
+    assert_eq!((row(0xa).ops, row(0xa).busy_raw), (3, 30));
+    assert_eq!((row(0xb).ops, row(0xb).busy_raw), (1, 10));
+    // tag 0xc: no draw of its own, the whole-CALL bracket of part 0 (its refused draw)
+    assert_eq!((row(0xc).ops, row(0xc).busy_raw, row(0xc).untimed_in_calls), (0, 10, 1));
+    assert_eq!((f0.untimed, f0.unrepresented), (1, 1));
+    assert_eq!(f0.ranges.get("pass").map(|r| (r.count, r.raw)), Some((4, 40)));
+    assert_eq!(f0.ranges.get("outer").map(|r| r.count), Some(1));
+    let f1 = &b.frames[1];
+    assert_eq!(f1.untimed, 3, "three draws outside the timed ranges");
+    let s = ps3dk_prof::auto_rsx::range_summary(&b);
+    assert_eq!(s.get("pass"), Some(&(2, 13, 130, 65)));
+    let t = ps3dk_prof::auto_rsx::tag_summary(&b);
+    assert_eq!(t.get(&0xe), Some(&(1, 3, 40, 40)));
+    let (code, out) = cli(&["auto", "--by-tag", "--json", &fixture_path("tags")]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["tagged"], true);
+    assert_eq!(v["summary"]["ranges"].as_array().unwrap().len(), 3);
+    // an older capture has no tags: a named refusal, exit 1
+    let (code, out) = cli(&["auto", "--by-tag", &fixture_path("segments")]);
+    assert_eq!(code, 1);
+    assert!(String::from_utf8_lossy(&out).starts_with("no tags"));
+}
+
+/// `auto --ops` names tag and fp_offset (and RANGE depth) only for 1023/11 records; `auto --json` names the new
+/// exclusion reason and the refused ranges only for 1023/11 rows.
+#[test]
+fn tags_in_ops_and_json() {
+    let (code, out) = cli(&["auto", "--ops", &fixture_path("tags")]);
+    assert_eq!(code, 0);
+    let text = String::from_utf8_lossy(&out).to_string();
+    assert!(text.lines().nth(1).unwrap().ends_with("args tag fp_offset"), "{text}");
+    assert!(text.lines().any(|l| l.contains(" RANGE ")), "{text}");
+    let (_, out) = cli(&["auto", "--ops", "--json", &fixture_path("tags")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let ops = v["ops"].as_array().unwrap();
+    assert!(ops.iter().any(|o| o["kind"] == "CALL" && o["tag"] == 0xc && o["fp_offset"] == 0x1000));
+    assert!(ops.iter().any(|o| o["kind"] == "RANGE" && o["depth"] == 4));
+    let (_, out) = cli(&["auto", "--ops", &fixture_path("segments")]);
+    assert!(!String::from_utf8_lossy(&out).contains("fp_offset"));
+    let (_, out) = cli(&["auto", "--ops", "--json", &fixture_path("segments")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(v["ops"].as_array().unwrap().iter().all(|o| o.get("tag").is_none()));
+    let (_, out) = cli(&["auto", "--json", &fixture_path("tags")]);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["frames"][1]["outside_timed_range"]["clear"], 3);
+    assert_eq!(v["frames"][1]["ranges_refused"], 10);
+    assert_eq!(v["frames"][0]["ranges_refused"], 3);
+}
+
+/// One busy_frame (1023/11) with `outside` more CLEAR visits left untimed outside the timed ranges.
+fn outside_frame(outside: u64, visits_too: bool) -> File {
+    let mut f = busy_frame(&[(6000, 36_000)], Blk { runs: 1, ticks: 30_000, ..Blk::default() }, None, 1023);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let row = &mut f.chunks[at].payload;
+    if visits_too {
+        let v = u64::from_le_bytes(row[64 + 2 * 96..64 + 2 * 96 + 8].try_into().unwrap()) + outside;
+        row[64 + 2 * 96..64 + 2 * 96 + 8].copy_from_slice(&v.to_le_bytes());
+    }
+    row[432..440].copy_from_slice(&outside.to_le_bytes());
+    f
+}
+
+/// Draws left untimed outside the timed ranges are untimed for the bounded rule like the other untimed draws; the
+/// row must still reconcile (visited = observed + exclusions + outside).
+#[test]
+fn outside_timed_draws_are_untimed() {
+    let f = busy_read(outside_frame(0, true));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy polling"), "{}", f.reason);
+    let f = busy_read(outside_frame(2, true));
+    assert_eq!(f.outside_timed, [0, 0, 2]);
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("2 covered draw(s) untimed; verdict holds"), "{}", f.reason);
+    assert!(reader::read(&outside_frame(2, false).bytes()).is_err(), "outside visits must be counted as visits");
+}
+
+/// RANGE records are a 1023/11 kind with fixed rules; tags are only read from 160-byte records.
+#[test]
+fn range_records_are_checked() {
+    let base = reader::read(&fixture("tags")).expect("reads");
+    let inv = base.auto.as_ref().unwrap();
+    let ranges: Vec<_> = inv.ops.iter().filter(|o| o.kind == 6).collect();
+    assert_eq!(ranges.len(), 15);
+    assert!(ranges.iter().all(|o| (1..=4).contains(&o.depth) && o.args[0] >= 1 && o.args[1] <= 1 && o.tag == Some(0xd)));
+    assert!(inv.ops.iter().filter(|o| o.kind != 6).all(|o| o.depth == 0));
+    // a RANGE under 255/11 is refused (kind 6 is unknown there)
+    let mut f = busy_frame(&[(6000, 36_000)], Blk::default(), None, 255);
+    let at = f.chunks.iter().position(|c| c.ty == 35).unwrap();
+    f.chunks[at].payload[16 + 144 + 12] = 6;
+    assert!(reader::read(&f.bytes()).is_err());
+}
+
+// ---- blocked flip waits as RSX-bound evidence (CONFIG masks 1023/11) ----------------------------------------------
+
+/// busy_frame (no FIFO wait, no polling) with one flip-wait scope at PPU `scope` recorded in the row (count and ticks
+/// at 12/56, the scope block at 448 under 1023/11), and optionally with anchors that cannot qualify a map.
+fn flip_frame(clears: &[(u64, u64)], scope: (u64, u64), masks: u32, anchored: bool) -> File {
+    let mut f = busy_frame(clears, Blk::default(), None, masks);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let row = &mut f.chunks[at].payload;
+    row[12..16].copy_from_slice(&1u32.to_le_bytes());
+    row[56..64].copy_from_slice(&(scope.1 - scope.0).to_le_bytes());
+    if masks & 512 != 0 {
+        row[448..456].copy_from_slice(&scope.0.to_le_bytes());
+        row[456..464].copy_from_slice(&scope.1.to_le_bytes());
+    }
+    if !anchored {
+        // the same nine anchors all at one coordinate: fewer than four distinct, so the map does not qualify
+        let mut k = 0;
+        for c in f.chunks.iter_mut().filter(|c| c.ty == 38) {
+            k += 1;
+            let mut a = anchor(k, 1000, (1999, 2001));
+            a.labels = (0, 2 * a.id);
+            *c = clock(&a);
+        }
+    }
+    f
+}
+
+/// RSX busy through a blocked flip wait is RSX-bound evidence; a wait that mostly continues after the RSX finished
+/// is not (pacing when the RSX was short, as today); without a qualified clock map the evidence is unusable.
+#[test]
+fn blocked_flip_wait_needs_certain_rsx_overlap() {
+    // the anchors map raw x to PPU ~2x: a clear at raw 6000..36000 is busy at PPU ~12000..72000 (60% of 100000)
+    // phase A: blocked 20000..70000 while the RSX is busy throughout
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true));
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy flip wait: RSX busy time >= "), "{}", f.reason);
+    // the RSX finishes early (busy ~12000) and the wait runs on to the flip: PACING as today
+    let f = busy_read(flip_frame(&[(6000, 12_000)], (26_000, 100_000), 1023, true));
+    assert_eq!(f.verdict, Verdict::Pacing, "{}", f.reason);
+    // RSX busy 60% of the frame, the wait mostly after it ended (12000 of 48000 overlap): not RSX-bound
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (60_000, 108_000), 1023, true));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // overlap just below 3/4 of the scope: not RSX-bound; at 3/4 or more: RSX-bound
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (40_000, 84_000), 1023, true)); // 32000 of 44000: 73%
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (40_000, 80_000), 1023, true)); // 32000 of 40000: 80%
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // a blocked wait with short busy time: UNKNOWN
+    let f = busy_read(flip_frame(&[(6000, 6001), (36_000, 36_001)], (20_000, 70_000), 1023, true));
+    assert_ne!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    // no qualified clock map: the evidence is unusable, the frame UNKNOWN as today
+    let f = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, false));
+    assert_eq!(f.verdict, Verdict::Unknown, "{}", f.reason);
+    assert!(f.reason.contains("clock map unqualified"), "{}", f.reason);
+    // older masks: no scope block, no flip-wait rule (today's verdict)
+    let old = busy_read(flip_frame(&[(6000, 36_000)], (20_000, 70_000), 511, true));
+    assert_eq!(old.verdict, Verdict::Unknown, "{}", old.reason);
+    assert!(old.reason.starts_with("unresolved: FIFO wait >= 0"), "{}", old.reason);
+}
+
+/// The scope block must describe the row's scopes: inside the frame, in order, summing to the row's ticks.
+#[test]
+fn flip_wait_scope_block_is_checked() {
+    assert!(reader::read(&flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true).bytes()).is_ok());
+    let mut f = flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    f.chunks[at].payload[56..64].copy_from_slice(&40_000u64.to_le_bytes()); // ticks disagree with the scope
+    assert!(reader::read(&f.bytes()).is_err());
+    let f = flip_frame(&[(6000, 36_000)], (5_000, 70_000), 1023, true); // begins before the frame
+    assert!(reader::read(&f.bytes()).is_err());
+}
+
+/// The inner PPU bound of a raw timestamp comes from the nearest anchors and contains the anchor's own bracket.
+#[test]
+fn raw_to_ppu_bounds_from_anchors() {
+    let r = reader::read(&flip_frame(&[(6000, 36_000)], (20_000, 70_000), 1023, true).bytes()).expect("reads");
+    let inv = r.auto.as_ref().unwrap();
+    let MapState::Qualified(m) = ps3dk_prof::auto_rsx::qualify(inv) else { panic!("qualified") };
+    // anchor 1 is raw 1000 at PPU [1999, 2001]
+    assert_eq!(ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, 1000), Some((1999, 2001)));
+    let (lo, hi) = ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, 26_000).unwrap();
+    assert!(lo <= 52_000 && 52_000 <= hi && hi - lo < 100, "{lo}..{hi}");
+    assert_eq!(ps3dk_prof::auto_rsx::raw_to_ppu_bounds(&inv.clocks, &m, u64::MAX), None);
+    // certain overlap: a busy interval mapped inward, intersected with the scope
+    let o = ps3dk_prof::auto_rsx::certain_overlap(&inv.clocks, &m, &[(6000, 36_000)], &[(20_000, 70_000)]);
+    assert!((49_900..=50_000).contains(&o), "{o}");
+}
+
+/// 1023/11 CONFIG names its two report-pair reserves; the range reserve is the default or an option leaving 64 pairs
+/// for draws; other widths and masks are refused.
+#[test]
+fn config_names_the_reserves() {
+    let f = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    let r = reader::read(&f.bytes()).expect("reads");
+    let a = r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().clone();
+    assert_eq!(a.reserves, Some((32, 16)));
+    let set = |f: &mut File, ranges: u32| {
+        let at = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+        f.chunks[at].payload[164..168].copy_from_slice(&ranges.to_le_bytes());
+    };
+    let mut g = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    set(&mut g, 32);
+    let r = reader::read(&g.bytes()).expect("a range reserve of 32 reads");
+    assert_eq!(r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().reserves, Some((32, 32)));
+    let rep = analyze(&r);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_text(&mut out, &rep).unwrap();
+    assert!(String::from_utf8_lossy(&out).contains("report-pair reserves: 32 for whole-CALL brackets, 32 for AUTO ranges"));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_json(&mut out, &rep).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["config"]["range_pairs"], 32);
+    set(&mut g, 504 - 32 - 64 + 1);
+    assert!(reader::read(&g.bytes()).is_err(), "a range reserve leaving fewer than 64 pairs");
+    // the 176-byte CONFIG only with 1023/11, and 1023/11 only with it
+    let mut h = busy_frame(&[(6000, 36_000)], Blk::default(), None, 1023);
+    let at = h.chunks.iter().position(|c| c.ty == 34).unwrap();
+    h.chunks[at].payload.truncate(160);
+    assert!(reader::read(&h.bytes()).is_err());
+    let mut h = busy_frame(&[(6000, 36_000)], Blk::default(), None, 511);
+    let at = h.chunks.iter().position(|c| c.ty == 34).unwrap();
+    h.chunks[at].payload.extend_from_slice(&[0; 16]);
+    assert!(reader::read(&h.bytes()).is_err());
+    // older masks: no reserves
+    let r = reader::read(&busy_frame(&[(6000, 36_000)], Blk::default(), None, 511).bytes()).expect("reads");
+    assert_eq!(r.auto.as_ref().unwrap().config.as_ref().unwrap().attached().unwrap().reserves, None);
 }
 
 #[test]

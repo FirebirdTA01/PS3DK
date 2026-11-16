@@ -56,6 +56,11 @@
 extern "C" {
 #endif
 
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FP_HOOK)
+/* PS3_PROF_AUTO observation (libps3dkprof_auto.a): the fragment-program offset just bound on a context. */
+void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
+#endif
+
 /* ---- command-buffer primitives ------------------------------------ */
 /*
  * Build an RSX method-header word.  The NV40 command-buffer format
@@ -400,6 +405,10 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
         if (!w) return;
         *w++ = PS3TC_GCM_METHOD(NV40TCL_FP_ADDRESS, 1);
         *w++ = ((uint32_t)GCM_LOCATION_RSX + 1u) | (offset & 0x1fffffffu);
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FP_HOOK)
+        /* PS3_PROF_AUTO: the automatic profiler records this context's program offset with later operations */
+        ps3dk_prof__auto_fragment_program((struct _gcmCtxData *)ctx, offset);
+#endif
     }
 
     /* Reference cellGcmSetFragmentProgramOffset refreshes the VP output
