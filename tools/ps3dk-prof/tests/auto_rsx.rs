@@ -1909,6 +1909,31 @@ fn by_tag_on_the_runtime_capture() {
     assert!(String::from_utf8_lossy(&out).starts_with("no tags"));
 }
 
+/// The by-tag JSON carries the frame-scoped `outside_timed_range` and `ranges_refused`
+/// (shape identical to `auto --json`'s frame objects) and they agree with the
+/// per-frame values `auto --json` emits for the same (owner, frame).
+#[test]
+fn by_tag_frame_fields_match_auto_json() {
+    let p = fixture_path("tags");
+    let by: serde_json::Value = serde_json::from_slice(&cli(&["auto", "--by-tag", "--json", &p]).1).unwrap();
+    let auto: serde_json::Value = serde_json::from_slice(&cli(&["auto", "--json", &p]).1).unwrap();
+    let auto_frames = auto["frames"].as_array().expect("auto frames");
+    let by_frames = by["frames"].as_array().expect("by-tag frames");
+    assert!(!by_frames.is_empty());
+    for bf in by_frames {
+        let key = (bf["owner"].as_u64().unwrap(), bf["frame"].as_u64().unwrap());
+        let af = auto_frames.iter().find(|a| {
+            (a["owner"].as_u64().unwrap(), a["frame"].as_u64().unwrap()) == key
+        }).unwrap_or_else(|| panic!("auto --json missing frame {key:?}"));
+        // outside_timed_range: same object shape ({array,index,clear})
+        assert_eq!(bf["outside_timed_range"], af["outside_timed_range"],
+            "outside_timed_range parity for frame {key:?}: {bf}");
+        // ranges_refused: same value
+        assert_eq!(bf["ranges_refused"], af["ranges_refused"],
+            "ranges_refused parity for frame {key:?}");
+    }
+}
+
 /// `auto --ops` names tag and fp_offset (and RANGE depth) only for 1023/11 records; `auto --json` names the new
 /// exclusion reason and the refused ranges only for 1023/11 rows.
 #[test]
