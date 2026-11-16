@@ -563,7 +563,10 @@ static void t_sink_fail(int type, const char *name)
     WANT(D.retired, "retired even when output failed");
     WANT(prg_release(&D) == PRG_OK, "release after a sink failure");
     e = finish(name);
-    fprintf(e, "exit 1\n"); /* a failed sink never writes the TRAILER: INCOMPLETE */
+    /* Failing the first event leaves only metadata (1). Failing FINAL keeps
+     * a reported LOSS (4). Failing the trailing LOSS leaves accepted events
+     * without a trailer (0). Prefix acceptance never erases recorded loss. */
+    fprintf(e, "exit %d\n", type == 14 ? 1 : type == 16 ? 4 : 0);
     fclose(e);
 }
 

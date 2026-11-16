@@ -7,6 +7,8 @@
 //! synthetic input in its tests.
 
 pub mod app;
+pub mod auto;
+pub mod auto_ui;
 pub mod capture;
 pub mod capture_ctl;
 pub mod capture_ui;
@@ -26,6 +28,7 @@ pub mod rsx;
 pub mod rsx_ui;
 pub mod sha256;
 pub mod timeline;
+pub mod timeline_auto;
 pub mod timeline_foreign;
 pub mod timeline_spu;
 pub mod timeline_ui;

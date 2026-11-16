@@ -41,9 +41,17 @@ fn main() -> eframe::Result<()> {
         Page::Waits
     } else if args.iter().any(|a| a == "--page=fifo") {
         Page::Fifo
+    } else if args.iter().any(|a| a == "--page=auto" || a == "--page=automatic") {
+        Page::Automatic
     } else {
         Page::Overview
     };
+    let theme_light = args.iter().any(|a| a == "--light" || a == "--theme=light");
+    let theme_dark = args.iter().any(|a| a == "--dark" || a == "--theme=dark");
+    let screenshot = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--screenshot=").map(PathBuf::from))
+        .or_else(|| std::env::var_os("VIEWER_SCREENSHOT_TO").map(PathBuf::from));
     // The Frames page graph mode (for screenshots and bug reports).
     let graph = args.iter().find_map(|a| match a.strip_prefix("--graph=")? {
         "bars" => Some(ps3dk_prof_viewer::graphs::GraphMode::Bars),
@@ -52,7 +60,20 @@ fn main() -> eframe::Result<()> {
         "map" => Some(ps3dk_prof_viewer::graphs::GraphMode::VerdictMap),
         _ => None,
     });
-    let size = if args.iter().any(|a| a == "--min-size") {
+    let width_px = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--width-px=").and_then(|w| w.parse::<f32>().ok()));
+    let width = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--width=").and_then(|w| w.parse::<f32>().ok()))
+        .or_else(|| width_px.map(|px| px / 1.5));
+    let height = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--height=").and_then(|h| h.parse::<f32>().ok()))
+        .unwrap_or(780.0);
+    let size = if let Some(w) = width {
+        [w, height]
+    } else if args.iter().any(|a| a == "--min-size") {
         [860.0, 540.0]
     } else {
         [1240.0, 780.0]
@@ -61,12 +82,14 @@ fn main() -> eframe::Result<()> {
         .into_iter()
         .find(|a| !a.starts_with('-'))
         .map(PathBuf::from);
+    let min_w = size[0].min(860.0).min(500.0);
+    let min_h = size[1].min(540.0).min(300.0);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
             .with_app_id("ps3dk-prof-viewer")
             .with_inner_size(size)
-            .with_min_inner_size([860.0, 540.0]),
+            .with_min_inner_size([min_w, min_h]),
         ..Default::default()
     };
     eframe::run_native(
@@ -74,8 +97,14 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             ui::install(&cc.egui_ctx);
+            if theme_light {
+                cc.egui_ctx.set_theme(egui::ThemePreference::Light);
+            } else if theme_dark {
+                cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
+            }
             let mut app = App::new(open);
             app.page = page;
+            app.screenshot = screenshot;
             if let Some(g) = graph {
                 app.frames.mode = g;
             }
@@ -95,6 +124,7 @@ fn main() -> eframe::Result<()> {
             if let (Some((t0, dt)), Some(st)) = (window, app.timeline.as_mut()) {
                 st.view = ps3dk_prof_viewer::timeline::View { t0, dt };
                 st.view.clamp(&st.tl);
+                st.fit_all = false; // preserve an explicit window when mapped lanes extend the axis
             }
             Ok(Box::new(app))
         }),

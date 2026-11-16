@@ -192,6 +192,19 @@ impl Analysis {
     pub fn zone(&self, name: &str) -> Option<&ZoneStats> {
         self.zones.iter().find(|z| z.name == name)
     }
+    pub fn window_zones(&self, w: &crate::model::CaptureWindow) -> Vec<ZoneStats> {
+        let valid = |inc: u32| self.lane_valid(inc);
+        zone_stats_filtered(&self.capture, &valid, |s, i| {
+            let v = &self.spans[i];
+            match v.attribution.claim() {
+                Some((_, f)) => w.contains_frame(f),
+                None => match s.frame_context {
+                    FrameContext::Frame(f) => w.contains_frame(f),
+                    _ => false,
+                },
+            }
+        })
+    }
     pub fn work_for(&self, owner: u32, frame: u64, lane: u32) -> Option<&Metric<u128>> {
         self.work.iter().find(|w| w.owner == owner && w.frame == frame && w.lane == lane).map(|w| &w.value)
     }
@@ -512,7 +525,10 @@ fn analyze_mode(cap: Capture, prefix: bool) -> Result<Analysis, Malformed> {
     Ok(Analysis { capture: cap, verdict, lanes, spans, tokens, frames, work, zones, prefix: None })
 }
 
-fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
+pub fn zone_stats_filtered<F>(cap: &Capture, valid: &dyn Fn(u32) -> bool, mut span_filter: F) -> Vec<ZoneStats>
+where
+    F: FnMut(&Span, usize) -> bool,
+{
     #[derive(Default)]
     struct Z {
         instances: u64,
@@ -525,8 +541,8 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
         *keys.entry((d.name.clone(), d.logical_tag.clone())).or_default() += 1;
     }
     let mut zones: BTreeMap<(String, String), Z> = BTreeMap::new();
-    for s in &cap.spans {
-        if !valid(s.incarnation) {
+    for (i, s) in cap.spans.iter().enumerate() {
+        if !valid(s.incarnation) || !span_filter(s, i) {
             continue;
         }
         let d = &cap.descriptors[&s.desc];
@@ -598,6 +614,10 @@ fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
             }
         })
         .collect()
+}
+
+pub fn zone_stats(cap: &Capture, valid: &dyn Fn(u32) -> bool) -> Vec<ZoneStats> {
+    zone_stats_filtered(cap, valid, |_, _| true)
 }
 
 #[derive(Debug, Clone, PartialEq)]

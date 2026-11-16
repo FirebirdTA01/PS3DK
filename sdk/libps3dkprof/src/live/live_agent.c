@@ -11,7 +11,7 @@ live_test_hooks ps3dk_prof_test_live_hooks;
 
 /* Agent states. JOIN_FAILED is terminal: the handle is consumed. */
 enum { ST_IDLE, ST_RUNNING, ST_STOPPING, ST_STOPPED, ST_JOIN_FAILED };
-enum { C_NONE, C_HANDSHAKE, C_STREAM };
+enum { C_NONE, C_HANDSHAKE, C_STREAM, C_DRAIN };
 
 static int now_us(uint64_t *t)
 {
@@ -78,7 +78,10 @@ static void queue_frame(live_out *o, uint32_t type, const uint8_t *payload, uint
 static void drop(live_agent *a, live_conn *c, enum live_drop why)
 {
     /* Count first: a peer that sees the close may read the counters. */
-    atomic_fetch_add(&a->drops[why], 1);
+    /* END was already counted before the write half-close. Draining its
+     * remaining input does not end a second stream. */
+    if (c->phase != C_DRAIN)
+        atomic_fetch_add(&a->drops[why], 1);
     live_os_close(c->file_fd);
     live_os_close(c->fd);
     memset(c, 0, sizeof *c);
@@ -275,7 +278,7 @@ static void *agent_main(void *arg)
             break;
         }
         int stopping = atomic_load(&a->state) == ST_STOPPING;
-        if (stopping && (c->phase != C_STREAM || cancel_due(a, now))) {
+        if (stopping && ((c->phase != C_STREAM && c->phase != C_DRAIN) || cancel_due(a, now))) {
             if (c->phase != C_NONE)
                 drop(a, c, LIVE_DROP_CANCELLED);
             break;
@@ -286,6 +289,19 @@ static void *agent_main(void *arg)
         (void)live_os_poll(pf, c->phase == C_NONE ? 1 : 2, a->cfg.poll_us / 1000);
         if (now_us(&now) != 0)
             continue; /* handled at the top */
+        if (c->phase == C_DRAIN) {
+            /* Closing with unread PING bytes sends a TCP reset. END is
+             * terminal: send FIN, then consume input until the peer closes.
+             * One bounded read per poll keeps even a flooding peer subject
+             * to the fixed deadline; input never extends that deadline. */
+            if (now - c->last_progress >= a->cfg.send_timeout_us) {
+                drop(a, c, LIVE_DROP_STALLED);
+            } else {
+                int32_t n = live_os_recv(c->fd, c->out.bytes, sizeof c->out.bytes);
+                if (n < 0 && n != LIVE_OS_AGAIN)
+                    drop(a, c, LIVE_DROP_END);
+            }
+        }
         if (pf[0].revents & LIVE_OS_IN) {
             int fd = live_os_accept(a->listen_fd);
             if (fd >= 0) {
@@ -303,7 +319,7 @@ static void *agent_main(void *arg)
                 }
             }
         }
-        if (c->phase == C_NONE)
+        if (c->phase == C_NONE || c->phase == C_DRAIN)
             continue;
         int why = read_in(a, c, now);
         if (why >= 0) {
@@ -337,7 +353,15 @@ static void *agent_main(void *arg)
             if (c->out.done < c->out.len)
                 break;
             if (c->end_queued) {
-                drop(a, c, LIVE_DROP_END);
+                /* Preserve drop_end's meaning: END was fully sent. Count
+                 * before the FIN the peer observes, as the old close did. */
+                atomic_fetch_add(&a->drops[LIVE_DROP_END], 1);
+                c->phase = C_DRAIN;
+                c->last_progress = now;
+                live_os_close(c->file_fd);
+                c->file_fd = -1;
+                if (live_os_shutdown_write(c->fd) != 0)
+                    drop(a, c, LIVE_DROP_PEER_CLOSED);
                 break;
             }
             if (c->pongs_pending) {

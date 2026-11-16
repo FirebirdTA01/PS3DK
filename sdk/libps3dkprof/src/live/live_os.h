@@ -35,6 +35,7 @@
 #define live_os_recv ps3dk_prof__live_os_recv
 #define live_os_poll ps3dk_prof__live_os_poll
 #define live_os_close ps3dk_prof__live_os_close
+#define live_os_shutdown_write ps3dk_prof__live_os_shutdown_write
 #define live_os_file_open ps3dk_prof__live_os_file_open
 #define live_os_file_read_at ps3dk_prof__live_os_file_read_at
 #define live_os_capture_supported ps3dk_prof__live_os_capture_supported
@@ -91,6 +92,11 @@ int live_os_poll(live_os_pollfd *fds, uint32_t n, uint32_t timeout_ms);
 
 /* Closes a descriptor; a negative fd is ignored. */
 void live_os_close(int fd);
+
+/* Send FIN after all accepted output, keeping the receive side open to
+ * drain in-flight input. 0 or LIVE_OS_ERROR. EINTR is retried at most
+ * LIVE_OS_INTR_RETRIES times, then fails; this never waits for the peer. */
+int live_os_shutdown_write(int fd);
 
 /* Opens a file read-only: its descriptor, or LIVE_OS_ERROR. */
 int live_os_file_open(const char *path);

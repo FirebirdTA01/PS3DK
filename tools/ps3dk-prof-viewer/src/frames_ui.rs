@@ -229,7 +229,8 @@ pub fn draw(
                     swatch(h, pal.danger, "", &format!("over the {} budget", budget.label()));
                     let (r, _) = h.allocate_exact_size(Vec2::new(18.0, 12.0), Sense::hover());
                     h.painter().line_segment([r.left_center(), r.right_center()], Stroke::new(1.5_f32, pal.danger));
-                    h.label(format!("budget line: freq/fps = {f}/{fps} ticks ({})", budget.label()));
+                    h.label(format!("budget line: {:.3} ms ({})", 1000.0 / fps as f64, budget.label()))
+                        .on_hover_text(format!("freq/fps = {f}/{fps} ticks"));
                     h.add_space(ui::SPACE_MD);
                 }
                 mark(h, Glyph::Zero, "measured 0 (solid band)");
@@ -344,15 +345,18 @@ pub fn draw(
             "{} measured; {} unknown and {} refused excluded",
             sm.measured, sm.unknown, sm.refused
         ));
-        let some = |v: Option<u64>| v.map_or("none".to_string(), |d| tb.ticks(u128::from(d)));
-        p.label(format!("min {} | max {}", some(sm.min), some(sm.max)));
-        p.label(format!(
-            "p50 {} | p90 {}",
-            metric_text(&sm.p50, |d| tb.ticks(u128::from(*d))),
-            metric_text(&sm.p90, |d| tb.ticks(u128::from(*d)))
-        ));
+        let minmax = |exact| {
+            let some = |v: Option<u64>| v.map_or("none".to_string(), |d| if exact { tb.ticks(d.into()) } else { tb.short_ticks(d.into()) });
+            format!("min {} | max {}", some(sm.min), some(sm.max))
+        };
+        p.label(minmax(false)).on_hover_text(minmax(true));
+        let percentiles = |exact| {
+            let show = |d: &u64| if exact { tb.ticks((*d).into()) } else { tb.short_ticks((*d).into()) };
+            format!("p50 {} | p90 {}", metric_text(&sm.p50, show), metric_text(&sm.p90, show))
+        };
+        p.label(percentiles(false)).on_hover_text(percentiles(true));
         if let Some(m) = sm.mean {
-            p.label(format!("mean of {} measured frames: {}", sm.measured, tb.ticks_f(m)));
+            p.label(format!("mean of {} measured frames: {}", sm.measured, tb.short(m))).on_hover_text(tb.ticks_f(m));
         }
         if let (Some(over), Some(_)) = (sm.over, budget.fps()) {
             p.label(format!("over the {} budget: {over} of {} measured", budget.label(), sm.measured));
@@ -371,7 +375,11 @@ pub fn draw(
             return;
         };
         let Some((_, s)) = o.slot_of(k) else { return };
-        p.add(egui::Label::new(format!("Frame {k}: {}", slot_text(&s.kind, tb))).wrap());
+        let short = match &s.kind {
+            SlotKind::Measured(d) => format!("MEASURED {}", tb.short_ticks((*d).into())),
+            _ => slot_text(&s.kind, tb),
+        };
+        p.add(egui::Label::new(format!("Frame {k}: {short}")).wrap()).on_hover_text(slot_text(&s.kind, tb));
         if let (SlotKind::Measured(d), Some(fps), Some(f)) = (&s.kind, budget.fps(), ix.freq_hz) {
             if crate::frames::over_budget(*d, fps, f) {
                 ui::field_message(p, ui::Tone::Danger, &format!("over the {} budget", budget.label()));
@@ -610,7 +618,7 @@ fn draw_table(p: &mut egui::Ui, a: &Analysis, t: &LaneTable, tb: TimeBase) {
         }
         Table::Measured { w, rows } => {
             p.add(egui::Label::new(ps3dk_prof::report::W_NOTE).wrap());
-            p.label(format!("W (exclusive, this lane): {}", tb.ticks(*w)));
+            p.label(format!("W (exclusive, this lane): {}", tb.short_ticks(*w))).on_hover_text(tb.ticks(*w));
             egui::Grid::new(("hot", t.lane)).num_columns(3).striped(true).spacing([ui::SPACE_LG, ui::SPACE_XS]).show(
                 p,
                 |g| {
@@ -621,7 +629,7 @@ fn draw_table(p: &mut egui::Ui, a: &Analysis, t: &LaneTable, tb: TimeBase) {
                     for r in rows {
                         g.label(&r.label);
                         g.label(r.spans.to_string());
-                        g.label(tb.ticks(r.exclusive));
+                        g.label(tb.short_ticks(r.exclusive)).on_hover_text(tb.ticks(r.exclusive));
                         g.end_row();
                     }
                 },
@@ -758,7 +766,8 @@ fn mode_legend(
         if let (Some(fps), Some(f)) = (budget.fps(), freq_hz) {
             let (r, _) = h.allocate_exact_size(Vec2::new(18.0, 12.0), Sense::hover());
             h.painter().line_segment([r.left_center(), r.right_center()], Stroke::new(1.5_f32, pal.danger));
-            h.label(format!("budget: freq/fps = {f}/{fps} ticks ({})", budget.label()));
+            h.label(format!("budget: {:.3} ms ({})", 1000.0 / fps as f64, budget.label()))
+                .on_hover_text(format!("freq/fps = {f}/{fps} ticks"));
         }
     };
     match mode {
@@ -936,19 +945,20 @@ fn draw_lines(p: &mut egui::Ui, c: &ModeCtx, viewport: Rect, pal: &ui::Palette) 
         let yb = y(t);
         painter.line_segment([Pos2::new(rect.left(), yb), Pos2::new(rect.right(), yb)], Stroke::new(1.5_f32, pal.danger));
     }
-    painter.text(
+    let scale_rect = painter.text(
         Pos2::new(rect.left() + viewport.min.x + 4.0, rect.top() + 2.0),
         Align2::LEFT_TOP,
         scale_text(c),
         FontId::proportional(10.0),
         pal.text_muted,
     );
+    p.interact(scale_rect, p.id().with("lines-scale"), Sense::hover()).on_hover_text(c.tb.ticks_f(c.top));
     ModeOut { rect, clicked: resp.clicked(), at: resp.interact_pointer_pos().map(|p| p.x), painted, work, budget_line }
 }
 
 /// The value-axis caption of the lines and distribution modes.
 fn scale_text(c: &ModeCtx) -> String {
-    graphs::scale_caption(c.full_scale, &c.tb.ticks_f(c.top), c.fallback)
+    graphs::scale_caption(c.full_scale, &c.tb.short(c.top), c.fallback)
 }
 
 /// The population line of one lane's distribution: what its rows cover and what they omit.
@@ -1090,7 +1100,8 @@ fn draw_distribution(p: &mut egui::Ui, c: &ModeCtx, tb: TimeBase, pal: &ui::Pale
     }
     painter.line_segment([Pos2::new(left, base), Pos2::new(right, base)], Stroke::new(1.0_f32, pal.border_strong));
     painter.text(Pos2::new(left, base + 2.0), Align2::LEFT_TOP, "0", small(9.0), pal.text_muted);
-    painter.text(Pos2::new(right, base + 2.0), Align2::RIGHT_TOP, scale_text(c), small(9.0), pal.text_muted);
+    let scale_rect = painter.text(Pos2::new(right, base + 2.0), Align2::RIGHT_TOP, scale_text(c), small(9.0), pal.text_muted);
+    p.interact(scale_rect, p.id().with("distribution-scale"), Sense::hover()).on_hover_text(c.tb.ticks_f(c.top));
     if above > 0 {
         let msg = format!("{above} more beyond the axis >");
         painter.text(Pos2::new(right, rect.top() + 2.0), Align2::RIGHT_TOP, msg, small(10.0), pal.text);
@@ -1151,18 +1162,18 @@ fn draw_distribution(p: &mut egui::Ui, c: &ModeCtx, tb: TimeBase, pal: &ui::Pale
             egui::Label::new(format!(
                 "bins: {} of width {} (exact counts; total {})",
                 hs.counts.len(),
-                tb.ticks(hs.width),
+                tb.short_ticks(hs.width),
                 hs.total()
             ))
             .wrap(),
-        );
+        ).on_hover_text(tb.ticks(hs.width));
     }
-    let pct: Vec<String> = graphs::PERCENTILES
-        .iter()
-        .map(|&q| format!("p{q} {}", metric_text(&c.o.percentile_of(q), |d| tb.ticks(u128::from(*d)))))
-        .collect();
-    p.add(egui::Label::new(pct.join(" | ")).wrap());
-    p.label(format!("max {}", sm.max.map_or("none".to_string(), |d| tb.ticks(u128::from(d)))));
+    let pct = |exact| graphs::PERCENTILES.iter().map(|&q| {
+        format!("p{q} {}", metric_text(&c.o.percentile_of(q), |d| if exact { tb.ticks((*d).into()) } else { tb.short_ticks((*d).into()) }))
+    }).collect::<Vec<_>>().join(" | ");
+    p.add(egui::Label::new(pct(false)).wrap()).on_hover_text(pct(true));
+    p.label(format!("max {}", sm.max.map_or("none".to_string(), |d| tb.short_ticks(d.into()))))
+        .on_hover_text(sm.max.map_or("none".to_string(), |d| tb.ticks(d.into())));
     for (j, l) in c.lanes.iter().enumerate() {
         p.add_space(ui::SPACE_XS);
         p.label(egui::RichText::new(&l.label).strong());

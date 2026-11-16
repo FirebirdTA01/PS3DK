@@ -1,0 +1,10 @@
+/* Zcull/KIL probe -- heavy-nokil fragment: 64-iteration dependent float4 multiply-add (fma) seeded from TEXCOORD0, result feeds COLOR so the loop cannot be folded. Known instruction count. */
+void main(
+    float2   in_uv       : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    float4 p = float4(in_uv, 0.5, 1.0);        /* seed from the input per-fragment value */
+    for (int i = 0; i < 64; ++i)
+        p = p * float4(0.75, 0.75, 0.75, 0.75) + float4(0.10, 0.05, 0.15, 0.10);
+    out_color = p;
+}
