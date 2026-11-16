@@ -114,10 +114,20 @@ for mode in ["normal", "exit", "unregistered", "open", "abandoned", "immediate",
             if (report.returncode != 0 or "1 censored of 1" not in text
                     or "duration unknown (censored)" not in text):
                 errors.append("open worker span incorrectly accepted")
-        elif (report.returncode != 0 or "verdict: COMPLETE (ended without a trailer" not in text
-              or "ending: NO-TRAILER" not in text or "TRAILER is missing" in text):
+        else:
             # a valid capture that ends without a trailer reads COMPLETE, exit 0, ending NO-TRAILER
-            errors.append("abrupt exit not read as a trailerless complete capture")
+            trailerless = (report.returncode == 0 and "verdict: COMPLETE (ended without a trailer" in text
+                           and "ending: NO-TRAILER" in text and "TRAILER is missing" not in text)
+            # immediate (_exit) runs no hook: the init thread wrote HEADER and CLOCKS, so the file is never
+            # header-only and never refused; with no drain after the zones it reads INCOMPLETE no-events, exit 1.
+            # quick runs the at_quick_exit drain: always trailerless COMPLETE.
+            no_events = (mode == "immediate" and report.returncode == 1
+                         and "verdict: INCOMPLETE: no events recorded (ended before the first drain)" in text)
+            if "clock: PPU timebase" not in text:
+                errors.append("capture lacks HEADER/CLOCKS")
+            if not (trailerless or no_events):
+                errors.append("abrupt exit not read as a trailerless complete capture"
+                              + (" or a no-events capture" if mode == "immediate" else ""))
     results.append({"case": mode, "pass": not errors, "errors": errors})
     print(("PASS " if not errors else "FAIL ") + mode + (": " + "; ".join(errors) if errors else ""))
 
