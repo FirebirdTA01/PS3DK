@@ -302,7 +302,7 @@ for rel in sources:
             # the visit outside a capture window acknowledges the stop on its own path: ignored there too
             gate='        if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);\n'
             assert code.count(gate)==1
-            code=code.replace(gate,'')
+            code=code.replace(gate,'        if(0) p_observe_stop(g_prof);\n')   # the line stays: an else may follow it
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
     run('compile-'+source.stem,[cc,*flags,'-c',source,'-o',obj]);objects.append(obj)
 run('archive-members',['ar','rcsD',out/'members.a',*objects])
