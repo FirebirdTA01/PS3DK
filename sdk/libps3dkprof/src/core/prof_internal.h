@@ -60,11 +60,13 @@ typedef struct p_winrec { uint32_t type, desc; uint8_t b[32]; } p_winrec;
  * Owner: the thread that marks frames (owner_slot1 + owner_inc, its incarnation), never merely the opener. A window
  * begun before any thread marked a frame (or after the frame thread retired) has owner 0 and is adopted by the first
  * thread that marks one. frame_slot1 + frame_inc name the established frame thread (the last one that marked a frame,
- * cleared when it retires). opener_inc is the opener's incarnation (0 unregistered): the opener may also end it.
+ * cleared when it retires). opener_token is the opener's window token (tls win_token, never 0 once taken, never reused,
+ * registered or not): the opener may also end the window, before or after adoption.
  * reserved: queue records still owed by the current window (its BEGIN and END), taken at admission, so a window
  * that is admitted can always record both and one that cannot is refused (EFULL, queue_full). */
 typedef struct p_window {
-    uint32_t state, id, desc, kind, n, owner_slot1, owner_inc, opener_inc, frame_slot1, frame_inc, seal;
+    uint32_t state, id, desc, kind, n, owner_slot1, owner_inc, frame_slot1, frame_inc, seal;
+    uint64_t opener_token;
     uint64_t first, prev_last, owner_last;   /* owner_last: the retired owner's frame in progress */
     uint32_t have_prev, opened, refused, queue_full, dropped, reserved;
     const char *name;
@@ -331,6 +333,7 @@ typedef struct tls_state {
     uint32_t generation, incarnation;
     uint8_t acked, retired, in_drain, in_gpu; /* in_gpu: inside a GPU domain API call (reentry is EBUSY) */
     uint8_t qx;                 /* inside the quick_exit drain: bounded lock waits, core records only */
+    uint64_t win_token;         /* this thread's capture-window opener identity: 0 until its first BEGIN */
     uint32_t depth;
 #ifdef PS3DK_PROF_WITH_WAITS
     uint32_t wait_busy;

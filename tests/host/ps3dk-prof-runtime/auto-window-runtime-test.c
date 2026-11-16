@@ -20,9 +20,14 @@
  *   counts its draws as unrepresented, never zero.
  * TEST_WINDOW_MODE 6 (windowhandoff): WHOLE_RUN opened on a REGISTERED thread that never marks frames; a render
  *   thread marking five frames owns the window: its state shows the frames and its END succeeds.
- * TEST_WINDOW_MODE 7 (windowhandoffu): the same opened on an unregistered thread (immediate windows never register
- *   their opener); the render thread retires without ending it, and the opener's END closes it at the render
- *   thread's last frame.
+ * TEST_WINDOW_MODE 7 (windowhandoffu): WHOLE_RUN opened on an unregistered thread (immediate windows never register
+ *   their opener); a render thread marks five frames and owns it.  While that owner lives, an unrelated unregistered
+ *   thread's END and the registered main thread's END are refused (EPERM) and the opener's END succeeds; the opener
+ *   then begins a second window, the render thread retires without ending it, and the opener's END closes it at the
+ *   render thread's last frame.
+ * TEST_WINDOW_MODE 9 (windowcallafter): a timed segment built inside WHOLE_RUN, the window ended, then the segment
+ *   CALLed before the next frame boundary: nothing is emitted for it and it counts as unrepresented, never as a timed
+ *   record in the closed window; a CALL of the same segment inside a later window counts as unrepresented too.
  * TEST_WINDOW_MODE 8 (windowqueue): with the drainer held, eight windows fill the record queue; the ninth BEGIN is
  *   refused EFULL (counted, nothing opens); after the drain catches up a window opens and closes normally, so the
  *   capture never holds a WINDOW_END without its BEGIN. */
@@ -88,7 +93,7 @@ static void complete(void)
     st32(&labels[247],frontier);
 }
 
-#if TEST_WINDOW_MODE==5
+#if TEST_WINDOW_MODE==5 || TEST_WINDOW_MODE==9
 void ps3dk_prof__auto_test_segment_history(const void *,uint32_t[4]);
 void ps3dk_prof__auto_test_unrepresented(uint32_t[3]);
 void ps3dk_prof__auto_test_call_brackets(uint64_t[2]);
@@ -96,8 +101,8 @@ void ps3dk_prof__auto_test_call_brackets(uint64_t[2]);
 #if TEST_WINDOW_MODE==6 || TEST_WINDOW_MODE==7
 /* the render thread: five frame marks; in mode 6 it ends the window, in mode 7 it retires leaving it open */
 static uint64_t render_frames,render_first;
-static int render_end=1;
-static void *render_thread(void *unused)
+__attribute__((unused)) static int render_end=1;
+__attribute__((unused)) static void *render_thread(void *unused)
 {
     (void)unused;
     for(unsigned i=0;i<5;i++) ps3dk_prof_frame();
@@ -110,17 +115,38 @@ static void *render_thread(void *unused)
     return NULL;
 }
 #if TEST_WINDOW_MODE==7
-/* an unregistered opener: begins WHOLE_RUN, then ends it once the render thread has gone */
-static int opened,go,opener_end=1;
+/* ordered steps across the threads: each waits for its step, acts, then publishes the next */
+static int step7;
+static void wait_step(int n) {while(__atomic_load_n(&step7,__ATOMIC_ACQUIRE)<n) {struct timespec ts={0,100000};nanosleep(&ts,NULL);}}
+static void go_step(int n) {__atomic_store_n(&step7,n,__ATOMIC_RELEASE);}
+static int stranger_end=1,opener_end1=1,opener_end2=1,reopened=1;
+/* an unregistered opener: begins WHOLE_RUN, ends it while its owner lives, begins another, ends it after the owner
+ * retired */
 static void *opener_thread(void *unused)
 {
     (void)unused;
     assert(g_tls.slot1==0 && PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && g_tls.slot1==0);
-    __atomic_store_n(&opened,1,__ATOMIC_RELEASE);
-    while(!__atomic_load_n(&go,__ATOMIC_ACQUIRE)) {struct timespec ts={0,100000};nanosleep(&ts,NULL);}
-    opener_end=PS3DK_PROF_CAPTURE_END();
+    go_step(1);
+    wait_step(4); opener_end1=PS3DK_PROF_CAPTURE_END(); go_step(5);
+    wait_step(6); reopened=PS3DK_PROF_CAPTURE_WHOLE_RUN(); go_step(7);
+    wait_step(8); opener_end2=PS3DK_PROF_CAPTURE_END();
+    assert(g_tls.slot1==0);
     return NULL;
 }
+/* the render thread: five frames (it adopts the window), one more after the first window closed, then it retires */
+static void *render7(void *unused)
+{
+    (void)unused;
+    for(unsigned i=0;i<5;i++) ps3dk_prof_frame();
+    assert(state()==2);
+    render_frames=st.frames;render_first=st.first_frame;
+    go_step(2);
+    wait_step(5); ps3dk_prof_frame(); go_step(6);
+    wait_step(7); ps3dk_prof_thread_end();
+    return NULL;
+}
+/* an unrelated unregistered thread */
+static void *stranger(void *unused) {(void)unused;assert(g_tls.slot1==0);stranger_end=PS3DK_PROF_CAPTURE_END();return NULL;}
 #endif
 #endif
 
@@ -230,21 +256,69 @@ int main(void) {
         assert(render_end==PS3DK_PROF_OK && state()==0);
         assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EINVAL);
 #else
-        pthread_t o;
+        pthread_t o,x;
         assert(pthread_create(&o,NULL,opener_thread,NULL)==0);
-        while(!__atomic_load_n(&opened,__ATOMIC_ACQUIRE)) {struct timespec ts={0,100000};nanosleep(&ts,NULL);}
+        wait_step(1);
         assert(state()==2);
-        assert(pthread_create(&t,NULL,render_thread,NULL)==0 && pthread_join(t,NULL)==0);
-        assert(render_frames==5 && render_first==0);
-        assert(render_end==1 && state()==2);   /* the render thread retired without ending it */
-        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EPERM);   /* neither its frame thread nor its opener */
-        __atomic_store_n(&go,1,__ATOMIC_RELEASE);
+        assert(pthread_create(&t,NULL,render7,NULL)==0);
+        wait_step(2);
+        assert(render_frames==5 && render_first==0 && state()==2);   /* the render thread owns it now */
+        assert(pthread_create(&x,NULL,stranger,NULL)==0 && pthread_join(x,NULL)==0);
+        assert(stranger_end==PS3DK_PROF_EPERM);   /* an unrelated unregistered thread */
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EPERM);   /* the registered main thread: neither owner nor opener */
+        go_step(4);
+        wait_step(5);
+        assert(opener_end1==PS3DK_PROF_OK && state()==0);   /* the opener, while the owner lives */
+        wait_step(7);
+        assert(reopened==PS3DK_PROF_OK && state()==2);
+        assert(pthread_join(t,NULL)==0);   /* the render thread retired without ending the second window */
+        assert(state()==2);
+        go_step(8);
         assert(pthread_join(o,NULL)==0);
-        assert(opener_end==PS3DK_PROF_OK && state()==0);   /* the opener ended it */
+        assert(opener_end2==PS3DK_PROF_OK && state()==0);   /* the opener, after the owner retired */
 #endif
     }
     complete();
     puts("AUTO window frame-thread handoff PASS");
+#elif TEST_WINDOW_MODE==9
+    {
+        uint32_t sw[128],u[3],u0;
+        uint32_t *before;
+        uint32_t ticket;
+        gpp_ctx key={sw,sw+128,sw,NULL};
+        ps3tc_auto_call op={3,5,0,3,0,0,0,0xf3u};
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 0, inside the window */
+        ps3dk_prof__auto_segment_open((void *)&key);
+        ticket=ps3dk_prof__auto_begin((void *)&key,&op,0);
+        assert(ticket);   /* a timed segment draw, built inside the window */
+        key.current+=6;
+        ps3dk_prof__auto_end((void *)&key,ticket);
+        ps3dk_prof__auto_segment_close((void *)&key);
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK && state()==0);   /* closed now, frame 0's row still open */
+        ps3dk_prof__auto_test_unrepresented(u);u0=u[0];
+        before=(uint32_t *)(void *)context.current;
+        ps3dk_prof__auto_segment_call_begin((void *)&context,(void *)&key);
+        context.current+=5;   /* the CALL and its retirement label */
+        ps3dk_prof__auto_segment_call((void *)&context,(void *)&key);
+        assert((uint32_t *)(void *)context.current-before==5);   /* no bracket report and no observer words */
+        ps3dk_prof__auto_test_unrepresented(u);
+        assert(u[0]>u0);   /* executed without a record: unrepresented, not a timed draw */
+        ps3dk_prof_frame(); /* frame 1 */
+        assert(PS3DK_PROF_CAPTURE_BEGIN("again")==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 2: the new window */
+        assert(state()==2);
+        ps3dk_prof__auto_test_unrepresented(u);u0=u[0];
+        ps3dk_prof__auto_segment_call_begin((void *)&context,(void *)&key);
+        context.current+=5;
+        ps3dk_prof__auto_segment_call((void *)&context,(void *)&key);
+        ps3dk_prof__auto_test_unrepresented(u);
+        assert(u[0]>u0 && u[2]);   /* a re-CALL in a new window never qualifies: unrepresented, replay latched */
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 3 */
+    }
+    complete();
+    puts("AUTO CALL outside a window PASS");
 #elif TEST_WINDOW_MODE==8
     {
         uint32_t expected=0;

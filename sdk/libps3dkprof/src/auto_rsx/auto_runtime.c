@@ -778,6 +778,21 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring,struct _gcmCtxData *
         if(s->reports) ST_REL(&a->segment_replay,1u);
         (void)auto_frames_unrepresented(&a->coverage,s->visits);return;
     }
+    if(!p_window_gate(g_prof)) {
+        /* A CALL while no capture window is open (an immediate window ended earlier in this frame): it gets no
+         * in-window execution token and emits nothing.  Its build is accounted as executed without a record: a
+         * bracket begun for it is quarantined, its draws count as unrepresented, and the build is dropped, which
+         * records it as a dropped build and quarantines every report pair its embedded timestamp writes target,
+         * so neither this CALL nor a later replay can make stale data qualify.  The build counts as called, so a
+         * later CALL of it is a replay: its draws are unrepresented and, when it holds timestamp writes, the capture's
+         * replay latch is set. */
+        if(s->bracket) {auto_queue_quarantine_pair(&a->operations,s->bracket_pair);ST_REL(&a->segment_quarantine,1u);}
+        s->bracket=0;
+        s->called=1;
+        lost=s->count;history_add(&lost,s->refused);
+        (void)auto_frames_unrepresented(&a->coverage,lost ? lost:1u);
+        segment_drop(a,s);return;
+    }
     s->called=1;
     bracket=s->bracket;s->bracket=0;
     if(!s->count && !bracket) {(void)auto_frames_unrepresented(&a->coverage,s->refused);return;}

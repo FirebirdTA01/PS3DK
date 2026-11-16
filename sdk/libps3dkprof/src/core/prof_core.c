@@ -1014,6 +1014,8 @@ static uint64_t win_current(prof *p)
 {
     return p->win.owner_slot1 ? slot_current(p, p->win.owner_slot1) : p->win.owner_last;
 }
+/* Opener identities (tls win_token): taken at a thread's first BEGIN, registered or not; 64-bit, never reused. */
+static uint64_t win_token_next;
 /* Under window_lock: queue room for a new window's BEGIN and END beside what is queued and still owed. */
 static int win_room(prof *p)
 {
@@ -1065,8 +1067,6 @@ void p_window_retire(prof *p, uint32_t inc)
         p->win.owner_last = slot_current(p, p->win.owner_slot1);
         p->win.owner_slot1 = p->win.owner_inc = 0;   /* the next thread that marks a frame adopts the window */
     }
-    if (p->win.opener_inc == inc)
-        p->win.opener_inc = 0;
     win_unlock(p);
 }
 
@@ -1127,7 +1127,9 @@ int ps3dk_prof_capture_begin(ps3dk_prof_desc *name, uint32_t kind, uint32_t fram
             p->win.owner_slot1 = owner;
             p->win.owner_inc = owner_inc;
             p->win.owner_last = now;
-            p->win.opener_inc = t->incarnation;
+            if (!t->win_token)
+                t->win_token = __atomic_add_fetch(&win_token_next, 1u, __ATOMIC_RELAXED);   /* never 0, never reused */
+            p->win.opener_token = t->win_token;
             p->win.reserved = 2u;
             p->win.name = name ? name->name : "whole run";
             if (immediate)
@@ -1151,8 +1153,8 @@ int ps3dk_prof_capture_end(void)
     if (p->win.state == 0 || p->win.state == 3) {
         rc = PS3DK_PROF_EINVAL;
     } else if (!(p->win.owner_slot1 && p->win.owner_slot1 == t->slot1 && p->win.owner_inc == t->incarnation) &&
-               !(p->win.opener_inc == t->incarnation && (p->win.opener_inc || !p->win.owner_slot1))) {
-        rc = PS3DK_PROF_EPERM;   /* neither the frame thread that owns it nor its opener */
+               !(t->win_token && t->win_token == p->win.opener_token)) {
+        rc = PS3DK_PROF_EPERM;   /* neither the frame thread that owns it nor the thread that began it */
     } else if (p->win.state == 1) {
         p->win.state = 0;   /* not yet open: cancelled, nothing recorded */
         p->win.reserved = 0;

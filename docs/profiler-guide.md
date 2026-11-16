@@ -370,7 +370,7 @@ exits with a window open, the window keeps that thread's last frame until anothe
 wait in a small queue for the drainer; when the drainer is so far behind that a new window's begin and end records
 would not fit, BEGIN returns `PS3DK_PROF_EFULL`, nothing opens, and `ps3dk_prof_capture_state` counts it in
 `queue_full`. A CALL segment built while no window was open is never taken as a build without draws: its draws are
-counted as untimed, so a CALL of it inside a window is timed as a whole CALL or reported with unrepresented draws.
+counted as untimed, so a CALL of it inside a window is timed as a whole CALL or reported with unrepresented draws. A CALL made after its window closed (a `PS3DK_PROF_SECTION` or `PS3DK_PROF_CAPTURE_WHOLE_RUN()` ended earlier in the frame) records nothing and counts its draws as unrepresented; calling that build again later is a replay and is never timed.
 At shutdown an open window
 is closed with reason SHUTDOWN, or SEAL when the capture ends through `PS3DK_PROF_AUTO_SEAL()` or
 `ps3dk_prof_capture_seal()`. The calls are inert when profiling is off; they are live in a `PS3DK_PROF` build and in a
