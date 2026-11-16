@@ -242,11 +242,13 @@ jobs:
         run: |
           python3 tests/host/ps3dk-prof-runtime/quick-exit-test.py "$RUNNER_TEMP/qx-plain" --reader tools/target/debug/ps3dk-prof
           python3 tests/host/ps3dk-prof-runtime/quick-exit-test.py "$RUNNER_TEMP/qx-address" --reader tools/target/debug/ps3dk-prof --sanitize
-          set +e
-          python3 tests/host/ps3dk-prof-runtime/quick-exit-test.py "$RUNNER_TEMP/qx-mutant" --reader tools/target/debug/ps3dk-prof --mutant no-bound
-          rc=$?
-          set -e
-          test "$rc" -eq 1
+          for mutant in no-bound blocking-lock callback-drain; do
+            set +e
+            python3 tests/host/ps3dk-prof-runtime/quick-exit-test.py "$RUNNER_TEMP/qx-mutant-$mutant" --reader tools/target/debug/ps3dk-prof --mutant "$mutant"
+            rc=$?
+            set -e
+            test "$rc" -eq 1
+          done
 
       # Named counters: end-to-end values against the reader, unchanged zone records, and the counter-mutex lock
       # failures (each fails the capture closed, no FINAL after a failed freeze, nothing emitted twice), plain and

@@ -8,9 +8,16 @@
  *             bound and returns at once; the witness sees a short elapsed time.
  *   callback  APP mode with a callback sink whose write calls quick_exit inside ps3dk_prof_drain: the handler skips
  *             (the caller is inside the drainer); the witness's shutdown is EBUSY; nothing deadlocks.
- *   after     shutdown first, then quick_exit: the handler does nothing; the file keeps its size. */
+ *   after     shutdown first, then quick_exit: the handler does nothing; the file keeps its size.
+ *   cbmutex   APP mode with a callback sink whose write takes an application mutex; the application calls quick_exit
+ *             while holding it: the handler never calls the sink (callback sinks are not drained from quick_exit),
+ *             so the exit is prompt and the callback count stays 0.
+ *   tmutex    THREAD mode file sink; another thread holds the profiler's thread_mutex for good: the handler's
+ *             bounded try-lock gives up within its bound (lock_failed set), and the exit is prompt. */
 #include <ps3dk/prof.h>
+#include "prof_internal.h"
 #include "prof_test_hooks.h"
+#include <pthread.h>
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -32,6 +39,19 @@ static long file_size(void)
     return path[0] && stat(path, &st) == 0 ? (long)st.st_size : -1;
 }
 
+static pthread_mutex_t app_mu = PTHREAD_MUTEX_INITIALIZER;
+static atomic_int cb_calls, held;
+
+static void *hold_thread_mutex(void *unused)
+{
+    (void)unused;
+    pal_mutex_lock(&g_prof->thread_mutex);   /* held until the process exits */
+    atomic_store(&held, 1);
+    for (;;)
+        sleep(1);
+    return NULL;
+}
+
 static void witness(void)
 {
     struct timespec t1;
@@ -39,9 +59,12 @@ static void witness(void)
     int rc;
     clock_gettime(CLOCK_MONOTONIC, &t1);
     ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
-    rc = strcmp(mode, "midpass") == 0 ? 0 : ps3dk_prof_shutdown();   /* midpass: the drain thread is parked */
-    printf("witness mode=%s elapsed_ms=%ld shutdown=%d size_same=%d\n", mode, ms, rc,
-           size_before >= 0 && file_size() == size_before);
+    /* midpass: the drain thread is parked; cbmutex: a shutdown would call the sink, whose mutex this thread holds;
+     * tmutex: thread_mutex is held by another thread for good */
+    rc = !strcmp(mode, "midpass") || !strcmp(mode, "cbmutex") || !strcmp(mode, "tmutex") ? 0 : ps3dk_prof_shutdown();
+    printf("witness mode=%s elapsed_ms=%ld shutdown=%d size_same=%d cb_calls=%d lock_failed=%d\n", mode, ms, rc,
+           size_before >= 0 && file_size() == size_before, atomic_load(&cb_calls),
+           g_prof ? (int)__atomic_load_n(&g_prof->lock_failed, __ATOMIC_RELAXED) : -1);
     fflush(stdout);
 }
 
@@ -55,6 +78,12 @@ static long cb_write(void *ctx, const void *buf, unsigned long n)
 {
     (void)ctx;
     (void)buf;
+    if (!strcmp(mode, "cbmutex")) {
+        atomic_fetch_add(&cb_calls, 1);
+        pthread_mutex_lock(&app_mu);   /* the application's lock: held by the exiting thread in this schedule */
+        pthread_mutex_unlock(&app_mu);
+        return (long)n;
+    }
     if (atomic_exchange(&armed, 0)) {
         clock_gettime(CLOCK_MONOTONIC, &t0);
         quick_exit(0);
@@ -80,8 +109,10 @@ int main(int argc, char **argv)
     if (at_quick_exit(witness) != 0)
         return 10;
     ps3dk_prof_config_defaults(&c);
-    c.mode = strcmp(mode, "callback") == 0 ? PS3DK_PROF_MODE_APP : PS3DK_PROF_MODE_THREAD;
-    if (strcmp(mode, "callback") == 0) {
+    c.mode = !strcmp(mode, "callback") || !strcmp(mode, "cbmutex") ? PS3DK_PROF_MODE_APP : PS3DK_PROF_MODE_THREAD;
+    if (!strcmp(mode, "tmutex"))
+        c.drain_interval_us = 1000000;   /* the drain thread's first pass, then it sleeps past the schedule */
+    if (!strcmp(mode, "callback") || !strcmp(mode, "cbmutex")) {
         ps3dk_prof_sink_callbacks cb = {cb_write, NULL, cb_close, NULL};
         if (ps3dk_prof_set_sink_callbacks(&cb) != 0)
             return 11;
@@ -109,6 +140,16 @@ int main(int argc, char **argv)
             usleep(1000);
         if (!atomic_load(&entered))
             return 15;
+    }
+    if (!strcmp(mode, "cbmutex"))
+        pthread_mutex_lock(&app_mu);   /* quick_exit with the sink's mutex held */
+    if (!strcmp(mode, "tmutex")) {
+        pthread_t h;
+        usleep(200000);   /* the drain thread's first pass is done; it sleeps for the rest of its 1 s interval */
+        if (pthread_create(&h, NULL, hold_thread_mutex, NULL) != 0)
+            return 17;
+        while (!atomic_load(&held))
+            usleep(1000);
     }
     if (strcmp(mode, "after") == 0) {
         ps3dk_prof_thread_end();

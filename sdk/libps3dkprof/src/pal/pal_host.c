@@ -45,9 +45,7 @@ int pal_mutex_lock(pal_mutex *m) {
 int pal_mutex_lock(pal_mutex *m) { return pthread_mutex_lock(m) == 0 ? 0 : -1; }
 #endif
 int pal_mutex_unlock(pal_mutex *m) { return pthread_mutex_unlock(m) == 0 ? 0 : -1; }
-#ifdef PS3DK_PROF_TEST_HOOKS
 int pal_mutex_trylock(pal_mutex *m) { return pthread_mutex_trylock(m) == 0 ? 0 : -1; }
-#endif
 
 int pal_owner_get(pal_owner *o)
 {

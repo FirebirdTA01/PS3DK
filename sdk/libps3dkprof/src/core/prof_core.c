@@ -152,6 +152,18 @@ int p_lock(prof *p, pal_mutex *m)
         return -1;
     }
 #endif
+    if (g_tls.qx) {
+        /* the quick_exit drain never waits without a bound: another thread may hold the lock for good */
+        unsigned i;
+        for (i = 0; pal_mutex_trylock(m) != 0; i++) {
+            if (i + 1 >= P_QX_TRIES) {
+                ST_RLX(&p->lock_failed, 1);
+                return -1;
+            }
+            pal_sleep_us(P_QX_SLEEP_US);
+        }
+        return 0;
+    }
     if (pal_mutex_lock(m) != 0) {
         ST_RLX(&p->lock_failed, 1);
         return -1;
