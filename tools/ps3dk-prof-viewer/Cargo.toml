@@ -23,4 +23,8 @@ num-traits.workspace = true
 ps3dk-version.workspace = true
 ps3dk-ui.workspace = true
 eframe = { version = "0.29.1", default-features = false, features = ["glow", "default_fonts"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }
+
+[dev-dependencies]
+serde_json.workspace = true

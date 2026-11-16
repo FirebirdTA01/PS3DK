@@ -173,8 +173,11 @@ thread never registers as a profiled producer.
   stop; the agent thread is internal.
 - `ps3dk_prof_live_stop(graceful_us, join_us)` is called after shutdown.
   Graceful first: a viewer that is streaming keeps receiving until END has
-  been sent or `graceful_us` runs out. Then cancellation: the agent closes
-  the viewer without END (a partial download, never a success claim) and
+  been sent or `graceful_us` runs out. After END, output is half-closed and
+  in-flight client input is drained until the peer closes or the existing
+  `send_timeout_us` expires; incoming bytes do not extend that limit. The
+  graceful stop deadline also bounds this drain. Before END, cancellation
+  closes the viewer without END (a partial download, never a success claim) and
   exits. The agent never blocks in a socket call (non-blocking sockets,
   polled at the poll interval), so cancellation takes effect within one
   poll. Stop then waits up to `join_us` for the thread to exit and joins
@@ -185,9 +188,15 @@ thread never registers as a profiled producer.
   the wait, not the thread.
 - While the agent runs, a stream that ends by error (peer gone, protocol
   violation, stall) returns it to LISTEN; a later viewer starts again from
-  offset 0. A completed stream (END sent) also returns to LISTEN, so a
+  offset 0. A completed stream returns to LISTEN after its input drain, so a
   viewer that connects after the run still gets the whole file and END.
   Only stop ends the agent.
+- END remains the last frame: draining sends no PONG or other frame. The
+  write half-close lets the client observe a clean EOF even when a PING
+  crosses END, instead of resetting the socket by closing with unread
+  input. `drop_end` still counts END fully accepted by the socket, once per
+  stream; the later drain close adds no second drop count. The client still
+  refuses publication on a reset or other read error after END.
 - There is no automatic destructor. An app that exits without calling stop
   ends the thread with the process.
 
@@ -202,7 +211,8 @@ link with a reason.
 | LISTEN | nothing | one connection | accepted |
 | HANDSHAKE | nothing | `CLIENT_HELLO` (magic, protocol version) within 2 s | valid hello: STREAM; timeout or anything else: close, LISTEN |
 | STREAM | `HELLO`, then `DATA` | `PING` (at most 4 per second) | finalization record and all bytes sent: FINAL; error: close |
-| FINAL | `END` | nothing | sent: close, LISTEN |
+| FINAL | `END` | nothing | sent: half-close output, DRAIN |
+| DRAIN | nothing | discard in-flight bytes | peer close, fixed send timeout or stop deadline: close, LISTEN (or exit if stopping) |
 
 - `HELLO`: protocol version, agent version, capture identity (the init
   timebase value, app name and build id from the published init record),

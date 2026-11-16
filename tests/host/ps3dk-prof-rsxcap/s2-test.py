@@ -281,6 +281,11 @@ if want('rd') and have_checker:
             rr = subprocess.run([str(a.reader), 'check', str(p)], capture_output=True, text=True) if p.exists() else None
             if len(w) != 1 or rr is None or str(rr.returncode) != w[0]:
                 bad.append(f'{e.stem}: rc {rr.returncode if rr else "missing"} want {w}')
+            if e.stem == 'rsxcap-ckpt_lock_fault_stops_hook':
+                for text in ('ending: NO-TRAILER', 'STRUCTURE INCOMPLETE', 'no DOMAIN_FINAL',
+                             'RAW VALIDITY NOT VALID', 'COVERAGE UNKNOWN'):
+                    if rr is None or text not in rr.stdout:
+                        bad.append(f'{e.stem}: missing {text!r}')
         stray = [p.name for p in cdir.glob('*.prof') if not p.with_suffix('.expect').exists()]
         row('rd', f'exit_codes_{san}', n > 0 and not bad and not stray, f'{n} captures; {bad[:4]} stray {stray[:4]}')
         r = run([checker, cdir], out / f'checker-{san}.log', timeout=1800)

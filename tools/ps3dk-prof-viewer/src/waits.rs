@@ -191,6 +191,13 @@ pub fn operation(op: u16) -> &'static str {
     }
 }
 
+pub fn elapsed_short(ticks: Option<u64>, frequency: Option<u64>) -> String {
+    match ticks {
+        Some(t) => crate::model::TimeBase { freq_hz: frequency }.short_ticks(t.into()),
+        None => "UNKNOWN".into(),
+    }
+}
+
 pub fn elapsed(ticks: Option<u64>, frequency: Option<u64>) -> String {
     match (ticks, frequency.filter(|&f| f != 0)) {
         (Some(t), Some(f)) => format!("{t} ticks (approx {:.3} ms)", t as f64 * 1000.0 / f as f64),

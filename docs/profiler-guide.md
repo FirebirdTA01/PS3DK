@@ -258,6 +258,15 @@ Exit status: `0` COMPLETE, `1` INCOMPLETE, `2` MALFORMED, `3` usage or I/O error
 
 ### 3.2 The viewer
 
+Time displays use milliseconds with three decimal places; hover time cells and
+bars for the underlying tick values. Without a usable clock or a qualified
+mapping, the viewer labels raw ticks instead of inventing a time conversion.
+Exact bound diagnostics retain their rational values. Automatic verdict badges
+and strip cells explain the reader's classification on hover; the per-frame
+reason still describes the evidence for that particular frame. Empty pages name
+the missing records or capability, rather than treating missing data as zero work.
+
+
 The GUI viewer is started with an optional capture and flags (from the viewer's `main.rs`):
 
 ```
@@ -287,6 +296,18 @@ Open a capture either by passing the file on the command line, or from inside th
   - **Stated limits**: Series are never summed: lanes run concurrently with the PPU and with each other, and lane values represent start-attributed, unclipped included work, not occupancy (neither stacked totals nor per-frame utilization ratios are established by the reader). Percentiles cover only frames with bars. Edge arrows mark +inf, non-representable or out-of-scale values. A refused lane distribution is shown as unavailable; only the Fit p99 axis falls back to that lane's finite maximum, with a warning.
 - **Zones** — named-zone statistics for PPU zones only, from PPU lanes that are MEASUREMENT VALID (`ps3dk-prof report` prints each lane's validity; spans on other lanes are excluded); SPU and RSX zones are not listed. Columns: Zone (name and tag), Instances, Completed, Censored, Total, Mean, p50, p90, p99 and Max (all durations inclusive), and Qualification. Percentiles use the usable completed duration samples and are refused when there are fewer than 20 of them. Unknown values sort last.
 - **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains. For a capture with automatic function paths, a **Source** selector switches between **Zones** and **Functions (automatic)**; the latter shows one thread's indented call tree (calls, inclusive, self, % of the selection's wall elapsed, row statuses) for the whole capture or one interval, with the counters and statuses above it, the LOST row apart from the tree, and **Load ELF symbols...** for names.
+
+AUTO captures also add three collapsible Timeline lanes below the PPU threads:
+frame verdicts, mapped RSX busy intervals, and presentation aggregates. Busy
+intervals are the reader's union of retained draw/CALL intervals within each
+execution frame. They include RSX waits, so they are not shader execution time.
+Their solid cores lie inside the qualified clock map's endpoint bounds;
+whiskers show the outer bounds. Unqualified maps and invalidated timing have no
+busy bars, and intervals outside the map's support are not extrapolated.
+Flip-wait ticks/counts and polling cadence are per-frame annotations: this
+capture format does not record their positions, so it supplies no wait bars.
+The lanes share Timeline zoom and pan. A notice identifies any visible bars or
+aggregate rows beyond the paint limit; zooming narrows the displayed population.
 
 ### 3.4 Live sessions
 

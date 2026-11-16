@@ -437,3 +437,30 @@ fn overview_shows_a_counters_row_only_with_the_capability() {
     assert_eq!(status, "1 counters, 2 samples over 2 frames; dropped 0, refused 1");
     assert_eq!(rows, vec![CounterRow { name: "arena.bytes_used".into(), samples: 2, frames: 2, min: 10, max: 30, last: 30 }]);
 }
+
+#[test]
+fn fixed_millisecond_units_and_exact_ticks() {
+    assert_eq!(format_ms(0.012), "0.012 ms");
+    assert_eq!(format_ms(1234.5), "1234.500 ms");
+    let tb = TimeBase { freq_hz: Some(1_000_000) };
+    assert_eq!(tb.short(12.0), "0.012 ms");
+    assert_eq!(tb.ticks(12), "0.012 ms (12 ticks)");
+    assert_eq!(TimeBase { freq_hz: None }.short(12.0), "12 ticks");
+}
+
+#[test]
+fn millisecond_ruler_has_one_precision_at_every_scale() {
+    use ps3dk_prof_viewer::timeline::{ruler, View};
+    let tb = TimeBase { freq_hz: Some(1_000_000) };
+    for dt in [100.0, 10_000.0, 10_000_000.0] {
+        let labels = ruler(&View { t0: 0.0, dt }, tb, 1000.0, 90.0);
+        assert!(!labels.is_empty());
+        for (_, label) in labels {
+            let number = label.strip_suffix(" ms").expect("one time unit");
+            assert_eq!(number.split('.').nth(1).unwrap().len(), 3, "{label}");
+        }
+    }
+    let tb = TimeBase { freq_hz: None };
+    assert_eq!(tb.short_ticks(u64::MAX.into()), "18446744073709551615 ticks");
+    assert_eq!(TimeBase { freq_hz: Some(0) }.short_ticks(12), "12 ticks");
+}

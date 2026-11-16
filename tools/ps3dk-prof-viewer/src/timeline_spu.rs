@@ -589,7 +589,7 @@ pub fn details(info: &SpuTrackInfo, zone: &str, bar: usize, freq: Option<u64>) -
     let p = info.pair(bar);
     let width = |pl: &Place| match pl {
         Place::Placed(l, u) => match freq {
-            Some(f) if f > 0 => format!("{} tb ({:.3} us)", u - l, (u - l) as f64 * 1e6 / f as f64),
+            Some(f) if f > 0 => format!("{} tb ({:.3} ms)", u - l, (u - l) as f64 * 1000.0 / f as f64),
             _ => format!("{} tb", u - l),
         },
         _ => "unbounded".to_string(),

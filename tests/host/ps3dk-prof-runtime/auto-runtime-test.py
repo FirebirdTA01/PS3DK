@@ -16,7 +16,7 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','flips','present','spanning','fifofail','fifopre','fifopost'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','flips','present','spanning','fifofail','fifopre','fifopost','seal'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
@@ -111,7 +111,7 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('extsegments','segbuild','segnested','callbracket'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('seal','extsegments','segbuild','segnested','callbracket'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='labels' and a.sanitize=='thread':
     # the header's host-only ordering fence (cellGcmReadLabelOrdered) is a seq_cst fence, which GCC warns about under
     # TSan; the runtime under test has no fence of its own
@@ -316,12 +316,15 @@ if a.case=='labels':application=Path(__file__).with_name('auto-label-poll-runtim
 if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
+if a.case=='seal':application=Path(__file__).with_name('auto-seal-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 run('link',[cc,*flags,out/'main.c',out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
 cmd=[out/'app']
 if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
 result=run('run',cmd,capture_dir)
+if a.case in ('noinit','seal'):
+    assert result.stderr==b'', result.stderr
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
     print(result.stdout.decode(),end='')
@@ -351,6 +354,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO presentation evidence PASS\n' if a.case in ('present','spanning')
                        else b'AUTO attach/seal blocked owner refused without publication PASS\n' if a.case=='race'
                        else b'AUTO FIFO refusal and unpublished cleanup PASS\n' if a.case in ('fifofail','fifopre','fifopost')
+                       else b'AUTO app seal PASS\n' if a.case=='seal'
                        else b'application complete\n'),result.stdout
 files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
 data=files[0].read_bytes()
@@ -736,6 +740,18 @@ clocks=[b for k,b in chunks if k==2];assert len(clocks)==1
 assert struct.unpack_from('<Q',config,64)[0]==struct.unpack_from('<Q',clocks[0],12)[0]>0
 assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(120)
 assert chunks[-1][0]==6, 'complete capture trailer'
+if a.case=='seal':
+    err_src=out/'main_err.c'
+    err_src.write_text('#include <assert.h>\n#include "prof_test_hooks.h"\nint main(void) { ps3dk_prof_test_hooks.join_fail=1; return 0; }\n',encoding='utf-8')
+    err_app=out/'app_err'
+    run('link-err',[cc,*flags,err_src,out/'bridge.c','-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',err_app])
+    err_dir=out/'capture_err';err_dir.mkdir()
+    err_cmd=[err_app]
+    if a.sanitize=='thread':err_cmd=['setarch','x86_64','-R',*err_cmd]
+    err_res=run('run-err',err_cmd,err_dir)
+    assert err_res.returncode==0
+    assert b"ps3prof: automatic finalization failed; inspect capture validity\n" in err_res.stderr
 print('host attach/config/declaration lifecycle PASS' if a.case=='init' else
       'automatic FIFO refusal: CONFIG reason8 + zero FINAL STATUS PASS' if a.case=='fifofail' else
+      'automatic capture: application seal and clean destructor PASS' if a.case=='seal' else
       'profiler-free host application: automatic CONFIG reason10 + zero FINAL STATUS PASS')
