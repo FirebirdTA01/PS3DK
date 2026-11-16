@@ -1895,9 +1895,9 @@ fn by_tag_on_the_runtime_capture() {
     let f1 = &b.frames[1];
     assert_eq!(f1.untimed, 3, "three draws outside the timed ranges");
     let s = ps3dk_prof::auto_rsx::range_summary(&b);
-    assert_eq!(s.get("pass"), Some(&(2, 13, 130, 65)));
+    assert_eq!(s.get("pass"), Some(&(2, 13, 130, 65, 90)));
     let t = ps3dk_prof::auto_rsx::tag_summary(&b);
-    assert_eq!(t.get(&0xe), Some(&(1, 3, 40, 40)));
+    assert_eq!(t.get(&0xe), Some(&(1, 3, 40, 40, 40)));
     let (code, out) = cli(&["auto", "--by-tag", "--json", &fixture_path("tags")]);
     assert_eq!(code, 0);
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
