@@ -25,7 +25,7 @@ ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-f
                                   'owner-is-opener','queue-unreserved','opener-token-off','call-outside-gate',
                                   'late-range-off','late-draw-off','late-exact','late-marks',
                                   'preinit-ignored','preinit-after-init','preinit-any-thread','preinit-no-validate',
-                                  'preinit-consume-on-fail'])
+                                  'preinit-consume-on-fail','preinit-foreign-silent'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -39,7 +39,7 @@ if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopv
                           'call-outside-gate':'windowcallafter','late-range-off':'windowlate','late-draw-off':'windowlate',
                           'late-exact':'windowlate','late-marks':'windowlate','preinit-ignored':'preinit',
                           'preinit-after-init':'preinit','preinit-any-thread':'preinitthread','preinit-no-validate':'preinit',
-                          'preinit-consume-on-fail':'preinitfail'}[a.mutant] and not a.sanitize
+                          'preinit-consume-on-fail':'preinitfail','preinit-foreign-silent':'preinitthread'}[a.mutant] and not a.sanitize
 root=Path(__file__).resolve().parents[3]
 src=root/'sdk/libps3dkprof/src'
 assert (src/'auto_rsx/auto_runtime.c').is_file(), 'AUTO_RUNTIME_IMPLEMENTATION'
@@ -64,7 +64,7 @@ def run(name,cmd,cwd=out):
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
-    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks'):
+    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks','preinit-foreign-silent'):
         expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
                   'no-frame-boundary':b'context.current==words+24',
@@ -281,7 +281,8 @@ for rel in sources:
                  'preinit-any-thread':('have=pal_owner_is_self(&preinit_owner);','have=1;'),
                  'preinit-no-validate':('    if(!layout(&copy,&records,&frames,&bytes)) return PS3DK_PROF_EINVAL;\n',
                                         '    (void)records;(void)frames;(void)bytes;\n'),
-                 'preinit-consume-on-fail':('if(!rc) preinit_state=2u;','preinit_state=2u;')}[a.mutant]
+                 'preinit-consume-on-fail':('            if(!rc) {\n                preinit_state=2u;','            {\n                preinit_state=2u;'),
+                 'preinit-foreign-silent':('if(!have) ST_REL(&preinit_foreign,1u);','(void)have;')}[a.mutant]
         code=source.read_text();assert code.count(old)==1,a.mutant
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,new).encode())
     elif a.mutant=='late-exact' and rel=='auto_rsx/auto_frames.c':
@@ -668,6 +669,12 @@ if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     assert struct.unpack_from('<2I',config,24)==(1023,11) and len(config)==176,len(config)
     want={'preinit':100,'preinitthread':63,'preinitold':31,'preinitfail':100}[a.case]
     assert struct.unpack_from('<2I',config,160)==(32,want),struct.unpack_from('<2I',config,160)
+    status=struct.unpack_from('<H',[b for k,b in auto if k==37][-1],2)[0]
+    if a.mutant=='preinit-foreign-silent':
+        assert not status&2048,status
+        print('preinit-foreign-silent rejected: ignored pre-init options left no STATUS flag');raise SystemExit(0)
+    # options from another thread: defaults used and the sticky STATUS flag PREINIT_FOREIGN; never otherwise
+    assert bool(status&2048)==(a.case=='preinitthread'),hex(status)
     if a.case=='preinit':
         assert sum(1 for k,b in auto if k==35 for i in range(struct.unpack_from('<I',b,8)[0])
                    if struct.unpack_from('<H',b,16+OP*i+12)[0]==6)==100

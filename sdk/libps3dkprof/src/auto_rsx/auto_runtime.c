@@ -242,6 +242,9 @@ int ps3dk_prof_auto_attach(ps3dk_prof_gcm_ctx *context, const ps3dk_prof_auto_op
 static ps3dk_prof_auto_options preinit;
 static pal_owner preinit_owner;
 static uint32_t preinit_state; /* 0 none, 1 set, 2 consumed */
+/* The first successful init ran on another thread than the setter: the options were ignored (atomic; the drainer
+ * reports it as the sticky STATUS flag PREINIT_FOREIGN). */
+static uint32_t preinit_foreign;
 
 int ps3dk_prof_auto_options_set(const ps3dk_prof_auto_options *options)
 {
@@ -283,7 +286,10 @@ void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t comm
     if((claim=auto_config_begin(&configuration))!=0) {
         if(preinit_state==1u) {
             have=pal_owner_is_self(&preinit_owner);o=preinit;
-            if(!rc) preinit_state=2u;
+            if(!rc) {
+                preinit_state=2u;
+                if(!have) ST_REL(&preinit_foreign,1u);   /* not silent: the defaults were used */
+            }
         }
         auto_config_abort(&configuration,claim);
     }
@@ -1634,6 +1640,7 @@ void p_auto_drain(prof *p, int seal)
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
         if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
         if(LD_ACQ(&capture->segment_replay)) flags|=AUTO_STATUS_SEGMENT_REPLAY;
+        if(LD_ACQ(&preinit_foreign)) flags|=AUTO_STATUS_PREINIT_FOREIGN;
         if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
         if(LD_ACQ(&capture->frames_by_flip)) flags|=AUTO_STATUS_FRAMES_FLIP;
         if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;

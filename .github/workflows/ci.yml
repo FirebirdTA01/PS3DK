@@ -407,6 +407,7 @@ jobs:
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinit --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitthread --mutant preinit-any-thread --out "$RUNNER_TEMP/auto-runtime-preinit-any-thread-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitthread --mutant preinit-foreign-silent --out "$RUNNER_TEMP/auto-runtime-preinit-foreign-silent-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitfail --mutant preinit-consume-on-fail --out "$RUNNER_TEMP/auto-runtime-preinit-consume-on-fail-mutant"
           for mutant in tag-silent tag-at-call range-end-silent; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case tags --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"

@@ -61,7 +61,7 @@ typedef struct ps3dk_prof_auto_options {
  *                                      counted (per frame in its coverage row when the frame has one). Both are int
  *                                      expressions: BEGIN 1 when the range was admitted, END 1 when it was
  *                                      committed, 0 when refused; always 1 without PS3_PROF_AUTO (nothing is
- *                                      refused there). A refused BEGIN still keeps the nesting balanced: issue its
+ *                                      refused there, so BEGIN/END pairing logic is the same in both builds). A refused BEGIN still keeps the nesting balanced: issue its
  *                                      END whatever BEGIN returned. name is a string literal (the runtime keeps one
  *                                      descriptor per name/file/line site, 256 sites);
  *  a capture window opened mid-frame (an immediate SECTION or WHOLE_RUN, from any thread): the owner's first draw
@@ -106,7 +106,8 @@ int ps3dk_prof_shutdown(void);
 /* Options before cellGcmInit: validated and copied now (the caller's struct need not outlive the call; the earlier
  * 32-byte struct is accepted and takes the default range reserve), then used by the intercepted cellGcmInit in place
  * of the defaults, so commands written right after init cannot close the window for them. Only an init on the same
- * thread uses them (another thread's init takes the defaults); the first successful init consumes them; a later call
+ * thread uses them: another thread's init takes the defaults, and the capture then carries the sticky STATUS flag
+ * PREINIT_FOREIGN (2048; the reader prints "pre-init options ignored"). The first successful init consumes them; a later call
  * replaces an earlier one. EINVAL for options the attach would refuse, EBUSY once an intercepted cellGcmInit ran,
  * ENOTINIT before profiler start-up. PS3DK_PROF_AUTO_OPTIONS_SET(o) is 0 and calls nothing without PS3_PROF_AUTO.
  * The override below is unchanged: after any command write it still refuses (PRIOR_WRITES_UNKNOWN). */

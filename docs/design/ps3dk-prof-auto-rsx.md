@@ -420,7 +420,10 @@ FRAMES_EXPLICIT=512 (both together: flips delimited frames until the first
 explicit call), and with 63/11 SEGMENT_REPLAY=1024: a build that wrote
 timestamp reports into its buffer was CALLed again without a rebuild, so its
 report writes ran again and may have overwritten other records' timestamps
-(every per-frame verdict of the capture is then UNKNOWN). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
+(every per-frame verdict of the capture is then UNKNOWN), and with 1023/11
+PREINIT_FOREIGN=2048: options set before cellGcmInit on another thread than
+the one whose intercepted init attached were ignored (the defaults are in
+CONFIG). All of these, saturation, conflict and reset stay sticky. Cumulative counters/frontiers never decrease. Pending and held pairs are
 gauges and may decrease. operations_written counts accepted operation records, not chunks (a batched OPS chunk carries several). Exact admitted
 equals written plus dropped plus pending. Exact FINAL requires both gauges zero;
 an unacknowledged owner requires a lower bound. FINAL occurs once and forbids

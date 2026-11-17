@@ -133,6 +133,9 @@ pub const ST_FRAMES_EXPLICIT: u16 = 512;
 /// 63/11: a CALL segment whose build carried timed draws was called again without a rebuild.  Its embedded report
 /// writes ran again and may have overwritten other records' timestamps, so no frame of the capture has a verdict.
 pub const ST_SEGMENT_REPLAY: u16 = 1024;
+/// 1023/11: options set before cellGcmInit on another thread than the attaching init were ignored (defaults used).
+pub const ST_PREINIT_FOREIGN: u16 = 2048;
+pub const PREINIT_FOREIGN: &str = "pre-init options ignored: set on a different thread than cellGcmInit";
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -1068,6 +1071,7 @@ impl Reader {
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
         let known = match cfg.attached() {
+            Some(a) if a.tagged() => 4095,
             Some(a) if a.build_frames() => 2047,
             Some(a) if a.segments_covered() => 1023,
             _ => 63,
@@ -1092,7 +1096,7 @@ impl Reader {
                 }
             }
             for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED,
-                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY] {
+                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY, ST_PREINIT_FOREIGN] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -2214,6 +2218,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0) {
         writeln!(out, "SEGMENT REPLAY: {SEGMENT_REPLAY}; every frame is UNKNOWN")?;
     }
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        writeln!(out, "{PREINIT_FOREIGN} (the defaults were used)")?;
+    }
     writeln!(out, "frames delimited by: {}", frame_source(r))?;
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
     writeln!(out, "note: {INTERVAL_NOTE}")?;
@@ -2438,6 +2445,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        v["preinit_options_ignored"] = json!(PREINIT_FOREIGN);
+    }
     }
     if r.ops_dropped != 0 {
         // only when the reader could not retain every record, so complete captures keep their exact JSON

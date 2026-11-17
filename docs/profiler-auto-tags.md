@@ -52,8 +52,8 @@ still time their draws, from the draw pairs.
 
 The range macros are `int` expressions. `PS3DK_PROF_AUTO_RANGE_BEGIN` and `_BEGIN_TIMED` yield 1 when the range was
 admitted and 0 when it was refused; `PS3DK_PROF_AUTO_RANGE_END()` yields 1 when the range was committed (its record
-will be written) and 0 when it was refused. Without `PS3_PROF_AUTO` all three are a constant 1 (nothing is refused) and
-call nothing. A refused begin still occupies its nesting level, so always issue the matching end, whatever the begin
+will be written) and 0 when it was refused. Without `PS3_PROF_AUTO` all three are a constant 1 and call nothing:
+nothing is refused there, so the same BEGIN/END pairing and counting logic behaves the same in both builds. A refused begin still occupies its nesting level, so always issue the matching end, whatever the begin
 returned:
 
 ```c
@@ -102,6 +102,8 @@ cellGcmInit(command_size, io_size, io_address);
 The options are validated and copied at the call (EINVAL for options the attach would refuse; the earlier 32-byte
 struct is accepted and takes the default range reserve) and used by the intercepted `cellGcmInit` in place of the
 defaults. Only an init on the same thread uses them; the first successful init consumes them, and a later call is EBUSY.
+When the init runs on another thread the defaults are used and the capture says so: `auto` prints "pre-init options
+ignored: set on a different thread than cellGcmInit" (STATUS flag 2048, `preinit_options_ignored` in `auto --json`).
 Without `PS3_PROF_AUTO` the macro is 0 and calls nothing.
 
 ## Spending report pairs where you look
