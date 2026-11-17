@@ -104,6 +104,10 @@ int pal_open_rw_excl(const char *path, int *fd, int *err);
 long pal_read(int fd, void *buf, unsigned long n, int *err);
 int pal_rewind(int fd, int *err);
 int pal_sync(int fd, int *err);
+#define pal_retain_complete ps3dk_prof__pal_retain_complete
+/* Cold path after successful FILE close; an error keeps the current capture.
+ * Only files this opt-in protocol recorded as completed can be removed. */
+int pal_retain_complete(const char *path, const char *app, uint64_t session, unsigned keep);
 /* The errno-class codes the core compares *err against come from the platform's own errno.h, in every build, so
  * the host and LV2 builds each compare against their own values (review 2026-10-22 02:49, O2). */
 #define PAL_EINTR EINTR

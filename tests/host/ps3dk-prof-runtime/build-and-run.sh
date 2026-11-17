@@ -366,7 +366,7 @@ fi
 
 if [ "$lib_ok" = 1 ]; then
     api="ps3dk_prof_capture_begin ps3dk_prof_capture_end ps3dk_prof_capture_seal ps3dk_prof_capture_state ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record ps3dk_prof_init \
-ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
+ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_capture_retention ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin \
 ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
     # nm output goes to files first: under pipefail a `nm | grep -q` can exit 141 on an early match.
     nm -g --defined-only "${libobjs[@]}" >"$ob/nm-defined.txt" || bad "nm --defined-only failed"

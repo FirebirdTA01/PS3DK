@@ -1017,6 +1017,8 @@ close_capture:
         return PS3DK_PROF_ESINKRECOVERED;
     if (p->clock_failed)
         return PS3DK_PROF_ECLOCK;
+    if (p->retention_keep && pal_retain_complete(p->snk.path, p->app, p->tb_at_init, p->retention_keep))
+        return PS3DK_PROF_ERETENTION;
     return PS3DK_PROF_OK;
 }
 

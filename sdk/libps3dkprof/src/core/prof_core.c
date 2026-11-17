@@ -41,6 +41,7 @@ static struct {
     int kind;                   /* 0 default directory, 1 a set directory, 2 callbacks */
     char dir[256];
     ps3dk_prof_sink_callbacks cb;
+    uint32_t retention_keep;
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arcs;
 #endif
@@ -1230,6 +1231,19 @@ int ps3dk_prof__configure_arcs(const struct ps3dk_prof_arc_options *o)
 }
 #endif
 
+int ps3dk_prof_set_capture_retention(uint32_t keep)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc != PS3DK_PROF_OK)
+        return rc;
+    if (keep > 1024)
+        rc = PS3DK_PROF_EINVAL;
+    else
+        g_pending.retention_keep = keep;
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+
 int ps3dk_prof_set_sink_path(const char *dir)
 {
     int rc = gate_enter(G_CONFIGURING);
@@ -1620,7 +1634,12 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     p->tb_at_init = p_tb();
     p->next_incarnation = 1;
 
-    /* Step 6: the sink. */
+    /* Step 6: the sink. Retention requires an owned FILE, never callbacks. */
+    p->retention_keep = g_pending.retention_keep;
+    if (p->retention_keep && g_pending.kind == 2) {
+        rc = PS3DK_PROF_ENOTSUP;
+        goto fail_mutex2;
+    }
     if (g_pending.kind == 2) {
         p->snk.kind = 2;
         p->snk.cb = g_pending.cb;   /* 6b: no callback runs during init */

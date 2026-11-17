@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include "capture_retention.h"
 
 #include <sys/ppu_thread.h>
 #include <sys/sys_time.h>

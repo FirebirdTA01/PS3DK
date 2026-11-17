@@ -239,6 +239,7 @@ typedef struct prof {
     uint32_t desc_count;        /* atomic: RELEASE after a complete entry */
     uint32_t pad;
     sink snk;
+    uint32_t retention_keep;    /* FILE close only; zero leaves append-only lifecycle unchanged */
     drainer dr;
     pal_thread drain_thread;
     int drain_thread_started;

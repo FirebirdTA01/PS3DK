@@ -129,6 +129,34 @@ A zone handle `kind` is `0 INERT`, `1 PUSHED`, `2 REFUSED`, or `3 SPENT`; a zero
 
 The default sink writes `<dir>/<app>-<session_id>.prof`, where `session_id` is the timebase value at init. The sample writes under `/dev_hdd0/tmp/<app>-<session>.prof`. The live view (below) serves only captures on `/dev_hdd0/`.
 
+**Completed-file retention (candidate).** Before init, call
+`ps3dk_prof_set_capture_retention(N)` to keep the newest `N` successfully closed,
+opt-in captures for this exact `app` in that directory. `N` is 1..1024; zero
+(the default) disables cleanup. Completion order comes from a per-app index,
+independent of filenames, modification times, or the timebase resetting after
+a reboot. Existing untracked captures, active files, incomplete captures, and
+other applications' files remain untouched. Callback sinks refuse this option.
+
+Cleanup runs during successful shutdown after the current file closes. It reads
+and checks candidate files before deleting them, so its IO cost is additional
+shutdown work. `PS3DK_PROF_ERETENTION` means the capture closed but index update
+or cleanup failed; the current capture is kept. An exclusive per-app lock
+prevents concurrent cleaners. A crash may leave `.ps3dk-retain-<app>.lock`;
+cleanup then refuses. Remove that lock only after confirming no process is
+using the directory. A corrupt index or an old file that changed also causes
+refusal, rather than guessing which files belong to the application. Retention
+checks regular files and their complete recorded bytes; host cleanup also
+rejects symbolic links. LV2 exposes `stat`/`fstat`, without an `lstat` interface,
+so do not replace or edit managed paths while cleanup runs. It unlinks only
+indexed app/session paths and never traverses or deletes a directory tree.
+Retention
+syncs the current file and replacement index before eviction; target filesystem
+power-loss durability, including directory updates, still needs measurement.
+It uses a bounded index buffer of about 25 KiB during shutdown. Retention
+does not cap a running file's size. The separate rolling-store code remains an
+[internal foundation](design/ps3dk-prof-rolling-store.md), with no enabled
+rolling-capture option yet.
+
 **Live view.** The live agent serves this run's FILE-sink capture to one PC viewer at a time over TCP while it grows; it only reads the file, so the writer never waits for a viewer. The network must be initialised first.
 
 Link `net` and `netctl_stub` in addition to the profiler. After a successful `ps3dk_prof_init`:
