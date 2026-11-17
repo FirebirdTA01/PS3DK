@@ -2644,17 +2644,17 @@ pub struct TagFrame {
     /// while building in this frame and CALLed here is counted in both
     pub unrepresented: u32,
     pub tags: BTreeMap<u32, TagRow>,
-        pub ranges: BTreeMap<String, RangeRow>,
-        /// Per-occurrence ranges (t_f77eb7ed): one entry per retained RANGE record in this frame, with depth,
-        /// inclusive raw span, and parent/exclusive when the nesting is reconstructable from the retained records.
-        pub range_occurrences: Vec<RangeOccurrence>,
-        /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
-        /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
-        /// frame `outside_timed_range`).
-        pub outside_timed_range: [u64; 3],
-        /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
-        pub ranges_refused: u32,
-    }
+    pub ranges: BTreeMap<String, RangeRow>,
+    /// Per-occurrence ranges (t_f77eb7ed): one entry per retained RANGE record in this frame, with depth,
+    /// inclusive raw span, and parent/exclusive when the nesting is reconstructable from the retained records.
+    pub range_occurrences: Vec<RangeOccurrence>,
+    /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
+    /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
+    /// frame `outside_timed_range`).
+    pub outside_timed_range: [u64; 3],
+    /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
+    pub ranges_refused: u32,
+}
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
     pub tagged: bool,
@@ -2695,8 +2695,8 @@ pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<
 /// frames of capture window `w` (the viewer's window picker uses this to
 /// scope the Passes page to one capture window).
 pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
-    let Some(last) = w.last_frame else { return ByTag::default() };
-    by_tag_range(cap, Some(w.first_frame..=last))
+    // A still-open window (no last frame yet) covers every frame from its first one onward.
+    by_tag_range(cap, Some(w.first_frame..=w.last_frame.unwrap_or(u64::MAX)))
 }
 
 /// The body of `by_tag`, unscoped.
@@ -2760,43 +2760,46 @@ fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::
     let contains = |outer: &RangeOccurrence, inner: &RangeOccurrence|
         outer.begin <= inner.begin && inner.end <= outer.end;
 
-    // Resolve the immediate parent: the unique occurrence at depth-1 that contains this one.
-    for i in 0..occs.len() {
+    // Resolve the immediate parent BY OCCURRENCE (index), never by name: the unique occurrence at depth - 1 whose
+    // interval contains this one. Names repeat (one "pass" range per pass), so a name cannot identify a parent.
+    let n = occs.len();
+    let mut parent_idx: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
         if occs[i].depth <= 1 { continue; }
-        let containing = (0..occs.len())
+        let containing = (0..n)
             .filter(|&j| occs[j].depth == occs[i].depth - 1 && contains(&occs[j], &occs[i]))
             .collect::<Vec<usize>>();
         match containing.as_slice() {
-            [j] => occs[i].parent = Some(occs[*j].name.clone()),
+            [j] => { parent_idx[i] = Some(*j); occs[i].parent = Some(occs[*j].name.clone()); }
             [] => occs[i].reason = Some(format!("no occurrence at depth {} contains this one — ancestry not established", occs[i].depth - 1)),
             _ => occs[i].reason = Some(format!("{} occurrences at depth {} contain this one — ambiguous", containing.len(), occs[i].depth - 1)),
         }
     }
 
-    // Walk up from each occurrence: every ancestor must be present and contain its child, down to depth 1.
-    // If the chain breaks anywhere, this occurrence's `exclusive` is "unavailable" with a reason.
-    let chain_complete = |i: usize, occs: &[RangeOccurrence]| -> Option<String> {
+    // An occurrence's chain is complete when every ancestor down to depth 1 was resolved by index.
+    let chain_complete = |i: usize| -> bool {
         let mut cur = i;
-        for depth in (1..occs[i].depth).rev() {
-            let want = occs[cur].parent.as_deref()?;
-            let Some(next) = (0..occs.len()).find(|&j| occs[j].depth == depth && occs[j].name == want) else {
-                return None; };
-            if !contains(&occs[next], &occs[cur]) { return None; }
-            cur = next;
+        while occs[cur].depth > 1 {
+            match parent_idx[cur] { Some(p) => cur = p, None => return false }
         }
-        Some(occs[i].name.clone())
+        true
     };
-    // Walk up from each occurrence: every ancestor must be present and contain its child, down to depth 1.
-    // A root (depth 1) has no parent to resolve, so its chain is trivially complete.
-    for i in 0..occs.len() {
-        if occs[i].depth > 1 && chain_complete(i, &occs).is_none() {
+    for i in 0..n {
+        if occs[i].depth > 1 && !chain_complete(i) {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some(format!("ancestor chain to depth 1 incomplete from {} — parent/exclusive unavailable", occs[i].name)); }
             continue;
         }
-        let child_sum: u64 = occs.iter()
-            .filter(|r| r.depth == occs[i].depth + 1 && r.parent.as_deref() == Some(occs[i].name.as_str()))
-            .fold(0u64, |a, r| a.saturating_add(r.inclusive_raw));
+        // A deeper occurrence inside this span whose own parent could not be resolved may belong to this one: its
+        // time cannot be assigned, so this occurrence's exclusive is not claimed.
+        if (0..n).any(|c| occs[c].depth == occs[i].depth + 1 && parent_idx[c].is_none() && contains(&occs[i], &occs[c])) {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some("a nested range inside this one has no resolved parent — exclusive unavailable".into()); }
+            continue;
+        }
+        let child_sum: u64 = (0..n)
+            .filter(|&c| parent_idx[c] == Some(i))
+            .fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw));
         if child_sum > occs[i].inclusive_raw {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children sum {child_sum} exceeds own inclusive {} — exclusive uncomputable", occs[i].inclusive_raw)); }
@@ -3044,6 +3047,30 @@ mod tests {
         let child = &r[2];
         assert!(child.parent.is_none() && child.exclusive_raw.is_none(), "{child:?}");
         assert_eq!(child.reason.as_deref(), Some("2 occurrences at depth 1 contain this one — ambiguous"));
+    }
+
+    #[test]
+    fn repeated_parent_names_resolve_by_occurrence_not_name() {
+        let desc = dmap(&[("pass", 0), ("draws", 1)]);
+        // two "pass" ranges (depth 1), each with one "draws" child; each parent's exclusive subtracts only its own
+        // child, not every child of every "pass"
+        let ops = vec![ro(1, 0, 100, 200), ro(2, 1, 110, 130), ro(1, 0, 300, 400), ro(2, 1, 310, 370)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let first = r.iter().find(|o| o.depth == 1 && o.begin == 100).unwrap();
+        let second = r.iter().find(|o| o.depth == 1 && o.begin == 300).unwrap();
+        assert_eq!(first.exclusive_raw, Some(100 - 20), "{first:?}");
+        assert_eq!(second.exclusive_raw, Some(100 - 60), "{second:?}");
+        assert!(r.iter().filter(|o| o.depth == 2).all(|o| o.parent.as_deref() == Some("pass") && o.exclusive_raw.is_some()));
+    }
+
+    #[test]
+    fn unresolved_nested_child_blocks_the_parents_exclusive() {
+        let desc = dmap(&[("a", 0), ("b", 1), ("c", 2)]);
+        // two overlapping depth-1 ranges both contain the depth-2 one: it has no parent, so neither depth-1
+        // occurrence may claim an exclusive
+        let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 2, 150, 160)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert!(r.iter().filter(|o| o.depth == 1).all(|o| o.exclusive_raw.is_none() && o.reason.is_some()), "{r:?}");
     }
 
     #[test]
