@@ -563,6 +563,26 @@ fn count_reason_on_manual_refused() {
 }
 
 #[test]
+fn count_window_at_u64_boundary_rejects_overflow_without_panicking() {
+    let make = |first, last, count| base_file(vec![
+        chunk(CHUNK_WINDOW_BEGIN,
+            window_begin_payload(1, 0, first, WINDOW_SOURCE_APP, WINDOW_KIND_FRAMES, count)),
+        chunk(CHUNK_WINDOW_END, window_end_payload(1, WINDOW_REASON_COUNT, last)),
+    ], FLAG_WINDOWS);
+    let error = reader::read(&make(0, u64::MAX, 1).bytes()).unwrap_err();
+    assert_eq!(error.rule, Rule::Windows);
+    assert!(error.detail.contains("COUNT span overflow"), "{error:?}");
+    for (first, last, count) in [
+        (u64::MAX, u64::MAX, 1),
+        (u64::MAX - 1, u64::MAX, 2),
+        (u64::MAX - u64::from(u32::MAX) + 1, u64::MAX, u32::MAX),
+    ] {
+        let capture = reader::read(&make(first, last, count).bytes()).unwrap();
+        assert_eq!(capture.windows[0].last_frame, Some(last));
+    }
+}
+
+#[test]
 fn count_with_the_wrong_span_refused() {
     let f = base_file(
         vec![
