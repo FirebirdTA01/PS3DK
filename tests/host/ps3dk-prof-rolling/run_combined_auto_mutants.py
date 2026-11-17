@@ -19,11 +19,12 @@ import sys
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
-# Reviewed LF hashes of the exact parent C110 GREEN dependency set.
+# Reviewed LF hashes: C110 set plus the integration PREINIT_FOREIGN mask and
+# sticky-bit change (ordinary-source/old-C RED in gate137).
 PINS = {
     "roll_combined2.c": "3af713b702820d4bef5cd285472a64e7e9946d47e86b47649e8490c549864624",
     "roll_combined2.h": "8c2d218877bf5280d98e181378ecc5e82a20338bdc8ebeaca7c9401f22c97e7d",
-    "roll_combined2_auto.h": "472dbb42b5ba9e785c067ea912d7232f608e08036d0a82ba7f75580211fc1814",
+    "roll_combined2_auto.h": "3817f1a8bcd56fe64c617f914842918fcf97c48718e701eeff60b63c1d3ed5f7",
     "roll_combined2_fifo.h": "cd757ae2cea21fa75269d8c3104ec0f3f8def0aab8f36cbc057ac8fe5c507b05",
     "roll_combined.c": "8645d9614afffa6a0d251688d6b4bceafa4ad1c7586de78c008e695ad5f607cb",
     "roll_combined.h": "0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431",
@@ -154,6 +155,15 @@ def specs():
     canonical = ['C canonical AUTO schema2 at original cut']
     formatted = ['C canonical AUTO negotiated format at original cut']
     return [
+        ('preinit_foreign_not_known', 'b2', 'c_auto_preinit_foreign_survives_every_checkpoint',
+         ['C AUTO negotiated-format encoder rejected valid original', 'rc=-1 reason=0'],
+         [(h, '(au_mask(s)&512)?4095u:', '(au_mask(s)&512)?2047u:')]),
+        ('preinit_foreign_not_sticky', 'b2', 'c_auto_preinit_foreign_is_sticky_and_unknown_flags_still_refuse',
+         ['semantic C refusal must exit1, not crash: preinit-cleared', 'left: Some(0)'],
+         [(h, 'UINT16_C(4084)', 'UINT16_C(2036)')]),
+        ('unknown_status_4096_admitted', 'b2', 'c_auto_preinit_foreign_is_sticky_and_unknown_flags_still_refuse',
+         ['semantic C refusal must exit1, not crash: status-unknown-4096', 'left: Some(0)'],
+         [(h, '(au_mask(s)&512)?4095u:', '(au_mask(s)&512)?8191u:')]),
         ('negotiated_width_fixed128', 'b2', B2,
          ['C AUTO negotiated-format encoder rejected valid original', 'rc=-1 reason=0'],
          [(h, 'r32(p+60)!=width', 'r32(p+60)!=128 || width==0')]),
@@ -253,7 +263,7 @@ def main():
     checks = classifier_checks()
     data = snapshot()
     if a.check_only:
-        print(f'PASS twelve AUTO mutation anchors, reviewed C110 pins, {checks} classifier checks; no builds')
+        print(f'PASS {len(specs())} AUTO mutation anchors, reviewed pins, {checks} classifier checks; no builds')
         return 0
     binaries = {name: getattr(a, name + '_test') for name in SOURCES}
     if not a.build_dir or not all(binaries.values()):
@@ -333,7 +343,7 @@ def main():
         receipt['all_named_mutants_killed'] = True
     finally:
         (out/'results.json').write_text(json.dumps(receipt,indent=2)+'\n')
-    print('PASS baseline sources/witnesses and twelve named AUTO mutants')
+    print(f'PASS baseline sources/witnesses and {len(specs())} named AUTO mutants')
     return 0
 
 

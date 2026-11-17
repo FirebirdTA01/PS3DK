@@ -5,6 +5,7 @@ mod fifo_support;
 mod spu_support;
 mod combined_auto_support;
 mod combined_auto_c_support;
+mod combined_auto_invalid_support;
 use common::*;
 use combined_auto_support::{config,op,coverage,clock,status,put16,put32,put64};
 use combined_auto_c_support::{references,parity};
@@ -125,3 +126,33 @@ c_format!(c_auto_mask1023_tagged_ranges_and_call_rows,1023);
 fn c_auto_refused_config160_has_no_invented_domain_or_population(){let f=refused(160);truth(&f,None);parity(f.bytes());}
 #[test] #[ignore="requires prebuilt actual C AUTO encoder"]
 fn c_auto_refused_config176_preserves_original_wide_payload(){let f=refused(176);truth(&f,None);parity(f.bytes());}
+
+fn preinit_foreign(mut f:File)->File {
+    for c in f.chunks.iter_mut().filter(|c|c.ty==37) {
+        let flags=u16::from_le_bytes(c.payload[2..4].try_into().unwrap());
+        put16(&mut c.payload,2,flags|2048);
+    }
+    f
+}
+#[test]
+fn preinit_foreign_sources_validate_under_tagged_and_ring_masks_only(){
+    truth(&preinit_foreign(source(1023)),Some(1023));
+    let f=preinit_foreign(combined_auto_invalid_support::baseline());references(&f.bytes());
+    for mask in [15,31,63,127,255,511] {
+        assert_eq!(reader::read(&preinit_foreign(source(mask)).bytes()).unwrap_err().rule,ps3dk_prof::Rule::AutoStatus);
+    }
+}
+#[test] #[ignore="requires prebuilt actual C AUTO encoder"]
+fn c_auto_preinit_foreign_survives_every_checkpoint(){
+    parity(preinit_foreign(source(1023)).bytes());
+    parity(preinit_foreign(combined_auto_invalid_support::baseline()).bytes());
+}
+#[test] #[ignore="requires prebuilt actual C AUTO encoder"]
+fn c_auto_preinit_foreign_is_sticky_and_unknown_flags_still_refuse(){
+    use combined_auto_invalid_support::{Forgery,rejected};
+    let f=preinit_foreign(combined_auto_invalid_support::baseline());
+    rejected(&f,&Forgery{name:"preinit-cleared",ty:37,occurrence:1,rule:ps3dk_prof::Rule::AutoStatus,
+        edit:|p|{let flags=u16::from_le_bytes(p[2..4].try_into().unwrap());put16(p,2,flags&!2048);}});
+    rejected(&f,&Forgery{name:"status-unknown-4096",ty:37,occurrence:1,rule:ps3dk_prof::Rule::AutoStatus,
+        edit:|p|{let flags=u16::from_le_bytes(p[2..4].try_into().unwrap());put16(p,2,flags|4096);}});
+}

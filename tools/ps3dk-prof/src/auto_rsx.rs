@@ -196,6 +196,9 @@ pub const ST_FRAMES_EXPLICIT: u16 = 512;
 /// 63/11: a CALL segment whose build carried timed draws was called again without a rebuild.  Its embedded report
 /// writes ran again and may have overwritten other records' timestamps, so no frame of the capture has a verdict.
 pub const ST_SEGMENT_REPLAY: u16 = 1024;
+/// 1023/11: options set before cellGcmInit on another thread than the attaching init were ignored (defaults used).
+pub const ST_PREINIT_FOREIGN: u16 = 2048;
+pub const PREINIT_FOREIGN: &str = "pre-init options ignored: set on a different thread than cellGcmInit";
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -382,7 +385,7 @@ pub fn reason_name(reason: u32) -> &'static str {
     REASONS.get(reason.wrapping_sub(1) as usize).copied().unwrap_or("UNKNOWN")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Op {
     pub id: u64,
     pub frame_owner: u32,
@@ -796,7 +799,8 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
-                // is the default (16, an eighth of a small pool) or an option that leaves 64 pairs for draws
+                // is the default (an eighth of the pool, at most 64; 16 at most before the reserve was resized, which
+                // the option bound below still admits) or an option that leaves 64 pairs for draws
                 if (wide && !ringed) != ((kinds, forms) == MASKS_TAG) || ringed != ((kinds, forms) == MASKS_RING) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
                 }
@@ -830,7 +834,7 @@ impl Reader {
                     // the reserves come from the legacy pool (all pairs without a ring)
                     let pool = ring.map_or(pairs, |g| g.legacy_pairs);
                     let call = if pool >= 128 { 32 } else { pool / 4 };
-                    let default = if pool >= 128 { 16 } else { pool / 8 };
+                    let default = (pool / 8).min(64);
                     let max = pool.saturating_sub(call + 64);
                     if r6 != 0 || call_pairs != call || (range_pairs != default && range_pairs > max) {
                         return bad(r, format!("AUTO_CONFIG reserves CALL {call_pairs} ranges {range_pairs} for {pairs} pairs"));
@@ -1399,6 +1403,7 @@ impl Reader {
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
         let known = match cfg.attached() {
+            Some(a) if a.tagged() => 4095,
             Some(a) if a.build_frames() => 2047,
             Some(a) if a.segments_covered() => 1023,
             _ => 63,
@@ -1423,7 +1428,7 @@ impl Reader {
                 }
             }
             for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED,
-                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY] {
+                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY, ST_PREINIT_FOREIGN] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -1995,6 +2000,107 @@ pub struct Report {
     pub frames: Vec<FrameView>,
     pub refusal: Option<&'static str>,
     pub export: Option<crate::model::ExportRecord>,
+    /// Attached captures without a FINAL STATUS only (None when sealed, so sealed output is unchanged): the
+    /// unrecorded tail and the capture totals as recorded or UNAVAILABLE.
+    pub unsealed: Option<Unsealed>,
+}
+
+/// Capture-level facts of an attached capture with no FINAL STATUS. The runtime queues only closed rows, so the
+/// live frame is generally not in the file and the last retained row is not the capture's last frame: what follows
+/// it is unrecorded, never assumed absent. A row is called OPEN only when the file itself marks it (FR_OPEN: the
+/// writer implied its closure, at a frame opened over an unclosed one or at the shutdown close).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unsealed {
+    /// The last retained frame row (owner, frame); None when no row was retained.
+    pub last_row: Option<(u32, u64)>,
+    /// The file marks that last row OPEN.
+    pub last_row_open: bool,
+    /// Retained rows the file marks OPEN.
+    pub open_rows: u64,
+    /// The capture-level tail fact ("tail not recorded: ...").
+    pub tail: String,
+    /// Capture totals, in TOTALS order, then ranges_refused for 1023/11 captures.
+    pub totals: Vec<CaptureTotal>,
+}
+
+/// One capture total of an unsealed capture: the last recorded STATUS counter (a STATUS that is not FINAL, so the
+/// capture total is at least this) or UNAVAILABLE with the reason. The sum over retained rows is never a capture
+/// total; where it is shown (ranges_refused) it is partial evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureTotal {
+    pub name: &'static str,
+    pub value: Option<u64>,
+    /// Where the value comes from, or why it is unavailable.
+    pub note: String,
+    /// ranges_refused only: the AUTO ranges refused counted in retained rows (COVERAGE u32@440).
+    pub retained_rows: Option<u64>,
+}
+
+impl Unsealed {
+    pub fn total(&self, name: &str) -> Option<&CaptureTotal> {
+        self.totals.iter().find(|t| t.name == name)
+    }
+}
+
+/// Capture totals an unsealed capture reports from its last STATUS: (name, STATUS counter index).
+pub const TOTALS: [(&str, usize); 4] =
+    [("operations_written", 2), ("operations_dropped", 3), ("frames_written", 5), ("frames_lost", 6)];
+
+pub const TOTAL_LAST_STATUS: &str = "last STATUS, not FINAL: the capture total is at least this";
+pub const TOTAL_NO_STATUS: &str = "no STATUS recorded";
+/// No writer records a capture-level count of refused AUTO ranges: STATUS carries none, and a range refused while no
+/// coverage frame is open counts in no row.
+pub const RANGES_REFUSED_UNRECORDED: &str = "no capture-level count is recorded (STATUS has none; a range refused \
+with no open frame counts in no row)";
+
+fn unsealed_facts(inv: &Inventory, tagged: bool) -> Unsealed {
+    let last = inv.frames.last();
+    let tail = match last {
+        None => "tail not recorded: no frame row retained; frames may exist (no FINAL status)".to_string(),
+        Some(f) if f.flags & FR_OPEN != 0 => format!("tail not recorded: frames after #{} (owner {}) may exist (no \
+            FINAL status); row #{} is marked OPEN in the file (closure implied, end not observed)", f.frame, f.owner,
+            f.frame),
+        Some(f) => format!("tail not recorded: frames after #{} (owner {}) may exist (no FINAL status; the writer \
+            queues only closed rows, so a live frame is not in the file)", f.frame, f.owner),
+    };
+    let status = inv.last_status.as_ref();
+    let mut totals: Vec<CaptureTotal> = TOTALS.iter().map(|&(name, i)| CaptureTotal {
+        name,
+        value: status.map(|s| s.counters[i]),
+        note: (if status.is_some() { TOTAL_LAST_STATUS } else { TOTAL_NO_STATUS }).to_string(),
+        retained_rows: None,
+    }).collect();
+    if tagged {
+        let sum = inv.frames.iter().fold(0u64, |a, f| a.saturating_add(u64::from(f.ranges_refused)));
+        totals.push(CaptureTotal {
+            name: "ranges_refused",
+            value: None,
+            note: RANGES_REFUSED_UNRECORDED.to_string(),
+            retained_rows: Some(sum),
+        });
+    }
+    Unsealed {
+        last_row: last.map(|f| (f.owner, f.frame)),
+        last_row_open: last.is_some_and(|f| f.flags & FR_OPEN != 0),
+        open_rows: inv.frames.iter().filter(|f| f.flags & FR_OPEN != 0).count() as u64,
+        tail,
+        totals,
+    }
+}
+
+/// The capture totals line of an unsealed capture.
+fn totals_text(u: &Unsealed) -> String {
+    let parts: Vec<String> = u.totals.iter().map(|t| {
+        let mut s = match t.value {
+            Some(v) => format!("{} >= {v} ({})", t.name, t.note),
+            None => format!("{} UNAVAILABLE ({})", t.name, t.note),
+        };
+        if let Some(n) = t.retained_rows {
+            s.push_str(&format!(", {n} in retained rows (partial)"));
+        }
+        s
+    }).collect();
+    format!("capture totals: {}", parts.join("; "))
 }
 
 impl Report {
@@ -2115,6 +2221,12 @@ pub fn raw_duration_ppu_bounds(map: &MapState, raw: u64) -> Option<(u64, u64)> {
 /// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
 /// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
 pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
+    overlap_merged(&certain_busy_ppu(anchors, m, busy), scopes)
+}
+
+/// RSX busy intervals (raw) mapped to the PPU interval the map certainly places them in (begin's upper bound to
+/// end's lower bound), sorted and merged; intervals outside the map's support or with no certain extent are dropped.
+pub fn certain_busy_ppu(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)]) -> Vec<(u64, u64)> {
     let mut iv: Vec<(u64, u64)> = busy.iter().filter_map(|&(b, e)| {
         let (_, start) = raw_to_ppu_bounds(anchors, m, b)?;
         let (end, _) = raw_to_ppu_bounds(anchors, m, e)?;
@@ -2128,10 +2240,18 @@ pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes:
             _ => merged.push((b, e)),
         }
     }
-    scopes.iter().fold(0u64, |acc, &(sb, se)| merged.iter().fold(acc, |a, &(b, e)| {
-        let (lo, hi) = (b.max(sb), e.min(se));
-        if lo < hi { a.saturating_add(hi - lo) } else { a }
-    }))
+    merged
+}
+
+/// Total time the PPU `scopes` overlap the sorted, merged (disjoint) `merged` intervals.
+fn overlap_merged(merged: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
+    scopes.iter().fold(0u64, |acc, &(sb, se)| {
+        let first = merged.partition_point(|&(_, e)| e <= sb);
+        merged[first..].iter().take_while(|&&(b, _)| b < se).fold(acc, |a, &(b, e)| {
+            let (lo, hi) = (b.max(sb), e.min(se));
+            if lo < hi { a.saturating_add(hi - lo) } else { a }
+        })
+    })
 }
 
 pub(crate) struct AnalysisSupport<'a> {
@@ -2193,6 +2313,9 @@ pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::E
     support: AnalysisSupport<'_>, map: MapState) -> Report {
     let mut rep = base_report(inv, export);
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
+    if !inv.final_seen {
+        rep.unsealed = Some(unsealed_facts(inv, attached.tagged()));
+    }
     let build = attached.build_frames();
     // Bounded verdicts for untimed draws come with the bracketed-clock writer (127/11); older captures keep their
     // exact rules and output.
@@ -2214,6 +2337,21 @@ pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::E
     // names as without a record of their own are not untimed in the calling frame, and those refused while building
     // are not untimed in their build frame (they ran inside the bracket, not there).
     let bracket_ok = |o: &Op| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0;
+    // 1023/11 flip-wait evidence: every owner's certain RSX busy time on the PPU clock, from all its timed records
+    // and whole-CALL brackets with valid clocks. A frame's work is submitted at its end and the RSX may run it one or
+    // more frames later, so a flip wait blocks on whatever work of its owner the RSX is running, not only its own.
+    let owner_busy: BTreeMap<u32, Vec<(u64, u64)>> = match &map {
+        MapState::Qualified(m) => {
+            let mut raw: BTreeMap<u32, Vec<(u64, u64)>> = BTreeMap::new();
+            for o in inv.ops.iter().filter(|o| (o.covered() || bracket_ok(o)) && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
+                if let Some((owner, _)) = o.token() {
+                    raw.entry(owner).or_default().push((o.raw_begin, o.raw_end));
+                }
+            }
+            raw.into_iter().map(|(k, v)| (k, certain_busy_ppu(&inv.clocks, m, &v))).collect()
+        }
+        _ => BTreeMap::new(),
+    };
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
@@ -2318,14 +2456,14 @@ pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::E
         let last = last_frame == Some((f.owner, f.frame));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
-        // 1023/11: blocked flip-wait time that certainly overlaps RSX busy time: (overlap, scopes' elapsed), None when
-        // unusable (no scope, more than two, the map unqualified, or a timed record not raw-valid)
+        // 1023/11: blocked flip-wait time that certainly overlaps its owner's RSX busy time, from any frame of that
+        // owner (owner_busy): (overlap, scopes' elapsed), None when unusable (no scope, more than two, the map
+        // unqualified, or a timed record of this frame not raw-valid)
         let flip_overlap = match (&f.flip_wait_at, &map) {
-            (Some(at), MapState::Qualified(m)) if !at.is_empty() && at.len() == f.flip_waits as usize
+            (Some(at), MapState::Qualified(_)) if !at.is_empty() && at.len() == f.flip_waits as usize
                 && f.flip_wait_spanning == 0 && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) => {
-                let busy: Vec<(u64, u64)> = timed_set.iter().map(|o| (o.raw_begin, o.raw_end)).collect();
                 let elapsed = at.iter().fold(0u64, |a, &(b, e)| a.saturating_add(e - b));
-                Some((certain_overlap(&inv.clocks, m, &busy, at), elapsed))
+                Some((overlap_merged(owner_busy.get(&f.owner).map_or(&[][..], |v| &v[..]), at), elapsed))
             }
             _ => None,
         };
@@ -2670,7 +2808,14 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0) {
         writeln!(out, "SEGMENT REPLAY: {SEGMENT_REPLAY}; every frame is UNKNOWN")?;
     }
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        writeln!(out, "{PREINIT_FOREIGN} (the defaults were used)")?;
+    }
     writeln!(out, "frames delimited by: {}", frame_source(r))?;
+    if let Some(u) = &r.unsealed {
+        writeln!(out, "{}", u.tail)?;
+        writeln!(out, "{}", totals_text(u))?;
+    }
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
     writeln!(out, "note: {INTERVAL_NOTE}")?;
     let failed = r.clocks.iter().filter(|a| a.flags != CK_VALID).count();
@@ -2695,6 +2840,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
             f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
+        if r.unsealed.is_some() && f.flags & FR_OPEN != 0 {
+            writeln!(out, "  row OPEN in the file: the writer implied its closure; its end was not observed")?;
+        }
         if r.build_frames {
             if r.call_bracket {
                 writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
@@ -2835,6 +2983,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if f.call_brackets != 0 {
             v["call_brackets"] = json!(f.call_brackets);
         }
+        if r.unsealed.is_some() {
+            // unsealed captures only, so sealed captures keep their exact JSON: OPEN only where the file marks it
+            v["row_state"] = json!(if f.flags & FR_OPEN != 0 { "OPEN" } else { "CLOSED" });
+        }
         if r.tagged {
             v["flip_wait_intervals"] = json!(f.flip_wait_at.as_ref().map(|at| at.iter()
                 .map(|&(b,e)| json!({"tb_begin":b,"tb_end":e})).collect::<Vec<_>>()));
@@ -2921,10 +3073,37 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        v["preinit_options_ignored"] = json!(PREINIT_FOREIGN);
+    }
     }
     if r.ops_dropped != 0 {
         // only when the reader could not retain every record, so complete captures keep their exact JSON
         v["operations"]["dropped"] = json!(r.ops_dropped);
+    }
+    if let Some(u) = &r.unsealed {
+        // attached captures without a FINAL STATUS only, so sealed captures keep their exact JSON
+        v["sealed"] = json!(false);
+        v["tail"] = json!({
+            "recorded": false,
+            "last_row": u.last_row.map(|(owner, frame)| json!({"owner": owner, "frame": frame})),
+            "last_row_open": u.last_row_open,
+            "open_rows": u.open_rows,
+            "text": u.tail,
+        });
+        let mut totals = serde_json::Map::new();
+        for t in &u.totals {
+            let mut o = match t.value {
+                Some(n) => json!({"value": n, "at_least": true, "source": t.note}),
+                None => json!({"value": null, "reason": t.note}),
+            };
+            if let Some(n) = t.retained_rows {
+                o["retained_rows"] = json!(n);
+                o["retained_rows_note"] = json!("refusals counted in retained rows only: partial, not a capture total");
+            }
+            totals.insert(t.name.to_string(), o);
+        }
+        v["capture_totals"] = serde_json::Value::Object(totals);
     }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
@@ -3071,6 +3250,32 @@ pub struct RangeRow {
     pub count: u64,
     pub raw: u64,
 }
+/// One AUTO range OCCURRENCE in one frame (t_f77eb7ed, EMP G): the range's name, its nesting depth (1..=4, from the
+/// RANGE record), its inclusive raw RSX span (the range's own report pair), and its reconstructed parent and
+/// exclusive span.  `parent`/`exclusive_raw` are Some only when the nesting of this frame's retained ranges is fully
+/// and unambiguously reconstructable (each level present and properly nested); otherwise they are None and
+/// `reason` says why (e.g. a same-depth sibling whose interval overlaps, an unresolvable depth-1 parent, or a depth
+/// with no occurrence at all).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeOccurrence {
+    pub name: String,
+    pub depth: u32,
+    /// Begin of the range's own report pair.
+    pub begin: u64,
+    /// End of the range's own report pair.
+    pub end: u64,
+    /// Inclusive raw span: end - begin (the range's own report pair, independent of per-draw timing).
+    pub inclusive_raw: u64,
+    /// The name of the nearest enclosing range at depth - 1, Some only when it is the unique one containing this
+    /// occurrence at depth - 1 in this frame.
+    pub parent: Option<String>,
+    /// Inclusive minus the summed inclusive of every occurrence whose parent is this one.  Some for a leaf (== its
+    /// inclusive) and for a parent whose children population is unambiguously the retained set; None with `reason`
+    /// when the nesting cannot be reconstructed (see `RangeOccurrence::reason`).
+    pub exclusive_raw: Option<u64>,
+    /// Why `parent`/`exclusive_raw` are None (present when either is None).
+    pub reason: Option<String>,
+}
 #[derive(Debug, Clone, Default)]
 pub struct TagFrame {
     pub owner: u32,
@@ -3083,6 +3288,9 @@ pub struct TagFrame {
     pub unrepresented: u32,
     pub tags: BTreeMap<u32, TagRow>,
     pub ranges: BTreeMap<String, RangeRow>,
+    /// Per-occurrence ranges (t_f77eb7ed): one entry per retained RANGE record in this frame, with depth,
+    /// inclusive raw span, and parent/exclusive when the nesting is reconstructable from the retained records.
+    pub range_occurrences: Vec<RangeOccurrence>,
     /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
     /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
     /// frame `outside_timed_range`).
@@ -3094,6 +3302,8 @@ pub struct TagFrame {
 pub struct ByTag {
     pub tagged: bool,
     pub frames: Vec<TagFrame>,
+    /// Unsealed captures only (no FINAL STATUS): the tail fact; the summaries then cover the retained rows only.
+    pub tail: Option<String>,
 }
 
 fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
@@ -3112,9 +3322,40 @@ fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
 
 /// Per frame and per tag, from the capture's records and rows (no verdict).
 pub fn by_tag(cap: &Capture) -> ByTag {
+    by_tag_range(cap, None)
+}
+
+/// `by_tag` scoped to a frame range (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).  `frame_range = None`
+/// returns every frame, matching `by_tag(cap)`.
+pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<u64>>) -> ByTag {
+    let mut out = by_tag_impl(cap);
+    if let Some(range) = frame_range {
+        out.frames.retain(|f| range.contains(&f.frame));
+    }
+    out
+}
+
+/// Per frame and per tag, from the capture's records and rows, scoped to the
+/// frames of capture window `w` (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).
+pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
+    // The same membership rule as every other `--window` view (CaptureWindow::contains_frame): an open window's
+    // last_frame is the last frame the reader observed, and a window with no last frame holds no frames.
+    let mut out = by_tag_impl(cap);
+    out.frames.retain(|f| w.contains_frame(f.frame));
+    out
+}
+
+/// The body of `by_tag`, unscoped.
+fn by_tag_impl(cap: &Capture) -> ByTag {
     let Some(inv) = cap.auto.as_ref() else { return ByTag::default() };
     let tagged = matches!(&inv.config, Some(Config::Attached(a)) if a.tagged());
-    let mut out = ByTag { tagged, frames: Vec::new() };
+    let tail = match &inv.config {
+        Some(Config::Attached(a)) if !inv.final_seen => Some(unsealed_facts(inv, a.tagged()).tail),
+        _ => None,
+    };
+    let mut out = ByTag { tagged, frames: Vec::new(), tail };
     if !tagged {
         return out;
     }
@@ -3147,9 +3388,97 @@ pub fn by_tag(cap: &Capture) -> ByTag {
         for (tag, iv) in intervals {
             tf.tags.entry(tag).or_default().busy_raw = merged(iv);
         }
+        let range_ops: Vec<Op> = mine.iter().filter(|o| o.kind == KIND_RANGE).map(|o| (*o).clone()).collect();
+        tf.range_occurrences = reconstruct_range_occurrences(&range_ops, &cap.descriptors);
         out.frames.push(tf);
     }
     out
+}
+
+/// Reconstruct the per-occurrence range records of one frame, resolving parent (containment at depth - 1) and, only
+/// where the ancestor chain is present and properly nested, exclusive (inclusive minus own-children inclusive).
+fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::model::Descriptor>) -> Vec<RangeOccurrence> {
+    let mut occs: Vec<RangeOccurrence> = ops.iter()
+        .filter(|o| o.kind == KIND_RANGE && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0 && o.raw_end >= o.raw_begin)
+        .map(|o| {
+            let name = descriptors.get(&(o.args[0] - 1)).map_or_else(
+                || format!("descriptor {}", o.args[0] - 1), |d| d.name.clone());
+            RangeOccurrence { name, depth: o.depth, begin: o.raw_begin, end: o.raw_end,
+                              inclusive_raw: o.raw_end - o.raw_begin,
+                              parent: None, exclusive_raw: None, reason: None }
+        })
+        .collect();
+    occs.sort_by_key(|r| (r.depth, r.begin));
+    let contains = |outer: &RangeOccurrence, inner: &RangeOccurrence|
+        outer.begin <= inner.begin && inner.end <= outer.end;
+
+    // Resolve the immediate parent BY OCCURRENCE (index), never by name: the unique occurrence at depth - 1 whose
+    // interval contains this one. Names repeat (one "pass" range per pass), so a name cannot identify a parent.
+    let n = occs.len();
+    let mut parent_idx: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        if occs[i].depth <= 1 { continue; }
+        let containing = (0..n)
+            .filter(|&j| occs[j].depth == occs[i].depth - 1 && contains(&occs[j], &occs[i]))
+            .collect::<Vec<usize>>();
+        match containing.as_slice() {
+            [j] => { parent_idx[i] = Some(*j); occs[i].parent = Some(occs[*j].name.clone()); }
+            [] => occs[i].reason = Some(format!("no occurrence at depth {} contains this one — ancestry not established", occs[i].depth - 1)),
+            _ => occs[i].reason = Some(format!("{} occurrences at depth {} contain this one — ambiguous", containing.len(), occs[i].depth - 1)),
+        }
+    }
+
+    // An occurrence's chain is complete when every ancestor down to depth 1 was resolved by index. Computed before
+    // any occurrence is updated, so the walk reads only the resolved parents.
+    let chain_complete: Vec<bool> = (0..n).map(|i| {
+        let mut cur = i;
+        while occs[cur].depth > 1 {
+            match parent_idx[cur] { Some(p) => cur = p, None => return false }
+        }
+        true
+    }).collect();
+    // Any DEEPER occurrence inside this span whose own chain is incomplete (an unresolved parent at depth + 1, or an
+    // orphan further down with a missing level in between) may hold time of this one that cannot be assigned.
+    let contained_unresolved: Vec<bool> = (0..n).map(|i| {
+        (0..n).any(|c| occs[c].depth > occs[i].depth && !chain_complete[c] && contains(&occs[i], &occs[c]))
+    }).collect();
+    // Children must be pairwise disjoint for inclusive minus their sum to be this occurrence's own time: overlapping
+    // siblings double-count their shared span (a sum <= inclusive does not establish disjointness).
+    let children_overlap: Vec<Option<(u64, u64, u64, u64)>> = (0..n).map(|i| {
+        let mut kids: Vec<(u64, u64)> = (0..n).filter(|&c| parent_idx[c] == Some(i)).map(|c| (occs[c].begin, occs[c].end)).collect();
+        kids.sort_unstable();
+        kids.windows(2).find(|w| w[1].0 < w[0].1).map(|w| (w[0].0, w[0].1, w[1].0, w[1].1))
+    }).collect();
+    let child_sums: Vec<u64> = (0..n).map(|i| {
+        (0..n).filter(|&c| parent_idx[c] == Some(i)).fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw))
+    }).collect();
+    for i in 0..n {
+        if occs[i].depth > 1 && !chain_complete[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("ancestor chain to depth 1 incomplete from {} — parent/exclusive unavailable", occs[i].name)); }
+            continue;
+        }
+        // A deeper occurrence inside this span whose own parent could not be resolved may belong to this one: its
+        // time cannot be assigned, so this occurrence's exclusive is not claimed.
+        if contained_unresolved[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some("a nested range inside this one has no resolved parent — exclusive unavailable".into()); }
+            continue;
+        }
+        if let Some((a, b, c, d)) = children_overlap[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children [{a},{b}] and [{c},{d}] overlap — exclusive unavailable")); }
+            continue;
+        }
+        let child_sum = child_sums[i];
+        if child_sum > occs[i].inclusive_raw {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children sum {child_sum} exceeds own inclusive {} — exclusive uncomputable", occs[i].inclusive_raw)); }
+        } else {
+            occs[i].exclusive_raw = Some(occs[i].inclusive_raw - child_sum);
+        }
+    }
+    occs
 }
 
 fn median(mut v: Vec<u64>) -> u64 {
@@ -3195,6 +3524,25 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     }).collect()
 }
 
+/// Whole-window summary per range name (t_f77eb7ed, EMP G): (distinct (owner, frame) pairs the name occurs in,
+/// occurrences, sum of each occurrence's inclusive raw span, sum of each occurrence's exclusive raw span where
+/// available, occurrences whose exclusive could not be reconstructed from retained records).
+pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
+    let mut per: BTreeMap<String, (u64, u64, u64, u64, u64)> = BTreeMap::new();
+    let mut seen: std::collections::BTreeSet<(String, u32, u64)> = std::collections::BTreeSet::new();
+    for f in &b.frames {
+        for r in &f.range_occurrences {
+            let entry = per.entry(r.name.clone()).or_default();
+            if seen.insert((r.name.clone(), f.owner, f.frame)) { entry.0 += 1; }
+            entry.1 += 1;
+            entry.2 = entry.2.saturating_add(r.inclusive_raw);
+            if let Some(e) = r.exclusive_raw { entry.3 = entry.3.saturating_add(e); }
+            else { entry.4 += 1; }
+        }
+    }
+    per
+}
+
 pub const BY_TAG_NOTE: &str = "raw RSX report-timestamp ticks; busy = merged timed intervals of the tag's records and \
 whole-CALL brackets (gaps between them not counted); untimed ring draws carry no tag and are counted per frame only; \
 range time is each range's own report pair";
@@ -3204,6 +3552,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         return writeln!(out, "no tags: the capture's writer does not record them (CONFIG before 1023/11)");
     }
     writeln!(out, "{BY_TAG_NOTE}")?;
+    if let Some(t) = &b.tail {
+        writeln!(out, "{t}; the summary covers the retained rows only")?;
+    }
     for f in &b.frames {
         writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
         for (t, r) in &f.tags {
@@ -3212,6 +3563,14 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         for (n, r) in &f.ranges {
             writeln!(out, "  range {n}: {} x, {} ticks", r.count, r.raw)?;
         }
+        for r in &f.range_occurrences {
+            let parent = match &r.parent { Some(s) => format!(" parent {s}"), None => String::new() };
+            let exclusive = match r.exclusive_raw {
+                Some(e) => format!(" exclusive {e}"),
+                None => format!(" exclusive unavailable{}", r.reason.as_deref().map(|rs| format!(" ({rs})")).unwrap_or_default()),
+            };
+            writeln!(out, "    occurrence {} depth {} inclusive {} ticks{parent}{exclusive}", r.name, r.depth, r.inclusive_raw)?;
+        }
     }
     writeln!(out, "summary")?;
     for (t, (n, ops, busy, med, hi)) in tag_summary(b) {
@@ -3219,6 +3578,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     }
     for (name, (n, count, raw, med, hi)) in range_summary(b) {
         writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}, p95 per frame {hi}")?;
+    }
+    for (name, (frames, occurrences, inclusive_sum, exclusive_sum, exclusive_unavailable)) in range_occurrence_summary(b) {
+        writeln!(out, "  range {name}: {frames} frame(s), {occurrences} occurrence(s), inclusive sum {inclusive_sum}, exclusive sum {exclusive_sum}, exclusive unavailable {exclusive_unavailable}")?;
     }
     Ok(())
 }
@@ -3232,13 +3594,24 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         "tags": f.tags.iter().map(|(t, r)| json!({"tag": t, "ops": r.ops, "busy_raw": r.busy_raw,
             "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
         "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
+        "range_occurrences": f.range_occurrences.iter().map(|r| json!({
+            "name": r.name, "depth": r.depth, "begin": r.begin, "end": r.end,
+            "inclusive_raw": r.inclusive_raw, "parent": r.parent,
+            "exclusive_raw": r.exclusive_raw, "reason": r.reason,
+        })).collect::<Vec<_>>(),
     })).collect();
     let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med, hi))| json!({
         "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
     let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({
         "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med, "raw_p95": hi})).collect();
-    let v = json!({"schema": 1, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
-        "summary": {"tags": tags, "ranges": ranges}});
+    let range_occurrences: Vec<serde_json::Value> = range_occurrence_summary(b).into_iter().map(|(name, (frames, occurrences, incl, excl, unavail))| json!({
+        "name": name, "frames": frames, "occurrences": occurrences, "inclusive_sum": incl, "exclusive_sum": excl, "exclusive_unavailable": unavail})).collect();
+    let mut v = json!({"schema": 2, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
+        "summary": {"tags": tags, "ranges": ranges, "range_occurrences": range_occurrences}});
+    if let Some(t) = &b.tail {
+        // unsealed captures only, so sealed captures keep their exact JSON
+        v["tail"] = json!(t);
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }
@@ -3255,7 +3628,7 @@ mod tests {
 
     #[test]
     fn p95_single_frame_matches_value() {
-        let b = ByTag { tagged: true, frames: vec![one(0xa, 42)] };
+        let b = ByTag { tagged: true, frames: vec![one(0xa, 42)], tail: None };
         let s = tag_summary(&b);
         assert_eq!(*s.get(&0xa).unwrap(), (1, 1, 42, 42, 42));
     }
@@ -3263,7 +3636,7 @@ mod tests {
     #[test]
     fn p95_odd_count_picks_rank95() {
         let frames: Vec<TagFrame> = vec![one(0xa, 40), one(0xa, 10), one(0xa, 30), one(0xa, 50), one(0xa, 20)];
-        let b = ByTag { tagged: true, frames };
+        let b = ByTag { tagged: true, frames, tail: None };
         let s = tag_summary(&b);
         let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
         assert_eq!((frames_n, ops), (5, 5), "5 frames, 1 op each");
@@ -3275,7 +3648,7 @@ mod tests {
     #[test]
     fn p95_even_count_picks_rank95() {
         let frames: Vec<TagFrame> = vec![one(0xa, 30), one(0xa, 10), one(0xa, 40), one(0xa, 20)];
-        let b = ByTag { tagged: true, frames };
+        let b = ByTag { tagged: true, frames, tail: None };
         let s = tag_summary(&b);
         let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
         assert_eq!((frames_n, ops), (4, 4));
@@ -3300,5 +3673,137 @@ mod tests {
         // rank = (95*21+99)/100 = 20 (1-based) → sorted[19] = 20
         assert_eq!(p95(v.clone()), 20);
         assert_ne!(p95(v), 21, "must not collapse to the max");
+    }
+
+    // ---- per-occurrence range reconstruction (t_f77eb7ed, EMP G) ----
+
+    /// A 160-byte-valid, raw-valid RANGE op: depth 1..=4, descriptor index `desc` (+1 in args[0]), interval [b, e).
+    fn ro(depth: u32, desc: u32, b: u64, e: u64) -> Op {
+        Op { frame_owner: 1, frame: 0, kind: KIND_RANGE,
+             flags: OP_TOKEN | OP_RAW_VALID, raw_begin: b, raw_end: e,
+             args: [desc + 1, 0, 0, 0, 0, 0, 0], depth, ..Op::default() }
+    }
+    fn dmap(pairs: &[(&str, u32)]) -> BTreeMap<u32, crate::model::Descriptor> {
+        pairs.iter().enumerate()
+            .map(|(i, (n, d))| (*d, crate::model::Descriptor {
+                index: i as u32, id: *d as u64, scope: 2, line: 0,
+                name: (*n).into(), logical_tag: String::new(), file: "t.rs".into() }))
+            .collect()
+    }
+
+    #[test]
+    fn range_occurrences_nested_resolve_parent_and_exclusive() {
+        let desc = dmap(&[("outer", 0), ("inner", 1)]);
+        // outer 100..120 (depth 1) contains inner 105..115 (depth 2)
+        let ops = vec![ro(1, 0, 100, 120), ro(2, 1, 105, 115)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert_eq!(r.as_slice(), &[
+            RangeOccurrence { name: "outer".into(), depth: 1, begin: 100, end: 120, inclusive_raw: 20,
+                              parent: None, exclusive_raw: Some(10), reason: None },
+            RangeOccurrence { name: "inner".into(), depth: 2, begin: 105, end: 115, inclusive_raw: 10,
+                              parent: Some("outer".into()), exclusive_raw: Some(10), reason: None },
+        ]);
+    }
+
+    #[test]
+    fn range_occurrence_without_retained_parent_is_unavailable() {
+        let desc = dmap(&[("orphan", 0)]);
+        // depth-2 occurrence but no depth-1 retained in this frame
+        let ops = vec![ro(2, 0, 100, 120)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert_eq!(r.as_slice(), &[
+            RangeOccurrence { name: "orphan".into(), depth: 2, begin: 100, end: 120, inclusive_raw: 20,
+                              parent: None, exclusive_raw: None,
+                              reason: Some("no occurrence at depth 1 contains this one — ancestry not established".into()) },
+        ]);
+    }
+
+    #[test]
+    fn range_occurrence_with_ambiguous_parent_is_unavailable() {
+        let desc = dmap(&[("a", 0), ("b", 1)]);
+        // two depth-1 both contain the depth-2: ambiguous -> no parent, no exclusive
+        let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 0, 150, 160)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let child = &r[2];
+        assert!(child.parent.is_none() && child.exclusive_raw.is_none(), "{child:?}");
+        assert_eq!(child.reason.as_deref(), Some("2 occurrences at depth 1 contain this one — ambiguous"));
+    }
+
+    #[test]
+    fn repeated_parent_names_resolve_by_occurrence_not_name() {
+        let desc = dmap(&[("pass", 0), ("draws", 1)]);
+        // two "pass" ranges (depth 1), each with one "draws" child; each parent's exclusive subtracts only its own
+        // child, not every child of every "pass"
+        let ops = vec![ro(1, 0, 100, 200), ro(2, 1, 110, 130), ro(1, 0, 300, 400), ro(2, 1, 310, 370)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let first = r.iter().find(|o| o.depth == 1 && o.begin == 100).unwrap();
+        let second = r.iter().find(|o| o.depth == 1 && o.begin == 300).unwrap();
+        assert_eq!(first.exclusive_raw, Some(100 - 20), "{first:?}");
+        assert_eq!(second.exclusive_raw, Some(100 - 60), "{second:?}");
+        assert!(r.iter().filter(|o| o.depth == 2).all(|o| o.parent.as_deref() == Some("pass") && o.exclusive_raw.is_some()));
+    }
+
+    #[test]
+    fn unresolved_nested_child_blocks_the_parents_exclusive() {
+        let desc = dmap(&[("a", 0), ("b", 1), ("c", 2)]);
+        // two overlapping depth-1 ranges both contain the depth-2 one: it has no parent, so neither depth-1
+        // occurrence may claim an exclusive
+        let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 2, 150, 160)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert!(r.iter().filter(|o| o.depth == 1).all(|o| o.exclusive_raw.is_none() && o.reason.is_some()), "{r:?}");
+    }
+
+    #[test]
+    fn orphan_deeper_descendant_blocks_the_ancestors_exclusive() {
+        let desc = dmap(&[("top", 0), ("deep", 1)]);
+        // depth 1 [0,100] contains a depth-3 [10,20] with no depth-2 occurrence: the depth-1 exclusive is not 100
+        let ops = vec![ro(1, 0, 0, 100), ro(3, 1, 10, 20)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let top = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(top.exclusive_raw, None, "{top:?}");
+        assert!(top.reason.is_some(), "{top:?}");
+    }
+
+    #[test]
+    fn overlapping_sibling_children_block_the_parents_exclusive() {
+        let desc = dmap(&[("p", 0), ("c", 1)]);
+        // parent [0,100] with depth-2 children [10,30] and [20,40]: each resolves uniquely, but they overlap, so
+        // 100 - (20 + 20) = 60 is not the parent's own time
+        let ops = vec![ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 20, 40)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let p = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(p.exclusive_raw, None, "{p:?}");
+        assert_eq!(p.reason.as_deref(), Some("own children [10,30] and [20,40] overlap — exclusive unavailable"));
+        // touching (not overlapping) children still give a numeric exclusive
+        let ok = reconstruct_range_occurrences(&[ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 30, 40)], &desc);
+        assert_eq!(ok.iter().find(|o| o.depth == 1).unwrap().exclusive_raw, Some(70));
+    }
+
+    #[test]
+    fn range_occurrence_summary_counts_frames_and_occurrences_separately() {
+        let occ = |b: u64, e: u64| RangeOccurrence { name: "pass".into(), depth: 1, begin: b, end: e, inclusive_raw: e - b,
+                                                    parent: None, exclusive_raw: Some(e - b), reason: None };
+        // two same-name ranges in ONE frame
+        let f = TagFrame { owner: 1, frame: 7, range_occurrences: vec![occ(0, 10), occ(20, 25)], ..TagFrame::default() };
+        let b = ByTag { tagged: true, frames: vec![f], tail: None };
+        let mut text = Vec::new();
+        write_by_tag_text(&mut text, &b).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("range pass: 1 frame(s), 2 occurrence(s), inclusive sum 15"), "{text}");
+        let mut js = Vec::new();
+        write_by_tag_json(&mut js, &b).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&js).unwrap();
+        let row = &v["summary"]["range_occurrences"][0];
+        assert_eq!((row["frames"].as_u64(), row["occurrences"].as_u64()), (Some(1), Some(2)), "{row}");
+    }
+
+    #[test]
+    fn range_occurrences_sibling_depth1_each_independent() {
+        let desc = dmap(&[("p", 0)]);
+        // two non-overlapping depth-1 ranges: each parent None, exclusive = its own inclusive
+        let ops = vec![ro(1, 0, 100, 110), ro(1, 0, 200, 210)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert!(r.iter().all(|o| o.parent.is_none() && o.exclusive_raw == Some(o.inclusive_raw) && o.reason.is_none()),
+                "{r:?}");
     }
 }

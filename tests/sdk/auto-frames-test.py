@@ -17,7 +17,7 @@ source=src/'auto_frames.c'
 mutations={
     'accounting':('if(remaining) return 0;','(void)remaining;','!auto_frames_close(&frames,42,0,20,0)'),
     'partial-ack':('if(!whole || !f ||','(void)whole; if(!f ||','!auto_frames_ack(&frames,42,0,0)'),
-    'implicit-close':('if(open || tb<q->live.tb_begin)','(void)open; if(tb<q->live.tb_begin)','f->frame==1 && f->flags==19'),
+    'implicit-close':('if(open || q->late || tb<q->live.tb_begin)','(void)open; if(q->late || tb<q->live.tb_begin)','f->frame==1 && f->flags==19'),
     'lost':('else REL(&q->lost,lost+1u);','else REL(&q->lost,lost);','frames.lost==1 && !frames.active'),
     'publication':('REL(&q->write_idx,w+1u);','__atomic_store_n(&q->write_idx,w+1u,__ATOMIC_RELAXED);','WARNING: ThreadSanitizer: data race'),
 }

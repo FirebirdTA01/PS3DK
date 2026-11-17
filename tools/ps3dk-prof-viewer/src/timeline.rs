@@ -8,7 +8,7 @@
 //! as a zero-length bar.
 
 use crate::model::{TimeBase, ZoneKey};
-use ps3dk_prof::Analysis;
+use ps3dk_prof::{Analysis, CaptureWindow};
 
 /// How a bar ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +62,18 @@ pub struct Timeline {
 }
 
 pub fn timeline(a: &Analysis) -> Timeline {
+    build_timeline(a, None)
+}
+
+/// `timeline` scoped to capture window `w`: lanes are shown with their bar
+/// set restricted to the spans `a` attributes to the window (by `span_in_window`) and
+/// their frame markers restricted to frames `w` contains (by `contains_frame`).
+/// The AUTO coverage contribution to the axis is also scoped by the same rule.
+pub fn timeline_window(a: &Analysis, w: &CaptureWindow) -> Timeline {
+    build_timeline(a, Some(w))
+}
+
+fn build_timeline(a: &Analysis, window: Option<&CaptureWindow>) -> Timeline {
     let cap = &a.capture;
     let mut lo = u64::MAX;
     let mut hi = 0u64;
@@ -77,6 +89,15 @@ pub fn timeline(a: &Analysis) -> Timeline {
         let mut max_depth = 0u8;
         for &idx in &lane.spans {
             let s = &cap.spans[idx];
+            // Window scope: only spans the reader attributes to the window
+            // (span_in_window: attributed frame in the window, or frame
+            // context in the window, or the capture has exactly one window
+            // and this span has neither).
+            if let Some(w) = window {
+                if !a.span_in_window(s, idx, w) {
+                    continue;
+                }
+            }
             seen(s.begin_tb);
             let end = if s.is_censored() {
                 // A truncated END still has a timestamp: it extends the
@@ -113,7 +134,11 @@ pub fn timeline(a: &Analysis) -> Timeline {
             });
         }
         bars.sort_by_key(|b| (b.begin, b.depth));
-        let frames: Vec<u64> = lane.frames.iter().map(|f| f.tb).collect();
+        let frames: Vec<u64> = if let Some(w) = window {
+            lane.frames.iter().filter(|f| w.contains_frame(f.id)).map(|f| f.tb).collect()
+        } else {
+            lane.frames.iter().map(|f| f.tb).collect()
+        };
         for &f in &frames {
             seen(f);
         }
@@ -137,7 +162,9 @@ pub fn timeline(a: &Analysis) -> Timeline {
     // not establish an axis.
     if let Some(auto) = &cap.auto {
         for f in &auto.frames {
-            if f.flags & ps3dk_prof::auto_rsx::FR_TOKEN != 0 && f.tb_end >= f.tb_begin {
+            if f.flags & ps3dk_prof::auto_rsx::FR_TOKEN != 0 && f.tb_end >= f.tb_begin
+                && (window.is_none() || window.is_some_and(|w| w.contains_frame(f.frame)))
+            {
                 seen(f.tb_begin);
                 seen(f.tb_end);
             }

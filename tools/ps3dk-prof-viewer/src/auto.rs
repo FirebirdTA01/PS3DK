@@ -40,6 +40,18 @@ pub fn passes_build(cap: &Capture) -> PassesView {
     PassesView { by, tags, ranges, map, tb_freq }
 }
 
+/// Builds the Passes page view scoped to a capture window's frames.  Uses the
+/// reader's `by_tag_window` (`RangeOccurrence` and the per-name sums are
+/// rebuilt only over the window's frames).
+pub fn passes_build_window(cap: &Capture, w: &ps3dk_prof::CaptureWindow) -> PassesView {
+    let by = auto_rsx::by_tag_window(cap, w);
+    let tags = auto_rsx::tag_summary(&by);
+    let ranges = auto_rsx::range_summary(&by);
+    let map = cap.auto.as_ref().map(auto_rsx::qualify);
+    let tb_freq = cap.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0);
+    PassesView { by, tags, ranges, map, tb_freq }
+}
+
 impl PassesView {
     /// Whether the capture's AUTO writer has the tag capability (CONFIG 1023/11).
     pub fn has_tags(&self) -> bool {
@@ -76,6 +88,27 @@ impl AutoView {
         AutoView { report, tb_freq, busy }
     }
 
+    /// The Automatic page view scoped to capture window `w`, exactly as the
+    /// CLI's `auto --window` renders it: the report filtered by the window
+    /// (`Report::filter_window`) and the RSX busy intervals confined to the
+    /// window's frames (`w.contains_frame`).  Analyzes the capture exactly
+    /// once; the reader's `busy_timeline` needs the full report for its
+    /// map/refusal checks, so we build busy from it and then retain only the
+    /// intervals this window holds.
+    pub fn build_window(cap: &Capture, w: &ps3dk_prof::CaptureWindow) -> AutoView {
+        let full = auto_rsx::analyze(cap);
+        let tb_freq = cap
+            .clock
+            .as_ref()
+            .map(|c| c.freq_hz)
+            .filter(|&f| f > 0)
+            .unwrap_or(79_800_000);
+        let report = full.filter_window(w);
+        let mut busy = auto_rsx::busy_timeline(cap, &full);
+        busy.bars.retain(|b| w.contains_frame(b.frame));
+        AutoView { report, tb_freq, busy }
+    }
+
     /// Whether this capture contains automatic profiler capability (FLAG_AUTO / auto chunks).
     pub fn has_auto(&self) -> bool {
         self.report.capability
@@ -94,9 +127,18 @@ impl AutoView {
             .is_some_and(|s| s.flags & auto_rsx::ST_FRAME_MARK_MISSED != 0)
     }
 
-    /// Coverage records lost to ring buffer capacity (counter 6, "lost" in coverage rows).
-    pub fn coverage_rows_lost(&self) -> u64 {
-        self.report.status.as_ref().map_or(0, |s| s.counters[6])
+    /// Coverage records lost to ring buffer capacity (counter 6, "lost" in coverage rows). For an unsealed capture
+    /// this is the reader's capture total: the last STATUS value (a lower bound), or None (UNAVAILABLE) without one.
+    pub fn coverage_rows_lost(&self) -> Option<u64> {
+        match &self.report.unsealed {
+            Some(u) => u.total("frames_lost").and_then(|t| t.value),
+            None => self.report.status.as_ref().map(|s| s.counters[6]),
+        }
+    }
+
+    /// The reader's unsealed-capture facts (no FINAL STATUS): the unrecorded tail and the capture totals.
+    pub fn unsealed(&self) -> Option<&auto_rsx::Unsealed> {
+        self.report.unsealed.as_ref()
     }
 
     /// Operations dropped past the retention ceiling.

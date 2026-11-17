@@ -234,11 +234,11 @@ static int au_status(au_state *s,const uint8_t *p,size_t n)
         if(au_inc(&s->statuses,1))return PFR_COUNTER_RANGE;
         memcpy(s->status,p,n);s->status_bytes=(uint32_t)n;s->flags|=AU_STATUS|AU_FINAL;return PFR_OK;
     }
-    if((flags&~((au_mask(s)&32)?2047u:au_mask(s)!=7?1023u:63u))||((flags&12)&&!lower))return PFR_INVALID;
+    if((flags&~((au_mask(s)&512)?4095u:(au_mask(s)&32)?2047u:au_mask(s)!=7?1023u:63u))||((flags&12)&&!lower))return PFR_INVALID;
     for(j=0;j<15;++j){value[j]=r64(p+8+8*j);
         if(s->status_bytes&&j!=4&&j!=14&&value[j]<r64(s->status+8+8*j))return PFR_INVALID;
     }
-    if(s->status_bytes&&((r16(s->status+2)&UINT16_C(2036))&~flags))return PFR_INVALID;
+    if(s->status_bytes&&((r16(s->status+2)&UINT16_C(4084))&~flags))return PFR_INVALID;
     if(!(flags&4)){sum=value[2];if(!plus64(&sum,value[3])||!plus64(&sum,value[4])||sum>value[1]||(!lower&&sum!=value[1]))return PFR_INVALID;}
     if(value[0]<s->last_op||value[13]<s->max_snapshot||value[13]>UINT32_MAX||value[14]>r32(s->config+48)||value[10]>value[9])return PFR_INVALID;
     if(ring){

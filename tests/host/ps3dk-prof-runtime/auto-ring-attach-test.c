@@ -143,7 +143,7 @@ int main(void)
     assert(a->operations.capacity==16384 && a->operations.pairs==252);
     assert((uintptr_t)a->operations.entries==a->ring_ea+(16u<<20));
     ps3dk_prof__auto_test_reserves(reserves);
-    assert(reserves[0]==32 && reserves[1]==16);
+    assert(reserves[0]==32 && reserves[1]==31);                  /* from the 252 legacy pairs: 252/8 */
     assert(a->ring_port.ready && a->ring_port.label==245 && a->ring_port.report_first==1544 &&
            a->ring_port.report_count==504);
     assert(g_prof->auto_lease.ring_label==245 && g_prof->auto_lease.first==1024 && g_prof->auto_lease.count==1024);

@@ -29,7 +29,10 @@ enum { AUTO_FINAL=1, AUTO_LOWER_BOUND=2, AUTO_SATURATED=4, AUTO_OWNER_UNACK=8,
        /* a CALL segment whose build carried timed draws was called again without a rebuild: its embedded
         * report writes ran again and may have overwritten other records' timestamps (sticky; every per-frame
         * verdict is UNKNOWN) */
-       AUTO_STATUS_SEGMENT_REPLAY=1024 };
+       AUTO_STATUS_SEGMENT_REPLAY=1024,
+       /* 1023/11: options were set before cellGcmInit (ps3dk_prof_auto_options_set) on another thread than the one
+        * whose intercepted init attached: they were ignored and the defaults used (sticky) */
+       AUTO_STATUS_PREINIT_FOREIGN=2048 };
 /* COVERAGE row flag: this frame was opened by a flip on the owner thread. */
 enum { AUTO_FRAME_ROW_FLIP=32,
        AUTO_FRAME_ROW_PRESENT=64 /* this writer observed presentation in this row (block at 352) */ };

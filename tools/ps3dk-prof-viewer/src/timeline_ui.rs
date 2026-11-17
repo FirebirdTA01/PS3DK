@@ -37,6 +37,8 @@ const ZONE_COLORS: [Color32; 10] = [
 pub struct TimelineState {
     pub tl: Timeline,
     pub view: View,
+    /// The capture window the bars are scoped to (None = all frames); kept across live snapshots.
+    pub window: Option<ps3dk_prof::CaptureWindow>,
     box_from: Option<f32>,
     /// Where each track's bar area was drawn last frame, by track index.
     pub track_areas: Vec<Rect>,
@@ -93,6 +95,7 @@ impl TimelineState {
         TimelineState {
             tl,
             view,
+            window: None,
             box_from: None,
             track_areas: Vec::new(),
             live: false,
@@ -165,7 +168,11 @@ impl TimelineState {
     /// when the window stays put, and cancelled when the window moves under
     /// it (its pixels would no longer mean the same times).
     pub fn refresh(&mut self, a: &Analysis) {
-        self.tl = crate::timeline::timeline(a);
+        // A newer snapshot keeps the picked capture window (and the user's view): only the picker refits.
+        self.tl = match &self.window {
+            Some(w) => crate::timeline::timeline_window(a, w),
+            None => crate::timeline::timeline(a),
+        };
         self.foreign = None; // the next frame takes the new snapshot's rows
         self.spu_pick = None; // its pair belongs to the old snapshot
         let before = self.view;
@@ -183,6 +190,36 @@ impl TimelineState {
     /// A shift-drag box is being dragged.
     pub fn box_active(&self) -> bool {
         self.box_from.is_some()
+    }
+
+    /// Switches the state's timeline to capture window `w` (rebuilding its
+    /// tracks from `a.span_in_window`, keeping no user zoom or selection,
+    /// and re-deriving the visible window from the new bar set).  The next
+    /// frame's `sync_foreign` picks up the window's SPU/RSX rows; we clear
+    /// any pick that belonged to a different window.
+    pub fn refresh_windowed(&mut self, a: &Analysis, w: &ps3dk_prof::CaptureWindow) {
+        self.window = Some(w.clone());
+        self.tl = crate::timeline::timeline_window(a, w);
+        self.view = View::fit(&self.tl);
+        self.fit_all = true;
+        self.follow = false;
+        self.foreign = None;
+        self.spu_pick = None;
+        self.box_from = None;
+    }
+
+    /// Switches the state's timeline to the unscoped capture (clearing the
+    /// window-scoped bars, and any SPU/RSX row or zoom that belonged to a
+    /// narrower window).
+    pub fn refresh_unscoped(&mut self, a: &Analysis) {
+        self.window = None;
+        self.tl = crate::timeline::timeline(a);
+        self.view = View::fit(&self.tl);
+        self.fit_all = true;
+        self.follow = false;
+        self.foreign = None;
+        self.spu_pick = None;
+        self.box_from = None;
     }
 }
 

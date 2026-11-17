@@ -2117,6 +2117,57 @@ fn blocked_flip_wait_needs_certain_rsx_overlap() {
     assert!(old.reason.starts_with("unresolved: FIFO wait >= 0"), "{}", old.reason);
 }
 
+/// Two 1023/11 frames on the t = 2 raw map: frame 0 (PPU 10000..110000) submits a clear at raw `prev` that the RSX
+/// runs during frame 1 (PPU 110000..210000); frame 1 has its own clear at raw `own` and one flip-wait scope `scope`.
+fn flip_two_frames(prev: (u64, u64), own: (u64, u64), scope: (u64, u64)) -> File {
+    let list = vec![mark(1, 0, 1, 5000), op(2, 0, prev), mark(3, 0, 2, 50_000), mark(4, 1, 1, 50_500), op(5, 1, own),
+        mark(6, 1, 2, own.1 + 500)];
+    let n = list.len() as u64;
+    let block = |x: &ARow, sc: Option<(u64, u64)>| {
+        let mut c = coverage_p(x, &Blk::default());
+        let mut b = Buf::default();
+        b.u32(0).u32(0).u32(0).u32(0).u64(0).u64(0);
+        c.payload.extend_from_slice(&b.0);
+        c.payload.extend_from_slice(&[0; 64]);
+        if let Some((b0, e0)) = sc {
+            c.payload[12..16].copy_from_slice(&1u32.to_le_bytes());
+            c.payload[56..64].copy_from_slice(&(e0 - b0).to_le_bytes());
+            c.payload[448..456].copy_from_slice(&b0.to_le_bytes());
+            c.payload[456..464].copy_from_slice(&e0.to_le_bytes());
+        }
+        c
+    };
+    let mut r0 = row(0, (10_000, 110_000), 1);
+    r0.flags |= 64;
+    let mut r1 = row(1, (110_000, 210_000), 1);
+    r1.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 160), block(&r0, None), block(&r1, Some(scope))];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 2, 9, 2 * n)));
+    let mut cfg = brk_cfg();
+    cfg.words[4] = 1023;
+    cfg.words[13] = 160;
+    brk_file(cfg, rest)
+}
+
+/// A frame's work is submitted at its end, so the RSX runs it while a LATER frame waits for the flip: the blocked
+/// wait is RSX-bound evidence against its owner's busy time from any frame, not only the waiting frame's own records.
+#[test]
+fn blocked_flip_wait_counts_earlier_frames_rsx_work() {
+    // frame 0's clear runs at raw 56000..100000 = PPU ~112000..200000, inside frame 1's wait 115000..205000; frame 1's
+    // own clear (raw 101000..130000 = PPU ~202000..260000) is busy >= half its frame but overlaps the wait by ~3000
+    let r = analyze(&reader::read(&flip_two_frames((56_000, 100_000), (101_000, 130_000), (115_000, 205_000)).bytes())
+        .expect("reads"));
+    let f = &r.frames[1];
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy flip wait: RSX busy time >= "), "{}", f.reason);
+    // the earlier frame's work finished before the wait began: no certain overlap, not RSX-bound
+    let r = analyze(&reader::read(&flip_two_frames((6000, 50_000), (101_000, 130_000), (115_000, 205_000)).bytes())
+        .expect("reads"));
+    assert_ne!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+}
+
 /// The scope block must describe the row's scopes: inside the frame, in order, summing to the row's ticks.
 #[test]
 fn flip_wait_scope_block_is_checked() {
@@ -2786,4 +2837,131 @@ fn ring_export_dropping_a_block_inside_a_kept_frame_is_refused() {
     assert_eq!(err.rule, Rule::AutoOps, "{err:?}");
     assert!(err.detail.contains("ring generation 4 ordinal 0, expected generation 3 (or above it with a new frame token)"),
         "{err:?}");
+}
+
+// ---- unsealed captures: the unrecorded tail and capture totals (EMP Mossbrook run 13, item E) ---------------------
+
+/// One 1023/11 frame row (frame 0) with `refused` AUTO ranges refused in it (COVERAGE u32@440), optionally marked
+/// OPEN in the file (closure implied by the writer), and the given STATUS: Some(true) FINAL, Some(false) a STATUS
+/// that is not FINAL, None no STATUS at all (an unsealed file).
+fn totals_file(refused: u32, open: bool, status: Option<bool>) -> File {
+    let mut f = busy_frame(&[(6000, 36_000)], polls(30_000), None, 1023);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let row = &mut f.chunks[at].payload;
+    row[440..444].copy_from_slice(&refused.to_le_bytes());
+    if open {
+        let flags = u16::from_le_bytes([row[2], row[3]]) | 16;
+        row[2..4].copy_from_slice(&flags.to_le_bytes());
+    }
+    let st = f.chunks.iter().position(|c| c.ty == 37).unwrap();
+    match status {
+        Some(true) => {}
+        Some(false) => f.chunks[st].payload[2..4].copy_from_slice(&0u16.to_le_bytes()),
+        None => {
+            f.chunks.remove(st);
+        }
+    }
+    f
+}
+fn totals_outputs(f: &File) -> (Report, String, serde_json::Value) {
+    let r = analyze(&reader::read(&f.bytes()).expect("reads"));
+    let mut text = Vec::new();
+    write_text(&mut text, &r).unwrap();
+    let mut json = Vec::new();
+    write_json(&mut json, &r).unwrap();
+    (r, String::from_utf8(text).unwrap(), serde_json::from_slice(&json).unwrap())
+}
+
+/// (a) A sealed capture keeps its exact output: no tail fact, no capture-total block, no row state; the per-row
+/// ranges_refused is still the row's own count.
+#[test]
+fn sealed_capture_output_has_no_unsealed_facts() {
+    let (r, text, v) = totals_outputs(&totals_file(3, false, Some(true)));
+    assert_eq!(r.state, "FINAL");
+    assert!(r.unsealed.is_none());
+    assert_eq!(r.frames[0].verdict, Verdict::RsxBound, "{}", r.frames[0].reason);
+    assert!(!text.contains("tail not recorded") && !text.contains("capture totals") && !text.contains("row OPEN in the file"), "{text}");
+    for key in ["sealed", "tail", "capture_totals"] {
+        assert!(v.get(key).is_none(), "sealed JSON gained {key}");
+    }
+    assert!(v["frames"][0].get("row_state").is_none());
+    assert_eq!(v["frames"][0]["ranges_refused"], 3);
+    // a sealed row the file marks OPEN keeps its existing reason and output too
+    let (r, text, v) = totals_outputs(&totals_file(3, true, Some(true)));
+    assert!(r.unsealed.is_none() && !text.contains("row OPEN in the file") && v.get("tail").is_none());
+    assert!(r.frames[0].reason.starts_with("coverage row OPEN"), "{}", r.frames[0].reason);
+}
+
+/// (b) No STATUS and no OPEN row: the last retained row is closed and stays closed; the capture says its tail was
+/// not recorded, and every capture total is UNAVAILABLE (the retained rows' refusal sum is shown as partial only).
+#[test]
+fn unsealed_capture_names_the_unrecorded_tail_and_unavailable_totals() {
+    let (r, text, v) = totals_outputs(&totals_file(3, false, None));
+    assert!(r.state.starts_with("PROVISIONAL"), "{}", r.state);
+    // the finality policy is unchanged: every frame reads UNKNOWN with the same reason
+    assert!(r.frames.iter().all(|f| f.verdict == Verdict::Unknown && f.reason.starts_with("capture not final")));
+    let u = r.unsealed.as_ref().expect("unsealed facts");
+    assert_eq!((u.last_row, u.last_row_open, u.open_rows), (Some((OWNER, 0)), false, 0));
+    assert!(u.tail.starts_with("tail not recorded: frames after #0"), "{}", u.tail);
+    assert!(!u.tail.contains("OPEN"), "a closed last row is not called OPEN: {}", u.tail);
+    assert!(text.contains(&u.tail), "{text}");
+    assert!(!text.contains("row OPEN in the file"), "{text}");
+    let totals = text.lines().find(|l| l.starts_with("capture totals")).expect("capture totals line");
+    for name in ["operations_written", "operations_dropped", "frames_written", "frames_lost", "ranges_refused"] {
+        assert!(totals.contains(&format!("{name} UNAVAILABLE")), "{name}: {totals}");
+    }
+    assert!(totals.contains("3 in retained rows (partial)"), "{totals}");
+    assert_eq!(v["sealed"], false);
+    assert_eq!(v["tail"]["recorded"], false);
+    assert_eq!(v["tail"]["last_row"]["frame"], 0);
+    assert_eq!(v["tail"]["last_row_open"], false);
+    assert_eq!(v["tail"]["text"], u.tail.as_str());
+    for name in ["operations_written", "operations_dropped", "frames_written", "frames_lost", "ranges_refused"] {
+        let t = &v["capture_totals"][name];
+        assert!(t["value"].is_null(), "{name}: {t}");
+        assert!(t["reason"].as_str().is_some_and(|s| !s.is_empty()), "{name}: {t}");
+    }
+    assert_eq!(v["capture_totals"]["ranges_refused"]["retained_rows"], 3);
+    assert_eq!(v["frames"][0]["row_state"], "CLOSED");
+    assert_eq!(v["frames"][0]["ranges_refused"], 3, "the per-row field keeps its meaning");
+    // a STATUS that is not FINAL is a recorded total as of that STATUS (a lower bound); ranges refused still has none
+    let (r, text, v) = totals_outputs(&totals_file(3, false, Some(false)));
+    let u = r.unsealed.as_ref().expect("unsealed facts");
+    assert_eq!(u.total("frames_written").and_then(|t| t.value), Some(1));
+    assert!(u.total("ranges_refused").is_some_and(|t| t.value.is_none()));
+    let totals = text.lines().find(|l| l.starts_with("capture totals")).expect("capture totals line");
+    assert!(totals.contains("frames_written >= 1") && totals.contains("ranges_refused UNAVAILABLE"), "{totals}");
+    assert_eq!(v["capture_totals"]["frames_written"]["value"], 1);
+    assert_eq!(v["capture_totals"]["frames_written"]["at_least"], true);
+    assert!(v["capture_totals"]["ranges_refused"]["value"].is_null());
+    // by-tag names the same tail (its summaries cover retained rows only); a sealed capture's by-tag is unchanged
+    let cap = reader::read(&totals_file(3, false, None).bytes()).unwrap();
+    let b = ps3dk_prof::auto_rsx::by_tag(&cap);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_by_tag_text(&mut out, &b).unwrap();
+    assert!(String::from_utf8(out).unwrap().contains("tail not recorded: frames after #0"));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_by_tag_json(&mut out, &b).unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(j["tail"].as_str().is_some_and(|s| s.starts_with("tail not recorded")));
+    let b = ps3dk_prof::auto_rsx::by_tag(&reader::read(&totals_file(3, false, Some(true)).bytes()).unwrap());
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_by_tag_json(&mut out, &b).unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&out).unwrap().get("tail").is_none());
+}
+
+/// (c) The writer emits a row OPEN when it implies a closure (a new frame opened over an unclosed one, or the
+/// shutdown close), so an unsealed file can carry one: that row, and only that row, is marked OPEN; the tail stays
+/// unrecorded.
+#[test]
+fn unsealed_capture_marks_the_open_row_the_file_carries() {
+    let (r, text, v) = totals_outputs(&totals_file(0, true, None));
+    let u = r.unsealed.as_ref().expect("unsealed facts");
+    assert_eq!((u.last_row, u.last_row_open, u.open_rows), (Some((OWNER, 0)), true, 1));
+    assert!(u.tail.starts_with("tail not recorded: frames after #0") && u.tail.contains("#0 is marked OPEN"), "{}", u.tail);
+    assert!(text.contains("  row OPEN in the file"), "{text}");
+    assert_eq!(v["frames"][0]["row_state"], "OPEN");
+    assert_eq!(v["tail"]["last_row_open"], true);
+    assert_eq!(v["capture_totals"]["ranges_refused"]["retained_rows"], 0);
+    assert!(v["capture_totals"]["ranges_refused"]["value"].is_null());
 }
