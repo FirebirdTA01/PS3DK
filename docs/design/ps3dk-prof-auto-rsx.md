@@ -499,7 +499,9 @@ Wire: CONFIG 216 bytes (u32 at 176..208 ring bytes, blocks, pairs, first ring
 report, ring label, stride, extents, metadata stride, legacy pairs; u32@212=1
 owner draws only); OPS 176 bytes, flag 128 RING with u32@160 generation,
 u32@164 extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state (0
-untouched, 1 restored), serials 2g-1/2g on the ring label, `published` the ring
+untouched, 1 restored, 2 uncertain; the writer reads only blocks sealed by a
+known flush, so it never writes 2 and a RAW_VALID record never carries it),
+serials 2g-1/2g on the ring label, `published` the ring
 label value read; COVERAGE 528 bytes; STATUS 208 bytes with u64x8 at 128:
 blocks issued, retired, published ring label, held extents, copied bytes,
 untouched and restored flushes, decoded application words; then u32@192 the
@@ -514,9 +516,30 @@ another object; all three zero when nothing was rejected) and u32@204 zero. The 
 `ring decoder rejected header 0x... at +0x...: <reason>`. The reader refuses a
 ring tail on a legacy record, any other width, a non-consecutive ordinal, a
 generation that does not name its extent and block, ring reports outside its
-block or legacy reports inside one, a block spanning frame tokens, and a STATUS
-tail that does not reconcile with the records. Older captures and their JSON are
-unchanged.
+block or legacy reports inside one, a block spanning frame tokens, a RAW_VALID
+record with M2MF state 2 (uncertain state is never timing evidence; an
+INCOMPLETE record may carry it), RAW_VALID records of one block with different
+states, more RAW_VALID blocks of state 0 (1) than the FINAL STATUS counts
+untouched (restored) flushes, and a STATUS tail that does not reconcile with
+the records. Older captures and their JSON are unchanged.
+
+Export (`ps3dk-prof export --frame/--frames/--window`, the viewer's Save
+window/range) keeps the RING records of the selected frames. A block never
+spans a frame token, so whole generations are kept; the generations of other
+frames and of tokenless draws (before the first frame) are dropped, and STATUS
+is kept as written. The EXPORT chunk of a ring capture sets flag 2 and appends
+a 40-byte ring accounting tail after the lane entries: u32 first and u32 last
+kept generation, u64 kept generations, u64 kept and u64 dropped RING records,
+u32 the source's last RING generation, u32 zero (all kept fields zero when no
+RING record was kept). The reader accepts the tail only on a ring capture and
+requires it on one. In an export, the first RING generation must be the
+declared first and later generations only increase, skipping generations only
+where the frame token changes (each still from ordinal 0, one frame token,
+consecutive ordinals); the parsed first, last, generation and
+record counts must equal the tail; the exact FINAL rule compares blocks issued
+with the declared source last generation instead of the last kept one. An
+unexported capture keeps the strict rules: generations 1, 2, 3, ... and an
+exact FINAL issued equal to the last generation.
 
 Cost, measured from GCC 16.1.0 PPU assembly constants (both ABIs) at the
 defaults (2 blocks, 16 MiB, 16,384 records, 256 frame rows): a metadata record

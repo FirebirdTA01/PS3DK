@@ -565,6 +565,20 @@ pub struct Inventory {
     pub max_snapshot: u64,
     /// 2047/11: the largest ring label value of any parsed RING record, and the last RING generation.
     pub max_ring_published: u64,
+    /// 2047/11: the RING records parsed (an export's EXPORT ring accounting is checked against it).
+    pub ring_seen: RingSeen,
+}
+
+/// The RING records of a 2047/11 capture: the first and last generation (0 none), how many generations and records,
+/// and the generations with RAW_VALID records whose flush left the application M2MF state untouched (state 0) or
+/// restored (state 1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RingSeen {
+    pub first: u32,
+    pub last: u32,
+    pub generations: u64,
+    pub records: u64,
+    pub valid_state: [u64; 2],
 }
 impl Inventory {
     pub fn state(&self) -> String {
@@ -592,6 +606,10 @@ pub struct Reader {
     last_anchor: u32,
     /// 2047/11: the last RING record's generation, ordinal and frame token.
     last_ring: Option<(u32, u32, (u16, u32, u64))>,
+    /// 2047/11: the M2MF state of the current generation's RAW_VALID records (one flush, one state).
+    ring_valid_state: Option<u32>,
+    /// 2047/11 exported capture: the EXPORT ring accounting (kept generations need not start at 1 or be adjacent).
+    export_ring: Option<crate::model::ExportRing>,
 }
 
 fn bad<T>(rule: Rule, detail: impl Into<String>) -> Result<T, Malformed> {
@@ -613,6 +631,8 @@ impl Reader {
             last_lost: 0,
             last_anchor: 0,
             last_ring: None,
+            ring_valid_state: None,
+            export_ring: None,
         }
     }
 
@@ -755,6 +775,14 @@ impl Reader {
                 // is the default (16, an eighth of a small pool) or an option that leaves 64 pairs for draws
                 if (wide && !ringed) != ((kinds, forms) == MASKS_TAG) || ringed != ((kinds, forms) == MASKS_RING) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
+                }
+                // an export of a report-ring capture carries the EXPORT ring accounting, and only such an export does
+                if let Some(exp) = &cap.export {
+                    if ringed != exp.ring.is_some() {
+                        return bad(r, format!("AUTO_CONFIG report ring {ringed} in an export with ring accounting {}",
+                            exp.ring.is_some()));
+                    }
+                    self.export_ring = exp.ring;
                 }
                 // 2047/11: the ring partition. Blocks of 126 pairs end the report range; the legacy pool (clock reports
                 // excluded) is the rest and is never empty; budgets are whole 1 MiB pages and 4096-byte extents.
@@ -1077,6 +1105,12 @@ impl Reader {
         {
             return bad(r, format!("{at}: ring tail {t:?} does not name its extent and block"));
         }
+        // state 2 (uncertain M2MF state) is never timing evidence: the writer reads only blocks sealed with a known
+        // flush (untouched 0 or restored 1); an uncertain block is quarantined and its records stay INCOMPLETE
+        let valid = flags & OP_RAW_VALID != 0;
+        if valid && t.state == 2 {
+            return bad(r, format!("{at}: RAW_VALID ring record with uncertain M2MF state 2"));
+        }
         let base = g.first + 2 * g.pairs * u32::from(t.local) + 2 * u32::from(t.ordinal);
         if report_begin != base || report_end != base + 1 {
             return bad(r, format!("{at}: ring reports {report_begin}/{report_end}, not {base}/{}", base + 1));
@@ -1095,13 +1129,48 @@ impl Reader {
                 }
             }
             last => {
-                let next = last.map_or(1, |(gen, _, _)| gen + 1);
-                if t.generation != next || t.ordinal != 0 {
+                // an ordinary capture: generations 1, 2, ... in order. An export keeps whole generations of the
+                // frames it selected: the first is the one its EXPORT accounting names, later ones only increase
+                // (the generations of frames or tokenless draws it dropped are omitted, never reordered)
+                let (ok, next) = match (self.export_ring, last) {
+                    (None, _) => {
+                        let next = last.map_or(1, |(gen, _, _)| gen + 1);
+                        (t.generation == next, next.to_string())
+                    }
+                    (Some(e), None) => (t.generation == e.first_generation, e.first_generation.to_string()),
+                    // a generation is skipped only where the frame token changes: the blocks of one token are
+                    // consecutive, so an export never drops a block between two blocks of a frame it keeps
+                    (Some(_), Some((gen, _, tok))) => (t.generation == gen + 1 || (t.generation > gen && tok != token),
+                        format!("{} (or above it with a new frame token)", gen + 1)),
+                };
+                if !ok || t.ordinal != 0 {
                     return bad(r, format!("{at}: ring generation {} ordinal {}, expected generation {next} ordinal 0",
                         t.generation, t.ordinal));
                 }
+                let seen = &mut self.result.ring_seen;
+                if seen.generations == 0 {
+                    seen.first = t.generation;
+                }
+                seen.last = t.generation;
+                seen.generations += 1;
+                self.ring_valid_state = None;
             }
         }
+        // the records of one block were read after one flush: its RAW_VALID records carry one M2MF state
+        if valid {
+            match self.ring_valid_state {
+                Some(s) if s != t.state => {
+                    return bad(r, format!("{at}: ring generation {} RAW_VALID M2MF state {} after {s}",
+                        t.generation, t.state));
+                }
+                Some(_) => {}
+                None => {
+                    self.ring_valid_state = Some(t.state);
+                    self.result.ring_seen.valid_state[t.state as usize] += 1;
+                }
+            }
+        }
+        self.result.ring_seen.records += 1;
         self.last_ring = Some((t.generation, u32::from(t.ordinal), token));
         Ok(())
     }
@@ -1385,9 +1454,17 @@ impl Reader {
                 }
             }
             // exact FINAL: every issued block was read and its extent retired, and every issued block had records
-            if fin && !lower && (held != 0 || issued != last_gen) {
-                return bad(r, format!("exact FINAL AUTO_STATUS with {held} held extent(s), {issued} blocks for \
-                    generation {last_gen}"));
+            // (in an export: up to the source's last generation, at or after the last one it kept)
+            let source_last = self.export_ring.map_or(last_gen, |e| u64::from(e.source_last_generation));
+            if fin && !lower && (held != 0 || issued != source_last) {
+                return bad(r, format!("exact FINAL AUTO_STATUS with {held} held extent(s), {issued} blocks for {}",
+                    format_args!("generation {source_last}")));
+            }
+            // every block with timed records was flushed once, untouched or restored, and counted as such
+            let [v0, v1] = self.result.ring_seen.valid_state;
+            if fin && (v0 > untouched || v1 > restored) {
+                return bad(r, format!("FINAL AUTO_STATUS flushes untouched {untouched} / restored {restored} {}",
+                    format_args!("below the RAW_VALID blocks of state 0 / 1 ({v0} / {v1})")));
             }
         }
         if fin {
@@ -2449,6 +2526,11 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if exp.clipped_zones > 0 {
             writeln!(out, "{} zone(s) clipped at window edges", exp.clipped_zones)?;
         }
+        if let Some(g) = exp.ring {
+            writeln!(out, "report ring kept generations {}..{} ({} blocks, {} records; {} records dropped) of source {}",
+                g.first_generation, g.last_generation, g.generations, g.records_kept, g.records_dropped,
+                format_args!("generations 1..{}", g.source_last_generation))?;
+        }
     }
     writeln!(out, "{SCOPE}")?;
     if r.ops_dropped != 0 {
@@ -2737,6 +2819,17 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             "source_fifo_last_attempt_seq": exp.source_fifo_last_attempt_seq,
             "source_auto_frames": exp.source_auto_frames,
         });
+        // report-ring exports only: older exports keep their exact JSON
+        if let Some(g) = exp.ring {
+            v["export"]["ring"] = json!({
+                "first_generation": g.first_generation,
+                "last_generation": g.last_generation,
+                "generations": g.generations,
+                "records_kept": g.records_kept,
+                "records_dropped": g.records_dropped,
+                "source_last_generation": g.source_last_generation,
+            });
+        }
     }
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
