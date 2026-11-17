@@ -60,7 +60,7 @@ flags = ["-O1", "-g", "-Wall", "-Wextra", "-Werror", "-pthread",
 if a.sanitize:
     flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie"]
 lib = root / "sdk/libps3dkprof/src"
-sources = [lib / "core/prof_core.c", lib / "core/prof_drain.c", lib / "core/prof_version.c", lib / "pal/pal_host.c"]
+sources = [lib / "core/prof_core.c", lib / "core/prof_drain.c", lib / "core/prof_version.c", lib / "pal/pal_host.c", lib / "rolling/roll_file.c", lib / "rolling/roll_retention_inspect.c", lib / "rolling/roll_store.c"]
 if a.baseline:
     stub = out / "absent-startup.c"
     stub.write_text("void __ps3dk_prof_startup_anchor(void) {}\n"

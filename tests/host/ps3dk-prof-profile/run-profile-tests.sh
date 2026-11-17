@@ -27,7 +27,7 @@ step() { # name want command...
 }
 mkdir -p "$O/inc/ps3dk" && cp "$R/sdk/include/ps3dk/prof.h" "$O/inc/ps3dk/prof.h"
 FL="-std=c11 -O1 -g -pthread -Wall -Wextra -Werror -DPS3DK_PROF=1 -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_WITH_SPU -I$O/inc -I$S/core -I$S/pal -I$S/spu -I$S/rsx"
-SRCS="core/prof_core.c core/prof_drain.c core/prof_version.c pal/pal_host.c spu/psp_ppu.c spu/psp_spu.c spu/ext_runtime.c spu/psp_elf.c spu/psp_host_emul.c rsx/gpu_runtime.c rsx/prg.c rsx/gpu_port_gcm.c rsx/rsxcap.c"
+SRCS="core/prof_core.c core/prof_drain.c core/prof_version.c pal/pal_host.c rolling/roll_file.c rolling/roll_retention_inspect.c rolling/roll_store.c spu/psp_ppu.c spu/psp_spu.c spu/ext_runtime.c spu/psp_elf.c spu/psp_host_emul.c rsx/gpu_runtime.c rsx/prg.c rsx/gpu_port_gcm.c rsx/rsxcap.c"
 step digest-tool 0 python3 -I -B "$H/digest_test.py" "$O/digest" "$CC"
 build_members() { # dir extra-flags
     mkdir -p "$1"
@@ -44,7 +44,7 @@ pipeline() { # the Makefile ext-ilp32-profile recipe, with the host compiler and
     python3 -I -B "$R/sdk/libps3dkprof/tools/archive_digest.py" emit "$D/members.a" --id RSX-HOST --premises 463 \
         --kinds 1 > "$D/prof_identity.c" || return 1
     $CC $FL -DPS3DK_PROF_WITH_PROFILE -c "$D/prof_identity.c" -o "$D/prof_identity.o" || return 1
-    ar rcsD "$D/final.a" "$D"/prof_*.o "$D"/pal_host.o "$D"/psp_*.o "$D"/ext_runtime.o "$D"/gpu_*.o "$D"/prg.o \
+    ar rcsD "$D/final.a" "$D"/prof_*.o "$D"/pal_host.o "$D"/roll_*.o "$D"/psp_*.o "$D"/ext_runtime.o "$D"/gpu_*.o "$D"/prg.o \
         "$D"/rsxcap.o || return 1
     python3 -I -B "$R/sdk/libps3dkprof/tools/archive_digest.py" verify "$D/final.a" --id RSX-HOST --premises 463 --kinds 1
 }

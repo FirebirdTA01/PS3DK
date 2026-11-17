@@ -53,7 +53,8 @@ for abi, subdir in [("ilp32", ""), ("lp64", "lp64")]:
             errors.append("installed archive missing")
         else:
             members = run([a.cross + "ar", "t", archive], abi + "-" + name + "-members")
-            expected = {"prof_core.o", "prof_drain.o", "prof_version.o", "pal_lv2.o"}
+            expected = {"prof_core.o", "prof_drain.o", "prof_version.o", "pal_lv2.o",
+                        "roll_file.o", "roll_retention_inspect.o", "roll_store.o"}
             if automatic:
                 expected |= {"startup.o", "prof_arcs_writer.o"}
             else:

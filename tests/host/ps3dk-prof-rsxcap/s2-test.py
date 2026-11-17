@@ -78,7 +78,7 @@ def run(cmd, log, timeout=600, env=None, cwd=None):
 SAN = {'plain': [], 'asan': ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'],
        'tsan': ['-fsanitize=thread']}
 SAN_TEXT = ('runtime error', 'AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer')
-RT_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/psp_ppu.c', 'spu/psp_spu.c',
+RT_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c', 'spu/psp_ppu.c', 'spu/psp_spu.c',
            'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c', 'rsx/gpu_runtime.c', 'rsx/prg.c',
            'rsx/gpu_port_gcm.c', 'rsx/rsxcap.c')
 
@@ -568,7 +568,7 @@ if want('reg'):
     (inc / 'ps3dk').mkdir(parents=True)
     shutil.copy(root / 'sdk/include/ps3dk/prof.h', inc / 'ps3dk/prof.h')
     objs, okb = [], True
-    ARCH_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/ext_runtime.c', 'spu/psp_ppu.c',
+    ARCH_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c', 'spu/ext_runtime.c', 'spu/psp_ppu.c',
                  'spu/psp_elf.c', 'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c', 'rsx/rsxcap.c')
     for s in ARCH_SRCS:
         o = d / (Path(s).stem + '.o')

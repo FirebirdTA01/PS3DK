@@ -128,9 +128,74 @@ worker-stack headroom or power-loss durability.
 ## Remaining integration
 
 The selected retention policy is newest N completed captures per exact app
-across `.prof` and `.profr`, sharing one completion order and lock. The planned
-index revision tags each record's format and migrates version1 under that lock
-without changing existing order. Duplicate app/session across formats refuses.
-That index work, bounded PAL allocation/open/close handling, build linkage and
-runtime result-OK enrollment are separate work. This inspector alone neither
-implements that policy nor completes the rolling capture feature.
+across `.prof` and `.profr`, sharing one completion order and lock. The shared
+retention implementation tags each version2 record's format and migrates
+version1 under that lock without changing existing order. Duplicate app/session
+across formats refuses. Its rolling branch measures before allocating full-slot
+scratch and requires successful inspection, current-file sync and close before
+publishing the index. An old-file inspection failure can leave the current
+completion enrolled and count above N; a later completion retries that eviction.
+This index implementation and the dependency wiring below do not enable a
+rolling producer. Actual rolling lifecycle integration must supply explicit
+budgets and runtime result-OK enrollment after semantic seal, close and join.
+
+## Explicit archive dependency amendment
+
+The shared mixed-format retention implementation calls the private inspector
+from the PAL. Its dependency chain is explicit at every optimization level:
+`pal_lv2`/`pal_host` → `roll_retention_inspect` and `roll_file` → `roll_store`.
+No weak replacement or optimizer removal is used to satisfy linkage.
+
+The manual and automatic lifecycle archives therefore add exactly
+`roll_file.o`, `roll_retention_inspect.o`, and `roll_store.o` to their common
+members. The extension and PROFILE extension archives add the same three;
+WAIT, FUNC, COUNTERS, FIFO and AUTO variants inherit them from the common or
+extension member list. The separate extension-live archive keeps its three
+existing live members. SDK recipes provide the same sources for ILP32 and
+LP64, including each explicit extension/PROFILE object directory. Public
+headers, public options and rolling output remain disabled/unchanged by this
+dependency amendment. Semantic encoders are not added to the archives here.
+
+Exact member contracts in the release-tree gate, its independent fixture,
+SDK install test, PPU archive test and extension checker include these three
+names. PROFILE archive digests consequently include their actual member bytes;
+an old digest is not relabeled as the new archive identity. Host and sample
+harnesses that compile a PAL or include the retention implementation list all
+three C files explicitly, including the standalone retention driver.
+
+The extension import contract distinguishes three source-traced additions to
+its historical baseline:
+
+| Source | Additional external libc symbols |
+| --- | --- |
+| Existing completed-file retention, previously absent from that historical contract | `calloc`, `fstat`, `stat`, `rename`, `unlink`, `memmove`, `strrchr` |
+| Bounded rolling inspection and exact basename comparison | `malloc`, `strcmp` |
+| Existing early-exit support (#136), omitted by its historical contract | `at_quick_exit`, `pthread_mutex_trylock` |
+
+Commit `cc0283378` added `prof_core.c:init_gate`'s registration of
+`p_quick_exit_drain` through `at_quick_exit` and `pal_lv2.c:pal_mutex_trylock`'s
+call to `pthread_mutex_trylock` for the bounded quick-exit lock path. The archive
+contract at that same commit still omitted those two imports. They apply to
+both data models and are separate from the rolling dependencies. The real
+target archive gate exposed the stale expectation; the amendment follows
+these call sites, without admitting other observed names.
+
+The existing `fsync`, `read`, `lseek`, allocation/free and string/memory imports
+remain where already required. `sysLv2FsRead`, `sysLv2FsWrite`, `sysLv2FsLSeek64`,
+`sysLv2FsFStat`, `sysLv2FsFtruncate` and `sysLv2FsFsync` are static inline syscall
+wrappers in the target headers, so their names are not added as external
+imports. Target `nm` validation must still reject any unexplained difference;
+the expected set is not generated from observed tool output.
+
+The AUTO package-plan test retains exact default-command equality against its
+historical base after narrowly adding these three members, their source files,
+source search path and extension recipes to the private baseline copy. It does
+not normalize away arbitrary output or move the base to the current commit.
+A separate extra-member control must change that comparison. This amendment
+accounts for the dependency change without admitting automatic capture as a
+new default behavior.
+
+`tests/host/ps3dk-prof-retention/dependency_test.py` is a read-only source-list
+audit. It checks direct Python source groups, shell/CMake lists and SDK recipes
+and has removal controls for each helper. It does not replace `-O0` host links,
+both PPU ABI builds, exact archive inspection or runtime lifecycle tests.

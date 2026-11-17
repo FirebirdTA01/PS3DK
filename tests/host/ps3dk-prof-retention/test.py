@@ -45,6 +45,9 @@ def main():
     exe = args.build_dir.resolve() / 'retention-test'
     cmd = [args.cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
            '-I', str(ROOT / 'sdk/libps3dkprof/src/pal'), str(HERE / 'driver.c'), '-o', str(exe)]
+    # Explicit cold-retention dependencies, including unoptimized standalone builds.
+    cmd += [str(ROOT / 'sdk/libps3dkprof/src/rolling' / (name + '.c'))
+            for name in ['roll_file', 'roll_retention_inspect', 'roll_store']]
     if args.red:
         cmd.append('-DRETENTION_RED')
     # All TLS lives in this executable. Match the established host ASan setup:
@@ -143,7 +146,7 @@ def main():
                         '-I',str(inc.parent),'-I',str(lib/'core'),
                         str(HERE/'runtime.c'),str(lib/'core/prof_core.c'),
                         str(drain),str(lib/'core/prof_version.c'),
-                        str(lib/'pal/pal_host.c'),'-o',str(app),*sanitizers],check=True)
+                        str(lib/'pal/pal_host.c'), str(lib/'rolling/roll_file.c'), str(lib/'rolling/roll_retention_inspect.c'), str(lib/'rolling/roll_store.c'),'-o',str(app),*sanitizers],check=True)
         with tempfile.TemporaryDirectory(prefix='runtime-',dir=args.build_dir) as tmp:
             d=Path(tmp).resolve()
             def emit(name,keep,mode='complete'):

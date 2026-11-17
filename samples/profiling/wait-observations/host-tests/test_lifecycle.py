@@ -57,7 +57,7 @@ src=root/'sdk/libps3dkprof/src'
 inc=out/'include/ps3dk';inc.mkdir(parents=True)
 for name in ['prof.h','prof_wait.h','prof_wait_internal.h']:
     (inc/name).write_bytes((root/'sdk/include/ps3dk'/name).read_bytes())
-files=[src/f for f in ['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c']]
+files=[src/f for f in ['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c']]
 flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-Wno-prio-ctor-dtor','-pthread','-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-DWAIT_BUILD_ID="'+'a'*64+'"','-I',inc.parent,'-I',src/'core','-I',src/'waits']
 commands=[]
 def run(name,argv,env=None):

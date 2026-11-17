@@ -57,12 +57,13 @@ if [ "${source_hash%% *}" != "${copy_hash%% *}" ]; then
 fi
 inc=(-I"$public_inc" -I"$root/sdk/libps3dkprof/src/core" -I"$root/sdk/libps3dkprof/src/pal")
 warn=(-Wall -Wextra -Werror)
-lib_src=(prof_core prof_drain prof_version pal_host)
+lib_src=(prof_core prof_drain prof_version pal_host roll_file roll_retention_inspect roll_store)
 test_c=(rt_main rt_util rt_t_lifecycle rt_t_stop rt_t_zones rt_t_init rt_t_sink rt_t_race rt_t_counters rt_t_capture)
 
 src_of() {
     case "$1" in
     pal_host) echo "$root/sdk/libps3dkprof/src/pal/pal_host.c" ;;
+    roll_file|roll_retention_inspect|roll_store) echo "$root/sdk/libps3dkprof/src/rolling/$1.c" ;;
     prof_*) echo "$root/sdk/libps3dkprof/src/core/$1.c" ;;
     *) echo "$here/$1.c" ;;
     esac

@@ -287,11 +287,11 @@ for abi in '' lp64/; do
     for lib in ps3dkprof ps3prof ps3dkprof_ext ps3dkprof_ext_live; do
         rel="ppu/lib/${abi}lib${lib}.a"
         case "$lib" in
-            ps3dkprof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o
+            ps3dkprof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o
                                  live_agent.o live_os_lv2.o live_api.o) ;;
-            ps3prof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o
+            ps3prof) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o
                                prof_arcs_writer.o startup.o) ;;
-            ps3dkprof_ext) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o ext_runtime.o psp_ppu.o
+            ps3dkprof_ext) expected=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o ext_runtime.o psp_ppu.o
                                      psp_elf.o gpu_runtime.o prg.o gpu_port_gcm.o rsxcap.o prof_identity.o) ;;
             ps3dkprof_ext_live) expected=(live_agent.o live_os_lv2.o live_api.o) ;;
         esac

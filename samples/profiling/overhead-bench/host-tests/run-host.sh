@@ -32,7 +32,7 @@ step() { # name expected-rc command...
 # the public header alone on the host include path (the SDK's libc wrappers target newlib)
 mkdir -p "$O/inc/ps3dk" && cp "$W/sdk/include/ps3dk/prof.h" "$O/inc/ps3dk/prof.h"
 PROFH="-I$O/inc -I$CORE -I$PAL -pthread -DPS3DK_PROF_PAL_HOST -DPS3DK_PROF_TEST_HOOKS"
-LIB="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c"
+LIB="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c $PAL/../rolling/roll_file.c $PAL/../rolling/roll_retention_inspect.c $PAL/../rolling/roll_store.c"
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window after every successful init
 WHOLE_RUN="$W/tests/host/ps3dk-prof-common/prof_whole_run.c -Wl,--wrap=ps3dk_prof_init -Wl,--wrap=ps3dk_prof_init_ex"
 ppu_build() { # out sanitizer-flags
@@ -63,7 +63,7 @@ step build-ob-life 0 $CC $BASE $SAN -pthread $LIFESRC "$H/test_ob_life.c" -o "$O
 step run-ob-life 0 env OB_LIFE_CSV="$O/ob-life.csv" OB_LIFE_GPU_CSV="$O/ob-life.gpu.csv" "$O/test_ob_life"
 # the GPU section on the REAL runtime and the REAL GCM port over fake device memory
 RSX=$W/sdk/libps3dkprof/src/rsx
-RTSRC="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c $SPU/psp_ppu.c $SPU/psp_spu.c $SPU/ext_runtime.c \
+RTSRC="$CORE/prof_core.c $CORE/prof_drain.c $CORE/prof_version.c $PAL/pal_host.c $PAL/../rolling/roll_file.c $PAL/../rolling/roll_retention_inspect.c $PAL/../rolling/roll_store.c $SPU/psp_ppu.c $SPU/psp_spu.c $SPU/ext_runtime.c \
     $SPU/psp_elf.c $SPU/psp_host_emul.c $RSX/gpu_runtime.c $RSX/prg.c $RSX/gpu_port_gcm.c $RSX/rsxcap.c"
 GSRC="$B/common/ob_gpu_run.c $B/common/ob_rsx.c $B/common/ob_sched.c $B/common/ob_io.c $B/common/ob_teardown.c"
 step build-ob-gpu-rt 0 $CC $BASE $SAN $PROFH -DPS3DK_PROF=1 -DPS3DK_PROF_WITH_SPU -I"$SPU" -I"$RSX" $RTSRC $GSRC \

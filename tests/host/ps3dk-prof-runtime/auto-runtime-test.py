@@ -156,7 +156,7 @@ if a.sanitize=='address':
     # sanitizer checks enabled, including null checks.
     flags+=['-ftls-model=local-exec','-fno-omit-frame-pointer']
 cc=os.environ.get('CC','cc')
-sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c',
+sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c',
          'spu/psp_ppu.c','spu/psp_spu.c','spu/ext_runtime.c','spu/psp_elf.c','spu/psp_host_emul.c',
          'rsx/gpu_runtime.c','rsx/prg.c','rsx/gpu_port_gcm.c','rsx/rsxcap.c',
          'fifo/fifo_runtime.c','fifo/fifo_writer.c',

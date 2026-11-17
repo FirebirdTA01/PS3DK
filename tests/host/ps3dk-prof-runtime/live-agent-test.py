@@ -40,7 +40,7 @@ if a.sanitize:
     flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
 exe = out / 'live-agent-test'
 r = run('compile', [os.environ.get('CC', 'cc'), *flags, src / 'live/live_agent.c', src / 'live/live_os_host.c',
-                    src / 'pal/pal_host.c', here / 'live_agent_test.c', '-o', exe])
+                    src / 'pal/pal_host.c', src / 'rolling/roll_file.c', src / 'rolling/roll_retention_inspect.c', src / 'rolling/roll_store.c', here / 'live_agent_test.c', '-o', exe])
 if r.returncode != 0:
     raise SystemExit('compile failed:\n' + r.stderr.decode())
 cases = run('list', [exe, '--list']).stdout.decode().split()

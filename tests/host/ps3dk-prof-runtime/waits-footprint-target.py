@@ -49,7 +49,7 @@ for abi,extra in [('ilp32',[]),('lp64',['-mlp64'])]:
         models[mode]={m[2]:int(m[1],16 if m[1].startswith('0x') else 10)-1 for m in re.finditer(r'^\s*\d+:\s+[0-9a-f]+\s+(0x[0-9a-f]+|\d+)\s+OBJECT\s+GLOBAL\s+DEFAULT\s+\S+\s+report_(\w+)\s*$',symbols,re.M)}
     assert models['on']['default_block']==806912
     report[abi]=dict(layout=models,core_tls_delta=models['on']['tls']-models['off']['tls'],core_prof_delta=models['on']['prof']-models['off']['prof'])
-    for rel in ['waits/wait_runtime.c','waits/wait_config.c','waits/wait_writer.c','core/prof_core.c','core/prof_drain.c','pal/pal_lv2.c']:
+    for rel in ['waits/wait_runtime.c','waits/wait_config.c','waits/wait_writer.c','core/prof_core.c','core/prof_drain.c','pal/pal_lv2.c','rolling/roll_file.c','rolling/roll_retention_inspect.c','rolling/roll_store.c']:
         name=abi+'-'+Path(rel).stem
         run(name,[cc,*flags,'-DPS3DK_PROF_WITH_WAITS=1','-DPS3DK_PROF_WAIT_STACK_BYTES=1','-c',src/rel,'-o',out/(name+'.o')])
         undefined=run(name+'-undefined',[prefix+'nm','-u',out/(name+'.o')])

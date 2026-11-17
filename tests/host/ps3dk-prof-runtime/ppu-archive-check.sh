@@ -54,11 +54,11 @@ for abi in ilp32 lp64; do
         ar="$lib/$abi/$a.a"
         tag="$abi $a"
         if [ "$a" = libps3dkprof ]; then
-            want="live_agent.o live_api.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o prof_version.o"
+            want="live_agent.o live_api.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o"
             want_api="$api"
             extra=""
         else
-            want="pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o prof_version.o startup.o"
+            want="pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o startup.o"
             want_api="$auto_api"
             extra="__ps3dk_prof_startup_anchor __ps3dk_prof_thread_exit ps3prof_arcs_write"
         fi
