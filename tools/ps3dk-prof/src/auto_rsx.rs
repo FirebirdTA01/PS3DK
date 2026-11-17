@@ -2776,30 +2776,35 @@ fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::
         }
     }
 
-    // An occurrence's chain is complete when every ancestor down to depth 1 was resolved by index.
-    let chain_complete = |i: usize| -> bool {
+    // An occurrence's chain is complete when every ancestor down to depth 1 was resolved by index. Computed before
+    // any occurrence is updated, so the walk reads only the resolved parents.
+    let chain_complete: Vec<bool> = (0..n).map(|i| {
         let mut cur = i;
         while occs[cur].depth > 1 {
             match parent_idx[cur] { Some(p) => cur = p, None => return false }
         }
         true
-    };
+    }).collect();
+    let contained_unresolved: Vec<bool> = (0..n).map(|i| {
+        (0..n).any(|c| occs[c].depth == occs[i].depth + 1 && parent_idx[c].is_none() && contains(&occs[i], &occs[c]))
+    }).collect();
+    let child_sums: Vec<u64> = (0..n).map(|i| {
+        (0..n).filter(|&c| parent_idx[c] == Some(i)).fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw))
+    }).collect();
     for i in 0..n {
-        if occs[i].depth > 1 && !chain_complete(i) {
+        if occs[i].depth > 1 && !chain_complete[i] {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some(format!("ancestor chain to depth 1 incomplete from {} — parent/exclusive unavailable", occs[i].name)); }
             continue;
         }
         // A deeper occurrence inside this span whose own parent could not be resolved may belong to this one: its
         // time cannot be assigned, so this occurrence's exclusive is not claimed.
-        if (0..n).any(|c| occs[c].depth == occs[i].depth + 1 && parent_idx[c].is_none() && contains(&occs[i], &occs[c])) {
+        if contained_unresolved[i] {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some("a nested range inside this one has no resolved parent — exclusive unavailable".into()); }
             continue;
         }
-        let child_sum: u64 = (0..n)
-            .filter(|&c| parent_idx[c] == Some(i))
-            .fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw));
+        let child_sum = child_sums[i];
         if child_sum > occs[i].inclusive_raw {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children sum {child_sum} exceeds own inclusive {} — exclusive uncomputable", occs[i].inclusive_raw)); }
