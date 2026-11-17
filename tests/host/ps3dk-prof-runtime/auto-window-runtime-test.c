@@ -28,6 +28,11 @@
  * TEST_WINDOW_MODE 9 (windowcallafter): a timed segment built inside WHOLE_RUN, the window ended, then the segment
  *   CALLed before the next frame boundary: nothing is emitted for it and it counts as unrepresented, never as a timed
  *   record in the closed window; a CALL of the same segment inside a later window counts as unrepresented too.
+ * TEST_WINDOW_MODE 10 (windowlate): windows opened mid-frame. A WHOLE_RUN before the first frame refuses a range (no
+ *   frame, no row) and holds frame 0 from its boundary (19 ranges); one opened by the owner mid-frame 1 gets a late
+ *   row from its first range (19 ranges, OPEN even after an explicit exact close; a range after that close has no
+ *   row); one opened mid-frame 2 by an unregistered thread (whose own range is refused and opens nothing) gets its
+ *   late row from the owner's first draw.
  * TEST_WINDOW_MODE 8 (windowqueue): with the drainer held, eight windows fill the record queue; the ninth BEGIN is
  *   refused EFULL (counted, nothing opens); after the drain catches up a window opens and closes normally, so the
  *   capture never holds a WINDOW_END without its BEGIN. */
@@ -93,6 +98,23 @@ static void complete(void)
     st32(&labels[247],frontier);
 }
 
+#if TEST_WINDOW_MODE==10
+void ps3dk_prof__auto_test_ranges(uint64_t out[4]);
+void ps3dk_prof__auto_test_unrepresented(uint32_t[3]);
+static uint64_t r[4];
+static void ranges(void) {ps3dk_prof__auto_test_ranges(r);}
+/* an unregistered thread: opens a whole-run window mid-frame; its own range is not the owner's (0, no row) */
+static int foreign_rc=-1,foreign_range=-1;
+static void *foreign_opener(void *unused)
+{
+    (void)unused;
+    assert(g_tls.slot1==0);
+    foreign_rc=PS3DK_PROF_CAPTURE_WHOLE_RUN();
+    foreign_range=PS3DK_PROF_AUTO_RANGE_BEGIN("foreign");
+    (void)PS3DK_PROF_AUTO_RANGE_END();
+    return NULL;
+}
+#endif
 #if TEST_WINDOW_MODE==5 || TEST_WINDOW_MODE==9
 void ps3dk_prof__auto_test_segment_history(const void *,uint32_t[4]);
 void ps3dk_prof__auto_test_unrepresented(uint32_t[3]);
@@ -319,6 +341,44 @@ int main(void) {
     }
     complete();
     puts("AUTO CALL outside a window PASS");
+#elif TEST_WINDOW_MODE==10
+    {
+        pthread_t t;
+        uint32_t u[3];
+        /* before the first frame: a whole-run window is open but there is no frame, so no row: the range is refused
+         * and counted in the run total only; its END stays balanced */
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && state()==2);
+        assert(!PS3DK_PROF_AUTO_RANGE_BEGIN("early") && !PS3DK_PROF_AUTO_RANGE_END());
+        ranges();assert(r[0]==0 && r[1]==1 && r[2]==0);
+        ps3dk_prof_frame(); /* frame 0: the window held it from its boundary: an exact row with FRAME marks */
+        for(unsigned i=0;i<19;i++) {assert(PS3DK_PROF_AUTO_RANGE_BEGIN("pass") && clear() && PS3DK_PROF_AUTO_RANGE_END());}
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 1: outside a window; the owner opens one mid-frame */
+        assert(PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK);
+        ps3dk_prof__auto_test_unrepresented(u);assert(!u[1]);   /* opening the window touched no AUTO state */
+        for(unsigned i=0;i<19;i++) {
+            assert(PS3DK_PROF_AUTO_RANGE_BEGIN("late owner range"));   /* the first one opens the late row */
+            assert(clear() && PS3DK_PROF_AUTO_RANGE_END());
+        }
+        ranges();assert(r[0]==38 && r[1]==1);
+        /* an exact explicit closure of the late row still leaves it OPEN; a later range in that frame has no row */
+        assert(ps3dk_prof_auto_frame_end(1,ps3dk_prof_frame_token())==0);
+        assert(!PS3DK_PROF_AUTO_RANGE_BEGIN("after close") && !PS3DK_PROF_AUTO_RANGE_END());
+        ranges();assert(r[1]==2 && r[2]==0);
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 2: another thread (unregistered) opens the window mid-frame */
+        assert(pthread_create(&t,NULL,foreign_opener,NULL)==0 && pthread_join(t,NULL)==0);
+        assert(foreign_rc==PS3DK_PROF_OK && foreign_range==0 && state()==2);
+        ps3dk_prof__auto_test_unrepresented(u);assert(!u[1]);   /* neither the opener nor its range opened a row */
+        assert(clear());                                         /* the owner's first draw opens the late row */
+        ps3dk_prof__auto_test_unrepresented(u);assert(u[1]&64);
+        assert(PS3DK_PROF_AUTO_RANGE_BEGIN("foreign window") && clear() && PS3DK_PROF_AUTO_RANGE_END());
+        assert(PS3DK_PROF_AUTO_RANGE_BEGIN("foreign window 2") && PS3DK_PROF_AUTO_RANGE_END());
+        assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_OK);
+        ps3dk_prof_frame(); /* frame 3: outside, the late row closes */
+    }
+    complete();
+    puts("AUTO late rows PASS");
 #elif TEST_WINDOW_MODE==8
     {
         uint32_t expected=0;
