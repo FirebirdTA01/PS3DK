@@ -277,6 +277,20 @@ and END records are the runtime's own).
   the command within the agent's 5 s deadline; it is withdrawn, nothing
   changed), `ENOTSUP` (an agent without a runtime). `END` is never followed
   by an ACK; a command still pending then is shown as unanswered.
+- **One window at a time:** an app that keeps its own window open (for
+  example `PS3DK_PROF_CAPTURE_WHOLE_RUN()` right after init) refuses every
+  viewer `BEGIN` and `CAPTURE_FRAMES` with `EBUSY` for as long as that window
+  is open. Use triggers in an app that opens no window of its own, or after
+  its window closed.
+- **Which thread applies a command:** the first thread to mark a frame after
+  the command arrives applies it. In `PS3DK_PROF_MODE_THREAD` with several
+  frame-marking threads there is no affinity to a chosen render thread, so a
+  window may open on another thread than expected, and an `END` taken by a
+  thread that does not own the open window is refused `EPERM`.
+- **No origin in the capture:** a triggered window is recorded exactly like
+  one the app opens. Reading a capture offline, nothing tells a viewer
+  window from an app window; the ACKs in the live session are the only
+  record of which windows the viewer opened.
 
 ### Viewer
 
