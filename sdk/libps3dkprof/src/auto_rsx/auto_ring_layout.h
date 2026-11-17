@@ -9,7 +9,9 @@
  * used by the profiler samples). The local pool is split as 16 clock reports,
  * then the legacy pairs, then blocks x 126 ring pairs at the top. 126 pairs is
  * the hardware-tested maximum copy; one block occupies a whole 4096-byte MAIN
- * extent (126 x 32 = 4032 bytes). */
+ * extent (126 x 32 = 4032 bytes). Blocks are fixed at 126 pairs: with at most
+ * 1024 reports (504 pairs), 4 blocks leave no legacy pair and are refused;
+ * smaller blocks are not offered. */
 enum { AUTO_RING_DEFAULT_BYTES=16u<<20, AUTO_RING_DEFAULT_RECORDS=16384u, AUTO_RING_DEFAULT_LABEL=245u,
        AUTO_RING_PAGE=1u<<20, AUTO_RING_BYTES_MAX=256u<<20, AUTO_RING_RECORDS_MAX=65536u,
        AUTO_RING_STRIDE=4096u, AUTO_RING_CLOCK_REPORTS=16u, AUTO_RING_BLOCK_PAIRS=126u };

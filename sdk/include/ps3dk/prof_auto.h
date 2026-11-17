@@ -28,7 +28,9 @@ typedef struct ps3dk_prof_auto_options {
                                  * (32, a quarter of a small pool) and this one; larger is refused */
     /* Report ring (owner-buffer draws recycle report blocks through MAIN memory). RESERVED: all four must be 0 in
      * this release, which refuses any other value; 0 keeps the bounded local report pool. */
-    uint32_t ring_blocks;       /* 2..4 local blocks of 126 pairs at the top of the range; the rest stay legacy */
+    uint32_t ring_blocks;       /* 2 or 3 local blocks of 126 pairs (the hardware-tested copy) at the top of the
+                                 * range; the rest stay legacy and must be nonempty, so 3 needs over 378 pairs and 4
+                                 * (504 pairs, the whole 1024-report maximum) is always refused */
     uint32_t ring_label;        /* 0: 245; otherwise 64 or 69..254, distinct from both labels above */
     uint32_t ring_bytes;        /* 0: 16 MiB; whole 1 MiB pages up to 256 MiB of MAIN extents */
     uint32_t ring_records;      /* 0: 16384; 1..65536 operation snapshots, replacing metadata_records */
