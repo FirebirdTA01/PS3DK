@@ -11,6 +11,7 @@ pub(super) struct Saved {
     pub metadata: Vec<Vec<u8>>,
     pub record_chunks: BTreeMap<u32, u64>,
     pub journal: Vec<Entry>,
+    pub families:Option<super::families::Saved>,
 }
 fn ck<T>(s: &'static str) -> Result<T, Error> { Err(Error::Checkpoint(s)) }
 pub(super) struct Read<'a> { bytes: &'a [u8], pos: usize }
@@ -47,27 +48,35 @@ pub(super) fn decode(bytes: &[u8], budget: &mut Budget) -> Result<Saved, Error> 
     let limits = budget.limits;
     if bytes.len() > limits.checkpoint_bytes { return Err(Error::Limit("checkpoint bytes")); }
     if bytes.len() < 84 { return ck("short combined checkpoint"); }
+    if bytes.get(8..10)==Some([2u8,0].as_slice()) && 8*bytes.len() as u128>limits.temporary_bytes as u128{return Err(Error::Limit("combined import temporary bytes"));}
     budget.bytes(bytes.len())?;
     let end = bytes.len() - 4;
     if crc32(&bytes[..end]) != u32::from_le_bytes(bytes[end..].try_into().unwrap()) { return ck("combined checkpoint CRC"); }
     let mut r = Read::new(&bytes[..end]);
-    if r.take(8)? != b"PFRMIX01" || r.u16()? != 1 || r.u16()? != 80 || r.u32()? != 4 { return ck("combined schema/header"); }
+    if r.take(8)? != b"PFRMIX01"{return ck("combined schema/header");}
+    let version=r.u16()?;let fixed=usize::from(r.u16()?);let section_count=r.u32()?;
+    if !matches!(version,1|2){return Err(Error::Unsupported{flags:0,chunk:None});}
+    if (fixed,section_count)!=(if version==1{(80,4)}else{(96,6)}){return ck("combined schema/header");}
     let header: [u8; 16] = r.take(16)?.try_into().unwrap(); admit(&header)?;
+    let flags=super::flags(&header);
+    if (version==2)!=(flags&192!=0){return ck("combined schema/capability mismatch");}
     let next_chunk = r.u64()?; let prefix_bytes = r.u64()?;
-    if next_chunk == u64::MAX || prefix_bytes.checked_add(16).is_none() || r.u64()? != (end - 80) as u64 {
+    if next_chunk == u64::MAX || prefix_bytes.checked_add(16).is_none() || end<fixed || r.u64()? != (end - fixed) as u64 {
         return ck("combined frontier/section length");
     }
-    if r.u32()? != 3 || r.u32()? != 0 { return ck("combined family mask/reserved"); }
-    for _ in 0..4 { if r.u16()? != 1 { return ck("combined family schema"); } }
-    if r.u64()? != 0 { return ck("combined reserved"); }
+    let mask=3|(if flags&128!=0{4}else{0})|(if flags&64!=0{8}else{0});
+    if r.u32()? != mask || r.u32()? != 0 { return ck("combined family mask/reserved"); }
+    for _ in 0..section_count { if r.u16()? != 1 { return ck("combined family schema"); } }
+    if r.take(if version==1{8}else{20})?.iter().any(|x|*x!=0){return ck("combined reserved");}
     let mut sections = Vec::new();
-    for expected in 1..=4 {
+    for expected in 1..=section_count as u16 {
         if r.u16()? != expected || r.u16()? != 1 { return ck("combined section order/schema"); }
         let count = r.u32()? as usize; let len = r.u32()? as usize;
         if r.u32()? != 0 { return ck("combined section reserved"); }
         sections.push((count, r.take(len)?));
     }
     r.done()?;
+    let families=if version==2{Some(super::families::decode(sections[4],sections[5],&header,budget)?)}else{None};
     let (count, bytes) = sections[0];
     if count > bytes.len() / 24 { return ck("metadata count/length"); }
     if bytes.len().checked_add(16).is_none_or(|n| n > limits.metadata_bytes) { return Err(Error::Limit("metadata bytes")); }
@@ -144,13 +153,14 @@ pub(super) fn decode(bytes: &[u8], budget: &mut Budget) -> Result<Saved, Error> 
     }
     if expected_support.next().is_some() { return ck("missing SPU support reference"); }
     j.done()?;
-    Ok(Saved { ppu: ppu::State { header, next_chunk, prefix_bytes, metadata: Vec::new(), rows, tokens }, metadata, record_chunks, journal })
+    Ok(Saved { ppu: ppu::State { header, next_chunk, prefix_bytes, metadata: Vec::new(), rows, tokens }, metadata, record_chunks, journal, families })
 }
 
 pub(super) fn encode(live: &Live, cursors: &ppu::State, budget: &mut Budget) -> Result<Vec<u8>, Error> {
     let limits = budget.limits;
     budget.cursor_work(&cursors.rows, cursors.tokens.len())?;
-    let mut out = Write::new(limits.checkpoint_bytes); out.raw(&[0; 80])?;
+    let fixed=if live.families.is_some(){96}else{80};
+    let mut out = Write::new(limits.checkpoint_bytes); out.raw(&[0;96][..fixed])?;
     let mut metadata = Write::new(limits.checkpoint_bytes);
     let mut ordinals = BTreeMap::new();
     for (i, raw) in live.metadata.iter().enumerate() {
@@ -176,13 +186,20 @@ pub(super) fn encode(live: &Live, cursors: &ppu::State, budget: &mut Budget) -> 
         }
     }
     out.section(4, live.spu.journal().len(), &journal.bytes)?;
-    out.bytes[..8].copy_from_slice(b"PFRMIX01"); out.bytes[8..10].copy_from_slice(&1u16.to_le_bytes());
-    out.bytes[10..12].copy_from_slice(&80u16.to_le_bytes()); out.bytes[12..16].copy_from_slice(&4u32.to_le_bytes());
+    if let Some(f)=&live.families{
+        let (a,f)=f.encode(budget)?;
+        out.section(5,usize::from(super::flags(&live.header)&128!=0),&a)?;
+        out.section(6,usize::from(super::flags(&live.header)&64!=0),&f)?;
+    }
+    let version:u16=if live.families.is_some(){2}else{1};let count:u32=if version==2{6}else{4};
+    out.bytes[..8].copy_from_slice(b"PFRMIX01"); out.bytes[8..10].copy_from_slice(&version.to_le_bytes());
+    out.bytes[10..12].copy_from_slice(&(fixed as u16).to_le_bytes()); out.bytes[12..16].copy_from_slice(&count.to_le_bytes());
     out.bytes[16..32].copy_from_slice(&live.header); out.bytes[32..40].copy_from_slice(&live.next.to_le_bytes());
     out.bytes[40..48].copy_from_slice(&live.bytes.to_le_bytes());
-    let n = (out.bytes.len() - 80) as u64; out.bytes[48..56].copy_from_slice(&n.to_le_bytes());
-    out.bytes[56..60].copy_from_slice(&3u32.to_le_bytes());
-    for at in [64, 66, 68, 70] { out.bytes[at..at + 2].copy_from_slice(&1u16.to_le_bytes()); }
+    let n = (out.bytes.len() - fixed) as u64; out.bytes[48..56].copy_from_slice(&n.to_le_bytes());
+    let flags=super::flags(&live.header);let mask=3u32|(if flags&128!=0{4}else{0})|(if flags&64!=0{8}else{0});
+    out.bytes[56..60].copy_from_slice(&mask.to_le_bytes());
+    for j in 0..count as usize {let at=64+2*j;out.bytes[at..at + 2].copy_from_slice(&1u16.to_le_bytes());}
     budget.bytes(out.bytes.len())?;
     let crc = crc32(&out.bytes); out.u32(crc)?; Ok(out.bytes)
 }

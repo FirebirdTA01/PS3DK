@@ -163,6 +163,11 @@ static int enc_end(prof *p)
     p_le32(b + 4, (uint32_t)d->pos);
     p_le64(b + 8, d->chunk_seq);
     p_le32(b + 16 + d->pos, p_crc32(b, 16 + d->pos));
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        if (p_roll_accept(p, b, 16 + d->pos + 4)) return -1;
+    } else
+#endif
     if (sink_write(p, b, 16 + d->pos + 4) != 0)
         return -1;
     d->chunk_seq++;
@@ -363,18 +368,11 @@ static void enc_profile(prof *p)
  * A sink failure here is recorded exactly as one in the first drain was: init still succeeds and the next drain or
  * shutdown reports ESINKFAIL.  A CALLBACK sink keeps the first-drain start step: no callback runs during init.
  * AUTO RSX CONFIG is not part of this step; it stays mutable after init and the drainer writes it once frozen. */
-static void dr_start(prof *p)
+static void original_header(prof *p, uint8_t head[16])
 {
     static const uint8_t magic[16] = {'P', 'S', '3', 'D', 'K', 'P', 'R', 'F', 1, 0, 0, 0, 0, 0, 0, 0};
-    uint8_t head[16];
-    if (p->dr.started)
-        return;
-    p->dr.started = 1;
-#ifdef PS3DK_PROF_TEST_HOOKS
-    if (ps3dk_prof_test_hooks.chunk_seq_seed)
-        p->dr.chunk_seq = ps3dk_prof_test_hooks.chunk_seq_seed; /* the chunk-sequence ceiling tests */
-#endif
-    memcpy(head, magic, sizeof head);
+    (void)p;
+    memcpy(head, magic, 16);
 #ifdef PS3DK_PROF_WITH_SPU
     head[12] = p->ext_flags; /* file_flags bit 0 (DOMAIN_EXTENSIONS); 0 when the extension is off or disabled */
 #endif
@@ -396,6 +394,28 @@ static void dr_start(prof *p)
         head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
 #endif
     head[13] |= 2;   /* file_flags bit 9: capture windows (chunks 41, 42); heavy data only inside them */
+}
+static void dr_start(prof *p)
+{
+    uint8_t head[16];
+    if (p->dr.started)
+        return;
+    p->dr.started = 1;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof_test_hooks.chunk_seq_seed)
+        p->dr.chunk_seq = ps3dk_prof_test_hooks.chunk_seq_seed; /* the chunk-sequence ceiling tests */
+#endif
+    original_header(p, head);
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        int rc = p_roll_start(p, head);
+        if (rc) {
+            p->rolling->result = rc;
+            sink_fail(&p->snk, rc);
+            return;
+        }
+    } else
+#endif
     if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
@@ -923,7 +943,11 @@ int p_quiesce_freeze_seal(prof *p)
 
     if (LD_RLX(&p->lock_failed))
         sink_fail(&p->snk, -3);
-    if (!p->snk.failed) {
+    if (!p->snk.failed
+#ifdef P_ROLLING_RUNTIME
+        && (!p->rolling || !p->rolling->result)
+#endif
+        ) {
         /* The final drain: exactly the incarnations below Ft, the descriptors below Fd, the records below F[i]. */
         dr_start(p);
         for (i = 0; i < d->nfront; i++) {
@@ -1040,8 +1064,7 @@ int p_quiesce_freeze_seal(prof *p)
         enc_u32(p, 0);
         enc_u64(p, unreg);
         enc_u64(p, d->desc_emitted);
-        enc_end(p);
-        trailer = !p->snk.failed;
+        trailer = enc_end(p) == 0;
         p->prefix_trailer = (uint32_t)trailer;
         if (trailer && p->snk.kind == 2 && p->snk.cb.flush && p->snk.cb.flush(p->snk.cb.ctx) < 0)
             sink_fail(&p->snk, -4);   /* B5: a flush failure is a sink failure before close */
@@ -1055,7 +1078,17 @@ close_capture:
     if (p->ext_flags)
         p_ext_seal(p);
 #endif
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) (void)p_roll_finish(p);
+#endif
     sink_close(p);
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        if (p->snk.failed) return PS3DK_PROF_ESINKFAIL;
+        if (p->snk.close_failed) return PS3DK_PROF_ECLOSE;
+        if (p->rolling->result) return p->rolling->result;
+    }
+#endif
 
     if (p->snk.failed || !trailer)
         return PS3DK_PROF_ESINKFAIL;
@@ -1079,7 +1112,11 @@ static prof *ready_prof(void) { return p_ready() ? g_prof : NULL; }
 int ps3dk_prof__shutdown_claimed(void)
 {
     prof *p = ready_prof();
-    return p && LD_ACQ(&p->shutdown_once) != 0u;
+    return p && (LD_ACQ(&p->shutdown_once) != 0u
+#ifdef P_ROLLING_RUNTIME
+        || (p->rolling && LD_ACQ(&p->rolling->stop_owner) != 0u)
+#endif
+        );
 }
 
 const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void)
@@ -1092,6 +1129,18 @@ static int retain_completed(prof *p, int result)
 {
     /* Called by the shutdown owner after the THREAD join result is known.
      * Failed runs never enter the index or prune earlier completed captures. */
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        p_roll_runtime *r = p->rolling;
+        pfi_limits limits = {r->disk.file_bytes, r->disk.slot_bytes,
+                            r->options.store.checkpoint_bytes, r->options.ppu.metadata_bytes};
+        if (result == PS3DK_PROF_OK && p->retention_keep &&
+            pal_retain_complete_kind(p->snk.path, p->app, p->tb_at_init,
+                                     p->retention_keep, 2u /* PROFR v2 */, &limits))
+            return PS3DK_PROF_ERETENTION;
+        return result;
+    }
+#endif
     if (result == PS3DK_PROF_OK && p->retention_keep &&
         pal_retain_complete(p->snk.path, p->app, p->tb_at_init, p->retention_keep))
         return PS3DK_PROF_ERETENTION;
@@ -1121,7 +1170,65 @@ static void publish_finalization(prof *p, int result)
         .flags = {p->flags, p->flags_len}, .workload_tag = {p->workload_tag, p->workload_tag_len},
 #endif
     };
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) p_roll_publish(p, result);
+#endif
     ST_REL(&p->finalization_ready, 1u);
+}
+
+/* Shared Ft preparation. Rolling automatic stop owns this independently of
+ * the first public shutdown/join. No caller is inside an encoder callback. */
+static void prepare_stop(prof *p, uint32_t owner)
+{
+    uint32_t i, n = 0;
+    int locked;
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        uint32_t z = 0;
+        if (!CAS_ACQREL(&p->rolling->stop_owner, &z, owner)) {
+            while (!LD_ACQ(&p->rolling->stop_prepared)) pal_sleep_us(100);
+            return;
+        }
+        if (ps3dk_prof_test_hooks.rolling_stop_claimed)
+            ps3dk_prof_test_hooks.rolling_stop_claimed(owner);
+    }
+#else
+    (void)owner;
+#endif
+    p_window_shutdown(p);         /* an open window ends here (SHUTDOWN, or SEAL from ps3dk_prof_capture_seal) */
+#ifdef PS3DK_PROF_WITH_SPU
+    {
+        /* Capture RSX frame (S2, R40): the stopper sets STOP right after the claim, before the seal */
+        const rsxcap_ops *ro = __atomic_load_n(&p->rsxcap, __ATOMIC_ACQUIRE);
+        if (ro)
+            ro->stop(p);
+    }
+#endif
+
+    /* The latch, under thread_mutex, fixing Ft (5.4).  A lock failure still latches, and fails the capture closed. */
+    locked = p_lock(p, &p->thread_mutex) == 0;
+    ST_REL(&p->stop_latch, 1u);
+    for (i = 0; i < p->nslots; i++) {
+        const slot *s = &p->slots[i];
+        fentry *e;
+        if (s->state == SLOT_FREE)
+            continue;
+        e = &p->dr.front[n++];
+        memset(e, 0, sizeof *e);
+        e->slot = i;
+        e->generation = s->generation;
+        e->incarnation = s->incarnation;
+        e->os_id = s->os_id;
+        memcpy(e->name, s->name, sizeof e->name);
+    }
+    p->dr.nfront = n;
+    if (locked)
+        p_unlock(p, &p->thread_mutex);
+    ST_REL(&p->phase, 1u);   /* STOPPING */
+
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) ST_REL(&p->rolling->stop_prepared, 1u);
+#endif
 }
 
 int ps3dk_prof_drain(void)
@@ -1145,6 +1252,18 @@ int ps3dk_prof_drain(void)
     } else {
         t->in_drain = 1;
         rc = p_drain_once(p) == 0 ? PS3DK_PROF_OK : PS3DK_PROF_ESINKFAIL;
+#ifdef P_ROLLING_RUNTIME
+        if (p->rolling) {
+            int rr = p_roll_flush(p);
+            if (rr) {
+                prepare_stop(p, 2u);
+                if (t->slot1 && !t->acked && !t->retired) p_observe_stop(p);
+                rc = p_quiesce_freeze_seal(p);
+                p->thread_result = rc;
+                ST_REL(&p->phase, 3u);
+            }
+        }
+#endif
         t->in_drain = 0;
     }
     ST_REL(&p->drain_busy, 0u);
@@ -1192,6 +1311,9 @@ void p_quick_exit_drain(void)
     t->in_drain = 1;
     t->qx = 1;
     (void)p_drain_once(p);
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) (void)p_roll_flush(p); /* coherent OPEN prefix, never finish/enroll */
+#endif
     t->qx = 0;
     t->in_drain = 0;
     /* drain_busy stays held until _exit */
@@ -1243,6 +1365,12 @@ void *p_drain_main(void *arg)
         z = 0;
         if (CAS_ACQREL(&p->drain_busy, &z, 1u)) {
             (void)p_drain_once(p);
+#ifdef P_ROLLING_RUNTIME
+            if (p->rolling && p_roll_flush(p)) {
+                prepare_stop(p, 2u);
+                ST_REL(&p->wake, 1u);
+            }
+#endif
             ST_REL(&p->drain_busy, 0u);
         }
         drain_wait(p);
@@ -1260,8 +1388,8 @@ int ps3dk_prof_shutdown(void)
 {
     prof *p = ready_prof();
     tls_state *t = &g_tls;
-    uint32_t z = 0, i, n = 0;
-    int locked, rc;
+    uint32_t z = 0;
+    int rc;
 
     if (!p)
         return PS3DK_PROF_ENOTINIT;
@@ -1273,36 +1401,7 @@ int ps3dk_prof_shutdown(void)
     if (!CAS_ACQREL(&p->shutdown_once, &z, 1u))
         return PS3DK_PROF_EALREADY;
     HOOK(after_shutdown_claim);   /* claimed: shutdown has begun, the stop latch is not yet set */
-    p_window_shutdown(p);         /* an open window ends here (SHUTDOWN, or SEAL from ps3dk_prof_capture_seal) */
-#ifdef PS3DK_PROF_WITH_SPU
-    {
-        /* Capture RSX frame (S2, R40): the stopper sets STOP right after the claim, before the seal */
-        const rsxcap_ops *ro = __atomic_load_n(&p->rsxcap, __ATOMIC_ACQUIRE);
-        if (ro)
-            ro->stop(p);
-    }
-#endif
-
-    /* The latch, under thread_mutex, fixing Ft (5.4).  A lock failure still latches, and fails the capture closed. */
-    locked = p_lock(p, &p->thread_mutex) == 0;
-    ST_REL(&p->stop_latch, 1u);
-    for (i = 0; i < p->nslots; i++) {
-        const slot *s = &p->slots[i];
-        fentry *e;
-        if (s->state == SLOT_FREE)
-            continue;
-        e = &p->dr.front[n++];
-        memset(e, 0, sizeof *e);
-        e->slot = i;
-        e->generation = s->generation;
-        e->incarnation = s->incarnation;
-        e->os_id = s->os_id;
-        memcpy(e->name, s->name, sizeof e->name);
-    }
-    p->dr.nfront = n;
-    if (locked)
-        p_unlock(p, &p->thread_mutex);
-    ST_REL(&p->phase, 1u);   /* STOPPING */
+    prepare_stop(p, 1u);
 
     if (t->slot1 && !t->acked && !t->retired)
         p_observe_stop(p);   /* self-quiescence: the caller never waits for itself */
@@ -1312,6 +1411,10 @@ int ps3dk_prof_shutdown(void)
         if (!CAS_ACQREL(&p->drain_busy, &z, 1u))
             return PS3DK_PROF_EBUSY;   /* unreachable: only the owner drains, and it is not in a drain */
         t->in_drain = 1;
+#ifdef P_ROLLING_RUNTIME
+        if (p->rolling && LD_ACQ(&p->phase) == 3u) rc = p->thread_result;
+        else
+#endif
         rc = p_quiesce_freeze_seal(p);
         t->in_drain = 0;
         ST_REL(&p->drain_busy, 0u);

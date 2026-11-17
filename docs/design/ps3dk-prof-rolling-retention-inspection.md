@@ -52,15 +52,17 @@ session identifier.
   and `pfr_get_segment`. It requires a nonempty selected SEALED chain with no
   resource reason. It exposes the physical recovered flag. It does not retry
   an older root after a checkpoint or terminal inspection failure.
-* PFRCKP01 schema1 or PFRMIX01 schema1 envelopes, inner CRC, fixed fields,
+* PFRCKP01 schema1 or PFRMIX01 schema1/schema2 envelopes, inner CRC, fixed fields,
   section order/schema/lengths, admitted original flags, and each checkpoint's
   original chunk/byte frontier against its selected physical segment. Unknown
-  versions and source capabilities, including a future AUTO combined schema,
-  remain explicitly unsupported.
+  versions and source capabilities remain explicitly unsupported. Schema2
+  requires the exact 96-byte header, six sections, capability/family mask and
+  AUTO/FIFO wrapper lengths and presence rules. Wrapper contents remain opaque;
+  cold inspection is not semantic validation of family checkpoints.
 * Counted metadata framing, CRCs, increasing original positions below the
   checkpoint frontier, and required original HEADER0/CLOCKS1/PROFILE2 anchors.
   Event and TRAILER chunks cannot be presented as metadata. Non-metadata cursor,
-  token and SPU journal bodies remain opaque to this helper.
+  token, SPU journal and AUTO/FIFO state bodies remain opaque to this helper.
 * The actual HEADER payload's six length-prefixed strings and exact fixed
   tail. String0 must equal the caller's app bytes exactly; the original u64
   session must equal the caller's expected session. Original16-byte file

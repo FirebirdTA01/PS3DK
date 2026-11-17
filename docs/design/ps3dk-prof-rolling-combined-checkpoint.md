@@ -1,11 +1,12 @@
-# Offline combined PPU/SPU restart checkpoint
+# Offline combined restart checkpoint
 
 This is an internal host-side checkpoint format for the admitted PPU/WINDOWS
-and SPU record families. `rolling_file::read_combined` joins this format to an
+and SPU record families, with schema 2 adding AUTO and FIFO support.
+`rolling_file::read_combined` joins this format to an
 offline PS3DKROL v1/v2 physical snapshot. It does not enable an SDK rolling
 sink, live capture, or the complete maximum-capture-bytes feature.
-GPU/RSX, AUTO, FIFO, waits, function samples, counters and dependency/proof
-families remain outside this format.
+Manual GPU, waits, function samples, counters and dependency/proof families
+remain outside this format. AUTO report-ring CONFIG 2047/11 is not admitted.
 
 The implementation is in `tools/ps3dk-prof/src/rolling_combined.rs` and its
 private `rolling_combined_checkpoint.rs` codec. It uses the existing PPU and
@@ -15,11 +16,14 @@ contracts; neither is relabeled as a combined checkpoint.
 
 ## Admission and claim limits
 
-Admitted original flags are exactly 1, 3 or 7, optionally ORed with WINDOWS:
+Admitted original flags are exactly 1, 3 or 7, optionally ORed with WINDOWS
+and, for schema 2, FIFO64 or AUTO128:
 EXT is required, PROFILE is optional, and ORDER requires PROFILE. The actual
 original file header and version are validated and retained. No flag is
 cleared to make a different reader accept the state. Other flags, unknown
-chunks and non-SPU domains reject.
+chunks reject. Schema 1 admits SPU domains; schema 2 also preserves actual RSX
+declarations for AUTO/FIFO. A mixed DOMAIN payload is validated as one original
+chunk, not rewritten into separate synthetic declarations.
 
 The earliest imported checkpoint contains bounded producer claims about
 evicted history. CRCs, exact accounting, typed active witnesses and feasible
@@ -105,6 +109,49 @@ Four sections follow in exactly this order: metadata (kind 1), PPU cursors
 `kind:u16, schema:u16, count:u32, body_bytes:u32, zero:u32`. Every section
 schema is 1. Unknown, duplicate, omitted, reordered or wrong-version sections
 reject, as do trailing bytes or inexact lengths.
+
+## Schema 2 envelope and family support
+
+Schema 2 uses the same magic and original header/frontiers, an outer header of
+96 bytes and six sections. The family mask is 3 plus 4 for AUTO and 8 for FIFO.
+Offsets 64 through 74 contain six u16 schema values, all 1; bytes 76 through 95
+are zero. Section kinds 1 through 4 retain their schema 1 meanings. Kind 5 is
+AUTO and kind 6 is FIFO; an absent family has an empty section with count zero.
+Schema 2 is required exactly when either original AUTO or FIFO capability is
+present. Existing schema 1 encodings remain unchanged.
+
+An AUTO section has count 1 and a 32-byte wrapper followed by its bounded
+PFRAUTO1 state. The wrapper contains the state byte length, the accepted OPS-list
+count at the latest STATUS and zero reserved fields. A FIFO section has count 1 and a
+64-byte wrapper, its bounded PFRFIFO1 state and 32 bytes per accounting-window
+group. The wrappers retain original list/status positions and counts needed
+to prove a possible interleaving; they never invent original chunk indices.
+
+Common support metadata is stored once. Family CONFIG, all AUTO CLOCK/COVERAGE
+records and the latest STATUS are preserved. Replaced STATUS records contribute
+to exact historical byte/chunk counts, but do not consume metadata indefinitely.
+Replacing metadata rebases its references without changing original positions.
+The original global N/B conservation and disjoint position proof jointly cover
+PPU records, SPU events, AUTO operations, FIFO phase lists, omitted statuses and
+type 43 accounting rows. A closed window bounds its frames, not the later
+emission time of an asynchronously drained accounting row.
+
+The retained AUTO result uses actual retained operations and frame rows, plus
+bounded build-frame and clock support from the prefix. Prefix execution and
+FIFO phase boundaries remain explicit unavailability reasons. A saved build
+population or clock anchor cannot become a retained operation. The reader
+applies its existing qualified-map and verdict rules to the resulting evidence.
+
+Combined admission charges family storage, other live state and conservative
+analysis scratch against one temporary budget. It also charges metadata
+replacement scans and family support scans before doing that work. Limits do
+not reset at every retained segment, and a huge evicted count does not create
+an allocation proportional to history. Exhaustion refuses the report rather
+than pruning dependencies or relaxing final equations.
+
+The [rolling CLI](ps3dk-prof-rolling-cli.md) exposes this typed retained report.
+The C combined encoder and SDK runtime have their own admission gates; host
+schema 2 reader support does not enable those producers.
 
 ## Shared metadata section
 

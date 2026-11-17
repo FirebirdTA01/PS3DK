@@ -186,6 +186,7 @@ impl PpuState {
         self.reader.windows.as_ref().map_or_else(|| (BTreeSet::new(), None), |w|
             (w.windows.iter().map(|x| x.id).collect(), w.open.as_ref().map(|x| x.id)))
     }
+    pub(crate) fn windows(&self)->Option<&crate::windows::Reader>{self.reader.windows.as_ref()}
     pub(crate) fn max_span(&self, inc: u32) -> u64 {
         self.reader.rolling_span_max.as_ref().and_then(|m| m.get(&inc)).copied().unwrap_or(0)
     }

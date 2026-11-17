@@ -203,12 +203,14 @@ fn insert(runs:&mut Vec<FrameRun>,key:Key,limit:usize,m:&mut Meter<'_>)->Result<
 fn cardinality(runs:&[FrameRun])->Result<u64,Error>{
     let mut n=0u64;for r in runs {n=n.checked_add(r.last.checked_sub(r.first).and_then(|x|x.checked_add(1)).ok_or(Error::Checkpoint("run cardinality"))?).ok_or(Error::Checkpoint("run cardinality"))?;}Ok(n)
 }
-fn context(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>)->Result<Vec<Original>,Error>{
+fn context_mode(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>,combined:bool)->Result<Vec<Original>,Error>{
     let bytes=refs.bootstrap.iter().map(|x|16+x.payload.len() as u128).sum::<u128>();
     if bytes>l.support_bytes as u128 || bytes+340>l.checkpoint_bytes as u128 || 8*(bytes+340)>l.temporary_bytes as u128{return Err(Error::Limit("bootstrap storage"));}
     m.charge(32+bytes)?;
     let flags=get32(refs.original_header,12);
-    if !matches!(flags,129|131|193|195|641|643|705|707){return Err(Error::Unsupported(flags));}
+    let admitted=if combined {flags&128!=0 && flags&!(7|64|128|512)==0 && matches!(flags&7,1|3|7)}
+        else{matches!(flags,129|131|193|195|641|643|705|707)};
+    if !admitted{return Err(Error::Unsupported(flags));}
     // This is the genuine original header prefix, not a fabricated event file.
     crate::reader::read(refs.original_header).map_err(Error::Malformed)?;
     if refs.capture.auto.is_none() || refs.capture.export.is_some(){return Err(Error::Context("AUTO capability/export"));}
@@ -226,8 +228,11 @@ fn context(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>)->Result<Vec<Origina
 }
 impl State {
     fn new(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>)->Result<Self,Error>{
+        Self::new_mode(refs,next,l,m,false)
+    }
+    fn new_mode(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>,combined:bool)->Result<Self,Error>{
         Ok(Self{reader:super::Reader::new(super::Budgets{max_ops:u64::MAX,max_frames:u64::MAX,max_clocks:u64::MAX}),
-            header:*refs.original_header,bootstrap:context(refs,next,l,m)?,frequency:refs.capture.clock.as_ref().map(|c|c.freq_hz),next:0,
+            header:*refs.original_header,bootstrap:context_mode(refs,next,l,m,combined)?,frequency:refs.capture.clock.as_ref().map(|c|c.freq_hz),next:0,
             history:0,bytes:0,chunks:0,op_chunks:0,config:None,status:None,snapshot:[0;5],last_coverage:0,
             finals:Vec::new(),touched:Vec::new(),unassociated:false,invalid:false,builds:BTreeMap::new(),clocks:Vec::new(),ops:Vec::new(),frames:Vec::new()})
     }
@@ -338,6 +343,9 @@ fn runs(d:&mut Decode<'_>,n:usize,m:&mut Meter<'_>)->Result<Vec<FrameRun>,Error>
     cardinality(&out)?;Ok(out)
 }
 fn import(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>)->Result<State,Error>{
+    import_mode(refs,b,target,l,m,false)
+}
+fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combined:bool)->Result<State,Error>{
     if b.len()>l.checkpoint_bytes{return Err(Error::Limit("checkpoint bytes"));}
     if b.len()<340{return ck("short checkpoint");}
     if 8*b.len() as u128>l.temporary_bytes as u128{return Err(Error::Limit("import temporary bytes"));}
@@ -353,7 +361,7 @@ fn import(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>)->Result<St
     if minimum>b.len() as u128{return ck("impossible section sizes");}
     let mut d=Decode{b:&b[..b.len()-4],at:320};let original_header:[u8;16]=d.take(16)?.try_into().unwrap();
     if &original_header!=refs.original_header || get32(&original_header,12)!=get32(b,44){return Err(Error::Context("original file header"));}
-    let mut s=State::new(refs,target,l,m)?;let current_boot=s.bootstrap.clone();let current_frequency=s.frequency;
+    let mut s=State::new_mode(refs,target,l,m,combined)?;let current_boot=s.bootstrap.clone();let current_frequency=s.frequency;
     let nboot=get32(b,240) as usize;if nboot>3{return ck("bootstrap count");}let start=d.at;let mut bootstrap=Vec::new();
     for p in 0..nboot{let h=d.take(16)?;let index=get64(h,0);let kind=get32(h,8);let n=get32(h,12) as usize;
         if index!=p as u64 || index>=next || kind!=[1,2,17][p] || n>1_048_576{return ck("bootstrap chronology/size");}
@@ -472,13 +480,97 @@ pub fn advance(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_chunk:u64
 pub fn read(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_chunk:u64,l:Limits,work:&mut WorkBudget)->Result<Retained,Error>{
     let mut m=Meter{outer:work,left:l.work_items};let mut s=import(refs,checkpoint,next_chunk,l,&mut m)?;
     let first_chunk=s.next;let prefix=s.counts();let boundary_frames=s.touched.clone();let prefix_unassociated=s.unassociated;
-    s.apply(refs,suffix,next_chunk,l,&mut m,true)?;let cumulative=s.counts();
+    s.apply(refs,suffix,next_chunk,l,&mut m,true)?;
+    project(s,Boundary{first_chunk,prefix,boundary_frames,prefix_unassociated},&mut m)
+}
+struct Boundary {first_chunk:u64,prefix:Counts,boundary_frames:Vec<FrameRun>,prefix_unassociated:bool}
+fn project(s:State,b:Boundary,m:&mut Meter<'_>)->Result<Retained,Error>{
+    let Boundary{first_chunk,prefix,boundary_frames,prefix_unassociated}=b;let next_chunk=s.next;let cumulative=s.counts();
     let retained=Counts{ops:cumulative.ops-prefix.ops,op_chunks:cumulative.op_chunks-prefix.op_chunks,frames:cumulative.frames-prefix.frames,clocks:cumulative.clocks-prefix.clocks,statuses:cumulative.statuses-prefix.statuses};
     m.charge(s.builds.len() as u128+s.clocks.len() as u128+s.ops.len() as u128+s.frames.len() as u128)?;
     let last_frame=s.reader.last_frame;let r=s.reader.result;
     Ok(Retained{original_header:s.header,bootstrap:s.bootstrap,first_chunk,next_chunk,prefix,retained,cumulative,config:r.config,status:r.last_status,
         final_seen:r.final_seen,ops:s.ops,frames:s.frames,clocks:s.clocks.into_iter().zip(r.clocks).map(|(x,value)|Located{index:x.index,value}).collect(),
         builds:s.builds.into_values().map(|x|x.value).collect(),boundary_frames,prefix_unassociated,invalid_exclusion_seen:s.invalid,last_frame})
+}
+
+/// Private continuous combined-file state. Public standalone admission and the
+/// PFRAUTO1 codec retain their original contracts.
+pub(crate) struct CombinedAdapter {state:State,boundary:Option<Boundary>,status_chunks:u64}
+pub(crate) struct CombinedSummary {
+    pub counts:Counts,pub config:Option<u64>,pub status:Option<u64>,
+    pub status_chunks:u64,pub status_ops:u64,pub final_seen:bool,pub row_width:u32,pub domain:Option<u32>,
+}
+impl CombinedAdapter {
+    pub(crate) fn new(refs:Refs<'_>,l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
+        let mut m=Meter{outer:work,left:l.work_items};
+        Ok(Self{state:State::new_mode(refs,0,l,&mut m,true)?,boundary:None,status_chunks:0})
+    }
+    pub(crate) fn import(refs:Refs<'_>,bytes:&[u8],next:u64,status_chunks:u64,l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
+        let mut m=Meter{outer:work,left:l.work_items};let state=import_mode(refs,bytes,next,l,&mut m,true)?;
+        if state.next!=next{return ck("combined AUTO frontier");}
+        let s=Self{state,boundary:None,status_chunks};s.packet_sides()?;Ok(s)
+    }
+    fn packet_sides(&self)->Result<(),Error>{
+        let s=&self.state;
+        if s.status.is_none(){if self.status_chunks!=0{return ck("absent STATUS chunk snapshot");}return Ok(());}
+        let Some(config)=s.reader.result.config.as_ref().and_then(Config::attached) else{
+            if self.status_chunks!=0{return ck("REFUSED operation chunk snapshot");}return Ok(());
+        };
+        let after=s.op_chunks.checked_sub(self.status_chunks).ok_or(Error::Checkpoint("STATUS chunk snapshot"))?;
+        let rows=s.reader.result.ops_parsed.checked_sub(s.snapshot[0]).ok_or(Error::Checkpoint("STATUS row snapshot"))?;
+        let max=u128::from((crate::model::MAX_CHUNK_LEN-16)/config.op_width());
+        for (chunks,rows) in [(self.status_chunks,s.snapshot[0]),(after,rows)]{
+            if (chunks==0)!=(rows==0) || chunks>rows || u128::from(rows)>u128::from(chunks)*max{return ck("STATUS packet-side feasibility");}
+        }Ok(())
+    }
+    pub(crate) fn sync(&mut self,refs:Refs<'_>,next:u64,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        if next<self.state.next{return Err(Error::Order);}
+        let mut m=Meter{outer:work,left:l.work_items};
+        self.state.bootstrap=context_mode(refs,next,l,&mut m,true)?;
+        self.state.frequency=refs.capture.clock.as_ref().map(|c|c.freq_hz);self.state.next=next;self.state.bound(l)
+    }
+    pub(crate) fn accept(&mut self,refs:Refs<'_>,input:Input<'_>,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        let next=input.index.checked_add(1).ok_or(Error::Order)?;
+        let mut m=Meter{outer:work,left:l.work_items};
+        self.state.bootstrap=context_mode(refs,next,l,&mut m,true)?;
+        self.state.frequency=refs.capture.clock.as_ref().map(|c|c.freq_hz);
+        self.state.apply(refs,&[input],next,l,&mut m,self.boundary.is_some())?;
+        if input.kind==37{self.status_chunks=self.state.op_chunks;}Ok(())
+    }
+    pub(crate) fn encode(&self,l:Limits,work:&mut WorkBudget)->Result<Vec<u8>,Error>{
+        self.packet_sides()?;encode(&self.state,l,&mut Meter{outer:work,left:l.work_items})
+    }
+    pub(crate) fn mark_retained(&mut self,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        if self.boundary.is_some(){return ck("second AUTO retention boundary");}
+        let mut m=Meter{outer:work,left:l.work_items};m.charge(self.state.touched.len() as u128+1)?;
+        self.boundary=Some(Boundary{first_chunk:self.state.next,prefix:self.state.counts(),
+            boundary_frames:self.state.touched.clone(),prefix_unassociated:self.state.unassociated});Ok(())
+    }
+    pub(crate) fn finish(self,l:Limits,work:&mut WorkBudget)->Result<Retained,Error>{
+        let boundary=self.boundary.ok_or(Error::Checkpoint("missing AUTO retention boundary"))?;
+        project(self.state,boundary,&mut Meter{outer:work,left:l.work_items})
+    }
+    pub(crate) fn summary(&self)->CombinedSummary{
+        let s=&self.state;let config=s.reader.result.config.as_ref().and_then(Config::attached);
+        CombinedSummary{counts:s.counts(),config:s.config.as_ref().map(|x|x.index),
+            status:s.status.as_ref().map(|x|x.index),status_chunks:self.status_chunks,status_ops:s.snapshot[0],
+            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),domain:config.map(|c|c.domain)}
+    }
+    pub(crate) fn support(&self)->impl Iterator<Item=&Original>{
+        self.state.config.iter().chain(self.state.status.iter()).chain(self.state.builds.values().filter_map(|b|b.raw.as_ref())).chain(self.state.clocks.iter())
+    }
+    pub(crate) fn storage(&self)->u128{8*self.state.footprint()+1024*(self.state.ops.len()+self.state.frames.len()) as u128}
+    /// Charge before storage() walks original bootstrap and build support.
+    pub(crate) fn storage_work(&self)->u128{self.state.bootstrap.len() as u128+self.state.builds.len() as u128+1}
+    pub(crate) fn analysis_scratch(&self,fifo_items:u128)->Result<u128,Error>{
+        let s=&self.state;let anchors=s.clocks.len() as u128;
+        let population=s.ops.len() as u128+s.frames.len() as u128+s.builds.len() as u128+anchors+1;
+        population.checked_add(fifo_items).and_then(|n|n.checked_mul(4096))
+            .and_then(|n|anchors.checked_mul(anchors).and_then(|a|a.checked_mul(2048)).and_then(|a|n.checked_add(a)))
+            .ok_or(Error::Limit("analysis temporary overflow"))
+    }
+    pub(crate) fn retained_rows(&self)->usize{self.state.ops.len()+self.state.frames.len()}
 }
 
 fn fifo_boundary(f:&fifo::rolling::Retained,key:Key)->bool {

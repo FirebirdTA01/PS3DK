@@ -23,7 +23,12 @@ IMPL = ROOT / 'sdk/libps3dkprof/src/rolling'
 RUST = ROOT / 'tools/ps3dk-prof/tests/rolling_ppu_c_output.rs'
 PINS = {
     'roll_output.c': '8e54c64c83cc9242e36dd9d555a88af82af715975bdb6973946abccb5feed787',
-    'roll_ppu.c': '0e31529f8eabf44b0acb3ad70b7393c0417d480f2d68cff2407447f014439efe',
+    # Verified shared-family extraction: standalone pfp_prepare still calls
+    # core_accept(external_metadata=0), then the same PFRCKP01 envelope;
+    # core_sections(counts=NULL) preserves standalone 120-byte lane rows.
+    # All eight mutation sites remain in unchanged roll_output.c.
+    'roll_ppu.c': '37c3dc29c1a486c69816840ee34c3132be570b25a2785920675052a64a052245',
+    'roll_ppu_internal.h': '6282c7128aeee1fcc738cb62b0c2977acbe180b8114d408a86469476f5859230',
     'roll_store.c': '4ce68eadd1f52a5307d90b211dc93abe2b497440df489da34b22767bd578951d',
 }
 PREFIX = 'actual_c_ppu_output_'
@@ -83,7 +88,7 @@ def specifications():
 
 def snapshot():
     files = [IMPL / name for name in ('roll_output.c', 'roll_output.h', 'roll_ppu.c',
-             'roll_ppu.h', 'roll_store.c', 'roll_store.h')]
+             'roll_ppu.h', 'roll_ppu_internal.h', 'roll_store.c', 'roll_store.h')]
     files += [HERE / 'ppu_output_fixture.c', HERE / 'run_ppu_output.py', Path(__file__).resolve(),
               RUST, RUST.parent / 'common/mod.rs']
     data = {p: read_bounded(p) for p in files}

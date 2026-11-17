@@ -1,6 +1,7 @@
 /* Private PPU/WINDOWS accepted-state encoder. No runtime installation, IO,
  * allocation, extension-family acceptance or historical event replay. */
 #include "roll_ppu.h"
+#include "roll_ppu_internal.h"
 #include <string.h>
 
 #define CONTEXT_MAGIC UINT32_C(0x50465043)
@@ -155,23 +156,23 @@ static void o32(writer *w,uint32_t n){uint8_t p[4];w32(p,n);out(w,p,4);}
 static void o64(writer *w,uint64_t n){uint8_t p[8];unsigned i;for(i=0;i<8;++i)p[i]=(uint8_t)(n>>(8*i));out(w,p,8);}
 static void section(writer *w,uint16_t kind,uint32_t count,uint32_t bytes)
 {o16(w,kind);o16(w,1);o32(w,count);o32(w,bytes);o32(w,0);}
-static int encode(const context *c,state *s,void *checkpoint,size_t capacity,size_t *written)
+int pfp_core_sections(const void *opaque,const void *arena,const pfp_record_chunks *counts,uint32_t count,
+    void *buffer,size_t capacity,size_t *written)
 {
+    const context *c=opaque;state *s=(state *)arena;
     lane *ls=lanes(c,s);stack_node *ns=stacks(c,s);frame_node *fs=frames(c,s);token *ts=tokens(c,s);
-    uint64_t row_bytes=(uint64_t)s->lane_count*120+(uint64_t)s->stacks_used*80+(uint64_t)s->frames_used*16;
-    uint64_t length=132+(uint64_t)s->metadata_used+row_bytes+(uint64_t)s->tokens_used*16;
-    writer w={(uint8_t *)checkpoint,0,capacity,0};uint32_t i,k,j,index;
-    if(length>c->cfg.checkpoint_bytes||length>capacity||row_bytes>UINT32_MAX)return PFR_CHECKPOINT_BYTES;
-    out(&w,"PFRCKP01",8);o16(&w,1);o16(&w,3);o32(&w,0);o64(&w,s->next);
-    o32(&w,r32(s->header+12));o32(&w,0);o64(&w,s->bytes);o64(&w,length-68);o64(&w,s->total_written);o64(&w,0);
-    section(&w,1,s->metadata_count,16+s->metadata_used);out(&w,s->header,16);
-    out(&w,(uint8_t *)s+c->layout.metadata_offset,s->metadata_used);
+    uint32_t fixed=counts?128:120;
+    uint64_t row_bytes=(uint64_t)s->lane_count*fixed+(uint64_t)s->stacks_used*80+(uint64_t)s->frames_used*16;
+    uint64_t length=32+row_bytes+(uint64_t)s->tokens_used*16;
+    writer w={(uint8_t *)buffer,0,capacity,0};uint32_t i,k,j,index;
+    if(length>capacity||row_bytes>UINT32_MAX)return PFR_CHECKPOINT_BYTES;
     section(&w,2,s->lane_count,(uint32_t)row_bytes);
     for(i=0;i<s->lane_count;++i){lane *l=&ls[i];
-        o32(&w,120+80*l->depth+16*l->frame_runs);o32(&w,l->inc);
+        o32(&w,fixed+80*l->depth+16*l->frame_runs);o32(&w,l->inc);
         o64(&w,l->written);o64(&w,l->gaps);o64(&w,l->gap_count);o64(&w,l->regerr);o64(&w,l->next);
         o64(&w,l->max_span);o64(&w,l->last_tb);o64(&w,l->next_frame);o64(&w,l->frame);o64(&w,l->frame);
         o64(&w,l->last_frame_seq);o64(&w,l->last_frame_tb);o32(&w,l->flags);o32(&w,l->depth);o32(&w,l->frame_runs);o32(&w,0);
+        if(counts){uint64_t chunks=0;for(j=0;j<count;++j)if(counts[j].incarnation==l->inc){chunks=counts[j].chunks;break;}o64(&w,chunks);}
         /* Stack pool links run top-to-bottom; wire witnesses are bottom-first.
          * Depth <=256 bounds this walk without a per-call scratch allocation. */
         for(k=l->depth;k>0;--k){index=l->stack;for(j=1;j<k;++j)index=ns[index].next;
@@ -181,24 +182,44 @@ static int encode(const context *c,state *s,void *checkpoint,size_t capacity,siz
     }
     section(&w,3,s->tokens_used,(uint32_t)((uint64_t)s->tokens_used*16));
     for(i=0;i<s->tokens_used;++i){o32(&w,ts[i].owner);o32(&w,0);o64(&w,ts[i].frame);}
+    if(w.bad||w.n!=length)return PFR_INVALID;
+    *written=w.n;return PFR_OK;
+}
+static int encode(const context *c,state *s,void *checkpoint,size_t capacity,size_t *written)
+{
+    uint64_t row_bytes=(uint64_t)s->lane_count*120+(uint64_t)s->stacks_used*80+(uint64_t)s->frames_used*16;
+    uint64_t length=132+(uint64_t)s->metadata_used+row_bytes+(uint64_t)s->tokens_used*16;
+    writer w={(uint8_t *)checkpoint,0,capacity,0};size_t sections=0;int rc;
+    if(length>c->cfg.checkpoint_bytes||length>capacity||row_bytes>UINT32_MAX)return PFR_CHECKPOINT_BYTES;
+    out(&w,"PFRCKP01",8);o16(&w,1);o16(&w,3);o32(&w,0);o64(&w,s->next);
+    o32(&w,r32(s->header+12));o32(&w,0);o64(&w,s->bytes);o64(&w,length-68);o64(&w,s->total_written);o64(&w,0);
+    section(&w,1,s->metadata_count,16+s->metadata_used);out(&w,s->header,16);
+    out(&w,(uint8_t *)s+c->layout.metadata_offset,s->metadata_used);
+    rc=pfp_core_sections(c,s,NULL,0,w.p+w.n,w.cap-w.n,&sections);if(rc!=PFR_OK)return rc;w.n+=sections;
     if(w.bad||w.n!=length-4)return PFR_INVALID;
     o32(&w,crc(w.p,w.n));if(w.bad)return PFR_INVALID;*written=w.n;return PFR_OK;
 }
-int pfp_init(void *opaque,size_t context_bytes,const pfp_config *cfg,const uint8_t header[16],
-    void *arena,size_t arena_bytes,void *checkpoint,size_t capacity,size_t *written)
+int pfp_core_init(void *opaque,size_t context_bytes,const pfp_config *cfg,const uint8_t header[16],void *arena,size_t arena_bytes)
 {
-    pfp_layout p;context *c=opaque;state *s=arena;uint32_t i;size_t n=0;int rc;
-    if(written)*written=0;
-    if(!opaque||!header||!arena||!checkpoint||!written||pfp_plan(cfg,&p)!=PFR_OK
-       ||context_bytes<p.context_bytes||arena_bytes<p.arena_bytes||capacity<cfg->checkpoint_bytes
+    pfp_layout p;context *c=opaque;state *s=arena;uint32_t i;
+    if(!opaque||!header||!arena||pfp_plan(cfg,&p)!=PFR_OK
+       ||context_bytes<p.context_bytes||arena_bytes<p.arena_bytes
        ||(uintptr_t)opaque%_Alignof(context)||(uintptr_t)arena%p.arena_alignment
-       ||memcmp(header,"PS3DKPRF",8)||r16(header+8)!=1||(r32(header+12)&~UINT32_C(512)))return PFR_INVALID;
+       ||memcmp(header,"PS3DKPRF",8)||r16(header+8)!=1)return PFR_INVALID;
     memset(c,0,sizeof *c);c->magic=CONTEXT_MAGIC;c->cfg=*cfg;c->layout=p;
     memset(s,0,p.arena_bytes);s->magic=ARENA_MAGIC;s->arena_bytes=(uint32_t)p.arena_bytes;memcpy(s->header,header,16);
     s->free_stack=cfg->stack_rows?0:NONE;s->free_frame=cfg->frame_identities?0:NONE;
     for(i=0;i<cfg->stack_rows;++i)stacks(c,s)[i].next=i+1<cfg->stack_rows?i+1:NONE;
     for(i=0;i<cfg->frame_identities;++i)frames(c,s)[i].next=i+1<cfg->frame_identities?i+1:NONE;
-    rc=encode(c,s,checkpoint,capacity,&n);if(rc!=PFR_OK)return PFR_INVALID;*written=n;return PFR_OK;
+    return PFR_OK;
+}
+int pfp_init(void *opaque,size_t context_bytes,const pfp_config *cfg,const uint8_t header[16],
+    void *arena,size_t arena_bytes,void *checkpoint,size_t capacity,size_t *written)
+{
+    size_t n=0;int rc;if(written)*written=0;
+    if(!header||!cfg||!checkpoint||!written||capacity<cfg->checkpoint_bytes||(r32(header+12)&~UINT32_C(512)))return PFR_INVALID;
+    rc=pfp_core_init(opaque,context_bytes,cfg,header,arena,arena_bytes);if(rc!=PFR_OK)return rc;
+    rc=encode(opaque,arena,checkpoint,capacity,&n);if(rc!=PFR_OK)return PFR_INVALID;*written=n;return PFR_OK;
 }
 static int header_chunk(const context *c,state *s,cursor *p)
 {
@@ -380,22 +401,24 @@ static int window_end(state *s,cursor *p)
     }
     s->window_open=0;s->window_last_id=id;s->window_previous=1;s->window_last_frame=last;return PFR_OK;
 }
-int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
-    void *checkpoint,size_t capacity,pfo_prepared *result)
+int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
+    uint32_t external_metadata,pfo_prepared *result)
 {
     const context *c=opaque;const state *a=accepted;state *s=prepared;const uint8_t *raw=chunk;
-    cursor p;uint32_t ty,len;int rc;size_t cp_bytes=0;
+    cursor p;uint32_t ty,len;int rc;
     if(result)memset(result,0,sizeof *result);
-    if(!c||c->magic!=CONTEXT_MAGIC||!a||!s||a==s||!chunk||!checkpoint||!result
-       ||capacity<c->cfg.checkpoint_bytes||(uintptr_t)a%c->layout.arena_alignment||(uintptr_t)s%c->layout.arena_alignment
+    if(!c||c->magic!=CONTEXT_MAGIC||!a||!s||a==s||!chunk||!result
+       ||(external_metadata!=0&&!(external_metadata>=8&&external_metadata<=13)
+          &&external_metadata!=15&&external_metadata!=16&&external_metadata!=17&&external_metadata!=18)
+       ||(uintptr_t)a%c->layout.arena_alignment||(uintptr_t)s%c->layout.arena_alignment
        ||a->magic!=ARENA_MAGIC||a->arena_bytes!=c->layout.arena_bytes||a->terminal||n<20)return PFR_INVALID;
     ty=r32(raw);len=r32(raw+4);
     if(len>MAX_CHUNK||(uint64_t)len+20!=n||r64(raw+8)!=a->next||crc(raw,n-4)!=r32(raw+n-4)
-       ||!((ty>=1&&ty<=7)||((r32(a->header+12)&512)&&(ty==41||ty==42)))
+       ||!((ty>=1&&ty<=7)||((r32(a->header+12)&512)&&(ty==41||ty==42))||(external_metadata&&ty==external_metadata))
        ||(a->next==0&&ty!=1)||(a->next==1&&ty!=2)||(a->next>=2&&(ty==1||ty==2)))return PFR_INVALID;
     if(a->next==UINT64_MAX-1||n>UINT64_MAX-16-a->bytes){result->reason=PFR_COUNTER_RANGE;return PFO_RESOURCE;}
     memcpy(s,a,c->layout.arena_bytes);
-    if(ty!=5){
+    if(ty!=5&&ty!=13){
         if(n>c->cfg.metadata_bytes||s->metadata_used>c->cfg.metadata_bytes-n||4>c->cfg.metadata_bytes-n-s->metadata_used){
             result->reason=PFR_SUPPORT;return PFO_RESOURCE;
         }
@@ -412,6 +435,8 @@ int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chu
     case 5:rc=records_chunk(c,s,&p);break;
     case 6:rc=trailer_chunk(c,s,&p);break;
     case 7:rc=retired_chunk(c,s,&p);break;
+    case 8:case 9:case 10:case 11:case 12:case 13:case 15:case 16:case 17:case 18:
+        rc=external_metadata==ty?PFR_OK:PFR_INVALID;break;
     case 41:rc=window_begin(c,s,&p);break;
     case 42:rc=window_end(s,&p);break;
     default:rc=PFR_INVALID;break;
@@ -423,8 +448,37 @@ int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chu
         result->reason=PFR_IDENTITIES;return PFO_RESOURCE;
     }
     ++s->next;s->bytes+=n;
-    if(!s->terminal){rc=encode(c,s,checkpoint,capacity,&cp_bytes);
+    result->terminal=s->terminal;return PFR_OK;
+}
+int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
+    void *checkpoint,size_t capacity,pfo_prepared *result)
+{
+    const context *c=opaque;size_t cp_bytes=0;int rc;
+    if(result)memset(result,0,sizeof *result);
+    if(!c||c->magic!=CONTEXT_MAGIC||!checkpoint||!result||capacity<c->cfg.checkpoint_bytes)return PFR_INVALID;
+    rc=pfp_core_accept(opaque,accepted,prepared,chunk,n,0,result);if(rc!=PFR_OK)return rc;
+    if(!result->terminal){rc=encode(c,prepared,checkpoint,capacity,&cp_bytes);
         if(rc>0){result->reason=(uint32_t)rc;return PFO_RESOURCE;}if(rc!=PFR_OK)return rc;
     }
-    result->checkpoint_bytes=cp_bytes;result->terminal=s->terminal;return PFR_OK;
+    result->checkpoint_bytes=cp_bytes;return PFR_OK;
+}
+int pfp_core_view(const void *opaque,const void *arena,pfp_view *v)
+{
+    const context *c=opaque;const state *s=arena;const uint8_t *m;size_t first;uint32_t i;
+    if(!c||c->magic!=CONTEXT_MAGIC||!s||!v||s->magic!=ARENA_MAGIC||s->arena_bytes!=c->layout.arena_bytes)return PFR_INVALID;
+    memset(v,0,sizeof *v);v->header=s->header;v->metadata=(const uint8_t *)s+c->layout.metadata_offset;
+    v->next=s->next;v->bytes=s->bytes;v->metadata_bytes=s->metadata_used;v->metadata_count=s->metadata_count;
+    v->lanes=s->lane_count;v->stacks=s->stacks_used;v->frames=s->frames_used;v->tokens=s->tokens_used;v->terminal=s->terminal;
+    for(i=0;i<s->lane_count;++i){const lane *l=&lanes(c,(void *)s)[i];
+        if(l->written>UINT64_MAX-v->physical_rows)return PFR_INVALID;
+        v->physical_rows+=l->written;if(l->gap_count>UINT64_MAX-v->physical_rows)return PFR_INVALID;
+        v->physical_rows+=l->gap_count;
+    }
+    /* Actual CLOCKS is the second metadata entry. No copied clock or header. */
+    if(s->have_clock){m=v->metadata;if(v->metadata_bytes<4)return PFR_INVALID;
+        first=(size_t)r32(m)+4;if(first>v->metadata_bytes||v->metadata_bytes-first<52)return PFR_INVALID;
+        if(r32(m+first)!=48||r32(m+first+4)!=2)return PFR_INVALID;
+        v->clock_frequency=r64(m+first+4+16+12);
+    }
+    return PFR_OK;
 }

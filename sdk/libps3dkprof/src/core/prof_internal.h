@@ -16,6 +16,7 @@
 
 #include "../pal/pal.h"
 #include "prof_finalization.h"
+#include "../rolling/roll_runtime.h"
 #ifdef PS3DK_PROF_WITH_AUTO
 #include "../auto_rsx/auto_lease.h"
 #endif
@@ -239,6 +240,9 @@ typedef struct prof {
     uint32_t desc_count;        /* atomic: RELEASE after a complete entry */
     uint32_t pad;
     sink snk;
+#ifdef P_ROLLING_RUNTIME
+    p_roll_runtime *rolling;
+#endif
     uint32_t retention_keep;    /* FILE close + successful join; zero leaves append-only lifecycle unchanged */
     drainer dr;
     pal_thread drain_thread;

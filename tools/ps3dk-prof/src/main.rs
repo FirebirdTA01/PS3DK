@@ -11,10 +11,12 @@
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
 
 use std::process::ExitCode;
+mod rolling_cli;
 
 use ps3dk_prof::{load_file, report, Outcome, Verdict};
 
 const USAGE: &str = "usage:
+  ps3dk-prof rolling [--json] [--max-bytes N] <file>   validate and list retained rolling data
   ps3dk-prof check <file>    print the verdict
   ps3dk-prof report [--window <id|name>] <file>   print the verdict and the full report
   ps3dk-prof windows <file>  list capture windows
@@ -1027,6 +1029,9 @@ fn export(args: &[String]) -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|c| c == "rolling") {
+        return rolling_cli::run(&args[1..]);
+    }
     if args.first().is_some_and(|c| c == "export") {
         return export(&args[1..]);
     }

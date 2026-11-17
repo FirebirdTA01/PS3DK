@@ -144,13 +144,53 @@ pub struct Adapter {
     last_index: Option<u64>, input_bytes: u64, events: u64, work_events: u64,
     metadata_used: usize, runs_used: usize, witnesses_used: usize, poisoned: bool,
     prefix: BTreeMap<SourceKey, Prefix>,
+    mixed_domains: bool,
+    bound_gpu: BTreeSet<u32>,
 }
 impl Adapter {
     pub fn new(flags: u32, limits: Limits) -> Result<Self, Error> {
         supported(flags)?;
-        Ok(Self { reader: if flags & FLAG_SPU_ORDER != 0 { ExtReader::with_order() } else { ExtReader::new() },
+        Ok(Self::create(flags,limits,false))
+    }
+    pub(crate) fn new_combined(flags:u32,limits:Limits)->Result<Self,Error>{
+        if flags&192==0{return Self::new(flags,limits);}
+        if flags&!(7|64|128|FLAG_WINDOWS)!=0 || !matches!(flags&7,1|3|7){return Err(Error::Unsupported("combined domain capabilities"));}
+        Ok(Self::create(flags,limits,true))
+    }
+    fn create(flags:u32,limits:Limits,mixed_domains:bool)->Self{
+        Self { reader: if flags & FLAG_SPU_ORDER != 0 { ExtReader::with_order() } else { ExtReader::new() },
             flags, limits, journal: Vec::new(), last_index: None, input_bytes: 0, events: 0, work_events: 0,
-            metadata_used: 0, runs_used: 0, witnesses_used: 0, poisoned: false, prefix: BTreeMap::new() })
+            metadata_used: 0, runs_used: 0, witnesses_used: 0, poisoned: false, prefix: BTreeMap::new(),
+            mixed_domains,bound_gpu:BTreeSet::new() }
+    }
+    pub(crate) fn bind_combined_domain(&mut self,id:u32)->Result<(),Error>{
+        if !self.mixed_domains || self.reader.cap.domains.get(&id).is_none_or(|d|d.kind!=KIND_RSX_TIMESTAMP){return ck("combined CONFIG domain");}
+        self.bound_gpu.insert(id);Ok(())
+    }
+    pub(crate) fn rsx_domains(&self)->impl Iterator<Item=u32>+'_ {
+        self.reader.cap.domains.values().filter(|d|d.kind==KIND_RSX_TIMESTAMP).map(|d|d.id)
+    }
+    pub(crate) fn combined_lifecycle_work(&self)->u128{
+        self.reader.sources.len() as u128+self.reader.cap.epochs.len() as u128+1
+    }
+    pub(crate) fn combined_storage(&self)->u128{
+        8*self.metadata_used as u128+256*(self.runs_used+self.witnesses_used) as u128
+            +self.reader.sources.values().map(|s|256*(s.raw.events.len()+s.raw.losses.len()+s.raw.pairs.len()+s.raw.censored.len()
+                +s.raw.unpaired.len()+s.raw.marks.len()+s.stack.len()) as u128).sum::<u128>()
+    }
+    fn mixed_lifecycle(&self)->Result<(),Error>{
+        if !self.mixed_domains{return Ok(());}
+        for (&key,s) in &self.reader.sources {if let SourceKey::Gpu(id)=key {
+            if s.named_epoch>1 || s.events!=0 || s.lost!=0 || s.next_seq!=0 || !s.frame_refs.is_empty()
+                || (s.final_entry.is_some()&&!self.bound_gpu.contains(&id)){
+                return Err(Error::Unsupported("manual RSX measurements or unbound lifecycle"));
+            }
+        }}
+        for e in &self.reader.cap.epochs {
+            if self.reader.cap.domains.get(&e.domain_id).is_some_and(|d|d.kind==KIND_RSX_TIMESTAMP)
+                && (e.epoch!=1 || e.reason!=1 || e.written_value!=0){return Err(Error::Unsupported("manual RSX epoch transition"));}
+        }
+        Ok(())
     }
     fn healthy(&self) -> Result<(), Error> { if self.poisoned { ck("adapter poisoned by rejected input") } else { Ok(()) } }
     fn position(&self, index: u64) -> Result<(), Error> {
@@ -172,10 +212,14 @@ impl Adapter {
             }
             for _ in 0..n {
                 c.u32()?; let kind = c.u8()?;
-                if kind != KIND_SPU_DEC { return Err(Error::Unsupported("only SPU_DEC domains supported")); }
+                if kind != KIND_SPU_DEC && !(self.mixed_domains && kind==KIND_RSX_TIMESTAMP) { return Err(Error::Unsupported("only SPU_DEC domains supported")); }
                 c.take(43)?; let name_len = usize::from(c.u16()?); c.take(name_len)?;
             }
             c.done()?;
+        }
+        if self.mixed_domains && ty==CHUNK_CALIBRATION {
+            let mut c=Cursor::new(payload,"combined calibration domain");let id=c.u32()?;
+            if self.reader.cap.domains.get(&id).is_some_and(|d|d.kind==KIND_RSX_TIMESTAMP){return Err(Error::Unsupported("manual RSX calibration"));}
         }
         Ok(())
     }
@@ -212,6 +256,7 @@ impl Adapter {
         // This is the existing parser, including pairing, epoch, tiling, ORDER
         // and exact final-entry equations. No rolling bypass is present.
         self.reader.chunk(ty, payload, v1)?;
+        self.mixed_lifecycle()?;
         if let Some((lane, epoch, first, n)) = event {
             let s = &self.reader.sources[&SourceKey::Lane(lane)];
             let mut stack = Vec::new();
@@ -271,10 +316,14 @@ impl Adapter {
     }
     pub fn finish(self, has_trailer: bool, trailer_ok: bool, frames: &BTreeMap<u32, BTreeSet<u64>>) -> Result<Retained, Error> {
         self.healthy()?;
+        self.mixed_lifecycle()?;
         if trailer_ok && !has_trailer { return ck("inconsistent trailer context"); }
         let cap = self.reader.finish(has_trailer, trailer_ok, frames)?;
         let mut sources = BTreeMap::new();
         for report in cap.sources {
+            // The complete original lifecycle was validated above. AUTO/FIFO
+            // declarations carry no manual measurements and are not SPU lanes.
+            if self.mixed_domains && matches!(report.key,SourceKey::Gpu(_)){continue;}
             let p = self.prefix.get(&report.key).copied().unwrap_or_default();
             let mut pairs = Vec::new(); let mut left_censored = Vec::new();
             for pair in report.raw.pairs {

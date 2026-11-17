@@ -24,6 +24,9 @@
 #include "gpu_internal.h"
 #endif
 
+#ifdef PS3DK_PROF_TEST_HOOKS
+#include "../rolling/roll_runtime_test.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -43,6 +46,9 @@ static struct {
     char dir[256];
     ps3dk_prof_sink_callbacks cb;
     uint32_t retention_keep;
+#ifdef P_ROLLING_RUNTIME
+    ps3dk_prof_test_rolling_options rolling;
+#endif
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arcs;
 #endif
@@ -1264,6 +1270,40 @@ int ps3dk_prof_set_capture_retention(uint32_t keep)
     return rc;
 }
 
+#ifdef PS3DK_PROF_TEST_HOOKS
+int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *o)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        rc = p_roll_plan(o, &bytes);
+        if (!rc) g_pending.rolling = *o;
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_result(ps3dk_prof_test_rolling_record *out)
+{
+    if (!out) return PS3DK_PROF_EINVAL;
+    if (!p_ready()) return PS3DK_PROF_ENOTINIT;
+#ifdef P_ROLLING_RUNTIME
+    if (!g_prof->rolling) return PS3DK_PROF_ENOTSUP;
+    if (!LD_ACQ(&g_prof->finalization_ready)) return PS3DK_PROF_EBUSY;
+    *out = g_prof->rolling->record;
+    return 0;
+#else
+    return PS3DK_PROF_ENOTSUP;
+#endif
+}
+#endif
+
 int ps3dk_prof_set_sink_path(const char *dir)
 {
     int rc = gate_enter(G_CONFIGURING);
@@ -1422,6 +1462,9 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     uint64_t now;
     int rc, err = 0, n;
     const char *dir;
+#ifdef P_ROLLING_RUNTIME
+    size_t roll_bytes = 0, o_roll = 0;
+#endif
 #ifdef PS3DK_PROF_WITH_ARCS
     size_t o_arc_rows = 0, o_arc_index = 0;
 #endif
@@ -1505,9 +1548,31 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
             return PS3DK_PROF_EINVAL;
     }
 #endif
+#ifdef P_ROLLING_RUNTIME
+    if (g_pending.rolling.enabled) {
+        if (g_pending.kind == 2
+#ifdef PS3DK_PROF_WITH_SPU
+            || x.enabled
+#endif
+#ifdef PS3DK_PROF_WITH_ARCS
+            || p->arc_options.max_arcs_per_thread
+#endif
+#if defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC) || defined(PS3DK_PROF_WITH_COUNTERS)
+            || 1
+#endif
+            ) return PS3DK_PROF_ENOTSUP;
+        if (p_roll_plan(&g_pending.rolling, &roll_bytes) ||
+            take(&off, 1, roll_bytes, &o_roll) || off > P_TOTAL_MAX ||
+            (uint64_t)off > g_pending.rolling.max_state_bytes)
+            return PS3DK_PROF_EINVAL;
+    }
+#endif
     p->block = (uint8_t *)pal_alloc(off);
     if (!p->block)
         return PS3DK_PROF_ENOMEM;
+#ifdef P_ROLLING_RUNTIME
+    if (roll_bytes) p_roll_bind(p, p->block + o_roll, &g_pending.rolling, off);
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
     p->block_bytes = off;
     if (x.enabled) {
@@ -1665,18 +1730,39 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         p->snk.cb = g_pending.cb;   /* 6b: no callback runs during init */
     } else {
         dir = g_pending.kind == 1 ? g_pending.dir : PAL_DEFAULT_SINK_DIR;
-        n = snprintf(p->snk.path, sizeof p->snk.path, "%s/%s-%016llx.prof", dir, p->app,
-                     (unsigned long long)p->tb_at_init);
+        n = snprintf(p->snk.path, sizeof p->snk.path, "%s/%s-%016llx.%s", dir, p->app,
+                     (unsigned long long)p->tb_at_init,
+#ifdef P_ROLLING_RUNTIME
+                     p->rolling ? "profr" :
+#endif
+                     "prof");
         if (n < 0 || (size_t)n >= sizeof p->snk.path) {
             rc = PS3DK_PROF_EINVAL;   /* Q7: a truncated name is never used */
             goto fail_mutex2;
         }
-        if (pal_open_excl(p->snk.path, &p->snk.fd, &err) != 0) {
+        rc =
+#ifdef P_ROLLING_RUNTIME
+            p->rolling ? pal_open_rw_excl(p->snk.path, &p->snk.fd, &err) :
+#endif
+            pal_open_excl(p->snk.path, &p->snk.fd, &err);
+        if (rc != 0) {
             rc = err == PAL_EEXIST ? PS3DK_PROF_EEXIST : PS3DK_PROF_ESINKFAIL;   /* no file created: retryable */
             goto fail_mutex2;
         }
         p->snk.kind = 1;
     }
+
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        p_drain_prologue(p); /* real HEADER/CLOCKS committed before worker creation */
+        rc = p->rolling->result ? p->rolling->result : p_roll_flush(p);
+        if (rc) {
+            (void)pal_close(p->snk.fd, &err);
+            *terminal = 1;
+            goto fail_mutex2;
+        }
+    }
+#endif
 
     /* Step 7: THREAD mode's drain thread waits on the start gate until the state is published. */
     if (c.mode == PS3DK_PROF_MODE_THREAD) {

@@ -92,7 +92,9 @@ static int original_header(identity *id, const uint8_t *p, uint32_t kind)
     if (memcmp(p, "PS3DKPRF", 8)) return PFI_CORRUPT;
     if (r16(p + 8) != 1 || r16(p + 10) != 0) return PFI_UNSUPPORTED;
     if ((kind == PFI_CHECKPOINT_PPU && base != 0)
-        || (kind == PFI_CHECKPOINT_COMBINED && base != 1 && base != 3 && base != 7))
+        || (kind == PFI_CHECKPOINT_COMBINED
+            && ((flags & ~UINT32_C(711))
+                || ((flags & 7) != 1 && (flags & 7) != 3 && (flags & 7) != 7))))
         return PFI_UNSUPPORTED;
     if (id->have_original) {
         if (id->kind != kind || memcmp(id->original, p, 16)) return PFI_CORRUPT;
@@ -115,7 +117,7 @@ static int header_identity(identity *id, const uint8_t *p, size_t n)
     if (n != 24 || r16(p + 2) || r64(p + 4) != id->session) return PFI_CORRUPT;
     id->have_identity = 1; return PFI_OK;
 }
-/* Only the admitted PPU/WINDOWS and PPU+SPU schemas have cold inspection.
+/* Only the admitted PPU/SPU/AUTO/FIFO/WINDOWS schemas have cold inspection.
  * This is a family/flag gate, not validation of the bodies of these chunks. */
 static int chunk_type(uint32_t type, uint32_t flags, int metadata)
 {
@@ -127,6 +129,12 @@ static int chunk_type(uint32_t type, uint32_t flags, int metadata)
     case 13: return metadata ? PFI_CORRUPT : ((flags & 1) ? PFI_OK : PFI_UNSUPPORTED);
     case 17: return (flags & 2) ? PFI_OK : PFI_UNSUPPORTED;
     case 18: return (flags & 4) ? PFI_OK : PFI_UNSUPPORTED;
+    case 31: case 33: return (flags & 64) ? PFI_OK : PFI_UNSUPPORTED;
+    case 32: case 43:
+        return metadata ? PFI_CORRUPT : ((flags & 64) ? PFI_OK : PFI_UNSUPPORTED);
+    case 34: case 36: case 37: case 38:
+        return (flags & 128) ? PFI_OK : PFI_UNSUPPORTED;
+    case 35: return metadata ? PFI_CORRUPT : ((flags & 128) ? PFI_OK : PFI_UNSUPPORTED);
     case 41: case 42: return (flags & 512) ? PFI_OK : PFI_UNSUPPORTED;
     default: return PFI_UNSUPPORTED;
     }
@@ -195,12 +203,24 @@ static int checkpoint(identity *id, const pfi_limits *limits, const pfr_segment 
             || r64(p + 40) != (uint64_t)(n - 68)) return PFI_CORRUPT;
         next = r64(p + 16); bytes = r64(p + 32); original = NULL;
     } else if (!memcmp(p, "PFRMIX01", 8)) {
-        kind = PFI_CHECKPOINT_COMBINED; fixed = 80; section_count = 4;
+        uint32_t version, flags, families;
+        kind = PFI_CHECKPOINT_COMBINED;
         if (n < 84) return PFI_CORRUPT;
-        if (r16(p + 8) != 1) return PFI_UNSUPPORTED;
-        if (r16(p + 10) != 80 || r32(p + 12) != 4 || r64(p + 48) != (uint64_t)(n - 84)
-            || r32(p + 56) != 3 || r32(p + 60) || r64(p + 72)) return PFI_CORRUPT;
-        for (i = 0; i < 4; ++i) if (r16(p + 64 + 2 * i) != 1) return PFI_UNSUPPORTED;
+        version = r16(p + 8);
+        if (version == 1) { fixed = 80; section_count = 4; }
+        else if (version == 2) { fixed = 96; section_count = 6; }
+        else return PFI_UNSUPPORTED;
+        if (n < fixed + 4) return PFI_CORRUPT;
+        flags = r32(p + 28);
+        families = 3u | ((flags & 128) ? 4u : 0u) | ((flags & 64) ? 8u : 0u);
+        if ((version == 2) != ((flags & 192) != 0)
+            || r16(p + 10) != fixed || r32(p + 12) != section_count
+            || r64(p + 48) != (uint64_t)(n - fixed - 4)
+            || r32(p + 56) != families || r32(p + 60)
+            || !zeroes(p + 64 + 2 * section_count, fixed - 64 - 2 * section_count))
+            return PFI_CORRUPT;
+        for (i = 0; i < section_count; ++i)
+            if (r16(p + 64 + 2 * i) != 1) return PFI_UNSUPPORTED;
         next = r64(p + 32); bytes = r64(p + 40); original = p + 16;
     } else return PFI_UNSUPPORTED;
     if (next == UINT64_MAX || next != seg->first_chunk || bytes != prefix_bytes
@@ -223,8 +243,23 @@ static int checkpoint(identity *id, const pfi_limits *limits, const pfr_segment 
             }
             rc = original_header(id, original, kind); if (rc) return rc;
             rc = metadata(id, limits, body, len, count, next); if (rc) return rc;
+        } else if (i == 5 || i == 6) {
+            uint32_t flag = i == 5 ? 128u : 64u;
+            if (!(id->flags & flag)) {
+                if (count || len) return PFI_CORRUPT;
+            } else {
+                if (count != 1) return PFI_CORRUPT;
+                if (i == 5) {
+                    if (len < 32 || (uint64_t)r32(body) != (uint64_t)(len - 32)
+                        || r32(body + 4) || !zeroes(body + 16, 16)) return PFI_CORRUPT;
+                } else {
+                    if (len < 64 || r64(body + 56)
+                        || UINT64_C(64) + r32(body) + UINT64_C(32) * r32(body + 4)
+                           != (uint64_t)len) return PFI_CORRUPT;
+                }
+            }
         }
-        /* Non-metadata table/journal bodies remain deliberately opaque. */
+        /* Table/journal bodies, including family wrapper contents, are opaque. */
     }
     return remain ? PFI_CORRUPT : PFI_OK;
 }

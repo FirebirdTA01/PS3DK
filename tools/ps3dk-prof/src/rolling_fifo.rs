@@ -406,6 +406,11 @@ pub fn read_with_work(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_ch
     let first_chunk=state.next;let prefix=state.counts();let prefix_known_missing=state.reader.result.accounting.known_missing;
     let boundary_frames=state.runs.clone();let prefix_unassociated=state.unassociated;
     state.apply(refs,suffix,next_chunk,limits,&mut meter,true)?;
+    project(state,Boundary{first_chunk,prefix,prefix_known_missing,boundary_frames,prefix_unassociated},&mut meter)
+}
+struct Boundary {first_chunk:u64,prefix:Counts,prefix_known_missing:u64,boundary_frames:Vec<FrameRun>,prefix_unassociated:bool}
+fn project(state:State,b:Boundary,meter:&mut Meter<'_>)->Result<Retained,Error>{
+    let Boundary{first_chunk,prefix,prefix_known_missing,boundary_frames,prefix_unassociated}=b;let next_chunk=state.next;
     let cumulative=state.counts();
     let retained=Counts{events:cumulative.events-prefix.events,enter:cumulative.enter-prefix.enter,exit:cumulative.exit-prefix.exit,
         statuses:cumulative.statuses-prefix.statuses,accounting_rows:cumulative.accounting_rows-prefix.accounting_rows};
@@ -415,4 +420,129 @@ pub fn read_with_work(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_ch
     Ok(Retained{first_chunk,next_chunk,prefix,retained,cumulative,config:state.reader.result.config,status:state.reader.result.last_status,
         final_seen:state.reader.result.final_seen,wraps:report.wraps,accounting:state.reader.result.accounting.rows,
         prefix_known_missing,known_missing:state.reader.result.accounting.known_missing,boundary_frames,prefix_unassociated})
+}
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(crate) struct AccountingGroup {pub window:u64,pub rows:u64,pub first:u64,pub last:u64}
+#[derive(Default)]
+pub(crate) struct CombinedPosition {
+    pub config:u64,pub status:u64,pub event_chunks:u64,pub status_chunks:u64,
+    pub chunks:u64,pub bytes:u64,pub groups:Vec<AccountingGroup>,
+}
+pub(crate) struct CombinedAdapter {state:State,boundary:Option<Boundary>,position:CombinedPosition}
+impl CombinedAdapter {
+    pub(crate) fn new(refs:Refs<'_>)->Result<Self,Error>{
+        Ok(Self{state:State::new(refs)?,boundary:None,position:CombinedPosition::default()})
+    }
+    pub(crate) fn import(refs:Refs<'_>,bytes:&[u8],next:u64,position:CombinedPosition,closed_windows:u64,
+        l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
+        if position.groups.len()>l.membership_runs{return Err(Error::Limit("accounting window groups"));}
+        let mut m=Meter{outer:work,left:l.work_records};m.charge(position.groups.len() as u64+1)?;
+        let state=import(refs,bytes,l,&mut m)?;
+        if state.next!=next{return Err(Error::Checkpoint("combined FIFO frontier"));}
+        if encode(&state,l,&mut m)?.as_slice()!=bytes{return Err(Error::Checkpoint("noncanonical FIFO checkpoint"));}
+        let s=Self{state,boundary:None,position};s.validate(closed_windows)?;Ok(s)
+    }
+    fn validate(&self,closed_windows:u64)->Result<(),Error>{
+        let p=&self.position;let r=&self.state.reader.result;let n=self.state.next;
+        if r.config.is_some(){if p.config<2 || p.config>=n{return Err(Error::Checkpoint("FIFO CONFIG position"));}}
+        else if p.config!=0{return Err(Error::Checkpoint("absent FIFO CONFIG position"));}
+        let max=u128::from((crate::model::MAX_CHUNK_LEN-16)/96);
+        let packet=|c:u64,rows:u64|->Result<(),Error>{
+            if (c==0)!=(rows==0) || c>rows || u128::from(rows)>u128::from(c)*max{return Err(Error::Checkpoint("FIFO packet capacity"));}Ok(())
+        };
+        packet(p.event_chunks,r.parsed_events)?;
+        if let Some(status)=&r.last_status {
+            if p.status>=n || p.status<=p.config || r.statuses>p.status-p.config{return Err(Error::Checkpoint("FIFO STATUS positions"));}
+            let after=p.event_chunks.checked_sub(p.status_chunks).ok_or(Error::Checkpoint("FIFO STATUS list snapshot"))?;
+            let rows=r.parsed_events.checked_sub(status.written).ok_or(Error::Checkpoint("FIFO STATUS row snapshot"))?;
+            packet(p.status_chunks,status.written)?;packet(after,rows)?;
+        }else if p.status!=0 || p.status_chunks!=0{return Err(Error::Checkpoint("absent FIFO STATUS snapshot"));}
+        let chunks=u128::from(r.config.is_some())+u128::from(p.event_chunks)+u128::from(r.statuses)+u128::from(r.accounting.parsed);
+        let bytes=84*u128::from(r.config.is_some())+36*u128::from(p.event_chunks)+96*u128::from(r.parsed_events)
+            +100*u128::from(r.statuses)+100*u128::from(r.accounting.parsed);
+        if chunks!=u128::from(p.chunks) || bytes!=u128::from(p.bytes)
+            || chunks+u128::from(r.parsed_events)+u128::from(closed_windows)!=u128::from(self.state.historical_work){
+            return Err(Error::Checkpoint("FIFO exact chunk/byte/work census"));
+        }
+        let mut previous:Option<AccountingGroup>=None;let mut total=0u128;
+        for &g in &p.groups {
+            if g.rows==0 || g.first>g.last || g.last>=SEQ_CEIL || u128::from(g.rows)>u128::from(g.last-g.first)+1
+                || (g.rows==1)!=(g.first==g.last) || self.state.windows!=(g.window!=0)
+                || previous.is_some_and(|v|v.window>=g.window || v.last>=g.first){return Err(Error::Checkpoint("FIFO accounting window groups"));}
+            total+=u128::from(g.rows);previous=Some(g);
+        }
+        if total!=u128::from(r.accounting.parsed) || previous.map(|g|g.last)!=r.accounting.last_frame
+            || previous.map_or(0,|g|g.window)!=r.accounting.last_window{return Err(Error::Checkpoint("FIFO accounting group census/cursor"));}
+        Ok(())
+    }
+    pub(crate) fn sync(&mut self,refs:Refs<'_>,next:u64)->Result<(),Error>{
+        if next<self.state.next{return Err(Error::Order);}
+        let frequency=context(refs)?;
+        if self.state.frequency.is_some() && self.state.frequency!=frequency{return Err(Error::Context("CLOCKS binding"));}
+        if self.state.windows!=refs.capture.windows_flag{return Err(Error::Context("windows mode changed"));}
+        self.state.frequency=frequency;self.state.next=next;Ok(())
+    }
+    pub(crate) fn accept(&mut self,refs:Refs<'_>,input:Input<'_>,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        let index=match input{Input::Fifo{index,..}|Input::WindowClosed{index,..}=>index};
+        let next=index.checked_add(1).ok_or(Error::Order)?;let mut m=Meter{outer:work,left:l.work_records};
+        self.state.frequency=context(refs)?;
+        self.state.apply(refs,&[input],next,l,&mut m,self.boundary.is_some())?;
+        if let Input::Fifo{kind,payload,..}=input {
+            self.position.chunks=self.position.chunks.checked_add(1).ok_or(Error::Limit("FIFO chunks"))?;
+            self.position.bytes=self.position.bytes.checked_add(payload.len() as u64+20).ok_or(Error::Limit("FIFO bytes"))?;
+            match kind {
+                31=>self.position.config=index,
+                32=>self.position.event_chunks=self.position.event_chunks.checked_add(1).ok_or(Error::Limit("FIFO list count"))?,
+                33=>{self.position.status=index;self.position.status_chunks=self.position.event_chunks;},
+                43=>{
+                    let a=&self.state.reader.result.accounting;let frame=a.last_frame.ok_or(Error::Checkpoint("missing accounting cursor"))?;
+                    m.charge(1)?;
+                    if let Some(g)=self.position.groups.last_mut().filter(|g|g.window==a.last_window){
+                        g.rows=g.rows.checked_add(1).ok_or(Error::Limit("accounting group rows"))?;g.last=frame;
+                    }else{
+                        if self.position.groups.len()>=l.membership_runs{return Err(Error::Limit("accounting window groups"));}
+                        self.position.groups.try_reserve(1).map_err(|_|Error::Limit("accounting group allocation"))?;
+                        self.position.groups.push(AccountingGroup{window:a.last_window,rows:1,first:frame,last:frame});
+                    }
+                },_=>unreachable!(),
+            }
+        }Ok(())
+    }
+    pub(crate) fn encode(&self,closed_windows:u64,l:Limits,work:&mut WorkBudget)->Result<Vec<u8>,Error>{
+        let mut m=Meter{outer:work,left:l.work_records};m.charge(self.position.groups.len() as u64+1)?;
+        self.validate(closed_windows)?;encode(&self.state,l,&mut m)
+    }
+    pub(crate) fn mark_retained(&mut self,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        if self.boundary.is_some(){return Err(Error::Checkpoint("second FIFO retention boundary"));}
+        let mut m=Meter{outer:work,left:l.work_records};m.charge(self.state.runs.len() as u64+1)?;
+        self.boundary=Some(Boundary{first_chunk:self.state.next,prefix:self.state.counts(),
+            prefix_known_missing:self.state.reader.result.accounting.known_missing,
+            boundary_frames:self.state.runs.clone(),prefix_unassociated:self.state.unassociated});Ok(())
+    }
+    pub(crate) fn finish(self,l:Limits,work:&mut WorkBudget)->Result<Retained,Error>{
+        let b=self.boundary.ok_or(Error::Checkpoint("missing FIFO retention boundary"))?;
+        project(self.state,b,&mut Meter{outer:work,left:l.work_records})
+    }
+    pub(crate) fn support(&self,l:Limits,work:&mut WorkBudget)->Result<Vec<(u64,u32,Vec<u8>)>,Error>{
+        let mut m=Meter{outer:work,left:l.work_records};m.charge(3)?;let mut result=Vec::new();
+        if let Some(c)=&self.state.reader.result.config {
+            let mut b=vec![0;64];encode_config(&mut b,c);result.push((self.position.config,31,b));
+            if let Some(s)=&self.state.reader.result.last_status{let mut b=vec![0;80];encode_status(&mut b,s,c.instance);result.push((self.position.status,33,b));}
+        }Ok(result)
+    }
+    pub(crate) fn position(&self)->&CombinedPosition{&self.position}
+    pub(crate) fn counts(&self)->Counts{self.state.counts()}
+    pub(crate) fn status(&self)->Option<&super::Status>{self.state.reader.result.last_status.as_ref()}
+    pub(crate) fn domain(&self)->Option<u32>{self.state.reader.result.config.as_ref().map(|c|c.domain)}
+    pub(crate) fn storage(&self)->u128{
+        8*(404+24*self.state.runs.len() as u128+32*self.position.groups.len() as u128)
+            +256*(self.state.reader.result.events.len()+self.state.reader.result.accounting.rows.len()) as u128
+    }
+    pub(crate) fn retained_rows(&self)->usize{self.state.reader.result.events.len()+self.state.reader.result.accounting.rows.len()}
+    /// Each retained wrap needs at least one retained event. Use the original
+    /// boundary runs, which can outnumber subsequently merged membership runs.
+    pub(crate) fn analysis_items(&self)->u128{
+        self.state.reader.result.events.len() as u128+self.boundary.as_ref().map_or(0,|b|b.boundary_frames.len()) as u128
+    }
 }
