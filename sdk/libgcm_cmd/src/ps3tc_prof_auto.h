@@ -24,6 +24,10 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
  * waits. Callers re-read current and end afterwards; nothing cached survives. */
 void ps3dk_prof__auto_prewrap(struct _gcmCtxData *);
 void ps3dk_prof__auto_preflush(struct _gcmCtxData *);
+/* FIFO accounting (owner thread): 1 when visible_end is a known end of ctx: equal to the registered physical end, or
+ * exactly the end the report ring's active tail lowered that physical end to on the owner context it attached to.
+ * The same predicate as the runtime's own clean-end check; a physical end is never derived by subtraction. */
+int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end);
 /* Provided by the observed ps3tc_fifo_wrap.o: 1 when the context's callback is
  * the native two-phase wrap that calls prewrap; any replaced or custom callback
  * would wrap without it, so recycling refuses. */

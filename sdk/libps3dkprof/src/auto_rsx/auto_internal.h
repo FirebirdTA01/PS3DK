@@ -167,9 +167,18 @@ typedef struct auto_capture {
     auto_ring_tail tail;
     auto_ring_shadow shadow;
     uintptr_t scan;
-    uint32_t ring_flush_request; /* owner work requested at the next owner hook (frame/window/seal boundaries) */
+    /* atomic: owner work requested by a foreign closer (the sealing drainer); the owner settles its open block at
+     * its next hook. Foreign closers and the drainer never emit. */
+    uint32_t ring_flush_request;
     uint32_t ring_refusal;       /* AUTO_RING_REFUSED_*, the first one */
     uint64_t ring_flushes, ring_quarantined, ring_injected_words;
+    /* The ring's own PUT frontier: the owner commits 2g after a block's complete flush, publish_before snapshots
+     * it before PUT (ring_put_snapshot, owner only) and publish_after releases it; the drainer acquires it. */
+    auto_publication ring_publication;
+    uint32_t ring_put_snapshot;
+    /* owner stores (release), drainer loads: copied bytes, flushes that found the application's M2MF state untouched
+     * or restored it, application words decoded (STATUS ring tail) */
+    uint64_t ring_copied, ring_untouched, ring_restored, ring_decoded;
 } auto_capture;
 
 void p_auto_init(prof *p); /* before READY/start_gate publication */

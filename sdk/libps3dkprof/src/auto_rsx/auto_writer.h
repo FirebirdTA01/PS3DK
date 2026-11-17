@@ -8,6 +8,7 @@
 #define auto_writer_frame ps3dk_prof__auto_writer_frame
 #define auto_writer_clock ps3dk_prof__auto_writer_clock
 #define auto_writer_status ps3dk_prof__auto_writer_status
+#define auto_writer_status_ring ps3dk_prof__auto_writer_status_ring
 
 /* The adapter must return zero only after accepting the complete chunk. A
  * failed/short write is terminal and is never retried. The capture drainer is
@@ -24,6 +25,7 @@ typedef struct auto_writer {
     uint16_t sticky;
     uint64_t operations_written, frames_written, clocks_written;
     uint64_t publication_max;
+    uint64_t ring_published_max; /* REPORT_RING: the largest ring label value of a written ring record */
     uint64_t prior[15];
 } auto_writer;
 
@@ -36,4 +38,9 @@ int auto_writer_ops(auto_writer *, const auto_wire_op *, uint32_t count);
 int auto_writer_frame(auto_writer *, const auto_wire_frame *);
 int auto_writer_clock(auto_writer *, const auto_wire_clock *);
 int auto_writer_status(auto_writer *, uint16_t flags, const uint64_t counters[15]);
+/* REPORT_RING CONFIG (ring_bytes nonzero) only, and the only STATUS such a config accepts. ring[8]: issued blocks,
+ * retired blocks, published ring label, held extents, copied bytes, untouched-state and restored-state flushes, decoded
+ * words. Refused unless retired <= issued, held == issued - retired, the label is even, at most 2 x issued and at
+ * least every written ring record's, the copied bytes fit the issued blocks and both flush cases fit them too. */
+int auto_writer_status_ring(auto_writer *, uint16_t flags, const uint64_t counters[15], const uint64_t ring[8]);
 #endif

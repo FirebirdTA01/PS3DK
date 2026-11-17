@@ -45,20 +45,25 @@ int auto_writer_ops(auto_writer *w, const auto_wire_op *ops, uint32_t count)
 {
     const auto_wire_config *c;
     size_t n;
-    uint64_t publication;
+    uint64_t publication,ring;
     uint32_t i;
     if(!auto_writer_begin(w) || UINT64_MAX-w->operations_written<count) return 0;
     c=auto_config_read(w->config);
-    n=auto_encode_ops(w->scratch,w->capacity,c->instance,ops,count);
+    n=c->ring_bytes ? auto_encode_ops_ring(w->scratch,w->capacity,c->instance,ops,count):
+                      auto_encode_ops(w->scratch,w->capacity,c->instance,ops,count);
     if(!n) return 0;
-    publication=w->publication_max;
+    publication=w->publication_max;ring=w->ring_published_max;
     for(i=0;i<count;i++) {
         if(ops[i].published>UINT32_MAX) return 0;
-        if(ops[i].published>publication) publication=ops[i].published;
+        if(ops[i].flags&AUTO_OP_RING) {
+            /* a ring record only exists in the ring CONFIG and carries the ring label, never the operation label */
+            if(!c->ring_bytes) return 0;
+            if(ops[i].published>ring) ring=ops[i].published;
+        } else if(ops[i].published>publication) publication=ops[i].published;
     }
     if(!send(w,C_AUTO_OPS,n)) return 0;
     w->operations_written+=count;
-    w->publication_max=publication;
+    w->publication_max=publication;w->ring_published_max=ring;
     return 1; /* caller may acknowledge these exact queue entries now */
 }
 
@@ -67,7 +72,8 @@ int auto_writer_frame(auto_writer *w, const auto_wire_frame *frame)
     size_t n;
     if(!auto_writer_begin(w) || !frame || w->frames_written==UINT64_MAX ||
        frame->instance!=auto_config_read(w->config)->instance) return 0;
-    n=auto_encode_frame(w->scratch,w->capacity,frame);
+    n=auto_config_read(w->config)->ring_bytes ? auto_encode_frame_ring(w->scratch,w->capacity,frame):
+                                                auto_encode_frame(w->scratch,w->capacity,frame);
     if(!send(w,C_AUTO_COVERAGE,n)) return 0;
     w->frames_written++;
     return 1;
@@ -84,7 +90,16 @@ int auto_writer_clock(auto_writer *w, const auto_wire_clock *clock)
     return 1;
 }
 
+static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring);
 int auto_writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15])
+{
+    return writer_status(w,flags,values,NULL);
+}
+int auto_writer_status_ring(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t ring[8])
+{
+    return ring ? writer_status(w,flags,values,ring):0;
+}
+static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring)
 {
     const auto_wire_config *c;
     uint64_t disposed;
@@ -111,7 +126,15 @@ int auto_writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15]
         if(!(flags&AUTO_LOWER_BOUND) && values[1]!=disposed) return 0;
     }
     if((flags&AUTO_FINAL) && !(flags&AUTO_LOWER_BOUND) && (values[4] || values[14])) return 0;
-    n=auto_encode_status(w->scratch,w->capacity,c->instance,flags,values);
+    if(!c->ring_bytes!=!ring) return 0;
+    if(ring) {
+        uint64_t extent=(uint64_t)c->ring_pairs*32u;
+        if(ring[1]>ring[0] || ring[3]!=ring[0]-ring[1] || (ring[2]&1u) || ring[2]>2u*ring[0] ||
+           ring[2]<w->ring_published_max || ring[0]>UINT32_MAX || ring[4]>ring[0]*extent ||
+           ring[5]>ring[0] || ring[6]>ring[0]-ring[5]) return 0;
+    }
+    n=ring ? auto_encode_status_ring(w->scratch,w->capacity,c->instance,flags,values,ring):
+             auto_encode_status(w->scratch,w->capacity,c->instance,flags,values);
     if(!send(w,C_AUTO_STATUS,n)) return 0;
     memcpy(w->prior,values,sizeof w->prior); w->status_seen=1;
     w->sticky=flags&(AUTO_SATURATED|AUTO_STATUS_CONFLICT|AUTO_STATUS_RESET|AUTO_STATUS_SEGMENT_QUARANTINE|

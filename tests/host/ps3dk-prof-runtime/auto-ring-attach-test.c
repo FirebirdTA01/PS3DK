@@ -179,18 +179,19 @@ int main(void)
         assert(c->metadata_stride==sizeof(auto_queue_entry) && c->call_pairs==31 && c->range_pairs==15);
     }
 
-    /* the first device write resets the ring label; one that does not read back zero stops recycling only */
+    /* the first device write resets the ring label; one that does not read back zero stops recycling: owner draws
+     * are then untimed with the explicit unknown-ring-state reason (no markers, no legacy fallback) */
     {
         ps3tc_auto_call clear={3,0,0,0,0,0,0,0xf3};
         uint32_t ticket;
         drop_ring_label=1;
         ticket=ps3dk_prof__auto_begin((void *)&context,&clear,0);
-        assert(ticket && labels[247]==0 && labels[246]==0 && labels[245]==0x5a5a5a5au);
+        assert(!ticket && labels[247]==0 && labels[246]==0 && labels[245]==0x5a5a5a5au);
         a=ps3dk_prof__auto_test_capture();
         assert(a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_LABEL);
         context.current+=6;
         ps3dk_prof__auto_end((void *)&context,ticket);
-        assert(context.current==words+18);
+        assert(context.current==words+6);
     }
 
     /* an application write to the ring label is a resource conflict */

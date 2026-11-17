@@ -18,6 +18,7 @@ typedef struct auto_ring_slot {
     uint32_t generation, count;
     uint32_t closed; /* producer release: 0 filling, 1 emitted, 2 uncertain */
     uint32_t acked, ready; /* consumer only, until retirement */
+    uint32_t state; /* producer, before closed: the flush's M2MF case, 0 untouched, 1 restored */
 } auto_ring_slot;
 
 typedef struct auto_ring_ticket {

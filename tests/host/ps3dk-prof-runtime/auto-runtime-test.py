@@ -23,7 +23,7 @@ RING_MUTANTS={
                             b'a->conflicts==1'),
     'no-label-readback':('ring','auto_rsx/auto_runtime.c',
                          'a->ring_device.read_label(a->ring_device.ctx,a->ring_label)!=0','0',
-                         b'a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_LABEL'),
+                         b'!ticket && labels[247]==0 && labels[246]==0 && labels[245]==0x5a5a5a5au'),
     'map-failure-reused':('ring','auto_rsx/auto_runtime.c','            ring_retained+=plan->total;return AUTO_ALLOCATION_FAILED;',
                           '            ring_memory.ea=ea;ring_memory.total=plan->total;ring_memory.bytes=plan->bytes;return AUTO_ALLOCATION_FAILED;',
                           b'ps3dk_prof__auto_test_ring_retained()=='),
@@ -44,15 +44,55 @@ RING_MUTANTS={
     'no-wrap-scan-reset':('ringwrap','auto_rsx/auto_runtime.c',
                           '    a->scan=(uintptr_t)(void *)ctx->begin; /* the wrap resumes at begin; its JUMP is not application state */','',
                           b'a->scan==(uintptr_t)fifo'),
-    'custom-callback':('ringwrap','auto_rsx/auto_runtime.c','(a->ring_flush_request || !ring_native(ctx))','(a->ring_flush_request)',
+    'custom-callback':('ringwrap','auto_rsx/auto_runtime.c','(LD_ACQ(&a->ring_flush_request) || !ring_native(ctx))','(LD_ACQ(&a->ring_flush_request))',
                        b'a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK'),
-    'end-arbitrary':('ringwrap','auto_rsx/auto_runtime.c','a->tail.physical==clean_end && end==a->tail.visible',
-                     'a->tail.physical==clean_end && end<=clean_end',b'a->operations.stopped'),
+    'end-arbitrary':('ringwrap','auto_rsx/auto_runtime.c','a->tail.physical==physical && end==a->tail.visible',
+                     'a->tail.physical==physical && end<=physical',
+                     b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible-1)'),
 }
+RING_MUTANTS.update({
+    # the shadow is not brought up to date before a flush: the split Mode/Format is lost, the app transfer misfires
+    'flush-no-scan':('ringrun','auto_rsx/auto_runtime.c','    ring_scan(a,ctx);\n    ST_REL(&a->ring_flush_request,0u);',
+                     '    ST_REL(&a->ring_flush_request,0u);',b"dst>=MAIN_IO && dst-MAIN_IO+len<=main_bytes"),
+    # the window id ignored: an END and reopen share one block
+    'window-aba':('ringrun','auto_rsx/auto_runtime.c','const uint32_t window=p_window_id(g_prof);','const uint32_t window=1;',
+                  b'a->ring.active==g+1u && a->ring_flushes==flushes+1u'),
+    # no settle at a frame boundary: the open block spans into the next frame
+    'no-frame-settle':('ringrun','auto_rsx/auto_runtime.c',
+                       "        ring_settle(a); /* the previous frame's block, before its END mark */\n",'',
+                       b'!a->tail.active && !a->ring.active'),
+    # the ring ordinal acknowledged before whole sink acceptance
+    'ring-ack-early':('ringshort','auto_rsx/auto_runtime.c',
+                      '    if(!auto_writer_ops(&writer,batch,n)) return 0;\n    /* whole sink acceptance',
+                      '    for(i=0;i<n;i++) if(batch_ring[i]) (void)auto_ring_ack(&a->ring,batch[i].ring_generation,'
+                      'batch[i].ring_ordinal,1);\n    if(!auto_writer_ops(&writer,batch,n)) return 0;\n    /* whole sink acceptance',
+                      b'RETIRED(a)==retired'),
+    # metadata exhaustion latching the rest of the frame (the legacy frame-tail rule)
+    'ring-meta-latch':('ringmeta','auto_rsx/auto_runtime.c',
+                       "                        a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;\n"
+                       "        (void)auto_frames_count(&a->coverage,call->kind,column);return 0;",
+                       "                        a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;\n"
+                       "        if(column==4) a->pool_tail_column=4;\n"
+                       "        (void)auto_frames_count(&a->coverage,call->kind,column);return 0;",
+                       b'a->coverage.live.counts[2][1]==timed+10u'),
+    # a full block not flushed after its last pair (it would wait for the next draw)
+    'no-full-flush':('ringrun','auto_rsx/auto_runtime.c','    if(a->ring.slots[slot].count==a->ring.pairs) ring_flush(a,ctx);\n    else if',
+                     '    if(a->ring.slots[slot].count>a->ring.pairs) ring_flush(a,ctx);\n    else if',b'a->ring.slots[(a->ring.active-1u)%256u].count<126u'),
+    # the public end-known query without its registered-end and owner-TLS identity checks
+    'end-known-registered':('ringwrap','auto_rsx/auto_runtime.c','    if((uintptr_t)registered_physical_end!=clean_end) return 0;\n','',
+                            b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+100,fifo+100)'),
+    'end-known-foreign':('ringwrap','auto_rsx/auto_runtime.c',
+                         '    if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||\n'
+                         '       a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation) return 0;\n',
+                         '',b'known==0'),
+})
+RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3}
+RING_WRAP=('ringwrap',*RING_RUNTIME)
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture'],default='noinit')
+ap.add_argument('--fixture',type=Path,help='ringfixture: copy the capture here')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
@@ -90,7 +130,7 @@ for name,rel in [('prof_gpu.h','rsx/prof_gpu.h'),('prof_spu.h','spu/prof_spu.h')
 commands=[]
 def run(name,cmd,cwd=out):
     cmd=list(map(str,cmd))
-    r=subprocess.run(cmd,capture_output=True,cwd=cwd,timeout=90,
+    r=subprocess.run(cmd,capture_output=True,cwd=cwd,timeout=900 if a.case in RING_RUNTIME else 90,
                      env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1:exitcode=66'))
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
@@ -179,7 +219,11 @@ if a.case=='labels':
         hp.write_text(code.replace(old,'at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?\n                     (uint32_t)((at - base) / 4u)'))
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
-if a.case in ('ring','ringwrap'):flags+=['-DGPP_HOST_DEVMEM','-DPS3DK_PROF_AUTO_RING=1']
+if a.case in ('ring',*RING_WRAP):flags+=['-DGPP_HOST_DEVMEM','-DPS3DK_PROF_AUTO_RING=1']
+if a.case in RING_RUNTIME:
+    flags+=['-DTEST_RING_MODE='+str(RING_RUNTIME[a.case])]
+    # the application's host stand-in for PUT's barrier is a seq_cst fence, which GCC warns about under TSan
+    if a.sanitize=='thread':flags+=['-Wno-tsan']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
 if a.sanitize=='address':
@@ -417,9 +461,10 @@ if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-p
 if a.case=='seal':application=Path(__file__).with_name('auto-seal-test.c').read_text()
 if a.case=='ring':application=Path(__file__).with_name('auto-ring-attach-test.c').read_text()
 if a.case=='ringwrap':application=Path(__file__).with_name('auto-ring-wrap-test.c').read_text()
+if a.case in RING_RUNTIME:application=Path(__file__).with_name('auto-ring-runtime-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 extra=[]
-if a.case=='ringwrap':
+if a.case in RING_WRAP:
     stub=out/'stub'
     for rel,text in {
         'rsx/gcm_sys.h':'#pragma once\n#include <stdint.h>\ntypedef uint32_t u32;\nstruct _gcmCtxData;\n'
@@ -460,6 +505,20 @@ if a.case in ('noinit','seal'):
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
     print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case in RING_RUNTIME:
+    passed={'ringrun':b'PASS','ringmeta':b'AUTO ring metadata-full without a frame-tail latch PASS',
+            'ringshort':b'AUTO ring short sink retires nothing PASS','ringfixture':b'AUTO ring fixture PASS'}[a.case]
+    assert result.stdout.endswith(passed+bytes([10])),result.stdout
+    print(result.stdout.decode(),end='')
+    if a.case in ('ringrun','ringfixture'):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
+        check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
+        files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
+        summary=check.verify(files[0].read_bytes(),pending_tail=5 if a.case=='ringrun' else 0)
+        print(json.dumps(summary,sort_keys=True))
+        if a.case=='ringfixture' and a.fixture:shutil.copyfile(files[0],a.fixture)
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else

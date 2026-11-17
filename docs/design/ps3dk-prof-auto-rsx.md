@@ -412,6 +412,78 @@ an unacknowledged owner requires a lower bound. FINAL occurs once and forbids
 later records. A live conflict/reset stops admission and quarantines outstanding
 resources, without replacing CONFIG or rewriting earlier retained facts.
 
+## Report ring (CONFIG 2047/11, private: PS3DK_PROF_AUTO_RING)
+
+Not in any archive yet: a nonzero ring option is refused (EINVAL) unless the
+library is built with the private `PS3DK_PROF_AUTO_RING`. The ring removes the
+local report-pair ceiling for **owner-buffer draws only** (phase 1): ARRAY,
+INDEX and CLEAR written into the attached context. Segment-built draws, FRAME
+marks, whole-CALL brackets and AUTO ranges keep the disjoint legacy pool and
+stay bounded by it; a whole-CALL bracket still times every draw its CALL ran.
+
+Partition and budgets (both reported in CONFIG, each bounded on its own): the
+report range ends with 2..4 local blocks of 126 pairs (the hardware-tested
+copy size; 4 blocks leave no legacy pair and are refused), the legacy pool
+is the rest after the 16 clock reports (252 pairs by default). MAIN memory is a
+fixed allocation of whole 1 MiB pages (default 16 MiB, at most 256 MiB) split
+into 4096-byte extents, one per block generation; metadata is a separate budget
+of up to 65,536 records (default 16,384) that replaces `metadata_records`.
+Neither grows. The ring label (default 245) is leased beside the two others and
+reset and read back at the first device write.
+
+Producer (owner thread): a draw claims metadata first, then joins the open
+block, or opens one: the application M2MF state must be known (or untouched),
+the physical tail for the worst-case flush (46 words) is reserved by lowering
+`end`, and only then is a MAIN extent admitted (and poisoned). The draw writes
+two timestamp reports into its pair of the local block and no per-draw label
+release. The block is flushed (odd ring label + GPU wait, the M2MF copy to its
+extent, even label + GPU wait, then the application's M2MF registers restored)
+right after its 126th draw, at the native FIFO wrap before the JUMP, at
+FlushBuffer when requested, and by the owner at every frame boundary, window
+change (the gate carries the window id, so an END and a reopen are never one
+window), stop acknowledgement and retirement. Foreign closers (the sealing
+drainer) only set a request; they never emit. Exclusions are explicit:
+`ring_full` (COVERAGE u64x3 at 480, no free extent: untimed only, transient,
+never latched for the rest of the frame), `ring_state` (u64x3 at 504: unknown
+M2MF state, refused or invalid ring: invalid evidence, the frame stays UNKNOWN),
+and the usual room/metadata/reentry columns; metadata exhaustion is not latched
+either.
+
+Drainer: a ring record is read only when its block's even label is at or below
+the ring's own PUT frontier (committed after the flush, published after PUT);
+then its MAIN copy is read, never the recycled local block. After whole sink
+acceptance it acknowledges the metadata AND the record's exact ordinal; the last
+ordinal frees the extent. A short or failed sink acknowledges nothing. A block
+not published at seal leaves its records INCOMPLETE and its extent held
+(STATUS LOWER_BOUND).
+
+Wire: CONFIG 216 bytes (u32 at 176..208 ring bytes, blocks, pairs, first ring
+report, ring label, stride, extents, metadata stride, legacy pairs; u32@212=1
+owner draws only); OPS 176 bytes, flag 128 RING with u32@160 generation,
+u32@164 extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state (0
+untouched, 1 restored), serials 2g-1/2g on the ring label, `published` the ring
+label value read; COVERAGE 528 bytes; STATUS 192 bytes with u64x8 at 128:
+blocks issued, retired, published ring label, held extents, copied bytes,
+untouched and restored flushes, decoded application words. The reader refuses a
+ring tail on a legacy record, any other width, a non-consecutive ordinal, a
+generation that does not name its extent and block, ring reports outside its
+block or legacy reports inside one, a block spanning frame tokens, and a STATUS
+tail that does not reconcile with the records. Older captures and their JSON are
+unchanged.
+
+Cost, measured from GCC 16.1.0 PPU assembly constants (both ABIs) at the
+defaults (2 blocks, 16 MiB, 16,384 records, 256 frame rows): a metadata record
+is 184 bytes and an extent descriptor 40 in ILP32 and LP64 alike, so the ring's
+one page allocation is 16,777,216 MAIN bytes + 3,014,656 metadata + 163,840
+descriptors = 19,955,712, rounded to 20 MiB (20,971,520 bytes, never freed).
+The control allocation is 253,568 bytes in ILP32 (capture 116,336) and 266,752
+in LP64 (capture 129,416), so the full attach footprint is 21,225,088 bytes
+(ILP32) or 21,238,272 bytes (LP64). The M2MF decoder reads every owner command
+word once, at flush, wrap and FlushBuffer boundaries (STATUS decoded_words; the
+host run decoded 585,722 words for 55,110 timed draws, about 10.6 per draw);
+its PPU time per word is not yet measured on hardware. Each block adds one
+flush of 28 words plus 2 per restored register (at most 46).
+
 ## CLOCK, type 38
 
 Fixed 96 bytes: schema u16 at 0, flags u16 at 2; instance, epoch, anchor id, role,

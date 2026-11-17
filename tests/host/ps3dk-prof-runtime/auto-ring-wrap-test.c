@@ -4,6 +4,7 @@
  * labels, GPU waits, timestamp reports, M2MF registers and copies, JUMPs. The
  * executor is no proof of asynchronous GPU ordering (hardware probes are). */
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 const auto_capture *ps3dk_prof__auto_test_capture(void);
 int ps3dk_prof__auto_test_ring_admit(void *context, uint32_t draws);
 void ps3dk_prof__auto_test_ring_request(void);
+int ps3dk_prof__auto_fifo_end_known(void *ctx,const void *physical,const void *visible);
 void ps3dk_prof__auto_gcm_init_result(gpp_ctx *,uint32_t,uint32_t,const void *,int32_t);
 void ps3dk_prof__auto_fifo_boundary(void *ctx);
 int32_t ps3tc_fifo_wrap_callback(struct _gcmCtxData *,uint32_t);
@@ -96,6 +98,13 @@ static void gpu_run(void)
 }
 int sys_timer_usleep(unsigned long us) {(void)us;gpu_run();return 0;}
 
+static const uint32_t *probe_visible;
+static void *foreign_query(void *arg)
+{
+    /* another thread with the owner's context and matching ends: not the owner */
+    *(int *)arg=ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,probe_visible);
+    return NULL;
+}
 /* ---- the application ---- */
 static int32_t custom(gpp_ctx *c,uint32_t n) {(void)c;(void)n;return -1;}
 static uint32_t *reserve(uint32_t n)
@@ -168,9 +177,31 @@ int main(void)
     assert(labels[245]==0 && a->tail.active);
     assert(context.end==fifo+PHYS-AUTO_RING_FLUSH_WORDS);
     visible=context.end;
+    /* the FIFO accounting query, the clean-end predicate: unchanged end, the active lowered tail on the owner context;
+     * never a foreign context, another visible end, or a physical end that is not the registered one */
+    {
+        gpp_ctx other=context;
+        assert(ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,fifo+PHYS));
+        assert(ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible));
+        assert(!ps3dk_prof__auto_fifo_end_known(&other,fifo+PHYS,visible));
+        assert(!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible-1));
+        assert(!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS-8,visible));
+        /* a registered end that is not the attach-time end, even when the visible end equals it */
+        assert(!ps3dk_prof__auto_fifo_end_known(&context,fifo+100,fifo+100));
+        {
+            pthread_t t;
+            int known=-1;
+            probe_visible=visible;
+            assert(pthread_create(&t,NULL,foreign_query,&known)==0 && pthread_join(t,NULL)==0);
+            assert(known==0);   /* foreign TLS */
+        }
+    }
     fill_to_end();assert(context.current==visible);
     nops(4);                               /* the real callback wraps: prewrap, flush, JUMP after it */
     assert(context.current==fifo+4 && context.end==fifo+PHYS && !a->tail.active);
+    /* inactive tail: only the unchanged end is known */
+    assert(!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible) &&
+           ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,fifo+PHYS));
     assert(visible[0]==M(0,0x1d6c,1) && visible[1]==245u*16u);  /* the flush, not the JUMP, at the old current */
     assert(fifo[PHYS-2]==(0x20000000u|IO));      /* 28 + 16 restore words, inside the 46-word tail */
     assert(copies==1 && copied(0,0,3) && labels[245]==2);
@@ -197,11 +228,11 @@ int main(void)
     app_transfer();app_flush();
     assert(app_transfers==1 && app_in==0x11110000u && app_out==0x22220000u && app_src==0x100 && app_dst==0x200);
 
-    /* block 4: an owner draw beside the reservation is clean; any other end is not */
-    assert(ps3dk_prof__auto_test_ring_admit(&context,1));
-    visible=context.end;
+    /* block 4: a real owner draw opens it (metadata, physical tail, MAIN extent); the reservation's end is clean,
+     * any other end is not */
     ticket=ps3dk_prof__auto_begin((void *)&context,&clear,0);
-    assert(ticket);
+    assert(ticket && a->tail.active && a->ring.active==4);
+    visible=context.end;
     for(unsigned i=0;i<6;i++) context.current[i]=0;
     context.current+=6;
     ps3dk_prof__auto_end((void *)&context,ticket);

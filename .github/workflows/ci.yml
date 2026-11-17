@@ -305,7 +305,7 @@ jobs:
 
       - name: Report ring attach and native pre-wrap tail (runtime, not enabled)
         run: |
-          for case in ring ringwrap; do
+          for case in ring ringwrap ringrun ringmeta ringshort; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -314,9 +314,16 @@ jobs:
           for mutant in ring-unleased ring-label-unwatched no-label-readback map-failure-reused legacy-whole-pool; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ring --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
           done
-          for mutant in no-prewrap cached-current cached-end scan-injected no-wrap-scan-reset custom-callback end-arbitrary; do
+          for mutant in no-prewrap cached-current cached-end scan-injected no-wrap-scan-reset custom-callback end-arbitrary \
+                        end-known-registered end-known-foreign; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringwrap --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
           done
+          # producer, drainer and owner-only partial flush (host fake GPU a frame behind, delayed and held consumer)
+          for mutant in flush-no-scan window-aba no-frame-settle no-full-flush; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringrun --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringshort --mutant ring-ack-early --out "$RUNNER_TEMP/auto-ring-mutant-ring-ack-early"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringmeta --mutant ring-meta-latch --out "$RUNNER_TEMP/auto-ring-mutant-ring-meta-latch"
 
       - name: Automatic RSX initialization, wire and queue controls
         run: |
