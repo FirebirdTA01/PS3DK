@@ -56,10 +56,10 @@ fn paint_cap_is_announced() {
 #[test]
 fn not_enabled_names_only_the_fifo_observer() {
     // Review 2026-11-12: the fixed sentence said RSX-reached markers were not enabled, also in captures with AUTO
-    // RSX records; it now speaks for the FIFO wrap observer and names where those markers are shown ('ps3dk-prof auto').
+    // RSX records; it speaks for the FIFO wrap observer and names both available AUTO viewers.
     let s = ps3dk_prof_viewer::fifo::NOT_ENABLED;
     assert!(s.starts_with("Not recorded by the FIFO wrap observer") && s.contains("ps3dk-prof auto"), "{s}");
-    assert!(!s.contains("AUTO page"), "the viewer has no AUTO page: {s}");
+    assert!(s.contains("Automatic") && !s.contains("does not show"), "{s}");
     assert!(!s.contains("Not enabled in this capture"), "{s}");
 }
 
@@ -68,9 +68,14 @@ fn long_phases_and_an_open_end() {
     let mut evs = wrap(1, 1, 1000, 79_800_000, 10);
     evs.extend(wrap(7, 2, 80_000_000, 5, 39_900_000));
     evs.extend(wrap(13, 3, 200_000_000, 0, 0)[..2].iter().copied());
-    let v = view(&with(vec![events(&evs)]));
+    let fixture = with(vec![events(&evs)]);
+    common::harvest(&fixture.bytes());
+    let v = view(&fixture);
     assert!(v.capability);
     assert_eq!(v.bars.len(), 5, "{:?}", v.bars);
+    assert!(v.rows[0].display.contains("1000.000 ms"));
+    assert!(!v.rows[0].display.contains("ticks"));
+    assert!(v.rows[0].text.contains("79800000 ticks"));
     let b1 = &v.bars[0];
     assert_eq!((b1.wrap_id, b1.phase, b1.min_ticks, b1.max_ticks), (1, 1, Some(79_800_000), Some(79_800_002)));
     let open = v.bars.last().unwrap();

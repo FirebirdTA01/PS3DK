@@ -23,7 +23,7 @@ mutants={
     'short-ack': ('if(!whole || !e || e->op.id!=id)', 'if(whole<0 || !e || e->op.id!=id)', '!auto_queue_ack(&q,1,1,0)'),
     'foreign-ack': ('e->op.id!=id', 'id==UINT64_MAX', '!auto_queue_ack(&q,99,1,1)'),
     'free-incomplete': ('completed && !ACQ(&q->stopped)', 'completed>=0 && !ACQ(&q->stopped)', 'q.written==3 && auto_queue_held(&q)==1'),
-    'reserve-ignored': ('if(ACQ(&q->free_pairs)<=q->reserve) {q->refusal=AUTO_QUEUE_REPORTS;return NULL;}', '',
+    'reserve-ignored': ('if(ACQ(&q->free_pairs)<=keep_free(q)) {q->refusal=AUTO_QUEUE_REPORTS;return NULL;}', '',
                         '!auto_queue_claim(&q) && q.refusal==AUTO_QUEUE_REPORTS'),
     'relaxed-publication': ('REL(&q->write_idx,RLX(&q->write_idx)+1u);',
                             '__atomic_store_n(&q->write_idx,RLX(&q->write_idx)+1u,__ATOMIC_RELAXED);', 'ThreadSanitizer: data race'),

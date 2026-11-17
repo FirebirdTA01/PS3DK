@@ -14,8 +14,12 @@
 #define auto_queue_quarantine_pair ps3dk_prof__auto_queue_quarantine_pair
 #define auto_queue_claim_held ps3dk_prof__auto_queue_claim_held
 #define auto_queue_take_reserved_pair ps3dk_prof__auto_queue_take_reserved_pair
+#define auto_queue_take_class_pair ps3dk_prof__auto_queue_take_class_pair
+#define auto_queue_set_reserve ps3dk_prof__auto_queue_set_reserve
 
 enum { AUTO_PAIRS_MAX=504, AUTO_METADATA_MAX=1024 };
+/* Pair classes: covered draws and FRAME marks (0), whole-CALL brackets (1), AUTO ranges (2). */
+enum { AUTO_PAIR_DRAW=0, AUTO_PAIR_CALL=1, AUTO_PAIR_RANGE=2, AUTO_PAIR_CLASSES=3 };
 enum { AUTO_QUEUE_NONE, AUTO_QUEUE_STOPPED, AUTO_QUEUE_REENTRY,
        AUTO_QUEUE_EXHAUSTED, AUTO_QUEUE_METADATA, AUTO_QUEUE_REPORTS };
 typedef struct auto_queue_entry {
@@ -31,8 +35,12 @@ typedef struct auto_queue {
     uint32_t pair_state[AUTO_PAIRS_MAX]; /* 0 free, 1 owned, 2 quarantined */
     /* free pairs (state 0): the owner takes, the consumer's ack returns; a lower bound for the owner */
     uint32_t free_pairs;
-    /* owner only: pairs that claim and take_pair leave free for take_reserved_pair (whole-CALL brackets) */
-    uint32_t reserve;
+    /* Reserves: class c (1, 2) may hold at most cap[c] pairs, and class 0 (claim, take_pair) leaves free the part of
+     * every reserve its class does not hold yet. held[c] is raised by the owner at take and lowered by the consumer
+     * when an acknowledged completion frees the pair; a quarantined pair stays held. pair_class is written by the
+     * owner before the pair is published as owned. */
+    uint32_t cap[AUTO_PAIR_CLASSES], held[AUTO_PAIR_CLASSES];
+    uint8_t pair_class[AUTO_PAIRS_MAX];
     /* owner only */
     uint32_t claimed, pair_cursor, next_serial, refusal;
     uint64_t next_id;
@@ -68,7 +76,11 @@ void auto_queue_quarantine_pair(auto_queue *, uint32_t pair);
  * is the serial_end of the previous record of the same CALL, which completes
  * every record of that call at once. */
 auto_queue_entry *auto_queue_claim_held(auto_queue *, uint32_t pair, uint32_t share);
-/* Owner only: take_pair that may use the reserve (claim and take_pair refuse REPORTS once only `reserve` pairs are
- * free). The reserve is 0 after init. */
+/* Owner only, before observation: class c (1 or 2) may hold up to cap pairs; claim and take_pair keep the unheld
+ * part of each reserve free. Every reserve is 0 after init. */
+void auto_queue_set_reserve(auto_queue *, uint32_t cls, uint32_t cap);
+/* Owner only: a pair of class 1 or 2, within its reserve (REPORTS when the class holds cap pairs or none is free). */
+int auto_queue_take_class_pair(auto_queue *, uint32_t cls);
+/* take_class_pair for whole-CALL brackets (class 1). */
 int auto_queue_take_reserved_pair(auto_queue *);
 #endif

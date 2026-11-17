@@ -51,6 +51,27 @@ extern const uint32_t ps3dk_prof_sdk_version_len;
 
 enum { K_BEGIN = 1, K_BEGIN_PARENT = 2, K_END = 3, K_FRAME = 4, K_GAP = 5, K_REGERR = 6 };
 enum { C_HEADER = 1, C_CLOCKS = 2, C_DESCRIPTORS = 3, C_THREADS = 4, C_RECORDS = 5, C_TRAILER = 6, C_RETIRED = 7 };
+/* Capture windows (file_flags bit 9): WINDOW_BEGIN / WINDOW_END, 32-byte payloads. */
+enum { C_WINDOW_BEGIN = 41, C_WINDOW_END = 42, P_WINQ = 16 };
+/* A queued window record: the owner side builds it, the drainer writes it once its name descriptor is declared. */
+typedef struct p_winrec { uint32_t type, desc; uint8_t b[32]; } p_winrec;
+/* The window slot (one window at a time), under window_lock. state: 0 idle, 1 opens at the next frame boundary,
+ * 2 open, 3 closes at the next frame boundary.
+ * Owner: the thread that marks frames (owner_slot1 + owner_inc, its incarnation), never merely the opener. A window
+ * begun before any thread marked a frame (or after the frame thread retired) has owner 0 and is adopted by the first
+ * thread that marks one. frame_slot1 + frame_inc name the established frame thread (the last one that marked a frame,
+ * cleared when it retires). opener_token is the opener's window token (tls win_token, never 0 once taken, never reused,
+ * registered or not): the opener may also end the window, before or after adoption.
+ * reserved: queue records still owed by the current window (its BEGIN and END), taken at admission, so a window
+ * that is admitted can always record both and one that cannot is refused (EFULL, queue_full). */
+typedef struct p_window {
+    uint32_t state, id, desc, kind, n, owner_slot1, owner_inc, frame_slot1, frame_inc, seal;
+    uint64_t opener_token;
+    uint64_t first, prev_last, owner_last;   /* owner_last: the retired owner's frame in progress */
+    uint32_t have_prev, opened, refused, queue_full, dropped, reserved;
+    const char *name;
+} p_window;
+
 enum { ST_RETIRED = 1, ST_ACKED = 2, ST_NOT_QUIESCED = 3 };       /* final-entry states (section 6) */
 enum { ZK_INERT = 0, ZK_PUSHED = 1, ZK_REFUSED = 2, ZK_SPENT = 3 }; /* zone handle kinds */
 
@@ -160,7 +181,7 @@ typedef struct snap {
 } snap;
 
 typedef struct drainer {
-    int started;                /* file header, HEADER and CLOCKS written */
+    int started;                /* the start step ran: file header, HEADER, CLOCKS (and PROFILE) written or failed */
     uint64_t chunk_seq;
     uint8_t *buf;               /* one chunk: 16 + P_CHUNK_CAP + 4 bytes, allocated at init */
     size_t pos;                 /* bytes of the current chunk payload */
@@ -284,13 +305,35 @@ typedef struct prof {
     char workload_tag[P_STR_MAX + 1];
     uint32_t app_len, build_id_len, flags_len, workload_tag_len;
     uint64_t fnv_build;         /* FNV-1a-64 state after (build_id, 0x00): the shared prefix of every descriptor id */
+    /* Capture windows: nothing heavy is recorded outside a window. window_open: the gate, read with acquire on every
+     * heavy record path; window_lock: a spin word over win and the queue head. */
+    uint32_t window_open, window_lock;
+    p_window win;
+    p_winrec winq[P_WINQ];
+    uint32_t winq_w, winq_r;    /* atomic: owner side publishes w, the drainer releases r */
 } prof;
+
+/* 1 when heavy records may be written: only while a capture window is open. */
+static inline int p_window_gate(const prof *p)
+{
+    return __atomic_load_n(&p->window_open, __ATOMIC_ACQUIRE) != 0;
+}
+#define p_window_frame ps3dk_prof__window_frame
+#define p_window_retire ps3dk_prof__window_retire
+#define p_window_shutdown ps3dk_prof__window_shutdown
+#define p_window_drain ps3dk_prof__window_drain
+void p_window_frame(prof *p, uint32_t slot1, uint32_t inc, uint64_t fid); /* a frame boundary, before AUTO sees it */
+void p_window_retire(prof *p, uint32_t inc); /* a retiring thread: no longer the frame thread or a window's owner */
+void p_window_shutdown(prof *p);                            /* at the shutdown claim: closes an open window */
+void p_window_drain(prof *p, uint32_t declared);            /* drainer: queued records whose descriptor is declared */
 
 /* Thread-local producer state (r2 section 3; erratum 2 F1). */
 typedef struct tls_state {
     uint32_t slot1;             /* slot index + 1; 0 = no incarnation */
     uint32_t generation, incarnation;
     uint8_t acked, retired, in_drain, in_gpu; /* in_gpu: inside a GPU domain API call (reentry is EBUSY) */
+    uint8_t qx;                 /* inside the quick_exit drain: bounded lock waits, core records only */
+    uint64_t win_token;         /* this thread's capture-window opener identity: 0 until its first BEGIN */
     uint32_t depth;
 #ifdef PS3DK_PROF_WITH_WAITS
     uint32_t wait_busy;
@@ -314,6 +357,8 @@ typedef struct tls_state {
 #define p_observe_stop ps3dk_prof__observe_stop
 #define p_drain_once ps3dk_prof__drain_once
 #define p_drain_main ps3dk_prof__drain_main
+#define p_drain_prologue ps3dk_prof__drain_prologue
+#define p_quick_exit_drain ps3dk_prof__quick_exit_drain
 #define p_quiesce_freeze_seal ps3dk_prof__quiesce_freeze_seal
 #define p_fnv ps3dk_prof__fnv
 #define p_crc32_init ps3dk_prof__crc32_init
@@ -336,6 +381,11 @@ int p_ready(void);
 void p_observe_stop(prof *p);
 int p_drain_once(prof *p);
 void *p_drain_main(void *arg);
+void p_drain_prologue(prof *p);
+void p_quick_exit_drain(void);
+/* the quick_exit drain's bound on each lock wait: tries, P_QX_SLEEP_US apart (lock waits only; writes are not bounded) */
+#define P_QX_TRIES 500u
+#define P_QX_SLEEP_US 100u
 int p_quiesce_freeze_seal(prof *p);
 uint64_t p_fnv(uint64_t h, const void *data, size_t n);
 void p_crc32_init(void);

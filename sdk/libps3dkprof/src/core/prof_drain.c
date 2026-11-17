@@ -355,7 +355,19 @@ static void enc_profile(prof *p)
 }
 #endif
 
-/* The file header, HEADER (chunk 0) and CLOCKS (chunk 1), written by the first drain. */
+/* The start step: the file header, HEADER (chunk 0), CLOCKS (chunk 1) and, with the extension, PROFILE (chunk 2).
+ *
+ * Ownership hand-off.  For a FILE sink the init thread runs this step (p_drain_prologue, from init_gate) after
+ * init_impl succeeds and BEFORE the capture is published (g_gate READY, then start_gate), so a capture file whose
+ * write here succeeded already holds the metadata a torn capture is read with, even when the process ends
+ * by _exit or quick_exit before the drainer runs once.  Until that publication the init thread is the only thread
+ * that can reach p->snk or p->dr: no drain thread passes start_gate and no ps3dk_prof_drain passes the READY gate.
+ * The release stores of READY and start_gate publish the written state (snk counters, prefix accounting, chunk_seq,
+ * dr.started); the drainer's acquire loads take it over.  From then on the drainer (the drain thread, or the
+ * ps3dk_prof_drain / shutdown caller under drain_busy) is the sole writer, and its first drain finds dr.started set.
+ * A sink failure here is recorded exactly as one in the first drain was: init still succeeds and the next drain or
+ * shutdown reports ESINKFAIL.  A CALLBACK sink keeps the first-drain start step: no callback runs during init.
+ * AUTO RSX CONFIG is not part of this step; it stays mutable after init and the drainer writes it once frozen. */
 static void dr_start(prof *p)
 {
     static const uint8_t magic[16] = {'P', 'S', '3', 'D', 'K', 'P', 'R', 'F', 1, 0, 0, 0, 0, 0, 0, 0};
@@ -388,6 +400,7 @@ static void dr_start(prof *p)
     if (p->ext_flags)
         head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
 #endif
+    head[13] |= 2;   /* file_flags bit 9: capture windows (chunks 41, 42); heavy data only inside them */
     if (sink_write(p, head, sizeof head) != 0)
         return;
     enc_begin(p, C_HEADER);
@@ -494,6 +507,24 @@ static void declare_descs(prof *p, uint32_t upto)
     d->desc_emitted = upto;
 }
 
+/* Capture windows: every queued record in order, up to the first BEGIN whose name descriptor is not declared yet. */
+void p_window_drain(prof *p, uint32_t declared)
+{
+    uint32_t r = p->winq_r;
+    while (r != LD_ACQ(&p->winq_w)) {
+        const p_winrec *e = &p->winq[r % P_WINQ];
+        unsigned i;
+        if (e->type == C_WINDOW_BEGIN && e->desc != 0xffffffffu && e->desc >= declared)
+            break;
+        enc_begin(p, e->type);
+        for (i = 0; i < 32; i++)
+            enc_u8(p, e->b[i]);
+        enc_end(p);
+        r++;
+        ST_REL(&p->winq_r, r);
+    }
+}
+
 /* Step 3: one ring up to w, whole publications only (r2 7).  A boundary that fails validation is library-internal
  * corruption: it is handled as a SINK FAILURE (nothing more written, no trailer, ESINKFAIL). */
 static void drain_ring(prof *p, uint32_t si, uint32_t inc, uint64_t w)
@@ -580,6 +611,12 @@ static int consume_arcs(prof *p, uint32_t slot_id, uint32_t generation,
 #endif
 
 /* One ordinary drain: steps 1-4 of 5.4 with the r2 3.1 snapshot protocol.  Never runs after the frontier. */
+void p_drain_prologue(prof *p)
+{
+    if (p->snk.kind == 1)
+        dr_start(p);
+}
+
 int p_drain_once(prof *p)
 {
     drainer *d = &p->dr;
@@ -591,7 +628,7 @@ int p_drain_once(prof *p)
     if (p->snk.failed) {
 #ifdef PS3DK_PROF_WITH_SPU
         /* no output, but lane lifetime still progresses: end requests are retired and released */
-        if (p->ext_flags)
+        if (p->ext_flags && !g_tls.qx)
             p_ext_step3b(p);
 #endif
         return -1;
@@ -599,7 +636,7 @@ int p_drain_once(prof *p)
     dr_start(p);
 #ifdef PS3DK_PROF_WITH_COUNTERS
     /* 0. The counter snapshot BEFORE the table snapshot: every sample below it was made by a thread step 2 declares. */
-    if (p_counter_snapshot(p) != 0)
+    if (!g_tls.qx && p_counter_snapshot(p) != 0)
         goto lockfail;
 #endif
 
@@ -639,11 +676,14 @@ int p_drain_once(prof *p)
     if (declare_threads(p) != 0)
         goto lockfail;
     declare_descs(p, LD_ACQ(&p->desc_count));
+    p_window_drain(p, d->desc_emitted);
     HOOK(drainer_after_tables);
 
     /* 3. Records up to the snapshot. */
     for (i = 0; i < n; i++)
         drain_ring(p, d->snaps[i].slot, d->snaps[i].incarnation, d->snaps[i].widx);
+    if (g_tls.qx)
+        return p->snk.failed ? -1 : 0;   /* the quick_exit drain: core records only, no extension, no retirement */
 #ifdef PS3DK_PROF_WITH_AUTO
     if (p->ext_flags)
         p_auto_drain(p, 0);
@@ -853,6 +893,7 @@ int p_quiesce_freeze_seal(prof *p)
         }
         enc_threads(p, d->tscratch, nt);
         declare_descs(p, fd);
+        p_window_drain(p, d->desc_emitted);
         for (i = 0; i < d->nfront; i++)
             if (!d->front[i].done)
                 drain_ring(p, d->front[i].slot, d->front[i].incarnation, d->front[i].widx);
@@ -1048,6 +1089,52 @@ int ps3dk_prof_drain(void)
     return rc;
 }
 
+/* quick_exit: one best-effort last drain, no trailer (docs/design/ps3dk-prof-auto-lifecycle.md, the quick_exit row).
+ *
+ * quick_exit runs at_quick_exit handlers and then _exit: no atexit handler, no destructor and so no shutdown.  This
+ * handler, registered once by the successful init, writes the PPU records published so far, so the capture usually
+ * reads COMPLETE with ending NO-TRAILER instead of depending on when the drainer last ran.  Best effort: it skips in
+ * the cases below and then leaves the file as it is.  Lock waits are bounded; file writes are not.
+ *  - FILE sinks only: a callback sink is never called from quick_exit (its callback may wait on a lock the exiting
+ *    thread holds).
+ *  - It runs at most once (qx_once), and never after or during a shutdown: it claims shutdown_once itself, so a
+ *    later ps3dk_prof_shutdown (another thread, a later handler) returns EALREADY and cannot race a seal.
+ *  - A thread already inside the drainer (the drain thread, a sink callback) skips: it holds drain_busy itself.
+ *  - drain_busy is taken exactly like ps3dk_prof_drain takes it, and every lock of the pass (thread_mutex) through
+ *    a try-lock; each wait is retried for at most P_QX_TRIES x P_QX_SLEEP_US, past which the handler gives up.
+ *  - Core PPU records only (tables and ring records): no counter, SPU, GPU, FIFO, AUTO, wait or function-path
+ *    step, whose locks are outside this bound, and no retirement entries.
+ *  - It never releases drain_busy: the drain thread cannot start another pass that _exit would cut short.
+ *  - No trailer and no finalization record: this is not a normal finalization. */
+static uint32_t qx_once;
+
+void p_quick_exit_drain(void)
+{
+    prof *p = ready_prof();
+    tls_state *t = &g_tls;
+    uint32_t z = 0;
+    unsigned i;
+    if (!p || p->snk.kind != 1 || t->in_drain || !CAS_ACQREL(&qx_once, &z, 1u))
+        return;
+    z = 0;
+    if (!CAS_ACQREL(&p->shutdown_once, &z, 1u) || LD_ACQ(&p->stop_latch))
+        return;
+    for (i = 0;; i++) {
+        z = 0;
+        if (CAS_ACQREL(&p->drain_busy, &z, 1u))
+            break;
+        if (i + 1 >= P_QX_TRIES)
+            return;   /* a pass on another thread did not finish within the bound: the file stays as it is */
+        pal_sleep_us(P_QX_SLEEP_US);
+    }
+    t->in_drain = 1;
+    t->qx = 1;
+    (void)p_drain_once(p);
+    t->qx = 0;
+    t->in_drain = 0;
+    /* drain_busy stays held until _exit */
+}
+
 void *p_drain_main(void *arg)
 {
     prof *p = (prof *)arg;
@@ -1099,6 +1186,7 @@ int ps3dk_prof_shutdown(void)
     if (!CAS_ACQREL(&p->shutdown_once, &z, 1u))
         return PS3DK_PROF_EALREADY;
     HOOK(after_shutdown_claim);   /* claimed: shutdown has begun, the stop latch is not yet set */
+    p_window_shutdown(p);         /* an open window ends here (SHUTDOWN, or SEAL from ps3dk_prof_capture_seal) */
 #ifdef PS3DK_PROF_WITH_SPU
     {
         /* Capture RSX frame (S2, R40): the stopper sets STOP right after the claim, before the seal */

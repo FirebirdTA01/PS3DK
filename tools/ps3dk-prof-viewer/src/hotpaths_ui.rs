@@ -183,9 +183,9 @@ fn body(
             ui::field_message(p, ui::Tone::Warning, &format!("lane {} is NOT VALID ({reasons}): counts only, no sums", lh.incarnation));
             p.add(egui::Label::new(population).wrap());
         }
-        LaneKind::Paths { lines, rows, more } => {
+        LaneKind::Paths { lines, totals_exact, rows, more } => {
             for l in lines {
-                p.add(egui::Label::new(l).wrap());
+                p.add(egui::Label::new(l).wrap()).on_hover_text(totals_exact);
             }
             p.add_space(ui::SPACE_MD);
             for r in rows {
@@ -200,7 +200,8 @@ fn body(
                     }
                 });
                 let share = r.share.map_or("share n/a".to_string(), |s| format!("{s:.1}% of retained exclusive"));
-                p.add(egui::Label::new(format!("exclusive {} | inclusive {} | {share}", r.exclusive, r.inclusive)).wrap());
+                p.add(egui::Label::new(format!("exclusive {} | inclusive {} | {share}", r.exclusive, r.inclusive)).wrap())
+                    .on_hover_text(format!("exclusive {} | inclusive {}", r.exclusive_exact, r.inclusive_exact));
                 if selected {
                     p.add(egui::Label::new(format!("path: {}", r.text)).wrap());
                     p.add(egui::Label::new(&r.counts).wrap());

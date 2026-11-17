@@ -33,6 +33,10 @@ import subprocess
 import sys
 import zlib
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('out', type=Path)
 ap.add_argument('--reader', type=Path, required=True)
@@ -97,7 +101,7 @@ def build(d, kind, san, src=lib, tdir=here):
         if san == 'tsan':
             fl.append('-DGPP_HOST_DEVMEM')  # every device-memory access an SC atomic (the R4a Mode C seam)
         harness = tdir / ('rsxcap_rt.c' if kind == 'rt' else 'rsxcap_contract.c')
-        cmd = [cc, *fl, *[src / s for s in RT_SRCS], harness, '-o', exe]
+        cmd = [cc, *fl, *[src / s for s in RT_SRCS], harness, *WHOLE_RUN, '-o', exe]
     r = run(cmd, d / f'build-{kind}.log', timeout=900)
     return exe if r is not None and r.returncode == 0 else None
 
@@ -281,6 +285,11 @@ if want('rd') and have_checker:
             rr = subprocess.run([str(a.reader), 'check', str(p)], capture_output=True, text=True) if p.exists() else None
             if len(w) != 1 or rr is None or str(rr.returncode) != w[0]:
                 bad.append(f'{e.stem}: rc {rr.returncode if rr else "missing"} want {w}')
+            if e.stem == 'rsxcap-ckpt_lock_fault_stops_hook':
+                for text in ('ending: NO-TRAILER', 'STRUCTURE INCOMPLETE', 'no DOMAIN_FINAL',
+                             'RAW VALIDITY NOT VALID', 'COVERAGE UNKNOWN'):
+                    if rr is None or text not in rr.stdout:
+                        bad.append(f'{e.stem}: missing {text!r}')
         stray = [p.name for p in cdir.glob('*.prof') if not p.with_suffix('.expect').exists()]
         row('rd', f'exit_codes_{san}', n > 0 and not bad and not stray, f'{n} captures; {bad[:4]} stray {stray[:4]}')
         r = run([checker, cdir], out / f'checker-{san}.log', timeout=1800)

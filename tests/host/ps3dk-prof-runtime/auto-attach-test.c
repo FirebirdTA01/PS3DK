@@ -15,6 +15,7 @@ extern unsigned auto_test_fifo_installs,auto_test_fifo_removes;
 extern const ps3tc_fifo_observer *auto_test_fifo_observer;
 int p_gpu_fifo_owner(prof *,uint32_t,void *);
 
+void ps3dk_prof__auto_test_reserves(uint32_t out[2]);
 static uint64_t reports[2048][2];
 static uint32_t labels[256], words[64];
 static gpp_ctx context;
@@ -81,6 +82,35 @@ int main(void)
         assert(!instance && !domain && g_prof->auto_lease.ticket==retained);
         assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
         assert(instance==1 && domain==1026 && g_prof->gpu_lifetime==1);
+    }
+    {
+        /* the range reserve: default 16 (an eighth of a small pool), an explicit size honoured, a size that leaves
+         * fewer than 64 pairs for draws refused, and the earlier 32-byte struct still accepted with the default */
+        ps3dk_prof_auto_options d=PS3DK_PROF_AUTO_OPTIONS_INIT;
+        uint32_t reserves[2];
+        assert(d.size==36 && sizeof d==36 && d.range_pairs==0);
+        ps3dk_prof__auto_test_reserves(reserves);
+        assert(reserves[0]==2 && reserves[1]==1);              /* 8 pairs: a quarter and an eighth */
+        d.max_bytes=o.max_bytes=2097152;
+        assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==0);
+        ps3dk_prof__auto_test_reserves(reserves);
+        assert(reserves[0]==32 && reserves[1]==16);            /* 504 pairs: the default */
+        d.range_pairs=32;
+        assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==0);
+        ps3dk_prof__auto_test_reserves(reserves);
+        assert(reserves[0]==32 && reserves[1]==32);
+        d.range_pairs=504-32-64;                                /* the largest: 64 pairs left */
+        assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==0);
+        d.range_pairs=504-32-64+1;
+        assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==PS3DK_PROF_EINVAL);
+        assert(!instance && !domain);
+        o.range_pairs=1;                                        /* a small pool cannot keep 64 pairs */
+        assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==PS3DK_PROF_EINVAL);
+        o.range_pairs=0;o.size=32;                              /* the earlier struct */
+        assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
+        ps3dk_prof__auto_test_reserves(reserves);
+        assert(reserves[0]==2 && reserves[1]==1);
+        o.size=sizeof o;
     }
     for(unsigned i=0;i<2048;i++) assert(reports[i][0]==UINT64_C(0xa5a5a5a5a5a5a5a5));
     for(unsigned i=0;i<256;i++) assert(labels[i]==UINT32_C(0x5a5a5a5a));

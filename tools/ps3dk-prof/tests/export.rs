@@ -1207,3 +1207,104 @@ fn export_e5_reconcile_provisional_fifo_status() {
     assert_eq!(st.written, 12);
     assert_eq!(st.last_attempt_seq, 16);
 }
+
+#[test]
+fn export_keeps_writer_gap_inside_window_as_loss_affected() {
+    let recs = vec![
+        frame(0, 1000, 0),
+        begin(1, 0, 0, 1500, 1),
+        bparent(2, 0, 0),
+        end(3, 0, 0, 1600, 1),
+        frame(4, 2000, 1),
+        gap(5, 6),
+        begin(7, 0, 0, 2100, 2),
+        bparent(8, 0, 0),
+        end(9, 0, 0, 2500, 2),
+        frame(10, 3000, 2),
+        frame(11, 4000, 3),
+    ];
+    let src = scenario(vec![lane(1, recs)]).bytes();
+    let src_cap = ps3dk_prof::reader::read(&src).expect("source valid");
+    let src_lane = src_cap.lanes.get(&1).unwrap();
+    assert_eq!(src_lane.gap_count, 1);
+    let src_analysis = ps3dk_prof::analysis::analyze(src_cap.clone()).expect("source analysis");
+    assert!(src_analysis.lanes[&1].loss);
+
+    // Export frame 1..1
+    let out = ps3dk_prof::export_bytes(&src, 1..=1).expect("export success");
+    let cap = ps3dk_prof::reader::read(&out).expect("exported capture valid");
+    let exp_lane = cap.lanes.get(&1).unwrap();
+    assert_eq!(exp_lane.gap_count, 1, "real writer GAP inside window must be preserved as writer GAP");
+    assert_eq!(exp_lane.export_gap_count, 0, "no synthetic export gaps on this frame");
+    let exp_analysis = ps3dk_prof::analysis::analyze(cap.clone()).expect("exported analysis");
+    assert!(exp_analysis.lanes[&1].loss, "exported lane with writer GAP must have loss = true");
+    assert!(exp_analysis.lanes[&1].reasons.iter().any(|r| r.contains("1 GAP(s)")));
+
+    let span2 = cap.spans.iter().find(|s| s.span_id == 2).unwrap();
+    assert_eq!(span2.frame_context, ps3dk_prof::model::FrameContext::Loss);
+    assert_eq!(span2.gaps_before_begin, 1);
+}
+
+#[test]
+fn export_clipped_nested_zone_marked_as_export_gap_not_writer_loss() {
+    let recs = vec![
+        frame(0, 1000, 0),
+        // Span 1 begins before frame 1
+        begin(1, 0, 0, 1500, 1),
+        bparent(2, 0, 0),
+        // Frame 1
+        frame(3, 2000, 1),
+        // Nested Span 2 under Span 1 (completely inside frame 1, but parent Span 1 crossed boundary)
+        begin(4, 1, 1, 2200, 2),
+        bparent(5, 1, 1),
+        end(6, 1, 1, 2400, 2),
+        // Span 1 ends inside frame 1
+        end(7, 0, 0, 2600, 1),
+        // Frame 2
+        frame(8, 3000, 2),
+    ];
+    let src = scenario(vec![lane(1, recs)]).bytes();
+    let src_cap = ps3dk_prof::reader::read(&src).expect("source valid");
+    let src_lane = src_cap.lanes.get(&1).unwrap();
+    assert_eq!(src_lane.gap_count, 0, "source has no writer gaps");
+    let src_analysis = ps3dk_prof::analysis::analyze(src_cap.clone()).expect("source analysis");
+    assert!(!src_analysis.lanes[&1].loss);
+
+    // Export frame 1..1
+    let out = ps3dk_prof::export_bytes(&src, 1..=1).expect("export success");
+    let cap = ps3dk_prof::reader::read(&out).expect("exported capture valid");
+    let exp_lane = cap.lanes.get(&1).unwrap();
+    assert_eq!(exp_lane.gap_count, 0, "export-made holes must not be counted as writer loss");
+    assert_eq!(exp_lane.export_gap_count, 1, "clipped zone hole must be marked as export gap");
+    let exp = cap.export.clone().unwrap();
+    assert_eq!(exp.clipped_zones, 2, "both Span 1 and nested Span 2 are clipped");
+    let exp_analysis = ps3dk_prof::analysis::analyze(cap).expect("exported analysis");
+    assert!(!exp_analysis.lanes[&1].loss, "export-made gaps must not cause loss in analysis");
+}
+
+#[test]
+fn export_worker_only_gap_after_clipping() {
+    let src = scenario(vec![
+        lane(1, vec![frame(0, 1000, 0), frame(1, 2000, 1), frame(2, 3000, 2)]),
+        lane(2, vec![
+            begin(0, 0, 0, 1500, 1),
+            bparent(1, 0, 0),
+            end(2, 0, 0, 2200, 1),
+            gap(3, 4),
+            begin(5, 0, 0, 2500, 2),
+            bparent(6, 0, 0),
+            end(7, 0, 0, 3500, 2),
+        ]),
+    ])
+    .bytes();
+    ps3dk_prof::reader::read(&src).expect("source is valid");
+    let result = ps3dk_prof::export_bytes(&src, 1..=1);
+    let exported = result.expect("valid source must export successfully when all worker zones clipped");
+    let loaded = ps3dk_prof::reader::read(&exported).expect("exported capture must pass strict reader");
+    let exp_meta = loaded.export.as_ref().expect("EXPORT chunk present");
+    let el2 = exp_meta.lanes.get(&2).expect("worker lane in EXPORT");
+    assert_eq!(el2.kept, 0, "lane with only clipped zones and writer gap is declared with kept 0");
+    assert_eq!(el2.first_seq, 0);
+    assert_eq!(el2.last_seq, 0);
+    assert_eq!(el2.dropped_by_export, 6);
+}

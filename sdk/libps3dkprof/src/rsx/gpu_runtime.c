@@ -719,6 +719,8 @@ int ps3dk_prof_gpu_begin(uint32_t h, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *d
     if (!out)
         return (g_tls.in_drain || g_tls.in_gpu) ? PS3DK_PROF_EBUSY : PS3DK_PROF_EINVAL; /* nothing written */
     memset(out, 0, sizeof *out);                                                         /* INERT */
+    if (p_ready() && !p_window_gate(g_prof))
+        return PS3DK_PROF_OK;   /* triggered capture: an INERT zone outside a window */
     rc = prologue(h, &p, &g);
     if (rc != PS3DK_PROF_OK)
         return rc;

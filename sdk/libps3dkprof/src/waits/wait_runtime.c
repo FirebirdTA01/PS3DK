@@ -50,7 +50,7 @@ ps3dk_prof_wait_cookie ps3dk_prof__wait_begin(uint32_t op,uint64_t target,uint64
     ps3dk_prof_wait_cookie c={0};prof *p;wait_capture *w;wait_actor *a;
     if(!p_ready())return c;
     p=g_prof;w=p->waits;
-    if(!w || LD_ACQ(&p->stop_latch))return c;
+    if(!w || LD_ACQ(&p->stop_latch) || !p_window_gate(p))return c; /* no wait row outside a window */
     /* Internal acquisitions never become application rows, even before thread
      * registration. Drain and sink callbacks share the drainer's scope. */
     if(g_tls.wait_busy==2 || g_tls.in_drain || g_tls.in_gpu){

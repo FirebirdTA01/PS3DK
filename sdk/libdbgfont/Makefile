@@ -70,7 +70,7 @@ ARCHIVE     := $(OBJ_DIR)/libdbgfont.a
 PS3DK       ?= $(PS3DEV)/ps3dk
 INSTALL_LIB := $(PS3DK)/ppu/lib
 
-.PHONY: all install clean
+.PHONY: all install clean rsx-cg-path
 
 all: $(ARCHIVE) $(LP64_ARCHIVE)
 
@@ -126,5 +126,12 @@ install: $(ARCHIVE) $(LP64_ARCHIVE)
 
 clean:
 	rm -rf $(OBJ_DIR) $(LP64_OBJ_DIR)
+
+# Print the rsx-cg-compiler this Makefile will use.  scripts/build-sdk.sh calls
+# it as its --no-host-tools precheck, so the precheck and the build share one
+# lookup (above): it fails exactly when the build would.  Kept below `all` so
+# `all` stays the default goal.
+rsx-cg-path:
+	@echo $(RSX_CG)
 
 -include $(wildcard $(OBJ_DIR)/*.d)

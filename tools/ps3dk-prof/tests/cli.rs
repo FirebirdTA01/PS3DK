@@ -113,3 +113,18 @@ fn a_file_with_no_event_chunk_and_no_trailer_stays_incomplete() {
     assert!(out.starts_with("INCOMPLETE"), "{out}");
     assert!(!out.contains("ending:"), "{out}");
 }
+
+/// A capture that ended before the first drain (metadata only, no TRAILER): every command reads it as INCOMPLETE
+/// with the no-events statement and exits 1 like any other incomplete capture; it is never refused (2).
+#[test]
+fn a_metadata_only_file_is_incomplete_no_events_with_exit_1() {
+    let mut s = scenario(vec![lane(1, Vec::new())]);
+    s.trailer = false;
+    let bytes = s.bytes();
+    for cmd in ["check", "report"] {
+        let (code, out) = run(&[cmd], &bytes, &format!("meta-{cmd}"));
+        assert_eq!(code, Some(1), "{cmd}: {out}");
+        assert!(out.contains("INCOMPLETE: no events recorded (ended before the first drain)"), "{cmd}: {out}");
+        assert!(!out.lines().any(|l| l == "ending: NO-TRAILER"), "{cmd}: {out}");
+    }
+}

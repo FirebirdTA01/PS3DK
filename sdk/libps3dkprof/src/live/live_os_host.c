@@ -131,6 +131,17 @@ void live_os_close(int fd)
         (void)close(fd); /* never retried: the descriptor is released even when close reports EINTR */
 }
 
+int live_os_shutdown_write(int fd)
+{
+    for (int i = 0; i <= LIVE_OS_INTR_RETRIES; ++i) {
+        if (shutdown(fd, SHUT_WR) == 0)
+            return 0;
+        if (errno != EINTR)
+            break;
+    }
+    return LIVE_OS_ERROR;
+}
+
 int live_os_file_open(const char *path)
 {
     for (int i = 0; i <= LIVE_OS_INTR_RETRIES; ++i) {

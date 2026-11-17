@@ -23,6 +23,7 @@
 #include "prof_test_hooks.h"
 #include "psp_elf.h"
 #include "psp_ppu.h"
+#include "i3b_table.h"
 
 static int g_bad;
 #define CHECK(c, ...)                                                                                                  \
@@ -167,68 +168,48 @@ static int each(const char *list, int reg)
 }
 
 /* ---- table: new wrapper vs the committed function (renamed old_*) ---- */
-int old_ps3dk_prof__psp_ppu_init(psp_ppu *p, const psp_cfg *cfg, const psp_limits *lim, const psp_mem *mem,
-                                 const psp_out *out, const psp_storage *st);
-int old_ps3dk_prof__psp_image_add(psp_ppu *p, const uint8_t *build_id, uint32_t build_len, const psp_desc *d,
-                                  uint32_t n, uint32_t *index);
 static int table_mode(void)
 {
     static uint8_t a1[1u << 22], a2[1u << 22];
     static char big[600], names[4096][16];
-    static psp_desc many[4096];
-    psp_desc t0[] = {{0x100, 1, "a", "f.c"}, {0x110, 2, "b", NULL}, {0x120, 3, "c", ""}};
-    psp_desc t1[] = {{0, 0, big, big}};
-    psp_desc t2[] = {{0, 0, "", "x"}};          /* EINVAL: empty name */
-    psp_desc t3[] = {{0, 0, "a\x80", "x"}};     /* EINVAL: byte >= 0x80 */
-    psp_desc t4[] = {{0, 0, "ctl\x01ok", "x"}}; /* accepted by the table policy (0x01..0x7F) */
+    static i3b_desc many[4096];
+    i3b_desc t0[] = {{0x100, 1, "a", "f.c"}, {0x110, 2, "b", NULL}, {0x120, 3, "c", ""}};
+    i3b_desc t1[] = {{0, 0, big, big}};
+    i3b_desc t2[] = {{0, 0, "", "x"}};          /* EINVAL: empty name */
+    i3b_desc t3[] = {{0, 0, "a\x80", "x"}};     /* EINVAL: byte >= 0x80 */
+    i3b_desc t4[] = {{0, 0, "ctl\x01ok", "x"}}; /* accepted by the table policy (0x01..0x7F) */
     struct {
-        const psp_desc *d;
+        const i3b_desc *d;
         uint32_t n;
         uint32_t blen;
     } cases[] = {{t0, 3, 3}, {t1, 1, 64}, {t2, 1, 2}, {t3, 1, 2}, {t4, 1, 1}, {many, 4096, 5}, {t0, 3, 0}, {t0, 3, 65}};
     memset(big, 'b', 512);
     for (int i = 0; i < 4096; i++) {
         snprintf(names[i], sizeof names[i], "z%u", (unsigned)i);
-        many[i] = (psp_desc){(uint32_t)(16 * i), (uint32_t)i, names[i], "m.c"};
+        many[i] = (i3b_desc){(uint32_t)(16 * i), (uint32_t)i, names[i], "m.c"};
     }
     for (unsigned k = 0; k < sizeof cases / sizeof cases[0]; k++) {
-        psp_ppu p1, p2;
-        psp_cfg cfg = {64, 1, 1u << 20, 1024};
-        psp_limits l = limits();
-        static uint8_t s1[PSP_SCRATCH_BYTES], s2[PSP_SCRATCH_BYTES], c1[512], c2[512];
-        psp_mem m = {0};
-        psp_out o = {0};
-        psp_storage st1 = {s1, sizeof s1, c1, sizeof c1, a1, sizeof a1}, st2 = {s2, sizeof s2, c2, sizeof c2, a2, sizeof a2};
-        uint32_t i1 = 9, i2 = 9;
-        uint8_t bid[65];
-        int r1, r2;
-        memset(bid, 0x3c, sizeof bid);
-        memset(a1, 0x5a, sizeof a1);
-        memset(a2, 0x5a, sizeof a2);
-        CHECK(psp_ppu_init(&p1, &cfg, &l, &m, &o, &st1) == 0 && old_ps3dk_prof__psp_ppu_init(&p2, &cfg, &l, &m, &o, &st2) == 0,
-              "init");
-        r1 = psp_image_add(&p1, bid, cases[k].blen, cases[k].d, cases[k].n, &i1);
-        r2 = old_ps3dk_prof__psp_image_add(&p2, bid, cases[k].blen, cases[k].d, cases[k].n, &i2);
-        CHECK(r1 == r2 && i1 == i2, "case %u: rc %d vs old %d, index %u vs %u", k, r1, r2, i1, i2);
-        CHECK(p1.arena_used == p2.arena_used && p1.nimages == p2.nimages, "case %u: arena_used %zu vs %zu", k,
-              p1.arena_used, p2.arena_used);
-        if (r1 != 0)
+        static i3b_table_result r1, r2;
+        i3b_table(cases[k].d, cases[k].n, cases[k].blen, a1, sizeof a1, &r1);
+        old_i3b_table(cases[k].d, cases[k].n, cases[k].blen, a2, sizeof a2, &r2);
+        CHECK(r1.init_rc == 0 && r2.init_rc == 0, "init");
+        CHECK(r1.rc == r2.rc && r1.index == r2.index,
+              "case %u: rc %d vs old %d, index %u vs %u", k, r1.rc, r2.rc, r1.index, r2.index);
+        CHECK(r1.arena_used == r2.arena_used && r1.nimages == r2.nimages,
+              "case %u: arena_used %zu vs %zu", k, r1.arena_used, r2.arena_used);
+        if (r1.rc != 0) {
             CHECK(!memcmp(a1, a2, sizeof a1), "case %u: a refused registration changed the arena", k);
-        if (r1 == 0) {
-            psp_image *m1 = &p1.images[i1], *m2 = &p2.images[i2];
-            /* every arena byte except the descriptors' absolute name/file pointers (compared as offsets below):
-             * the bytes before the descriptor array, and the string region after it, up to the whole arena */
-            size_t d0 = (size_t)((uint8_t *)m1->descs - a1), dn = sizeof(psp_desc) * m1->ndesc;
-            CHECK(!memcmp(a1, a2, d0) && !memcmp(a1 + d0 + dn, a2 + d0 + dn, sizeof a1 - d0 - dn),
-                  "case %u: arena bytes outside the descriptor pointers differ", k);
-            int same = m1->build_len == m2->build_len && m1->ndesc == m2->ndesc &&
-                       !memcmp(m1->build_id, m2->build_id, m1->build_len) &&
-                       (uint8_t *)m1->descs - a1 == (uint8_t *)m2->descs - a2;
-            for (uint32_t i = 0; same && i < m1->ndesc; i++)
-                same = m1->descs[i].ls_addr == m2->descs[i].ls_addr && m1->descs[i].line == m2->descs[i].line &&
-                       m1->descs[i].name - (char *)a1 == m2->descs[i].name - (char *)a2 &&
-                       m1->descs[i].file - (char *)a1 == m2->descs[i].file - (char *)a2;
-            CHECK(same, "case %u: image fields or pointer offsets differ", k);
+        } else {
+            /* Compare all non-pointer arena bytes, then every pointer as an
+             * arena-relative offset in the neutral result. */
+            size_t d0 = r1.desc_offset, dn = r1.desc_bytes;
+            CHECK(r1.desc_offset == r2.desc_offset && r1.desc_bytes == r2.desc_bytes,
+                  "case %u: descriptor layout differs", k);
+            CHECK(d0 <= sizeof a1 && dn <= sizeof a1 - d0, "case %u: descriptor bounds", k);
+            if (d0 <= sizeof a1 && dn <= sizeof a1 - d0)
+                CHECK(!memcmp(a1, a2, d0) && !memcmp(a1 + d0 + dn, a2 + d0 + dn, sizeof a1 - d0 - dn),
+                      "case %u: arena bytes outside the descriptor pointers differ", k);
+            CHECK(!memcmp(&r1, &r2, sizeof r1), "case %u: image fields or pointer offsets differ", k);
         }
     }
     printf("TABLE cases %u\n", (unsigned)(sizeof cases / sizeof cases[0]));

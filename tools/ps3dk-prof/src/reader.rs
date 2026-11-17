@@ -122,6 +122,8 @@ struct Reader {
     fifo: Option<crate::fifo::Reader>,
     /// file_flags bit 7: automatic RSX observation (chunk types 34-38).
     auto: Option<crate::auto_rsx::Reader>,
+    /// file_flags bit 9: capture windows (chunk types 41-42).
+    windows: Option<crate::windows::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -219,6 +221,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         counters: None,
         fifo: None,
         auto: None,
+        windows: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -247,8 +250,8 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let v = bytes.get(12).copied().unwrap_or(0);
         let known = (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
             && (v & 64 == 0 || v & 1 != 0) && (v & 128 == 0 || v & 1 != 0);
-        // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte); bytes 14..15 must be 0
-        let high_ok = !(n > 13 && bytes[13] & !1 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
+        // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte) or bit 9 (WINDOWS, value 2 in that byte); bytes 14..15 must be 0
+        let high_ok = !(n > 13 && bytes[13] & !3 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
             let allowed = if bytes[12] & 128 != 0 {
@@ -268,6 +271,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if n > 13 && bytes[13] & 1 != 0 {
             r.cap.counters = Some(crate::counters::Inventory::default());
+        }
+        if n > 13 && bytes[13] & 2 != 0 {
+            r.cap.windows_flag = true;
         }
         if n > 12 && u32::from(bytes[12]) & crate::func_paths::FLAG_FUNC_PATHS != 0 {
             r.cap.func_paths = Some(crate::func_paths::Inventory::default());
@@ -299,8 +305,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let counters_flag = crate::counters::FLAG_COUNTERS;
     let fifo_flag = crate::fifo::FLAG_FIFO;
     let auto_flag = crate::auto_rsx::FLAG_AUTO;
+    let windows_flag = crate::model::FLAG_WINDOWS;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag | fifo_flag | auto_flag) != 0
+        | counters_flag | fifo_flag | auto_flag | windows_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
@@ -315,6 +322,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 1 without bit 0"));
     }
     r.cap.profile_flag = file_flags & profile_flag != 0;
+    r.cap.windows_flag = file_flags & windows_flag != 0;
     if file_flags & checkpoint_flag != 0 {
         r.checkpoints = Some(crate::checkpoints::Reader::new(budgets));
         r.source_checkpoints = Some(crate::source_checkpoints::Reader::new(source));
@@ -334,6 +342,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & auto_flag != 0 {
         r.auto = Some(crate::auto_rsx::Reader::new(auto));
+    }
+    if file_flags & windows_flag != 0 {
+        r.windows = Some(crate::windows::Reader::new());
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -404,8 +415,10 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let fifo_ty = r.fifo.is_some()
             && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
         let export_ty = ty == crate::model::CHUNK_EXPORT;
+        let windows_ty = r.windows.is_some()
+            && (ty == crate::model::CHUNK_WINDOW_BEGIN || ty == crate::model::CHUNK_WINDOW_END);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -472,6 +485,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             index += 1;
             continue;
         }
+        if windows_ty {
+            r.windows.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
         match ty {
             CHUNK_HEADER => r.header(payload, minor)?,
             CHUNK_CLOCKS => r.clocks(payload)?,
@@ -517,6 +536,30 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
+    let mut frame_marks: Vec<u64> = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).collect();
+    if let Some(auto) = &r.cap.auto {
+        for cov in &auto.frames {
+            frame_marks.push(cov.frame);
+        }
+    }
+    if let Some(w) = r.windows.take() {
+        r.cap.windows = w.finish(&frame_marks);
+    } else {
+        let min_frame = frame_marks.iter().copied().min().unwrap_or(0);
+        let max_frame = frame_marks.iter().copied().max();
+        r.cap.windows = vec![crate::model::CaptureWindow {
+            id: 1,
+            name: "default".to_string(),
+            name_desc: 0,
+            first_frame: min_frame,
+            last_frame: max_frame,
+            source: crate::model::WindowSource::App,
+            kind: crate::model::WindowKind::Manual,
+            reason: crate::model::WindowReason::End,
+            is_open: false,
+            incomplete: false,
+        }];
+    }
     let mut cap = r.finish(torn)?;
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);
@@ -1180,7 +1223,7 @@ fn process_records(
         if lane.pending_begin.is_some() && r.kind != KIND_BEGIN_PARENT {
             return malformed(Rule::BeginParentPlacement, format!("{}: BEGIN not followed by its BEGIN_PARENT", at()));
         }
-        check_fields(r, descriptors, declared).map_err(|rule| Malformed { rule, detail: at() })?;
+        check_fields(r, descriptors, declared, export).map_err(|rule| Malformed { rule, detail: at() })?;
 
         if r.kind == KIND_GAP {
             if lane.pending_gap.is_some() {
@@ -1200,14 +1243,18 @@ fn process_records(
             }
             lane.pending_gap = Some((r.b, r.c));
             lane.gap_sum += u128::from(r.c - r.b) + 1;
-            lane.gap_count += 1;
-            // Every span on the partial stack is AFFECTED; the base becomes UNKNOWN.
-            for &s in &lane.stack {
-                spans[s].affected = true;
+            if r.flags == GAP_FLAG_EXPORT {
+                lane.export_gap_count += 1;
+            } else {
+                lane.gap_count += 1;
+                // Every span on the partial stack is AFFECTED; the base becomes UNKNOWN.
+                for &s in &lane.stack {
+                    spans[s].affected = true;
+                }
+                lane.stack.clear();
+                lane.base_unknown = true;
+                lane.gap_since_frame = true;
             }
-            lane.stack.clear();
-            lane.base_unknown = true;
-            lane.gap_since_frame = true;
             if let Some(batch) = evidence.as_deref_mut() { batch.ppu_record(r, i as u32); }
             continue;
         }
@@ -1340,6 +1387,7 @@ fn check_fields(
     r: &RawRecord,
     descriptors: &BTreeMap<u32, Descriptor>,
     declared: &BTreeSet<u32>,
+    export: Option<&ExportRecord>,
 ) -> Result<(), Rule> {
     match r.kind {
         KIND_BEGIN => {
@@ -1382,7 +1430,14 @@ fn check_fields(
             if r.depth != 0 {
                 return Err(Rule::DepthOnNonSpanRecord);
             }
-            if r.a != 0 || r.flags != 0 {
+            if r.a != 0 {
+                return Err(Rule::RecordReserved);
+            }
+            if r.kind == KIND_GAP {
+                if r.flags != 0 && (export.is_none() || r.flags != GAP_FLAG_EXPORT) {
+                    return Err(Rule::RecordReserved);
+                }
+            } else if r.flags != 0 {
                 return Err(Rule::RecordReserved);
             }
         }

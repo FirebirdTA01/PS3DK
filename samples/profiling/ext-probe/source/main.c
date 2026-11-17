@@ -692,6 +692,8 @@ int main(void)
             call = "sink-path";
         else if ((rc = ps3dk_prof_init_ex(&cfg, &ext)) != 0)
             call = "init-ex";
+        else
+            (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* capture windows: record the whole run */
         if (call) {
             e1_hex_err(res, sizeof res, call, rc);
             e1_mark(2, "prof-init-done", res, "");

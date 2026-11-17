@@ -66,6 +66,14 @@ def reader_check(d):
         n += 1
         if len(want) != 1 or str(r.returncode) != want[0]:
             bad.append(f'{e.stem}: rc {r.returncode} want {want}')
+        if e.stem.startswith('r1-sink-fail-'):
+            ending = 'INCOMPLETE: no events recorded (ended before the first drain)' if e.stem == 'r1-sink-fail-events' else 'ending: NO-TRAILER'
+            for text in (ending, 'STRUCTURE INCOMPLETE', 'no DOMAIN_FINAL',
+                         'RAW VALIDITY NOT VALID', 'COVERAGE UNKNOWN'):
+                if text not in r.stdout:
+                    bad.append(f'{e.stem}: missing {text!r}')
+            if e.stem == 'r1-sink-fail-final' and '1 events lost' not in r.stdout:
+                bad.append(f'{e.stem}: the accepted prefix must still report its LOSS')
     return bad, n
 
 

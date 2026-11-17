@@ -9,6 +9,9 @@
 #include "auto_clock.h"
 #include "../rsx/gpu_port_gcm.h"
 #include <ps3dk/prof_auto.h>
+
+/* labels whose complete-run cadence one coverage row tracks separately (label_one); later labels are not credited */
+#define AUTO_LABEL_TRACK 8u
 #if !defined(PS3DK_PROF_WITH_SPU) || !defined(PS3DK_PROF_WITH_FIFO)
 #error "automatic RSX observation requires the extension and FIFO provider"
 #endif
@@ -33,6 +36,8 @@ enum { AUTO_SEGMENTS_OPEN=32, AUTO_SEGMENT_POOL=512, AUTO_SEGMENT_NONE=0xfffffff
 /* Report pairs kept for whole-CALL brackets: covered draws and FRAME marks stop taking pairs when only this many
  * are free (fewer with a small pool: a quarter of it). */
 enum { AUTO_CALL_PAIRS=32 };
+/* Report pairs kept for AUTO ranges (an eighth of a small pool), and their nesting limit. */
+enum { AUTO_RANGE_PAIRS=16, AUTO_RANGE_DEPTH=4 };
 /* One covered operation built inside a CALL segment: its report pair is owned
  * from the build; its record is committed at cellGcmSegmentCall (or as an
  * INCOMPLETE record when the segment is rebuilt, never called or called
@@ -61,7 +66,13 @@ typedef struct auto_segment {
      * report is in the ring before the CALL) and the PPU time before that report. */
     uint32_t bracket, bracket_pair;
     uint64_t bracket_tb;
+    uint32_t fp;   /* the last fragment-program offset set while building this part (0 none) */
 } auto_segment;
+/* One open AUTO range (owner only): refused ranges are kept too, so END stays balanced. */
+typedef struct auto_range {
+    uint32_t ok, pair, desc, timed, tag;
+    uint64_t frame, tb;
+} auto_range;
 
 /* One allocation before observation; variable queues follow this control block
  * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
@@ -94,6 +105,11 @@ typedef struct auto_capture {
     uint64_t segment_visits, foreign_visits, segment_table_full, frame_marks_missed;
     uint64_t call_brackets, call_brackets_refused; /* whole-CALL brackets begun; CALLs that needed one and got none */
     uint32_t admit_column; /* the column segment_admit counted its last refusal in (0: counted in no frame) */
+    /* owner only: the current tag (PS3DK_PROF_AUTO_TAG), the attached ring's last fragment-program offset, the timing
+     * mode (0 every covered draw, 1 only inside timed ranges), the open ranges and the depth beyond the stack */
+    uint32_t tag, fp_ring, timing, timed_open, range_depth, range_excess;
+    auto_range ranges[AUTO_RANGE_DEPTH];
+    uint64_t ranges_done, ranges_refused;
     /* owner only: frame source. A flip opens frames until an explicit
      * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
      * ignored (counted). Both kinds are reported in STATUS. */
@@ -107,6 +123,13 @@ typedef struct auto_capture {
     /* the open run or scope crossed a frame boundary: it belongs to no frame */
     uint32_t cadence_spanning, flip_wait_spanning;
     uint64_t cadence_last, cadence_ticks, cadence_bound, flip_wait_since;
+    /* owner only: label-poll cadence, the same rules for cellGcmIsLabelPassed reads of one label (label_at) */
+    uint32_t label_open, label_spanning, label_at;
+    uint64_t label_last, label_ticks;
+    /* owner only: the open row's per-label totals of complete runs (label_row = its frame + 1; at most
+     * AUTO_LABEL_TRACK labels, later ones are not credited) */
+    uint64_t label_row, label_sum[AUTO_LABEL_TRACK];
+    uint32_t label_n, label_id[AUTO_LABEL_TRACK];
     uint64_t admitted, unassociated, internal_suppressed, conflicts;
     auto_wire_frame *frames;
     uint32_t frame_capacity;

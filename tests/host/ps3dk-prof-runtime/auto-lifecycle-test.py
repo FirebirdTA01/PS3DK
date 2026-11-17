@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 import subprocess
 
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
+
 p = argparse.ArgumentParser()
 p.add_argument("out", type=Path)
 p.add_argument("--reader", required=True, type=Path)
@@ -75,7 +79,7 @@ exe = out / "lifecycle"
 link = ["-no-pie"] if a.sanitize else []
 build([cxx, "-std=c++17", *flags, *cxx_priority, "-DPS3PROF_HOST_EXIT_MODEL",
        root / "tests/host/ps3dk-prof-runtime/auto_lifecycle.cpp",
-       "-Wl,-u,__ps3dk_prof_startup_anchor", archive, *link, "-o", exe], "link")
+       "-Wl,-u,__ps3dk_prof_startup_anchor", *WHOLE_RUN, archive, *link, "-o", exe], "link")
 
 results = []
 for mode in ["normal", "exit", "unregistered", "open", "abandoned", "immediate", "quick"]:
@@ -110,10 +114,20 @@ for mode in ["normal", "exit", "unregistered", "open", "abandoned", "immediate",
             if (report.returncode != 0 or "1 censored of 1" not in text
                     or "duration unknown (censored)" not in text):
                 errors.append("open worker span incorrectly accepted")
-        elif (report.returncode != 0 or "verdict: COMPLETE (ended without a trailer" not in text
-              or "ending: NO-TRAILER" not in text or "TRAILER is missing" in text):
+        else:
             # a valid capture that ends without a trailer reads COMPLETE, exit 0, ending NO-TRAILER
-            errors.append("abrupt exit not read as a trailerless complete capture")
+            trailerless = (report.returncode == 0 and "verdict: COMPLETE (ended without a trailer" in text
+                           and "ending: NO-TRAILER" in text and "TRAILER is missing" not in text)
+            # immediate (_exit) runs no hook: the init thread wrote HEADER and CLOCKS, so the file is never
+            # header-only and never refused; with no drain after the zones it reads INCOMPLETE no-events, exit 1.
+            # quick runs the at_quick_exit drain: always trailerless COMPLETE.
+            no_events = (mode == "immediate" and report.returncode == 1
+                         and "verdict: INCOMPLETE: no events recorded (ended before the first drain)" in text)
+            if "clock: PPU timebase" not in text:
+                errors.append("capture lacks HEADER/CLOCKS")
+            if not (trailerless or no_events):
+                errors.append("abrupt exit not read as a trailerless complete capture"
+                              + (" or a no-events capture" if mode == "immediate" else ""))
     results.append({"case": mode, "pass": not errors, "errors": errors})
     print(("PASS " if not errors else "FAIL ") + mode + (": " + "; ".join(errors) if errors else ""))
 

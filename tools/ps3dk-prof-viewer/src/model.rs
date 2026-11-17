@@ -36,6 +36,10 @@ pub struct Document {
     pub func_paths: crate::funcpaths::FuncSlot,
     /// The Timeline's SPU/RSX rows: a one-entry cache keyed by W32, filled on first need.
     pub foreign_tl: crate::timeline_foreign::ForeignTimelineSlot,
+    /// Automatic RSX observation page view, computed ONCE here.
+    pub auto: Option<crate::auto::AutoView>,
+    /// Passes page: the reader's by-tag/range inventory, computed ONCE here (never re-derived per repaint).
+    pub passes: crate::auto::PassesView,
     /// The RSX frames page (captures found in the data): built once, on first need.
     pub rsx: crate::rsx::RsxSlot,
 }
@@ -110,7 +114,7 @@ impl Document {
     // One construction path for file/live results and policy-controlled parser
     // results. It never accepts an index from another capture.
     pub(crate) fn from_outcome(path: PathBuf, size: usize, prefix_ok: bool, loaded: Outcome) -> Document {
-        let (state, ext, frames, hot, waits, fifo) = match loaded {
+        let (state, ext, frames, hot, waits, fifo, auto, passes) = match loaded {
             Outcome::Malformed(m) => (
                 DocState::Malformed {
                     diagnosis: m.to_string(),
@@ -120,6 +124,8 @@ impl Document {
                 None,
                 None,
                 None,
+                None,
+                crate::auto::PassesView::default(),
             ),
             Outcome::Analysed(a) => {
                 let ext = ext_view(&a);
@@ -128,7 +134,9 @@ impl Document {
                 let hot = crate::hotpaths::build(&a, &pm);
                 let waits = crate::waits::WaitsView::build(&a.capture, crate::waits::Budget::default());
                 let fifo = crate::fifo::FifoView::build(&a.capture);
-                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo))
+                let auto = Some(crate::auto::AutoView::build(&a.capture));
+                let passes = crate::auto::passes_build(&a.capture);
+                (DocState::Analysed(a), ext, Some(frames), Some(hot), Some(waits), Some(fifo), auto, passes)
             }
         };
         Document {
@@ -142,6 +150,8 @@ impl Document {
             hot,
             waits,
             fifo,
+            auto,
+            passes,
             foreign_hot: crate::foreign_hot::ForeignHotSlot::default(),
             func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
@@ -219,13 +229,21 @@ impl TimeBase {
     }
 
     pub fn ms(&self, ticks: f64) -> Option<f64> {
-        self.freq_hz.map(|f| ticks * 1000.0 / f as f64)
+        self.freq_hz.filter(|&f| f > 0).map(|f| ticks * 1000.0 / f as f64)
     }
 
     /// "13.305 ms (1061712 ticks)", or "1061712 ticks" without a clock.
     pub fn ticks(&self, ticks: u128) -> String {
         match self.ms(ticks as f64) {
             Some(ms) => format!("{} ({ticks} ticks)", format_ms(ms)),
+            None => format!("{ticks} ticks"),
+        }
+    }
+
+    /// A visible duration; retain the integer verbatim if conversion is unavailable.
+    pub fn short_ticks(&self, ticks: u128) -> String {
+        match self.ms(ticks as f64) {
+            Some(ms) => format_ms(ms),
             None => format!("{ticks} ticks"),
         }
     }
@@ -248,13 +266,7 @@ impl TimeBase {
 }
 
 pub fn format_ms(ms: f64) -> String {
-    if ms >= 1000.0 {
-        format!("{:.3} s", ms / 1000.0)
-    } else if ms >= 1.0 {
-        format!("{ms:.3} ms")
-    } else {
-        format!("{:.3} us", ms * 1000.0)
-    }
+    format!("{ms:.3} ms")
 }
 
 /// Display a metric: a value through `show`, otherwise the reader's reason.
@@ -524,12 +536,12 @@ pub fn zone_cell(z: &ZoneStats, col: ZoneColumn, tb: TimeBase) -> String {
         ZoneColumn::Instances => z.instances.to_string(),
         ZoneColumn::Completed => z.completed.to_string(),
         ZoneColumn::Censored => z.censored.to_string(),
-        ZoneColumn::Total => metric_text(&z.total, |v| tb.short(*v as f64)),
+        ZoneColumn::Total => metric_text(&z.total, |v| tb.short_ticks((*v).into())),
         ZoneColumn::Mean => metric_text(&z.mean, |v| tb.short(*v)),
-        ZoneColumn::P50 => metric_text(&z.p50, |v| tb.short(*v as f64)),
-        ZoneColumn::P90 => metric_text(&z.p90, |v| tb.short(*v as f64)),
-        ZoneColumn::P99 => metric_text(&z.p99, |v| tb.short(*v as f64)),
-        ZoneColumn::Max => metric_text(&z.max, |v| tb.short(*v as f64)),
+        ZoneColumn::P50 => metric_text(&z.p50, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::P90 => metric_text(&z.p90, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::P99 => metric_text(&z.p99, |v| tb.short_ticks((*v).into())),
+        ZoneColumn::Max => metric_text(&z.max, |v| tb.short_ticks((*v).into())),
     }
 }
 

@@ -34,6 +34,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData 
  * whole-CALL bracket, ended by ps3dk_prof__auto_segment_call). Call reserved
  * those words too, with the 2 of the bracket's end report. */
 void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
+/* cellGcmSetFragmentProgram in a PS3TC_PROF_AUTO unit (cell/gcm/gcm_cg_bridge.h): the offset just bound. */
+void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
 void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key, const void *buffer, uint32_t size);
 void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key);
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),

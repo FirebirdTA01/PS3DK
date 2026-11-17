@@ -21,6 +21,7 @@ import argparse
 import contextlib
 import dataclasses
 import enum
+import importlib.util
 import io
 import os
 from pathlib import Path
@@ -164,8 +165,16 @@ def _is_pid_alive(pid: int) -> bool:
         return True
 
 
-TEST_PATH_RE = re.compile(r"^[A-Za-z0-9_/-]+-test\.(?:sh|ps1)$")
-SELF = "tests/ci-test-list-test.py"
+# The inventory also names legacy profiler drivers without the usual -test.sh
+# suffix. Share its accepted paths so adding a CI suite cannot split the two
+# parsers' populations (including the Windows path-parsing mode).
+_inventory_spec = importlib.util.spec_from_file_location(
+    "ci_test_inventory", Path(__file__).resolve().parents[1] / "ci-test-list-test.py")
+assert _inventory_spec is not None and _inventory_spec.loader is not None
+_inventory = importlib.util.module_from_spec(_inventory_spec)
+_inventory_spec.loader.exec_module(_inventory)
+TEST_PATH_RE = re.compile(_inventory.TEST_PATH)
+SELF = _inventory.SELF
 
 # Idle timeout: process is killed if it produces no stdout/stderr output and no temp file activity
 DEFAULT_IDLE_TIMEOUT = 300.0  # 5 minutes (default)
@@ -301,7 +310,7 @@ def parse_ci_invocations(workflow_text: str, compiler_override: str | None = Non
         if norm_path.startswith("./"):
             norm_path = norm_path[2:]
 
-        if not (TEST_PATH_RE.match(norm_path) or norm_path == SELF):
+        if not (TEST_PATH_RE.fullmatch(norm_path) or norm_path == SELF):
             continue
 
         # Deduplicate across multiple workflow jobs (e.g. linux vs windows runs of adversary)

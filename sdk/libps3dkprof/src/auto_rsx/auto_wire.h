@@ -10,7 +10,7 @@
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=160, AUTO_OP_BYTES=144, AUTO_FRAME_BYTES=384,
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
@@ -38,9 +38,14 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * timestamp between the last poll below 2k-1 and the first at or above 2k:
  * label_first/label_second carry those observed values), and CALL_BRACKET=128
  * (OPS kind 5 CALL: one report pair around a whole cellGcmSegmentCall whose
- * build was not fully timed, see below). A reader that knows only 7/15, 15/11,
- * 31/11, 63/11 or 127/11 refuses 255/11 at CONFIG. */
-enum { AUTO_KIND_MASK=255, AUTO_FORM_MASK=11 };
+ * build was not fully timed, see below), and LABEL_POLL=256 (416-byte COVERAGE
+ * rows: a label-poll cadence block at 384, see auto_wire_frame), and TAG=512
+ * (160-byte OPS records: u32@144 tag current at the record's claim, u32@148 the
+ * fragment-program offset last set on its context, u32@152 a RANGE's nesting
+ * depth, u32@156 zero; OPS kind 6 RANGE; 480-byte COVERAGE rows with the
+ * timed-range block at 416 and the flip-wait scope block at 448). A reader that knows only 7/15, 15/11, 31/11,
+ * 63/11, 127/11, 255/11 or 511/11 refuses 1023/11 at CONFIG. */
+enum { AUTO_KIND_MASK=1023, AUTO_FORM_MASK=11 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
@@ -57,6 +62,13 @@ enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=
  * untimed-only exclusion counted in the build-tail frame (BUILD_KNOWN only when
  * args[4] is nonzero; the tail is zero otherwise), args[5..6] zero. */
 enum { AUTO_KIND_CALL=5 };
+/* OPS kind 6 RANGE (TAG): an AUTO-owned range, a timestamp report at
+ * PS3DK_PROF_AUTO_RANGE_BEGIN and one at PS3DK_PROF_AUTO_RANGE_END in the ring,
+ * completed by an operation-label release after the end report. TOKEN is the
+ * frame of both (a range whose END falls in another frame is refused); args[0]
+ * the name descriptor index + 1, args[1] 1 for a timed range, args[2..6] zero;
+ * u32@152 its nesting depth 1..4; the tag is the one current at BEGIN. */
+enum { AUTO_KIND_RANGE=6, AUTO_RANGE_TIMED=1 };
 /* OPS build tail (SEGMENT records only, zero otherwise): u64@128 build frame,
  * u32@136 build owner, u16@140 build flags (BUILD_KNOWN=1: the draw was
  * admitted while a coverage frame was open; without it owner and frame are
@@ -73,6 +85,7 @@ typedef struct auto_wire_config {
     uint32_t reason;
     int32_t application_rc;
     uint8_t mechanism[32], binding[32];
+    uint32_t call_pairs, range_pairs; /* TAG: u32@160 whole-CALL reserve, u32@164 range reserve; u64@168 zero */
 } auto_wire_config;
 
 typedef struct auto_wire_op {
@@ -87,6 +100,9 @@ typedef struct auto_wire_op {
     uint64_t build_frame;   /* SEGMENT only: the coverage frame that admitted this draw */
     uint32_t build_owner;
     uint16_t build_flags;   /* AUTO_OP_BUILD_KNOWN */
+    uint32_t tag;           /* TAG: the tag current at the claim (a segment draw: at its build) */
+    uint32_t fp_offset;     /* TAG: the last cellGcmSetFragmentProgram offset on the record's context, 0 if none */
+    uint32_t depth;         /* RANGE only: nesting depth 1..4 */
 } auto_wire_op;
 
 typedef struct auto_wire_frame {
@@ -107,6 +123,25 @@ typedef struct auto_wire_frame {
      * the CALL's token (re-CALL, untracked segment, draws refused or quarantined while building, a refused CALL,
      * a pair lost at commit). A lower bound: an untracked segment counts 1. Saturates (row SATURATED). */
     uint32_t segment_unrepresented;
+    /* label-poll block at 384 (LABEL_POLL): cellGcmIsLabelPassed / cellGcmIsLabelValuePassed reads on the owner
+     * thread, with the same run rules as flip-status polling cadence (a run of not-yet-passed polls of one label
+     * closed by a passed poll, every gap within the bound). Polling cadence, never evidence of waiting. */
+    uint32_t label_runs;        /* u32@384: complete runs */
+    uint32_t label_broken;      /* u32@388: runs ended by a gap over the bound, another label or a flip-wait scope */
+    uint32_t label_spanning;    /* u32@392: runs that crossed a boundary of this frame (charged to neither) */
+    uint32_t label_index;       /* u32@396: the complete runs' label + 1; 0 none, 0xffffffff several */
+    uint64_t label_cadence;     /* u64@400: summed bounded gaps of the complete runs, over every label */
+    uint64_t label_one;         /* u64@408: the largest total of any ONE label's complete runs (never a sum) */
+    /* timed-range block at 416 (TAG): u64@416/424/432 covered ARRAY/INDEX/CLEAR visits left untimed because timing
+     * was limited to timed ranges and none was open (counted in visited, not observed, not in the ten exclusions);
+     * u32@440 AUTO ranges refused in this frame (depth, no pair, no room, a segment build, another frame); u32@444
+     * zero */
+    uint64_t outside_timed[3];
+    uint32_t ranges_refused;
+    /* flip-wait scope block at 448 (TAG): the owner PPU ticks [begin, end] of the first two flip-wait scopes counted
+     * at 12 (u64@448/456 and u64@464/472); zero for scopes not recorded. With more than two scopes in the frame the
+     * reader cannot place the others and does not use the block. */
+    uint64_t flip_wait_at[2][2];
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
 } auto_wire_frame;
 

@@ -9,14 +9,23 @@ per process.  The enabled and disabled captures are checked with the given reade
 G-v1a: v1a_fixture.c built against the BASE runtime sources (--base, extracted from the base commit) and against the
 candidate, each with PS3DK_PROF_WITH_ARCS off and on, and the candidate also without PS3DK_PROF_WITH_SPU (the
 shipped configuration); deterministic (APP mode, the clock hook, pthread_self wrapped).  Every candidate variant's
-capture and finalization dump must equal the base's for the same arcs setting, byte for byte.
+capture and finalization dump must equal the base's for the same arcs setting, byte for byte, once the capture-window
+declaration the candidate adds is taken out (drop_windows: file_flags bit 9 and exactly one WINDOW_BEGIN and one
+WINDOW_END chunk; the chunk sequence, CRCs and the dump's byte count, chunk count and prefix CRC recomputed).
 
 usage: i1-test.py OUT --base BASE_ROOT --reader READER"""
 import argparse
 import os
 from pathlib import Path
+import re
 import shutil
+import struct
 import subprocess
+import zlib
+
+# capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
+WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
+             '-Wl,--wrap=ps3dk_prof_init', '-Wl,--wrap=ps3dk_prof_init_ex']
 
 p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument('out', type=Path)
@@ -60,7 +69,9 @@ def build(label, r, extra, spu, test_src, links):
             if (lib / 'rsx/gpu_port_gcm.c').exists():  # P3.3 R4a: the runtime prepares the GCM port
                 srcs += [lib / 'rsx/gpu_port_gcm.c']
     exe = d / 'exe'
-    r_ = subprocess.run([cc, *flags, *map(str, srcs), '-o', str(exe), *links], capture_output=True, text=True)
+    # the whole-run helper only for a tree that has capture windows (the base tree predates them)
+    whole = WHOLE_RUN if 'ps3dk_prof_capture_begin' in (r / 'sdk/include/ps3dk/prof.h').read_text() else []
+    r_ = subprocess.run([cc, *flags, *map(str, srcs), *whole, '-o', str(exe), *links], capture_output=True, text=True)
     (d / 'build.log').write_text(r_.stdout + r_.stderr)
     if r_.returncode != 0:
         raise SystemExit(f'build {label} failed:\n{r_.stderr[:3000]}')
@@ -126,6 +137,39 @@ for mode, extra in [('plain', []), ('asan', san)]:
         failed.append(f'{mode} layout')
 
 # ---- G-v1a ----
+def drop_windows(cap, final):
+    """The candidate's capture and finalization dump without its capture-window declaration (see the docstring), and
+    the number of window chunks removed.  A capture without file_flags bit 9 is returned unchanged."""
+    flags = struct.unpack_from('<I', cap, 12)[0]
+    if not flags & 0x200:
+        return cap, final, 0
+    out = bytearray(cap[:16])
+    struct.pack_into('<I', out, 12, flags & ~0x200)
+    pos, seq, removed = 16, 0, []
+    while pos + 16 <= len(cap):
+        t, n, _ = struct.unpack_from('<IIQ', cap, pos)
+        if t in (41, 42):
+            removed.append(t)
+        else:
+            head = bytearray(cap[pos:pos + 16 + n])
+            struct.pack_into('<Q', head, 8, seq)
+            out += head + struct.pack('<I', zlib.crc32(head))
+            seq += 1
+        pos += 16 + n + 4
+    out = bytes(out)
+    text = final.decode()
+    text = re.sub(r'accepted \d+', f'accepted {len(out)}', text)
+    text = re.sub(r'chunks \d+ last \d+ crc [0-9a-f]{8}', f'chunks {seq} last {seq - 1} crc {zlib.crc32(out):08x}', text)
+    return out, text.encode(), (len(removed) if sorted(removed) == [41, 42] else -1)
+
+
+def candidate(d):
+    """A candidate run's (capture, dump) with the window declaration taken out, or None when it is not exactly one
+    BEGIN/END pair."""
+    cap, final, n = drop_windows((d / 'capture.prof').read_bytes(), (d / 'final.txt').read_bytes())
+    return (cap, final) if n in (0, 2) else None
+
+
 gv = []
 for arcs in [False, True]:
     ax = ['-DPS3DK_PROF_WITH_ARCS'] if arcs else []
@@ -151,7 +195,7 @@ for arcs in [False, True]:
             failed.append(f'G-v1a determinism {tag} {unwind}')
         # sensitivity control: an enabled capture (flags 1) must differ from the base
         rs, ds = run(cand, [unwind + 'ex-enabled'], f'v1a-cand-spu-{tag}-{unwind}ex-enabled')
-        sens = rs.returncode == 0 and (ds / 'capture.prof').read_bytes() != ref[0]
+        sens = rs.returncode == 0 and (candidate(ds) or (None,))[0] != ref[0]
         print(f'G-v1a {tag} sensitivity control {unwind}ex-enabled: {"DIFFERENT (detected)" if sens else "NOT DETECTED"}',
               flush=True)
         if not sens:
@@ -160,8 +204,7 @@ for arcs in [False, True]:
                                                                                               'ex-disabled'])]:
             for v in variants:
                 rc_, dc = run(exe, [unwind + v], f'v1a-{label}-{tag}-{unwind}{v}')
-                same = rc_.returncode == 0 and (dc / 'capture.prof').read_bytes() == ref[0] and \
-                    (dc / 'final.txt').read_bytes() == ref[1]
+                same = rc_.returncode == 0 and candidate(dc) == ref
                 gv.append(same)
                 print(f'G-v1a {tag} {label} {unwind}{v}: {len(ref[0])} bytes vs base: '
                       f'{"IDENTICAL" if same else "DIFFERENT"}', flush=True)

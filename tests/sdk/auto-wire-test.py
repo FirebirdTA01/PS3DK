@@ -22,14 +22,14 @@ int main(void) {
     c.instance=1; c.domain=1026; c.epoch=1; c.owner=7; c.generation=1;
     c.report_first=1024; c.report_count=1024; c.op_label=239; c.clock_label=238;
     c.pairs=504; c.metadata=1024; c.frames=256;
-    c.frequency=79800000; c.allocated=262144; c.ceiling=2097152;
+    c.frequency=79800000; c.allocated=262144; c.ceiling=2097152; c.call_pairs=32; c.range_pairs=16;
     for(i=0;i<32;i++) { c.mechanism[i]=(uint8_t)i; c.binding[i]=(uint8_t)(255-i); }
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if (auto_encode_config(b,159,&c)!=0 || memcmp(b,before,sizeof b)) return 2;
-    n=auto_encode_config(b,sizeof b,&c); if(n!=160 || put(n)) return 3;
+    if (auto_encode_config(b,175,&c)!=0 || memcmp(b,before,sizeof b)) return 2;
+    n=auto_encode_config(b,sizeof b,&c); if(n!=176 || put(n)) return 3;
     for(i=1;i<=10;i++) {
         c.reason=i; c.application_rc=-42;
-        n=auto_encode_config(b,sizeof b,&c); if(n!=160 || put(n)) return 4;
+        n=auto_encode_config(b,sizeof b,&c); if(n!=176 || put(n)) return 4;
     }
     c.reason=11; memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_config(b,sizeof b,&c)!=0 || memcmp(b,before,sizeof b)) return 15;
@@ -39,19 +39,23 @@ int main(void) {
     op.report_begin=1040; op.report_end=1041; op.serial_begin=1; op.serial_end=2;
     op.generation=1; op.published=2; op.segment=0x31; op.call=0x32;
     op.build_frame=UINT64_C(0x1112131415161718); op.build_owner=7; op.build_flags=1;
+    op.tag=0x41; op.fp_offset=0x42; op.depth=3;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if(auto_encode_ops(b,159,1,&op,1)!=0 || memcmp(b,before,sizeof b)) return 5;
+    if(auto_encode_ops(b,175,1,&op,1)!=0 || memcmp(b,before,sizeof b)) return 5;
     if(auto_encode_ops(b,sizeof b,1,&op,0)!=0 || memcmp(b,before,sizeof b)) return 6;
     if(auto_encode_ops(b,sizeof b,1,&op,UINT32_MAX)!=0 || memcmp(b,before,sizeof b)) return 7;
-    n=auto_encode_ops(b,sizeof b,1,&op,1); if(n!=160 || put(n)) return 8;
+    n=auto_encode_ops(b,sizeof b,1,&op,1); if(n!=176 || put(n)) return 8;
     f.flags=3; f.instance=1; f.owner=7; f.frame=0; f.tb_begin=100; f.tb_end=200;
     f.unsupported=3; f.lost=4; f.flip_waits=5; f.flip_wait=6;
     f.cadence_runs=7; f.cadence_broken=8; f.cadence_spanning=9; f.flip_wait_spanning=10; f.cadence=11;
     f.flip_wait_timeouts=12; f.segment_unrepresented=13;
+    f.label_runs=14; f.label_broken=15; f.label_spanning=16; f.label_index=17; f.label_cadence=18;
+    f.outside_timed[0]=19; f.outside_timed[1]=20; f.outside_timed[2]=21; f.ranges_refused=22;
+    f.flip_wait_at[0][0]=23; f.flip_wait_at[0][1]=24; f.flip_wait_at[1][0]=25; f.flip_wait_at[1][1]=26;
     for(i=0;i<3;i++) for(j=0;j<12;j++) f.counts[i][j]=1000+i*100+j;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if(auto_encode_frame(b,383,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
-    n=auto_encode_frame(b,sizeof b,&f); if(n!=384 || put(n)) return 10;
+    if(auto_encode_frame(b,479,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
+    n=auto_encode_frame(b,sizeof b,&f); if(n!=480 || put(n)) return 10;
     for(i=0;i<15;i++) counts[i]=UINT64_C(0x1020304050607080)+i;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
     if(auto_encode_status(b,127,1,49,counts)!=0 || memcmp(b,before,sizeof b)) return 11;
@@ -109,22 +113,24 @@ def main():
         print('short-config KILLED: short buffer modified'); return
     assert run.returncode == 0, ('writer/short-buffer control', run.returncode)
     chunks = []
-    c = bytearray(160)
-    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,255,11,1024,1024,239,238,504,1024,256,144,
+    c = bytearray(176)
+    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,1023,11,1024,1024,239,238,504,1024,256,160,
                      79800000,262144,2097152,3,1)
-    c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
+    c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); struct.pack_into('<II',c,160,32,16)
+    chunks.append(bytes(c))
     for reason in range(1,11):
-        c=bytearray(160)
+        c=bytearray(176)
         struct.pack_into('<HHI',c,0,1,1,1); struct.pack_into('<Ii',c,24,reason,-42)
         struct.pack_into('<Q',c,64,79800000)
         c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); chunks.append(bytes(c))
-    op=bytearray(160); struct.pack_into('<HHIII',op,0,1,0,1,1,144)
+    op=bytearray(176); struct.pack_into('<HHIII',op,0,1,0,1,1,160)
     struct.pack_into('<QIHH6Q7I',op,16,0x0102030405060708,7,2,3,9,10,11,12,13,14,*range(20,27))
     struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2)
     struct.pack_into('<I',op,108,0x31); struct.pack_into('<I',op,132,0x32)
-    struct.pack_into('<QIHH',op,144,0x1112131415161718,7,1,0); chunks.append(bytes(op))
-    f=bytearray(384); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
+    struct.pack_into('<QIHH',op,144,0x1112131415161718,7,1,0); struct.pack_into('<3I',op,160,0x41,0x42,3); chunks.append(bytes(op))
+    f=bytearray(480); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
     struct.pack_into('<4IQII',f,352,7,8,9,10,11,12,13)
+    struct.pack_into('<4IQ',f,384,14,15,16,17,18); struct.pack_into('<3QI',f,416,19,20,21,22); struct.pack_into('<4Q',f,448,23,24,25,26)
     struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12))); chunks.append(bytes(f))
     chunks.append(struct.pack('<HHI15Q',1,49,1,*(0x1020304050607080+i for i in range(15))))
     chunks.append(struct.pack('<HH7I4Q2IQIIQ',1,1,1,1,3,0,1026,3,5,6,7,8,8,3,3,16,7,0,9))

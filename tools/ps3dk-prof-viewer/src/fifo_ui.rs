@@ -87,7 +87,7 @@ pub fn page(p: &mut egui::Ui, v: &FifoView, d: &mut Drawn) {
     egui::ScrollArea::vertical().id_salt("fifo-wraps").max_height(320.0).show_rows(p, 22.0, v.rows.len(), |p, range| {
         for i in range {
             let row = &v.rows[i];
-            p.add(egui::Label::new(&row.text).truncate()).on_hover_text(&row.text);
+            p.add(egui::Label::new(&row.display).truncate()).on_hover_text(&row.text);
             d.rows += 1;
         }
     });
