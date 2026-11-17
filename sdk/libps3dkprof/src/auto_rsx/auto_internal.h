@@ -7,6 +7,9 @@
 #include "auto_completion.h"
 #include "auto_frames.h"
 #include "auto_clock.h"
+#include "auto_ring.h"
+#include "auto_ring_commands.h"
+#include "auto_ring_layout.h"
 #include "../rsx/gpu_port_gcm.h"
 #include <ps3dk/prof_auto.h>
 
@@ -74,6 +77,20 @@ typedef struct auto_range {
     uint64_t frame, tb;
 } auto_range;
 
+/* The MAIN ring's page allocation and its IO mapping: sys_memory_allocate with 1 MiB pages and
+ * cellGcmMapMainMemory on LV2 (gpp_ring_memory_gcm), ps3dk_prof_test_hooks.auto_ring_memory in host tests.
+ * Both return 0 on success. Nothing is ever freed or unmapped: a mapping that was attempted, successful or not,
+ * may be GPU visible, and queue emptiness does not prove the RSX quiescent. */
+typedef struct auto_ring_memory {
+    int (*allocate)(uint32_t bytes, uintptr_t *ea);
+    int (*map)(uintptr_t ea, uint32_t bytes, uint32_t *offset);
+} auto_ring_memory;
+/* Why recycling stopped (first reason kept): the owner context's callback is not the native FIFO wrap, its end is
+ * not the exact one the tail reservation set, the flush could not be emitted (unknown M2MF state or no room), a
+ * context reset, or the ring label did not read back zero after its startup reset. A refused or uncertain block is quarantined, never reused. */
+enum { AUTO_RING_REFUSED_CALLBACK=1, AUTO_RING_REFUSED_END, AUTO_RING_REFUSED_EMIT, AUTO_RING_REFUSED_RESET,
+       AUTO_RING_REFUSED_LABEL };
+
 /* One allocation before observation; variable queues follow this control block
  * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
 typedef struct auto_capture {
@@ -137,6 +154,22 @@ typedef struct auto_capture {
     uint32_t clock_put_frontier; /* owner-only snapshot around original PUT */
     uint64_t allocated;
     uint32_t owner_declared, domain_declared, epoch_declared, final_declared;
+    /* REPORT_RING, attached when ring_plan.blocks is nonzero. ring_ea is the page allocation: [0, bytes) IO mapped at
+     * ring_offset (the MAIN extents), then the CPU-only metadata entries and descriptors (ring_plan). */
+    auto_ring_plan ring_plan;
+    auto_ring ring;
+    uintptr_t ring_ea;
+    uint32_t ring_offset, ring_label;
+    gpp_port ring_port;
+    prg_port ring_device;
+    /* owner only: the physical tail reserved while a block fills, the application M2MF shadow and its scan cursor
+     * (the next owner word not yet scanned; profiler-injected flush packets are never scanned) */
+    auto_ring_tail tail;
+    auto_ring_shadow shadow;
+    uintptr_t scan;
+    uint32_t ring_flush_request; /* owner work requested at the next owner hook (frame/window/seal boundaries) */
+    uint32_t ring_refusal;       /* AUTO_RING_REFUSED_*, the first one */
+    uint64_t ring_flushes, ring_quarantined, ring_injected_words;
 } auto_capture;
 
 void p_auto_init(prof *p); /* before READY/start_gate publication */

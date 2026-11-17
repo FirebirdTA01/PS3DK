@@ -25,6 +25,11 @@ MUTANTS = {
     'unknown-binding': ('commands', 'if(!m) {s->invalid=1;return 0;}', 'if(!m) {continue;}'),
     'missing-gpu-wait': ('commands', 'p[6]=METHOD(0,0x68,1)', 'p[6]=METHOD(0,0x50,1)'),
     'wrong-pre-copy-label': ('commands', 'barrier(p,label,2u*generation-1u);', 'barrier(p,label,2u*generation);'),
+    'ring-overlap': ('layout', 'p.first=report_first+report_count-(uint32_t)(2u*ring);',
+                     'p.first=report_first+16u+(uint32_t)(2u*ring);'),
+    'empty-legacy': ('layout', 'if(pool<=ring) return 0;', 'if(pool<ring) return 0;'),
+    'odd-ring-report': ('layout', 'if(p.first&1u) return 0;', ''),
+    'partial-page': ('layout', '(bytes%AUTO_RING_PAGE) || ', ''),
 }
 
 def main():
@@ -32,7 +37,7 @@ def main():
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--sanitize',choices=['none','address','thread'],default='none')
     p.add_argument('--mutants',action='store_true')
-    p.add_argument('--case',choices=['all','core','commands','wire'],default='all')
+    p.add_argument('--case',choices=['all','core','commands','wire','layout'],default='all')
     a=p.parse_args()
     a.out.mkdir(parents=True,exist_ok=False)
     records=[]
@@ -63,7 +68,7 @@ def main():
         run(name+'-build',cmd)
         return str(exe)
     sources={'core':SRC/'auto_ring.c','commands':SRC/'auto_ring_commands.c',
-             'wire':[SRC/'auto_wire.c',SRC/'auto_queue.c']}
+             'wire':[SRC/'auto_wire.c',SRC/'auto_queue.c'],'layout':SRC/'auto_ring_layout.c'}
     for kind,source in sources.items():
         if a.case in ('all',kind):run(kind,[build(kind,kind,source)])
     if a.mutants:

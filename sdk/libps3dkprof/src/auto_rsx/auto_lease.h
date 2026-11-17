@@ -10,12 +10,14 @@ struct prof;
 typedef struct auto_resource_lease {
     void *ctx;
     uint32_t domain, first, count, operation_label, clock_label;
+    uint32_t ring_label; /* 0: no report ring; otherwise a third reserved label */
     uint32_t ticket, next_ticket, published;
     uint32_t owner_incarnation, owner_generation;
     pal_owner owner;
 } auto_resource_lease;
 
 #define p_auto_lease_claim ps3dk_prof__auto_lease_claim
+#define p_auto_lease_claim_ring ps3dk_prof__auto_lease_claim_ring
 #define p_auto_lease_drop ps3dk_prof__auto_lease_drop
 #define p_auto_lease_mark ps3dk_prof__auto_lease_mark
 #define p_auto_lease_owner ps3dk_prof__auto_lease_owner
@@ -29,6 +31,12 @@ typedef struct auto_resource_lease {
 int p_auto_lease_claim(struct prof *, void *, uint32_t first, uint32_t count,
                       uint32_t operation_label, uint32_t clock_label,
                       uint32_t *domain, uint32_t *ticket);
+/* The same claim with the report ring's label (0: none). A nonzero ring label is
+ * refused unless it is valid and distinct from both other labels; manual GPU
+ * domains and later manual attaches conflict with it like with the other two. */
+int p_auto_lease_claim_ring(struct prof *, void *, uint32_t first, uint32_t count,
+                           uint32_t operation_label, uint32_t clock_label, uint32_t ring_label,
+                           uint32_t *domain, uint32_t *ticket);
 /* mark is also allowed on the sole emitting owner after CONFIG is frozen:
  * at that point claim/drop cannot run and all identity fields are immutable.
  * published is atomic for both calling disciplines. mark immediately precedes

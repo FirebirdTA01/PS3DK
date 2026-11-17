@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 typedef struct ps3dk_prof_auto_options {
-    uint32_t size;              /* sizeof(ps3dk_prof_auto_options) = 36 (32: the earlier struct, without range_pairs) */
+    uint32_t size;              /* sizeof(ps3dk_prof_auto_options) = 52; 36 and 32, the earlier structs (without the
+                                 * ring fields; 32 also without range_pairs), are still accepted */
     uint32_t report_first;      /* local reports, first index 0..2047 */
     uint32_t report_count;      /* even, 18..1024, wholly within 0..2047 */
     uint32_t operation_label;   /* 64 or 69..254; distinct from clock_label */
@@ -25,12 +26,18 @@ typedef struct ps3dk_prof_auto_options {
     uint32_t range_pairs;       /* report pairs kept for AUTO ranges; 0 the default (16, an eighth of a small pool);
                                  * at most what leaves 64 pairs for draws and FRAME marks after the whole-CALL reserve
                                  * (32, a quarter of a small pool) and this one; larger is refused */
+    /* Report ring (owner-buffer draws recycle report blocks through MAIN memory). RESERVED: all four must be 0 in
+     * this release, which refuses any other value; 0 keeps the bounded local report pool. */
+    uint32_t ring_blocks;       /* 2..4 local blocks of 126 pairs at the top of the range; the rest stay legacy */
+    uint32_t ring_label;        /* 0: 245; otherwise 64 or 69..254, distinct from both labels above */
+    uint32_t ring_bytes;        /* 0: 16 MiB; whole 1 MiB pages up to 256 MiB of MAIN extents */
+    uint32_t ring_records;      /* 0: 16384; 1..65536 operation snapshots, replacing metadata_records */
 } ps3dk_prof_auto_options;
 
 /* Defaults: reports 1024..2047, operation label 247, clock label 246. All are PROFILER-owned in
  * <cell/gcm/ps3tc_gcm_labels.h> (labels 240..247, reports 0..511 and 1024..2047), so they never collide with the
  * application's labels (64, 69..239, 248..254) or reports (512..1023); the attach refuses defaults that would. */
-#define PS3DK_PROF_AUTO_OPTIONS_INIT {36u,1024u,1024u,247u,246u,1024u,256u,2097152u,0u}
+#define PS3DK_PROF_AUTO_OPTIONS_INIT {52u,1024u,1024u,247u,246u,1024u,256u,2097152u,0u,0u,0u,0u,0u}
 
 /* Extra command words the automatic profiler writes inside a CALL segment around each covered draw or clear
  * (one 2-word timestamp report before it, one after it), whether the segment is written through

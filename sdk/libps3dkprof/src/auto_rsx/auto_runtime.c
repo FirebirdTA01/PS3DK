@@ -44,28 +44,67 @@ static int defaults_reserved(const ps3dk_prof_auto_options *o)
 /* The two reserves for a pool of `pairs`: whole-CALL brackets (32, a quarter of a small pool) and AUTO ranges (the
  * option, or 16 / an eighth of a small pool). 0 when an explicit range reserve leaves fewer than 64 pairs. */
 static uint32_t call_pairs(uint32_t pairs) {return pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u;}
-static int range_pairs(const ps3dk_prof_auto_options *o,uint32_t *out)
+/* The published option sizes: 32 (no range_pairs), 36 (no ring fields) and the current 52. */
+enum { AUTO_OPTIONS_V32=offsetof(ps3dk_prof_auto_options,range_pairs),
+       AUTO_OPTIONS_V36=offsetof(ps3dk_prof_auto_options,ring_blocks) };
+_Static_assert(AUTO_OPTIONS_V32==32 && AUTO_OPTIONS_V36==36 && sizeof(ps3dk_prof_auto_options)==52,
+               "published ps3dk_prof_auto_options sizes");
+/* Copies exactly the caller's published size, zero-extending the rest; size keeps the caller's value. Nothing
+ * past that size is ever read from the caller. */
+static int options_copy(const ps3dk_prof_auto_options *o, ps3dk_prof_auto_options *n)
 {
-    uint32_t pairs=(o->report_count-16)/2,call=call_pairs(pairs);
-    if(o->size<sizeof *o || !o->range_pairs) {*out=pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u;return 1;}
+    memset(n,0,sizeof *n);
+    if(o->size!=sizeof *n && o->size!=AUTO_OPTIONS_V36 && o->size!=AUTO_OPTIONS_V32) return 0;
+    memcpy(n,o,o->size);
+    return 1;
+}
+static int ring_requested(const ps3dk_prof_auto_options *o)
+{
+    return o->ring_blocks || o->ring_label || o->ring_bytes || o->ring_records;
+}
+/* The local pool the legacy pair allocator owns: all of it, or what the ring blocks leave. */
+static uint32_t legacy_pool(const ps3dk_prof_auto_options *o, const auto_ring_plan *ring)
+{
+    return ring->blocks ? ring->legacy_pairs:(o->report_count-16)/2;
+}
+static int range_pairs(const ps3dk_prof_auto_options *o,const auto_ring_plan *ring,uint32_t *out)
+{
+    uint32_t pairs=legacy_pool(o,ring),call=call_pairs(pairs);
+    if(o->size<AUTO_OPTIONS_V36 || !o->range_pairs) {*out=pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u;return 1;}
     if(pairs<call+64u || o->range_pairs>pairs-call-64u) return 0;
     *out=o->range_pairs;
     return 1;
 }
-static int layout(const ps3dk_prof_auto_options *o, size_t *records, size_t *frames, size_t *total)
+/* ring is zeroed unless the (normalized) options select the report ring. */
+static int ring_options(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, uint32_t *label)
+{
+    memset(ring,0,sizeof *ring);*label=0;
+    if(!ring_requested(o)) return 1;
+#ifdef PS3DK_PROF_AUTO_RING
+    *label=o->ring_label ? o->ring_label:AUTO_RING_DEFAULT_LABEL;
+    if(!label_valid(*label) || *label==o->operation_label || *label==o->clock_label) return 0;
+    return auto_ring_layout(o->report_first,o->report_count,o->ring_blocks,o->ring_bytes,o->ring_records,
+                            sizeof(auto_queue_entry),sizeof(auto_ring_slot),ring);
+#else
+    return 0; /* reserved until the ring writer, drainer and reader are integrated */
+#endif
+}
+static int layout(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, uint32_t *ring_label,
+                  size_t *records, size_t *frames, size_t *total)
 {
     uint64_t n;
     uint32_t ranges;
-    if((o->size!=sizeof *o && o->size!=offsetof(ps3dk_prof_auto_options,range_pairs)) || o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
+    if(o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
        o->report_first>2048-o->report_count || !label_valid(o->operation_label) ||
        !label_valid(o->clock_label) || o->operation_label==o->clock_label ||
        !o->metadata_records || o->metadata_records>1024 || !o->frame_records || o->frame_records>256 ||
-       !o->max_bytes || o->max_bytes>2097152 || !range_pairs(o,&ranges)) return 0;
+       !o->max_bytes || o->max_bytes>2097152 || !ring_options(o,ring,ring_label) || !range_pairs(o,ring,&ranges)) return 0;
     /* Every multiplier is bounded above before these widened expressions.
-     * Include padding in the published allocation, not just symbol payloads. */
+     * Include padding in the published allocation, not just symbol payloads.
+     * Ring metadata and descriptors live in the separate page allocation. */
     n=((uint64_t)sizeof(auto_capture)+127u)&~UINT64_C(127);
     *records=(size_t)n;
-    n+=(uint64_t)o->metadata_records*sizeof(auto_queue_entry);
+    if(!ring->blocks) n+=(uint64_t)o->metadata_records*sizeof(auto_queue_entry);
     n=(n+127u)&~UINT64_C(127);
     *frames=(size_t)n;
     n+=(uint64_t)o->frame_records*sizeof(auto_wire_frame);
@@ -86,11 +125,85 @@ static const gpp_dev *device(void)
 #endif
 }
 
+static void queue_reserves(auto_capture *a, const ps3dk_prof_auto_options *o, const auto_ring_plan *ring)
+{
+    uint32_t ranges=0;
+    (void)range_pairs(o,ring,&ranges);   /* validated by layout */
+    auto_queue_set_reserve(&a->operations,AUTO_PAIR_CALL,call_pairs(legacy_pool(o,ring)));
+    auto_queue_set_reserve(&a->operations,AUTO_PAIR_RANGE,ranges);
+}
+
+#ifdef PS3DK_PROF_AUTO_RING
+/* Process lifetime: the one reusable MAIN page allocation (mapped; a capture that never issued device commands
+ * leaves it unreferenced), and the bytes of allocations that can never be reused or freed. Only the configuring
+ * owner, under CONFIG's WRITING claim, touches these. */
+static struct { uintptr_t ea; uint32_t total, bytes, offset; } ring_memory;
+static uint64_t ring_retained;
+
+#ifdef PS3DK_PROF_PAL_LV2
+#include <sys/memory.h>
+static int ring_allocate_lv2(uint32_t bytes, uintptr_t *ea)
+{
+    sys_addr_t addr=0;
+    if(sys_memory_allocate(bytes,SYS_MEMORY_PAGE_SIZE_1M,&addr)!=0 || !addr) return -1;
+    *ea=(uintptr_t)addr;
+    return 0;
+}
+static int ring_map_lv2(uintptr_t ea, uint32_t bytes, uint32_t *offset)
+{
+    return cellGcmMapMainMemory((const void *)ea,bytes,offset)==0 ? 0:-1;
+}
+static const auto_ring_memory gpp_ring_memory_gcm={ring_allocate_lv2,ring_map_lv2};
+#endif
+
+static const auto_ring_memory *ring_memory_ops(void)
+{
+#ifdef PS3DK_PROF_PAL_LV2
+    return &gpp_ring_memory_gcm;
+#elif defined(PS3DK_PROF_TEST_HOOKS)
+    return (const auto_ring_memory *)ps3dk_prof_test_hooks.auto_ring_memory;
+#else
+    return NULL;
+#endif
+}
+
+/* 0, or the CONFIG refusal reason. Allocates (or reuses) and maps before any admission; the metadata queue and the
+ * descriptors are initialized in the allocation's unmapped tail. */
+static uint32_t ring_attach(auto_capture *a, const ps3dk_prof_auto_options *o, const auto_ring_plan *plan)
+{
+    const auto_ring_memory *m=ring_memory_ops();
+    uintptr_t ea=0;
+    uint32_t offset=0;
+    if(ring_memory.ea && ring_memory.total==plan->total && ring_memory.bytes==plan->bytes) {
+        ea=ring_memory.ea;offset=ring_memory.offset;
+    } else {
+        if(!m || !m->allocate || !m->map || m->allocate(plan->total,&ea)!=0 || !ea) return AUTO_ALLOCATION_FAILED;
+        /* Kept from here on: a failed map may still have made the pages GPU visible. */
+        if((ea&(AUTO_RING_PAGE-1u)) || m->map(ea,plan->bytes,&offset)!=0 || (offset&15u) ||
+           (uint64_t)offset+plan->bytes>UINT64_C(0x100000000)) {
+            ring_retained+=plan->total;return AUTO_ALLOCATION_FAILED;
+        }
+        if(ring_memory.ea) ring_retained+=ring_memory.total;
+        ring_memory.ea=ea;ring_memory.total=plan->total;ring_memory.bytes=plan->bytes;ring_memory.offset=offset;
+    }
+    memset((void *)(ea+plan->metadata_at),0,plan->total-plan->metadata_at);
+    if(!auto_ring_init(&a->ring,(auto_ring_slot *)(void *)(ea+plan->slots_at),plan->slots,plan->blocks,plan->pairs) ||
+       !auto_queue_init_wide(&a->operations,(auto_queue_entry *)(void *)(ea+plan->metadata_at),plan->records,
+                             plan->legacy_pairs)) return AUTO_UNSUPPORTED_CONTEXT;
+    queue_reserves(a,o,plan);
+    a->ring_plan=*plan;a->ring_ea=ea;a->ring_offset=offset;
+    return 0;
+}
+#endif
+
 static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *options,
                   uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc)
 {
     const ps3dk_prof_auto_options defaults=PS3DK_PROF_AUTO_OPTIONS_INIT;
-    const ps3dk_prof_auto_options *o=options ? options:&defaults;
+    ps3dk_prof_auto_options normalized;
+    const ps3dk_prof_auto_options *o=&normalized;
+    auto_ring_plan ring;
+    uint32_t ring_label=0;
     auto_wire_config config={0};
     auto_capture *next=NULL,*prior;
     prof *p;
@@ -104,7 +217,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     if(g_tls.in_drain || g_tls.in_gpu) return PS3DK_PROF_EBUSY;
     p=p_ready() ? g_prof:NULL;
     if(!p) return PS3DK_PROF_ENOTINIT;
-    if(!layout(o,&records,&frames,&bytes)) return rc;
+    if(!options_copy(options ? options:&defaults,&normalized) ||
+       !layout(o,&ring,&ring_label,&records,&frames,&bytes)) return rc;
     if(!options && !defaults_reserved(o)) return rc; /* defaults never take application indices */
     /* Become a participant before owning mutable configuration or entering a
      * device accessor. Shutdown's owner inventory can then see this setup. */
@@ -139,7 +253,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     memset(next,0,bytes);
     if(pal_owner_get(&next->owner)!=0) {reason=AUTO_NO_OWNER;rc=PS3DK_PROF_ETHREAD;goto fail;}
     if(gpp_prepare(&next->operations_port,device(),gc,o->report_first,o->report_count,o->operation_label)!=PRG_OK ||
-       gpp_prepare(&next->clock_port,device(),gc,o->report_first,16,o->clock_label)!=PRG_OK) {
+       gpp_prepare(&next->clock_port,device(),gc,o->report_first,16,o->clock_label)!=PRG_OK ||
+       (ring.blocks && gpp_prepare(&next->ring_port,device(),gc,ring.first,2u*ring.blocks*ring.pairs,ring_label)!=PRG_OK)) {
         reason=AUTO_LEASE_UNVERIFIED;goto fail;
     }
     next->context=gc;next->owner_slot=g_tls.slot1-1;
@@ -151,22 +266,27 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     if(!auto_clock_init(&next->clocks,1,1,o->report_first,p->tb_freq)) {
         reason=AUTO_UNSUPPORTED_CONTEXT;goto fail;
     }
-    (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
-                          o->metadata_records,(o->report_count-16)/2);
-    {
-        uint32_t pairs=(o->report_count-16)/2;
-        uint32_t ranges=0;
-        (void)range_pairs(o,&ranges);   /* validated by layout */
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_CALL,call_pairs(pairs));
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_RANGE,ranges);
+    if(!ring.blocks) {
+        (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
+                              o->metadata_records,(o->report_count-16)/2);
+        queue_reserves(next,o,&ring);
     }
+    next->ring_label=ring_label;next->scan=(uintptr_t)(void *)gc->current;
     for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
     next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
     gpp_bind(&next->operations_device,&next->operations_port);
     gpp_bind(&next->clock_device,&next->clock_port);
+    if(ring.blocks) gpp_bind(&next->ring_device,&next->ring_port);
+#ifdef PS3DK_PROF_AUTO_RING
+    /* Before the lease: a failed override leaves the current reservation and capture intact. */
+    if(ring.blocks && (reason=ring_attach(next,o,&ring))!=0) {
+        rc=reason==AUTO_ALLOCATION_FAILED ? PS3DK_PROF_ENOMEM:PS3DK_PROF_EINVAL;goto fail;
+    }
+#endif
     if(p_ext_lock_at(p)!=0) {reason=AUTO_STOPPED;rc=PS3DK_PROF_ESTOPPED;goto fail;}
     locked=1;
-    rc=p_auto_lease_claim(p,gc,o->report_first,o->report_count,o->operation_label,o->clock_label,&id,&lease);
+    rc=p_auto_lease_claim_ring(p,gc,o->report_first,o->report_count,o->operation_label,o->clock_label,ring_label,
+                               &id,&lease);
     if(rc!=0) {reason=rc==PS3DK_PROF_ESTOPPED ? AUTO_STOPPED:AUTO_RESOURCE_CONFLICT;goto fail;}
     next->lease_ticket=lease;
     /* CONFIG's WRITING claim protects the candidate, not the extension mutex.
@@ -186,8 +306,15 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     config.instance=1;config.domain=id;config.epoch=1;config.owner=g_tls.incarnation;config.generation=1;
     config.report_first=o->report_first;config.report_count=o->report_count;
     config.op_label=o->operation_label;config.clock_label=o->clock_label;
-    config.pairs=(o->report_count-16)/2;config.metadata=o->metadata_records;config.frames=o->frame_records;
-    config.call_pairs=call_pairs(config.pairs);(void)range_pairs(o,&config.range_pairs);
+    config.pairs=(o->report_count-16)/2;config.metadata=ring.blocks ? ring.records:o->metadata_records;
+    config.frames=o->frame_records;
+    config.call_pairs=call_pairs(legacy_pool(o,&ring));(void)range_pairs(o,&ring,&config.range_pairs);
+    if(ring.blocks) {
+        /* REPORT_RING budgets: raw MAIN extents and metadata, each bounded separately */
+        config.ring_bytes=ring.bytes;config.ring_blocks=ring.blocks;config.ring_pairs=ring.pairs;
+        config.ring_first=ring.first;config.ring_label=ring_label;config.ring_stride=ring.stride;
+        config.ring_slots=ring.slots;config.metadata_stride=ring.metadata_stride;config.legacy_pairs=ring.legacy_pairs;
+    }
     config.allocated=bytes;config.ceiling=o->max_bytes;
     capture=next;
     if(initial) {
@@ -310,6 +437,13 @@ static void increment(auto_capture *a,uint64_t *v)
     }
 }
 
+/* Owner only: recycling stops for the rest of the capture. A pending block is quarantined by its caller. */
+static void ring_refuse(auto_capture *a, uint32_t reason)
+{
+    if(!a->ring_refusal) a->ring_refusal=reason;
+    auto_ring_stop(&a->ring);
+}
+
 static int initialize_device(auto_capture *a)
 {
     const auto_wire_config *c=auto_config_read(&configuration);
@@ -317,7 +451,11 @@ static int initialize_device(auto_capture *a)
     if(!c || !p_auto_lease_mark(g_prof,a->lease_ticket)) return 0;
     a->operations_device.write_label(a->operations_device.ctx,c->op_label,0);
     a->clock_device.write_label(a->clock_device.ctx,c->clock_label,0);
+    if(a->ring_plan.blocks) a->ring_device.write_label(a->ring_device.ctx,a->ring_label,0);
     a->operations_device.sync(a->operations_device.ctx);
+    /* The ring's publication targets 2g-1, 2g only increase from this reset. A label that does not read back zero
+     * stops recycling; the legacy pool is unaffected. */
+    if(a->ring_plan.blocks && a->ring_device.read_label(a->ring_device.ctx,a->ring_label)!=0) ring_refuse(a,AUTO_RING_REFUSED_LABEL);
     a->device_initialized=1;return 1;
 }
 
@@ -389,7 +527,8 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *context,uint32_t kind,u
     if(a && (!c || !c->reason)) {
         uint32_t first=a->operations_port.report_first,count=a->operations_port.report_count;
         int conflict=kind==1 ? (index>=2048 || (index>=first && index-first<count)):
-                     (index==a->operations_port.label || index==a->clock_port.label);
+                     (index==a->operations_port.label || index==a->clock_port.label ||
+                      (a->ring_port.ready && index==a->ring_port.label));
         if(conflict) {
             increment(a,&a->conflicts);
             auto_queue_stop(&a->operations);
@@ -1716,4 +1855,10 @@ void ps3dk_prof__auto_test_ranges(uint64_t out[4])
     const auto_capture *a=capture;
     out[0]=a ? a->ranges_done:0;out[1]=a ? a->ranges_refused:0;out[2]=a ? a->range_depth:0;out[3]=a ? a->tag:0;
 }
+#endif
+#if defined(PS3DK_PROF_TEST_HOOKS) && defined(PS3DK_PROF_AUTO_RING)
+/* Host ring tests: the candidate or attached capture, its CONFIG bytes and the never-reusable retained pages. */
+const auto_capture *ps3dk_prof__auto_test_capture(void) {return capture;}
+const auto_wire_config *ps3dk_prof__auto_test_config(void) {return &configuration.config;}
+uint64_t ps3dk_prof__auto_test_ring_retained(void) {return ring_retained;}
 #endif

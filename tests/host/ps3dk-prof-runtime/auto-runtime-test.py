@@ -13,19 +13,38 @@ import struct
 import subprocess
 import zlib
 
+# Report-ring mutants: (case, source, old, new, the assertion that must reject it)
+RING_MUTANTS={
+    'range-by-sizeof':('init','auto_rsx/auto_runtime.c','if(o->size<AUTO_OPTIONS_V36 || !o->range_pairs)',
+                       'if(o->size<sizeof *o || !o->range_pairs)',b'reserves[0]==32 && reserves[1]==32'),
+    'ring-unleased':('ring','rsx/gpu_runtime.c','(a->ring_label && label==a->ring_label) ||','0 ||',
+                     b'ps3dk_prof_gpu_attach((void *)&third,32,16,245,&manual)==PS3DK_PROF_EINVAL'),
+    'ring-label-unwatched':('ring','auto_rsx/auto_runtime.c','(a->ring_port.ready && index==a->ring_port.label)','0',
+                            b'a->conflicts==1'),
+    'no-label-readback':('ring','auto_rsx/auto_runtime.c',
+                         'a->ring_device.read_label(a->ring_device.ctx,a->ring_label)!=0','0',
+                         b'a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_LABEL'),
+    'map-failure-reused':('ring','auto_rsx/auto_runtime.c','            ring_retained+=plan->total;return AUTO_ALLOCATION_FAILED;',
+                          '            ring_memory.ea=ea;ring_memory.total=plan->total;ring_memory.bytes=plan->bytes;return AUTO_ALLOCATION_FAILED;',
+                          b'ps3dk_prof__auto_test_ring_retained()=='),
+    'legacy-whole-pool':('ring','auto_rsx/auto_runtime.c','plan->legacy_pairs)) return AUTO_UNSUPPORTED_CONTEXT;',
+                         'plan->legacy_pairs+plan->blocks*plan->pairs)) return AUTO_UNSUPPORTED_CONTEXT;',
+                         b'a->operations.capacity==16384 && a->operations.pairs==252'),
+}
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring'],default='noinit')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
                                   'replay-silent','recall-silent','moved-draw-silent','nested-silent','no-call-reserve','bracket-silent','label-silent','label-switch-silent','tag-silent','tag-at-call','range-end-silent','window-gate-off','frames-off-by-one','label-stride-4','label-sum','label-unknown-run','prebuild-silent',
-                                  'owner-is-opener','queue-unreserved','opener-token-off','call-outside-gate'])
+                                  'owner-is-opener','queue-unreserved','opener-token-off','call-outside-gate',*RING_MUTANTS])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
-if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
+if a.mutant in RING_MUTANTS:assert a.case==RING_MUTANTS[a.mutant][0] and not a.sanitize
+elif a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
@@ -59,7 +78,7 @@ def run(name,cmd,cwd=out):
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
     if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call'):
-        expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
+        expected=RING_MUTANTS[a.mutant][4] if a.mutant in RING_MUTANTS else {'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
                   'no-frame-boundary':b'context.current==words+24',
                   'fifo-publish':b'g_fifo.state==FS_SEALED',
@@ -93,7 +112,7 @@ def run(name,cmd,cwd=out):
                   'frames-off-by-one':b'state()==0 && !zone() && !clear()',
                   'label-stride-4':b'l[0]==1 && l[3]==91 && l[5]==l[4]',
                   'label-sum':b'l[5]<l[4]',
-                  'label-unknown-run':b'l[0]==1 && l[1]==1 && l[3]==91'}[a.mutant]
+                  'label-unknown-run':b'l[0]==1 && l[1]==1 && l[3]==91'}.get(a.mutant)
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -142,6 +161,7 @@ if a.case=='labels':
         hp.write_text(code.replace(old,'at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?\n                     (uint32_t)((at - base) / 4u)'))
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
+if a.case=='ring':flags+=['-DGPP_HOST_DEVMEM','-DPS3DK_PROF_AUTO_RING=1']
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-sanitize-recover=all']
 if a.sanitize=='address':
@@ -157,7 +177,8 @@ sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_h
          'fifo/fifo_runtime.c','fifo/fifo_writer.c',
          'auto_rsx/auto_runtime.c','auto_rsx/auto_startup.c','auto_rsx/auto_config.c',
          'auto_rsx/auto_wire.c','auto_rsx/auto_writer.c','auto_rsx/auto_queue.c',
-         'auto_rsx/auto_commands.c','auto_rsx/auto_completion.c','auto_rsx/auto_frames.c','auto_rsx/auto_clock.c']
+         'auto_rsx/auto_commands.c','auto_rsx/auto_completion.c','auto_rsx/auto_frames.c','auto_rsx/auto_clock.c',
+         'auto_rsx/auto_ring.c','auto_rsx/auto_ring_commands.c','auto_rsx/auto_ring_layout.c']
 objects=[]
 for rel in sources:
     source=src/rel;obj=out/(source.stem+'.o')
@@ -315,6 +336,9 @@ for rel in sources:
             assert code.count(gate)==1
             code=code.replace(gate,'        if(0) p_observe_stop(g_prof);\n')   # the line stays: an else may follow it
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
+    if a.mutant in RING_MUTANTS and rel==RING_MUTANTS[a.mutant][1]:
+        code=source.read_text();old,new=RING_MUTANTS[a.mutant][2:4];assert code.count(old)==1,a.mutant
+        source=out/source.name;source.write_bytes(code.replace(old,new).encode())
     run('compile-'+source.stem,[cc,*flags,'-c',source,'-o',obj]);objects.append(obj)
 run('archive-members',['ar','rcsD',out/'members.a',*objects])
 digest=root/'sdk/libps3dkprof/tools/archive_digest.py'
@@ -373,6 +397,7 @@ if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 if a.case=='seal':application=Path(__file__).with_name('auto-seal-test.c').read_text()
+if a.case=='ring':application=Path(__file__).with_name('auto-ring-attach-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 # every case but the window API ones records through a whole-run window opened right after init (the shared helper)
 whole_run=[] if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter') else [
@@ -386,6 +411,10 @@ if a.case in ('noinit','seal'):
     assert result.stderr==b'', result.stderr
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
+    print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case=='ring':
+    assert result.stdout.endswith(b'AUTO ring attach, partition, budgets and label reservation PASS'+bytes([10])),result.stdout
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
 if a.case=='segmetatail':
