@@ -79,6 +79,8 @@ pub struct App {
     pub waits: crate::waits_ui::WaitState,
     pub auto: crate::auto_ui::AutoState,
     pub live: Option<Live>,
+    /// The live view's capture-trigger inputs (window name, frame count).
+    pub trigger_form: crate::live_triggers::Form,
     connect: Option<ConnectForm>,
     last_host: String,
     /// The current session's frame snapshots and bookmarks.
@@ -190,6 +192,7 @@ impl App {
             waits: crate::waits_ui::WaitState::default(),
             auto: crate::auto_ui::AutoState::default(),
             live: None,
+            trigger_form: crate::live_triggers::Form::default(),
             connect: None,
             last_host: String::new(),
             captures: Captures::with_pool("none", Home::Live, pool.clone()),
@@ -909,13 +912,19 @@ impl eframe::App for App {
         let link_line = live_view.as_ref().map(live_line);
         let snap_msg = self.captures.message.clone();
         let save_msg = self.save_result.clone();
+        let mut want_trigger = None;
         if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() || save_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
+            let form = &mut self.trigger_form;
             egui::TopBottomPanel::top("verdict").show(ctx, |strip| {
                 strip.add_space(ui::SPACE_XS);
                 // The link and the reader's verdict are separate statements.
                 if let Some((t, text)) = &link_line {
                     ui::field_message(strip, *t, text);
+                }
+                // Capture triggers while the live session runs (disabled, with the reason, on a v1 agent).
+                if let Some(v) = live_view.as_ref().filter(|v| v.outcome.is_none()) {
+                    want_trigger = crate::live_triggers_ui::row(strip, &v.triggers, form);
                 }
                 if let Some((t, _, text)) = &verdict {
                     ui::field_message(strip, *t, text);
@@ -930,6 +939,10 @@ impl eframe::App for App {
             });
         }
 
+        if let (Some(cmd), Some(l)) = (want_trigger, &self.live) {
+            // A refusal to send is shown by the trigger row itself (the client records it).
+            let _ = l.client.send(cmd);
+        }
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
         let rsx_count = self.rsx_count();
         let mut side_act = None;

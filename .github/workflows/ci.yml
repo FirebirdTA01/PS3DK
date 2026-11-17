@@ -152,13 +152,14 @@ jobs:
       - name: I2 SPU lane integration
         if: matrix.suite == 'i2'
         run: python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
-      - name: Live END close, deadlines and OS/API controls
+      - name: Live END close, deadlines, OS/API controls and capture triggers
         if: matrix.suite == 'live-e2e'
         run: |
           python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent"
           python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent-address" --sanitize
           python3 tests/host/ps3dk-prof-runtime/live-os-test.py "$RUNNER_TEMP/live-e2e/os"
           python3 tests/host/ps3dk-prof-runtime/live-api-test.py "$RUNNER_TEMP/live-e2e/api"
+          python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"

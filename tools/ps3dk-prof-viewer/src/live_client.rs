@@ -10,6 +10,13 @@
 //!   parse of the final bytes, which the network thread waits for (outside
 //!   the shared lock) before it decides publication.
 //!
+//! - Capture triggers (protocol 2): `send` queues one command frame for the
+//!   network thread, which writes it within one read wait; the session
+//!   checks its one ACK. CLIENT_HELLO asks for version 2; a v1 agent closes
+//!   that hello without a reply, and the client then reconnects ONCE asking
+//!   for version 1, with the triggers disabled. No command frame is ever sent
+//!   on a version-1 session.
+//!
 //! Waits: connecting is bounded by `connect_timeout`, HELLO must arrive
 //! within `hello_timeout`, and while streaming some byte (data or PONG)
 //! must arrive within `liveness_timeout`. These are SOCKET-wait bounds: a
@@ -19,6 +26,7 @@
 //! finalization are not bounded by them.
 
 use crate::live::*;
+use crate::live_triggers::Triggers;
 use crate::model::{Document, VerdictTone};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream};
@@ -161,11 +169,17 @@ pub struct LiveView {
     /// reader's analysis, the network read buffer and allocator slack. The
     /// memory test reports the process high-water mark (VmHWM) beside it.
     pub snapshot_buffers_estimate: u64,
+    /// Capture triggers: availability, the pending command and the last answer.
+    pub triggers: Triggers,
+    /// The session reconnected asking for protocol 1 after the agent closed a version-2 hello.
+    pub v1_fallback: bool,
 }
 
 struct Inner {
     session: Session,
     view: LiveView,
+    /// A command frame for the network thread to send: (request id, frame).
+    outbox: Option<(u32, Vec<u8>)>,
     dirty: bool,
     /// The network side is done: the received bytes are final.
     net_done: bool,
@@ -205,7 +219,10 @@ impl LiveClient {
                     local_error: None,
                     outcome: None,
                     snapshot_buffers_estimate: 0,
+                    triggers: Triggers::default(),
+                    v1_fallback: false,
                 },
+                outbox: None,
                 dirty: false,
                 net_done: false,
                 final_parsed: false,
@@ -236,6 +253,27 @@ impl LiveClient {
         // The snapshot shares the sealed blocks (copies at most the tail); only the prefix is copied out.
         let snap = self.shared.inner.lock().unwrap().session.received.snapshot();
         snap.prefix_vec(len)
+    }
+
+    /// Sends a capture command (protocol 2).  `Ok` is its request id: the answer arrives in `view().triggers`.
+    /// `Err` says why nothing was sent (the agent speaks protocol 1, a command is pending, a bad name, ...).
+    pub fn send(&self, command: Command) -> Result<u32, String> {
+        let mut g = self.shared.inner.lock().unwrap();
+        let request = g.view.triggers.start(command.clone())?;
+        let frame = command.encode(request).and_then(|f| {
+            g.session.expect_ack(request, command.frame_type())?;
+            Ok(f)
+        });
+        match frame {
+            Ok(f) => {
+                g.outbox = Some((request, f));
+                Ok(request)
+            }
+            Err(why) => {
+                g.view.triggers.send_failed(request, &why);
+                Err(why)
+            }
+        }
     }
 
     /// Asks the session to end; valid data that arrived is published as a capture that ended early.
@@ -329,6 +367,11 @@ fn run_worker(sh: &Shared, every: Duration) {
 fn set_link(sh: &Shared, g: &mut Inner) {
     g.view.link = g.session.state.clone();
     g.view.hello = g.session.hello.clone();
+    for ack in g.session.take_acks() {
+        g.view.triggers.on_ack(ack);
+    }
+    let (link, hello) = (g.view.link.clone(), g.view.hello.clone());
+    g.view.triggers.on_link(&link, hello.as_ref());
     g.view.received = g.session.received.len();
     g.view.pongs = g.session.pongs;
     g.dirty = true;
@@ -366,34 +409,50 @@ fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
         clean_eof: false,
         early: None,
     };
-    let connected = TcpStream::connect_timeout(&addr, cfg.connect_timeout).and_then(|s| {
-        s.set_nodelay(true)?;
-        s.set_read_timeout(Some(READ_WAIT))?;
-        s.set_write_timeout(Some(WRITE_TIMEOUT))?;
-        Ok(s)
-    });
-    match connected {
-        Ok(mut stream) => {
-            if let Ok(clone) = stream.try_clone() {
-                *sh.stream.lock().unwrap() = Some(clone);
-            }
-            if sh.cancel.load(Ordering::SeqCst) {
+    let mut version = VERSION;
+    loop {
+        let connected = TcpStream::connect_timeout(&addr, cfg.connect_timeout).and_then(|s| {
+            s.set_nodelay(true)?;
+            s.set_read_timeout(Some(READ_WAIT))?;
+            s.set_write_timeout(Some(WRITE_TIMEOUT))?;
+            Ok(s)
+        });
+        let mut retry = false;
+        match connected {
+            Ok(mut stream) => {
+                if let Ok(clone) = stream.try_clone() {
+                    *sh.stream.lock().unwrap() = Some(clone);
+                }
+                if sh.cancel.load(Ordering::SeqCst) {
+                    let _ = stream.shutdown(Shutdown::Both);
+                }
+                retry = stream_loop(sh, cfg, &mut stream, &mut r, version);
+                *sh.stream.lock().unwrap() = None;
                 let _ = stream.shutdown(Shutdown::Both);
             }
-            stream_loop(sh, cfg, &mut stream, &mut r);
-            *sh.stream.lock().unwrap() = None;
-            let _ = stream.shutdown(Shutdown::Both);
+            Err(e) => r.extra.push(format!("could not connect to {addr}: {e}")),
         }
-        Err(e) => r.extra.push(format!("could not connect to {addr}: {e}")),
+        // A v1 agent closes a version-2 hello without a byte: ask once more for version 1.
+        if retry && version > VERSION_MIN && !sh.cancel.load(Ordering::SeqCst) {
+            version = VERSION_MIN;
+            let mut g = sh.inner.lock().unwrap();
+            g.session = Session::asking(cfg.cap, version);
+            g.view.v1_fallback = true;
+            continue;
+        }
+        break;
     }
     finish(sh, cfg, r);
 }
 
-fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut NetResult) {
-    if let Err(e) = stream.write_all(&client_hello()) {
+/// Returns true only when the agent closed the connection during the handshake without sending a single byte (what
+/// a v1 agent does with a version-2 hello): nothing was recorded, and the caller may retry with version 1.
+fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut NetResult, version: u16) -> bool {
+    if let Err(e) = stream.write_all(&client_hello_version(version)) {
         r.extra.push(format!("could not send the hello: {e}"));
-        return;
+        return false;
     }
+    let mut got_bytes = false;
     let started = Instant::now();
     let mut last_rx = Instant::now();
     let mut last_ping = Instant::now();
@@ -403,31 +462,43 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
         if sh.cancel.load(Ordering::SeqCst) {
             r.extra.push("disconnected by the user".into());
             r.early = Some("disconnected by the user".into());
-            return;
+            return false;
         }
-        let state = sh.inner.lock().unwrap().session.state.clone();
+        let (state, outbox) = {
+            let mut g = sh.inner.lock().unwrap();
+            (g.session.state.clone(), g.outbox.take())
+        };
+        if let Some((request, frame)) = outbox {
+            if let Err(e) = stream.write_all(&frame) {
+                let why = format!("could not send a capture command: {e}");
+                sh.inner.lock().unwrap().view.triggers.send_failed(request, &why);
+                r.extra.push(why.clone());
+                r.early = Some(why);
+                return false;
+            }
+        }
         match (&state, ended_at) {
             (LinkState::Handshake, _) if started.elapsed() > cfg.hello_timeout => {
                 r.extra.push("the console sent no HELLO in time".into());
-                return;
+                return false;
             }
             (_, Some(t)) if t.elapsed() > cfg.close_wait => {
                 r.extra
                     .push("the console did not close the link after END".into());
-                return;
+                return false;
             }
             (LinkState::Streaming, None) => {
                 if last_rx.elapsed() > cfg.liveness_timeout {
                     r.extra.push("the console stopped responding".into());
                     r.early = Some("the console stopped responding".into());
-                    return;
+                    return false;
                 }
                 if last_ping.elapsed() >= cfg.ping_every {
                     last_ping = Instant::now();
                     if let Err(e) = stream.write_all(&ping()) {
                         r.extra.push(format!("could not send a PING: {e}"));
                         r.early = Some(format!("could not send a PING: {e}"));
-                        return;
+                        return false;
                     }
                 }
             }
@@ -437,8 +508,10 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
             _ if sh.cancel.load(Ordering::SeqCst) => {
                 r.extra.push("disconnected by the user".into());
                 r.early = Some("disconnected by the user".into());
-                return;
+                return false;
             }
+            Ok(0) if !got_bytes && version > VERSION_MIN => return true,
+            Err(e) if !got_bytes && version > VERSION_MIN && e.kind() == ErrorKind::ConnectionReset => return true,
             Ok(0) => {
                 let mut g = sh.inner.lock().unwrap();
                 r.clean_eof = matches!(g.session.state, LinkState::Ended(_));
@@ -447,9 +520,10 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
                 }
                 g.session.closed(); // a failure before END
                 set_link(sh, &mut g);
-                return;
+                return false;
             }
             Ok(n) => {
+                got_bytes = true;
                 last_rx = Instant::now();
                 let mut new = Vec::new();
                 let (failed, ended, hello) = {
@@ -483,7 +557,7 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
                     }
                 }
                 if failed {
-                    return;
+                    return false;
                 }
                 if ended && ended_at.is_none() {
                     ended_at = Some(Instant::now());
@@ -500,7 +574,7 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
                 }
                 g.session.closed();
                 set_link(sh, &mut g);
-                return;
+                return false;
             }
         }
     }

@@ -23,6 +23,8 @@ pub mod hotpaths;
 pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
+pub mod live_triggers;
+pub mod live_triggers_ui;
 pub mod model;
 pub mod passes_ui;
 pub mod rsx;

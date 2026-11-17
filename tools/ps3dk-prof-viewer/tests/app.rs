@@ -146,6 +146,8 @@ fn view(outcome: Outcome) -> LiveView {
         local_error: None,
         outcome: Some(outcome),
         snapshot_buffers_estimate: 0,
+        triggers: Default::default(),
+        v1_fallback: false,
     }
 }
 
