@@ -268,3 +268,30 @@ fn timeline_window_no_last_frame_is_empty() {
         assert!(wt.frames.is_empty(), "windowed lane has no frame markers (last_frame=None)");
     }
 }
+
+/// A live snapshot (TimelineState::refresh) keeps the picked window and the user's follow mode: only a picker
+/// change refits the view. Without a window, a snapshot rebuilds the unscoped timeline and still keeps follow.
+#[test]
+fn live_snapshot_keeps_the_window_and_follow() {
+    use ps3dk_prof_viewer::timeline_ui::TimelineState;
+    let a = analysis(&fixture("windows"));
+    let w2 = a.capture.windows.iter().find(|w| w.id == 2).expect("window 2").clone();
+
+    let mut st = TimelineState::new(&a);
+    st.refresh_windowed(&a, &w2);
+    st.live = true;
+    st.follow = true;
+    st.refresh(&a);
+    assert_eq!(st.window.as_ref().map(|w| w.id), Some(2), "the picked window survives a snapshot");
+    assert!(st.follow, "a snapshot never turns follow off");
+    let want = timeline::timeline_window(&a, &w2);
+    let bars = |t: &timeline::Timeline| t.tracks.iter().map(|tr| tr.bars.iter().map(|b| b.span).collect::<Vec<_>>()).collect::<Vec<_>>();
+    assert_eq!(bars(&st.tl), bars(&want), "the snapshot rebuilds the window's bars, not the whole capture's");
+
+    st.refresh_unscoped(&a);
+    st.follow = true;
+    st.refresh(&a);
+    assert!(st.window.is_none());
+    assert!(st.follow, "a snapshot without a window keeps follow too");
+    assert_eq!(bars(&st.tl), bars(&timeline::timeline(&a)));
+}

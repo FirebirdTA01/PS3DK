@@ -284,9 +284,7 @@ impl App {
                 if let Some(ix) = self.frames_window.as_ref() {
                     self.frames.refresh(a, ix);
                 }
-                if let Some(st) = self.timeline.as_mut() {
-                    st.refresh_windowed(a, &w);
-                }
+                // The timeline was refreshed above with its remembered window, keeping follow and zoom.
             } else {
                 self.passes_window = None;
                 self.auto_window = None;
@@ -296,15 +294,6 @@ impl App {
             self.passes_window = None;
             self.auto_window = None;
             self.frames_window = None;
-            if !fresh {
-                self.auto.refresh(doc.auto.as_ref());
-                if let (Some(a), Some(ix)) = (doc.analysis(), doc.frames.as_ref()) {
-                    self.frames.refresh(a, ix);
-                }
-                if let (Some(st), Some(a)) = (self.timeline.as_mut(), doc.analysis()) {
-                    st.refresh_unscoped(a);
-                }
-            }
         }
         self.doc = Some(doc);
     }
