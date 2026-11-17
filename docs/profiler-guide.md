@@ -136,6 +136,11 @@ opt-in captures for this exact `app` in that directory. `N` is 1..1024; zero
 independent of filenames, modification times, or the timebase resetting after
 a reboot. Existing untracked captures, active files, incomplete captures, and
 other applications' files remain untouched. Callback sinks refuse this option.
+This setter currently serves explicitly initialized captures. Managed AUTO
+initializes in constructor 100, before `main`; calling the setter from `main`
+is too late. `PS3_PROF_AUTO_ROLLING` configures the size of one file, not the
+completed-file retention policy. It does not automatically prune older AUTO
+files.
 
 Cleanup runs during successful shutdown after the current file closes and, in
 THREAD mode, the drainer joins successfully. A failed join leaves the index and
@@ -147,6 +152,15 @@ prevents concurrent cleaners. A crash may leave `.ps3dk-retain-<app>.lock`;
 cleanup then refuses. Remove that lock only after confirming no process is
 using the directory. A corrupt index or an old file that changed also causes
 refusal, rather than guessing which files belong to the application. Retention
+does not retry a lost lock or enroll that run later, so a concurrent loser can
+leave a successfully closed but unindexed file. An indexed rolling file also
+cannot be pruned by a later append-only run, or by a run whose inspection
+limits are smaller than that file. Cleanup stops at that oldest entry and
+retained file counts can exceed `N`; it resumes only when a later run can
+inspect that entry. An init failure after exclusive creation can leave an
+OPEN, unindexed `.profr`. These files are preserved for inspection and manual
+management; they are not discovered or deleted by a directory sweep.
+Retention
 checks regular files and their complete recorded bytes; host cleanup also
 rejects symbolic links. LV2 exposes `stat`/`fstat`, without an `lstat` interface,
 so do not replace or edit managed paths while cleanup runs. It unlinks only
