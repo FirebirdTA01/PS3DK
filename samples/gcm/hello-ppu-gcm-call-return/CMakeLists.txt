@@ -6,7 +6,7 @@ include(ps3-self)
 # overflow refusal, which issues no CALL); -local checks that a segment in
 # RSX local memory is refused; -large runs one 1 MiB segment on its own;
 # -jump chains two sub-segments with a JUMP.
-foreach(variant "" "-local" "-large" "-jump")
+foreach(variant "" "-local" "-large" "-jump" "-ring")
     set(t hello-ppu-gcm-call-return${variant})
     add_executable(${t} source/main.c)
     target_compile_features(${t} PRIVATE c_std_11)
@@ -17,6 +17,9 @@ foreach(variant "" "-local" "-large" "-jump")
         target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_LARGE=1)
     elseif(variant STREQUAL "-jump")
         target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_JUMP=1)
+    elseif(variant STREQUAL "-ring")
+        # owner-buffer clears above the local report ceiling, for the AUTO report ring (inert unless profiled)
+        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_RING=1)
     else()
         set(id GCMS00001)
     endif()

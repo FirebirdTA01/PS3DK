@@ -27,6 +27,7 @@
 #include "../../common/gcm_segment_labels.h"
 #include "../../common/gcm_segment_crumb.h"
 #include <ps3dk/prof.h>   /* capture windows: PS3DK_PROF_CAPTURE_WHOLE_RUN (inert unless profiled) */
+#include <ps3dk/prof_auto.h>
 
 #if defined(GCM_SEG_VARIANT_LOCAL)
 #define VARIANT "local"
@@ -34,6 +35,8 @@
 #define VARIANT "large"
 #elif defined(GCM_SEG_VARIANT_JUMP)
 #define VARIANT "jump"
+#elif defined(GCM_SEG_VARIANT_RING)
+#define VARIANT "ring"
 #else
 #define VARIANT "main"
 #endif
@@ -323,6 +326,39 @@ static int large_check(CellGcmContextData *ring, uint32_t *mem)
 }
 #endif
 
+#if defined(GCM_SEG_VARIANT_RING)
+/* -ring: owner-buffer clears only, RING_DRAWS per frame (above the 504-pair local ceiling), timed through the AUTO
+ * report ring when the SDK was built with it. The attach precedes every device write of the application. */
+enum { RING_FRAMES = 30, RING_DRAWS = 600 };
+static void ring_attach(void)
+{
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+    ps3dk_prof_auto_options o = PS3DK_PROF_AUTO_OPTIONS_INIT;
+    uint32_t instance = 0, domain = 0;
+    o.ring_blocks = 2;   /* 16 MiB of MAIN extents, 16,384 records, label 245: the defaults */
+    int rc = ps3dk_prof_auto_attach((ps3dk_prof_gcm_ctx *)(void *)CELL_GCM_CURRENT, &o, &instance, &domain);
+    printf("GCM_SEG_RING attach rc=%d instance=%u domain=%u\n", rc, (unsigned)instance, (unsigned)domain);
+#else
+    puts("GCM_SEG_RING attach skipped (not a PS3_PROF_AUTO build)");
+#endif
+}
+static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st)
+{
+    for (unsigned frame = 0; frame < RING_FRAMES && !quit_requested; ++frame) {
+        seg_display_target(ring, &disp);
+        for (unsigned i = 0; i < RING_DRAWS; ++i) {
+            cellGcmSetClearColor(ring, 0xff000000u | ((frame * 7u + i) & 0xffu) << 8);
+            cellGcmSetClearSurface(ring, CELL_GCM_CLEAR_R | CELL_GCM_CLEAR_G | CELL_GCM_CLEAR_B | CELL_GCM_CLEAR_A);
+        }
+        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { puts("GCM_SEG_FAIL ring flip"); return 0; }
+        st->frames++;
+        cellSysutilCheckCallback();
+    }
+    printf("GCM_SEG_PHASE name=ring frames=%u draws_per_frame=%u\n", st->frames, (unsigned)RING_DRAWS);
+    return 1;
+}
+#endif
+
 int main(void)
 {
     sys_addr_t host = 0, pool = 0;
@@ -337,7 +373,11 @@ int main(void)
 
     seg_crumb_open("hello-ppu-gcm-call-return-" VARIANT);
     if (gcm_host_buffer_alloc(HOST_BYTES, &host) != 0 ||
-        cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host) || !seg_display_init(&disp)) {
+        cellGcmInit(FIFO_BYTES, HOST_BYTES, (void *)(uintptr_t)host)
+#if defined(GCM_SEG_VARIANT_RING)
+        || (ring_attach(), 0)
+#endif
+        || !seg_display_init(&disp)) {
         puts("GCM_SEG_FAIL initialization"); seg_step("FAIL initialization"); return 1;
     }
     CellGcmContextData *ring = CELL_GCM_CURRENT;
@@ -365,6 +405,9 @@ int main(void)
 #elif defined(GCM_SEG_VARIANT_LOCAL)
     if (!local_refusal_check(&config)) { puts("GCM_SEG_FAIL local refusal"); return 1; }
     outcome = "local-refused";
+#elif defined(GCM_SEG_VARIANT_RING)
+    if (!run_ring_phase(ring, &st)) return 1;
+    outcome = "ring-ok";
 #elif defined(GCM_SEG_VARIANT_JUMP)
     CellGcmSegment sub[2];
     for (unsigned k = 0; k < 2; ++k)
