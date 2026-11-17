@@ -2138,13 +2138,33 @@ pub const SCOPE: &str = "Reached-marker intervals between two RSX command-stream
 clears, including dependencies and pipeline effects between them: not isolated draw cost, not utilization, not GPU \
 busy time. Frame tokens identify submission, not GPU execution containment.";
 
-/// What delimited the capture's frames, from STATUS (FLIP, EXPLICIT, both, or none seen).
-pub fn frame_source(r: &Report) -> &'static str {
-    match r.status.as_ref().map(|s| s.flags & (ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT)) {
-        Some(f) if f == ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT => "MIXED (flips until the first explicit ps3dk_prof_frame)",
-        Some(ST_FRAMES_FLIP) => "FLIP",
-        Some(ST_FRAMES_EXPLICIT) => "EXPLICIT",
-        _ => "NONE (no flip or explicit frame seen: operations unassociated)",
+/// What delimited the capture's frames, preferring the final STATUS bits (FLIP, EXPLICIT, both, or none seen).
+/// Returns a String: the fallback when STATUS is absent (unsealed / provisional capture) derives the delimiter from
+/// the retained frame rows' own flags and says so, so an unsealed flip-delimited capture no longer reads NONE.
+pub fn frame_source(r: &Report) -> String {
+    if let Some(s) = r.status.as_ref() {
+        return match s.flags & (ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT) {
+            f if f == ST_FRAMES_FLIP | ST_FRAMES_EXPLICIT => "MIXED (flips until the first explicit ps3dk_prof_frame)".into(),
+            ST_FRAMES_FLIP => "FLIP".into(),
+            ST_FRAMES_EXPLICIT => "EXPLICIT".into(),
+            _ => "NONE (no flip or explicit frame seen: operations unassociated)".into(),
+        };
+    }
+    // No final STATUS (unsealed or provisional): derive the delimiter from the retained frame rows and say so. A row
+    // exists only for a delimited frame, and a writer whose rows can carry FR_FLIP (segment-covering CONFIGs: known
+    // row mask 127) marks every flip-opened row, so its unflagged rows were opened explicitly. Older accepted writers
+    // (CONFIG 7/15, known row mask 31) never mark FR_FLIP, so their rows cannot tell flip from explicit. No retained
+    // row is missing evidence, not proof that no frame was delimited: report UNAVAILABLE, never NONE.
+    let marks_flip = matches!(&r.config, Some(Config::Attached(a)) if a.segments_covered());
+    let flips = r.frames.iter().filter(|f| f.flags & FR_FLIP != 0).count();
+    match (r.frames.len(), flips) {
+        (0, _) => "UNAVAILABLE (no frame rows retained; capture status unavailable)".into(),
+        (n, f) if f == n => "FLIP (from frame rows; capture status unavailable)".into(),
+        _ if !marks_flip => {
+            "UNAVAILABLE (capture status unavailable; this writer does not mark flip-opened frame rows)".into()
+        }
+        (_, 0) => "EXPLICIT (from frame rows; capture status unavailable)".into(),
+        _ => "MIXED (from frame rows: flip and explicit frames; capture status unavailable)".into(),
     }
 }
 
