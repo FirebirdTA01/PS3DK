@@ -125,7 +125,10 @@ pub struct Drawn {
     pub is_final: bool,
     pub ops_dropped: u64,
     pub frame_marks_missed: bool,
-    pub coverage_rows_lost: u64,
+    /// None: UNAVAILABLE (an unsealed capture without a STATUS, or no STATUS at all).
+    pub coverage_rows_lost: Option<u64>,
+    /// The unsealed capture's tail fact as drawn; None for a sealed capture.
+    pub tail_text: Option<String>,
     pub verdict_strip_cells: usize,
     pub steady_frame_count: usize,
     pub steady_mix: Vec<(Verdict, usize)>,
@@ -411,9 +414,38 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         });
         let lost = v.coverage_rows_lost();
         drawn.coverage_rows_lost = lost;
+        let unsealed = v.unsealed();
+        let lost_note = unsealed.and_then(|u| u.total("frames_lost")).map(|t| t.note.clone());
         fact_row(c, "Coverage rows lost", |v_ui| {
-            auto_badge(v_ui, &format!("{lost} LOST"), if lost == 0 { ui::Tone::Neutral } else { ui::Tone::Danger });
+            v_ui.horizontal_top(|h| {
+                match lost {
+                    Some(n) if unsealed.is_some() => {
+                        auto_badge(h, &format!(">= {n} LOST"), if n == 0 { ui::Tone::Warning } else { ui::Tone::Danger });
+                    }
+                    Some(n) => {
+                        auto_badge(h, &format!("{n} LOST"), if n == 0 { ui::Tone::Neutral } else { ui::Tone::Danger });
+                    }
+                    None => {
+                        auto_badge(h, "UNAVAILABLE", ui::Tone::Warning);
+                    }
+                }
+                if let Some(note) = &lost_note {
+                    h.add_space(ui::SPACE_XS);
+                    h.add(egui::Label::new(note.as_str()).wrap()).on_hover_text(note.as_str());
+                }
+            });
         });
+        // Unsealed capture: frames after the last retained row are unrecorded, never assumed absent.
+        drawn.tail_text = unsealed.map(|u| u.tail.clone());
+        if let Some(u) = unsealed {
+            fact_row(c, "Capture tail", |v_ui| {
+                v_ui.horizontal_top(|h| {
+                    auto_badge(h, "NOT RECORDED", ui::Tone::Warning);
+                    h.add_space(ui::SPACE_XS);
+                    h.add(egui::Label::new(u.tail.as_str()).wrap()).on_hover_text(u.tail.as_str());
+                });
+            });
+        }
     });
 }
 
