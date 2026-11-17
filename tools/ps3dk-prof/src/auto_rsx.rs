@@ -615,6 +615,17 @@ pub struct Reader {
     export_ring: Option<crate::model::ExportRing>,
 }
 
+/// Private continuation state for an ordinary (non-EXPORT) ring source. The
+/// rolling importer validates the counted prefix before installing this state;
+/// no operation or coverage record is synthesized by this seam.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RingRestart {
+    pub published: u64,
+    pub seen: RingSeen,
+    pub last: Option<(u32, u32, (u16, u32, u64))>,
+    pub valid_state: Option<u32>,
+}
+
 fn bad<T>(rule: Rule, detail: impl Into<String>) -> Result<T, Malformed> {
     malformed(rule, detail)
 }
@@ -624,6 +635,16 @@ fn label_valid(n: u32) -> bool {
 }
 
 impl Reader {
+    pub(crate) fn ring_restart(&self) -> RingRestart {
+        RingRestart { published:self.result.max_ring_published, seen:self.result.ring_seen,
+            last:self.last_ring, valid_state:self.ring_valid_state }
+    }
+    pub(crate) fn install_ring_restart(&mut self, cursor: RingRestart) -> bool {
+        if self.export_ring.is_some() || (!self.result.config.as_ref().and_then(Config::attached)
+            .is_some_and(Attached::ringed) && cursor != RingRestart::default()) { return false; }
+        self.result.max_ring_published=cursor.published;self.result.ring_seen=cursor.seen;
+        self.last_ring=cursor.last;self.ring_valid_state=cursor.valid_state;true
+    }
     pub fn new(budgets: Budgets) -> Self {
         Self {
             result: Inventory::default(),

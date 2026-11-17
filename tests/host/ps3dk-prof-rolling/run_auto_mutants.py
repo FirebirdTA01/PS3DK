@@ -21,9 +21,9 @@ import tomllib
 
 sys.dont_write_bytecode = True
 PINS = {
-    "tools/ps3dk-prof/src/rolling_auto.rs": "455a505cd594721492678e16bf49e7bd0ba0bc93a4800951ebbc214f23b65b7b",
-    "tools/ps3dk-prof/src/auto_rsx.rs": "27eeb0f7656961275f9a1dfa14765ee75541e6416048a54cd7effc7cb31828fc",
-    "tools/ps3dk-prof/tests/rolling_auto.rs": "4e006af8c9b5de956d49330903345b9e925af95f1587809f741c445b9125c6b2",
+    "tools/ps3dk-prof/src/rolling_auto.rs": "7400d5a8fc2c11aceeafab81ffffd51e505d0b2539a3f1bda7588edff800af1b",
+    "tools/ps3dk-prof/src/auto_rsx.rs": "de2fe9aa337b55ee613dfba11322bd2ee88ac3bbf233335434a7dbce49db9bb8",
+    "tools/ps3dk-prof/tests/rolling_auto.rs": "c808139f94b17aed6e75258a78003ff78281a9b9f0c48273b5e33ce9aca3bbf8",
     "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": "0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece",
 }
 AUTO = "tools/ps3dk-prof/src/rolling_auto.rs"
@@ -75,7 +75,7 @@ def controls(inputs):
         ("m08_bootstrap_identity", "changed_bootstrap_and_unavailable_owner_cannot_seed_restart", 235, None, [
             (AUTO, 'if current_boot.len()<bootstrap.len() || current_boot[..bootstrap.len()]!=bootstrap{return Err(Error::Context("bootstrap identity"));}', '// MUTANT: ignore original bootstrap identity')]),
         ("m09_schema_version_and_canonical_guard", schema, 316, "accepted mutation at 8", [
-            (AUTO, " || get32(b,8)!=1", ""),
+            (AUTO, "2=>RING_CHECKPOINT_FIXED", "2=>CHECKPOINT_FIXED"),
             (AUTO, 'if encode(&s,l,m)?.as_slice()!=b{return ck("noncanonical checkpoint");}', 'let _ = encode(&s,l,m)?; // MUTANT: omit canonical comparison')]),
         ("m10_operation_id_feasibility", schema, 316, "accepted mutation at 64", [
             (AUTO, " || last_op<ops", "")]),
@@ -96,8 +96,8 @@ def controls(inputs):
             (AUTO, 'if i.kind==38 && self.clocks.len()>=l.anchors{return Err(Error::Limit("anchors"));}', '// MUTANT: omit anchor support cap')]),
         ("m17_original_full_mask", "all_ten_bit_full_masks_are_either_preserved_or_explicitly_unsupported", 297, None, [
             (AUTO, "put32(&mut b,44,get32(&s.header,12));", "put32(&mut b,44,get32(&s.header,12)&!64);")]),
-        ("m18_future_config_classification", "all_negotiated_config_forms_preserve_identity_and_2047_is_unsupported", 245, None, [
-            (AUTO, 'if i.kind==34 && i.payload.len()>=32 && i.payload[2..4]==[0,0] && get32(i.payload,24)==2047{return Err(Error::Unsupported(2047));}', '// MUTANT: lose explicit unsupported future CONFIG classification')]),
+        ("m18_short_ring_config_classification", "old_negotiated_config_forms_preserve_identity_and_short_ring_config_refuses", 245, None, [
+            (AUTO, 'if i.kind==34 && i.payload.len()==216{', 'if i.kind==34 && i.payload.len()==160 && get32(i.payload,24)==2047{return Err(Error::Unsupported(2047));}\n            if i.kind==34 && i.payload.len()==216{')]),
         ("m19_prefix_clock_regression", "failed_prefix_clock_is_preserved_and_regression_disqualifies_map", 206, None, [
             (SHARED, "} else if inv.clocks.iter().any(|a| a.flags == CK_REGRESSION) {", "} else if false {")]),
         ("m20_fifo_cut_identity", "mismatched_fifo_cut_is_context_error_not_zero_wait", 199, None, [

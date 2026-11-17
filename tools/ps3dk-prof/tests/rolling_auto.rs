@@ -238,11 +238,11 @@ fn changed_bootstrap_and_unavailable_owner_cannot_seed_restart() {
 }
 
 #[test]
-fn all_negotiated_config_forms_preserve_identity_and_2047_is_unsupported() {
+fn old_negotiated_config_forms_preserve_identity_and_short_ring_config_refuses() {
     for mask in [7,15,31,63,127,255,511,1023] {let mut f=base(193);f.chunks.push(config(mask));f.chunks.push(status(1,0,0,0));
         let r=read_at(&f,6);assert_eq!(r.config.unwrap().attached().unwrap().kind_mask,mask);assert!(r.final_seen);}
     let mut f=base(193);f.chunks.push(config(2047));let c=Context::at(&f,4);let b=c.boot();
-    assert!(matches!(rolling::checkpoint(c.refs(&b),&inputs(&f,0,6),6,Limits::default(),&mut work()),Err(Error::Unsupported(_))));
+    assert!(matches!(rolling::checkpoint(c.refs(&b),&inputs(&f,0,6),6,Limits::default(),&mut work()),Err(Error::Malformed(e)) if e.rule==ps3dk_prof::Rule::AutoConfig));
 }
 
 #[test]

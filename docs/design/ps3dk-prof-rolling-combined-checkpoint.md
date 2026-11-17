@@ -6,7 +6,8 @@ and SPU record families, with schema 2 adding AUTO and FIFO support.
 offline PS3DKROL v1/v2 physical snapshot. It does not enable an SDK rolling
 sink, live capture, or the complete maximum-capture-bytes feature.
 Manual GPU, waits, function samples, counters and dependency/proof families
-remain outside this format. AUTO report-ring CONFIG 2047/11 is not admitted.
+remain outside this format. Ordinary-source AUTO report-ring CONFIG 2047/11
+uses the version2 inner AUTO checkpoint described below; EXPORT remains refused.
 
 The implementation is in `tools/ps3dk-prof/src/rolling_combined.rs` and its
 private `rolling_combined_checkpoint.rs` codec. It uses the existing PPU and
@@ -121,7 +122,14 @@ Schema 2 is required exactly when either original AUTO or FIFO capability is
 present. Existing schema 1 encodings remain unchanged.
 
 An AUTO section has count 1 and a 32-byte wrapper followed by its bounded
-PFRAUTO1 state. The wrapper contains the state byte length, the accepted OPS-list
+PFRAUTO1 state. Its inner version is1 for earlier CONFIG forms and2 for ordinary
+ring CONFIG 2047/11; this does not change the PFRMIX01 schema2 wrapper. The ring
+inner contract preserves two fixed-size cursors, original CONFIG216, OPS176,
+COVERAGE528 and STATUS208, as specified in
+[the AUTO checkpoint contract](ps3dk-prof-rolling-auto-checkpoint.md#ring-inner-schema-2).
+Global byte conservation includes228 framed bytes for every ring STATUS,
+including statuses no longer held as original payloads. The wrapper contains
+the state byte length, the accepted OPS-list
 count at the latest STATUS and zero reserved fields. A FIFO section has count 1 and a
 64-byte wrapper, its bounded PFRFIFO1 state and 32 bytes per accounting-window
 group. The wrappers retain original list/status positions and counts needed

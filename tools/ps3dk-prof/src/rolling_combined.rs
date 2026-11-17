@@ -186,7 +186,7 @@ fn framed<'a>(b: &'a [u8], expected: u64, header: &[u8; 16]) -> Result<Option<cr
         if payload.len()<16{return Err(bad(rule,"short event/operation list"));}
         let n=u32::from_le_bytes(payload[8..12].try_into().unwrap());
         let width=if ty==32{96}else{u32::from_le_bytes(payload[12..16].try_into().unwrap())};
-        if n==0 || (ty==35 && !matches!(width,128|144|160)) || 16+u64::from(n)*u64::from(width)!=payload.len() as u64{
+        if n==0 || (ty==35 && !matches!(width,128|144|160|176)) || 16+u64::from(n)*u64::from(width)!=payload.len() as u64{
             return Err(bad(rule,"event/operation list shape"));
         }
     }

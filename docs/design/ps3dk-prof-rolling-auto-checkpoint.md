@@ -30,9 +30,11 @@ never masked away. The mask admits context for this family, not arbitrary chunks
 of every advertised family. A joined reader needs a separate complete admission
 and position proof. EXPORT contexts are refused.
 
-Attached CONFIG pairs are 7/15, 15/11, 31/11, 63/11, 127/11, 255/11, 511/11 and 1023/11;
-both existing REFUSED widths are supported. CONFIG 2047 remains explicitly
-unsupported. Its number is unrelated to the already accepted STATUS flag mask.
+Attached CONFIG pairs are 7/15, 15/11, 31/11, 63/11, 127/11, 255/11, 511/11,
+1023/11 and ordinary-source ring 2047/11; both existing REFUSED widths are
+supported. Ring CONFIG requires its original 216-byte payload. A short 160-byte
+2047 CONFIG is malformed. EXPORT remains refused: sparse export generations and
+source export provenance are not inferred from rolling eviction.
 The current ordinary CONFIG checks are reused, including frequency, owner and
 domain declarations. No new epoch-declaration or RANGE-descriptor source rule is
 invented by this adapter.
@@ -83,7 +85,7 @@ historical run is expanded into individual frame IDs.
 A build entry has 80 fixed bytes: owner:u32, COVERAGE presence:u32, frame:u64,
 three u64 kind populations, abandoned:u64, valid whole-CALL build-excluded:u64,
 coverage index:u64, coverage payload length:u32, zero:u32, zero:u64; then its
-optional original 352/384/416/480-byte coverage payload. Keys are unique and
+optional original 352/384/416/480/528-byte coverage payload. Keys are unique and
 sorted. A 104-byte anchor entry is original index:u64 plus the original 96-byte
 payload. Failed observations remain in support, in original order.
 
@@ -98,6 +100,55 @@ The exact encoded length is:
 This is not an all-history operation log. It is bounded support, not constant
 memory for unrestricted capture duration: sparse membership, old build references
 without a wire retirement rule, and complete anchor qualification can grow.
+
+### Ring inner schema 2
+
+CONFIG 2047/11 selects version2 and fixed size512 under the same `PFRAUTO1`
+magic. Earlier CONFIG forms retain schema1 bytes exactly. Version2 requires
+CONFIG216 and optional STATUS208; its variable sections start at512, in the
+same order as schema1. Its length equation substitutes532 for340 above. The
+extra192 bytes count toward checkpoint, support and temporary limits. This
+inner version does not introduce a new public capture flag or outer slot schema.
+
+Two 96-byte typed cursors occupy320..415 and416..511: current state and state at
+the last actual STATUS. Relative offsets within each cursor are:
+
+| Offset | Field |
+|---|---|
+| 0 | u64 maximum ring publication; independent of legacy maximum at72 |
+| 8,12 | u32 first and last generations |
+| 16,24 | u64 generations and ring records |
+| 32,40 | u64 valid blocks of flush state0 and state1 |
+| 48,52 | u32 current generation and ordinal |
+| 56,60,64 | u32 TOKEN flags, u32 owner, u64 frame |
+| 72 | u32 current valid state: 0 absent, 1 state0, 2 state1 |
+| 76 | u32 current-record presence, 0 or1 |
+| 80..95 | Reserved zero |
+
+An empty cursor is all zero. Import checks ordinary contiguous generations from1,
+ordinals0..125, token/owner/population membership, u32 publication range, ring
+records bounded by total OPS, and valid-block counts backed by published end
+serials. It checks bounded append existence from empty to each cursor and from
+the STATUS cursor to the current cursor. Equal record counts require identical
+cursors. Same-generation appends preserve token and any established valid flush
+state. Crossing generations requires at least one record in every new block;
+upgrading an older incomplete block requires an additional record and publication
+of that block's end serial. These checks use constant arithmetic, not a loop over
+historical generations or records.
+
+The saved STATUS is validated by the ordinary Reader after installing its own
+cursor. The current cursor is then restored for suffix validation. A later prefix
+generation/publication cannot be borrowed to validate an earlier STATUS.
+Ring publication never replaces the independent legacy publication maximum.
+Canonical import and advancement preserve both cursors. Imported summaries remain
+claims constrained by these checks; they do not authenticate unseen events.
+
+Ring OPS176, COVERAGE528 and STATUS208 retain ordinary wire validation. Framed
+STATUS bytes are228, including discarded STATUS occurrences in the combined
+global byte equation. Retained intervals remain actual suffix operations; prefix
+ring counts are exposed separately from cumulative counts. Ring-full exclusions
+are untimed capacity, while ring-state exclusions are sticky invalid evidence.
+Neither distinction is lost at eviction or inferred from a synthetic record.
 
 ## Validation and retained analysis
 
@@ -174,6 +225,23 @@ The REFUSED-count control also bypasses the positional guard because that witnes
 violates both; it is not an independent kill of each guard. The separate attached
 STATUS-position control tests the positional obligation. The snapshot-bound
 control bypasses its redundant checked subtraction as well as its original bounds.
+
+`tests/rolling_auto_ring.rs` adds ordinary ring fixtures, actual suffix intervals,
+paired FIFO verdicts, canonical cuts, repaired-cursor controls, snapshot chronology
+and resource limits. Three private cursor tests include an independent exhaustive
+record enumerator and arithmetic ceilings. `run_ring_mutants.py` runs these two
+baselines and 24 isolated controls with exact named assertion witnesses. Compiler
+errors, unwrap failures, crashes and timeouts never count as detection. It records
+explicitly paired guards and skips redundant absent-STATUS/FINAL cursor guards;
+no independent kill is claimed for an obligation covered only by another guard.
+The runner snapshots bounded inputs, uses one offline Cargo job, bounds each
+process/log and the total duration, and rechecks checkout bytes. Actual results
+belong to the caller's gate; constructing the runner is not a passing test claim.
+
+The old 26-control runner retains its 29-test baseline. Its schema-version
+control now pairs the v2/v1 fixed-size discriminator with canonical comparison;
+its short-ring-CONFIG control checks malformed classification instead of the
+superseded blanket 2047 refusal. Other control obligations are unchanged.
 
 This unit's tests do not enable physical rolling capture or prove arbitrary
 history equivalence. Combined-family position proof, full reader/report regression,

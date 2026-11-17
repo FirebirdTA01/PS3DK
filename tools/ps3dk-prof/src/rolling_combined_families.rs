@@ -153,7 +153,7 @@ impl Families {
             let s=a.summary();b.charge(16)?;
             if let Some(config)=s.config{lists(&mut out.demands,config,s.status,s.counts.op_chunks,s.status_chunks,next)?;statuses(&mut out.demands,config,s.status,s.counts.statuses)?;}
             let old=s.counts.statuses.saturating_sub(1);out.chunks+=u128::from(s.counts.op_chunks)+u128::from(old);
-            out.bytes+=36*u128::from(s.counts.op_chunks)+u128::from(s.row_width)*u128::from(s.counts.ops)+148*u128::from(old);
+            out.bytes+=36*u128::from(s.counts.op_chunks)+u128::from(s.row_width)*u128::from(s.counts.ops)+(20+u128::from(s.status_width))*u128::from(old);
             if s.final_seen && (s.status_ops!=s.counts.ops || s.status_chunks!=s.counts.op_chunks){return ck("AUTO post-final demand");}
         }
         if let Some(f)=&self.fifo{

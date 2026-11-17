@@ -3,10 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use crate::{fifo, model::{Capture, Malformed}};
-use super::{Anchor, Config, Coverage, FrameView, MapState, Op, Status};
+use super::{Anchor, Config, Coverage, FrameView, MapState, Op, Status, RingRestart};
 
 pub const CHECKPOINT_MAGIC: &[u8; 8] = b"PFRAUTO1";
 pub const CHECKPOINT_FIXED: usize = 320;
+const RING_CHECKPOINT_FIXED: usize = 512;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
@@ -87,6 +88,11 @@ pub struct Retained {
     pub prefix: Counts,
     pub retained: Counts,
     pub cumulative: Counts,
+    /// Counted ring prefix/cumulative observations, never displayed prefix OPS.
+    /// None means no ring CONFIG had yet been accepted at that frontier.
+    pub ring_prefix: Option<super::RingSeen>,
+    pub ring_cumulative: Option<super::RingSeen>,
+    pub max_ring_published: u64,
     pub config: Option<Config>,
     pub status: Option<Status>,
     pub final_seen: bool,
@@ -161,7 +167,7 @@ struct State {
     reader: super::Reader,
     header: [u8;16], bootstrap: Vec<Original>, frequency: Option<u64>, next: u64,
     history: u64, bytes: u64, chunks: u64, op_chunks: u64,
-    config: Option<Original>, status: Option<Original>, snapshot: [u64;5], last_coverage: u64,
+    config: Option<Original>, status: Option<Original>, snapshot: [u64;5], ring_snapshot: RingRestart, last_coverage: u64,
     finals: Vec<FrameRun>, touched: Vec<FrameRun>, unassociated: bool, invalid: bool,
     builds: BTreeMap<Key,Build>, clocks: Vec<Original>,
     ops: Vec<Located<Op>>, frames: Vec<Located<Coverage>>,
@@ -203,6 +209,75 @@ fn insert(runs:&mut Vec<FrameRun>,key:Key,limit:usize,m:&mut Meter<'_>)->Result<
 fn cardinality(runs:&[FrameRun])->Result<u64,Error>{
     let mut n=0u64;for r in runs {n=n.checked_add(r.last.checked_sub(r.first).and_then(|x|x.checked_add(1)).ok_or(Error::Checkpoint("run cardinality"))?).ok_or(Error::Checkpoint("run cardinality"))?;}Ok(n)
 }
+// Fixed-size ordinary-source cursor. EXPORT has a different generation rule
+// and is explicitly excluded by context_mode, not inferred from an eviction.
+fn encode_ring(b:&mut[u8],r:RingRestart){
+    put64(b,0,r.published);put32(b,8,r.seen.first);put32(b,12,r.seen.last);
+    for (at,n) in [(16,r.seen.generations),(24,r.seen.records),(32,r.seen.valid_state[0]),(40,r.seen.valid_state[1])]{put64(b,at,n);}
+    if let Some((g,o,(flags,owner,frame)))=r.last{
+        put32(b,48,g);put32(b,52,o);put32(b,56,u32::from(flags));put32(b,60,owner);put64(b,64,frame);put32(b,76,1);
+    }
+    put32(b,72,r.valid_state.map_or(0,|s|s+1));
+}
+fn decode_ring(b:&[u8])->Result<RingRestart,Error>{
+    let present=get32(b,76);let state=get32(b,72);let token=get32(b,56);
+    if present>1 || state>2 || token>u32::from(super::OP_TOKEN) || b[80..96].iter().any(|&x|x!=0)
+        || (present==0 && b[48..72].iter().any(|&x|x!=0)){return ck("ring cursor encoding");}
+    Ok(RingRestart{published:get64(b,0),seen:super::RingSeen{first:get32(b,8),last:get32(b,12),generations:get64(b,16),
+        records:get64(b,24),valid_state:[get64(b,32),get64(b,40)]},
+        last:(present!=0).then_some((get32(b,48),get32(b,52),(token as u16,get32(b,60),get64(b,64)))),
+        valid_state:(state!=0).then(||state-1)})
+}
+fn ring_cursor(r:RingRestart,ops:u64,owner:u32)->Result<(),Error>{
+    let Some((generation,ordinal,(token,who,frame)))=r.last else{
+        return if r==RingRestart::default(){Ok(())}else{ck("empty ring cursor")};
+    };
+    let g=u64::from(generation);let count=r.seen.records;let valid=r.seen.valid_state;
+    if generation==0 || generation>super::RING_GENERATION_MAX || ordinal>=super::RING_PAIRS
+        || r.seen.first!=1 || r.seen.last!=generation || r.seen.generations!=g || count>ops
+        || count<g+u64::from(ordinal) || count>u64::from(super::RING_PAIRS)*(g-1)+u64::from(ordinal)+1
+        || r.published>u64::from(u32::MAX) || valid[0]>g || valid[1]>g || valid[0]+valid[1]>g
+        || (token!=0 && token!=super::OP_TOKEN) || (token==0 && (who!=0 || frame!=0)) || (token!=0 && who!=owner)
+        || r.valid_state.is_some_and(|s|s>1){return ck("ring cursor census/token");}
+    let current=u64::from(r.valid_state.is_some());
+    if valid[0]+valid[1]>g-1+current || valid[0]+valid[1]>r.published/2
+        || r.valid_state.is_some_and(|s|valid[s as usize]==0 || r.published<2*g){return ck("ring valid-block census");}
+    Ok(())
+}
+/// Existence of an ordinary append, without per-generation or per-record
+/// expansion. Earlier complete blocks have 1..126 records; only the current
+/// block's final ordinal and known valid flush state constrain continuation.
+fn ring_append(before:RingRestart,after:RingRestart,ops:u64,owner:u32)->Result<(),Error>{
+    ring_cursor(before,u64::MAX,owner)?;ring_cursor(after,u64::MAX,owner)?;
+    let rows=after.seen.records.checked_sub(before.seen.records).ok_or(Error::Checkpoint("ring record regression"))?;
+    if rows>ops || after.published<before.published{return ck("ring append population/publication");}
+    let mut valid=[0u64;2];for (i,v) in valid.iter_mut().enumerate(){*v=after.seen.valid_state[i].checked_sub(before.seen.valid_state[i]).ok_or(Error::Checkpoint("ring valid-block regression"))?;}
+    if rows==0{return if before==after{Ok(())}else{ck("ring cursor changed without records")};}
+    let (g,o,token)=after.last.ok_or(Error::Checkpoint("ring append without last"))?;
+    let old=before.last.map_or(0,|x|x.0);
+    if g<old{return ck("ring generation regression");}
+    if g==old{
+        let (_,old_ordinal,old_token)=before.last.ok_or(Error::Checkpoint("ring empty generation"))?;
+        let expected=u64::from(o.checked_sub(old_ordinal).ok_or(Error::Checkpoint("ring ordinal regression"))?);
+        if rows!=expected || token!=old_token{return ck("ring same-generation continuation");}
+        let expected=match (before.valid_state,after.valid_state){
+            (Some(a),Some(b)) if a==b=>[0,0],(None,None)=>[0,0],
+            (None,Some(s))=>{let mut a=[0,0];a[s as usize]=1;a},_=>return ck("ring flush-state change"),
+        };
+        if valid!=expected{return ck("ring same-generation valid census");}return Ok(());
+    }
+    let middle=u64::from(g-old-1);let last=u64::from(o)+1;
+    let remaining=before.last.map_or(0,|(_,o,_)|u64::from(super::RING_PAIRS-o-1));
+    if rows<middle+last || rows>remaining+u64::from(super::RING_PAIRS)*middle+last{return ck("ring block capacity");}
+    if let Some(s)=after.valid_state{valid[s as usize]=valid[s as usize].checked_sub(1).ok_or(Error::Checkpoint("ring new current state"))?;}
+    // Only generations whose end serial could have been published may supply
+    // valid blocks. Upgrading the old incomplete block needs one extra record.
+    let eligible=(u64::from(g)-1).min(after.published/2).saturating_sub(u64::from(old));
+    let count=valid[0]+valid[1];
+    let upgrade=old!=0 && before.valid_state.is_none() && remaining!=0 && u64::from(old)<=after.published/2;
+    if count>eligible+u64::from(upgrade) || (count>eligible && rows==middle+last){return ck("ring valid-block append capacity");}
+    Ok(())
+}
 fn context_mode(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>,combined:bool)->Result<Vec<Original>,Error>{
     let bytes=refs.bootstrap.iter().map(|x|16+x.payload.len() as u128).sum::<u128>();
     if bytes>l.support_bytes as u128 || bytes+340>l.checkpoint_bytes as u128 || 8*(bytes+340)>l.temporary_bytes as u128{return Err(Error::Limit("bootstrap storage"));}
@@ -233,11 +308,13 @@ impl State {
     fn new_mode(refs:Refs<'_>,next:u64,l:Limits,m:&mut Meter<'_>,combined:bool)->Result<Self,Error>{
         Ok(Self{reader:super::Reader::new(super::Budgets{max_ops:u64::MAX,max_frames:u64::MAX,max_clocks:u64::MAX}),
             header:*refs.original_header,bootstrap:context_mode(refs,next,l,m,combined)?,frequency:refs.capture.clock.as_ref().map(|c|c.freq_hz),next:0,
-            history:0,bytes:0,chunks:0,op_chunks:0,config:None,status:None,snapshot:[0;5],last_coverage:0,
+            history:0,bytes:0,chunks:0,op_chunks:0,config:None,status:None,snapshot:[0;5],ring_snapshot:RingRestart::default(),last_coverage:0,
             finals:Vec::new(),touched:Vec::new(),unassociated:false,invalid:false,builds:BTreeMap::new(),clocks:Vec::new(),ops:Vec::new(),frames:Vec::new()})
     }
     fn counts(&self)->Counts {let r=&self.reader.result;Counts{ops:r.ops_parsed,op_chunks:self.op_chunks,frames:r.frames_parsed,clocks:r.clocks_parsed,statuses:r.statuses}}
     fn snap(&self)->[u64;5]{let r=&self.reader.result;[r.ops_parsed,r.frames_parsed,r.clocks_parsed,self.reader.last_op,r.max_snapshot]}
+    fn ringed(&self)->bool{self.reader.result.config.as_ref().and_then(Config::attached).is_some_and(super::Attached::ringed)}
+    fn fixed(&self)->usize{if self.ringed(){RING_CHECKPOINT_FIXED}else{CHECKPOINT_FIXED}}
     fn entry(&mut self,k:Key,l:Limits,m:&mut Meter<'_>)->Result<&mut Build,Error>{
         m.charge(1+self.builds.len() as u128)?;
         if !self.builds.contains_key(&k) {
@@ -247,7 +324,7 @@ impl State {
         Ok(self.builds.entry(k).or_insert_with(||Build{value:BuildSupport{owner:k.0,frame:k.1,records:[0;3],abandoned:0,call_excluded:0,coverage:None},raw:None}))
     }
     fn footprint(&self)->u128 {
-        340+self.bootstrap.iter().map(|x|16+x.payload.len() as u128).sum::<u128>()
+        self.fixed() as u128+20+self.bootstrap.iter().map(|x|16+x.payload.len() as u128).sum::<u128>()
             +self.config.as_ref().map_or(0,|x|x.payload.len() as u128)+self.status.as_ref().map_or(0,|x|x.payload.len() as u128)
             +24*(self.finals.len()+self.touched.len()) as u128+104*self.clocks.len() as u128
             +self.builds.values().map(|b|80+b.raw.as_ref().map_or(0,|x|x.payload.len() as u128)).sum::<u128>()
@@ -265,12 +342,15 @@ impl State {
             if !(34..=38).contains(&i.kind){return Err(Error::Unsupported(i.kind));}
             bytes+=i.payload.len() as u128;if bytes>l.input_bytes as u128 || i.payload.len()>1_048_576{return Err(Error::Limit("input bytes"));}
             let rows=if i.kind==35 {if i.payload.len()<16{return source(35,"short operation list");}let n=get32(i.payload,8);let w=get32(i.payload,12);
-                if n==0 || !matches!(w,128|144|160) || 16+u64::from(n)*u64::from(w)!=i.payload.len() as u64{return source(35,"operation list count/length");}u64::from(n)
+                if n==0 || !matches!(w,128|144|160|176) || 16+u64::from(n)*u64::from(w)!=i.payload.len() as u64{return source(35,"operation list count/length");}u64::from(n)
             }else{u64::from(i.kind==36)};
             m.charge(32+i.payload.len() as u128+64*u128::from(rows)+2*self.builds.len() as u128+self.bootstrap.len() as u128)?;
             if 8*(self.footprint()+i.payload.len() as u128)+1024*(self.ops.len()+self.frames.len()) as u128+2048*u128::from(rows)>l.temporary_bytes as u128{return Err(Error::Limit("decode temporary bytes"));}
             if retain && (self.ops.len()+self.frames.len()) as u128+u128::from(rows)>l.retained_records as u128{return Err(Error::Limit("retained rows"));}
-            if i.kind==34 && i.payload.len()>=32 && i.payload[2..4]==[0,0] && get32(i.payload,24)==2047{return Err(Error::Unsupported(2047));}
+            if i.kind==34 && i.payload.len()==216{
+                let n=self.footprint()+192+i.payload.len() as u128;
+                if n>l.checkpoint_bytes as u128 || n.saturating_sub(340)>l.support_bytes as u128 || 8*n>l.temporary_bytes as u128{return Err(Error::Limit("ring CONFIG storage"));}
+            }
             if i.kind==38 && self.clocks.len()>=l.anchors{return Err(Error::Limit("anchors"));}
             let r=&self.reader.result;
             match i.kind {35=>{add(r.ops_parsed,rows)?;add(self.op_chunks,1)?;},36=>{add(r.frames_parsed,1)?;},37=>{add(r.statuses,1)?;},38=>{add(r.clocks_parsed,1)?;},_=>{}}
@@ -293,11 +373,11 @@ impl State {
                 36=>{let f=self.reader.result.frames.pop().ok_or(Error::Checkpoint("decoder coverage"))?;
                     if !insert(&mut self.finals,(f.owner,f.frame),l.membership_runs,m)?{return source(36,"a second final row");}
                     self.reader.finals.clear();self.last_coverage=i.index;
-                    self.invalid|=(0..3).any(|k|(0..10).any(|c|!super::UNTIMED_ONLY[c] && f.rows[k][2+c]!=0));
+                    self.invalid|=f.invalid_evidence();
                     let b=self.entry((f.owner,f.frame),l,m)?;b.raw=Some(original(i));b.value.coverage=Some(Located{index:i.index,value:f.clone()});
                     if retain{self.frames.push(Located{index:i.index,value:f});}
                 },
-                37=>{self.snapshot=self.snap();self.status=Some(original(i));},
+                37=>{self.snapshot=self.snap();self.ring_snapshot=self.reader.ring_restart();self.status=Some(original(i));},
                 38=>self.clocks.push(original(i)),_=>unreachable!(),
             }
             self.history=history;self.bytes=framed;self.chunks=chunks;self.bound(l)?;
@@ -306,7 +386,9 @@ impl State {
 }
 fn encode(s:&State,l:Limits,m:&mut Meter<'_>)->Result<Vec<u8>,Error>{
     s.bound(l)?;let size=usize::try_from(s.footprint()).map_err(|_|Error::Limit("checkpoint size"))?;m.charge(size as u128)?;
-    let mut b=vec![0;320];b[..8].copy_from_slice(CHECKPOINT_MAGIC);put32(&mut b,8,1);put32(&mut b,12,320);put64(&mut b,16,size as u64);
+    let fixed=s.fixed();let mut b=vec![0;fixed];b[..8].copy_from_slice(CHECKPOINT_MAGIC);
+    put32(&mut b,8,if s.ringed(){2}else{1});put32(&mut b,12,fixed as u32);put64(&mut b,16,size as u64);
+    if s.ringed(){encode_ring(&mut b[320..416],s.reader.ring_restart());encode_ring(&mut b[416..512],s.ring_snapshot);}
     put64(&mut b,24,s.next);put64(&mut b,32,s.history);let r=&s.reader.result;
     let flags=u32::from(s.config.is_some())|u32::from(s.status.is_some())*2|u32::from(s.reader.last_frame.is_some())*4
         |u32::from(r.final_seen)*8|u32::from(s.invalid)*16|u32::from(s.unassociated)*32|u32::from(s.frequency.is_some())*64;
@@ -350,16 +432,21 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     if b.len()<340{return ck("short checkpoint");}
     if 8*b.len() as u128>l.temporary_bytes as u128{return Err(Error::Limit("import temporary bytes"));}
     m.charge(b.len() as u128*2)?;
-    if &b[..8]!=CHECKPOINT_MAGIC || get32(b,8)!=1 || get32(b,12)!=320 || get64(b,16)!=b.len() as u64
+    let fixed=match get32(b,8){1=>CHECKPOINT_FIXED,2=>RING_CHECKPOINT_FIXED,_=>return ck("checkpoint version")};
+    if b.len()<fixed+20{return ck("short ring checkpoint");}
+    if &b[..8]!=CHECKPOINT_MAGIC || get32(b,12)!=fixed as u32 || get64(b,16)!=b.len() as u64
         || crc(&b[..b.len()-4])!=get32(b,b.len()-4) || b[248..320].iter().any(|x|*x!=0){return ck("header/CRC/reserved");}
     let flags=get32(b,40);let next=get64(b,24);if flags&!127!=0 || next>target{return ck("flags/frontier");}
     let config_len=get32(b,216) as usize;let status_len=get32(b,220) as usize;
-    if !matches!(config_len,0|160|176) || !matches!(status_len,0|128) || (config_len!=0)!=(flags&1!=0) || (status_len!=0)!=(flags&2!=0){return ck("optional lengths");}
+    let ringed=fixed==RING_CHECKPOINT_FIXED;
+    if (if ringed{config_len!=216 || !matches!(status_len,0|208)}else{!matches!(config_len,0|160|176) || !matches!(status_len,0|128)})
+        || (config_len!=0)!=(flags&1!=0) || (status_len!=0)!=(flags&2!=0){return ck("optional lengths");}
+    let (ring,ring_snapshot)=if ringed{m.charge(256)?;(decode_ring(&b[320..416])?,decode_ring(&b[416..512])?)}else{(RingRestart::default(),RingRestart::default())};
     let nr=get32(b,224) as usize;let nt=get32(b,228) as usize;let nb=get32(b,232) as usize;let na=get32(b,236) as usize;
     if nr>l.membership_runs || nt>l.membership_runs || nb>l.build_entries || na>l.anchors{return Err(Error::Limit("section count"));}
-    let minimum=340u128+u128::from(get32(b,244))+config_len as u128+status_len as u128+24*(nr as u128+nt as u128)+80*nb as u128+104*na as u128;
+    let minimum=fixed as u128+20+u128::from(get32(b,244))+config_len as u128+status_len as u128+24*(nr as u128+nt as u128)+80*nb as u128+104*na as u128;
     if minimum>b.len() as u128{return ck("impossible section sizes");}
-    let mut d=Decode{b:&b[..b.len()-4],at:320};let original_header:[u8;16]=d.take(16)?.try_into().unwrap();
+    let mut d=Decode{b:&b[..b.len()-4],at:fixed};let original_header:[u8;16]=d.take(16)?.try_into().unwrap();
     if &original_header!=refs.original_header || get32(&original_header,12)!=get32(b,44){return Err(Error::Context("original file header"));}
     let mut s=State::new_mode(refs,target,l,m,combined)?;let current_boot=s.bootstrap.clone();let current_frequency=s.frequency;
     let nboot=get32(b,240) as usize;if nboot>3{return ck("bootstrap count");}let start=d.at;let mut bootstrap=Vec::new();
@@ -378,9 +465,10 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
         s.reader.chunk(34,cfg,refs.capture,refs.rsx_domains,refs.declared).map_err(|_|Error::Checkpoint("CONFIG payload/context"))?;
         s.config=Some(Original{index,kind:34,payload:cfg.to_vec()});
     }else if get64(b,56)!=0{return ck("absent CONFIG index");}
+    if s.ringed()!=ringed{return ck("ring checkpoint/config version");}
     let finals=runs(&mut d,nr,m)?;let touched=runs(&mut d,nt,m)?;let mut imported=BTreeMap::new();let mut metadata=Vec::new();let mut previous=None;
     for _ in 0..nb{m.charge(64)?;let h=d.take(80)?;let k=(get32(h,0),get64(h,8));let present=get32(h,4);let width=get32(h,64) as usize;
-        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480) || (width!=0)!=(present!=0) || get32(h,68)!=0 || get64(h,72)!=0{return ck("build entry encoding");}previous=Some(k);
+        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480|528) || (width!=0)!=(present!=0) || get32(h,68)!=0 || get64(h,72)!=0{return ck("build entry encoding");}previous=Some(k);
         let index=get64(h,56);if (width==0 && index!=0) || (width!=0 && index>=next){return ck("build coverage position");}
         let payload=d.take(width)?.to_vec();let raw=(width!=0).then_some(Original{index,kind:36,payload});
         if let Some(x)=&raw{metadata.push(x.clone());}
@@ -399,7 +487,7 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
         if x.kind==36{
             let row=s.reader.result.frames.pop().ok_or(Error::Checkpoint("coverage decode"))?;let k=(row.owner,row.frame);
             if !insert(&mut s.finals,k,l.membership_runs,m)?{return ck("duplicate coverage");}s.reader.finals.clear();s.last_coverage=x.index;
-            s.invalid|=(0..3).any(|k|(0..10).any(|c|!super::UNTIMED_ONLY[c] && row.rows[k][2+c]!=0));
+            s.invalid|=row.invalid_evidence();
             let e=imported.get_mut(&k).ok_or(Error::Checkpoint("coverage key"))?;
             if e.raw.as_ref()!=Some(&x){return ck("coverage identity");}e.value.coverage=Some(Located{index:x.index,value:row});
         }else{s.clocks.push(x);}
@@ -424,6 +512,23 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     s.touched=touched;s.builds=imported;
     let current=[ops,get64(b,120),get64(b,128),last_op,max_snapshot];let mut snapshot=[0;5];for (j,v) in snapshot.iter_mut().enumerate(){*v=get64(b,168+j*8);}
     if snapshot.iter().zip(current).any(|(p,c)|*p>c) || (snapshot[0]==ops && (snapshot[3]!=last_op || snapshot[4]!=max_snapshot)) && status_len!=0{return ck("STATUS snapshot bounds");}
+    if ringed{
+        let owner=owner.ok_or(Error::Checkpoint("ring CONFIG owner"))?;
+        ring_cursor(ring,ops,owner)?;ring_cursor(ring_snapshot,snapshot[0],owner)?;
+        ring_append(RingRestart::default(),ring,ops,owner)?;
+        ring_append(RingRestart::default(),ring_snapshot,snapshot[0],owner)?;
+        ring_append(ring_snapshot,ring,ops-snapshot[0],owner)?;
+        if (ring.seen.records==ops && max_snapshot!=0) || (ring_snapshot.seen.records==snapshot[0] && snapshot[4]!=0)
+            || (ring.seen.records-ring_snapshot.seen.records==ops-snapshot[0] && max_snapshot!=snapshot[4]){return ck("ring/legacy publication populations");}
+        for cursor in [ring,ring_snapshot]{if let Some((_,ordinal,(token,who,frame)))=cursor.last{
+            if token==0{if !s.unassociated{return ck("ring tokenless membership");}}
+            else{
+                let key=(who,frame);let population=s.builds.get(&key).map_or(0,|b|b.value.records.iter().map(|&n|u128::from(n)).sum::<u128>());
+                if !contains(&s.touched,key) || population<u128::from(ordinal)+1{return ck("ring current-generation membership");}
+            }
+        }}
+        if status_len==0 && ring_snapshot!=RingRestart::default(){return ck("absent ring STATUS cursor");}
+    }
     // Strictly increasing parsed IDs must have room for every later row,
     // independently of batching and the producer's admitted-ID frontier.
     if status_len!=0 && u128::from(ops)+u128::from(snapshot[3])>u128::from(last_op)+u128::from(snapshot[0]){return ck("STATUS operation ID capacity");}
@@ -448,17 +553,19 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
         if frames_at!=snapshot[1] || clocks_at!=snapshot[2] || snapshot[3]<snapshot[0] || (snapshot[0]==0 && (snapshot[3]!=0 || snapshot[4]!=0)){return ck("STATUS snapshot chronology");}
         s.reader.result.ops_parsed=snapshot[0];s.reader.result.frames_parsed=snapshot[1];s.reader.result.clocks_parsed=snapshot[2];
         s.reader.last_op=snapshot[3];s.reader.result.max_snapshot=snapshot[4];
+        if !s.reader.install_ring_restart(ring_snapshot){return ck("ring STATUS cursor context");}
         s.reader.chunk(37,status_payload,refs.capture,refs.rsx_domains,refs.declared).map_err(|_|Error::Checkpoint("STATUS payload/snapshot"))?;
-        if s.reader.result.final_seen && (snapshot!=current || prev.is_some_and(|p|p>index)){return ck("FINAL before newer state");}
+        if s.reader.result.final_seen && (snapshot!=current || ring_snapshot!=ring || prev.is_some_and(|p|p>index)){return ck("FINAL before newer state");}
         s.status=Some(Original{index,kind:37,payload:status_payload.to_vec()});
     }else if get64(b,160)!=0 || snapshot!=[0;5]{return ck("absent STATUS snapshot");}
     if s.reader.result.final_seen!=(flags&8!=0){return ck("FINAL fence");}
     s.reader.result.ops_parsed=ops;s.reader.result.frames_parsed=current[1];s.reader.result.clocks_parsed=current[2];s.reader.result.statuses=statuses;
     s.reader.last_op=last_op;s.reader.result.max_snapshot=max_snapshot;s.snapshot=snapshot;s.op_chunks=op_chunks;s.next=next;
+    if !s.reader.install_ring_restart(ring){return ck("ring current cursor context");}s.ring_snapshot=ring_snapshot;
     let counts=s.counts();let chunks=u128::from(s.config.is_some())+u128::from(counts.op_chunks)+u128::from(counts.frames)+u128::from(counts.clocks)+u128::from(counts.statuses);
-    let mut bytes=s.config.as_ref().map_or(0,|x|20+x.payload.len() as u128)+36*u128::from(op_chunks)+148*u128::from(statuses)+116*u128::from(counts.clocks);
+    let mut bytes=s.config.as_ref().map_or(0,|x|20+x.payload.len() as u128)+36*u128::from(op_chunks)+(if ringed{228}else{148})*u128::from(statuses)+116*u128::from(counts.clocks);
     if let Some(a)=s.reader.result.config.as_ref().and_then(Config::attached){
-        let width=if a.tagged(){480}else if a.label_polls(){416}else if a.presentation_scopes(){384}else{352};
+        let width=if a.ringed(){528}else if a.tagged(){480}else if a.label_polls(){416}else if a.presentation_scopes(){384}else{352};
         bytes+=u128::from(a.op_width())*u128::from(ops)+(20+width)*u128::from(counts.frames);
     }else if ops!=0 || counts.frames!=0 || counts.clocks!=0{return ck("nonattached census");}
     let history=chunks+u128::from(ops)+u128::from(counts.frames);
@@ -480,16 +587,19 @@ pub fn advance(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_chunk:u64
 pub fn read(refs:Refs<'_>,checkpoint:&[u8],suffix:&[Input<'_>],next_chunk:u64,l:Limits,work:&mut WorkBudget)->Result<Retained,Error>{
     let mut m=Meter{outer:work,left:l.work_items};let mut s=import(refs,checkpoint,next_chunk,l,&mut m)?;
     let first_chunk=s.next;let prefix=s.counts();let boundary_frames=s.touched.clone();let prefix_unassociated=s.unassociated;
+    let ring_prefix=s.ringed().then_some(s.reader.result.ring_seen);
     s.apply(refs,suffix,next_chunk,l,&mut m,true)?;
-    project(s,Boundary{first_chunk,prefix,boundary_frames,prefix_unassociated},&mut m)
+    project(s,Boundary{first_chunk,prefix,ring_prefix,boundary_frames,prefix_unassociated},&mut m)
 }
-struct Boundary {first_chunk:u64,prefix:Counts,boundary_frames:Vec<FrameRun>,prefix_unassociated:bool}
+struct Boundary {first_chunk:u64,prefix:Counts,ring_prefix:Option<super::RingSeen>,boundary_frames:Vec<FrameRun>,prefix_unassociated:bool}
 fn project(s:State,b:Boundary,m:&mut Meter<'_>)->Result<Retained,Error>{
-    let Boundary{first_chunk,prefix,boundary_frames,prefix_unassociated}=b;let next_chunk=s.next;let cumulative=s.counts();
+    let Boundary{first_chunk,prefix,ring_prefix,boundary_frames,prefix_unassociated}=b;let next_chunk=s.next;let cumulative=s.counts();
     let retained=Counts{ops:cumulative.ops-prefix.ops,op_chunks:cumulative.op_chunks-prefix.op_chunks,frames:cumulative.frames-prefix.frames,clocks:cumulative.clocks-prefix.clocks,statuses:cumulative.statuses-prefix.statuses};
     m.charge(s.builds.len() as u128+s.clocks.len() as u128+s.ops.len() as u128+s.frames.len() as u128)?;
+    let ring_cumulative=s.ringed().then_some(s.reader.result.ring_seen);
     let last_frame=s.reader.last_frame;let r=s.reader.result;
     Ok(Retained{original_header:s.header,bootstrap:s.bootstrap,first_chunk,next_chunk,prefix,retained,cumulative,config:r.config,status:r.last_status,
+        ring_prefix,ring_cumulative,max_ring_published:r.max_ring_published,
         final_seen:r.final_seen,ops:s.ops,frames:s.frames,clocks:s.clocks.into_iter().zip(r.clocks).map(|(x,value)|Located{index:x.index,value}).collect(),
         builds:s.builds.into_values().map(|x|x.value).collect(),boundary_frames,prefix_unassociated,invalid_exclusion_seen:s.invalid,last_frame})
 }
@@ -499,7 +609,7 @@ fn project(s:State,b:Boundary,m:&mut Meter<'_>)->Result<Retained,Error>{
 pub(crate) struct CombinedAdapter {state:State,boundary:Option<Boundary>,status_chunks:u64}
 pub(crate) struct CombinedSummary {
     pub counts:Counts,pub config:Option<u64>,pub status:Option<u64>,
-    pub status_chunks:u64,pub status_ops:u64,pub final_seen:bool,pub row_width:u32,pub domain:Option<u32>,
+    pub status_chunks:u64,pub status_ops:u64,pub final_seen:bool,pub row_width:u32,pub status_width:u32,pub domain:Option<u32>,
 }
 impl CombinedAdapter {
     pub(crate) fn new(refs:Refs<'_>,l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
@@ -545,6 +655,7 @@ impl CombinedAdapter {
         if self.boundary.is_some(){return ck("second AUTO retention boundary");}
         let mut m=Meter{outer:work,left:l.work_items};m.charge(self.state.touched.len() as u128+1)?;
         self.boundary=Some(Boundary{first_chunk:self.state.next,prefix:self.state.counts(),
+            ring_prefix:self.state.ringed().then_some(self.state.reader.result.ring_seen),
             boundary_frames:self.state.touched.clone(),prefix_unassociated:self.state.unassociated});Ok(())
     }
     pub(crate) fn finish(self,l:Limits,work:&mut WorkBudget)->Result<Retained,Error>{
@@ -555,7 +666,7 @@ impl CombinedAdapter {
         let s=&self.state;let config=s.reader.result.config.as_ref().and_then(Config::attached);
         CombinedSummary{counts:s.counts(),config:s.config.as_ref().map(|x|x.index),
             status:s.status.as_ref().map(|x|x.index),status_chunks:self.status_chunks,status_ops:s.snapshot[0],
-            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),domain:config.map(|c|c.domain)}
+            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),status_width:if s.ringed(){208}else{128},domain:config.map(|c|c.domain)}
     }
     pub(crate) fn support(&self)->impl Iterator<Item=&Original>{
         self.state.config.iter().chain(self.state.status.iter()).chain(self.state.builds.values().filter_map(|b|b.raw.as_ref())).chain(self.state.clocks.iter())
@@ -605,7 +716,8 @@ pub fn analyze(r:&Retained,f:Option<&fifo::rolling::Retained>,l:Limits,work:&mut
     let inv=super::Inventory{config:r.config.clone(),ops:r.ops.iter().map(|o|o.value.clone()).collect(),ops_parsed:r.cumulative.ops,
         frames:r.frames.iter().map(|x|x.value.clone()).collect(),frames_parsed:r.cumulative.frames,
         clocks:r.clocks.iter().map(|x|x.value.clone()).collect(),clocks_parsed:r.cumulative.clocks,statuses:r.cumulative.statuses,
-        last_status:r.status.clone(),final_seen:r.final_seen,..super::Inventory::default()};
+        last_status:r.status.clone(),final_seen:r.final_seen,ring_seen:r.ring_cumulative.unwrap_or_default(),max_ring_published:r.max_ring_published,
+        ..super::Inventory::default()};
     let n=inv.clocks.iter().filter(|a|a.flags==super::CK_VALID).count() as u64;
     let map_work=crate::clockmap::solve_budget(n).checked_add(crate::rsx_measured::split_budget(n).checked_mul(2).ok_or(Error::Limit("map budget overflow"))?).ok_or(Error::Limit("map budget overflow"))?;
     meter.charge(u128::from(map_work))?;let mut map_meter=crate::clockmap::Meter::new(map_work,crate::clockmap::Limit::Capture);
@@ -648,4 +760,91 @@ pub fn analyze(r:&Retained,f:Option<&fifo::rolling::Retained>,l:Limits,work:&mut
         FrameResult{view,unavailable}
     }).collect();
     Ok(Report{map,intervals,frames})
+}
+
+#[cfg(test)]
+mod ring_cursor_tests {
+    use super::*;
+    use std::cell::Cell;
+    // Test-side state identity; deliberately not the production cursor codec.
+    type Key=(u64,u32,u32,u64,u64,[u64;2],Option<(u32,u32,(u16,u32,u64))>,Option<u32>);
+    fn key(r:RingRestart)->Key{(r.published,r.seen.first,r.seen.last,r.seen.generations,r.seen.records,r.seen.valid_state,r.last,r.valid_state)}
+    type States=BTreeMap<Key,RingRestart>;
+    fn singleton(r:RingRestart)->States{BTreeMap::from([(key(r),r)])}
+    // Expand a real additional record: choose stay/new block, token at a new
+    // block, incomplete or valid flush state, and that record's publication.
+    // This does not call the production range/append validation or serializer.
+    fn step(input:&States,attempts:&Cell<u64>)->States{
+        let mut out=States::new();
+        for &before in input.values(){
+            for new_block in [false,true]{
+                if before.last.is_none() && !new_block{continue;}
+                let (generation,ordinal)=match (before.last,new_block){
+                    (None,_) =>(1,0),(Some((g,_,_)),true)=>(g+1,0),(Some((g,o,_)),false)=>(g,o+1),
+                };
+                if generation>4 || ordinal>=126{continue;}
+                for token in [(0,0,0),(1,1,7),(1,1,8)]{
+                    if !new_block && before.last.unwrap().2!=token{continue;}
+                    for valid in [None,Some(0),Some(1)]{
+                        let prior=if new_block{None}else{before.valid_state};
+                        if prior.is_some() && valid.is_some() && prior!=valid{continue;}
+                        for publication in [0,2,4,6,8]{
+                            attempts.set(attempts.get()+1);assert!(attempts.get()<=5_000_000,"bounded expanded record work");
+                            if valid.is_some() && publication<2*u64::from(generation){continue;}
+                            let mut next=before;next.published=next.published.max(publication);
+                            if new_block{next.seen.generations+=1;next.seen.last=generation;if next.seen.first==0{next.seen.first=generation;}}
+                            next.seen.records+=1;next.last=Some((generation,ordinal,token));next.valid_state=prior.or(valid);
+                            if prior.is_none(){if let Some(s)=valid{next.seen.valid_state[s as usize]+=1;}}
+                            out.insert(key(next),next);
+                        }
+                    }
+                }
+            }
+        }assert!(out.len()<=20_000,"bounded expanded cursor population");out
+    }
+    #[test]
+    fn ordinary_ring_append_matches_independent_tiny_record_enumeration(){
+        let attempts=Cell::new(0);let mut all=vec![singleton(RingRestart::default())];
+        for _ in 0..4{all.push(step(all.last().unwrap(),&attempts));}
+        let mut comparisons=0u64;let mut accepted=0;let mut refused=0;
+        for prefix in 0..=2{for &before in all[prefix].values(){
+            let mut reachable=singleton(before);
+            for rows in 0..=2{
+                if rows!=0{reachable=step(&reachable,&attempts);}
+                for &after in all[prefix+rows].values(){
+                    comparisons+=1;assert!(comparisons<=2_000_000,"bounded cursor comparisons");
+                    let expected=reachable.contains_key(&key(after));
+                    let got=ring_append(before,after,rows as u64,1).is_ok();
+                    assert_eq!(got,expected,"prefix {before:?}, suffix {rows}, after {after:?}");
+                    if expected{accepted+=1;}else{refused+=1;}
+                    assert_eq!(ring_append(before,after,rows as u64+1,1).is_ok(),expected,"extra legacy OPS cannot change ring reachability");
+                    if rows!=0{assert!(ring_append(before,after,rows as u64-1,1).is_err(),"ring rows consume total OPS capacity");}
+                }
+            }
+        }}
+        assert!(accepted>100&&refused>100,"both sides of the relation exercised");
+    }
+    #[test]
+    fn ring_generation_ceiling_and_ahead_publication_are_bounded_without_expansion(){
+        let g=super::super::RING_GENERATION_MAX;
+        let r=RingRestart{published:u64::from(u32::MAX),seen:super::super::RingSeen{first:1,last:g,generations:u64::from(g),
+            records:u64::from(g),valid_state:[0,1]},last:Some((g,0,(1,1,7))),valid_state:Some(1)};
+        assert!(ring_append(RingRestart::default(),r,u64::MAX,1).is_ok());
+        let mut bad=r;bad.last=Some((g,126,(1,1,7)));assert!(ring_append(RingRestart::default(),bad,u64::MAX,1).is_err());
+        let mut bad=r;bad.published=u64::from(u32::MAX)+1;assert!(ring_append(RingRestart::default(),bad,u64::MAX,1).is_err());
+    }
+    #[test]
+    fn ring_old_block_upgrade_needs_a_row_and_a_published_serial(){
+        let before=RingRestart{seen:super::super::RingSeen{first:1,last:1,generations:1,records:1,valid_state:[0,0]},
+            last:Some((1,0,(1,1,7))),..RingRestart::default()};
+        let mut after=RingRestart{published:2,seen:super::super::RingSeen{first:1,last:3,generations:3,records:3,valid_state:[1,0]},
+            last:Some((3,0,(1,1,8))),..RingRestart::default()};
+        // Only generation1 could be valid at publication2, but both appended
+        // records are consumed by the first records of generations2 and3.
+        assert!(ring_append(before,after,2,1).is_err());
+        after.published=4;assert!(ring_append(before,after,2,1).is_ok(),"generation2 can supply the valid block");
+        after.published=2;after.seen.records=4;
+        assert!(ring_append(before,after,3,1).is_ok(),"one extra row can upgrade generation1 before leaving it");
+        after.published=0;assert!(ring_append(before,after,3,1).is_err(),"no valid block before its end serial");
+    }
 }
