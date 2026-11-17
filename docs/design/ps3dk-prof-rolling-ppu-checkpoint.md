@@ -1,8 +1,9 @@
 # Offline PPU checkpoint slice
 
 Status: internal offline semantic work toward rolling capture. This is not an
-enabled SDK capture mode. It is independent of the physical store described in
-[ps3dk-prof-rolling-store.md](ps3dk-prof-rolling-store.md); neither component
+enabled SDK capture mode. The offline `rolling_file::read_ppu` API joins it to
+the physical store described in
+[ps3dk-prof-rolling-store.md](ps3dk-prof-rolling-store.md). Neither component
 currently connects the runtime sink, reader file dispatch, CLI, viewer, or live
 protocol to rolling capture. The complete rolling-capture task remains open.
 
@@ -23,6 +24,22 @@ evicted events. A segment-chain consumer must compare the returned bytes with
 the next stored checkpoint before claiming that transition was verified.
 Merely decoding both checkpoints is insufficient. The earliest retained
 checkpoint is still a producer claim about the evicted prefix.
+
+`ps3dk_prof::rolling_file::read_ppu(bytes, store_limits, ppu_limits)` accepts a
+coherent immutable container snapshot. It validates the selected physical root
+chain, analyzes every retained segment from the first checkpoint, and compares
+each following checkpoint with the canonical advancement of its predecessor.
+The first chunk, evicted byte count, and final chunk frontier must agree with
+the physical root. A semantic mismatch fails the operation; it does not select
+an older root or return a partial report. A TRAILER can occur only in the final
+retained segment. An empty physical root has no semantic checkpoint and is
+reported explicitly.
+
+This host API temporarily concatenates retained payloads, checked and fallibly
+allocated under `store_limits.max_file_bytes`, in addition to the caller's input
+buffer. That buffer is released before checking transitions. Semantic state
+uses the separate PPU limits, and the record-work budget applies to all retained
+segments together. This allocation strategy is not the runtime sink's design.
 
 Only PPU records and optional WINDOWS are supported: original file flags must
 be zero or `FLAG_WINDOWS`. Other families, including SPU, ORDER, GPU, AUTO, FIFO,

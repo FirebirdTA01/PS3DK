@@ -36,6 +36,7 @@ pub mod reader;
 pub mod rolling;
 mod rolling_checkpoint;
 pub mod rolling_store;
+pub mod rolling_file;
 pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;

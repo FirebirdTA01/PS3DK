@@ -1,0 +1,86 @@
+//! Offline physical-container/PPU join. No runtime, live, CLI or full-family claim.
+//!
+//! The caller supplies a coherent immutable container snapshot. Physical
+//! recovery selects one complete root chain; a semantic mismatch in that chain
+//! is an error, not permission to choose an older root or omit a segment.
+//!
+//! Host memory includes the input, at most 128 physical segment descriptors,
+//! and one temporary concatenation of retained payloads. Its requested byte
+//! capacity is bounded by `store_limits.max_file_bytes`, with checked arithmetic
+//! and fallible reservation. PPU analysis/checkpoint allocations separately use
+//! `ppu_limits`. The concatenation is released before transition validation.
+use crate::{rolling, rolling_store};
+
+#[derive(Debug)]
+pub enum Error {
+    Store(rolling_store::Error),
+    Semantic(rolling::Error),
+    EmptyStore,
+    Boundary(&'static str),
+    Transition { segment: u64 },
+    Limit(&'static str),
+}
+#[derive(Debug)]
+pub struct PpuFile { pub store_view: rolling_store::View, pub retained: rolling::RetainedPpu }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Store(error) => write!(f, "rolling physical validation: {error}"),
+            Self::Semantic(error) => write!(f, "rolling PPU validation: {error:?}"),
+            Self::EmptyStore => f.write_str("empty rolling store has no semantic checkpoint"),
+            Self::Boundary(reason) => write!(f, "rolling physical/PPU boundary mismatch: {reason}"),
+            Self::Transition { segment } => write!(f, "checkpoint does not follow preceding payload at segment {segment}"),
+            Self::Limit(reason) => write!(f, "rolling join admission limit: {reason}"),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
+/// Analyze all retained PPU/WINDOWS payloads from the first retained checkpoint.
+/// Evicted prefix state remains a checkpoint claim; this does not reconstruct
+/// or authenticate evicted events. Every retained checkpoint transition must
+/// agree exactly, and no partial result escapes on any mismatch.
+pub fn read_ppu(bytes: &[u8], store_limits: rolling_store::Limits, ppu_limits: rolling::Limits)
+    -> Result<PpuFile, Error> {
+    let store = rolling_store::read(bytes, store_limits).map_err(Error::Store)?;
+    let first = store.segments.first().ok_or(Error::EmptyStore)?;
+    let total = store.segments.iter().try_fold(0usize, |n, segment| n.checked_add(segment.payload.len()))
+        .ok_or(Error::Limit("retained payload byte sum"))?;
+    if u64::try_from(total).map_err(|_| Error::Limit("retained payload byte sum"))? > store_limits.max_file_bytes {
+        return Err(Error::Limit("retained payload bytes"));
+    }
+    let mut payload = Vec::new();
+    payload.try_reserve_exact(total).map_err(|_| Error::Limit("retained payload allocation"))?;
+    for segment in &store.segments { payload.extend_from_slice(segment.payload); }
+
+    // One suffix operation charges work_records across ALL retained segments
+    // and keeps every retained report. Reading only the last segment would
+    // silently discard earlier retained spans and reset the work budget.
+    let retained = rolling::read_ppu_suffix(first.checkpoint, &payload, ppu_limits).map_err(Error::Semantic)?;
+    drop(payload);
+    if retained.first_chunk != store.view.first_chunk {
+        return Err(Error::Boundary("first chunk"));
+    }
+    if retained.prefix_bytes != store.view.evicted_payload_bytes {
+        return Err(Error::Boundary("evicted prefix bytes"));
+    }
+    if retained.next_chunk != store.view.next_chunk {
+        return Err(Error::Boundary("next chunk"));
+    }
+
+    // The first validated checkpoint is anchored above. Physical validation
+    // proves contiguous chunk ranges; exact canonical advancement then anchors
+    // each next checkpoint's boundary/state by induction, including empty
+    // payloads. No duplicated checkpoint wire parser is needed here.
+    for pair in store.segments.windows(2) {
+        let next = rolling::advance_ppu(pair[0].checkpoint, pair[0].payload, ppu_limits).map_err(Error::Semantic)?;
+        if next.as_slice() != pair[1].checkpoint {
+            return Err(Error::Transition { segment: pair[1].segment });
+        }
+    }
+    // Do not advance the last segment: its terminal TRAILER is allowed. A
+    // TRAILER in any earlier segment is refused by advance_ppu, even when a
+    // subsequent segment has no payload bytes for suffix scanning to notice.
+    Ok(PpuFile { store_view: store.view, retained })
+}
