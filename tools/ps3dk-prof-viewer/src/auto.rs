@@ -106,9 +106,18 @@ impl AutoView {
             .is_some_and(|s| s.flags & auto_rsx::ST_FRAME_MARK_MISSED != 0)
     }
 
-    /// Coverage records lost to ring buffer capacity (counter 6, "lost" in coverage rows).
-    pub fn coverage_rows_lost(&self) -> u64 {
-        self.report.status.as_ref().map_or(0, |s| s.counters[6])
+    /// Coverage records lost to ring buffer capacity (counter 6, "lost" in coverage rows). For an unsealed capture
+    /// this is the reader's capture total: the last STATUS value (a lower bound), or None (UNAVAILABLE) without one.
+    pub fn coverage_rows_lost(&self) -> Option<u64> {
+        match &self.report.unsealed {
+            Some(u) => u.total("frames_lost").and_then(|t| t.value),
+            None => self.report.status.as_ref().map(|s| s.counters[6]),
+        }
+    }
+
+    /// The reader's unsealed-capture facts (no FINAL STATUS): the unrecorded tail and the capture totals.
+    pub fn unsealed(&self) -> Option<&auto_rsx::Unsealed> {
+        self.report.unsealed.as_ref()
     }
 
     /// Operations dropped past the retention ceiling.
