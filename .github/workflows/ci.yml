@@ -163,6 +163,7 @@ jobs:
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --sanitize --build-dir "$RUNNER_TEMP/capture-retention-asan"
           python3 tests/host/ps3dk-prof-rolling/run.py --build-dir "$RUNNER_TEMP/rolling-store"
           PS3DK_PROF_ROLLING_FIXTURE="$RUNNER_TEMP/rolling-store/rotated.profr" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_store c_produced_rotations_match_committed_view_and_borrowed_payload -- --ignored --exact
+          PS3DK_PROF_ROLLING_PPU_PACKER="$RUNNER_TEMP/rolling-store/rolling-ppu-packer" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_file rolling_c_ppu::c_rotations_preserve_genuine_ppu_checkpoint_and_retained_semantics -- --ignored --exact
           python3 tests/host/ps3dk-prof-rolling/mutations.py --build-dir "$RUNNER_TEMP/rolling-store-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'

@@ -35,6 +35,13 @@ def main():
     if result.returncode == 0 and not args.red:
         subprocess.run([sys.executable, str(HERE / "decode.py"), "--self-test",
                         "--expect-rotations", str(out / "rotated.profr")], check=True)
+        # Explicitly consumed by the ignored Rust semantic parity acceptance
+        # test. Compilation alone does not count as that test having run.
+        packer = out / ("rolling-ppu-packer.exe" if sys.platform == "win32" else "rolling-ppu-packer")
+        subprocess.run(shlex.split(args.cc) + ["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                       "-I", str(impl), str(HERE / "pack_ppu.c"), str(impl / "roll_store.c"),
+                       "-o", str(packer)], check=True)
+        print(f"Built test-only PPU fixture packer: {packer}", flush=True)
     return result.returncode
 
 if __name__ == "__main__":

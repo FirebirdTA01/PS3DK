@@ -2,6 +2,7 @@
 //! framed; checkpoints at each cut are generated directly, not by advancement.
 #[allow(dead_code)]
 mod common;
+mod rolling_c_ppu;
 use common::*;
 use ps3dk_prof::{rolling, rolling_store};
 use ps3dk_prof::rolling_file::{read_ppu, Error};

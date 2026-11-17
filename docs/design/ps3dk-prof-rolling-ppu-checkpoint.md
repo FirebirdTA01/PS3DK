@@ -41,6 +41,16 @@ buffer. That buffer is released before checking transitions. Semantic state
 uses the separate PPU limits, and the record-work budget applies to all retained
 segments together. This allocation strategy is not the runtime sink's design.
 
+The explicit cross-language CI test feeds independently framed PPU chunks and
+directly generated checkpoints to the C store's test-only packer. Twelve
+commits retain the final three segments after nine evictions. The Rust join
+checks the original prefix frontier, all retained zone totals, and an open zone
+crossing the cutoff. The packer uses a bounded memory IO adapter; this verifies
+the C wire writer against the semantic reader, not target filesystem durability.
+The test requires `PS3DK_PROF_ROLLING_PPU_PACKER` and fails if the executable is
+absent. CI builds it with the physical harness and invokes the otherwise ignored
+test explicitly.
+
 Only PPU records and optional WINDOWS are supported: original file flags must
 be zero or `FLAG_WINDOWS`. Other families, including SPU, ORDER, GPU, AUTO, FIFO,
 WAIT, FUNC, COUNTERS and export metadata, are explicitly refused. This profile
