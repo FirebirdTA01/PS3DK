@@ -10,6 +10,8 @@ use crate::wire::Cursor;
 
 #[path = "fifo_accounting.rs"]
 pub mod accounting;
+#[path = "rolling_fifo.rs"]
+pub mod rolling;
 
 pub const FLAG_FIFO: u32 = 64;
 pub const CHUNK_FIFO_CONFIG: u32 = 31;
@@ -510,6 +512,24 @@ impl Reader {
         if instance != cfg.instance {
             return bad(r, format!("FIFO_STATUS instance {instance} is not the CONFIG instance"));
         }
+        let last = self.last.as_ref().map_or(0, |e| e.seq);
+        self.validate_status(&s, export, last)?;
+        self.sat_seen |= flags & ST_SATURATED != 0;
+        self.result.statuses += 1;
+        self.result.final_seen = s.is_final();
+        self.result.last_status = Some(s);
+        Ok(())
+    }
+
+    // Shared typed predicate: restart imports validate a saved status against
+    // its own saved census, without replaying a synthetic STATUS or Event.
+    fn validate_status(&self, s: &Status, export: Option<&crate::model::ExportRecord>, last: u64) -> Result<(), Malformed> {
+        let r = Rule::FifoStatus;
+        let cfg = self.result.config.as_ref().expect("typed status requires configuration");
+        let flags = s.flags;
+        if flags & !(ST_FINAL | ST_LOWER_BOUND | ST_SATURATED | ST_OWNER_UNACK) != 0 {
+            return bad(r, format!("FIFO_STATUS unknown flags {flags:#x}"));
+        }
         if self.sat_seen && flags & ST_SATURATED == 0 {
             return bad(r, "FIFO_STATUS SATURATED cleared after an earlier status set it");
         }
@@ -532,7 +552,6 @@ impl Reader {
             return bad(r, format!("FIFO_STATUS written {} but {} events were written before it", s.written,
                 self.result.parsed_events));
         }
-        let last = self.last.as_ref().map_or(0, |e| e.seq);
         let seq_ok = if let Some(exp) = export {
             if s.is_final() {
                 s.last_attempt_seq == exp.source_fifo_last_attempt_seq
@@ -586,10 +605,6 @@ impl Reader {
                     s.wraps_completed, s.open_wrap_id));
             }
         }
-        self.sat_seen |= sat;
-        self.result.statuses += 1;
-        self.result.final_seen = s.is_final();
-        self.result.last_status = Some(s);
         Ok(())
     }
 }
@@ -681,6 +696,12 @@ pub fn analyze(cap: &Capture) -> Report {
     let Some(inv) = cap.fifo.as_ref() else {
         return Report { coverage: "UNSUPPORTED", ..Report::default() };
     };
+    analyze_inventory(inv)
+}
+
+// Shared retained-evidence projection. Prefix validation endpoints are never
+// inserted into this inventory's event vector by the rolling adapter.
+fn analyze_inventory(inv: &Inventory) -> Report {
     let mut rep = Report {
         capability: true,
         coverage: inv.coverage_status(),

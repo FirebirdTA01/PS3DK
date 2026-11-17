@@ -25,9 +25,10 @@ pub struct Inventory {
     pub rows: Vec<Row>,
     pub parsed: u64,
     pub known_missing: u64,
-    last_seq: u64,
-    last_frame: Option<u64>,
-    last_window: u64,
+    // Private family restart state; never exposed as retained accounting rows.
+    pub(super) last_seq: u64,
+    pub(super) last_frame: Option<u64>,
+    pub(super) last_window: u64,
 }
 fn bad<T>(s: &str) -> Result<T, Malformed> { malformed(Rule::FifoEvents, format!("FIFO_ACCOUNTING: {s}")) }
 
