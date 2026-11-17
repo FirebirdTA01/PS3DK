@@ -91,11 +91,13 @@ prof=plan(current,trees[1],'auto-rsx')
 compile_lines=[line for line in prof.splitlines() if ' -c ' in line]
 required={'auto_runtime','auto_startup','auto_config','auto_wire','auto_writer','auto_queue',
           'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer',
-          'auto_ring','auto_ring_commands','auto_ring_layout'}
+          'auto_ring','auto_ring_commands','auto_ring_layout',
+          'roll_runtime','roll_public','roll_output','roll_ppu','roll_combined','roll_combined2'}
 for member in required:
     lines=[line for line in compile_lines if '/'+member+'.c' in line]
     assert len(lines)==2 and sum('-mlp64' in line for line in lines)==1,member
 assert all('-DPS3DK_PROF_WITH_AUTO=1' in line and '-DPS3DK_PROF_WITH_FIFO=1' in line
+           and '-DPS3DK_PROF_ROLLING=1' in line and '-DPS3DK_PROF_ROLLING_PUBLIC=1' in line
            and '-fno-instrument-functions' in line for line in compile_lines)
 assert prof.count('archive_digest.py verify')==2
 assert 'libps3dkprof_auto.a' in prof and '--id "AUTO-RSX"' in prof
@@ -104,7 +106,7 @@ prof_install=plan(current,trees[1],'install-auto-package')
 for text in (gcm_install,prof_install):
     writes=[line for line in text.splitlines() if line.startswith('install -m')]
     assert not any('/libgcm_cmd.a' in line or '/libps3dkprof.a' in line or '/libps3prof.a' in line for line in writes)
-for item in ('prof_auto.h','prof_fifo.h','prof.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py',
+for item in ('prof_auto.h','prof_fifo.h','prof.h','prof_rolling.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py',
              'ps3-prof-auto-identity.py'):
     assert item in prof_install,item
 assert '--seal' in prof_install and '--source-commit' in prof_install
