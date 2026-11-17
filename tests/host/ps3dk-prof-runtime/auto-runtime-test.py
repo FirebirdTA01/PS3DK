@@ -135,7 +135,7 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','windowlate'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','windowlate','preinit','preinitthread','preinitold','preinitfail'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate'):
     flags+=['-DTEST_WINDOW_MODE='+str({'windows':0,'windowseal':1,'windowwhole':2,'windownone':4,'windowprebuild':5,
                                        'windowhandoff':6,'windowhandoffu':7,'windowqueue':8,'windowcallafter':9,'windowlate':10}[a.case])]
