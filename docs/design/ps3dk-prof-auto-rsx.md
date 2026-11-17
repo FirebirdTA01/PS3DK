@@ -412,6 +412,149 @@ an unacknowledged owner requires a lower bound. FINAL occurs once and forbids
 later records. A live conflict/reset stops admission and quarantines outstanding
 resources, without replacing CONFIG or rewriting earlier retained facts.
 
+## Report ring (CONFIG 2047/11, private: PS3DK_PROF_AUTO_RING)
+
+Not in any archive yet: a nonzero ring option is refused (EINVAL) unless the
+library is built with the private `PS3DK_PROF_AUTO_RING`. The ring removes the
+local report-pair ceiling for **owner-buffer draws only** (phase 1): ARRAY,
+INDEX and CLEAR written into the attached context. Segment-built draws, FRAME
+marks, whole-CALL brackets and AUTO ranges keep the disjoint legacy pool and
+stay bounded by it; a whole-CALL bracket still times every draw its CALL ran.
+
+Partition and budgets (both reported in CONFIG, each bounded on its own): the
+report range ends with 2..4 local blocks of 126 pairs (the hardware-tested
+copy size; 4 blocks leave no legacy pair and are refused), the legacy pool
+is the rest after the 16 clock reports (252 pairs by default). MAIN memory is a
+fixed allocation of whole 1 MiB pages (default 16 MiB, at most 256 MiB) split
+into 4096-byte extents, one per block generation; metadata is a separate budget
+of up to 65,536 records (default 16,384) that replaces `metadata_records`.
+Neither grows. The ring label (default 245) is leased beside the two others and
+reset and read back at the first device write.
+
+Producer (owner thread): a draw claims metadata first, then joins the open
+block, or opens one: the application M2MF state must be known (or untouched),
+the physical tail for the worst-case flush (46 words) is reserved by lowering
+`end`, and only then is a MAIN extent admitted (and poisoned). The draw writes
+two timestamp reports into its pair of the local block and no per-draw label
+release. The block is flushed (odd ring label + GPU wait, the M2MF copy to its
+extent, even label + GPU wait, then the application's M2MF registers restored)
+right after its 126th draw, at the native FIFO wrap before the JUMP, at
+FlushBuffer when requested, and by the owner at every frame boundary, window
+change (the gate carries the window id, so an END and a reopen are never one
+window), stop acknowledgement and retirement. Foreign closers (the sealing
+drainer) only set a request; they never emit. Exclusions are explicit:
+`ring_full` (COVERAGE u64x3 at 480, no free extent: untimed only, transient,
+never latched for the rest of the frame), `ring_state` (u64x3 at 504: unknown
+M2MF state, refused or invalid ring: invalid evidence, the frame stays UNKNOWN),
+and the usual room/metadata/reentry columns; metadata exhaustion is not latched
+either.
+
+Refusals come in two strengths. A flush refused before any of its words is
+stored (the M2MF decoder rejected an owner word, a replaced FIFO callback, an
+`end` that is not the one the reservation set) quarantines the open block and
+halts admission for the rest of the capture; blocks sealed before it were
+copied with known state and still publish, drain and retire. A context reset or
+a ring label anomaly (not zero after its reset, ahead of the issued blocks or
+regressed) stops the ring on both sides: nothing is read or retired afterwards.
+The decoder accepts only complete increment/non-increment packets: a JUMP,
+CALL or RETURN, any other reserved header bit, a zero count on a nonzero header,
+a packet longer than the words written, a method range past 0x1ffc or a
+method-0 object binding on the M2MF subchannel invalidates it for good, and its
+first rejected header word, that word's byte offset from the context begin and
+the reason are reported in STATUS.
+
+One CALL is followed: into the reserved prefix of the cellGcmInit host buffer.
+That buffer is IO offset 0; the context begins after a firmware-reserved prefix
+(4 KiB, IO 0x1000) that the command buffer never covers and no wrap jumps into.
+The firmware writes a default-state routine there once, at init: it binds the
+subchannels' objects (subchannel 1 to the M2MF object 0x31337303), sets their
+DMA contexts (M2MF 0x180 notify, 0x184 IN, 0x188 OUT) and ends in RET, with no
+JUMP or nested CALL. Every cellGcmSetFlip CALLs it (word 0x00000002, IO 0).
+The init wrapper's io_address and the context begin are recorded at the
+automatic attach (an override reuses the record); the record exists only when
+the context begins inside that buffer, word aligned, after a nonempty prefix
+within its io size. On a CALL from the owner words whose target is below the
+context start's offset, the decoder reads the routine at io_address + target,
+at most (start - target)/4 words, through the same packet decoder (its
+subchannel-1 binding and register writes update the shadow), requires a RET
+inside that bound and resumes after the CALL. It is read again on every CALL,
+never cached. Refused, each with its own reason: a target at or past the
+context start (an application segment), a CALL or JUMP inside the routine (the
+RSX allows one CALL level), a packet crossing the context start, no RET before
+it, and a subchannel-1 binding to any object but M2MF. Without a record every
+CALL is refused as before (reason 2), and a RET in the owner words stays
+refused (3). Inside a routine the reported header is the routine word (the
+CALL itself for a refused target or a missing RET) and the offset is the
+CALL's.
+
+Drainer: a ring record is read only when its block's even label is at or below
+the ring's own PUT frontier (committed after the flush, published after PUT);
+then its MAIN copy is read, never the recycled local block. After whole sink
+acceptance it acknowledges the metadata AND the record's exact ordinal; the last
+ordinal frees the extent. A short or failed sink acknowledges nothing. A block
+not published at seal leaves its records INCOMPLETE and its extent held; any
+extent held at seal makes the FINAL STATUS a lower bound (LOWER_BOUND).
+
+Wire: CONFIG 216 bytes (u32 at 176..208 ring bytes, blocks, pairs, first ring
+report, ring label, stride, extents, metadata stride, legacy pairs; u32@212=1
+owner draws only); OPS 176 bytes, flag 128 RING with u32@160 generation,
+u32@164 extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state (0
+untouched, 1 restored, 2 uncertain; the writer reads only blocks sealed by a
+known flush, so it never writes 2 and a RAW_VALID record never carries it),
+serials 2g-1/2g on the ring label, `published` the ring
+label value read; COVERAGE 528 bytes; STATUS 208 bytes with u64x8 at 128:
+blocks issued, retired, published ring label, held extents, copied bytes,
+untouched and restored flushes, decoded application words; then u32@192 the
+decoder's first rejected header word, u32@196 its byte offset from the context
+begin, u32@200 the reason (1 JUMP, 2 CALL, 3 RETURN, 4 reserved header bits,
+5 zero count, 6 packet longer than the words written, 7 method range, 8 M2MF
+object binding, 9 scan cursor outside the context, 10 decoder count overflow,
+11 CALL at or past the context start, 12 CALL inside the reserved-prefix
+routine, 13 JUMP inside it, 14 a routine packet crossing the context start,
+15 no RET before the context start, 16 a routine binding subchannel 1 to
+another object; all three zero when nothing was rejected) and u32@204 zero. The reader shows it as
+`ring decoder rejected header 0x... at +0x...: <reason>`. The reader refuses a
+ring tail on a legacy record, any other width, a non-consecutive ordinal, a
+generation that does not name its extent and block, ring reports outside its
+block or legacy reports inside one, a block spanning frame tokens, a RAW_VALID
+record with M2MF state 2 (uncertain state is never timing evidence; an
+INCOMPLETE record may carry it), RAW_VALID records of one block with different
+states, more RAW_VALID blocks of state 0 (1) than the FINAL STATUS counts
+untouched (restored) flushes, and a STATUS tail that does not reconcile with
+the records. Older captures and their JSON are unchanged.
+
+Export (`ps3dk-prof export --frame/--frames/--window`, the viewer's Save
+window/range) keeps the RING records of the selected frames. A block never
+spans a frame token, so whole generations are kept; the generations of other
+frames and of tokenless draws (before the first frame) are dropped, and STATUS
+is kept as written. The EXPORT chunk of a ring capture sets flag 2 and appends
+a 40-byte ring accounting tail after the lane entries: u32 first and u32 last
+kept generation, u64 kept generations, u64 kept and u64 dropped RING records,
+u32 the source's last RING generation, u32 zero (all kept fields zero when no
+RING record was kept). The reader accepts the tail only on a ring capture and
+requires it on one. In an export, the first RING generation must be the
+declared first and later generations only increase, skipping generations only
+where the frame token changes (each still from ordinal 0, one frame token,
+consecutive ordinals); the parsed first, last, generation and
+record counts must equal the tail; the exact FINAL rule compares blocks issued
+with the declared source last generation instead of the last kept one. An
+unexported capture keeps the strict rules: generations 1, 2, 3, ... and an
+exact FINAL issued equal to the last generation.
+
+Cost, measured from GCC 16.1.0 PPU assembly constants (both ABIs) at the
+defaults (2 blocks, 16 MiB, 16,384 records, 256 frame rows): a metadata record
+is 184 bytes and an extent descriptor 40 in ILP32 and LP64 alike, so the ring's
+one page allocation is 16,777,216 MAIN bytes + 3,014,656 metadata + 163,840
+descriptors = 19,955,712, rounded to 20 MiB (20,971,520 bytes, never freed).
+The control allocation is 253,696 bytes in ILP32 (capture 116,376) and 266,752
+in LP64 (capture 129,472), so the full attach footprint is 21,225,216 bytes
+(ILP32) or 21,238,272 bytes (LP64). The M2MF decoder reads every owner command
+word once, at flush, wrap and FlushBuffer boundaries, plus the reserved-prefix
+routine at each flip's CALL (STATUS decoded_words counts both; the
+host run decoded 585,722 words for 55,110 timed draws, about 10.6 per draw);
+its PPU time per word is not yet measured on hardware. Each block adds one
+flush of 28 words plus 2 per restored register (at most 46).
+
 ## CLOCK, type 38
 
 Fixed 96 bytes: schema u16 at 0, flags u16 at 2; instance, epoch, anchor id, role,

@@ -323,6 +323,11 @@ static inline int p_window_gate(const prof *p)
 {
     return __atomic_load_n(&p->window_open, __ATOMIC_ACQUIRE) != 0;
 }
+/* 0 outside a window, else the open window's id: a window END and a reopen never show the same value. */
+static inline uint32_t p_window_id(const prof *p)
+{
+    return __atomic_load_n(&p->window_open, __ATOMIC_ACQUIRE);
+}
 #define p_window_frame ps3dk_prof__window_frame
 #define p_window_retire ps3dk_prof__window_retire
 #define p_window_shutdown ps3dk_prof__window_shutdown

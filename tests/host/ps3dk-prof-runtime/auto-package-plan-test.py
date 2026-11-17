@@ -90,7 +90,8 @@ assert 'libgcm_cmd_prof_auto.a' in gcm
 prof=plan(current,trees[1],'auto-rsx')
 compile_lines=[line for line in prof.splitlines() if ' -c ' in line]
 required={'auto_runtime','auto_startup','auto_config','auto_wire','auto_writer','auto_queue',
-          'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer'}
+          'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer',
+          'auto_ring','auto_ring_commands','auto_ring_layout'}
 for member in required:
     lines=[line for line in compile_lines if '/'+member+'.c' in line]
     assert len(lines)==2 and sum('-mlp64' in line for line in lines)==1,member

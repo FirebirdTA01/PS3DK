@@ -120,6 +120,8 @@ typedef struct ps3dk_prof_test_hooks_t {
     /* Named counters: the drainer's counter-mutex lock fails once at this site (1 the drain snapshot, 2 the final
      * freeze, 3 an emit before the sink, 4 an emit after the sink accepted the chunk), after `skip` locks there. */
     uint32_t counter_lock_fail_site, counter_lock_fail_skip;
+    /* AUTO report ring: an auto_ring_memory (auto_internal.h), the MAIN page allocation and IO mapping */
+    const void *auto_ring_memory;
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;

@@ -16,27 +16,52 @@ static auto_writer writer;
 static auto_capture *capture;
 static gpp_ctx *clean_context;
 static uintptr_t clean_begin, clean_current, clean_end;
+/* The init record for the report ring's M2MF decoder: the EA of IO offset 0 (cellGcmInit's host buffer) and the
+ * context start's IO offset, kept only when the context begins inside that buffer at a word boundary after a
+ * nonempty prefix. 0 (no record): the decoder refuses every CALL. */
+static uintptr_t clean_io;
+static uint32_t clean_start;
+static void init_record(const gpp_ctx *gc, const void *io_address, uint32_t io_bytes, uintptr_t *io, uint32_t *start)
+{
+    uintptr_t base=(uintptr_t)io_address,begin=(uintptr_t)(void *)gc->begin;
+    *io=0;*start=0;
+    if(!base || (base&3u) || begin<=base || ((begin-base)&3u) || begin-base>io_bytes) return;
+    *io=base;*start=(uint32_t)(begin-base);
+}
 
-/* Owner-only bridge predicate. Validate publication and immutable owner fields
- * before reading capture, which can still be replaced by its owner during an
- * initialization override. No lock, PAL call, allocation or device access.
- * Report-ring integration replaces ONLY the final visible-end predicate with
- * its validated active-tail predicate; these identity guards stay in place. */
+static int label_valid(uint32_t n) { return n==64 || (n>=69 && n<=254); }
+/* The one known-end predicate: end is the registered physical end, or exactly the visible end that the report ring's
+ * active tail on its owner context lowered that physical end to; never any other change, and never a physical end
+ * derived by subtraction. end_clean (the owner context against its attach-time end) and the FIFO accounting query
+ * ps3dk_prof__auto_fifo_end_known both use it, so they cannot diverge. */
+static int end_known(const auto_capture *a, const void *ctx, uintptr_t physical, uintptr_t end)
+{
+    return end==physical ||
+           (a && ctx && (const void *)a->context==ctx && a->tail.active && a->tail.physical==physical && end==a->tail.visible);
+}
+static int end_clean(const auto_capture *a, uintptr_t end)
+{
+    return end_known(a,a ? (const void *)a->context:NULL,clean_end,end);
+}
+/* The public FIFO accounting query establishes ownership before either path: the calling thread is the attached
+ * owner (TLS only, as at the FIFO boundary: no lock, PAL identity call or device access), ctx is its context and the
+ * registered physical end is the attach-time end. Only then the shared predicate decides. */
 int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end)
 {
-    auto_capture *a;
+    const auto_capture *a;
+    /* Acquire published FIFO ownership before reading capture: an init-time
+     * override can still replace it. Preserve the accounting bridge guards. */
     if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED ||
         g_tls.slot1 != g_fifo.owner_slot + 1u || g_tls.incarnation != g_fifo.owner_inc ||
         g_tls.generation != g_fifo.owner_gen || g_tls.acked || g_tls.retired || g_tls.in_drain)
         return 0;
-    a = capture;
-    if (!a || a->context != ctx || a->owner_incarnation != g_tls.incarnation ||
-        a->owner_generation != g_tls.generation || (uintptr_t)registered_physical_end != clean_end)
-        return 0;
-    return (uintptr_t)visible_end == clean_end;
+    a=capture;
+    if(!a || !ctx || (void *)a->context!=ctx) return 0;
+    if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||
+       a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation) return 0;
+    if((uintptr_t)registered_physical_end!=clean_end) return 0;
+    return end_known(a,ctx,(uintptr_t)registered_physical_end,(uintptr_t)visible_end);
 }
-
-static int label_valid(uint32_t n) { return n==64 || (n>=69 && n<=254); }
 
 /* The defaults (no options: the automatic attach at cellGcmInit) must stay inside the profiler's reservation of
  * <cell/gcm/ps3tc_gcm_labels.h>: labels 240..247 and reports 0..511 or 1024..2047. An override is the
@@ -63,28 +88,67 @@ static int defaults_reserved(const ps3dk_prof_auto_options *o)
 /* The two reserves for a pool of `pairs`: whole-CALL brackets (32, a quarter of a small pool) and AUTO ranges (the
  * option, or 16 / an eighth of a small pool). 0 when an explicit range reserve leaves fewer than 64 pairs. */
 static uint32_t call_pairs(uint32_t pairs) {return pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u;}
-static int range_pairs(const ps3dk_prof_auto_options *o,uint32_t *out)
+/* The published option sizes: 32 (no range_pairs), 36 (no ring fields) and the current 52. */
+enum { AUTO_OPTIONS_V32=offsetof(ps3dk_prof_auto_options,range_pairs),
+       AUTO_OPTIONS_V36=offsetof(ps3dk_prof_auto_options,ring_blocks) };
+_Static_assert(AUTO_OPTIONS_V32==32 && AUTO_OPTIONS_V36==36 && sizeof(ps3dk_prof_auto_options)==52,
+               "published ps3dk_prof_auto_options sizes");
+/* Copies exactly the caller's published size, zero-extending the rest; size keeps the caller's value. Nothing
+ * past that size is ever read from the caller. */
+static int options_copy(const ps3dk_prof_auto_options *o, ps3dk_prof_auto_options *n)
 {
-    uint32_t pairs=(o->report_count-16)/2,call=call_pairs(pairs);
-    if(o->size<sizeof *o || !o->range_pairs) {*out=pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u;return 1;}
+    memset(n,0,sizeof *n);
+    if(o->size!=sizeof *n && o->size!=AUTO_OPTIONS_V36 && o->size!=AUTO_OPTIONS_V32) return 0;
+    memcpy(n,o,o->size);
+    return 1;
+}
+static int ring_requested(const ps3dk_prof_auto_options *o)
+{
+    return o->ring_blocks || o->ring_label || o->ring_bytes || o->ring_records;
+}
+/* The local pool the legacy pair allocator owns: all of it, or what the ring blocks leave. */
+static uint32_t legacy_pool(const ps3dk_prof_auto_options *o, const auto_ring_plan *ring)
+{
+    return ring->blocks ? ring->legacy_pairs:(o->report_count-16)/2;
+}
+static int range_pairs(const ps3dk_prof_auto_options *o,const auto_ring_plan *ring,uint32_t *out)
+{
+    uint32_t pairs=legacy_pool(o,ring),call=call_pairs(pairs);
+    if(o->size<AUTO_OPTIONS_V36 || !o->range_pairs) {*out=pairs>=8u*AUTO_RANGE_PAIRS ? AUTO_RANGE_PAIRS:pairs/8u;return 1;}
     if(pairs<call+64u || o->range_pairs>pairs-call-64u) return 0;
     *out=o->range_pairs;
     return 1;
 }
-static int layout(const ps3dk_prof_auto_options *o, size_t *records, size_t *frames, size_t *total)
+/* ring is zeroed unless the (normalized) options select the report ring. */
+static int ring_options(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, uint32_t *label)
+{
+    memset(ring,0,sizeof *ring);*label=0;
+    if(!ring_requested(o)) return 1;
+#ifdef PS3DK_PROF_AUTO_RING
+    *label=o->ring_label ? o->ring_label:AUTO_RING_DEFAULT_LABEL;
+    if(!label_valid(*label) || *label==o->operation_label || *label==o->clock_label) return 0;
+    return auto_ring_layout(o->report_first,o->report_count,o->ring_blocks,o->ring_bytes,o->ring_records,
+                            sizeof(auto_queue_entry),sizeof(auto_ring_slot),ring);
+#else
+    return 0; /* reserved until the ring writer, drainer and reader are integrated */
+#endif
+}
+static int layout(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, uint32_t *ring_label,
+                  size_t *records, size_t *frames, size_t *total)
 {
     uint64_t n;
     uint32_t ranges;
-    if((o->size!=sizeof *o && o->size!=offsetof(ps3dk_prof_auto_options,range_pairs)) || o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
+    if(o->report_count<18 || o->report_count>1024 || (o->report_count&1) ||
        o->report_first>2048-o->report_count || !label_valid(o->operation_label) ||
        !label_valid(o->clock_label) || o->operation_label==o->clock_label ||
        !o->metadata_records || o->metadata_records>1024 || !o->frame_records || o->frame_records>256 ||
-       !o->max_bytes || o->max_bytes>2097152 || !range_pairs(o,&ranges)) return 0;
+       !o->max_bytes || o->max_bytes>2097152 || !ring_options(o,ring,ring_label) || !range_pairs(o,ring,&ranges)) return 0;
     /* Every multiplier is bounded above before these widened expressions.
-     * Include padding in the published allocation, not just symbol payloads. */
+     * Include padding in the published allocation, not just symbol payloads.
+     * Ring metadata and descriptors live in the separate page allocation. */
     n=((uint64_t)sizeof(auto_capture)+127u)&~UINT64_C(127);
     *records=(size_t)n;
-    n+=(uint64_t)o->metadata_records*sizeof(auto_queue_entry);
+    if(!ring->blocks) n+=(uint64_t)o->metadata_records*sizeof(auto_queue_entry);
     n=(n+127u)&~UINT64_C(127);
     *frames=(size_t)n;
     n+=(uint64_t)o->frame_records*sizeof(auto_wire_frame);
@@ -105,11 +169,86 @@ static const gpp_dev *device(void)
 #endif
 }
 
+static void queue_reserves(auto_capture *a, const ps3dk_prof_auto_options *o, const auto_ring_plan *ring)
+{
+    uint32_t ranges=0;
+    (void)range_pairs(o,ring,&ranges);   /* validated by layout */
+    auto_queue_set_reserve(&a->operations,AUTO_PAIR_CALL,call_pairs(legacy_pool(o,ring)));
+    auto_queue_set_reserve(&a->operations,AUTO_PAIR_RANGE,ranges);
+}
+
+#ifdef PS3DK_PROF_AUTO_RING
+/* Process lifetime: the one reusable MAIN page allocation (mapped; a capture that never issued device commands
+ * leaves it unreferenced), and the bytes of allocations that can never be reused or freed. Only the configuring
+ * owner, under CONFIG's WRITING claim, touches these. */
+static struct { uintptr_t ea; uint32_t total, bytes, offset; } ring_memory;
+static uint64_t ring_retained;
+
+#ifdef PS3DK_PROF_PAL_LV2
+#include <sys/memory.h>
+static int ring_allocate_lv2(uint32_t bytes, uintptr_t *ea)
+{
+    sys_addr_t addr=0;
+    if(sys_memory_allocate(bytes,SYS_MEMORY_PAGE_SIZE_1M,&addr)!=0 || !addr) return -1;
+    *ea=(uintptr_t)addr;
+    return 0;
+}
+static int ring_map_lv2(uintptr_t ea, uint32_t bytes, uint32_t *offset)
+{
+    return cellGcmMapMainMemory((const void *)ea,bytes,offset)==0 ? 0:-1;
+}
+static const auto_ring_memory gpp_ring_memory_gcm={ring_allocate_lv2,ring_map_lv2};
+#endif
+
+static const auto_ring_memory *ring_memory_ops(void)
+{
+#ifdef PS3DK_PROF_PAL_LV2
+    return &gpp_ring_memory_gcm;
+#elif defined(PS3DK_PROF_TEST_HOOKS)
+    return (const auto_ring_memory *)ps3dk_prof_test_hooks.auto_ring_memory;
+#else
+    return NULL;
+#endif
+}
+
+/* 0, or the CONFIG refusal reason. Allocates (or reuses) and maps before any admission; the metadata queue and the
+ * descriptors are initialized in the allocation's unmapped tail. */
+static uint32_t ring_attach(auto_capture *a, const ps3dk_prof_auto_options *o, const auto_ring_plan *plan)
+{
+    const auto_ring_memory *m=ring_memory_ops();
+    uintptr_t ea=0;
+    uint32_t offset=0;
+    if(ring_memory.ea && ring_memory.total==plan->total && ring_memory.bytes==plan->bytes) {
+        ea=ring_memory.ea;offset=ring_memory.offset;
+    } else {
+        if(!m || !m->allocate || !m->map || m->allocate(plan->total,&ea)!=0 || !ea) return AUTO_ALLOCATION_FAILED;
+        /* Kept from here on: a failed map may still have made the pages GPU visible. */
+        if((ea&(AUTO_RING_PAGE-1u)) || m->map(ea,plan->bytes,&offset)!=0 || (offset&15u) ||
+           (uint64_t)offset+plan->bytes>UINT64_C(0x100000000)) {
+            ring_retained+=plan->total;return AUTO_ALLOCATION_FAILED;
+        }
+        if(ring_memory.ea) ring_retained+=ring_memory.total;
+        ring_memory.ea=ea;ring_memory.total=plan->total;ring_memory.bytes=plan->bytes;ring_memory.offset=offset;
+    }
+    memset((void *)(ea+plan->metadata_at),0,plan->total-plan->metadata_at);
+    if(!auto_ring_init(&a->ring,(auto_ring_slot *)(void *)(ea+plan->slots_at),plan->slots,plan->blocks,plan->pairs) ||
+       !auto_queue_init_wide(&a->operations,(auto_queue_entry *)(void *)(ea+plan->metadata_at),plan->records,
+                             plan->legacy_pairs)) return AUTO_UNSUPPORTED_CONTEXT;
+    queue_reserves(a,o,plan);
+    a->ring_plan=*plan;a->ring_ea=ea;a->ring_offset=offset;
+    return 0;
+}
+#endif
+
 static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *options,
-                  uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc)
+                  uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc,
+                  const void *io_address, uint32_t io_bytes)
 {
     const ps3dk_prof_auto_options defaults=PS3DK_PROF_AUTO_OPTIONS_INIT;
-    const ps3dk_prof_auto_options *o=options ? options:&defaults;
+    ps3dk_prof_auto_options normalized;
+    const ps3dk_prof_auto_options *o=&normalized;
+    auto_ring_plan ring;
+    uint32_t ring_label=0;
     auto_wire_config config={0};
     auto_capture *next=NULL,*prior;
     prof *p;
@@ -117,13 +256,16 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     uint32_t claim=0,lease=0,id=0,reason=0;
     size_t records=0,frames=0,bytes=0;
     int rc=PS3DK_PROF_EINVAL,locked=0,fifo_prepared=0;
+    uintptr_t io=clean_io;
+    uint32_t start=clean_start;
     if(instance) *instance=0;
     if(domain) *domain=0;
     if(!instance || !domain) return rc;
     if(g_tls.in_drain || g_tls.in_gpu) return PS3DK_PROF_EBUSY;
     p=p_ready() ? g_prof:NULL;
     if(!p) return PS3DK_PROF_ENOTINIT;
-    if(!layout(o,&records,&frames,&bytes)) return rc;
+    if(!options_copy(options ? options:&defaults,&normalized) ||
+       !layout(o,&ring,&ring_label,&records,&frames,&bytes)) return rc;
     if(!options && !defaults_reserved(o)) return rc; /* defaults never take application indices */
     /* Become a participant before owning mutable configuration or entering a
      * device accessor. Shutdown's owner inventory can then see this setup. */
@@ -158,7 +300,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     memset(next,0,bytes);
     if(pal_owner_get(&next->owner)!=0) {reason=AUTO_NO_OWNER;rc=PS3DK_PROF_ETHREAD;goto fail;}
     if(gpp_prepare(&next->operations_port,device(),gc,o->report_first,o->report_count,o->operation_label)!=PRG_OK ||
-       gpp_prepare(&next->clock_port,device(),gc,o->report_first,16,o->clock_label)!=PRG_OK) {
+       gpp_prepare(&next->clock_port,device(),gc,o->report_first,16,o->clock_label)!=PRG_OK ||
+       (ring.blocks && gpp_prepare(&next->ring_port,device(),gc,ring.first,2u*ring.blocks*ring.pairs,ring_label)!=PRG_OK)) {
         reason=AUTO_LEASE_UNVERIFIED;goto fail;
     }
     next->context=gc;next->owner_slot=g_tls.slot1-1;
@@ -170,22 +313,30 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     if(!auto_clock_init(&next->clocks,1,1,o->report_first,p->tb_freq)) {
         reason=AUTO_UNSUPPORTED_CONTEXT;goto fail;
     }
-    (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
-                          o->metadata_records,(o->report_count-16)/2);
-    {
-        uint32_t pairs=(o->report_count-16)/2;
-        uint32_t ranges=0;
-        (void)range_pairs(o,&ranges);   /* validated by layout */
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_CALL,call_pairs(pairs));
-        auto_queue_set_reserve(&next->operations,AUTO_PAIR_RANGE,ranges);
+    if(!ring.blocks) {
+        (void)auto_queue_init(&next->operations,(auto_queue_entry *)((uint8_t *)next+records),
+                              o->metadata_records,(o->report_count-16)/2);
+        queue_reserves(next,o,&ring);
     }
+    next->ring_label=ring_label;next->scan=(uintptr_t)(void *)gc->current;
+    /* the init's record (an override reuses it: the context is the one initialized) */
+    if(initial) init_record(gc,io_address,io_bytes,&io,&start);
+    next->shadow.io=(const uint32_t *)(void *)io;next->shadow.start=start;
     for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
     next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
     gpp_bind(&next->operations_device,&next->operations_port);
     gpp_bind(&next->clock_device,&next->clock_port);
+    if(ring.blocks) gpp_bind(&next->ring_device,&next->ring_port);
+#ifdef PS3DK_PROF_AUTO_RING
+    /* Before the lease: a failed override leaves the current reservation and capture intact. */
+    if(ring.blocks && (reason=ring_attach(next,o,&ring))!=0) {
+        rc=reason==AUTO_ALLOCATION_FAILED ? PS3DK_PROF_ENOMEM:PS3DK_PROF_EINVAL;goto fail;
+    }
+#endif
     if(p_ext_lock_at(p)!=0) {reason=AUTO_STOPPED;rc=PS3DK_PROF_ESTOPPED;goto fail;}
     locked=1;
-    rc=p_auto_lease_claim(p,gc,o->report_first,o->report_count,o->operation_label,o->clock_label,&id,&lease);
+    rc=p_auto_lease_claim_ring(p,gc,o->report_first,o->report_count,o->operation_label,o->clock_label,ring_label,
+                               &id,&lease);
     if(rc!=0) {reason=rc==PS3DK_PROF_ESTOPPED ? AUTO_STOPPED:AUTO_RESOURCE_CONFLICT;goto fail;}
     next->lease_ticket=lease;
     /* CONFIG's WRITING claim protects the candidate, not the extension mutex.
@@ -205,13 +356,21 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     config.instance=1;config.domain=id;config.epoch=1;config.owner=g_tls.incarnation;config.generation=1;
     config.report_first=o->report_first;config.report_count=o->report_count;
     config.op_label=o->operation_label;config.clock_label=o->clock_label;
-    config.pairs=(o->report_count-16)/2;config.metadata=o->metadata_records;config.frames=o->frame_records;
-    config.call_pairs=call_pairs(config.pairs);(void)range_pairs(o,&config.range_pairs);
+    config.pairs=(o->report_count-16)/2;config.metadata=ring.blocks ? ring.records:o->metadata_records;
+    config.frames=o->frame_records;
+    config.call_pairs=call_pairs(legacy_pool(o,&ring));(void)range_pairs(o,&ring,&config.range_pairs);
+    if(ring.blocks) {
+        /* REPORT_RING budgets: raw MAIN extents and metadata, each bounded separately */
+        config.ring_bytes=ring.bytes;config.ring_blocks=ring.blocks;config.ring_pairs=ring.pairs;
+        config.ring_first=ring.first;config.ring_label=ring_label;config.ring_stride=ring.stride;
+        config.ring_slots=ring.slots;config.metadata_stride=ring.metadata_stride;config.legacy_pairs=ring.legacy_pairs;
+    }
     config.allocated=bytes;config.ceiling=o->max_bytes;
     capture=next;
     if(initial) {
         clean_context=gc;clean_begin=(uintptr_t)(void *)gc->begin;
         clean_current=(uintptr_t)(void *)gc->current;clean_end=(uintptr_t)(void *)gc->end;
+        clean_io=io;clean_start=start;
     }
     if(!auto_config_commit(&configuration,claim,&config)) {
         capture=NULL;
@@ -253,7 +412,7 @@ fail:
 int ps3dk_prof_auto_attach(ps3dk_prof_gcm_ctx *context, const ps3dk_prof_auto_options *options,
                           uint32_t *instance, uint32_t *domain)
 {
-    return attach(context,options,instance,domain,0,0);
+    return attach(context,options,instance,domain,0,0,NULL,0);
 }
 
 void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t command_bytes,
@@ -261,9 +420,10 @@ void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t comm
 {
     uint32_t instance,domain;
     /* Only the selected SDK init wrapper calls this, after extent admission.
-     * No original application result is changed by an observer refusal. */
-    (void)command_bytes;(void)io_bytes;(void)io_address;
-    (void)attach(context,NULL,&instance,&domain,1,rc);
+     * No original application result is changed by an observer refusal.
+     * io_address/io_bytes: the host buffer at IO 0, recorded for the ring decoder. */
+    (void)command_bytes;
+    (void)attach(context,NULL,&instance,&domain,1,rc,io_address,io_bytes);
 }
 
 /* A mutable candidate is protected by the same CONFIG claim as attachment.
@@ -330,6 +490,15 @@ static void increment(auto_capture *a,uint64_t *v)
     }
 }
 
+/* Owner only: recycling stops for the rest of the capture, nothing is read or retired afterwards (a label anomaly or
+ * uncertain emission). A pending block is quarantined by its caller. */
+static void ring_refuse(auto_capture *a, uint32_t reason)
+{
+    if(!a->ring_refusal) a->ring_refusal=reason;
+    auto_ring_stop(&a->ring);
+}
+_Static_assert((int)AUTO_STATUS_RING_REJECT_MAX==(int)AUTO_RING_REJECT_MAX, "STATUS names every decoder rejection reason");
+
 static int initialize_device(auto_capture *a)
 {
     const auto_wire_config *c=auto_config_read(&configuration);
@@ -337,15 +506,218 @@ static int initialize_device(auto_capture *a)
     if(!c || !p_auto_lease_mark(g_prof,a->lease_ticket)) return 0;
     a->operations_device.write_label(a->operations_device.ctx,c->op_label,0);
     a->clock_device.write_label(a->clock_device.ctx,c->clock_label,0);
+    if(a->ring_plan.blocks) a->ring_device.write_label(a->ring_device.ctx,a->ring_label,0);
     a->operations_device.sync(a->operations_device.ctx);
+    /* The ring's publication targets 2g-1, 2g only increase from this reset. A label that does not read back zero
+     * stops recycling; the legacy pool is unaffected. */
+    if(a->ring_plan.blocks && a->ring_device.read_label(a->ring_device.ctx,a->ring_label)!=0) ring_refuse(a,AUTO_RING_REFUSED_LABEL);
     a->device_initialized=1;return 1;
 }
+
+#ifdef PS3DK_PROF_AUTO_RING
+static int ring_native(const gpp_ctx *ctx)
+{
+    return ps3tc_fifo_wrap_native((const struct _gcmCtxData *)(const void *)ctx);
+}
+/* Owner only: no new block for the rest of the capture, for a refusal found before anything was stored in the
+ * command stream (unknown M2MF state, a replaced callback, an end that is not ours). Blocks whose copies were already
+ * emitted with known state still drain and retire. */
+static void ring_halt(auto_capture *a, uint32_t reason)
+{
+    if(!a->ring_refusal) a->ring_refusal=reason;
+    auto_ring_halt(&a->ring);
+}
+static int ring_stopped(auto_capture *a)
+{
+    return LD_ACQ(&a->ring.invalid) || LD_ACQ(&a->ring.halted);
+}
+/* Owner: decode the owner words written since the cursor. At every hook all words below current are complete. A
+ * cursor outside [begin, current] means the ring moved without the native wrap: the shadow is unknown for good. The
+ * decoder's first rejection (header, offset, reason) is published once for the drainer's STATUS. */
+static void ring_scan(auto_capture *a, gpp_ctx *ctx)
+{
+    uintptr_t begin=(uintptr_t)(void *)ctx->begin,cur=(uintptr_t)(void *)ctx->current;
+    if(a->scan<begin || a->scan>cur || ((cur-a->scan)&3u))
+        auto_ring_shadow_reject(&a->shadow,0,(uint32_t)(cur-begin),AUTO_RING_REJECT_CURSOR);
+    else {
+        a->shadow.origin=(uint32_t)(a->scan-begin);
+        (void)auto_ring_shadow_scan(&a->shadow,(const uint32_t *)(void *)a->scan,(cur-a->scan)/4u);
+    }
+    a->scan=cur;
+    ST_REL(&a->ring_decoded,a->shadow.words); /* the decoder's cost, snapshot for the drainer's STATUS */
+    if(a->shadow.bad_reason && !a->ring_reject[2]) {
+        a->ring_reject[0]=a->shadow.bad_header;a->ring_reject[1]=a->shadow.bad_at;
+        ST_REL(&a->ring_reject[2],a->shadow.bad_reason);
+    }
+}
+/* Owner, before the first draw of a new block: keep the worst-case flush below the physical end. Only the native
+ * wrap releases it before its JUMP; any other callback refuses recycling. */
+static int ring_tail_reserve(auto_capture *a, gpp_ctx *ctx, uint64_t words)
+{
+    uintptr_t end=(uintptr_t)(void *)ctx->end;
+    if(!ring_native(ctx)) {ring_halt(a,AUTO_RING_REFUSED_CALLBACK);return 0;}
+    if(end!=clean_end || !auto_ring_tail_take(&a->tail,(uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
+                                              &end,AUTO_RING_FLUSH_WORDS,words)) return 0;
+    ctx->end=(void *)end;
+    return 1;
+}
+/* Owner, no callback, flush or wait: restore the exact physical end, append the open block's flush at current and
+ * seal it. A refusal before any flush word is stored quarantines the block (uncertain, never reused) and halts new
+ * admission; blocks sealed earlier still drain. An end that is not exactly ours is left as it is. */
+static void ring_flush(auto_capture *a, gpp_ctx *ctx)
+{
+    uintptr_t begin=(uintptr_t)(void *)ctx->begin,cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    size_t n;
+    uint32_t seq,slot;
+    if(!a->tail.active) return;
+    ring_scan(a,ctx);
+    ST_REL(&a->ring_flush_request,0u);
+    if(!auto_ring_tail_release(&a->tail,begin,cur,&end)) {
+        a->tail.active=0;ring_halt(a,AUTO_RING_REFUSED_END);goto quarantine;
+    }
+    ctx->end=(void *)end;
+    if(!ring_native(ctx)) {ring_halt(a,AUTO_RING_REFUSED_CALLBACK);goto quarantine;}
+    if(!a->ring.active) return;
+    seq=a->ring.active;slot=(seq-1u)%a->ring.capacity;
+    {
+        uint32_t local=(seq-1u)%a->ring.blocks;
+        /* the M2MF case this flush leaves the application in, published to the drainer by the seal below */
+        a->ring.slots[slot].state=a->shadow.known ? 1u:0u;
+        n=auto_ring_flush_packet((uint32_t *)(void *)cur,(end-cur)/4u,&a->shadow,
+                                 a->ring_offset+slot*a->ring_plan.stride,a->ring_plan.first+local*2u*a->ring_plan.pairs,
+                                 a->ring.slots[slot].count*32u,a->ring_label,seq);
+    }
+    if(!n) {ring_halt(a,AUTO_RING_REFUSED_EMIT);goto quarantine;} /* no word stored */
+    ctx->current=(void *)((uint32_t *)(void *)cur+n);
+    a->scan=(uintptr_t)(void *)ctx->current; /* the injected packet is never application state */
+    a->ring_injected_words+=n;a->ring_flushes++;
+    ST_REL(&a->ring_copied,a->ring_copied+a->ring.slots[slot].count*32u);
+    if(a->shadow.known) ST_REL(&a->ring_restored,a->ring_restored+1u);
+    else ST_REL(&a->ring_untouched,a->ring_untouched+1u);
+    (void)auto_ring_seal(&a->ring,1);
+    /* the block's publication target joins the ring PUT frontier; the next PUT (this wrap's, or FlushBuffer's)
+     * publishes it */
+    if(!auto_publication_commit(&a->ring_publication,2u*seq)) ring_refuse(a,AUTO_RING_REFUSED_EMIT);
+    return;
+quarantine:
+    if(auto_ring_quarantine(&a->ring)) a->ring_quarantined++;
+}
+
+/* Owner, outside any draw bracket: settle the open block now (frame, window, seal-request, stop and retirement
+ * boundaries). The flush is appended at current inside the tail reserved for it; never from another thread. */
+static void ring_settle(auto_capture *a)
+{
+    if(a->ring_plan.blocks && a->tail.active && !a->active && !a->segment_active) ring_flush(a,a->context);
+}
+
+enum { AUTO_RING_ROOM=100 };
+/* Owner, before the first draw of a new block: a known application M2MF state (or none touched), the physical tail
+ * for the worst-case flush below the draw and its two markers, then a MAIN extent. A tail taken for a block that is
+ * then refused is given back exactly. The new extent is poisoned before any GPU copy into it: the consumer retired it
+ * (auto_ring_admit acquires that), so nothing reads or writes it now. */
+static int ring_open(auto_capture *a, gpp_ctx *ctx, uint64_t frame, uint32_t window, uint64_t words,
+                     auto_ring_ticket *t)
+{
+    uintptr_t end;
+    int r;
+    ring_scan(a,ctx);
+    if(a->shadow.invalid) {ring_halt(a,AUTO_RING_REFUSED_EMIT);return AUTO_RING_INVALID;}
+    if(!ring_tail_reserve(a,ctx,words+4u)) return ring_stopped(a) ? AUTO_RING_INVALID:AUTO_RING_ROOM;
+    r=auto_ring_admit(&a->ring,frame,window,1,t);
+    if(r!=AUTO_RING_OK) {
+        end=(uintptr_t)(void *)ctx->end;
+        if(auto_ring_tail_release(&a->tail,(uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,&end))
+            ctx->end=(void *)end;
+        return r;
+    }
+    memset((void *)(a->ring_ea+(uintptr_t)t->slot*a->ring_plan.stride),0xff,(size_t)a->ring_plan.pairs*32u);
+    return AUTO_RING_OK;
+}
+
+static void segment_report(gpp_ctx *ctx,uint32_t report);
+/* Owner ARRAY/INDEX/CLEAR on the attached ring with the report ring: metadata first (a snapshot claim, cancelled if
+ * nothing follows), then the open block, or a new block (ring_open). The draw's begin timestamp goes to its local pair
+ * with no per-draw label release: the block's flush publishes it. Exclusions: room 2, metadata 4, reentry 5, stopped 9,
+ * device 10, others 11 as on the legacy path; ring_full (no free MAIN extent) and ring_state (unknown M2MF state,
+ * refused or invalid ring) are disjoint COVERAGE columns. Never the legacy frame-tail latch: ring pressure is transient. */
+static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call *call, uint64_t caller, uint64_t words)
+{
+    const auto_wire_config *c=auto_config_read(&configuration);
+    const uint64_t frame=a->coverage.active ? a->coverage.live.frame:UINT64_MAX;
+    const uint32_t window=p_window_id(g_prof);
+    auto_queue_entry *e;
+    auto_ring_ticket t;
+    int r;
+    if(!initialize_device(a)) {(void)auto_frames_count(&a->coverage,call->kind,10);return 0;}
+    if(ring_stopped(a)) {(void)auto_frames_ring(&a->coverage,call->kind,1);return 0;}
+    e=auto_queue_claim_snapshot(&a->operations);
+    if(!e) {
+        uint32_t column=a->operations.refusal==AUTO_QUEUE_METADATA ? 4:
+                        a->operations.refusal==AUTO_QUEUE_REENTRY ? 5:
+                        a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;
+        (void)auto_frames_count(&a->coverage,call->kind,column);return 0;
+    }
+    r=a->ring.active ? auto_ring_admit(&a->ring,frame,window,1,&t):AUTO_RING_BOUNDARY;
+    if(r==AUTO_RING_BOUNDARY) {
+        /* another frame or window (an END and reopen show different ids) or a full block: settle it first */
+        if(a->ring.active) ring_flush(a,ctx);
+        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words,&t);
+    }
+    if(r!=AUTO_RING_OK) {
+        (void)auto_queue_cancel_snapshot(&a->operations);
+        if(r==AUTO_RING_ROOM) (void)auto_frames_count(&a->coverage,call->kind,2);
+        else (void)auto_frames_ring(&a->coverage,call->kind,r==AUTO_RING_FULL ? 0:1);
+        return 0;
+    }
+    ST_REL(&a->admitted,e->op.id);
+    e->op.kind=(uint16_t)call->kind;e->op.caller=caller;e->op.generation=c->generation;
+    e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;e->op.flags=AUTO_OP_RING;
+    if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+    e->op.args[0]=(uint32_t)words;
+    if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
+    if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;
+        e->op.args[4]=call->index_type;e->op.args[5]=call->mode;}
+    if(call->kind==3) e->op.args[6]=call->clear_mask;
+    /* past the last cancellation point: the shared block serials on the ring label replace the claim's */
+    e->op.report_begin=a->ring_plan.first+t.local*2u*a->ring_plan.pairs+2u*t.pair;e->op.report_end=e->op.report_begin+1u;
+    e->op.serial_begin=2u*t.generation-1u;e->op.serial_end=2u*t.generation;
+    e->op.ring_generation=t.generation;e->op.ring_slot=t.slot;
+    e->op.ring_ordinal=(uint16_t)t.pair;e->op.ring_local=(uint16_t)t.local;
+    a->active=e;g_tls.in_gpu=1;
+    e->op.tb_before=observation_tb();
+    segment_report(ctx,e->op.report_begin);
+    a->expected_end=(uintptr_t)(void *)ctx->current+words*4u;
+    return e->op.serial_end;
+}
+/* The ring draw's end: its end timestamp, the record, and the block's flush right after its last pair. */
+static void ring_end(auto_capture *a, auto_queue_entry *e, uint32_t ticket)
+{
+    gpp_ctx *ctx=a->context;
+    uintptr_t current=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
+    const uint32_t slot=e->op.ring_slot;
+    int complete;
+    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<8) {
+        e->op.flags|=4|32;
+        auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
+    } else segment_report(ctx,e->op.report_end);
+    e->op.tb_after=observation_tb();
+    if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
+    complete=!(e->op.flags&4);
+    (void)auto_frames_count(&a->coverage,e->op.kind,complete ? 1:11);
+    auto_queue_commit(&a->operations);
+    a->active=NULL;g_tls.in_gpu=0;
+    if(a->ring.slots[slot].count==a->ring.pairs) ring_flush(a,ctx);
+    else if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
+}
+#else
+static void ring_settle(auto_capture *a) {(void)a;}
+#endif
 
 static uint64_t clock_tb(void *user) {(void)user;return observation_tb();}
 static int clock_live(void *user)
 {
     auto_capture *a=user;
-    if((uintptr_t)(void *)a->context->begin!=clean_begin || (uintptr_t)(void *)a->context->end!=clean_end) {
+    if((uintptr_t)(void *)a->context->begin!=clean_begin || !end_clean(a,(uintptr_t)(void *)a->context->end)) {
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);return 0;
     }
     return !LD_ACQ(&g_prof->stop_latch) && auto_config_can_admit(&configuration) &&
@@ -409,7 +781,8 @@ void ps3dk_prof__auto_resource_write(struct _gcmCtxData *context,uint32_t kind,u
     if(a && (!c || !c->reason)) {
         uint32_t first=a->operations_port.report_first,count=a->operations_port.report_count;
         int conflict=kind==1 ? (index>=2048 || (index>=first && index-first<count)):
-                     (index==a->operations_port.label || index==a->clock_port.label);
+                     (index==a->operations_port.label || index==a->clock_port.label ||
+                      (a->ring_port.ready && index==a->ring_port.label));
         if(conflict) {
             increment(a,&a->conflicts);
             auto_queue_stop(&a->operations);
@@ -746,7 +1119,7 @@ void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring,struct _gcmCtx
     /* room: this report (2), the CALL and its label (5), the end report (2) and the release (4) */
     if(ctx!=a->context || !c || c->reason || a->active || a->segment_active || !a->coverage.active ||
        a->call_ordinal==UINT32_MAX || LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
-       (uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end || (cur&3u) || cur>end || end-cur<52 ||
+       (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<52 ||
        !initialize_device(a) || (pair=auto_queue_take_reserved_pair(&a->operations))<0) {
         increment(a,&a->call_brackets_refused);return;
     }
@@ -906,7 +1279,7 @@ static void frame_mark(auto_capture *a,uint32_t role)
     uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
     if(!a->coverage.active || a->active || !c || c->reason || LD_ACQ(&g_prof->stop_latch) ||
        !auto_config_can_admit(&configuration)) return;
-    if((uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end || (cur&3u) || cur>end || end-cur<48 ||
+    if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<48 ||
        !initialize_device(a) || !(e=auto_queue_claim(&a->operations))) {
         increment(a,&a->frame_marks_missed);return;
     }
@@ -991,15 +1364,27 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
          * owner stop acknowledgement. No new marker is admitted here. */
         int stopped=LD_ACQ(&g_prof->stop_latch)!=0;
         (void)auto_frames_count(&a->coverage,call->kind,stopped ? 7:9);
-        if(stopped) p_observe_stop(g_prof);
+        if(stopped) {ring_settle(a);p_observe_stop(g_prof);}
         return 0;
     }
-    if((uintptr_t)(void *)ctx->begin!=clean_begin || (uintptr_t)(void *)ctx->end!=clean_end) {
+    if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,(uintptr_t)(void *)ctx->end)) {
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
         (void)auto_frames_count(&a->coverage,call->kind,11);
         return 0;
     }
     if(a->timing && !a->timed_open) { (void)auto_frames_outside(&a->coverage,call->kind);return 0; }
+#ifdef PS3DK_PROF_AUTO_RING
+    if(a->ring_plan.blocks) {
+        if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
+        words=auto_command_words(call);
+        if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
+        if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
+                             (uintptr_t)(void *)ctx->end,words)) {
+            (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
+        }
+        return ring_begin(a,ctx,call,caller,words);
+    }
+#endif
     if(a->pool_tail_column) { (void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0; }
     words=auto_command_words(call);
     if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
@@ -1061,6 +1446,13 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
         return;
     }
     if(!(e=a->active)) return;
+#ifdef PS3DK_PROF_AUTO_RING
+    if(e->op.flags&AUTO_OP_RING) {
+        ring_end(a,e,ticket);
+        if(LD_ACQ(&g_prof->stop_latch)) {ring_settle(a);p_observe_stop(g_prof);}
+        return;
+    }
+#endif
     c=auto_config_read(&configuration);
     uintptr_t current=(uintptr_t)(void *)a->context->current,end=(uintptr_t)(void *)a->context->end;
     if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<24 ||
@@ -1085,6 +1477,7 @@ uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *context)
     if(!context) return 0;
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,0);
     if(a) a->clock_put_frontier=auto_clock_before(&a->clocks);
+    if(a) a->ring_put_snapshot=auto_publication_before(&a->ring_publication);
     return a ? auto_publication_before(&a->publication):0;
 }
 void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontier)
@@ -1095,6 +1488,9 @@ void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontie
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
     if(a && !auto_clock_after(&a->clocks,a->clock_put_frontier))
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
+    /* the ring's own frontier: blocks flushed before this PUT are published by it */
+    if(a && a->ring_plan.blocks && !auto_publication_after(&a->ring_publication,a->ring_put_snapshot))
+        auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
 }
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 {
@@ -1102,6 +1498,48 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
     ps3dk_prof__fifo_account_unknown(context);
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,1);
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
+#ifdef PS3DK_PROF_AUTO_RING
+    if(a && a->tail.active) {
+        /* give the reserved tail back without a flush: the open block is uncertain */
+        gpp_ctx *ctx=(gpp_ctx *)(void *)context;
+        uintptr_t end=(uintptr_t)(void *)ctx->end;
+        if(auto_ring_tail_release(&a->tail,(uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,&end))
+            ctx->end=(void *)end;
+        a->tail.active=0;
+    }
+    if(a && a->ring_plan.blocks) {
+        ring_refuse(a,AUTO_RING_REFUSED_RESET);
+        if(auto_ring_seal(&a->ring,0)) a->ring_quarantined++;
+    }
+#endif
+}
+
+/* Report ring hooks (ps3tc_prof_auto.h). Owner context only; the drainer and foreign threads never emit. */
+void ps3dk_prof__auto_prewrap(struct _gcmCtxData *context)
+{
+#ifdef PS3DK_PROF_AUTO_RING
+    gpp_ctx *ctx=(gpp_ctx *)(void *)context;
+    auto_capture *a;
+    if(!ctx || !p_ready() || g_tls.in_drain || !(a=owner_capture(ctx,1)) || !a->ring_plan.blocks) return;
+    if(a->tail.active) ring_flush(a,ctx);
+    else ring_scan(a,ctx);
+    a->scan=(uintptr_t)(void *)ctx->begin; /* the wrap resumes at begin; its JUMP is not application state */
+#else
+    (void)context;
+#endif
+}
+void ps3dk_prof__auto_preflush(struct _gcmCtxData *context)
+{
+#ifdef PS3DK_PROF_AUTO_RING
+    gpp_ctx *ctx=(gpp_ctx *)(void *)context;
+    auto_capture *a;
+    if(!ctx || !p_ready() || g_tls.in_drain || !(a=owner_capture(ctx,0)) || !a->ring_plan.blocks) return;
+    /* a requested boundary, or a callback that would wrap without prewrap: settle the block before PUT */
+    if(a->tail.active && !a->active && (LD_ACQ(&a->ring_flush_request) || !ring_native(ctx))) ring_flush(a,ctx);
+    else ring_scan(a,ctx);
+#else
+    (void)context;
+#endif
 }
 
 static void present_boundary(auto_capture *a);
@@ -1109,6 +1547,7 @@ void p_auto_owner_retire(void)
 {
     auto_capture *a=owner_capture(NULL,1);
     if(a && !a->active) {
+        ring_settle(a); /* retirement: the open block flushes before the owner's last acknowledgement */
         if(a->fifo_instance) (void)ps3dk_prof_fifo_detach(a->fifo_instance);
         for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].count) segment_drop(a,&a->segments[i]);
         if(a->coverage.active) {
@@ -1128,6 +1567,7 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
         /* outside a window: the previous window's last row closes, clock anchors keep their cadence so the next
          * window's map qualifies, and no row or FRAME mark opens */
         if(!a->active && !g_tls.in_gpu && auto_config_can_admit(&configuration)) {
+            ring_settle(a); /* the window ended: its block flushes at the owner's next boundary */
             if(a->coverage.active) (void)close_frame(a,a->coverage.owner,a->coverage.live.frame);
             if(frame%8u==0) sample_clock(a,frame);
         }
@@ -1137,9 +1577,10 @@ void p_auto_frame(uint64_t frame,uint64_t tb)
         int flip=a->in_flip_frame!=0;
         if(!flip) a->explicit_seen=1; /* an explicit call takes precedence from here on */
         present_boundary(a);
+        ring_settle(a); /* the previous frame's block, before its END mark */
         if(a->coverage.active) frame_mark(a,AUTO_FRAME_END); /* implied closure of the previous frame */
         if(frame%8u==0) sample_clock(a,frame);
-        if(LD_ACQ(&g_prof->stop_latch)) {p_observe_stop(g_prof);return;}
+        if(LD_ACQ(&g_prof->stop_latch)) {ring_settle(a);p_observe_stop(g_prof);return;}
         a->pool_tail_column=0; /* each frame starts admitting again; its own exhaustion makes its own tail */
         if(auto_frames_open(&a->coverage,frame,tb)) {
             a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT; /* this writer observes presentation (block at 352) */
@@ -1156,6 +1597,7 @@ static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
 {
     if(a->coverage.active && owner==a->coverage.owner && frame==a->coverage.live.frame) {
         present_boundary(a);
+        ring_settle(a);
         frame_mark(a,AUTO_FRAME_END);
     }
     if(!auto_frames_close(&a->coverage,owner,frame,observation_tb(),0)) return 0;
@@ -1457,7 +1899,35 @@ static void completion_sync(void *user)
  * acknowledged, in order, after the whole chunk was accepted. */
 enum { AUTO_OPS_BATCH=64 };
 static auto_wire_op batch[AUTO_OPS_BATCH];
-static uint8_t batch_ready[AUTO_OPS_BATCH];
+static uint8_t batch_ready[AUTO_OPS_BATCH],batch_ring[AUTO_OPS_BATCH];
+
+#ifdef PS3DK_PROF_AUTO_RING
+/* Drainer: a ring record is READY only once its block's publication (label 2g) is observed at or below the acquired
+ * ring PUT frontier; only then is its MAIN copy read, never the recycled local block. *ack: the block is published
+ * (auto_ring_ready accepted it), so this record's exact ordinal must be acknowledged after whole sink acceptance,
+ * timed or not. A future/regressed label or an uncertain block refuses the record and stops recycling. */
+static int ring_read(auto_capture *a, auto_wire_op *record, uint8_t *ack)
+{
+    const uint32_t frontier=auto_publication_read(&a->ring_publication);
+    const uint32_t label=a->ring_device.read_label(a->ring_device.ctx,a->ring_label);
+    const volatile uint64_t *m;
+    int r;
+    *ack=0;
+    if(auto_config_flags(&configuration)) return AUTO_COMPLETION_REFUSED;
+    r=auto_ring_ready(&a->ring,record->ring_generation,label,frontier);
+    if(r==AUTO_RING_PENDING) return AUTO_COMPLETION_PENDING;
+    if(r!=AUTO_RING_OK || record->ring_slot!=(record->ring_generation-1u)%a->ring.capacity ||
+       record->ring_ordinal>=a->ring.slots[record->ring_slot].count) return AUTO_COMPLETION_REFUSED;
+    *ack=1;
+    a->ring_device.sync(a->ring_device.ctx); /* the copy before the label: read MAIN after the label read */
+    m=(const volatile uint64_t *)(a->ring_ea+(uintptr_t)record->ring_slot*a->ring_plan.stride+32u*record->ring_ordinal);
+    record->raw_begin=m[0];record->raw_end=m[2];
+    record->ring_state=a->ring.slots[record->ring_slot].state;
+    record->published=label;
+    if(record->raw_begin==PRG_POISON || record->raw_end==PRG_POISON) return AUTO_COMPLETION_REFUSED;
+    return AUTO_COMPLETION_READY;
+}
+#endif
 
 static int drain_operations(auto_capture *a,int seal)
 {
@@ -1470,6 +1940,23 @@ static int drain_operations(auto_capture *a,int seal)
         auto_wire_op record=head->op;
         auto_completion_fact fact={0};
         int result=AUTO_COMPLETION_REFUSED;
+        batch_ring[n]=0;
+#ifdef PS3DK_PROF_AUTO_RING
+        if(record.flags&AUTO_OP_RING) {
+            /* an incomplete draw of a published block still owes its ordinal's acknowledgement */
+            result=ring_read(a,&record,&batch_ring[n]);
+            if((record.flags&4) && result==AUTO_COMPLETION_READY) result=AUTO_COMPLETION_REFUSED;
+            if(result==AUTO_COMPLETION_PENDING && !seal) {stop=1;break;}
+            if(result==AUTO_COMPLETION_READY) record.flags|=2;
+            else {
+                record.flags|=4;record.raw_begin=record.raw_end=0;
+                if(!batch_ring[n]) {record.flags|=32;record.published=0;}
+                if(result==AUTO_COMPLETION_REFUSED) record.flags|=16;
+            }
+            batch[n]=record;batch_ready[n]=result==AUTO_COMPLETION_READY;n++;
+            continue;
+        }
+#endif
         if(!(record.flags&4) && !auto_config_flags(&configuration))
             result=auto_completion_read(&a->completion,&a->publication,&port,
                                         record.report_begin,record.report_end,
@@ -1493,8 +1980,12 @@ static int drain_operations(auto_capture *a,int seal)
     }
     if(!n) return 1;
     if(!auto_writer_ops(&writer,batch,n)) return 0;
-    for(i=0;i<n;i++)
+    /* whole sink acceptance, then the metadata AND the exact ring ordinal; the last ordinal frees the MAIN extent */
+    for(i=0;i<n;i++) {
         if(!auto_queue_ack(&a->operations,batch[i].id,batch_ready[i],1)) return 0;
+        if(batch_ring[i] && !auto_ring_ack(&a->ring,batch[i].ring_generation,batch[i].ring_ordinal,1))
+            auto_ring_stop(&a->ring);
+    }
     if(stop) return 1;
     }
 }
@@ -1512,6 +2003,8 @@ void p_auto_init(prof *p)
 
 void p_auto_seal_claim(void)
 {
+    /* a foreign closer: the owner settles its open block at its next hook; nothing is emitted here */
+    if(capture && capture->ring_plan.blocks) ST_REL(&capture->ring_flush_request,1u);
     auto_config_stop(&configuration);
 }
 
@@ -1594,7 +2087,23 @@ void p_auto_drain(prof *p, int seal)
         if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;
         if(LD_ACQ(&capture->saturated) || LD_ACQ(&capture->coverage.saturated) ||
            LD_ACQ(&capture->clocks.saturated)) flags|=AUTO_LOWER_BOUND|AUTO_SATURATED;
-        if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}
+        if(capture->ring_plan.blocks) {
+            /* REPORT_RING tail: owner values are its release stores; issued/retired the ring's own atomics */
+            uint64_t ring[8];
+            uint32_t reject[3]={0,0,0};
+            ring[0]=LD_ACQ(&capture->ring.issued);ring[1]=LD_ACQ(&capture->ring.retired);
+            ring[2]=auto_publication_read(&capture->ring_publication);ring[3]=ring[0]-ring[1];
+            ring[4]=LD_ACQ(&capture->ring_copied);ring[5]=LD_ACQ(&capture->ring_untouched);
+            ring[6]=LD_ACQ(&capture->ring_restored);ring[7]=LD_ACQ(&capture->ring_decoded);
+            if(ring[1]>ring[0]) ring[1]=ring[0];
+            ring[3]=ring[0]-ring[1];
+            /* an extent still held at seal: its records were not all read, the totals are a lower bound */
+            if(ring[3]) flags|=AUTO_LOWER_BOUND;
+            /* the decoder's first rejected header, its byte offset from the context begin and the reason */
+            reject[2]=LD_ACQ(&capture->ring_reject[2]);
+            if(reject[2]) {reject[0]=capture->ring_reject[0];reject[1]=capture->ring_reject[1];}
+            if(!auto_writer_status_ring(&writer,flags,totals,ring,reject)) {p_ext_sink_fail(p,-2);return;}
+        } else if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}
         memset(b,0,sizeof b);p_le32(b,1);p_le32(b+4,c->domain);b[8]=2;b[9]=1;
         if(chunk(p,16,b,40)!=0) return;
         capture->final_declared=1;
@@ -1660,7 +2169,7 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
     for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].open) {range_refuse(a);return 0;} /* a segment build */
     if(!c || c->reason || a->active || a->segment_active || !a->coverage.active || LD_ACQ(&g_prof->stop_latch) ||
-       !auto_config_can_admit(&configuration) || (uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end ||
+       !auto_config_can_admit(&configuration) || (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) ||
        (cur&3u) || cur>end || end-cur<8 || !initialize_device(a) ||
        p_gpu_desc(g_prof,desc,&idx,&scope)!=PS3DK_PROF_OK ||
        (pair=auto_queue_take_class_pair(&a->operations,AUTO_PAIR_RANGE))<0) {
@@ -1697,7 +2206,7 @@ int ps3dk_prof_auto_range_end(void)
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
     if(c->reason || a->active || a->segment_active || !a->coverage.active || a->coverage.live.frame!=r.frame ||
        LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
-       (uintptr_t)(void *)ctx->begin!=clean_begin || end!=clean_end || (cur&3u) || cur>end || end-cur<24 ||
+       (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<24 ||
        !(e=auto_queue_claim_held(&a->operations,r.pair,0))) {
         auto_queue_quarantine_pair(&a->operations,r.pair);ST_REL(&a->segment_quarantine,1u);
         range_refuse(a);return 0;
@@ -1738,4 +2247,24 @@ void ps3dk_prof__auto_test_ranges(uint64_t out[4])
     const auto_capture *a=capture;
     out[0]=a ? a->ranges_done:0;out[1]=a ? a->ranges_refused:0;out[2]=a ? a->range_depth:0;out[3]=a ? a->tag:0;
 }
+#endif
+#if defined(PS3DK_PROF_TEST_HOOKS) && defined(PS3DK_PROF_AUTO_RING)
+/* Host ring tests: the candidate or attached capture, its CONFIG bytes and the never-reusable retained pages. */
+const auto_capture *ps3dk_prof__auto_test_capture(void) {return capture;}
+const auto_wire_config *ps3dk_prof__auto_test_config(void) {return &configuration.config;}
+uint64_t ps3dk_prof__auto_test_ring_retained(void) {return ring_retained;}
+/* Admits draws into the open block as the step-3 producer will (the first reserves the tail); writes nothing. */
+int ps3dk_prof__auto_test_ring_admit(void *context, uint32_t draws)
+{
+    auto_capture *a=capture;
+    gpp_ctx *ctx=context;
+    auto_ring_ticket ticket;
+    if(!a || a->context!=ctx || !a->ring_plan.blocks || !initialize_device(a)) return 0;
+    for(uint32_t i=0;i<draws;i++) {
+        if(!a->tail.active && !ring_tail_reserve(a,ctx,1)) return 0;
+        if(auto_ring_admit(&a->ring,0,0,1,&ticket)!=AUTO_RING_OK) return 0;
+    }
+    return 1;
+}
+void ps3dk_prof__auto_test_ring_request(void) {if(capture) capture->ring_flush_request=1;}
 #endif

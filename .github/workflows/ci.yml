@@ -380,6 +380,39 @@ jobs:
           bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-plain" --mutants
           bash tests/host/auto-ring-model-test.sh --out "$RUNNER_TEMP/auto-ring-address" --sanitize
 
+      - name: Report ring production primitives
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core" --mutants
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-address" --sanitize address
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-thread" --sanitize thread --case core
+
+      - name: Report ring attach and native pre-wrap tail (runtime, not enabled)
+        run: |
+          for case in ring ringwrap ringrun ringmeta ringshort ringstop ringlabel ringflip ringsegment; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case init --mutant range-by-sizeof --out "$RUNNER_TEMP/auto-ring-mutant-range-by-sizeof"
+          for mutant in ring-unleased ring-label-unwatched no-label-readback map-failure-reused legacy-whole-pool; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ring --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+          for mutant in no-prewrap cached-current cached-end scan-injected no-wrap-scan-reset custom-callback end-arbitrary \
+                        end-known-registered end-known-foreign; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringwrap --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+          # producer, drainer and owner-only partial flush (host fake GPU a frame behind, delayed and held consumer)
+          for mutant in flush-no-scan window-aba no-frame-settle no-full-flush; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringrun --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringshort --mutant ring-ack-early --out "$RUNNER_TEMP/auto-ring-mutant-ring-ack-early"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringmeta --mutant ring-meta-latch --out "$RUNNER_TEMP/auto-ring-mutant-ring-meta-latch"
+          # a refused flush halts admission only (sealed blocks retire); a held extent at seal is a lower bound
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringstop --mutant halt-as-stop --out "$RUNNER_TEMP/auto-ring-mutant-halt-as-stop"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringlabel --mutant seal-ignores-held --out "$RUNNER_TEMP/auto-ring-mutant-seal-ignores-held"
+          # the flip's CALL into the reserved prefix needs the init's io_address record
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringflip --mutant flip-unrecorded --out "$RUNNER_TEMP/auto-ring-mutant-flip-unrecorded"
+
       - name: Automatic RSX initialization, wire and queue controls
         run: |
           python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
@@ -387,7 +420,7 @@ jobs:
           python3 tests/sdk/auto-command-size-test.py --out "$RUNNER_TEMP/auto-command-size-address" --sanitize
           python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication"
           python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-address" --sanitize
-          for mutant in flush-before-put wrap-phase2-missing reset-missing; do
+          for mutant in flush-before-put wrap-phase2-missing reset-missing preflush-after-offset; do
             python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-$mutant" --mutant "$mutant"
           done
           python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion"

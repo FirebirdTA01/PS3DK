@@ -1028,7 +1028,9 @@ static void win_open(prof *p, uint64_t first)
     p->win.state = 2;
     p->win.opened++;
     win_begin_record(p);
-    ST_REL(&p->window_open, 1u);
+    /* the gate carries the window's id (>= 1, never reused): an owner that sees END and a reopen only as two
+     * different nonzero values still tells the windows apart (AUTO report-ring blocks) */
+    ST_REL(&p->window_open, p->win.id ? p->win.id : 1u);
 }
 /* The frame in progress on a thread (0 before its first frame). */
 static uint64_t slot_current(prof *p, uint32_t slot1)

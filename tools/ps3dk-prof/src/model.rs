@@ -35,6 +35,9 @@ pub const CHUNK_RETIRED: u32 = 7;
 pub const CHUNK_EXPORT: u32 = 40;
 pub const EXPORT_SCHEMA: u16 = 1;
 pub const EXPORT_FLAG_TO_END: u16 = 1;
+/// The source is a report-ring capture (AUTO 2047/11): a 40-byte ring accounting tail follows the lane entries.
+pub const EXPORT_FLAG_RING: u16 = 2;
+pub const EXPORT_RING_LEN: usize = 40;
 pub const EXPORT_HEADER_LEN: usize = 112;
 pub const EXPORT_LANE_ENTRY_LEN: usize = 40;
 
@@ -46,6 +49,21 @@ pub struct ExportLane {
     pub last_seq: u64,
     pub kept: u64,
     pub dropped_by_export: u64,
+}
+
+/// The ring accounting tail of an EXPORT chunk (EXPORT_FLAG_RING): the RING records the export kept are whole
+/// generations, strictly increasing from `first_generation` to `last_generation` (`generations` of them,
+/// `records_kept` records); `records_dropped` RING records of the source were not kept, and
+/// `source_last_generation` is the source's last RING generation (what an exact source FINAL reconciled with the
+/// STATUS blocks issued, which the export keeps as written). All zero but the source fields when nothing was kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportRing {
+    pub first_generation: u32,
+    pub last_generation: u32,
+    pub generations: u64,
+    pub records_kept: u64,
+    pub records_dropped: u64,
+    pub source_last_generation: u32,
 }
 
 /// A parsed EXPORT chunk (type 40).
@@ -67,6 +85,8 @@ pub struct ExportRecord {
     pub source_fifo_last_attempt_seq: u64,
     pub source_auto_frames: u64,
     pub lanes: BTreeMap<u32, ExportLane>,
+    /// EXPORT_FLAG_RING: the report-ring accounting tail.
+    pub ring: Option<ExportRing>,
 }
 
 pub const CHUNK_WINDOW_BEGIN: u32 = 41;

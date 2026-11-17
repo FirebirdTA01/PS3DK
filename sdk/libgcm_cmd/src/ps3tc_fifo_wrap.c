@@ -150,11 +150,18 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
 {
     if (!ctx || !ctx->begin || !ctx->current) return -1;
 
+#ifdef PS3TC_PROF_AUTO
+    /* Before the JUMP position is known: the observer may append a report-ring
+     * flush at current and restore the end it lowered.  Everything below
+     * re-reads the context; no pointer or end from before this call is used. */
+    ps3dk_prof__auto_prewrap(ctx);
+#endif
+    volatile uint32_t *const tail = (volatile uint32_t *)ctx->current;
     uint32_t begin_off = 0;   /* offset of ctx->begin (the JUMP target) */
     uint32_t tail_off  = 0;   /* offset of the word the JUMP goes into  */
-    if (gcmAddressToOffset((void *)ctx->begin, &begin_off) != 0)
+    if (!tail || gcmAddressToOffset((void *)ctx->begin, &begin_off) != 0)
         return -1;
-    if (gcmAddressToOffset((void *)ctx->current, &tail_off) != 0)
+    if (gcmAddressToOffset((void *)tail, &tail_off) != 0)
         return -1;
 
     /* After the wrap the reserve resumes at begin; a request that does not
@@ -195,8 +202,7 @@ int32_t ps3tc_fifo_wrap_callback(gcmContextData *ctx, uint32_t count)
 #endif
     };
     const uint64_t t0 = __builtin_ppc_get_timebase();
-    ps3tc_fifo_wrap_protocol((volatile uint32_t *)ctx->current,
-                             tail_off, begin_off, &port);
+    ps3tc_fifo_wrap_protocol(tail, tail_off, begin_off, &port);
     const uint64_t ticks = __builtin_ppc_get_timebase() - t0;
     wrap_count++;
     wrap_ticks += ticks;
@@ -236,6 +242,13 @@ void ps3tc_fifo_wrap_install(gcmContextData *ctx)
     if (!ctx) return;
     ctx->callback = (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(ps3tc_fifo_wrap_callback);
 }
+
+#ifdef PS3TC_PROF_AUTO
+int ps3tc_fifo_wrap_native(const struct _gcmCtxData *ctx)
+{
+    return ctx && ctx->callback == (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(ps3tc_fifo_wrap_callback);
+}
+#endif
 
 #ifdef PS3TC_FIFO_OBSERVE
 /* The bridge (ps3tc_fifo_observe.h), on the quiescent context owner.  The ring
