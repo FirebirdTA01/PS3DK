@@ -626,13 +626,14 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
-                // is the default (16, an eighth of a small pool) or an option that leaves 64 pairs for draws
+                // is the default (an eighth of the pool, at most 64; 16 at most before the reserve was resized, which
+                // the option bound below still admits) or an option that leaves 64 pairs for draws
                 if wide != ((kinds, forms) == MASKS_TAG) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
                 }
                 if wide {
                     let call = if pairs >= 128 { 32 } else { pairs / 4 };
-                    let default = if pairs >= 128 { 16 } else { pairs / 8 };
+                    let default = (pairs / 8).min(64);
                     let max = pairs.saturating_sub(call + 64);
                     if r6 != 0 || call_pairs != call || (range_pairs != default && range_pairs > max) {
                         return bad(r, format!("AUTO_CONFIG reserves CALL {call_pairs} ranges {range_pairs} for {pairs} pairs"));

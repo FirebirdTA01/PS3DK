@@ -6,8 +6,9 @@
  *          with its own program 0x2000 (one timed clear, one refused for room), CALLed under tag 0xc (the CALL
  *          record carries 0xc, its draw keeps 0xa); a range "outer" with a nested "inner" around two clears; five
  *          nested begins (the fifth refused); a range begun while a part is open (refused); an END without a range
- *          (refused); a range open across the frame boundary (refused at its END in frame 1).
- * frame 1: the range reserve: 16 ranges, the 17th refused; then timing limited to timed ranges: a ring clear and a
+ *          (refused); a range through the public macros, whose BEGIN and END yield 1; a range open across the frame
+ *          boundary (refused at its END in frame 1).
+ * frame 1: the range reserve: 63 pairs, the ranges past it refused; a full site table refuses, balanced; then timing limited to timed ranges: a ring clear and a
  *          segment clear outside every timed range are untimed, a clear inside a timed range (and inside a plain
  *          range nested in it) is timed. */
 #include <assert.h>
@@ -115,21 +116,25 @@ int main(void) {
     /* an END without a range */
     assert(!ps3dk_prof_auto_range_end());
     ranges();assert(r[1]==3);
+    /* the public macros are int expressions: 1 admitted, 1 committed */
+    assert(PS3DK_PROF_AUTO_RANGE_BEGIN("macro")==1);
+    assert(PS3DK_PROF_AUTO_RANGE_END()==1);
+    ranges();assert(r[0]==7 && r[2]==0);
     /* a range across the frame boundary is refused at its END */
     assert(ps3dk_prof_auto_range_begin(&outer,0));
     ps3dk_prof_frame(); /* frame 1 */
     assert(!ps3dk_prof_auto_range_end());
-    ranges();assert(r[0]==6 && r[1]==4);
+    ranges();assert(r[0]==7 && r[1]==4);
 
-    /* the range reserve: 16 pairs, minus the 6 committed and the quarantined one above (none completes) */
+    /* the range reserve: 63 pairs (504/8), minus the 7 committed and the quarantined one above (none completes) */
     {
         unsigned ok=0;
-        for(unsigned i=0;i<16;i++) {
+        for(unsigned i=0;i<63;i++) {
             if(ps3dk_prof_auto_range_begin(&pass,0)) ok++;
             (void)ps3dk_prof_auto_range_end();
         }
-        assert(ok==16u-7u);
-        ranges();assert(r[0]==6+ok && r[1]==4+(16-ok));
+        assert(ok==63u-8u);
+        ranges();assert(r[0]==7+ok && r[1]==4+(63-ok));
     }
     ps3dk_prof_auto_tag(0xe);
     /* timing limited to timed ranges: the reserve is spent, so the timed range's own record is refused, but its
@@ -137,15 +142,24 @@ int main(void) {
     PS3DK_PROF_AUTO_TIMED_RANGES_ONLY();
     assert(!clear(&context));                             /* outside: untimed */
     part(1);assert(!clear(&port));close_part(1);          /* a segment draw outside: untimed */
-    PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED("timed");
+    assert(!PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED("timed")); /* refused: no pair left */
     assert(clear(&context));
-    PS3DK_PROF_AUTO_RANGE_BEGIN("inner");
+    assert(!PS3DK_PROF_AUTO_RANGE_BEGIN("inner"));
     assert(clear(&context));                              /* inside a plain range inside a timed one */
-    PS3DK_PROF_AUTO_RANGE_END();PS3DK_PROF_AUTO_RANGE_END();
+    ranges();assert(r[2]==2);                             /* refused BEGINs still pushed */
+    assert(!PS3DK_PROF_AUTO_RANGE_END() && !PS3DK_PROF_AUTO_RANGE_END());
+    ranges();assert(r[2]==0);                             /* balanced by the ENDs */
     assert(!clear(&context));                             /* outside again */
     ps3dk_prof_auto_timing(0);
     assert(clear(&context));                              /* every draw timed again */
     call(1);
+    /* a full table of 256 call sites: the 257th site's BEGIN is refused, still balanced */
+    {
+        uint64_t before;
+        ranges();before=r[1];
+        for(uint32_t i=0;i<257;i++) {(void)ps3dk_prof_auto_range_begin_at("site",__FILE__,100000u+i,0);(void)ps3dk_prof_auto_range_end();}
+        ranges();assert(r[2]==0 && r[1]==before+257);
+    }
     assert(ps3dk_prof_auto_frame_end(1,ps3dk_prof_frame_token())==0);
 
     uint32_t frontier=ps3dk_prof__auto_publish_before((void *)&context);

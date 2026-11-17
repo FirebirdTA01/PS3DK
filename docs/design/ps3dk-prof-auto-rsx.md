@@ -361,9 +361,24 @@ while a segment build is open, or ends in another frame than it began (its pair
 is then quarantined: the begin report is in the ring). Its RSX time is the exact
 span of its own pair, independent of per-draw timing.
 
+Late rows: an immediate window (SECTION, WHOLE_RUN) opened mid-frame, by any
+thread, enters a frame that got no row at its boundary. The owner's first draw
+or range inside the window opens that frame's row on the owner thread, with no
+lock held: tb_begin is the time it opened (nothing is backdated), it has no
+FRAME marks, and it always closes OPEN (u16@2 flag 16), even through
+ps3dk_prof_auto_frame_end, so no whole-frame verdict is made for it. Before the
+owner's first frame there is no frame and no row. Opening the window itself
+never touches AUTO state. The macros PS3DK_PROF_AUTO_RANGE_BEGIN/_END yield the
+functions' int (1 admitted/committed, 0 refused; a constant 1 without
+PS3_PROF_AUTO); BEGIN goes through ps3dk_prof_auto_range_begin_at, which keeps
+one runtime-owned descriptor per name/file/line site (256 sites). Options for
+the automatic attach may be set before cellGcmInit
+(ps3dk_prof_auto_options_set): validated and copied, used by the first
+successful intercepted init on the setting thread.
+
 Report pairs: covered draws and FRAME marks stop when only the unheld parts of
 the two reserves are free (32 for whole-CALL brackets, a quarter of a small
-pool; for ranges the default 16, an eighth of a small pool). Each class holds at
+pool; for ranges the default an eighth of the pool, at most 64). Each class holds at
 most its own reserve. `ps3dk_prof_auto_options.range_pairs` (the 36-byte struct;
 the earlier 32-byte one is still accepted and takes the default) sets the range
 reserve: 0 is the default, and the attach refuses a size that leaves fewer than
