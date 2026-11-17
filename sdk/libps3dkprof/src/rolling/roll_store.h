@@ -14,6 +14,8 @@ extern "C" {
 #define pfr_state_bytes ps3dk_prof__roll_state_bytes
 #define pfr_plan ps3dk_prof__roll_plan
 #define pfr_format ps3dk_prof__roll_format
+#define pfr_format_v2 ps3dk_prof__roll_format_v2
+#define pfr_publish_state ps3dk_prof__roll_publish_state
 #define pfr_open ps3dk_prof__roll_open
 #define pfr_commit ps3dk_prof__roll_commit
 #define pfr_get_view ps3dk_prof__roll_get_view
@@ -51,10 +53,24 @@ typedef struct {
     size_t scratch_bytes;
 } pfr_layout;
 typedef struct {
+    /* generation is the root revision, independent of next_segment in v2. */
     uint64_t generation, first_segment, next_segment, first_chunk, next_chunk;
     uint64_t evicted_segments, evicted_chunks, evicted_payload_bytes;
     uint32_t retained_segments, recovered;
+    /* V1 state is LEGACY_UNSPECIFIED. SEALED is a physical declaration;
+     * semantic finals, successful close/join and completion are not proved. */
+    uint32_t format_version, state, reason;
+    /* V2 cumulative framed payload bytes, excluding original 16-byte header;
+     * zero/unspecified for v1. */
+    uint64_t bound_payload_bytes;
 } pfr_view;
+enum { PFR_LEGACY_UNSPECIFIED = 0, PFR_OPEN = 1, PFR_SEALED = 2, PFR_STOPPED_RESOURCE = 3 };
+enum { PFR_REASON_NONE = 0, PFR_CHECKPOINT_BYTES = 1, PFR_STATE_BYTES = 2,
+       PFR_IDENTITIES = 3, PFR_SUPPORT = 4, PFR_COUNTER_RANGE = 5 };
+typedef struct {
+    uint64_t expected_revision, next_chunk, payload_bytes;
+    uint32_t state, reason;
+} pfr_transition;
 typedef struct {
     uint64_t segment, first_chunk, next_chunk;
     /* Borrowed from caller-provided scratch until the next store operation. */
@@ -68,7 +84,15 @@ typedef struct {
  * must not overlap. Calls on a store are serialized by its owner. */
 size_t pfr_state_bytes(void);
 int pfr_plan(const pfr_config *, pfr_layout *);
+/* Default formatter keeps the v1 wire bytes. V2 is explicit, no migration. */
 int pfr_format(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
+int pfr_format_v2(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
+/* V2 OPEN -> OPEN/SEALED/STOPPED_RESOURCE. Expected revision/chunk/byte
+ * frontiers must match exactly. Writes/syncs only the alternate root, leaving
+ * all slots/ranges untouched. Terminal handles refuse further commits with
+ * END; invalid requests perform no IO; IO failures poison as for commit.
+ * Caller owns semantic validation before SEALED and reason attribution. */
+int pfr_publish_state(pfr_store *, const pfr_transition *);
 /* Configuration/session must match exactly. IO may be read-only (write_at,
  * resize, sync NULL); commit is then refused. No resume into a live writer:
  * the caller must hold exclusive ownership before committing to an open store.

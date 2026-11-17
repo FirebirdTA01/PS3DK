@@ -1,4 +1,4 @@
-//! Physical PS3DKROL v1 reader. Checkpoints remain opaque: a successful read
+//! Physical PS3DKROL v1/v2 reader. Checkpoints remain opaque: a successful read
 //! proves container/chunk integrity, not semantic restart validity.
 //!
 //! The immutable input must be a coherent snapshot taken by the caller. This
@@ -16,16 +16,20 @@ const MAX_CHUNK: usize = 1_048_576;
 #[derive(Clone, Copy, Debug)]
 pub struct Limits { pub max_file_bytes: u64, pub max_slot_bytes: u32 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Error { Budget(&'static str), InvalidConfig(&'static str), NoCommittedRoot }
+pub enum Error { Budget(&'static str), InvalidConfig(&'static str), NoCommittedRoot, InconsistentRoots }
 /// Configuration/session identity read from the validated configuration page.
 /// The container cap and the caller's admission limits are separate constraints.
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub format_version: u32,
     pub file_bytes: u64, pub max_bytes: u64, pub retained_slots: u32,
     pub checkpoint_bytes: u32, pub payload_bytes: u32, pub slot_bytes: u32, pub session: [u8; 16],
 }
 #[derive(Clone, Debug)]
 pub struct View {
+    /// V1 state is 0 (unspecified). V2: 1 OPEN, 2 SEALED, 3 STOPPED_RESOURCE.
+    /// SEALED is a physical declaration, not proof of semantic finals or close.
+    pub format_version: u32, pub state: u32, pub reason: u32, pub bound_payload_bytes: u64,
     pub generation: u64, pub first_segment: u64, pub next_segment: u64,
     pub first_chunk: u64, pub next_chunk: u64, pub evicted_segments: u64,
     pub evicted_chunks: u64, pub evicted_payload_bytes: u64,
@@ -50,6 +54,7 @@ impl std::fmt::Display for Error {
             Self::Budget(reason) => write!(f, "rolling store admission limit: {reason}"),
             Self::InvalidConfig(reason) => write!(f, "invalid rolling store configuration: {reason}"),
             Self::NoCommittedRoot => f.write_str("no complete valid rolling store root chain"),
+            Self::InconsistentRoots => f.write_str("contradictory complete rolling store roots"),
         }
     }
 }
@@ -78,13 +83,15 @@ fn configuration(bytes: &[u8], limits: Limits) -> Result<Config, Error> {
     let slot_bytes = u32_at(b, 44);
     if file_bytes > limits.max_file_bytes { return Err(Error::Budget("declared file bytes")); }
     if slot_bytes > limits.max_slot_bytes { return Err(Error::Budget("slot bytes")); }
-    if &b[..8] != b"PS3DKROL" || u32_at(b, 8) != 1 || u32_at(b, 12) != PAGE as u32 {
+    let format_version = u32_at(b, 8);
+    if &b[..8] != b"PS3DKROL" || !matches!(format_version, 1 | 2) || u32_at(b, 12) != PAGE as u32 {
         return Err(Error::InvalidConfig("magic/version/page"));
     }
     if !zeros(&b[64..PAGE - 4]) || !crc_matches(b, PAGE - 4) {
         return Err(Error::InvalidConfig("reserved bytes/CRC"));
     }
     let config = Config {
+        format_version,
         file_bytes, slot_bytes, max_bytes: u64_at(b, 24), retained_slots: u32_at(b, 32),
         checkpoint_bytes: u32_at(b, 36), payload_bytes: u32_at(b, 40),
         session: b[48..64].try_into().unwrap(),
@@ -159,17 +166,24 @@ fn slot<'a>(bytes: &'a [u8], cfg: &Config, e: SlotEntry) -> Option<Segment<'a>> 
 
 fn root<'a>(bytes: &'a [u8], cfg: &Config, which: usize) -> Option<(View, Vec<Segment<'a>>)> {
     let b = &bytes[(which + 1) * PAGE..(which + 2) * PAGE];
-    if &b[..8] != b"PFRROOT1" || !crc_matches(b, PAGE - 4) || u32_at(b, 20) != 0
+    let v2 = cfg.format_version == 2;
+    let head = if v2 { 128 } else { HEAD };
+    if &b[..8] != (if v2 { b"PFRROOT2" } else { b"PFRROOT1" }) || !crc_matches(b, PAGE - 4) || u32_at(b, 20) != 0
         || b[80..96] != cfg.session { return None; }
     let view = View {
+        format_version: cfg.format_version, state: if v2 { u32_at(b, 96) } else { 0 },
+        reason: if v2 { u32_at(b, 100) } else { 0 }, bound_payload_bytes: if v2 { u64_at(b, 112) } else { 0 },
         generation: u64_at(b, 8), retained_segments: u32_at(b, 16),
         first_segment: u64_at(b, 24), next_segment: u64_at(b, 32),
         first_chunk: u64_at(b, 40), next_chunk: u64_at(b, 48),
         evicted_segments: u64_at(b, 56), evicted_chunks: u64_at(b, 64),
         evicted_payload_bytes: u64_at(b, 72), recovered: false,
     };
+    if v2 && (!(1..=3).contains(&view.state) || u64_at(b, 104) != view.next_chunk || u64_at(b, 120) != 0
+        || (view.state != 3 && view.reason != 0) || (view.state == 3 && !(1..=5).contains(&view.reason))) { return None; }
+    let minimum_revision = view.next_segment.checked_add(1)?;
     if view.generation == 0 || view.generation & 1 != which as u64
-        || view.next_segment.checked_add(1) != Some(view.generation)
+        || (if v2 { view.generation < minimum_revision } else { view.generation != minimum_revision })
         || view.retained_segments > cfg.retained_slots
         || view.next_segment.checked_sub(view.first_segment) != Some(u64::from(view.retained_segments))
         || view.first_segment != view.evicted_segments || view.first_chunk != view.evicted_chunks
@@ -179,18 +193,19 @@ fn root<'a>(bytes: &'a [u8], cfg: &Config, which: usize) -> Option<(View, Vec<Se
     if let Some(ceiling) = view.evicted_segments.checked_mul(u64::from(cfg.payload_bytes)) {
         if view.evicted_payload_bytes > ceiling { return None; }
     }
-    if view.retained_segments == 0 && (view.generation != 1 || view.first_chunk != 0
+    if view.retained_segments == 0 && ((!v2 && view.generation != 1) || view.first_chunk != 0
         || view.next_chunk != 0 || view.evicted_payload_bytes != 0) { return None; }
     if u64::from(view.retained_segments) != view.next_segment.min(u64::from(cfg.retained_slots)) {
         return None;
     }
     let count = view.retained_segments as usize; // already bounded to <=64
-    if !zeros(&b[HEAD + count * ENTRY..PAGE - 4]) { return None; }
+    if !zeros(&b[head + count * ENTRY..PAGE - 4]) { return None; }
     let mut seen = [false; 65];
     let mut segments = Vec::with_capacity(count);
     let mut cursor = view.first_chunk;
+    let mut bound = view.evicted_payload_bytes;
     for i in 0..count {
-        let at = HEAD + i * ENTRY;
+        let at = head + i * ENTRY;
         let e = SlotEntry { physical: u32_at(b, at), checkpoint: u32_at(b, at + 4),
             payload: u32_at(b, at + 8), segment: u64_at(b, at + 16),
             first: u64_at(b, at + 24), next: u64_at(b, at + 32) };
@@ -201,10 +216,43 @@ fn root<'a>(bytes: &'a [u8], cfg: &Config, which: usize) -> Option<(View, Vec<Se
             || seen[e.physical as usize] { return None; }
         seen[e.physical as usize] = true;
         segments.push(slot(bytes, cfg, e)?);
+        if v2 { bound = bound.checked_add(u64::from(e.payload))?; }
         cursor = e.next;
     }
-    if cursor != view.next_chunk { return None; }
+    if cursor != view.next_chunk || (v2 && bound != view.bound_payload_bytes) { return None; }
     Some((view, segments))
+}
+
+fn same_segment(a: &Segment<'_>, b: &Segment<'_>) -> bool {
+    // Both borrow one validated input snapshot: identical slot identity and
+    // ranges/lengths already imply identical checkpoint/payload bytes.
+    a.physical_slot == b.physical_slot && a.segment == b.segment && a.first_chunk == b.first_chunk
+        && a.next_chunk == b.next_chunk && a.checkpoint.len() == b.checkpoint.len() && a.payload.len() == b.payload.len()
+}
+fn successor(cfg: &Config, a: &(View, Vec<Segment<'_>>), b: &(View, Vec<Segment<'_>>)) -> bool {
+    let (x, before) = a; let (y, after) = b;
+    if x.generation.checked_add(1) != Some(y.generation) || x.state != 1 { return false; }
+    if x.next_segment == y.next_segment {
+        return x.first_segment == y.first_segment && x.first_chunk == y.first_chunk && x.next_chunk == y.next_chunk
+            && x.evicted_segments == y.evicted_segments && x.evicted_chunks == y.evicted_chunks
+            && x.evicted_payload_bytes == y.evicted_payload_bytes && x.bound_payload_bytes == y.bound_payload_bytes
+            && before.len() == after.len() && before.iter().zip(after).all(|(a,b)| same_segment(a,b));
+    }
+    if x.next_segment.checked_add(1) != Some(y.next_segment) || y.state != 1 { return false; }
+    let dropped = usize::from(before.len() == cfg.retained_slots as usize);
+    let survivors = &before[dropped..];
+    if after.len() != survivors.len() + 1 || !survivors.iter().zip(after).all(|(a,b)| same_segment(a,b)) { return false; }
+    let last = after.last().unwrap(); // at least one appended segment
+    if last.segment != x.next_segment || last.first_chunk != x.next_chunk
+        || x.bound_payload_bytes.checked_add(last.payload.len() as u64) != Some(y.bound_payload_bytes)
+        || before.iter().any(|s| s.physical_slot == last.physical_slot) { return false; }
+    if dropped != 0 {
+        x.evicted_segments.checked_add(1) == Some(y.evicted_segments) && y.evicted_chunks == before[0].next_chunk
+            && x.evicted_payload_bytes.checked_add(before[0].payload.len() as u64) == Some(y.evicted_payload_bytes)
+    } else {
+        x.evicted_segments == y.evicted_segments && x.evicted_chunks == y.evicted_chunks
+            && x.evicted_payload_bytes == y.evicted_payload_bytes
+    }
 }
 
 /// Validate both root chains and select the newest complete one. At most two
@@ -217,6 +265,12 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Committed<'_>, Error> {
     let missing_even = zeros(&bytes[PAGE..2 * PAGE]);
     let missing_odd = zeros(&bytes[2 * PAGE..PREFIX]);
     let damaged = (even.is_none() && !missing_even) || (odd.is_none() && !missing_odd);
+    if config.format_version == 2 {
+        if let (Some(e), Some(o)) = (&even, &odd) {
+            let valid = if e.0.generation < o.0.generation { successor(&config, e, o) } else { successor(&config, o, e) };
+            if !valid { return Err(Error::InconsistentRoots); }
+        }
+    }
     let (mut view, segments) = match (&even, &odd) {
         (None, None) => return Err(Error::NoCommittedRoot),
         (Some(_), None) => even.take().unwrap(),

@@ -52,7 +52,8 @@ def chunk_sequences(payload, first):
 def decode(data):
     need(len(data) >= PREFIX, "short container")
     header = data[:PAGE]
-    need(header[:8] == b"PS3DKROL" and num(header, 8, "I") == 1, "magic/version")
+    version = num(header, 8, "I")
+    need(header[:8] == b"PS3DKROL" and version in (1, 2), "magic/version")
     need(num(header, 12, "I") == PAGE and not any(header[64:-4]), "config reserved")
     check_crc(header, PAGE - 4)
     length, cap = num(header, 16, "Q"), num(header, 24, "Q")
@@ -93,23 +94,30 @@ def decode(data):
 
     def root(which):
         b = data[PAGE * (which + 1):PAGE * (which + 2)]
-        need(b[:8] == b"PFRROOT1" and b[80:96] == identity, "root identity")
+        head = 128 if version == 2 else 96
+        need(b[:8] == (b"PFRROOT2" if version == 2 else b"PFRROOT1") and b[80:96] == identity, "root identity")
         check_crc(b, PAGE - 4)
         gen, count, reserved = struct.unpack_from("<QII", b, 8)
         first_seg, next_seg, first, end, dropped_seg, dropped_chunks, dropped_bytes = struct.unpack_from("<7Q", b, 24)
-        need(gen > 0 and gen % 2 == which and next_seg < U64_MAX and gen == next_seg + 1, "root generation")
+        need(gen > 0 and gen % 2 == which and next_seg < U64_MAX, "root generation")
+        need(gen >= next_seg + 1 if version == 2 else gen == next_seg + 1, "root revision")
         need(reserved == 0 and count <= n and first_seg <= next_seg and next_seg - first_seg == count, "root segment range")
         need(first_seg == dropped_seg and first == dropped_chunks and first <= end, "root prefix accounting")
         need(dropped_bytes <= dropped_seg * pb, "evicted byte ceiling")
         need(count == min(next_seg, n), "root retained count")
         if not count:
-            need(gen == 1 and first == end == dropped_bytes == 0, "empty root")
-        need(not any(b[96 + count * 40:-4]), "root unused bytes")
+            need((version == 2 or gen == 1) and first == end == dropped_bytes == 0, "empty root")
+        state = reason = bound_bytes = 0
+        if version == 2:
+            state, reason, bound_next, bound_bytes, reserved2 = struct.unpack_from("<II3Q", b, 96)
+            need(state in (1, 2, 3) and (1 <= reason <= 5 if state == 3 else reason == 0), "state/reason")
+            need(bound_next == end and reserved2 == 0, "terminal frontier/reserved")
+        need(not any(b[head + count * 40:-4]), "root unused bytes")
         entries = []
         seen = set()
         cursor = first
         for i in range(count):
-            physical, cp_bytes, payload_bytes, zero, seq, start, stop = struct.unpack_from("<4I3Q", b, 96 + i * 40)
+            physical, cp_bytes, payload_bytes, zero, seq, start, stop = struct.unpack_from("<4I3Q", b, head + i * 40)
             need(physical <= n and physical not in seen and zero == 0, "root slot identity")
             need(cp_bytes <= cb and payload_bytes <= pb, "root slot limits")
             need(seq == first_seg + i and start == cursor and start <= stop and stop - start <= payload_bytes // 20,
@@ -118,7 +126,11 @@ def decode(data):
             entries.append(slot((physical, cp_bytes, payload_bytes, seq, start, stop)))
             cursor = stop
         need(cursor == end, "root final frontier")
-        return {"generation": gen, "first_segment": first_seg, "next_segment": next_seg,
+        if version == 2:
+            wanted_bytes = dropped_bytes + sum(len(s["payload"]) for s in entries)
+            need(wanted_bytes <= U64_MAX and wanted_bytes == bound_bytes, "bound byte arithmetic")
+        return {"format_version": version, "state": state, "reason": reason, "bound_payload_bytes": bound_bytes,
+                "generation": gen, "first_segment": first_seg, "next_segment": next_seg,
                 "first_chunk": first, "next_chunk": end, "evicted_segments": dropped_seg,
                 "evicted_chunks": dropped_chunks, "evicted_payload_bytes": dropped_bytes,
                 "segments": entries}
@@ -133,6 +145,25 @@ def decode(data):
         except Invalid as exc:
             failures.append((which, str(exc)))
     need(valid, "no complete valid root chain")
+    if version == 2 and len(valid) == 2:
+        older, newer = sorted(valid, key=lambda r: r["generation"])
+        need(newer["generation"] == older["generation"] + 1 and older["state"] == 1, "contradictory valid roots: revision/terminal predecessor")
+        before, after = older["segments"], newer["segments"]
+        if newer["next_segment"] == older["next_segment"]:
+            keys = ("first_segment", "next_segment", "first_chunk", "next_chunk", "evicted_segments", "evicted_chunks", "evicted_payload_bytes", "bound_payload_bytes", "segments")
+            need(all(older[k] == newer[k] for k in keys), "contradictory valid roots: state-only chain")
+        else:
+            need(newer["next_segment"] == older["next_segment"] + 1 and newer["state"] == 1, "contradictory valid roots: append")
+            drop = len(before) == n
+            survivors = before[1:] if drop else before
+            need(len(after) == len(survivors) + 1 and survivors == after[:-1], "contradictory valid roots: survivors")
+            last = after[-1]
+            need(last["segment"] == older["next_segment"] and last["first"] == older["next_chunk"]
+                 and last["physical"] not in {s["physical"] for s in before}
+                 and newer["bound_payload_bytes"] == older["bound_payload_bytes"] + len(last["payload"]), "contradictory valid roots: appended slot")
+            need(newer["evicted_segments"] == older["evicted_segments"] + int(drop)
+                 and newer["evicted_chunks"] == (before[0]["next"] if drop else older["evicted_chunks"])
+                 and newer["evicted_payload_bytes"] == older["evicted_payload_bytes"] + (len(before[0]["payload"]) if drop else 0), "contradictory valid roots: eviction")
     chosen = max(valid, key=lambda item: item["generation"])
     chosen["recovered"] = any(not missing[which] for which, _ in failures) or (any(missing) and chosen["generation"] != 1)
     chosen["file_bytes"] = length
@@ -196,14 +227,64 @@ def self_test():
         raise Invalid("negative control accepted")
     print("PASS independent decoder controls (Python fixture; not a C execution)")
 
+def terminal_self_test():
+    data = encode_control()
+    struct.pack_into("<I", data, 8, 2)
+    struct.pack_into("<I", data, PAGE - 4, crc(data[:PAGE - 4]))
+    base = bytes(data[PAGE:2 * PAGE])
+    for revision in (8, 9):
+        b = bytearray(base)
+        b[96:-4] = bytes(PAGE - 100)
+        b[128:208] = base[96:176]
+        b[:8] = b"PFRROOT2"
+        struct.pack_into("<Q", b, 8, revision)
+        struct.pack_into("<II3Q", b, 96, 1 if revision == 8 else 2, 0, 3, 72, 0)
+        struct.pack_into("<I", b, PAGE - 4, crc(b[:-4]))
+        at = PAGE + (revision & 1) * PAGE
+        data[at:at + PAGE] = b
+    got = decode(data)
+    need((got["generation"], got["state"], got["bound_payload_bytes"]) == (9, 2, 72), "v2 positive control")
+    for at, code, value in [(2 * PAGE + 8, "Q", 11), (PAGE + 96, "I", 2)]:
+        altered = data.copy()
+        struct.pack_into("<" + code, altered, at, value)
+        page = at // PAGE * PAGE
+        struct.pack_into("<I", altered, page + PAGE - 4, crc(altered[page:page + PAGE - 4]))
+        try:
+            decode(altered)
+        except Invalid as exc:
+            need("contradictory valid roots" in str(exc), "pair refusal must not be generic corruption")
+        else:
+            raise Invalid("accepted contradictory valid roots")
+    altered = data.copy(); altered[2 * PAGE + 120] ^= 1
+    got = decode(altered)
+    need(got["generation"] == 8 and got["state"] == 1 and got["recovered"], "terminal torn-root recovery")
+    print("PASS independent terminal controls (Python fixture; not a C execution)")
+
+def terminal_artifacts(directory):
+    expected = [("open.profr", 1, 0, 16, False), ("sealed.profr", 2, 0, 17, False)]
+    expected += [(f"stopped-{reason}.profr", 3, reason, 17, False) for reason in range(1, 6)]
+    expected += [("recovered.profr", 1, 0, 16, True)]
+    for name, state, reason, revision, recovered in expected:
+        got = decode((directory / name).read_bytes())
+        need((got["format_version"], got["state"], got["reason"], got["generation"], got["recovered"])
+             == (2, state, reason, revision, recovered), name + " identity")
+        need((got["first_chunk"], got["next_chunk"], got["bound_payload_bytes"], got["evicted_payload_bytes"])
+             == (10, 13, 312, 240), name + " frontier")
+        need([s["segment"] for s in got["segments"]] == [10, 11, 12], name + " retained chain")
+    print("PASS independent C terminal artifacts (8 states/recovery views)")
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("capture", type=pathlib.Path, nargs="?")
     p.add_argument("--self-test", action="store_true")
     p.add_argument("--expect-rotations", action="store_true")
+    p.add_argument("--terminal-dir", type=pathlib.Path)
     args = p.parse_args()
     if args.self_test:
         self_test()
+        terminal_self_test()
+    if args.terminal_dir:
+        terminal_artifacts(args.terminal_dir)
     if args.capture:
         result = decode(args.capture.read_bytes())
         if args.expect_rotations:
@@ -215,7 +296,7 @@ def main():
                 need(seg["checkpoint"] == struct.pack("<Q", seq) and seg["sequences"] == [seq], "C checkpoint/payload")
         print(f"PASS independent decode: generation {result['generation']}, chunks "
               f"[{result['first_chunk']},{result['next_chunk']}), {result['file_bytes']} bytes")
-    elif not args.self_test:
+    elif not args.self_test and not args.terminal_dir:
         p.error("provide a capture or --self-test")
 
 if __name__ == "__main__":
