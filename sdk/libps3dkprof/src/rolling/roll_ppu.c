@@ -401,15 +401,13 @@ static int window_end(state *s,cursor *p)
     }
     s->window_open=0;s->window_last_id=id;s->window_previous=1;s->window_last_frame=last;return PFR_OK;
 }
-int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
-    uint32_t external_metadata,pfo_prepared *result)
+static int core_accept(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
+    uint32_t external_metadata,uint32_t storage,pfo_prepared *result)
 {
     const context *c=opaque;const state *a=accepted;state *s=prepared;const uint8_t *raw=chunk;
     cursor p;uint32_t ty,len;int rc;
     if(result)memset(result,0,sizeof *result);
     if(!c||c->magic!=CONTEXT_MAGIC||!a||!s||a==s||!chunk||!result
-       ||(external_metadata!=0&&!(external_metadata>=8&&external_metadata<=13)
-          &&external_metadata!=15&&external_metadata!=16&&external_metadata!=17&&external_metadata!=18)
        ||(uintptr_t)a%c->layout.arena_alignment||(uintptr_t)s%c->layout.arena_alignment
        ||a->magic!=ARENA_MAGIC||a->arena_bytes!=c->layout.arena_bytes||a->terminal||n<20)return PFR_INVALID;
     ty=r32(raw);len=r32(raw+4);
@@ -418,10 +416,25 @@ int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void 
        ||(a->next==0&&ty!=1)||(a->next==1&&ty!=2)||(a->next>=2&&(ty==1||ty==2)))return PFR_INVALID;
     if(a->next==UINT64_MAX-1||n>UINT64_MAX-16-a->bytes){result->reason=PFR_COUNTER_RANGE;return PFO_RESOURCE;}
     memcpy(s,a,c->layout.arena_bytes);
-    if(ty!=5&&ty!=13){
-        if(n>c->cfg.metadata_bytes||s->metadata_used>c->cfg.metadata_bytes-n||4>c->cfg.metadata_bytes-n-s->metadata_used){
+    if(ty!=5&&!(external_metadata&&storage==PFP_EXTERNAL_EVENT)){
+        uint32_t old_offset=0,old_bytes=0,retained=s->metadata_used;
+        uint8_t *metadata=(uint8_t *)s+c->layout.metadata_offset;
+        if(external_metadata&&storage==PFP_EXTERNAL_LATEST){uint32_t at=0,count=0;
+            while(at<s->metadata_used){uint32_t bytes;
+                if(s->metadata_used-at<4)return PFR_INVALID;
+                bytes=r32(metadata+at);
+                if(bytes<20||bytes>s->metadata_used-at-4)return PFR_INVALID;
+                if(r32(metadata+at+4)==ty){if(old_bytes)return PFR_INVALID;old_offset=at;old_bytes=bytes+4;}
+                at+=bytes+4;++count;
+            }
+            if(count!=s->metadata_count)return PFR_INVALID;
+            retained-=old_bytes;
+        }
+        if(n>c->cfg.metadata_bytes||retained>c->cfg.metadata_bytes-n||4>c->cfg.metadata_bytes-n-retained){
             result->reason=PFR_SUPPORT;return PFO_RESOURCE;
         }
+        if(old_bytes){memmove(metadata+old_offset,metadata+old_offset+old_bytes,s->metadata_used-old_offset-old_bytes);
+            s->metadata_used=retained;--s->metadata_count;}
         if(ty!=6){uint8_t *m=(uint8_t *)s+c->layout.metadata_offset+s->metadata_used;w32(m,(uint32_t)n);memcpy(m+4,raw,n);
             s->metadata_used+=(uint32_t)n+4;++s->metadata_count;
         }
@@ -436,6 +449,7 @@ int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void 
     case 6:rc=trailer_chunk(c,s,&p);break;
     case 7:rc=retired_chunk(c,s,&p);break;
     case 8:case 9:case 10:case 11:case 12:case 13:case 15:case 16:case 17:case 18:
+    case 31:case 32:case 33:case 43:
         rc=external_metadata==ty?PFR_OK:PFR_INVALID;break;
     case 41:rc=window_begin(c,s,&p);break;
     case 42:rc=window_end(s,&p);break;
@@ -449,6 +463,25 @@ int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void 
     }
     ++s->next;s->bytes+=n;
     result->terminal=s->terminal;return PFR_OK;
+}
+int pfp_core_accept(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
+    uint32_t external_metadata,pfo_prepared *result)
+{
+    if(result)memset(result,0,sizeof *result);
+    if(external_metadata!=0&&!(external_metadata>=8&&external_metadata<=13)
+       &&external_metadata!=15&&external_metadata!=16&&external_metadata!=17&&external_metadata!=18)return PFR_INVALID;
+    return core_accept(opaque,accepted,prepared,chunk,n,external_metadata,
+        external_metadata==13?PFP_EXTERNAL_EVENT:PFP_EXTERNAL_APPEND,result);
+}
+int pfp_core_accept_external(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
+    uint32_t type,uint32_t storage,pfo_prepared *result)
+{
+    const state *a=accepted;
+    if(result)memset(result,0,sizeof *result);
+    if(!a||a->magic!=ARENA_MAGIC||!(r32(a->header+12)&64)
+       ||!(((type==32||type==43)&&storage==PFP_EXTERNAL_EVENT)
+           ||(type==31&&storage==PFP_EXTERNAL_APPEND)||(type==33&&storage==PFP_EXTERNAL_LATEST)))return PFR_INVALID;
+    return core_accept(opaque,accepted,prepared,chunk,n,type,storage,result);
 }
 int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,
     void *checkpoint,size_t capacity,pfo_prepared *result)

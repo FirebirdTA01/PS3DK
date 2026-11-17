@@ -8,6 +8,7 @@
 #define pfp_core_accept ps3dk_prof__roll_ppu_core_accept
 #define pfp_core_view ps3dk_prof__roll_ppu_core_view
 #define pfp_core_sections ps3dk_prof__roll_ppu_core_sections
+#define pfp_core_accept_external ps3dk_prof__roll_ppu_core_accept_external
 typedef struct {
     const uint8_t *header, *metadata;
     uint64_t next, bytes, clock_frequency, physical_rows;
@@ -22,6 +23,12 @@ int pfp_core_init(void *, size_t, const pfp_config *, const uint8_t[16], void *,
  * Accepted is immutable. Prepared may be dirty on refusal. */
 int pfp_core_accept(void *, const void *, void *, const void *, size_t,
                     uint32_t external_metadata, pfo_prepared *);
+enum { PFP_EXTERNAL_EVENT=1, PFP_EXTERNAL_APPEND=2, PFP_EXTERNAL_LATEST=3 };
+/* Additive FIFO-only trusted caller seam. Flags/framing/bootstrap remain
+ * mandatory. EVENTS32/43 advance N/B only; CONFIG31 appends; STATUS33 removes
+ * its prior same-type metadata before appending the new original entry. */
+int pfp_core_accept_external(void *,const void *,void *,const void *,size_t,
+                             uint32_t type,uint32_t storage,pfo_prepared *);
 int pfp_core_view(const void *, const void *, pfp_view *);
 /* Writes sections 2+3 using actual PPU rows. A non-NULL count array selects
  * combined 128-byte rows; NULL preserves standalone 120-byte rows. Counts
