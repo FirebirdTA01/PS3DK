@@ -172,6 +172,7 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_file.py --build-dir "$RUNNER_TEMP/rolling-file-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
           python3 tests/host/ps3dk-prof-rolling/run_file.py --lv2-mock --build-dir "$RUNNER_TEMP/rolling-file-lv2"
           python3 tests/host/ps3dk-prof-rolling/file_mutations.py --build-dir "$RUNNER_TEMP/rolling-file-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_positions_mutants.py --build-dir "$RUNNER_TEMP/rolling-positions-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'
         run: |
