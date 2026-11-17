@@ -161,6 +161,11 @@ jobs:
         run: |
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --build-dir "$RUNNER_TEMP/capture-retention"
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --sanitize --build-dir "$RUNNER_TEMP/capture-retention-asan"
+          python3 tests/host/ps3dk-prof-retention/dependency_test.py
+          python3 tests/host/ps3dk-prof-retention/mixed_test.py --implementation --build-dir "$RUNNER_TEMP/capture-retention-mixed"
+          python3 tests/host/ps3dk-prof-retention/mixed_test.py --implementation --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=all -fno-pie -no-pie' --build-dir "$RUNNER_TEMP/capture-retention-mixed-asan"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_ack.py --build-dir "$RUNNER_TEMP/chunk-acceptance"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_ack.py --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=all -ftls-model=local-exec -fno-pie -no-pie' --build-dir "$RUNNER_TEMP/chunk-acceptance-asan"
           rc=0
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --mutate-retain-before-join --build-dir "$RUNNER_TEMP/capture-retention-mutant" > "$RUNNER_TEMP/capture-retention-mutant.log" 2>&1 || rc=$?
           test "$rc" = 1
@@ -179,6 +184,20 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output"
           python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
           python3 tests/host/ps3dk-prof-rolling/output_mutations.py --build-dir "$RUNNER_TEMP/rolling-output-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_ppu_encoder.py --build-dir "$RUNNER_TEMP/rolling-ppu-encoder"
+          PS3DK_PROF_ROLLING_PPU_ENCODER="$RUNNER_TEMP/rolling-ppu-encoder/rolling-ppu-encoder-fixture" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_ppu_c_general --test rolling_ppu_c_rejections -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_ppu_encoder.py --cc 'cc -fsanitize=undefined -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-ppu-encoder-asan"
+          PS3DK_PROF_ROLLING_PPU_ENCODER="$RUNNER_TEMP/rolling-ppu-encoder-asan/rolling-ppu-encoder-fixture" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_ppu_c_general -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_ppu_output.py --build-dir "$RUNNER_TEMP/rolling-ppu-output"
+          PS3DK_PROF_ROLLING_PPU_OUTPUT="$RUNNER_TEMP/rolling-ppu-output/rolling-ppu-output-fixture" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_ppu_c_output -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_ppu_output.py --cc 'cc -fsanitize=undefined -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-ppu-output-asan"
+          PS3DK_PROF_ROLLING_PPU_OUTPUT="$RUNNER_TEMP/rolling-ppu-output-asan/rolling-ppu-output-fixture" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_ppu_c_output -- --ignored
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_ppu_c_output --no-run --message-format=json > "$RUNNER_TEMP/rolling-ppu-output-build.jsonl"
+          OUTPUT_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_ppu_c_output" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-ppu-output-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_ppu_output_mutants.py --build-dir "$RUNNER_TEMP/rolling-ppu-output-mutants" --rust-test-bin "$OUTPUT_EXE"
+          python3 tests/host/ps3dk-prof-rolling/run_retention_inspect.py --build-dir "$RUNNER_TEMP/rolling-retention-inspect"
+          python3 tests/host/ps3dk-prof-rolling/run_retention_inspect.py --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -fno-pie -no-pie' --build-dir "$RUNNER_TEMP/rolling-retention-inspect-asan"
+          python3 tests/host/ps3dk-prof-rolling/run_retention_inspect_mutants.py --build-dir "$RUNNER_TEMP/rolling-retention-inspect-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_combined_fixture.py --build-dir "$RUNNER_TEMP/rolling-combined-c"
           PS3DK_PROF_ROLLING_COMBINED_FIXTURE_DIR="$RUNNER_TEMP/rolling-combined-c/c-combined" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c c_accepted_output_mixed_checkpoints_and_store_match_original_source -- --ignored --exact
           cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c --no-run --message-format=json > "$RUNNER_TEMP/rolling-combined-build.jsonl"
@@ -188,6 +207,7 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_positions_mutants.py --build-dir "$RUNNER_TEMP/rolling-positions-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py --build-dir "$RUNNER_TEMP/rolling-counter-mutants"
           python3 tests/host/ps3dk-prof-rolling/fifo_mutations.py --build-dir "$RUNNER_TEMP/rolling-fifo-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_auto_mutants.py --build-dir "$RUNNER_TEMP/rolling-auto-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'
         run: |

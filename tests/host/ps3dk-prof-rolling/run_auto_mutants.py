@@ -34,7 +34,10 @@ TEST_COUNT = 29
 MAX_INPUT_FILES = 512
 MAX_INPUT_BYTES = 32 << 20
 MAX_OUTPUT_BYTES = 2 << 30
-FLOOR_BYTES = 30 << 30
+# The isolated output is capped at 2 GiB. Keep that amount plus 2 GiB
+# headroom on its own filesystem; workstation-wide build floors belong to
+# the local lease wrapper, not a portable CI test.
+FLOOR_BYTES = 4 << 30
 
 
 class GateError(Exception):
@@ -180,7 +183,7 @@ def packages(data):
 
 def disk_guard(out):
     if shutil.disk_usage(out).free < FLOOR_BYTES:
-        raise GateError("free-space floor below 30 GiB")
+        raise GateError("isolated-output free-space floor below 4 GiB")
     total = 0
     for directory, _, files in os.walk(out):
         for name in files:
@@ -243,7 +246,7 @@ def main():
     while not ancestor.exists():
         ancestor = ancestor.parent
     if shutil.disk_usage(ancestor).free < FLOOR_BYTES:
-        raise GateError("free-space floor below 30 GiB")
+        raise GateError("isolated-output free-space floor below 4 GiB")
     out.mkdir(parents=True, exist_ok=False)
     workspace = out/"workspace"
     for path, content in inputs.items():
