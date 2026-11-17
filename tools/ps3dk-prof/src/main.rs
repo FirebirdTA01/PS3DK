@@ -16,7 +16,8 @@ mod rolling_cli;
 use ps3dk_prof::{load_file, report, Outcome, Verdict};
 
 const USAGE: &str = "usage:
-  ps3dk-prof rolling [--json] [--max-bytes N] <file>   validate and list retained rolling data
+  ps3dk-prof rolling [--json] [--max-bytes N] [--max-analysis-bytes N] [--max-analysis-work N] <file>
+                                                  validate and list retained rolling data
   ps3dk-prof check <file>    print the verdict
   ps3dk-prof report [--window <id|name>] <file>   print the verdict and the full report
   ps3dk-prof windows <file>  list capture windows

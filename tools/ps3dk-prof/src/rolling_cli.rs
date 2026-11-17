@@ -28,7 +28,7 @@ fn ppu_json(p: &rolling::RetainedPpu) -> Value {
             "final_present":l.final_entry.is_some()})).collect::<Vec<_>>(),
         "incomplete":p.incomplete.iter().map(ToString::to_string).collect::<Vec<_>>()})
 }
-fn report(bytes: &[u8], cap: u64) -> Result<Value> {
+fn report(bytes: &[u8], cap: u64, analysis_cap: usize, analysis_work: u64) -> Result<Value> {
     let limits = store::Limits { max_file_bytes:cap, max_slot_bytes:cap.min(u32::MAX as u64) as u32 };
     let physical = store::read(bytes, limits).map_err(|e|failure(store_code(&e),e))?;
     let magic = physical.segments.first().ok_or_else(||failure(1,"empty store has no semantic checkpoint"))?
@@ -53,7 +53,8 @@ fn report(bytes: &[u8], cap: u64) -> Result<Value> {
         out["ppu"] = ppu_json(&f.retained);
     } else if magic == b"PFRMIX01" {
         let f = join::read_combined(bytes,limits,mixed::Limits {
-            input_bytes:usize::try_from(cap).map_err(|_|failure(1,"host input cap"))?,..Default::default()
+            input_bytes:usize::try_from(cap).map_err(|_|failure(1,"host input cap"))?,
+            temporary_bytes:analysis_cap,work_items:analysis_work,..join::desktop_limits()
         },mixed::ReportOptions { spu_profile_table:&[],causal_limits:Default::default() }).map_err(|e| {
             let code = match &e { join::CombinedError::Store(x)=>store_code(x),join::CombinedError::Semantic(x)=>mixed_code(x),join::CombinedError::Limit(_)=>1,_=>2 };
             failure(code,e)
@@ -105,8 +106,8 @@ fn read_saved(path: &str, cap: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 pub fn run(args: &[String]) -> ExitCode {
-    let mut json_output=false; let mut cap=None; let mut path=None; let mut i=0;
-    let usage=|| { eprintln!("usage: ps3dk-prof rolling [--json] [--max-bytes N] <file>"); ExitCode::from(3) };
+    let mut json_output=false; let mut cap=None; let mut analysis_cap=None; let mut analysis_work=None; let mut path=None; let mut i=0;
+    let usage=|| { eprintln!("usage: ps3dk-prof rolling [--json] [--max-bytes N] [--max-analysis-bytes N] [--max-analysis-work N] <file>"); ExitCode::from(3) };
     while i<args.len() {
         match args[i].as_str() {
             "--json" if !json_output => json_output=true,
@@ -116,12 +117,26 @@ pub fn run(args: &[String]) -> ExitCode {
                 let Ok(n)=n.parse::<u64>() else {return usage()};
                 if n==0 || usize::try_from(n).is_err() {return usage()} cap=Some(n);
             }
+            "--max-analysis-bytes" if analysis_cap.is_none() => {
+                i+=1; let Some(n)=args.get(i) else {return usage()};
+                if n.is_empty() || !n.bytes().all(|b|b.is_ascii_digit()) {return usage()}
+                let Ok(n)=n.parse::<usize>() else {return usage()};
+                if n==0 {return usage()} analysis_cap=Some(n);
+            }
+            "--max-analysis-work" if analysis_work.is_none() => {
+                i+=1; let Some(n)=args.get(i) else {return usage()};
+                if n.is_empty() || !n.bytes().all(|b|b.is_ascii_digit()) {return usage()}
+                let Ok(n)=n.parse::<u64>() else {return usage()};
+                if n==0 {return usage()} analysis_work=Some(n);
+            }
             s if !s.starts_with('-') && path.is_none() => path=Some(s),
             _ => return usage(),
         } i+=1;
     }
     let Some(path)=path else {return usage()}; let cap=cap.unwrap_or(64<<20);
-    match read_saved(path,cap).and_then(|b|report(&b,cap)) {
+    let analysis_cap=analysis_cap.unwrap_or(join::DEFAULT_ANALYSIS_BYTES);
+    let analysis_work=analysis_work.unwrap_or(join::DEFAULT_ANALYSIS_WORK);
+    match read_saved(path,cap).and_then(|b|report(&b,cap,analysis_cap,analysis_work)) {
         Err((code,reason))=> {eprintln!("rolling: {reason}");ExitCode::from(code)},
         Ok(v)=> {
             if json_output { println!("{}",serde_json::to_string(&v).expect("JSON value serialization")); }

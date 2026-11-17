@@ -12,6 +12,21 @@
 //! encoder temporaries. These are admission bounds, not exact RSS promises.
 use crate::{rolling, rolling_combined, rolling_store};
 
+/// Desktop CLI/viewer allowance for conservative combined-analysis storage.
+/// Separate from file admission and from the caller's retained-output budget;
+/// not a process RSS bound. Library Limits::default remains 64 MiB. Six default
+/// 1 MiB payload slots can retain enough AUTO rows to exceed that smaller cap.
+pub const DEFAULT_ANALYSIS_BYTES: usize = 256 << 20;
+/// Conservative analysis work units, including the AUTO cross-product charge;
+/// units are not CPU instructions or a wall-clock deadline.
+pub const DEFAULT_ANALYSIS_WORK: u64 = 1 << 34;
+
+/// Explicit desktop policy, without changing conservative library defaults.
+pub fn desktop_limits() -> rolling_combined::Limits {
+    rolling_combined::Limits { temporary_bytes: DEFAULT_ANALYSIS_BYTES,
+        work_items: DEFAULT_ANALYSIS_WORK, ..Default::default() }
+}
+
 #[derive(Debug)]
 pub enum Error {
     Store(rolling_store::Error),

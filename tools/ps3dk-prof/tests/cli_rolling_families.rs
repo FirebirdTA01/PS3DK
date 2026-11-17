@@ -114,6 +114,45 @@ fn output(scratch:&Scratch,bytes:&[u8])->Value{
     assert!(err.is_empty(),"successful CLI stderr: {}",String::from_utf8_lossy(&err));
     serde_json::from_slice(&out).expect("CLI JSON")
 }
+
+#[test]
+fn cli_default_analysis_admits_dense_auto_and_explicit_cap_still_refuses(){
+    let mut x=fixture();
+    let at=x.file.chunks.iter().position(|c|c.ty==35 && get64(&c.payload,16)==2).unwrap();
+    let n=18_000u32;
+    let mut chunks=Vec::new();
+    for first in (2..u64::from(n)+2).step_by(250) {
+        let mut dense=op(first,8,None,(101000,191000));
+        put32(&mut dense.payload,8,250);dense.payload.truncate(16);
+        for id in first..first+250 {dense.payload.extend_from_slice(&op(id,8,None,(101000,191000)).payload[16..]);}
+        chunks.push(dense);
+    }
+    x.file.chunks.splice(at..at+1,chunks);
+    let status=x.file.chunks.iter_mut().rev().find(|c|c.ty==37).unwrap();
+    *status=combined_auto_support::status(1,u64::from(n)+1,2,9);
+    let raw=x.file.bytes();
+    if let Outcome::Malformed(e)=load(&raw){panic!("original dense source: {e}");}
+    let p=parts(&x.file,&[0,x.cut,x.file.chunks.len()]);
+    let layout=Layout::new(2,2,32768,4<<20);
+    let bytes=container(&p,layout,2,0);
+    let scratch=Scratch::new();
+    let v=output(&scratch,&bytes);
+    assert_eq!(v["status"],"VALID_RETAINED");
+    let input=scratch.0.join("capture.profr");
+    let refused=Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(["rolling","--max-analysis-bytes","67108864"]).arg(&input).output().unwrap();
+    assert_eq!(refused.status.code(),Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("combined analysis temporary bytes"));
+    let work=Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(["rolling","--max-analysis-work","16777216"]).arg(&input).output().unwrap();
+    assert_eq!(work.status.code(),Some(1));
+    assert!(String::from_utf8_lossy(&work.stderr).contains("actual work"));
+    for args in [vec!["0"],vec!["-1"],vec!["abc"],vec!["268435456","--max-analysis-bytes","268435456"]] {
+        let bad=Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(["rolling","--max-analysis-bytes"]).args(args).arg(&input).output().unwrap();
+        assert_eq!(bad.status.code(),Some(3));
+    }
+    let explicit=Command::new(env!("CARGO_BIN_EXE_ps3dk-prof")).args(["rolling","--json","--max-analysis-bytes","268435456"]).arg(&input).output().unwrap();
+    assert!(explicit.status.success(),"{}",String::from_utf8_lossy(&explicit.stderr));
+    assert_eq!(serde_json::from_slice::<Value>(&explicit.stdout).unwrap(),v);
+}
 fn scope(v:&Value,first:usize,next:usize){
     assert_eq!(v["status"],"VALID_RETAINED");assert_eq!(v["physical"]["state"],"SEALED");
     assert_eq!(v["retained"]["first_chunk"],first);assert_eq!(v["retained"]["next_chunk"],next);

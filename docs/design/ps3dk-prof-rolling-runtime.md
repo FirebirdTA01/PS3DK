@@ -157,6 +157,22 @@ Ordinary append captures keep their existing live behavior.
 
 ## Acceptance tests
 
+The desktop `ps3dk-prof rolling` command admits files up to 64 MiB by default
+(`--max-bytes N`) and separately allows 256 MiB for the combined reader's
+conservative analysis-storage accounting (`--max-analysis-bytes N`, bytes).
+Dense retained AUTO rows can exceed the library's 64 MiB default analysis
+allowance even in a 21 MiB physical file. The CLI and viewer can use
+`rolling_file::desktop_limits()`; explicit library limits remain unchanged.
+That policy also admits 2^34 conservative analysis work units, configurable
+with `--max-analysis-work N`. AUTO precharges the product of retained frames,
+operations and supporting evidence, including a conservative constant factor;
+these units are not CPU instructions or a time limit. Both work and storage
+checks remain enforced before analysis.
+These caps do not promise a bound on total process RSS or authenticate evicted
+history. Budget exhaustion refuses the listing; it does not discard rows or
+relax wire validation. The analysis allowance applies to combined PPU/SPU/AUTO/
+FIFO captures; PPU-only captures retain their existing reader limits.
+
 `runtime_ppu_test.c` and `runtime_lifecycle_test.c` exercise actual FILE output,
 bootstrap ordering, APP/THREAD stopping, shutdown races, write/sync/close/join
 failures and quick exit. `runtime_spu_test.c` uses the real SPU producer and
