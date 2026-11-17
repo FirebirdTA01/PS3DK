@@ -93,10 +93,16 @@ pub struct App {
     pub pool: Arc<crate::capture::Pool>,
     pub screenshot: Option<PathBuf>,
     pub screenshot_frames: usize,
-    /// The capture window the Passes page is scoped to; None = all frames (the default).
+    /// The capture window every scoped page is restricted to; None = all frames (the default).
     pub window: Option<u32>,
     /// The Passes page's window-scoped view, rebuilt on demand (only when a window is selected).
     pub passes_window: Option<crate::auto::PassesView>,
+    /// The Automatic page's window-scoped view (report + busy filtered to the window),
+    /// mirroring the reader's `auto --window`; None when no window is selected.
+    pub auto_window: Option<crate::auto::AutoView>,
+    /// The Frames page's window-scoped index (each owner's slots + claimed work confined
+    /// to the window), mirroring the reader's `frames --window`; None when none is selected.
+    pub frames_window: Option<crate::frames::FramesIndex>,
     /// The frame-start for the "Save frame range…" dialog.
     pub save_range_from: u64,
     /// The frame-end for the "Save frame range…" dialog.
@@ -195,6 +201,8 @@ impl App {
             screenshot_frames: 0,
             window: None,
             passes_window: None,
+            auto_window: None,
+            frames_window: None,
             save_range_from: 0,
             save_range_to: 0,
             save_range_modal: false,
@@ -258,22 +266,35 @@ impl App {
         } else {
             self.auto.refresh(doc.auto.as_ref());
         }
-        // The window picker and its scoped Passes view belong to the previous capture.
+        // The window picker and its scoped views belong to the previous capture.
         if fresh {
             self.window = None;
+            self.auto_window = None;
+            self.frames_window = None;
         }
         self.save_result = None;
         self.save_range_modal = false;
-        let passes_window = match (self.window, doc.analysis()) {
-            (Some(id), Some(a)) => a
-                .capture
-                .windows
-                .iter()
-                .find(|w| w.id == id)
-                .map(|w| crate::auto::passes_build_window(&a.capture, w)),
-            _ => None,
-        };
-        self.passes_window = passes_window;
+        if let (Some(id), Some(a)) = (self.window, doc.analysis()) {
+            if let Some(w) = a.capture.windows.iter().find(|w| w.id == id) {
+                let w = w.clone();
+                self.passes_window = Some(crate::auto::passes_build_window(&a.capture, &w));
+                self.auto_window = Some(crate::auto::AutoView::build_window(&a.capture, &w));
+                self.frames_window = Some(crate::frames::FramesIndex::build_window(a, &w));
+                self.auto.refresh(self.auto_window.as_ref());
+                if let Some(ix) = self.frames_window.as_ref() {
+                    self.frames.refresh(a, ix);
+                }
+                // The timeline was refreshed above with its remembered window, keeping follow and zoom.
+            } else {
+                self.passes_window = None;
+                self.auto_window = None;
+                self.frames_window = None;
+            }
+        } else {
+            self.passes_window = None;
+            self.auto_window = None;
+            self.frames_window = None;
+        }
         self.doc = Some(doc);
     }
 
@@ -515,29 +536,82 @@ impl App {
         });
     }
 
-    /// Rebuilds the window-scoped Passes view for the current `self.window`.
-    /// Sets `self.passes_window = None` when the window is "All", or when the
-    /// selected id is not in the document (the picker should not offer it).
-    pub fn rebuild_passes_window(&mut self) {
-        let Some(doc) = self.doc.as_ref() else {
+    /// Rebuilds every window-scoped view for the current `self.window`:
+    /// `passes_window`, `auto_window`, and `frames_window` (all three), plus
+    /// the `TimelineState` (which rebuilds its timeline bars with
+    /// `span_in_window`). Clears them and re-clamps the auto/frames state when
+    /// the window is "All" or when the selected id is not in the document.
+    pub fn rebuild_window_views(&mut self) {
+        let Some(doc) = self.doc.as_ref().cloned() else {
             self.passes_window = None;
+            self.auto_window = None;
+            self.frames_window = None;
             return;
         };
         let Some(id) = self.window else {
             self.passes_window = None;
+            self.auto_window = None;
+            self.frames_window = None;
+            // Refresh the auto page to the unscoped view (bounds reset to
+            // the whole capture's frames) so its selection and steady bounds
+            // clamp against the now-larger population.
+            self.auto.refresh(doc.auto.as_ref());
+            // Frames: drop the window filter; the default owner reselects on
+            // the full index.
+            if let (Some(a), Some(ix)) = (doc.analysis(), doc.frames.as_ref()) {
+                self.frames.refresh(a, ix);
+            }
+            // Timeline: rebuild from the unscoped analysis (full capture).
+            if let (Some(st), Some(a)) = (self.timeline.as_mut(), doc.analysis()) {
+                st.refresh_unscoped(a);
+            }
             return;
         };
-        let w = doc
-            .analysis()
-            .and_then(|a| a.capture.windows.iter().find(|w| w.id == id))
-            .cloned();
-        self.passes_window = match w {
-            Some(w) => {
-                let cap = &doc.analysis().unwrap().capture;
-                Some(crate::auto::passes_build_window(cap, &w))
-            }
-            None => None,
+        // The window is valid: build the three scoped views.
+        let (passes, auto, frames, w) = {
+            let Some(a) = doc.analysis() else {
+                self.passes_window = None;
+                self.auto_window = None;
+                self.frames_window = None;
+                return;
+            };
+            let wref = match a
+                .capture
+                .windows
+                .iter()
+                .find(|w| w.id == id)
+            {
+                Some(w) => w,
+                None => {
+                    self.passes_window = None;
+                    self.auto_window = None;
+                    self.frames_window = None;
+                    return;
+                }
+            };
+            (
+                crate::auto::passes_build_window(&a.capture, wref),
+                crate::auto::AutoView::build_window(&a.capture, wref),
+                crate::frames::FramesIndex::build_window(a, wref),
+                wref.clone(),
+            )
         };
+        self.passes_window = Some(passes);
+        self.auto_window = Some(auto.clone());
+        self.frames_window = Some(frames);
+        // Auto page state: reconcile its selection and steady bounds against
+        // the windowed view's (filtered) frames.
+        self.auto.refresh(self.auto_window.as_ref());
+        // Frames page state: re-resolve the owner selection against the windowed
+        // index (a frame that's not in this window becomes NONE selection).
+        if let Some(a) = doc.analysis() {
+            self.frames.refresh(a, self.frames_window.as_ref().unwrap());
+        }
+        // Timeline: rebuild its bars from the scoped analysis, refit the visible
+        // window, and let the next frame re-sync the SPU/RSX foreign rows.
+        if let (Some(st), Some(a)) = (self.timeline.as_mut(), doc.analysis()) {
+            st.refresh_windowed(a, &w);
+        }
     }
 
     /// The "Save frame range…" modal: two spinners and Save/Cancel.  Closing it
@@ -807,7 +881,7 @@ impl eframe::App for App {
         }
         if new_window != self.window {
             self.window = new_window;
-            self.rebuild_passes_window();
+            self.rebuild_window_views();
         }
         if want_save_window {
             if let Some(id) = self.window {
@@ -965,11 +1039,13 @@ impl eframe::App for App {
             }
             self.page = Page::Frames;
         }
-        // The timeline takes the whole page: wheel and drag belong to it.
+        // The timeline takes the whole page: wheel and drag belong to it.  Its
+        // AUTO lane shows the window-scoped view when a window is selected.
         if page == Page::Timeline {
             if let (Some(doc), Some(st)) = (self.doc.as_ref(), self.timeline.as_mut()) {
                 if let Some(a) = doc.analysis() {
-                    timeline_ui::draw_with_auto(ctx, &doc.foreign_tl, a, doc.auto.as_ref(), st, &mut self.selected_zone);
+                    let auto = self.auto_window.as_ref().or(doc.auto.as_ref());
+                    timeline_ui::draw_with_auto(ctx, &doc.foreign_tl, a, auto, st, &mut self.selected_zone);
                     return;
                 }
             }
@@ -1008,7 +1084,8 @@ impl eframe::App for App {
                     }
                     Page::Frames => match &d.frames {
                         Some(ix) => {
-                            frames_ui::draw(p, a, ix, frames, timeline.as_mut(), Some(&d.foreign));
+                            let ix_show = self.frames_window.as_ref().unwrap_or(ix);
+                            frames_ui::draw(p, a, ix_show, frames, timeline.as_mut(), Some(&d.foreign));
                         }
                         None => ui::field_message(p, ui::Tone::Neutral, "No frame index for this document."),
                     },
@@ -1030,9 +1107,10 @@ impl eframe::App for App {
                     },
                     Page::Automatic => match &d.auto {
                         Some(v) => {
+                            let v_show = self.auto_window.as_ref().unwrap_or(v);
                             auto_nav = crate::auto_ui::page(
                                 p,
-                                v,
+                                v_show,
                                 auto,
                                 timeline.as_mut(),
                                 &mut crate::auto_ui::Drawn::default(),
@@ -1055,11 +1133,15 @@ impl eframe::App for App {
         if let Some(np) = auto_nav {
             self.page = np;
         }
-        // A frame link on the Hot paths page opens that (owner, frame) on the Frames page.
+        // A frame link on the Hot paths page opens that (owner, frame) on the Frames page,
+        // against the window-scoped index when a window is selected.
         if let (Some((owner, frame)), Some(d)) = (nav, self.doc.clone()) {
-            if let (Some(a), Some(ix)) = (d.analysis(), d.frames.as_ref()) {
-                self.frames.select(a, ix, owner, Some(frame));
-                self.page = Page::Frames;
+            if let Some(a) = d.analysis() {
+                let ix = self.frames_window.as_ref().or(d.frames.as_ref());
+                if let Some(ix) = ix {
+                    self.frames.select(a, ix, owner, Some(frame));
+                    self.page = Page::Frames;
+                }
             }
         }
     }

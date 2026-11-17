@@ -88,6 +88,27 @@ impl AutoView {
         AutoView { report, tb_freq, busy }
     }
 
+    /// The Automatic page view scoped to capture window `w`, exactly as the
+    /// CLI's `auto --window` renders it: the report filtered by the window
+    /// (`Report::filter_window`) and the RSX busy intervals confined to the
+    /// window's frames (`w.contains_frame`).  Analyzes the capture exactly
+    /// once; the reader's `busy_timeline` needs the full report for its
+    /// map/refusal checks, so we build busy from it and then retain only the
+    /// intervals this window holds.
+    pub fn build_window(cap: &Capture, w: &ps3dk_prof::CaptureWindow) -> AutoView {
+        let full = auto_rsx::analyze(cap);
+        let tb_freq = cap
+            .clock
+            .as_ref()
+            .map(|c| c.freq_hz)
+            .filter(|&f| f > 0)
+            .unwrap_or(79_800_000);
+        let report = full.filter_window(w);
+        let mut busy = auto_rsx::busy_timeline(cap, &full);
+        busy.bars.retain(|b| w.contains_frame(b.frame));
+        AutoView { report, tb_freq, busy }
+    }
+
     /// Whether this capture contains automatic profiler capability (FLAG_AUTO / auto chunks).
     pub fn has_auto(&self) -> bool {
         self.report.capability

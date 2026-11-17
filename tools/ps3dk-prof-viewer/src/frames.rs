@@ -106,6 +106,46 @@ impl Owner {
     pub fn percentile_of(&self, p: u64) -> Metric<u64> {
         percentile(&self.sorted, p)
     }
+
+    /// This owner scoped to capture window `w`: the same record order, but only
+    /// the slots whose frame `w` contains, with every aggregate (sorted values,
+    /// counts sum and percentiles) recomputed from just those slots.  Matches
+    /// the CLI's `frames --window`, which renders only `a.frames` /
+    /// `a.work` rows the window contains.
+    pub fn window(&self, w: &ps3dk_prof::CaptureWindow) -> Owner {
+        let slots: Vec<Slot> = self.slots.iter().filter(|s| w.contains_frame(s.frame)).cloned().collect();
+        let mut sorted: Vec<u64> = slots
+            .iter()
+            .filter_map(|s| match s.kind {
+                SlotKind::Measured(d) => Some(d),
+                _ => None,
+            })
+            .collect();
+        sorted.sort_unstable();
+        let unknown = slots.iter().filter(|s| matches!(s.kind, SlotKind::Unknown(_))).count() as u64;
+        let refused = slots.iter().filter(|s| matches!(s.kind, SlotKind::Refused(_))).count() as u64;
+        let placeable = slots
+            .iter()
+            .filter(|s| matches!(s.kind, SlotKind::Measured(d) if d > 0) && s.next_tb.is_some())
+            .count() as u64;
+        let sum: u128 = sorted.iter().map(|&d| u128::from(d)).sum();
+        let p50 = percentile(&sorted, 50);
+        let p90 = percentile(&sorted, 90);
+        Owner {
+            incarnation: self.incarnation,
+            name: self.name.clone(),
+            valid: self.valid,
+            reasons: self.reasons.clone(),
+            slots,
+            sorted,
+            unknown,
+            refused,
+            placeable,
+            sum,
+            p50,
+            p90,
+        }
+    }
 }
 
 /// The claimed spans of one (owner, frame, lane) and the reader's W for that key.
@@ -221,6 +261,30 @@ impl FramesIndex {
             owners,
             claimed,
             unattributed,
+        }
+    }
+
+    /// The frame index scoped to capture window `w`: each owner keeps only the
+    /// slots the window contains (re-aggregated), and only the claimed
+    /// (owner, frame, lane) work rows the window holds.  This mirrors the CLI's
+    /// `frames --window`, which lists the window's frame-elapsed and W rows.
+    /// Note: spans are already grouped by (owner, frame, lane) in `claimed`;
+    /// if `w` contains that frame, the span is `span_in_window`-in it by
+    /// attribution, so we only test the frame key.
+    pub fn build_window(a: &Analysis, w: &ps3dk_prof::CaptureWindow) -> FramesIndex {
+        let full = Self::build(a);
+        let owners: Vec<Owner> = full.owners.iter().map(|o| o.window(w)).collect();
+        let claimed: BTreeMap<(u32, u64, u32), Group> = full
+            .claimed
+            .iter()
+            .filter(|(&(_, frame, _), _)| w.contains_frame(frame))
+            .map(|(k, g)| (*k, g.clone()))
+            .collect();
+        FramesIndex {
+            freq_hz: a.capture.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0),
+            owners,
+            claimed,
+            unattributed: full.unattributed,
         }
     }
 
