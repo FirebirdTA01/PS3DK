@@ -13,6 +13,9 @@
  *   -jump    overflow refusal + 120 frames from mapped main memory, each a
  *            CALLed segment that JUMPs to a second sub-segment, which RETURNs
  *            (GCM_SEG_VARIANT_JUMP)
+ *   -ring    600 owner-buffer clears per frame for the AUTO report ring; the
+ *            first 3 flips print the flip words and IO offset 0 (GCM_SEG_PROBE)
+ *            (GCM_SEG_VARIANT_RING)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
 #include <cell/gcm/gcm_segment.h>
@@ -342,7 +345,77 @@ static void ring_attach(void)
     puts("GCM_SEG_RING attach skipped (not a PS3_PROF_AUTO build)");
 #endif
 }
-static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st)
+/* Flip probe (first PROBE_FLIPS frames): the words cellGcmSetFlip writes into the owner buffer, every CALL among
+ * them with the word after it, and the first PROBE_WORDS words at IO offset 0 before SetFlip, after it and after
+ * the flip completed. GCM_SEG_PROBE lines; an all-zero row of 8 words is not printed. */
+enum { PROBE_FLIPS = 3, PROBE_WORDS = 1024, PROBE_SPAN = 160 };
+static uint32_t probe_pre[PROBE_WORDS], probe_post[PROBE_WORDS], probe_first[PROBE_WORDS];
+static void probe_copy(uint32_t *to, const void *io0)
+{
+    const volatile uint32_t *w = (const volatile uint32_t *)io0;
+    for (unsigned i = 0; i < PROBE_WORDS; ++i) to[i] = w[i];
+}
+static void probe_rows(const char *tag, unsigned flip, uint32_t base, const uint32_t *w, unsigned n, int skip_zero)
+{
+    for (unsigned i = 0; i < n; i += 8) {
+        unsigned k = n - i < 8 ? n - i : 8, nz = 0;
+        for (unsigned j = 0; j < k; ++j) nz |= w[i + j] != 0;
+        if (skip_zero && !nz) continue;
+        printf("GCM_SEG_PROBE %s flip=%u +0x%04x:", tag, flip, (unsigned)(base + 4u * i));
+        for (unsigned j = 0; j < k; ++j) printf(" %08x", (unsigned)w[i + j]);
+        putchar('\n');
+    }
+}
+static void probe_diff(const char *tag, unsigned flip, const uint32_t *a, const uint32_t *b)
+{
+    unsigned n = 0;
+    for (unsigned i = 0; i < PROBE_WORDS; ++i)
+        if (a[i] != b[i]) {
+            if (n < 48) printf("GCM_SEG_PROBE %s flip=%u +0x%04x %08x -> %08x\n", tag, flip, 4u * i,
+                               (unsigned)a[i], (unsigned)b[i]);
+            ++n;
+        }
+    printf("GCM_SEG_PROBE %s flip=%u changed_words=%u\n", tag, flip, n);
+}
+static int ring_flip_probe(CellGcmContextData *ctx, SegDisplay *d, unsigned flip, uint32_t host)
+{
+    void *io0 = NULL;
+    uint32_t begin_io = 0, *before = ctx->current, *begin = ctx->begin;
+    int32_t rc0 = cellGcmIoOffsetToAddress(0, &io0), rcb = cellGcmAddressToOffset(begin, &begin_io);
+    if (rc0 == CELL_OK && io0) probe_copy(probe_pre, io0);
+    cellGcmResetFlipStatus();
+    if (cellGcmSetFlip(ctx, (uint8_t)d->buffer_id)) return 0;
+    uint32_t *after = ctx->current;
+    if (rc0 == CELL_OK && io0) probe_copy(probe_post, io0);
+    int same = ctx->begin == begin && after >= before;
+    unsigned n = same ? (unsigned)(after - before) : 0;
+    printf("GCM_SEG_PROBE flip=%u io0 rc=%08x ea=0x%08x host=0x%08x begin=0x%08x begin_io rc=%08x off=0x%08x "
+           "end=+0x%x before=+0x%x after=+0x%x same_begin=%d words=%u\n", flip, (unsigned)rc0,
+           (unsigned)(uintptr_t)io0, (unsigned)host, (unsigned)(uintptr_t)begin, (unsigned)rcb, (unsigned)begin_io,
+           (unsigned)(4u * (ctx->end - ctx->begin)), (unsigned)(4u * (before - begin)),
+           (unsigned)(4u * (after - ctx->begin)), same, n);
+    for (unsigned i = 0; i < n && i < PROBE_SPAN; ++i)
+        if ((before[i] & 3u) == 2u)
+            printf("GCM_SEG_PROBE flip=%u call at=+0x%x word=0x%08x target_io=0x%08x next=0x%08x\n", flip,
+                   (unsigned)(4u * (before + i - begin)), (unsigned)before[i], (unsigned)(before[i] & ~3u),
+                   i + 1 < n ? (unsigned)before[i + 1] : 0xffffffffu);
+    probe_rows("owner", flip, (uint32_t)(4u * (before - begin)), before, n < PROBE_SPAN ? n : PROBE_SPAN, 0);
+    if (rc0 == CELL_OK && io0) {
+        if (flip == 0) {
+            probe_rows("io0-pre", flip, 0, probe_pre, PROBE_WORDS, 1);
+            probe_rows("io0-post", flip, 0, probe_post, PROBE_WORDS, 1);
+            for (unsigned i = 0; i < PROBE_WORDS; ++i) probe_first[i] = probe_post[i];
+        }
+        probe_diff("io0-setflip", flip, probe_pre, probe_post);
+        if (flip) probe_diff("io0-vs-flip0", flip, probe_first, probe_post);
+    }
+    cellGcmFlush(ctx);
+    if (cellGcmWaitFlipComplete(SEG_FLIP_POLLS * 200u) != CELL_OK) return 0;
+    if (rc0 == CELL_OK && io0) { probe_copy(probe_pre, io0); probe_diff("io0-completed", flip, probe_post, probe_pre); }
+    d->buffer_id ^= 1u;
+    return 1;
+}
+static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st, uint32_t host)
 {
     for (unsigned frame = 0; frame < RING_FRAMES && !quit_requested; ++frame) {
         seg_display_target(ring, &disp);
@@ -350,7 +423,8 @@ static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st)
             cellGcmSetClearColor(ring, 0xff000000u | ((frame * 7u + i) & 0xffu) << 8);
             cellGcmSetClearSurface(ring, CELL_GCM_CLEAR_R | CELL_GCM_CLEAR_G | CELL_GCM_CLEAR_B | CELL_GCM_CLEAR_A);
         }
-        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { puts("GCM_SEG_FAIL ring flip"); return 0; }
+        if (frame < PROBE_FLIPS ? !ring_flip_probe(ring, &disp, frame, host)
+                                : !seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { puts("GCM_SEG_FAIL ring flip"); return 0; }
         st->frames++;
         cellSysutilCheckCallback();
     }
@@ -406,7 +480,7 @@ int main(void)
     if (!local_refusal_check(&config)) { puts("GCM_SEG_FAIL local refusal"); return 1; }
     outcome = "local-refused";
 #elif defined(GCM_SEG_VARIANT_RING)
-    if (!run_ring_phase(ring, &st)) return 1;
+    if (!run_ring_phase(ring, &st, (uint32_t)host)) return 1;
     outcome = "ring-ok";
 #elif defined(GCM_SEG_VARIANT_JUMP)
     CellGcmSegment sub[2];
