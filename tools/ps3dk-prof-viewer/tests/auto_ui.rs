@@ -861,7 +861,7 @@ fn ring_stopped_fixture_shows_reject_and_lower_bound_verdict() {
         .sum::<u64>();
     let row_total: u64 = f_bad_row.exclusions.iter().map(|(_, _, c)| *c).sum();
     assert_eq!(row_total, expected_total,
-        "frame #{k} per-frame breakdown must reconcile with reader's excluded total");
+        "frame #{} per-frame breakdown must reconcile with reader's excluded total", f_bad.frame);
     let _ = (kind, reason, count);
 
     // Parity against the CLI JSON.

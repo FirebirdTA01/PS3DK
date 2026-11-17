@@ -408,15 +408,17 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         drawn.state = v.report.state.clone();
         fact_row(c, "Capture state", |v_ui| {
             v_ui.horizontal_top(|h| {
-                if v.is_final() {
-                    auto_badge(h, "FINAL", ui::Tone::Success);
-                    h.add_space(ui::SPACE_XS);
-                    h.add(egui::Label::new(&drawn.state).wrap()).on_hover_text(&drawn.state);
+                // The badge names FINAL or PROVISIONAL; the text adds the reader's state only when it says more
+                // than the badge (e.g. "FINAL (lower bounds)").
+                let (badge, tone, plain) = if v.is_final() {
+                    ("FINAL", ui::Tone::Success, "Closed with complete stop / finalization")
                 } else {
-                    auto_badge(h, "PROVISIONAL", ui::Tone::Warning);
-                    h.add_space(ui::SPACE_XS);
-                    h.add(egui::Label::new(&drawn.state).wrap()).on_hover_text(&drawn.state);
-                }
+                    ("PROVISIONAL", ui::Tone::Warning, "Provisional snapshot / open session")
+                };
+                auto_badge(h, badge, tone);
+                h.add_space(ui::SPACE_XS);
+                let text = if drawn.state == badge { plain.to_string() } else { drawn.state.clone() };
+                h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
             });
         });
 
