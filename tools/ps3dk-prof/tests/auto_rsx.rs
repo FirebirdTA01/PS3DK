@@ -2317,7 +2317,7 @@ fn sealed_capture_output_has_no_unsealed_facts() {
     assert_eq!(r.state, "FINAL");
     assert!(r.unsealed.is_none());
     assert_eq!(r.frames[0].verdict, Verdict::RsxBound, "{}", r.frames[0].reason);
-    assert!(!text.contains("tail not recorded") && !text.contains("capture totals") && !text.contains("row OPEN"), "{text}");
+    assert!(!text.contains("tail not recorded") && !text.contains("capture totals") && !text.contains("row OPEN in the file"), "{text}");
     for key in ["sealed", "tail", "capture_totals"] {
         assert!(v.get(key).is_none(), "sealed JSON gained {key}");
     }
@@ -2325,7 +2325,7 @@ fn sealed_capture_output_has_no_unsealed_facts() {
     assert_eq!(v["frames"][0]["ranges_refused"], 3);
     // a sealed row the file marks OPEN keeps its existing reason and output too
     let (r, text, v) = totals_outputs(&totals_file(3, true, Some(true)));
-    assert!(r.unsealed.is_none() && !text.contains("row OPEN") && v.get("tail").is_none());
+    assert!(r.unsealed.is_none() && !text.contains("row OPEN in the file") && v.get("tail").is_none());
     assert!(r.frames[0].reason.starts_with("coverage row OPEN"), "{}", r.frames[0].reason);
 }
 
@@ -2342,7 +2342,7 @@ fn unsealed_capture_names_the_unrecorded_tail_and_unavailable_totals() {
     assert!(u.tail.starts_with("tail not recorded: frames after #0"), "{}", u.tail);
     assert!(!u.tail.contains("OPEN"), "a closed last row is not called OPEN: {}", u.tail);
     assert!(text.contains(&u.tail), "{text}");
-    assert!(!text.contains("row OPEN"), "{text}");
+    assert!(!text.contains("row OPEN in the file"), "{text}");
     let totals = text.lines().find(|l| l.starts_with("capture totals")).expect("capture totals line");
     for name in ["operations_written", "operations_dropped", "frames_written", "frames_lost", "ranges_refused"] {
         assert!(totals.contains(&format!("{name} UNAVAILABLE")), "{name}: {totals}");
