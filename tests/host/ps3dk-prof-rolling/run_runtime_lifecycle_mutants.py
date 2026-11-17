@@ -27,7 +27,7 @@ CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_lifecycle_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
 PINS = {
     DRAIN: 'e00ab67def7678c9315fcf26a0842cae21a9a65dd2a5651cab238fc6be84ba20',
-    BRIDGE: '0f97ce73ac439f33f9991d8a86d849f72d1a72ef86de650533dce6e5e3b292d4',
+    BRIDGE: 'dd91e860e2c615857bcd3310da931441972e8a7c73ea6b0a4657247bb39f2310',
 }
 RUST_TESTS = {
     'actual_thread_automatic_resource_stop_preserves_first_public_join_and_result',

@@ -661,6 +661,15 @@ static void inline_drain(prof *p)
     uint32_t z = 0;
     if (p->cfg.mode != PS3DK_PROF_MODE_APP || !pal_owner_is_self(&p->owner))
         return;
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        /* The lane-end request has released spu_mutex. Use the APP consumer
+         * boundary, including tail commit and deferred resource stopping;
+         * neither action is safe from an encoder or extension callback. */
+        (void)ps3dk_prof_drain();
+        return;
+    }
+#endif
     if (!CAS_ACQREL(&p->drain_busy, &z, 1u))
         return;
     if (!LD_ACQ(&p->stop_latch)) {

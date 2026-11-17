@@ -7,6 +7,7 @@
 #error "private rolling runtime seam requires PS3DK_PROF_TEST_HOOKS"
 #endif
 #include "roll_ppu.h"
+#include "roll_combined.h"
 
 typedef struct {
     uint32_t size, version, enabled, reserved; /* exact size, version1, enabled0/1 */
@@ -33,6 +34,9 @@ enum { PS3DK_PROF_TEST_EROLLRESOURCE = -33 };
  * Enabled requires explicit capacities and a FILE sink. Never mask flags to
  * fit the PPU/WINDOWS encoder. Unsupported families/ARC fail before creation. */
 int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *);
+/* Separate private SPU selector. options.ppu must be entirely zero; combined
+ * is the sole semantic capacity source. No manual GPU/AUTO/FIFO admission. */
+int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *, const pfm_config *);
 /* Errors leave out untouched: ENOTINIT before successful init, ENOTSUP for
  * append, EBUSY until first PUBLIC shutdown publishes after close/join.
  * Automatic stopping does not consume that public claim. Success is immutable.

@@ -1,0 +1,93 @@
+# Private rolling runtime
+
+This runtime is a host acceptance implementation behind both
+`PS3DK_PROF_ROLLING` and `PS3DK_PROF_TEST_HOOKS`. It is not a public SDK option.
+The LV2 PAL rejects test hooks; passing host tests does not establish target
+runtime behavior or filesystem durability. Append output remains the default.
+
+## Configuration and storage
+
+`ps3dk_prof_test_rolling_set` selects the PPU/WINDOWS encoder. The separate
+`ps3dk_prof_test_rolling_combined_set` selects the PPU/SPU encoder and requires
+every field of `options.ppu` to be zero. Its `pfm_config` is the sole semantic
+capacity source. Both setters copy their inputs before initialization, use the
+ordinary configuration gate, and leave prior configuration unchanged on error.
+A successful disabled setting clears the selection. Setters after successful
+initialization return EALREADY.
+
+All capacities are explicit. Before opening a file, checked planners count the
+existing core allocation and the rolling context, two arenas, checkpoint
+buffers, payload, physical-store scratch and control objects against one fixed
+memory ceiling. This private ceiling is at most 64 MiB. It excludes allocator
+overhead and the configured drainer thread stack. There is no allocation to grow
+these pools after READY. The logical file-size bound includes configuration,
+roots, retained slots and the replacement slot; it is not a disk-block
+reservation or a cumulative-I/O limit.
+
+Rolling output requires a FILE sink and exclusive creation of a `.profr` file.
+The combined selector requires SPU support and refuses manual GPU domains.
+Callbacks, ARC output, and the current wait/function/counter configurations are
+not admitted. AUTO/FIFO encoders and readers do not by themselves enable those
+families in this runtime. Original file flags are never masked to fit an
+encoder.
+
+The original HEADER and CLOCKS, plus PROFILE when present, are accepted and
+committed before a THREAD consumer is created or READY is published. The same
+header builder serves append and rolling output. A bootstrap failure does not
+publish a usable capture or leave an unpublished worker waiting for its start
+gate.
+
+## Acceptance and automatic stopping
+
+The output coordinator accepts complete original chunks. Its success transfers
+ownership into preallocated memory and permits the producer's sequence,
+read-index and event-ledger acknowledgements. A committed physical frontier is
+a separate fact. A failed semantic or resource check cannot acknowledge the
+candidate, even if earlier chunks were accepted.
+
+Resource exhaustion records the private typed result -33. It does not become a
+generic sink error or manufacture a terminal TRAILER. Stopping is serviced only
+after emission has returned to a consumer boundary with family locks released.
+The public APP drain and the THREAD consumer flush at their boundaries. The
+rolling SPU lane-end inline path uses the existing public APP drain boundary;
+it must not leave automatic stopping pending after an inline refusal.
+
+Automatic stopping owns a separate claim from public shutdown. It freezes the
+accepted frontier, closes the file and records the result. The first subsequent
+public shutdown still joins or retrieves that result and publishes immutable
+finalization; later shutdown calls return EALREADY. The private result getter
+returns EBUSY before this public finalization. A lane may have completed its
+output-free retirement even when its final record was refused: its return value
+and returned post-join observations do not imply accepted capture output.
+
+## Terminal and failure facts
+
+A genuine accepted TRAILER permits a SEALED physical root. Resource exhaustion
+instead produces STOPPED_RESOURCE for the accepted prefix. Successful tail
+commit is observed before attempting the separate terminal write, so a failed
+terminal sync does not erase knowledge of the preceding acknowledged root.
+Quick exit performs only a best-effort coherent OPEN flush; it does not seal or
+enroll retention.
+
+The primary result preserves this order: physical/encoder failure, close
+failure, resource exhaustion, source incompleteness, join failure, then
+retention failure. IO, close and join facts are also recorded separately.
+Retention is eligible only after successful terminal commit, close and join.
+Source completeness and qualified timing remain reader decisions; physical
+SEALED alone is insufficient.
+
+## Acceptance tests
+
+`runtime_ppu_test.c` and `runtime_lifecycle_test.c` exercise actual FILE output,
+bootstrap ordering, APP/THREAD stopping, shutdown races, write/sync/close/join
+failures and quick exit. `runtime_spu_test.c` uses the real SPU producer and
+drainer through the I2 host port. Its ordinary append capture is validated first;
+rolling checkpoints are then compared against the actual accepted original
+chunks. Tests cover eviction-crossing zones, no post-READY allocation, resource
+refusal before producer acknowledgement, and inline lane-end stopping before
+the first public shutdown. Mutation runners require their named semantic
+witnesses; compile errors, crashes and timeouts are not successful detections.
+
+These tests establish host behavior only. Production options, target runtime
+integration, AUTO/FIFO runtime admission and target storage measurements remain
+separate work before this can be advertised as rolling SDK capture support.

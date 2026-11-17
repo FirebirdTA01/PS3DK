@@ -15,6 +15,8 @@
 struct prof;
 typedef struct p_roll_runtime {
     ps3dk_prof_test_rolling_options options;
+    pfm_config combined;
+    uint32_t combined_enabled;
     ps3dk_prof_test_rolling_record record;
     pfr_layout disk;
     pfp_layout encoder;
@@ -27,8 +29,8 @@ typedef struct p_roll_runtime {
     uint32_t stop_owner, stop_prepared; /* atomic; distinct from public shutdown claim */
     int result;
 } p_roll_runtime;
-int p_roll_plan(const ps3dk_prof_test_rolling_options *, size_t *);
-void p_roll_bind(struct prof *, void *, const ps3dk_prof_test_rolling_options *, size_t);
+int p_roll_plan(const ps3dk_prof_test_rolling_options *, const pfm_config *, size_t *);
+void p_roll_bind(struct prof *, void *, const ps3dk_prof_test_rolling_options *, const pfm_config *, size_t);
 int p_roll_start(struct prof *, const uint8_t[16]);
 int p_roll_accept(struct prof *, const void *, size_t);
 int p_roll_flush(struct prof *);

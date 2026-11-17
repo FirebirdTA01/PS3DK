@@ -48,6 +48,8 @@ static struct {
     uint32_t retention_keep;
 #ifdef P_ROLLING_RUNTIME
     ps3dk_prof_test_rolling_options rolling;
+    pfm_config rolling_combined;
+    uint32_t rolling_combined_enabled;
 #endif
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arcs;
@@ -1282,8 +1284,37 @@ int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *o)
     else {
 #ifdef P_ROLLING_RUNTIME
         size_t bytes;
-        rc = p_roll_plan(o, &bytes);
-        if (!rc) g_pending.rolling = *o;
+        rc = p_roll_plan(o, NULL, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            g_pending.rolling_combined_enabled = 0;
+            memset(&g_pending.rolling_combined, 0, sizeof g_pending.rolling_combined);
+        }
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *o, const pfm_config *m)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1 ||
+        (o->enabled && !m) || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
+        o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        rc = p_roll_plan(o, m, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            g_pending.rolling_combined_enabled = o->enabled;
+            if (o->enabled) g_pending.rolling_combined = *m;
+            else memset(&g_pending.rolling_combined, 0, sizeof g_pending.rolling_combined);
+        }
 #else
         rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
 #endif
@@ -1472,7 +1503,7 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     ext_cfg x;
-    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0;
+    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0, ext_bytes = 0;
     size_t o_gslots = 0, o_gled = 0, o_gmeta = 0, o_gstage = 0, o_gscr = 0;
 #endif
 
@@ -1548,13 +1579,15 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
                            take(&off, x.gpu_max, PRG_SCRATCH_FOR(x.gpu_slots), &o_gscr))) ||
             off > P_TOTAL_MAX || (uint64_t)(off - ext_start) > x.mem_max)
             return PS3DK_PROF_EINVAL;
+        ext_bytes = off - ext_start;
     }
 #endif
 #ifdef P_ROLLING_RUNTIME
     if (g_pending.rolling.enabled) {
         if (g_pending.kind == 2
 #ifdef PS3DK_PROF_WITH_SPU
-            || x.enabled
+            || (x.enabled && (!g_pending.rolling_combined_enabled || x.gpu_max))
+            || (g_pending.rolling_combined_enabled && !x.spu)
 #endif
 #ifdef PS3DK_PROF_WITH_ARCS
             || p->arc_options.max_arcs_per_thread
@@ -1563,7 +1596,8 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
             || 1
 #endif
             ) return PS3DK_PROF_ENOTSUP;
-        if (p_roll_plan(&g_pending.rolling, &roll_bytes) ||
+        if (p_roll_plan(&g_pending.rolling,
+                        g_pending.rolling_combined_enabled ? &g_pending.rolling_combined : NULL, &roll_bytes) ||
             take(&off, 1, roll_bytes, &o_roll) || off > P_TOTAL_MAX ||
             (uint64_t)off > g_pending.rolling.max_state_bytes)
             return PS3DK_PROF_EINVAL;
@@ -1573,12 +1607,13 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     if (!p->block)
         return PS3DK_PROF_ENOMEM;
 #ifdef P_ROLLING_RUNTIME
-    if (roll_bytes) p_roll_bind(p, p->block + o_roll, &g_pending.rolling, off);
+    if (roll_bytes) p_roll_bind(p, p->block + o_roll, &g_pending.rolling,
+                               g_pending.rolling_combined_enabled ? &g_pending.rolling_combined : NULL, off);
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     p->block_bytes = off;
     if (x.enabled) {
-        p->spu_bytes = off - ext_start;
+        p->spu_bytes = ext_bytes; /* rolling storage is a separate preallocated region */
         p->ext_flags = 1;
 #ifdef PS3DK_PROF_WITH_PROFILE
         {
