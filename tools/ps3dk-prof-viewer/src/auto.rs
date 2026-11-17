@@ -40,6 +40,18 @@ pub fn passes_build(cap: &Capture) -> PassesView {
     PassesView { by, tags, ranges, map, tb_freq }
 }
 
+/// Builds the Passes page view scoped to a capture window's frames.  Uses the
+/// reader's `by_tag_window` (`RangeOccurrence` and the per-name sums are
+/// rebuilt only over the window's frames).
+pub fn passes_build_window(cap: &Capture, w: &ps3dk_prof::CaptureWindow) -> PassesView {
+    let by = auto_rsx::by_tag_window(cap, w);
+    let tags = auto_rsx::tag_summary(&by);
+    let ranges = auto_rsx::range_summary(&by);
+    let map = cap.auto.as_ref().map(auto_rsx::qualify);
+    let tb_freq = cap.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0);
+    PassesView { by, tags, ranges, map, tb_freq }
+}
+
 impl PassesView {
     /// Whether the capture's AUTO writer has the tag capability (CONFIG 1023/11).
     pub fn has_tags(&self) -> bool {

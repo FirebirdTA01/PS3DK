@@ -303,6 +303,24 @@ pub struct Overview {
     pub trailer: Vec<(String, String)>,
     /// Named per-frame counters (file flag bit 8): a status line and one row per counter; None without the capability.
     pub counters: Option<(String, Vec<CounterRow>)>,
+    /// One row per capture window (file_flags bit 9).  Empty when the window
+    /// capability is absent (legacy files) — in that case only the implicit
+    /// whole-run window exists and the whole run IS the only window.
+    pub windows: Vec<WindowRow>,
+}
+
+/// One capture window as the Overview's WINDOWS section shows it: id, name,
+/// source, kind, frames range, end reason (or OPEN if the window never closed),
+/// and whether the reader flagged it incomplete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRow {
+    pub id: u32,
+    pub name: String,
+    pub source: String,
+    pub kind: String,
+    pub frames: String,
+    pub end_reason: String,
+    pub incomplete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -413,6 +431,23 @@ pub fn overview(a: &Analysis) -> Overview {
         lanes,
         trailer,
         counters: cap.counters.as_ref().map(counter_rows),
+        windows: cap
+            .windows
+            .iter()
+            .map(|w| WindowRow {
+                id: w.id,
+                name: if w.name.is_empty() { format!("window {}", w.id) } else { w.name.clone() },
+                source: w.source.as_str().to_string(),
+                kind: w.kind.as_str(),
+                frames: w.frames_desc(),
+                end_reason: if w.is_open {
+                    "OPEN".to_string()
+                } else {
+                    w.reason.as_str().to_string()
+                },
+                incomplete: w.incomplete,
+            })
+            .collect(),
     }
 }
 
