@@ -93,6 +93,18 @@ pub struct App {
     pub pool: Arc<crate::capture::Pool>,
     pub screenshot: Option<PathBuf>,
     pub screenshot_frames: usize,
+    /// The capture window the Passes page is scoped to; None = all frames (the default).
+    pub window: Option<u32>,
+    /// The Passes page's window-scoped view, rebuilt on demand (only when a window is selected).
+    pub passes_window: Option<crate::auto::PassesView>,
+    /// The frame-start for the "Save frame range…" dialog.
+    pub save_range_from: u64,
+    /// The frame-end for the "Save frame range…" dialog.
+    pub save_range_to: u64,
+    /// The "Save frame range…" dialog is open.
+    pub save_range_modal: bool,
+    /// A save-window / save-range result line, shown in the status bar.
+    pub save_result: Option<(bool, String)>,
 }
 
 /// Turns the dialog's fields into a checked client config, changing
@@ -181,6 +193,12 @@ impl App {
             retiring: Vec::new(),
             screenshot: None,
             screenshot_frames: 0,
+            window: None,
+            passes_window: None,
+            save_range_from: 0,
+            save_range_to: 0,
+            save_range_modal: false,
+            save_result: None,
         };
         if let Some(p) = open {
             app.open(p);
@@ -240,6 +258,22 @@ impl App {
         } else {
             self.auto.refresh(doc.auto.as_ref());
         }
+        // The window picker and its scoped Passes view belong to the previous capture.
+        if fresh {
+            self.window = None;
+        }
+        self.save_result = None;
+        self.save_range_modal = false;
+        let passes_window = match (self.window, doc.analysis()) {
+            (Some(id), Some(a)) => a
+                .capture
+                .windows
+                .iter()
+                .find(|w| w.id == id)
+                .map(|w| crate::auto::passes_build_window(&a.capture, w)),
+            _ => None,
+        };
+        self.passes_window = passes_window;
         self.doc = Some(doc);
     }
 
@@ -431,6 +465,154 @@ impl App {
             self.open(p);
         }
     }
+
+    /// Writes a single frame or a frame range of an open capture as a standalone
+    /// `.prof` next to the capture itself, using the reader's no-clobber export.
+    /// Never overwrites an existing file: the `exists()` check is only an early
+    /// message; the export itself publishes without replacing (a target that
+    /// appears later is still refused) and never truncates a stray temporary.
+    pub fn save_frame_range(&mut self, lo: u64, hi: u64) {
+        let Some(doc) = self.doc.clone() else { return };
+        if lo > hi {
+            self.save_result = Some((true, "the frame range must start at or before its end".into()));
+            return;
+        }
+        let out = sibling_path(&doc.path, format!("{}..{}.prof", lo, hi));
+        if out.exists() {
+            self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
+            return;
+        }
+        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, lo..=hi) {
+            Ok(()) => (false, format!("Saved {}", out.display())),
+            Err(e) => save_failed(&out, e),
+        });
+    }
+
+    /// Saves the selected window (its [first_frame, last_frame]) as a standalone
+    /// `.prof` sibling; refuses if the window has no frames or a same-named sibling exists.
+    pub fn save_window(&mut self, id: u32) {
+        let Some(doc) = self.doc.clone() else { return };
+        let w = doc
+            .analysis()
+            .and_then(|a| a.capture.windows.iter().find(|w| w.id == id))
+            .cloned();
+        let Some(w) = w else {
+            self.save_result = Some((true, format!("no window {id} in this capture")));
+            return;
+        };
+        let Some(last) = w.last_frame else {
+            self.save_result = Some((true, format!("window {id} has no frames to save")));
+            return;
+        };
+        let out = sibling_path(&doc.path, format!("window_{}.prof", id));
+        if out.exists() {
+            self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
+            return;
+        }
+        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, w.first_frame..=last) {
+            Ok(()) => (false, format!("Saved window {} as {}", id, out.display())),
+            Err(e) => save_failed(&out, e),
+        });
+    }
+
+    /// Rebuilds the window-scoped Passes view for the current `self.window`.
+    /// Sets `self.passes_window = None` when the window is "All", or when the
+    /// selected id is not in the document (the picker should not offer it).
+    pub fn rebuild_passes_window(&mut self) {
+        let Some(doc) = self.doc.as_ref() else {
+            self.passes_window = None;
+            return;
+        };
+        let Some(id) = self.window else {
+            self.passes_window = None;
+            return;
+        };
+        let w = doc
+            .analysis()
+            .and_then(|a| a.capture.windows.iter().find(|w| w.id == id))
+            .cloned();
+        self.passes_window = match w {
+            Some(w) => {
+                let cap = &doc.analysis().unwrap().capture;
+                Some(crate::auto::passes_build_window(cap, &w))
+            }
+            None => None,
+        };
+    }
+
+    /// The "Save frame range…" modal: two spinners and Save/Cancel.  Closing it
+    /// is a no-op; clicking Save calls `save_frame_range` with the chosen bounds.
+    fn save_range_dialog(&mut self, ctx: &egui::Context) {
+        if !self.save_range_modal {
+            return;
+        }
+        let mut close = false;
+        let mut do_save = false;
+        let mut from = self.save_range_from;
+        let mut to = self.save_range_to;
+        ui::modal(
+            ctx,
+            "save-range",
+            "Save frame range",
+            Some("Writes a standalone .prof next to the open capture; the source is never touched."),
+            |m| {
+                let a = match self.doc.as_ref().and_then(|d| d.analysis()) {
+                    Some(a) => a,
+                    None => {
+                        m.label("No capture is open.");
+                        return;
+                    }
+                };
+                let max_frame = a.frames.iter().map(|e| e.frame).max().unwrap_or(0);
+                ui::field_label(m, "First frame", Some(&format!("0..={max_frame}")), None);
+                m.add(egui::DragValue::new(&mut from).range(0u64..=max_frame));
+                ui::field_label(m, "Last frame", Some(&format!("first..={max_frame}")), None);
+                m.add(egui::DragValue::new(&mut to).range(0u64..=max_frame));
+                ui::dialog_buttons(m, |b| {
+                    if ui::primary_button(b, "Save").clicked() {
+                        do_save = true;
+                    }
+                    if ui::quiet_button(b, "Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            },
+        );
+        // The spinners edit locals; keep the edits for the next UI frame.
+        self.save_range_from = from;
+        self.save_range_to = to;
+        if do_save {
+            if from > to {
+                self.save_result = Some((true, "the frame range must start at or before its end".into()));
+            } else {
+                self.save_frame_range(from, to);
+            }
+            close = true;
+        }
+        if close {
+            self.save_range_modal = false;
+        }
+    }
+}
+
+/// The status line for a failed save: an existing (or newly appeared) target
+/// says nothing was written; anything else is the export's own error.
+fn save_failed(out: &std::path::Path, e: ps3dk_prof::ExportError) -> (bool, String) {
+    match e {
+        ps3dk_prof::ExportError::Io(io) if io.kind() == std::io::ErrorKind::AlreadyExists => {
+            (true, format!("{} already exists; nothing was written", out.display()))
+        }
+        e => (true, format!("Save failed: {e}")),
+    }
+}
+
+/// `<capture>.prof` → `<capture>.<suffix>` in the same folder (or the sibling
+/// path itself plus the suffix if it has no extension).  Used for "save this
+/// window/range" so the capture is never overwritten.
+pub fn sibling_path(prof: &std::path::Path, suffix: String) -> std::path::PathBuf {
+    let stem = prof.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let parent = prof.parent().unwrap_or_else(|| std::path::Path::new("."));
+    parent.join(format!("{stem}.{suffix}"))
 }
 
 fn tone(t: VerdictTone) -> ui::Tone {
@@ -534,6 +716,20 @@ impl eframe::App for App {
         let capture_blocked = self.capture_blocked();
         let mut want_connect = false;
         let mut want_disconnect = false;
+
+        // The capture windows of the open document (the picker source).
+        let windows: Vec<ps3dk_prof::CaptureWindow> = self
+            .doc
+            .as_ref()
+            .and_then(|d| d.analysis())
+            .map(|a| a.capture.windows.clone())
+            .unwrap_or_default();
+        let windows_enabled = !windows.is_empty();
+
+        // The picker's live selection and the two Save buttons' requests, both mutated inside the bar closure.
+        let mut new_window = self.window;
+        let mut want_save_window = false;
+        let mut want_save_range = false;
         ui::app_bar(
             ctx,
             |bar| {
@@ -561,6 +757,33 @@ impl eframe::App for App {
                 } else if ui::quiet_button(bar, "Connect…").clicked() {
                     want_connect = true;
                 }
+                if has_doc_analysis {
+                    bar.add_space(ui::SPACE_LG);
+                    if windows_enabled {
+                        egui::ComboBox::from_id_salt("window-picker")
+                            .selected_text(match new_window {
+                                None => "All frames".to_string(),
+                                Some(id) => windows
+                                    .iter()
+                                    .find(|w| w.id == id)
+                                    .map(|w| format!("window {}", w.id))
+                                    .unwrap_or_else(|| format!("window {id}")),
+                            })
+                            .show_ui(bar, |cb| {
+                                let _ = cb.selectable_value(&mut new_window, Option::<u32>::None, "All frames");
+                                for w in &windows {
+                                    let _ = cb.selectable_value(&mut new_window, Some(w.id), format!("window {} — {}", w.id, w.name));
+                                }
+                            });
+                        if new_window.is_some() && ui::quiet_button(bar, "Save window…").clicked() {
+                            want_save_window = true;
+                        }
+                        bar.add_space(ui::SPACE_XS);
+                    }
+                    if ui::quiet_button(bar, "Save range…").clicked() {
+                        want_save_range = true;
+                    }
+                }
             },
         );
         if want_open {
@@ -582,12 +805,37 @@ impl eframe::App for App {
                 error: None,
             });
         }
+        if new_window != self.window {
+            self.window = new_window;
+            self.rebuild_passes_window();
+        }
+        if want_save_window {
+            if let Some(id) = self.window {
+                self.save_window(id);
+            }
+        }
+        if want_save_range {
+            // Prefill the dialog with the selected window's frames, else the whole capture's frame range.
+            let (lo, hi) = self.doc.as_ref().and_then(|d| d.analysis()).map(|a| {
+                let all = (a.frames.iter().map(|e| e.frame).min().unwrap_or(0),
+                           a.frames.iter().map(|e| e.frame).max().unwrap_or(0));
+                a.capture.windows.iter()
+                    .find(|w| Some(w.id) == self.window)
+                    .map(|w| (w.first_frame, w.last_frame.unwrap_or(w.first_frame)))
+                    .unwrap_or(all)
+            }).unwrap_or((0, 0));
+            self.save_range_from = lo;
+            self.save_range_to = hi;
+            self.save_range_modal = true;
+        }
         self.connect_dialog(ctx);
+        self.save_range_dialog(ctx);
         // The full verdict, always visible under the bar on every page; it
         // wraps instead of being cut off at small window sizes.
         let link_line = live_view.as_ref().map(live_line);
         let snap_msg = self.captures.message.clone();
-        if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() {
+        let save_msg = self.save_result.clone();
+        if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() || save_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
             egui::TopBottomPanel::top("verdict").show(ctx, |strip| {
                 strip.add_space(ui::SPACE_XS);
@@ -600,6 +848,9 @@ impl eframe::App for App {
                 }
                 if let Some((bad, m)) = &snap_msg {
                     ui::field_message(strip, if *bad { ui::Tone::Warning } else { ui::Tone::Neutral }, m);
+                }
+                if let Some((bad, m)) = &save_msg {
+                    ui::field_message(strip, if *bad { ui::Tone::Warning } else { ui::Tone::Success }, m);
                 }
                 strip.add_space(ui::SPACE_XS);
             });
@@ -794,7 +1045,8 @@ impl eframe::App for App {
                         ),
                     },
                     Page::Passes => {
-                        crate::passes_ui::page(p, &d.passes, &mut crate::passes_ui::Drawn::default());
+                        let pass_v = self.passes_window.as_ref().unwrap_or(&d.passes);
+                        crate::passes_ui::page(p, pass_v, &mut crate::passes_ui::Drawn::default());
                     }
                 },
             },
@@ -1013,6 +1265,34 @@ fn draw_overview(p: &mut egui::Ui, a: &ps3dk_prof::Analysis, ext: &ExtView, rsx:
                     g.label(r.min.to_string());
                     g.label(r.max.to_string());
                     g.label(r.last.to_string());
+                    g.end_row();
+                }
+            });
+        }
+        if !o.windows.is_empty() {
+            p.add_space(ui::SPACE_LG);
+            ui::section_label(p, "WINDOWS");
+            egui::Grid::new("windows").striped(true).show(p, |g| {
+                for h in ["Window", "Name", "Kind", "Frames", "End reason"] {
+                    g.strong(h);
+                }
+                g.end_row();
+                for w in &o.windows {
+                    g.label(w.id.to_string());
+                    g.label(&w.name);
+                    g.label(&w.kind);
+                    g.label(&w.frames);
+                    let mut why = w.end_reason.clone();
+                    if w.incomplete {
+                        why.push_str(" (incomplete)");
+                    }
+                    let tone = if w.end_reason == "OPEN" || w.incomplete {
+                        ui::Tone::Warning
+                    } else {
+                        ui::Tone::Neutral
+                    };
+                    let pal = ui::Palette::of(g);
+                    g.label(egui::RichText::new(why).color(tone.color(&pal)));
                     g.end_row();
                 }
             });
@@ -1265,3 +1545,105 @@ pub fn finish_live(caps: &mut Captures, o: &Outcome) -> (bool, String) {
 #[cfg(test)]
 #[path = "polish_tests.rs"]
 mod polish_tests;
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    /// A private copy of the `windows` fixture (frames 3..5 are present) as `<dir>/capture.prof`.
+    fn capture(tag: &str) -> (PathBuf, PathBuf) {
+        let d = std::env::temp_dir().join(format!("ps3dk-prof-viewer-save-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let src = format!("{}/../ps3dk-prof/tests/fixtures/auto/windows.prof", env!("CARGO_MANIFEST_DIR"));
+        let p = d.join("capture.prof");
+        std::fs::copy(src, &p).unwrap();
+        (d, p)
+    }
+
+    fn find(out: &egui::FullOutput, want: &str) -> Option<egui::Rect> {
+        fn walk(s: &egui::Shape, want: &str, r: &mut Option<egui::Rect>) {
+            match s {
+                egui::Shape::Text(t) if t.galley.job.text == want => *r = Some(t.galley.rect.translate(t.pos.to_vec2())),
+                egui::Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, want, r)),
+                _ => {}
+            }
+        }
+        let mut r = None;
+        for s in &out.shapes { walk(&s.shape, want, &mut r); }
+        r
+    }
+
+    fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    /// Spinner edits survive later UI frames, and Save uses the edited bounds (not the prefill).
+    #[test]
+    fn save_range_dialog_keeps_edits_across_frames() {
+        let (d, p) = capture("dialog");
+        let mut app = App::new(Some(p));
+        assert!(app.doc.is_some(), "{:?}", app.error);
+        app.save_range_from = 3;
+        app.save_range_to = 5;
+        app.save_range_modal = true;
+        let ctx = egui::Context::default();
+        ui::install(&ctx);
+        let mut t = 0.0;
+        let mut frame = |app: &mut App, events: Vec<egui::Event>| {
+            t += 0.05;
+            ctx.run(egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+                time: Some(t),
+                events,
+                ..Default::default()
+            }, |ctx| app.save_range_dialog(ctx))
+        };
+        let mut out = frame(&mut app, vec![]);
+        for _ in 0..3 { out = frame(&mut app, vec![]); }
+        let first = find(&out, "3").expect("the First frame spinner shows 3").center();
+        frame(&mut app, vec![egui::Event::PointerMoved(first), button(first, true)]);
+        frame(&mut app, vec![button(first, false)]);
+        frame(&mut app, vec![]);
+        // The click selected the spinner's text; typing replaces it, then several plain UI frames follow.
+        frame(&mut app, vec![egui::Event::Text("5".into())]);
+        for _ in 0..4 { out = frame(&mut app, vec![]); }
+        assert_eq!((app.save_range_from, app.save_range_to), (5, 5), "the edited bounds persist across frames");
+        let save = find(&out, "Save").expect("Save button").center();
+        frame(&mut app, vec![egui::Event::PointerMoved(save), button(save, true)]);
+        frame(&mut app, vec![button(save, false)]);
+        assert!(!app.save_range_modal, "Save closes the dialog");
+        assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+        assert!(d.join("capture.5..5.prof").is_file(), "saved with the edited bounds");
+        assert!(!d.join("capture.3..5.prof").exists(), "not with the prefill");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A stray temporary at the old predictable name is neither truncated nor renamed over the target.
+    #[test]
+    fn save_frame_range_preserves_a_precreated_temporary() {
+        let (d, p) = capture("tmp");
+        let mut app = App::new(Some(p));
+        let stray = d.join(format!("capture.3..5.prof.tmp-{}", std::process::id()));
+        std::fs::write(&stray, b"not ours").unwrap();
+        app.save_frame_range(3, 5);
+        assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+        assert_eq!(std::fs::read(&stray).unwrap(), b"not ours", "the stray temporary is untouched");
+        let saved = std::fs::read(d.join("capture.3..5.prof")).unwrap();
+        assert!(ps3dk_prof::reader::read(&saved).is_ok(), "the target is the exported capture");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An existing target is refused and left byte-for-byte as it was.
+    #[test]
+    fn save_window_refuses_an_existing_target() {
+        let (d, p) = capture("exists");
+        let mut app = App::new(Some(p));
+        let target = d.join("capture.window_2.prof");
+        std::fs::write(&target, b"theirs").unwrap();
+        app.save_window(2);
+        assert!(matches!(&app.save_result, Some((true, m)) if m.contains("already exists")), "{:?}", app.save_result);
+        assert_eq!(std::fs::read(&target).unwrap(), b"theirs");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

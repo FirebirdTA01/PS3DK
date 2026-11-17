@@ -290,7 +290,7 @@ pub fn reason_name(reason: u32) -> &'static str {
     REASONS.get(reason.wrapping_sub(1) as usize).copied().unwrap_or("UNKNOWN")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Op {
     pub id: u64,
     pub frame_owner: u32,
@@ -2757,6 +2757,32 @@ pub struct RangeRow {
     pub count: u64,
     pub raw: u64,
 }
+/// One AUTO range OCCURRENCE in one frame (t_f77eb7ed, EMP G): the range's name, its nesting depth (1..=4, from the
+/// RANGE record), its inclusive raw RSX span (the range's own report pair), and its reconstructed parent and
+/// exclusive span.  `parent`/`exclusive_raw` are Some only when the nesting of this frame's retained ranges is fully
+/// and unambiguously reconstructable (each level present and properly nested); otherwise they are None and
+/// `reason` says why (e.g. a same-depth sibling whose interval overlaps, an unresolvable depth-1 parent, or a depth
+/// with no occurrence at all).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeOccurrence {
+    pub name: String,
+    pub depth: u32,
+    /// Begin of the range's own report pair.
+    pub begin: u64,
+    /// End of the range's own report pair.
+    pub end: u64,
+    /// Inclusive raw span: end - begin (the range's own report pair, independent of per-draw timing).
+    pub inclusive_raw: u64,
+    /// The name of the nearest enclosing range at depth - 1, Some only when it is the unique one containing this
+    /// occurrence at depth - 1 in this frame.
+    pub parent: Option<String>,
+    /// Inclusive minus the summed inclusive of every occurrence whose parent is this one.  Some for a leaf (== its
+    /// inclusive) and for a parent whose children population is unambiguously the retained set; None with `reason`
+    /// when the nesting cannot be reconstructed (see `RangeOccurrence::reason`).
+    pub exclusive_raw: Option<u64>,
+    /// Why `parent`/`exclusive_raw` are None (present when either is None).
+    pub reason: Option<String>,
+}
 #[derive(Debug, Clone, Default)]
 pub struct TagFrame {
     pub owner: u32,
@@ -2769,6 +2795,9 @@ pub struct TagFrame {
     pub unrepresented: u32,
     pub tags: BTreeMap<u32, TagRow>,
     pub ranges: BTreeMap<String, RangeRow>,
+    /// Per-occurrence ranges (t_f77eb7ed): one entry per retained RANGE record in this frame, with depth,
+    /// inclusive raw span, and parent/exclusive when the nesting is reconstructable from the retained records.
+    pub range_occurrences: Vec<RangeOccurrence>,
     /// Frame-scoped (from the coverage row in this (owner,frame); not attributed to any tag): covered ARRAY/INDEX/CLEAR
     /// visits left untimed because timing was limited to timed ranges and none was open (same shapes as `auto --json`
     /// frame `outside_timed_range`).
@@ -2800,6 +2829,33 @@ fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
 
 /// Per frame and per tag, from the capture's records and rows (no verdict).
 pub fn by_tag(cap: &Capture) -> ByTag {
+    by_tag_range(cap, None)
+}
+
+/// `by_tag` scoped to a frame range (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).  `frame_range = None`
+/// returns every frame, matching `by_tag(cap)`.
+pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<u64>>) -> ByTag {
+    let mut out = by_tag_impl(cap);
+    if let Some(range) = frame_range {
+        out.frames.retain(|f| range.contains(&f.frame));
+    }
+    out
+}
+
+/// Per frame and per tag, from the capture's records and rows, scoped to the
+/// frames of capture window `w` (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).
+pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
+    // The same membership rule as every other `--window` view (CaptureWindow::contains_frame): an open window's
+    // last_frame is the last frame the reader observed, and a window with no last frame holds no frames.
+    let mut out = by_tag_impl(cap);
+    out.frames.retain(|f| w.contains_frame(f.frame));
+    out
+}
+
+/// The body of `by_tag`, unscoped.
+fn by_tag_impl(cap: &Capture) -> ByTag {
     let Some(inv) = cap.auto.as_ref() else { return ByTag::default() };
     let tagged = matches!(&inv.config, Some(Config::Attached(a)) if a.tagged());
     let tail = match &inv.config {
@@ -2839,9 +2895,97 @@ pub fn by_tag(cap: &Capture) -> ByTag {
         for (tag, iv) in intervals {
             tf.tags.entry(tag).or_default().busy_raw = merged(iv);
         }
+        let range_ops: Vec<Op> = mine.iter().filter(|o| o.kind == KIND_RANGE).map(|o| (*o).clone()).collect();
+        tf.range_occurrences = reconstruct_range_occurrences(&range_ops, &cap.descriptors);
         out.frames.push(tf);
     }
     out
+}
+
+/// Reconstruct the per-occurrence range records of one frame, resolving parent (containment at depth - 1) and, only
+/// where the ancestor chain is present and properly nested, exclusive (inclusive minus own-children inclusive).
+fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::model::Descriptor>) -> Vec<RangeOccurrence> {
+    let mut occs: Vec<RangeOccurrence> = ops.iter()
+        .filter(|o| o.kind == KIND_RANGE && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0 && o.raw_end >= o.raw_begin)
+        .map(|o| {
+            let name = descriptors.get(&(o.args[0] - 1)).map_or_else(
+                || format!("descriptor {}", o.args[0] - 1), |d| d.name.clone());
+            RangeOccurrence { name, depth: o.depth, begin: o.raw_begin, end: o.raw_end,
+                              inclusive_raw: o.raw_end - o.raw_begin,
+                              parent: None, exclusive_raw: None, reason: None }
+        })
+        .collect();
+    occs.sort_by_key(|r| (r.depth, r.begin));
+    let contains = |outer: &RangeOccurrence, inner: &RangeOccurrence|
+        outer.begin <= inner.begin && inner.end <= outer.end;
+
+    // Resolve the immediate parent BY OCCURRENCE (index), never by name: the unique occurrence at depth - 1 whose
+    // interval contains this one. Names repeat (one "pass" range per pass), so a name cannot identify a parent.
+    let n = occs.len();
+    let mut parent_idx: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        if occs[i].depth <= 1 { continue; }
+        let containing = (0..n)
+            .filter(|&j| occs[j].depth == occs[i].depth - 1 && contains(&occs[j], &occs[i]))
+            .collect::<Vec<usize>>();
+        match containing.as_slice() {
+            [j] => { parent_idx[i] = Some(*j); occs[i].parent = Some(occs[*j].name.clone()); }
+            [] => occs[i].reason = Some(format!("no occurrence at depth {} contains this one — ancestry not established", occs[i].depth - 1)),
+            _ => occs[i].reason = Some(format!("{} occurrences at depth {} contain this one — ambiguous", containing.len(), occs[i].depth - 1)),
+        }
+    }
+
+    // An occurrence's chain is complete when every ancestor down to depth 1 was resolved by index. Computed before
+    // any occurrence is updated, so the walk reads only the resolved parents.
+    let chain_complete: Vec<bool> = (0..n).map(|i| {
+        let mut cur = i;
+        while occs[cur].depth > 1 {
+            match parent_idx[cur] { Some(p) => cur = p, None => return false }
+        }
+        true
+    }).collect();
+    // Any DEEPER occurrence inside this span whose own chain is incomplete (an unresolved parent at depth + 1, or an
+    // orphan further down with a missing level in between) may hold time of this one that cannot be assigned.
+    let contained_unresolved: Vec<bool> = (0..n).map(|i| {
+        (0..n).any(|c| occs[c].depth > occs[i].depth && !chain_complete[c] && contains(&occs[i], &occs[c]))
+    }).collect();
+    // Children must be pairwise disjoint for inclusive minus their sum to be this occurrence's own time: overlapping
+    // siblings double-count their shared span (a sum <= inclusive does not establish disjointness).
+    let children_overlap: Vec<Option<(u64, u64, u64, u64)>> = (0..n).map(|i| {
+        let mut kids: Vec<(u64, u64)> = (0..n).filter(|&c| parent_idx[c] == Some(i)).map(|c| (occs[c].begin, occs[c].end)).collect();
+        kids.sort_unstable();
+        kids.windows(2).find(|w| w[1].0 < w[0].1).map(|w| (w[0].0, w[0].1, w[1].0, w[1].1))
+    }).collect();
+    let child_sums: Vec<u64> = (0..n).map(|i| {
+        (0..n).filter(|&c| parent_idx[c] == Some(i)).fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw))
+    }).collect();
+    for i in 0..n {
+        if occs[i].depth > 1 && !chain_complete[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("ancestor chain to depth 1 incomplete from {} — parent/exclusive unavailable", occs[i].name)); }
+            continue;
+        }
+        // A deeper occurrence inside this span whose own parent could not be resolved may belong to this one: its
+        // time cannot be assigned, so this occurrence's exclusive is not claimed.
+        if contained_unresolved[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some("a nested range inside this one has no resolved parent — exclusive unavailable".into()); }
+            continue;
+        }
+        if let Some((a, b, c, d)) = children_overlap[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children [{a},{b}] and [{c},{d}] overlap — exclusive unavailable")); }
+            continue;
+        }
+        let child_sum = child_sums[i];
+        if child_sum > occs[i].inclusive_raw {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children sum {child_sum} exceeds own inclusive {} — exclusive uncomputable", occs[i].inclusive_raw)); }
+        } else {
+            occs[i].exclusive_raw = Some(occs[i].inclusive_raw - child_sum);
+        }
+    }
+    occs
 }
 
 fn median(mut v: Vec<u64>) -> u64 {
@@ -2887,6 +3031,25 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     }).collect()
 }
 
+/// Whole-window summary per range name (t_f77eb7ed, EMP G): (distinct (owner, frame) pairs the name occurs in,
+/// occurrences, sum of each occurrence's inclusive raw span, sum of each occurrence's exclusive raw span where
+/// available, occurrences whose exclusive could not be reconstructed from retained records).
+pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
+    let mut per: BTreeMap<String, (u64, u64, u64, u64, u64)> = BTreeMap::new();
+    let mut seen: std::collections::BTreeSet<(String, u32, u64)> = std::collections::BTreeSet::new();
+    for f in &b.frames {
+        for r in &f.range_occurrences {
+            let entry = per.entry(r.name.clone()).or_default();
+            if seen.insert((r.name.clone(), f.owner, f.frame)) { entry.0 += 1; }
+            entry.1 += 1;
+            entry.2 = entry.2.saturating_add(r.inclusive_raw);
+            if let Some(e) = r.exclusive_raw { entry.3 = entry.3.saturating_add(e); }
+            else { entry.4 += 1; }
+        }
+    }
+    per
+}
+
 pub const BY_TAG_NOTE: &str = "raw RSX report-timestamp ticks; busy = merged timed intervals of the tag's records and \
 whole-CALL brackets (gaps between them not counted); untimed ring draws carry no tag and are counted per frame only; \
 range time is each range's own report pair";
@@ -2907,6 +3070,14 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         for (n, r) in &f.ranges {
             writeln!(out, "  range {n}: {} x, {} ticks", r.count, r.raw)?;
         }
+        for r in &f.range_occurrences {
+            let parent = match &r.parent { Some(s) => format!(" parent {s}"), None => String::new() };
+            let exclusive = match r.exclusive_raw {
+                Some(e) => format!(" exclusive {e}"),
+                None => format!(" exclusive unavailable{}", r.reason.as_deref().map(|rs| format!(" ({rs})")).unwrap_or_default()),
+            };
+            writeln!(out, "    occurrence {} depth {} inclusive {} ticks{parent}{exclusive}", r.name, r.depth, r.inclusive_raw)?;
+        }
     }
     writeln!(out, "summary")?;
     for (t, (n, ops, busy, med, hi)) in tag_summary(b) {
@@ -2914,6 +3085,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     }
     for (name, (n, count, raw, med, hi)) in range_summary(b) {
         writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}, p95 per frame {hi}")?;
+    }
+    for (name, (frames, occurrences, inclusive_sum, exclusive_sum, exclusive_unavailable)) in range_occurrence_summary(b) {
+        writeln!(out, "  range {name}: {frames} frame(s), {occurrences} occurrence(s), inclusive sum {inclusive_sum}, exclusive sum {exclusive_sum}, exclusive unavailable {exclusive_unavailable}")?;
     }
     Ok(())
 }
@@ -2927,13 +3101,20 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         "tags": f.tags.iter().map(|(t, r)| json!({"tag": t, "ops": r.ops, "busy_raw": r.busy_raw,
             "untimed_in_calls": r.untimed_in_calls})).collect::<Vec<_>>(),
         "ranges": f.ranges.iter().map(|(n, r)| json!({"name": n, "count": r.count, "raw": r.raw})).collect::<Vec<_>>(),
+        "range_occurrences": f.range_occurrences.iter().map(|r| json!({
+            "name": r.name, "depth": r.depth, "begin": r.begin, "end": r.end,
+            "inclusive_raw": r.inclusive_raw, "parent": r.parent,
+            "exclusive_raw": r.exclusive_raw, "reason": r.reason,
+        })).collect::<Vec<_>>(),
     })).collect();
     let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med, hi))| json!({
         "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
     let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({
         "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med, "raw_p95": hi})).collect();
-    let mut v = json!({"schema": 1, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
-        "summary": {"tags": tags, "ranges": ranges}});
+    let range_occurrences: Vec<serde_json::Value> = range_occurrence_summary(b).into_iter().map(|(name, (frames, occurrences, incl, excl, unavail))| json!({
+        "name": name, "frames": frames, "occurrences": occurrences, "inclusive_sum": incl, "exclusive_sum": excl, "exclusive_unavailable": unavail})).collect();
+    let mut v = json!({"schema": 2, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
+        "summary": {"tags": tags, "ranges": ranges, "range_occurrences": range_occurrences}});
     if let Some(t) = &b.tail {
         // unsealed captures only, so sealed captures keep their exact JSON
         v["tail"] = json!(t);
@@ -2999,5 +3180,137 @@ mod tests {
         // rank = (95*21+99)/100 = 20 (1-based) → sorted[19] = 20
         assert_eq!(p95(v.clone()), 20);
         assert_ne!(p95(v), 21, "must not collapse to the max");
+    }
+
+    // ---- per-occurrence range reconstruction (t_f77eb7ed, EMP G) ----
+
+    /// A 160-byte-valid, raw-valid RANGE op: depth 1..=4, descriptor index `desc` (+1 in args[0]), interval [b, e).
+    fn ro(depth: u32, desc: u32, b: u64, e: u64) -> Op {
+        Op { frame_owner: 1, frame: 0, kind: KIND_RANGE,
+             flags: OP_TOKEN | OP_RAW_VALID, raw_begin: b, raw_end: e,
+             args: [desc + 1, 0, 0, 0, 0, 0, 0], depth, ..Op::default() }
+    }
+    fn dmap(pairs: &[(&str, u32)]) -> BTreeMap<u32, crate::model::Descriptor> {
+        pairs.iter().enumerate()
+            .map(|(i, (n, d))| (*d, crate::model::Descriptor {
+                index: i as u32, id: *d as u64, scope: 2, line: 0,
+                name: (*n).into(), logical_tag: String::new(), file: "t.rs".into() }))
+            .collect()
+    }
+
+    #[test]
+    fn range_occurrences_nested_resolve_parent_and_exclusive() {
+        let desc = dmap(&[("outer", 0), ("inner", 1)]);
+        // outer 100..120 (depth 1) contains inner 105..115 (depth 2)
+        let ops = vec![ro(1, 0, 100, 120), ro(2, 1, 105, 115)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert_eq!(r.as_slice(), &[
+            RangeOccurrence { name: "outer".into(), depth: 1, begin: 100, end: 120, inclusive_raw: 20,
+                              parent: None, exclusive_raw: Some(10), reason: None },
+            RangeOccurrence { name: "inner".into(), depth: 2, begin: 105, end: 115, inclusive_raw: 10,
+                              parent: Some("outer".into()), exclusive_raw: Some(10), reason: None },
+        ]);
+    }
+
+    #[test]
+    fn range_occurrence_without_retained_parent_is_unavailable() {
+        let desc = dmap(&[("orphan", 0)]);
+        // depth-2 occurrence but no depth-1 retained in this frame
+        let ops = vec![ro(2, 0, 100, 120)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert_eq!(r.as_slice(), &[
+            RangeOccurrence { name: "orphan".into(), depth: 2, begin: 100, end: 120, inclusive_raw: 20,
+                              parent: None, exclusive_raw: None,
+                              reason: Some("no occurrence at depth 1 contains this one — ancestry not established".into()) },
+        ]);
+    }
+
+    #[test]
+    fn range_occurrence_with_ambiguous_parent_is_unavailable() {
+        let desc = dmap(&[("a", 0), ("b", 1)]);
+        // two depth-1 both contain the depth-2: ambiguous -> no parent, no exclusive
+        let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 0, 150, 160)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let child = &r[2];
+        assert!(child.parent.is_none() && child.exclusive_raw.is_none(), "{child:?}");
+        assert_eq!(child.reason.as_deref(), Some("2 occurrences at depth 1 contain this one — ambiguous"));
+    }
+
+    #[test]
+    fn repeated_parent_names_resolve_by_occurrence_not_name() {
+        let desc = dmap(&[("pass", 0), ("draws", 1)]);
+        // two "pass" ranges (depth 1), each with one "draws" child; each parent's exclusive subtracts only its own
+        // child, not every child of every "pass"
+        let ops = vec![ro(1, 0, 100, 200), ro(2, 1, 110, 130), ro(1, 0, 300, 400), ro(2, 1, 310, 370)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let first = r.iter().find(|o| o.depth == 1 && o.begin == 100).unwrap();
+        let second = r.iter().find(|o| o.depth == 1 && o.begin == 300).unwrap();
+        assert_eq!(first.exclusive_raw, Some(100 - 20), "{first:?}");
+        assert_eq!(second.exclusive_raw, Some(100 - 60), "{second:?}");
+        assert!(r.iter().filter(|o| o.depth == 2).all(|o| o.parent.as_deref() == Some("pass") && o.exclusive_raw.is_some()));
+    }
+
+    #[test]
+    fn unresolved_nested_child_blocks_the_parents_exclusive() {
+        let desc = dmap(&[("a", 0), ("b", 1), ("c", 2)]);
+        // two overlapping depth-1 ranges both contain the depth-2 one: it has no parent, so neither depth-1
+        // occurrence may claim an exclusive
+        let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 2, 150, 160)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert!(r.iter().filter(|o| o.depth == 1).all(|o| o.exclusive_raw.is_none() && o.reason.is_some()), "{r:?}");
+    }
+
+    #[test]
+    fn orphan_deeper_descendant_blocks_the_ancestors_exclusive() {
+        let desc = dmap(&[("top", 0), ("deep", 1)]);
+        // depth 1 [0,100] contains a depth-3 [10,20] with no depth-2 occurrence: the depth-1 exclusive is not 100
+        let ops = vec![ro(1, 0, 0, 100), ro(3, 1, 10, 20)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let top = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(top.exclusive_raw, None, "{top:?}");
+        assert!(top.reason.is_some(), "{top:?}");
+    }
+
+    #[test]
+    fn overlapping_sibling_children_block_the_parents_exclusive() {
+        let desc = dmap(&[("p", 0), ("c", 1)]);
+        // parent [0,100] with depth-2 children [10,30] and [20,40]: each resolves uniquely, but they overlap, so
+        // 100 - (20 + 20) = 60 is not the parent's own time
+        let ops = vec![ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 20, 40)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let p = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(p.exclusive_raw, None, "{p:?}");
+        assert_eq!(p.reason.as_deref(), Some("own children [10,30] and [20,40] overlap — exclusive unavailable"));
+        // touching (not overlapping) children still give a numeric exclusive
+        let ok = reconstruct_range_occurrences(&[ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 30, 40)], &desc);
+        assert_eq!(ok.iter().find(|o| o.depth == 1).unwrap().exclusive_raw, Some(70));
+    }
+
+    #[test]
+    fn range_occurrence_summary_counts_frames_and_occurrences_separately() {
+        let occ = |b: u64, e: u64| RangeOccurrence { name: "pass".into(), depth: 1, begin: b, end: e, inclusive_raw: e - b,
+                                                    parent: None, exclusive_raw: Some(e - b), reason: None };
+        // two same-name ranges in ONE frame
+        let f = TagFrame { owner: 1, frame: 7, range_occurrences: vec![occ(0, 10), occ(20, 25)], ..TagFrame::default() };
+        let b = ByTag { tagged: true, frames: vec![f], tail: None };
+        let mut text = Vec::new();
+        write_by_tag_text(&mut text, &b).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("range pass: 1 frame(s), 2 occurrence(s), inclusive sum 15"), "{text}");
+        let mut js = Vec::new();
+        write_by_tag_json(&mut js, &b).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&js).unwrap();
+        let row = &v["summary"]["range_occurrences"][0];
+        assert_eq!((row["frames"].as_u64(), row["occurrences"].as_u64()), (Some(1), Some(2)), "{row}");
+    }
+
+    #[test]
+    fn range_occurrences_sibling_depth1_each_independent() {
+        let desc = dmap(&[("p", 0)]);
+        // two non-overlapping depth-1 ranges: each parent None, exclusive = its own inclusive
+        let ops = vec![ro(1, 0, 100, 110), ro(1, 0, 200, 210)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        assert!(r.iter().all(|o| o.parent.is_none() && o.exclusive_raw == Some(o.inclusive_raw) && o.reason.is_none()),
+                "{r:?}");
     }
 }
