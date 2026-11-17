@@ -25,6 +25,8 @@ PROFILER_SUITES = {
     "tests/host/ps3dk-prof-rolling/terminal_mutations.py",
     "tests/host/ps3dk-prof-rolling/run_file.py",
     "tests/host/ps3dk-prof-rolling/file_mutations.py",
+    "tests/host/ps3dk-prof-rolling/run_output.py",
+    "tests/host/ps3dk-prof-rolling/output_mutations.py",
     "tests/host/ps3dk-prof-rolling/run_positions_mutants.py",
     "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py",
     "tests/host/ps3dk-prof-rolling/fifo_mutations.py",

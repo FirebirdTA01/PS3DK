@@ -463,6 +463,13 @@ int pfr_get_view(const pfr_store *s, pfr_view *v)
     *v = s->current.view;
     return PFR_OK;
 }
+int pfr_get_config(const pfr_store *s, pfr_config *cfg)
+{
+    if (!s || s->ready != READY || s->failed) return PFR_FAILED;
+    if (!cfg) return PFR_INVALID;
+    *cfg = s->cfg;
+    return PFR_OK;
+}
 int pfr_get_segment(pfr_store *s, uint32_t index, pfr_segment *seg)
 {
     const entry *e; int rc;

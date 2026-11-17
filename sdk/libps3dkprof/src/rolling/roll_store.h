@@ -19,6 +19,7 @@ extern "C" {
 #define pfr_open ps3dk_prof__roll_open
 #define pfr_commit ps3dk_prof__roll_commit
 #define pfr_get_view ps3dk_prof__roll_get_view
+#define pfr_get_config ps3dk_prof__roll_get_config
 #define pfr_get_segment ps3dk_prof__roll_get_segment
 
 enum { PFR_OK = 0, PFR_INVALID = -1, PFR_IO = -2, PFR_CORRUPT = -3,
@@ -107,6 +108,7 @@ int pfr_open(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
  * after exclusive recovery to learn whether the old or new root committed. */
 int pfr_commit(pfr_store *, const void *, size_t, const void *, size_t);
 int pfr_get_view(const pfr_store *, pfr_view *);
+int pfr_get_config(const pfr_store *, pfr_config *);
 int pfr_get_segment(pfr_store *, uint32_t, pfr_segment *);
 
 #ifdef __cplusplus

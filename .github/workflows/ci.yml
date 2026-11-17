@@ -172,6 +172,9 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_file.py --build-dir "$RUNNER_TEMP/rolling-file-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
           python3 tests/host/ps3dk-prof-rolling/run_file.py --lv2-mock --build-dir "$RUNNER_TEMP/rolling-file-lv2"
           python3 tests/host/ps3dk-prof-rolling/file_mutations.py --build-dir "$RUNNER_TEMP/rolling-file-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output"
+          python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
+          python3 tests/host/ps3dk-prof-rolling/output_mutations.py --build-dir "$RUNNER_TEMP/rolling-output-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_positions_mutants.py --build-dir "$RUNNER_TEMP/rolling-positions-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py --build-dir "$RUNNER_TEMP/rolling-counter-mutants"
           python3 tests/host/ps3dk-prof-rolling/fifo_mutations.py --build-dir "$RUNNER_TEMP/rolling-fifo-mutants"
