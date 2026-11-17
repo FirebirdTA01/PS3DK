@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::auto_rsx::{
     CHUNK_AUTO_COVERAGE, CHUNK_AUTO_OPS, CHUNK_AUTO_STATUS,
-    OP_BYTES, OP_BYTES_BUILD, OP_BUILD_KNOWN, OP_TOKEN,
+    OP_BYTES, OP_BYTES_BUILD, OP_BUILD_KNOWN, OP_RING, OP_TOKEN,
 };
 use crate::fifo::{CHUNK_FIFO_EVENTS, CHUNK_FIFO_STATUS, EV_TOKEN_PRESENT};
 use crate::hash::crc32;
@@ -107,12 +107,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     }
 
     // 3. Negotiated op width from AUTO_CONFIG if present.
-    let op_width = cap
-        .auto
-        .as_ref()
-        .and_then(|a| a.config.as_ref())
-        .and_then(|c| c.attached())
-        .map_or(OP_BYTES, |att| att.op_width()) as usize;
+    let attached = cap.auto.as_ref().and_then(|a| a.config.as_ref()).and_then(|c| c.attached());
+    let op_width = attached.map_or(OP_BYTES, |att| att.op_width()) as usize;
+    // a report-ring source (2047/11): the export accounts for the RING generations it keeps
+    let ringed = attached.is_some_and(|att| att.ringed());
 
     // 4. Determine frame owner lane and time bounds.
     let (&owner_inc, owner_lane) = cap
@@ -391,6 +389,8 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     let mut ops_dropped = 0u64;
     let mut events_kept = 0u64;
     let mut events_dropped = 0u64;
+    let mut ring = ExportRing { first_generation: 0, last_generation: 0, generations: 0, records_kept: 0,
+        records_dropped: 0, source_last_generation: 0 };
 
     for chunk in &raw_chunks {
         match chunk.ty {
@@ -427,6 +427,24 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                             ops_kept += 1;
                         } else {
                             ops_dropped += 1;
+                        }
+                        // RING records: a block shares one frame token, so a generation is kept or dropped whole
+                        if ringed && flags & OP_RING != 0 && actual_width == op_width {
+                            let generation =
+                                u32::from_le_bytes(chunk.payload[off + 160..off + 164].try_into().unwrap());
+                            ring.source_last_generation = ring.source_last_generation.max(generation);
+                            if has_token || has_build {
+                                if ring.records_kept == 0 {
+                                    ring.first_generation = generation;
+                                }
+                                if ring.records_kept == 0 || generation != ring.last_generation {
+                                    ring.generations += 1;
+                                }
+                                ring.last_generation = generation;
+                                ring.records_kept += 1;
+                            } else {
+                                ring.records_dropped += 1;
+                            }
                         }
                     }
                 }
@@ -467,10 +485,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
 
     // Build the 112-byte EXPORT header + per-lane 40-byte entries
     let lane_count = export_lanes.len();
-    let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+    let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN + if ringed { EXPORT_RING_LEN } else { 0 };
     let mut export_payload = Vec::with_capacity(total_export_len);
 
-    let flags = if to_end_of_run { EXPORT_FLAG_TO_END } else { 0 };
+    let flags = if to_end_of_run { EXPORT_FLAG_TO_END } else { 0 } | if ringed { EXPORT_FLAG_RING } else { 0 };
     export_payload.extend_from_slice(&EXPORT_SCHEMA.to_le_bytes()); // schema: u16
     export_payload.extend_from_slice(&flags.to_le_bytes());         // flags: u16
     export_payload.extend_from_slice(&crc32(bytes).to_le_bytes()); // source_crc: u32
@@ -496,6 +514,15 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         export_payload.extend_from_slice(&el.last_seq.to_le_bytes());
         export_payload.extend_from_slice(&el.kept.to_le_bytes());
         export_payload.extend_from_slice(&el.dropped_by_export.to_le_bytes());
+    }
+    if ringed {
+        export_payload.extend_from_slice(&ring.first_generation.to_le_bytes());
+        export_payload.extend_from_slice(&ring.last_generation.to_le_bytes());
+        export_payload.extend_from_slice(&ring.generations.to_le_bytes());
+        export_payload.extend_from_slice(&ring.records_kept.to_le_bytes());
+        export_payload.extend_from_slice(&ring.records_dropped.to_le_bytes());
+        export_payload.extend_from_slice(&ring.source_last_generation.to_le_bytes());
+        export_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved: u32
     }
 
     // 7. Pass 2: Filter and serialize chunks.

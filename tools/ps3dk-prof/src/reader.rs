@@ -536,6 +536,19 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
+    // an exported report-ring capture: the RING records parsed are exactly the ones its EXPORT accounting kept
+    if let Some(exp) = r.cap.export.as_ref().and_then(|e| e.ring) {
+        let seen = r.cap.auto.as_ref().filter(|a| a.config.as_ref().and_then(|c| c.attached())
+            .is_some_and(|a| a.ringed())).map(|a| a.ring_seen);
+        let Some(seen) = seen else {
+            return malformed(Rule::Export, "EXPORT ring accounting without a report-ring AUTO_CONFIG");
+        };
+        if (seen.first, seen.last, seen.generations, seen.records)
+            != (exp.first_generation, exp.last_generation, exp.generations, exp.records_kept)
+        {
+            return malformed(Rule::Export, format!("EXPORT ring accounting {exp:?} against the RING records {seen:?}"));
+        }
+    }
     let mut frame_marks: Vec<u64> = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).collect();
     if let Some(auto) = &r.cap.auto {
         for cov in &auto.frames {
@@ -810,7 +823,7 @@ impl Reader {
         let mut c = Cursor::new(payload, "EXPORT");
         let schema = c.u16()?;
         let flags = c.u16()?;
-        if schema != EXPORT_SCHEMA || (flags & !EXPORT_FLAG_TO_END != 0) {
+        if schema != EXPORT_SCHEMA || (flags & !(EXPORT_FLAG_TO_END | EXPORT_FLAG_RING) != 0) {
             return malformed(r, format!("EXPORT schema {schema} flags {flags:#x}"));
         }
         let source_crc = c.u32()?;
@@ -834,7 +847,8 @@ impl Reader {
         if reserved != 0 {
             return malformed(r, format!("EXPORT reserved {reserved}"));
         }
-        let expected_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+        let ringed = flags & EXPORT_FLAG_RING != 0;
+        let expected_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN + if ringed { EXPORT_RING_LEN } else { 0 };
         if payload.len() != expected_len {
             return malformed(
                 r,
@@ -881,6 +895,37 @@ impl Reader {
                 },
             );
         }
+        // the report-ring tail: kept generations are whole and strictly increasing within the source's issued
+        // generations; nothing kept names no generation
+        let ring = if ringed {
+            let first_generation = c.u32()?;
+            let last_generation = c.u32()?;
+            let generations = c.u64()?;
+            let records_kept = c.u64()?;
+            let records_dropped = c.u64()?;
+            let source_last_generation = c.u32()?;
+            let reserved = c.u32()?;
+            let span = u64::from(last_generation.saturating_sub(first_generation)) + 1;
+            let ok = reserved == 0 && source_last_generation <= crate::auto_rsx::RING_GENERATION_MAX
+                && records_kept.checked_add(records_dropped).is_some()
+                && if records_kept == 0 {
+                    first_generation == 0 && last_generation == 0 && generations == 0
+                } else {
+                    first_generation >= 1 && first_generation <= last_generation
+                        && last_generation <= source_last_generation && generations >= 1 && generations <= span
+                        && generations <= records_kept
+                        && records_kept <= generations * u64::from(crate::auto_rsx::RING_PAIRS)
+                };
+            if !ok {
+                return malformed(r, format!("EXPORT ring generations {first_generation}..{last_generation} ({generations} kept, {} {}",
+                    format_args!("{records_kept} records kept, {records_dropped} dropped)"),
+                    format_args!("of source {source_last_generation}, reserved {reserved}")));
+            }
+            Some(ExportRing { first_generation, last_generation, generations, records_kept, records_dropped,
+                source_last_generation })
+        } else {
+            None
+        };
         c.done()?;
         if sum_kept != records_kept || sum_dropped != records_dropped {
             return malformed(
@@ -908,6 +953,7 @@ impl Reader {
             source_fifo_last_attempt_seq,
             source_auto_frames,
             lanes,
+            ring,
         });
         Ok(())
     }

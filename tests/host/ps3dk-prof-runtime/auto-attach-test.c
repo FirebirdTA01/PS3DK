@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ps3dk/prof_auto.h>
 #include "prof_internal.h"
@@ -88,7 +89,8 @@ int main(void)
          * fewer than 64 pairs for draws refused, and the earlier 32-byte struct still accepted with the default */
         ps3dk_prof_auto_options d=PS3DK_PROF_AUTO_OPTIONS_INIT;
         uint32_t reserves[2];
-        assert(d.size==36 && sizeof d==36 && d.range_pairs==0);
+        assert(d.size==52 && sizeof d==52 && d.range_pairs==0 && !d.ring_blocks && !d.ring_label &&
+               !d.ring_bytes && !d.ring_records);
         ps3dk_prof__auto_test_reserves(reserves);
         assert(reserves[0]==2 && reserves[1]==1);              /* 8 pairs: a quarter and an eighth */
         d.max_bytes=o.max_bytes=2097152;
@@ -111,6 +113,43 @@ int main(void)
         ps3dk_prof__auto_test_reserves(reserves);
         assert(reserves[0]==2 && reserves[1]==1);
         o.size=sizeof o;
+        /* the 36-byte struct keeps its range_pairs after the extension, read from exactly 36 heap bytes (ASan) */
+        {
+            unsigned char *h=malloc(36),*h32=malloc(32);
+            assert(h && h32);
+            d.range_pairs=32;d.size=36;memcpy(h,&d,36);
+            assert(ps3dk_prof_auto_attach((void *)&context,(const ps3dk_prof_auto_options *)(void *)h,&instance,&domain)==0);
+            ps3dk_prof__auto_test_reserves(reserves);
+            assert(reserves[0]==32 && reserves[1]==32);
+            d.size=32;memcpy(h32,&d,32);                        /* range_pairs is outside a 32-byte struct */
+            assert(ps3dk_prof_auto_attach((void *)&context,(const ps3dk_prof_auto_options *)(void *)h32,&instance,&domain)==0);
+            ps3dk_prof__auto_test_reserves(reserves);
+            assert(reserves[0]==32 && reserves[1]==16);
+            free(h);free(h32);
+        }
+        /* only the three published sizes */
+        for(uint32_t size=28;size<=60;size+=4) if(size!=32 && size!=36 && size!=52) {
+            d.size=size;
+            assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==PS3DK_PROF_EINVAL);
+            assert(!instance && !domain);
+        }
+        d.size=sizeof d;d.range_pairs=0;
+#ifndef PS3DK_PROF_AUTO_RING
+        /* the ring fields are reserved: any nonzero one is refused before allocation */
+        for(unsigned i=0;i<4;i++) {
+            ps3dk_prof_auto_options r=d;
+            if(i==0) r.ring_blocks=2;
+            if(i==1) r.ring_label=245;
+            if(i==2) r.ring_bytes=1u<<20;
+            if(i==3) r.ring_records=1;
+            ps3dk_prof_test_hooks.alloc_fail=1;                 /* an allocation would fail ENOMEM, not EINVAL */
+            assert(ps3dk_prof_auto_attach((void *)&context,&r,&instance,&domain)==PS3DK_PROF_EINVAL);
+            ps3dk_prof_test_hooks.alloc_fail=0;
+            assert(!instance && !domain);
+        }
+#endif
+        /* the small override stays the final CONFIG */
+        assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
     }
     for(unsigned i=0;i<2048;i++) assert(reports[i][0]==UINT64_C(0xa5a5a5a5a5a5a5a5));
     for(unsigned i=0;i<256;i++) assert(labels[i]==UINT32_C(0x5a5a5a5a));

@@ -9,6 +9,7 @@
 #define auto_frames_unrepresented ps3dk_prof__auto_frames_unrepresented
 #define auto_frames_outside ps3dk_prof__auto_frames_outside
 #define auto_frames_peek ps3dk_prof__auto_frames_peek
+#define auto_frames_ring ps3dk_prof__auto_frames_ring
 #define auto_frames_ack ps3dk_prof__auto_frames_ack
 typedef struct auto_frames {
     auto_wire_frame *entries;
@@ -39,6 +40,10 @@ int auto_frames_unrepresented(auto_frames *,uint32_t n);
 /* One covered visit (already counted at column 0) left untimed because timing is limited to timed ranges and none is
  * open (COVERAGE u64@416+8k). False without an active frame. */
 int auto_frames_outside(auto_frames *,uint32_t kind);
+/* REPORT_RING: one covered owner visit (already counted at column 0) left untimed because no MAIN extent was free
+ * (which 0, ring_full at COVERAGE 480) or because the ring's state is unknown or recycling was refused (which 1,
+ * ring_state at 504). Disjoint from the ten exclusions; both reconcile at closure. False without an active frame. */
+int auto_frames_ring(auto_frames *,uint32_t kind,uint32_t which);
 /* 0: refused identity/accounting, unchanged; 1: queued; 2: queue loss recorded.
  * An implied closure or reversed clock is OPEN. Actual TB observations survive
  * a reversed clock; no replacement timestamp is invented. lost is cumulative. */

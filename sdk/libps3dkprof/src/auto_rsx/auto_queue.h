@@ -3,6 +3,9 @@
 #include "auto_wire.h"
 
 #define auto_queue_init ps3dk_prof__auto_queue_init
+#define auto_queue_init_wide ps3dk_prof__auto_queue_init_wide
+#define auto_queue_claim_snapshot ps3dk_prof__auto_queue_claim_snapshot
+#define auto_queue_cancel_snapshot ps3dk_prof__auto_queue_cancel_snapshot
 #define auto_queue_claim ps3dk_prof__auto_queue_claim
 #define auto_queue_commit ps3dk_prof__auto_queue_commit
 #define auto_queue_peek ps3dk_prof__auto_queue_peek
@@ -18,6 +21,7 @@
 #define auto_queue_set_reserve ps3dk_prof__auto_queue_set_reserve
 
 enum { AUTO_PAIRS_MAX=504, AUTO_METADATA_MAX=1024 };
+enum { AUTO_METADATA_RING_MAX=65536 };
 /* Pair classes: covered draws and FRAME marks (0), whole-CALL brackets (1), AUTO ranges (2). */
 enum { AUTO_PAIR_DRAW=0, AUTO_PAIR_CALL=1, AUTO_PAIR_RANGE=2, AUTO_PAIR_CLASSES=3 };
 enum { AUTO_QUEUE_NONE, AUTO_QUEUE_STOPPED, AUTO_QUEUE_REENTRY,
@@ -54,6 +58,13 @@ typedef struct auto_queue {
  * an in-flight claim. Capture seal must acquire the owner's acknowledgement or
  * retain the allocation forever; queue emptiness is not owner quiescence. */
 int auto_queue_init(auto_queue *, auto_queue_entry *, uint32_t capacity, uint32_t pairs);
+/* New ring CONFIG only: the metadata budget is independent of local pairs. */
+int auto_queue_init_wide(auto_queue *, auto_queue_entry *, uint32_t capacity, uint32_t pairs);
+/* Reserve an id/metadata slot, but no local pair (pair=UINT32_MAX). Commit only
+ * after the ring destination and command credit are reserved. Cancel is legal
+ * only before any emission or modification of this fresh claim's id/serials. */
+auto_queue_entry *auto_queue_claim_snapshot(auto_queue *);
+int auto_queue_cancel_snapshot(auto_queue *);
 auto_queue_entry *auto_queue_claim(auto_queue *);
 void auto_queue_commit(auto_queue *);
 const auto_queue_entry *auto_queue_peek(auto_queue *);

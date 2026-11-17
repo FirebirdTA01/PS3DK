@@ -9,7 +9,7 @@ import subprocess
 root=Path(__file__).resolve().parents[2]
 ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',action='store_true')
-ap.add_argument('--mutant',choices=['flush-before-put','wrap-phase2-missing','reset-missing'])
+ap.add_argument('--mutant',choices=['flush-before-put','wrap-phase2-missing','reset-missing','preflush-after-offset'])
 a=ap.parse_args()
 source=(root/'sdk/libgcm_cmd/src/rsx_legacy/buffer_impl.h').read_text()
 assert 'ps3dk_prof__auto_publish_before' in source,'AUTO_PUBLICATION_SEAM'
@@ -23,6 +23,10 @@ if a.mutant=='flush-before-put':
                           '#ifdef PS3TC_PROF_AUTO\n\t__sync();\n\tps3dk_prof__auto_publish_after(context,frontier);\n\tctrl->put = offset;\n#else\n\tctrl->put = offset;')
 elif a.mutant=='wrap-phase2-missing':
     protocol=protocol.replace('p->publish_after(p->arg, frontier2);','(void)frontier2;')
+elif a.mutant=='preflush-after-offset':
+    old='\tps3dk_prof__auto_preflush(context);\n#endif\n\t__sync();\n\tgcmAddressToOffset(context->current,&offset);'
+    assert bodies.count(old)==1
+    bodies=bodies.replace(old,'#endif\n\t__sync();\n\tgcmAddressToOffset(context->current,&offset);\n#ifdef PS3TC_PROF_AUTO\n\tps3dk_prof__auto_preflush(context);\n#endif')
 elif a.mutant=='reset-missing':
     bodies=bodies.replace('ps3dk_prof__auto_context_reset(context);','(void)context;')
 (a.out/'ps3tc_fifo_wrap_protocol.h').write_bytes(protocol.encode())
@@ -37,10 +41,11 @@ typedef uint32_t u32;
 typedef struct _gcmCtxData { uint32_t *begin,*current,*end; } gcmContextData;
 typedef struct { volatile uint32_t get,put,ref; } gcmControlRegister;
 static gcmControlRegister ctrl;
-static unsigned syncs,pre,post,resets,jumps;
+static unsigned syncs,pre,post,resets,jumps,preflushes;
 static uint32_t expected_put,old_put;
 static gcmControlRegister *gcmGetControlRegister(void) { return &ctrl; }
-static int gcmAddressToOffset(uint32_t *p,uint32_t *v) { (void)p;*v=expected_put;return 0; }
+static int gcmAddressToOffset(uint32_t *p,uint32_t *v) { (void)p;assert(preflushes==TEST_AUTO*(pre+1));*v=expected_put;return 0; }
+void ps3dk_prof__auto_preflush(struct _gcmCtxData *c) { (void)c;assert(!syncs && ctrl.put==old_put);preflushes++; }
 static void __sync(void) { ++syncs; }
 static void usleep(unsigned n) { (void)n;ctrl.get=ctrl.put; }
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *c) {

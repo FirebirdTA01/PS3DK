@@ -1,7 +1,8 @@
 # Explicit EXT + FIFO + AUTO provider. Default/archive lifecycle recipes stay
 # independent; application instrumentation flags never reach these objects.
 AUTORSX_MEMBERS := auto_runtime auto_startup auto_config auto_wire auto_writer auto_queue \
-                   auto_commands auto_completion auto_frames auto_clock
+                   auto_commands auto_completion auto_frames auto_clock \
+                   auto_ring auto_ring_commands auto_ring_layout
 AUTORSX_NAMES := $(EXT_MEMBERS) $(FIFO_MEMBERS) $(AUTORSX_MEMBERS)
 AUTORSX_DIR := $(BUILD)/auto-rsx
 AUTO_PROFILE_ID ?= AUTO-RSX
