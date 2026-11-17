@@ -142,29 +142,31 @@ static void enc_str(prof *p, const char *s, size_t n)
 }
 
 /* Finish the chunk: {type, len, chunk_seq}, payload, CRC over type..payload; one sink write. */
-static void enc_end(prof *p)
+static int enc_end(prof *p)
 {
     drainer *d = &p->dr;
     uint8_t *b = d->buf;
 #if defined(PS3DK_PROF_WITH_ARCS) || defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC) || defined(PS3DK_PROF_WITH_COUNTERS)
     if (d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
-        return;
+        return -1;
     }
 #elif defined(PS3DK_PROF_WITH_SPU)
     /* Extension mode: the ceiling guards EVERY chunk (v1, extension and the TRAILER), before any sink call.
      * flags = 0 keeps the base behaviour. */
     if (p->ext_flags && d->chunk_seq == UINT64_MAX) {
         sink_fail(&p->snk, -6);
-        return;
+        return -1;
     }
 #endif
     p_le32(b, d->chunk_type);
     p_le32(b + 4, (uint32_t)d->pos);
     p_le64(b + 8, d->chunk_seq);
     p_le32(b + 16 + d->pos, p_crc32(b, 16 + d->pos));
-    if (sink_write(p, b, 16 + d->pos + 4) == 0)
-        d->chunk_seq++;
+    if (sink_write(p, b, 16 + d->pos + 4) != 0)
+        return -1;
+    d->chunk_seq++;
+    return 0;
 }
 
 #ifdef PS3DK_PROF_WITH_WAITS
@@ -250,22 +252,15 @@ static void list_open(prof *p, uint32_t type, uint32_t *cnt)
     *cnt = 0;
 }
 
-static void list_close(prof *p, uint32_t *cnt)
+static int list_close(prof *p, uint32_t *cnt)
 {
+    int result = 0;
     if (*cnt) {
         p_le32(pl(p), *cnt);
-        enc_end(p);
+        result = enc_end(p);
     }
     *cnt = 0;
-}
-
-static void list_need(prof *p, uint32_t *cnt, size_t need)
-{
-    if (p->dr.pos + need > P_CHUNK_CAP) {
-        uint32_t type = p->dr.chunk_type;
-        list_close(p, cnt);
-        list_open(p, type, cnt);
-    }
+    return result;
 }
 
 #define P_FINAL_ENTRY 56u
@@ -431,32 +426,47 @@ static void dr_start(prof *p)
 #endif
 }
 
+/* Publish only the identities covered by this accepted THREADS chunk. */
+static void accept_threads(prof *p, const tdecl *t, uint32_t first, uint32_t end)
+{
+    uint32_t i;
+    for (i = first; i < end; ++i) {
+        p->dr.decl_gen[t[i].slot] = t[i].generation;
+        p->dr.written[t[i].slot] = 0;
+    }
+#ifdef PS3DK_PROF_WITH_SPU
+    if (p->ext_flags)
+        p_ext_threads_accepted(p, t + first, end - first);
+#endif
+#ifdef PS3DK_PROF_WITH_WAITS
+    p_wait_declared(p, t + first, end - first);
+#endif
+}
+
 static void enc_threads(prof *p, const tdecl *t, uint32_t n)
 {
-    uint32_t i, cnt;
+    uint32_t i, cnt, first = 0;
     size_t nl;
     if (!n)
         return;
     list_open(p, C_THREADS, &cnt);
     for (i = 0; i < n; i++) {
         nl = strlen(t[i].name);
-        list_need(p, &cnt, 4 + 4 + 8 + 2 + nl);
+        if (p->dr.pos + 4 + 4 + 8 + 2 + nl > P_CHUNK_CAP) {
+            if (list_close(p, &cnt) != 0)
+                return;
+            accept_threads(p, t, first, i);
+            first = i;
+            list_open(p, C_THREADS, &cnt);
+        }
         enc_u32(p, t[i].incarnation);
         enc_u32(p, t[i].slot);
         enc_u64(p, t[i].os_id);
         enc_str(p, t[i].name, nl);
         cnt++;
-        p->dr.decl_gen[t[i].slot] = t[i].generation;
-        p->dr.written[t[i].slot] = 0;
     }
-    list_close(p, &cnt);
-#ifdef PS3DK_PROF_WITH_SPU
-    if (p->ext_flags && !p->snk.failed)
-        p_ext_threads_accepted(p, t, n); /* exact identities, only once their THREADS chunks were accepted */
-#endif
-#ifdef PS3DK_PROF_WITH_WAITS
-    if(!p->snk.failed)p_wait_declared(p,t,n);
-#endif
+    if (list_close(p, &cnt) == 0)
+        accept_threads(p, t, first, n);
 }
 
 /* Step 2a: every non-FREE slot whose generation is not declared yet, copied under the mutex, encoded after it. */
@@ -492,7 +502,13 @@ static void declare_descs(prof *p, uint32_t upto)
     list_open(p, C_DESCRIPTORS, &cnt);
     for (i = d->desc_emitted; i < upto; i++) {
         const desc_entry *e = &p->descs[i];
-        list_need(p, &cnt, 4 + 8 + 1 + 1 + 4 + 6 + (size_t)e->name_len + e->tag_len + e->file_len);
+        size_t need = 4 + 8 + 1 + 1 + 4 + 6 + (size_t)e->name_len + e->tag_len + e->file_len;
+        if (p->dr.pos + need > P_CHUNK_CAP) {
+            if (list_close(p, &cnt) != 0)
+                return;
+            d->desc_emitted = i;
+            list_open(p, C_DESCRIPTORS, &cnt);
+        }
         enc_u32(p, i);
         enc_u64(p, e->id);
         enc_u8(p, (uint8_t)e->scope);
@@ -503,8 +519,8 @@ static void declare_descs(prof *p, uint32_t upto)
         enc_str(p, e->file, e->file_len);
         cnt++;
     }
-    list_close(p, &cnt);
-    d->desc_emitted = upto;
+    if (list_close(p, &cnt) == 0)
+        d->desc_emitted = upto;
 }
 
 /* Capture windows: every queued record in order, up to the first BEGIN whose name descriptor is not declared yet. */
@@ -519,7 +535,8 @@ void p_window_drain(prof *p, uint32_t declared)
         enc_begin(p, e->type);
         for (i = 0; i < 32; i++)
             enc_u8(p, e->b[i]);
-        enc_end(p);
+        if (enc_end(p) != 0)
+            break;
         r++;
         ST_REL(&p->winq_r, r);
     }
@@ -532,6 +549,7 @@ static void drain_ring(prof *p, uint32_t si, uint32_t inc, uint64_t w)
     ring *rg = p->slots[si].rg;
     uint64_t r = LD_RLX(&rg->read_idx);   /* only the drainer stores it */
     uint32_t n, j, cnt = 0;
+    uint64_t written = 0;
     const uint8_t *src;
     if (r == w || p->snk.failed)
         return;
@@ -547,26 +565,35 @@ static void drain_ring(prof *p, uint32_t si, uint32_t inc, uint64_t w)
                 goto corrupt;
         if (cnt + n > P_CHUNK_RECORDS) {
             p_le32(pl(p) + 4, cnt);
-            enc_end(p);
+            if (written > UINT64_MAX - p->dr.written[si])
+                goto corrupt;
+            if (enc_end(p) != 0)
+                return;
+            p->dr.written[si] += written;
             ST_REL(&rg->read_idx, r);
             enc_begin(p, C_RECORDS);
             enc_u32(p, inc);
             enc_u32(p, 0);
             cnt = 0;
+            written = 0;
         }
         for (j = 0; j < n; j++) {
             src = rg->slots + (size_t)((r + j) & rg->mask) * P_REC;
             memcpy(pl(p) + p->dr.pos, src, P_REC);
             p->dr.pos += P_REC;
             if (src[0] != K_GAP)
-                p->dr.written[si]++;
+                ++written;
         }
         cnt += n;
         r += n;
     }
     p_le32(pl(p) + 4, cnt);
-    enc_end(p);
-    ST_REL(&rg->read_idx, r);   /* the space is free once the records are copied out */
+    if (written > UINT64_MAX - p->dr.written[si])
+        goto corrupt;
+    if (enc_end(p) != 0)
+        return;
+    p->dr.written[si] += written;
+    ST_REL(&rg->read_idx, r);   /* free only after the whole chunk was accepted */
     return;
 corrupt:
     p->dr.corrupt = 1;
@@ -615,6 +642,22 @@ void p_drain_prologue(prof *p)
 {
     if (p->snk.kind == 1)
         dr_start(p);
+}
+
+static void accept_retired(prof *p, uint32_t first, uint32_t end)
+{
+    uint32_t i;
+    for (i = first; i < end; ++i) {
+        const snap *sn = &p->dr.snaps[i];
+        if (!sn->retire_now)
+            continue;
+        if (p->slots[sn->slot].cb->limit)
+            p->dr.any_retired_limit = 1;
+#ifdef PS3DK_PROF_WITH_ARCS
+        if (!p->arc_options.max_arcs_per_thread)
+#endif
+            p->dr.retired_gen[sn->slot] = sn->generation;
+    }
 }
 
 int p_drain_once(prof *p)
@@ -714,24 +757,27 @@ int p_drain_once(prof *p)
 #endif
     /* 4. Retirement: the RETIRED entry, then (and only then) the slot is free. */
     if (nret) {
+        uint32_t first = 0;
         list_open(p, C_RETIRED, &cnt);
         for (i = 0; i < n; i++) {
             const snap *sn = &d->snaps[i];
             const cblock *cb = p->slots[sn->slot].cb;
             if (!sn->retire_now)
                 continue;
-            list_need(p, &cnt, P_FINAL_ENTRY);
+            if (p->dr.pos + P_FINAL_ENTRY > P_CHUNK_CAP) {
+                if (list_close(p, &cnt) != 0)
+                    return -1;
+                accept_retired(p, first, i);
+                first = i;
+                list_open(p, C_RETIRED, &cnt);
+            }
             enc_final(p, sn->incarnation, ST_RETIRED, cb->limit ? 1 : 0, cb->next_seq, d->written[sn->slot],
                       cb->dropped, cb->refused, cb->regerr, cb->open_spans);
             cnt++;
-            if (cb->limit)
-                d->any_retired_limit = 1;
-#ifdef PS3DK_PROF_WITH_ARCS
-            if (!p->arc_options.max_arcs_per_thread)
-#endif
-                d->retired_gen[sn->slot] = sn->generation;
         }
-        list_close(p, &cnt);
+        if (list_close(p, &cnt) != 0)
+            return -1;
+        accept_retired(p, first, n);
 #ifdef PS3DK_PROF_WITH_ARCS
         if (p->arc_options.max_arcs_per_thread) {
             if (p->snk.failed)
@@ -822,7 +868,7 @@ static void quiesce_wait(prof *p)
 int p_quiesce_freeze_seal(prof *p)
 {
     drainer *d = &p->dr;
-    uint32_t i, cnt, ntr = 0, nt = 0, fd, end_flags = 0;
+    uint32_t i, cnt, ntr = 0, nt = 0, fd, end_flags = 0, pending_limit = 0;
     uint64_t unreg;
     int trailer = 0, any3 = 0, anylim;
 
@@ -907,14 +953,22 @@ int p_quiesce_freeze_seal(prof *p)
             const fentry *e = &d->front[i];
             if (e->done || e->cls != ST_RETIRED)
                 continue;
-            list_need(p, &cnt, P_FINAL_ENTRY);
+            if (p->dr.pos + P_FINAL_ENTRY > P_CHUNK_CAP) {
+                if (list_close(p, &cnt) != 0)
+                    goto close_capture;
+                d->any_retired_limit |= pending_limit;
+                pending_limit = 0;
+                list_open(p, C_RETIRED, &cnt);
+            }
             enc_final(p, e->incarnation, ST_RETIRED, e->limit ? 1 : 0, e->produced, d->written[e->slot], e->dropped,
                       e->refused, e->regerr, e->open_spans);
             cnt++;
             if (e->limit)
-                d->any_retired_limit = 1;
+                pending_limit = 1;
         }
-        list_close(p, &cnt);
+        if (list_close(p, &cnt) != 0)
+            goto close_capture;
+        d->any_retired_limit |= pending_limit;
 
 #ifdef PS3DK_PROF_WITH_ARCS
         if (p->arc_options.max_arcs_per_thread) {
@@ -992,9 +1046,7 @@ int p_quiesce_freeze_seal(prof *p)
         if (trailer && p->snk.kind == 2 && p->snk.cb.flush && p->snk.cb.flush(p->snk.cb.ctx) < 0)
             sink_fail(&p->snk, -4);   /* B5: a flush failure is a sink failure before close */
     }
-#ifdef PS3DK_PROF_WITH_ARCS
 close_capture:
-#endif
 #ifdef PS3DK_PROF_WITH_FIFO
     p_fifo_seal_close();
 #endif
