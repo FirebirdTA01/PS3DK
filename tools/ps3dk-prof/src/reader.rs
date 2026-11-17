@@ -135,6 +135,110 @@ struct Reader {
     ext: Option<crate::ext::ExtReader>,
     checkpoints: Option<crate::checkpoints::Reader>,
     source_checkpoints: Option<crate::source_checkpoints::Reader>,
+    /// Only the typed rolling importer populates these; legacy readers start empty.
+    rolling_prefix: BTreeMap<u32, PrefixCounts>,
+    rolling_span_max: Option<BTreeMap<u32, u64>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PrefixCounts {
+    pub written: u64,
+    pub gaps: u64,
+    pub regerr: u64,
+}
+
+/// Restricted unfinished-state adapter. It shares the core validators without
+/// changing the legacy multi-family dispatch or fabricating a prefix stream.
+pub(crate) struct PpuState {
+    reader: Reader,
+    minor: u16,
+}
+
+impl PpuState {
+    pub(crate) fn new(header: &[u8; 16]) -> Result<Self, Malformed> {
+        // This is the actual original file header. There are no event/metadata
+        // chunks to finalize, so no active parser state is lost here.
+        let mut cap = read(header)?;
+        cap.incomplete.clear();
+        let windows = cap.windows_flag.then(crate::windows::Reader::new);
+        Ok(Self { minor: u16::from_le_bytes([header[10], header[11]]), reader: Reader {
+            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows,
+            declared: BTreeSet::new(), live_slots: BTreeMap::new(), descriptor_ids: BTreeMap::new(),
+            trailer_seen: false, ext: None, checkpoints: None, source_checkpoints: None,
+            rolling_prefix: BTreeMap::new(), rolling_span_max: Some(BTreeMap::new()),
+        } })
+    }
+    pub(crate) fn capture(&self) -> &Capture { &self.reader.cap }
+    pub(crate) fn window_boundary(&self) -> (BTreeSet<u32>, Option<u32>) {
+        self.reader.windows.as_ref().map_or_else(|| (BTreeSet::new(), None), |w|
+            (w.windows.iter().map(|x| x.id).collect(), w.open.as_ref().map(|x| x.id)))
+    }
+    pub(crate) fn max_span(&self, inc: u32) -> u64 {
+        self.reader.rolling_span_max.as_ref().and_then(|m| m.get(&inc)).copied().unwrap_or(0)
+    }
+    pub(crate) fn accept(&mut self, index: u64, ty: u32, payload: &[u8]) -> Result<(), Malformed> {
+        let r = &mut self.reader;
+        if r.trailer_seen {
+            return malformed(if ty == CHUNK_TRAILER { Rule::SecondTrailer } else { Rule::TrailingBytesAfterTrailer },
+                "chunk after TRAILER");
+        }
+        if index == 0 && ty != CHUNK_HEADER { return malformed(Rule::HeaderNotChunk0, "chunk zero is not HEADER"); }
+        if index == 1 && ty != CHUNK_CLOCKS { return malformed(Rule::ClocksNotChunk1, "chunk one is not CLOCKS"); }
+        if index >= 2 && matches!(ty, CHUNK_HEADER | CHUNK_CLOCKS) {
+            return malformed(Rule::DuplicateHeaderOrClocks, "repeated HEADER/CLOCKS");
+        }
+        match ty {
+            CHUNK_HEADER => r.header(payload, self.minor),
+            CHUNK_CLOCKS => r.clocks(payload),
+            CHUNK_DESCRIPTORS => r.descriptors(payload),
+            CHUNK_THREADS => r.threads(payload),
+            CHUNK_RECORDS => r.records(payload, index),
+            CHUNK_RETIRED => r.retired(payload),
+            CHUNK_TRAILER => r.trailer(payload),
+            CHUNK_WINDOW_BEGIN | CHUNK_WINDOW_END if r.windows.is_some() =>
+                r.windows.as_mut().unwrap().chunk(ty, payload, &r.cap),
+            _ => malformed(Rule::UnknownChunkType, format!("PPU restart does not accept type {ty}")),
+        }
+    }
+    pub(crate) fn install_lane(&mut self, inc: u32, mut lane: Lane, spans: Vec<Span>, prefix: PrefixCounts, max: u64)
+        -> Result<(), Malformed> {
+        let Some(declared) = self.reader.cap.lanes.get(&inc) else {
+            return malformed(Rule::UndeclaredIncarnation, "checkpoint lane has no declaration");
+        };
+        lane.info = declared.info.clone();
+        lane.final_entry = declared.final_entry.clone();
+        lane.retired = declared.retired;
+        for span in spans {
+            lane.stack.push(self.reader.cap.spans.len());
+            lane.spans.push(self.reader.cap.spans.len());
+            lane.span_ids.insert(span.span_id);
+            self.reader.cap.spans.push(span);
+        }
+        self.reader.cap.lanes.insert(inc, lane);
+        self.reader.rolling_prefix.insert(inc, prefix);
+        self.reader.rolling_span_max.as_mut().unwrap().insert(inc, max);
+        Ok(())
+    }
+    pub(crate) fn check_span_fields(&self, begin: &RawRecord, parent: &RawRecord) -> Result<(), Malformed> {
+        for r in [begin, parent] {
+            check_fields(r, &self.reader.cap.descriptors, &self.reader.declared, None)
+                .map_err(|rule| Malformed { rule, detail: "checkpoint active span fields".into() })?;
+        }
+        Ok(())
+    }
+    pub(crate) fn finish(mut self, torn: bool) -> Result<Capture, Malformed> {
+        let marks: Vec<u64> = self.reader.cap.lanes.values().flat_map(|l| l.frames.iter().map(|f| f.id)).collect();
+        if let Some(w) = self.reader.windows.take() {
+            self.reader.cap.windows = w.finish(&marks);
+        } else {
+            self.reader.cap.windows = vec![CaptureWindow {
+                id: 1, name: "default".into(), name_desc: 0, first_frame: marks.iter().copied().min().unwrap_or(0),
+                last_frame: marks.iter().copied().max(), source: WindowSource::App, kind: WindowKind::Manual,
+                reason: WindowReason::End, is_open: false, incomplete: false,
+            }];
+        }
+        self.reader.finish(torn)
+    }
 }
 
 /// The STRUCTURAL pass: sections 1-6.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
@@ -229,6 +333,8 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         ext: None,
         checkpoints: None,
         source_checkpoints: None,
+        rolling_prefix: BTreeMap::new(),
+        rolling_span_max: None,
     };
     if bytes.len() < FILE_HEADER_LEN {
         // A file cut inside its 16-byte header is torn only if EVERY constrained byte present is right: the magic,
@@ -941,6 +1047,16 @@ impl Reader {
             return malformed(Rule::RecordsAfterRetired, format!("RECORDS of {inc} after its RETIRED entry"));
         }
         let recs: Vec<RawRecord> = payload[8..].chunks_exact(RECORD_LEN).map(RawRecord::decode).collect();
+        if let Some(maxima) = self.rolling_span_max.as_mut() {
+            let max = maxima.entry(inc).or_default();
+            for rec in recs.iter().filter(|r| r.kind == KIND_BEGIN && r.c != 0) {
+                if rec.c <= *max {
+                    return malformed(Rule::SpanIdDuplicate, "rolling BEGIN span ID did not exceed its prior maximum");
+                }
+                if rec.c >= SEQ_LIMIT { return malformed(Rule::SeqRange, "rolling span ID exceeds its runtime limit"); }
+                *max = rec.c;
+            }
+        }
         let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
             crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
             || recs.iter().filter(|r| r.kind == KIND_END).count()));
@@ -976,6 +1092,7 @@ impl Reader {
         }
         for (&inc, lane) in &self.cap.lanes {
             let Some(e) = &lane.final_entry else { continue };
+            let prefix = self.rolling_prefix.get(&inc).copied().unwrap_or_default();
             if let Some(exp) = &self.cap.export {
                 let exp_lane = exp.lanes.get(&inc).ok_or_else(|| {
                     Malformed {
@@ -999,7 +1116,7 @@ impl Reader {
                     );
                 }
             } else {
-                if e.written_count != lane.written {
+                if u128::from(e.written_count) != u128::from(prefix.written) + u128::from(lane.written) {
                     return malformed(
                         Rule::WrittenCountMismatch,
                         format!("incarnation {inc}: written_count {} but {} records", e.written_count, lane.written),
@@ -1115,7 +1232,7 @@ impl Reader {
             } else {
                 let next = lane.last_seq.map_or(0u128, |s| u128::from(s) + 1);
                 let produced = u128::from(e.produced_count);
-                if produced < next || u128::from(e.dropped_count) != lane.gap_sum + (produced - next) {
+                if produced < next || u128::from(e.dropped_count) != u128::from(prefix.gaps) + lane.gap_sum + (produced - next) {
                     return malformed(
                         Rule::DroppedCountArithmetic,
                         format!(
@@ -1127,7 +1244,7 @@ impl Reader {
             }
             // Section 5.3: regerr_count is incremented unconditionally and the REGERR record is best effort, so the
             // counter covers every REGERR record written.
-            if e.regerr_count < lane.regerr_records {
+            if u128::from(e.regerr_count) < u128::from(prefix.regerr) + u128::from(lane.regerr_records) {
                 return malformed(
                     Rule::RegerrCountBelowRecords,
                     format!(
