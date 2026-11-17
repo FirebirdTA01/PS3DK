@@ -169,6 +169,19 @@ impl PpuState {
         } })
     }
     pub(crate) fn capture(&self) -> &Capture { &self.reader.cap }
+    pub(crate) fn v1_refs(&self) -> crate::ext::V1Refs<'_> {
+        crate::ext::V1Refs { descriptors: &self.reader.cap.descriptors,
+            declared_incarnations: &self.reader.declared }
+    }
+    pub(crate) fn accept_profile(&mut self, index: u64, payload: &[u8]) -> Result<(), Malformed> {
+        if !self.reader.cap.profile_flag || index != 2 || self.reader.cap.profile.is_some() {
+            return malformed(Rule::ProfilePlacement, "PROFILE outside original position 2");
+        }
+        let freq = self.reader.cap.clock.as_ref().ok_or_else(|| Malformed {
+            rule: Rule::ProfilePlacement, detail: "PROFILE before CLOCKS".into() })?.freq_hz;
+        self.reader.cap.profile = Some(crate::profile::parse(payload, freq)?);
+        Ok(())
+    }
     pub(crate) fn window_boundary(&self) -> (BTreeSet<u32>, Option<u32>) {
         self.reader.windows.as_ref().map_or_else(|| (BTreeSet::new(), None), |w|
             (w.windows.iter().map(|x| x.id).collect(), w.open.as_ref().map(|x| x.id)))

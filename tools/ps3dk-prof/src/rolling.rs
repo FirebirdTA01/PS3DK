@@ -198,6 +198,12 @@ pub fn read_ppu_suffix(bytes: &[u8], suffix: &[u8], limits: Limits) -> Result<Re
     let (closed, open) = state.window_boundary();
     for c in &chunks { state.accept(c.index, c.ty, c.payload)?; state_limits(&state, limits)?; }
     let cap = state.finish(torn)?;
+    report_retained(cap, &cp, closed, open, next)
+}
+
+/// Shared retained PPU reporting after the actual validator has finished.
+pub(crate) fn report_retained(cap: Capture, cp: &checkpoint::State, closed: BTreeSet<u32>,
+    open: Option<u32>, next: u64) -> Result<RetainedPpu, Error> {
     // Token rule 4 still applies, including unresolved references from closed
     // prefix spans that were compacted away. Recorded prefix frames are proved
     // by exact membership runs, not by guessing every ID below a high-water mark.

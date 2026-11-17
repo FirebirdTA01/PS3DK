@@ -129,9 +129,9 @@ struct Run {
     known: bool, protocol: Protocol, stack: Vec<RawEvent>,
 }
 #[derive(Debug, Clone)]
-struct Block { first: u64, last: u64, runs: BTreeMap<u32, Run> }
+pub(crate) struct Block { pub(crate) first: u64, pub(crate) last: u64, runs: BTreeMap<u32, Run> }
 #[derive(Debug, Clone)]
-enum Entry { Support { index: u64, ty: u32, payload: Vec<u8> }, Events(Block) }
+pub(crate) enum Entry { Support { index: u64, ty: u32, payload: Vec<u8> }, Events(Block) }
 #[derive(Debug, Clone, Copy, Default)]
 struct Prefix { events: u64, lost: u64, next: u64 }
 
@@ -247,6 +247,24 @@ impl Adapter {
         self.input_bytes = self.input_bytes.checked_add(payload.len() as u64 + 20).ok_or(Error::Checkpoint("family byte count overflow"))?;
         self.last_index = Some(index); self.state_limit()
     }
+    pub(crate) fn journal(&self) -> &[Entry] { &self.journal }
+    pub(crate) fn combined_counts(&self) -> (usize, usize, usize, usize) {
+        (self.reader.cap.domains.len(), self.reader.cap.lanes.len(), self.reader.cap.images.len(), self.witnesses_used)
+    }
+    pub(crate) fn combined_totals(&self) -> (Option<u64>, u64, u64) { (self.last_index, self.input_bytes, self.events) }
+    pub(crate) fn import_block(&mut self, block: Block) -> Result<(), Error> {
+        self.healthy()?;
+        let result = self.restore_block(block);
+        if result.is_err() { self.poisoned = true; }
+        result
+    }
+    pub(crate) fn seal_import(&mut self) -> Result<(), Error> {
+        self.healthy()?;
+        self.prefix = self.reader.sources.iter().map(|(&key, s)| (key, Prefix { events: s.events, lost: s.lost, next: s.next_seq })).collect();
+        self.work_events = 0;
+        Ok(())
+    }
+    pub(crate) fn no_frame_references(&self) -> bool { self.reader.sources.values().all(|s| s.frame_refs.is_empty()) }
     pub fn checkpoint(&self) -> Result<Vec<u8>, Error> { self.healthy()?; encode(self) }
     pub fn from_checkpoint(bytes: &[u8], v1: &V1Refs<'_>, limits: Limits) -> Result<Self, Error> {
         decode(bytes, v1, limits)
@@ -365,14 +383,7 @@ fn encode(a: &Adapter) -> Result<Vec<u8>, Error> {
                 w.u32(1)?; w.u32(0)?; w.u64(*index)?; w.u64(*index)?; w.u32(*ty)?; w.raw(payload)?;
             }
             Entry::Events(b) => {
-                w.u32(2)?; w.u32(0)?; w.u64(b.first)?; w.u64(b.last)?; w.count(b.runs.len())?; w.u32(0)?;
-                for r in b.runs.values() {
-                    w.u32(r.lane)?; w.u32(r.epoch)?;
-                    for n in [r.first_seq, r.events, r.chunks] { w.u64(n)?; }
-                    w.u32(u32::from(r.known))?; w.count(r.stack.len())?;
-                    for n in [r.protocol.code, r.protocol.desc, r.protocol.depth, r.protocol.expected_desc, r.protocol.expected_depth, r.protocol.size] { w.u32(n)?; }
-                    for e in &r.stack { w.u64(e.seq)?; w.u32(e.epoch)?; w.u32(e.raw as u32)?; w.u32(e.desc)?; w.u32(u32::from(e.depth))?; }
-                }
+                w.raw(&encode_block(b, a.limits.checkpoint_bytes)?)?;
             }
         }
         let len = u32::try_from(w.bytes.len() - start).map_err(|_| Error::Limit("entry bytes"))?;
@@ -388,6 +399,30 @@ fn encode(a: &Adapter) -> Result<Vec<u8>, Error> {
     w.bytes[48..56].copy_from_slice(&a.input_bytes.to_le_bytes()); w.bytes[56..64].copy_from_slice(&a.events.to_le_bytes());
     let crc = crc32(&w.bytes); w.u32(crc)?; Ok(w.bytes)
 }
+pub(crate) fn encode_block(b: &Block, limit: usize) -> Result<Vec<u8>, Error> {
+    let mut w = Write::new(limit);
+    w.u32(2)?; w.u32(0)?; w.u64(b.first)?; w.u64(b.last)?; w.count(b.runs.len())?; w.u32(0)?;
+    for r in b.runs.values() {
+        w.u32(r.lane)?; w.u32(r.epoch)?;
+        for n in [r.first_seq, r.events, r.chunks] { w.u64(n)?; }
+        w.u32(u32::from(r.known))?; w.count(r.stack.len())?;
+        for n in [r.protocol.code, r.protocol.desc, r.protocol.depth, r.protocol.expected_desc, r.protocol.expected_depth, r.protocol.size] { w.u32(n)?; }
+        for e in &r.stack { w.u64(e.seq)?; w.u32(e.epoch)?; w.u32(e.raw as u32)?; w.u32(e.desc)?; w.u32(u32::from(e.depth))?; }
+    }
+    let len = u32::try_from(w.bytes.len()).map_err(|_| Error::Limit("block bytes"))?;
+    w.bytes[4..8].copy_from_slice(&len.to_le_bytes());
+    Ok(w.bytes)
+}
+
+impl Block {
+    pub(crate) fn import_work(&self) -> u128 { self.runs.len() as u128 * 8192 + 1 }
+    pub(crate) fn totals(&self) -> (u128, u128, usize) {
+        (self.runs.values().map(|r| u128::from(r.chunks)).sum(),
+         self.runs.values().map(|r| u128::from(r.events)).sum(),
+         self.runs.values().map(|r| r.stack.len()).sum())
+    }
+}
+
 struct Read<'a> { bytes: &'a [u8], pos: usize }
 impl<'a> Read<'a> {
     fn new(bytes: &'a [u8]) -> Self { Self { bytes, pos: 0 } }
@@ -428,30 +463,7 @@ fn decode(bytes: &[u8], refs: &V1Refs<'_>, limits: Limits) -> Result<Adapter, Er
                 a.accept(first, ty, payload, refs)?;
             }
             2 => {
-                if len < 32 { return ck("short event block"); }
-                let n = body.u32()? as usize;
-                if body.u32()? != 0 || n == 0 || n > (len - 32) / 64 { return ck("event block row count/length"); }
-                read_runs = read_runs.checked_add(n).ok_or(Error::Limit("event runs"))?;
-                if read_runs > limits.event_runs || n > limits.sources { return Err(Error::Limit("event runs/sources")); }
-                let mut block = Block { first, last, runs: BTreeMap::new() }; let mut previous_lane = 0;
-                for _ in 0..n {
-                    let lane = body.u32()?; let epoch = body.u32()?;
-                    if lane == 0 || lane <= previous_lane { return ck("event run lane order"); } previous_lane = lane;
-                    let first_seq = body.u64()?; let events = body.u64()?; let chunks = body.u64()?;
-                    let known = body.u32()?; let stack_count = body.u32()? as usize;
-                    if known > 1 || stack_count > 64 { return ck("event run state/stack count"); }
-                    read_witnesses = read_witnesses.checked_add(stack_count).ok_or(Error::Limit("stack witnesses"))?;
-                    if read_witnesses > limits.stack_rows { return Err(Error::Limit("stack witnesses")); }
-                    let protocol = Protocol { code: body.u32()?, desc: body.u32()?, depth: body.u32()?, expected_desc: body.u32()?, expected_depth: body.u32()?, size: body.u32()? };
-                    let mut stack = Vec::new();
-                    for _ in 0..stack_count {
-                        let seq = body.u64()?; let epoch = body.u32()?; let raw = u64::from(body.u32()?); let desc = body.u32()?; let depth = body.u32()?;
-                        if depth > 63 { return ck("active BEGIN depth"); }
-                        reserve(&mut stack, 1)?;
-                        stack.push(RawEvent { seq, epoch, raw, desc, kind: EV_BEGIN, depth: depth as u8, frame_owner: 0, frame_id: 0 });
-                    }
-                    block.runs.insert(lane, Run { lane, epoch, first_seq, events, chunks, known: known != 0, protocol, stack });
-                }
+                let block = decode_block(first, last, body.take(len - 24)?, limits, &mut read_runs, &mut read_witnesses)?;
                 a.restore_block(block)?;
             }
             _ => return ck("unknown journal entry"),
@@ -462,7 +474,40 @@ fn decode(bytes: &[u8], refs: &V1Refs<'_>, limits: Limits) -> Result<Adapter, Er
     if a.last_index != (have != 0).then_some(last) || a.runs_used != runs || a.input_bytes != input_bytes || a.events != events {
         return ck("checkpoint frontier/framing/counter identity");
     }
-    a.prefix = a.reader.sources.iter().map(|(&key, s)| (key, Prefix { events: s.events, lost: s.lost, next: s.next_seq })).collect();
-    a.work_events = 0;
+    a.seal_import()?;
     Ok(a)
+}
+
+/// Shared typed block fields, excluding its 24-byte entry envelope.
+pub(crate) fn decode_block(first: u64, last: u64, bytes: &[u8], limits: Limits,
+    read_runs: &mut usize, read_witnesses: &mut usize) -> Result<Block, Error> {
+    let len = bytes.len().checked_add(24).ok_or(Error::Limit("block bytes"))?;
+    let mut body = Read::new(bytes);
+    if len < 32 { return ck("short event block"); }
+    let n = body.u32()? as usize;
+    if body.u32()? != 0 || n == 0 || n > (len - 32) / 64 { return ck("event block row count/length"); }
+    *read_runs = read_runs.checked_add(n).ok_or(Error::Limit("event runs"))?;
+    if *read_runs > limits.event_runs || n > limits.sources { return Err(Error::Limit("event runs/sources")); }
+    let mut block = Block { first, last, runs: BTreeMap::new() }; let mut previous_lane = 0;
+    for _ in 0..n {
+        let lane = body.u32()?; let epoch = body.u32()?;
+        if lane == 0 || lane <= previous_lane { return ck("event run lane order"); } previous_lane = lane;
+        let first_seq = body.u64()?; let events = body.u64()?; let chunks = body.u64()?;
+        let known = body.u32()?; let stack_count = body.u32()? as usize;
+        if known > 1 || stack_count > 64 { return ck("event run state/stack count"); }
+        *read_witnesses = read_witnesses.checked_add(stack_count).ok_or(Error::Limit("stack witnesses"))?;
+        if *read_witnesses > limits.stack_rows { return Err(Error::Limit("stack witnesses")); }
+        let protocol = Protocol { code: body.u32()?, desc: body.u32()?, depth: body.u32()?, expected_desc: body.u32()?, expected_depth: body.u32()?, size: body.u32()? };
+        let mut stack = Vec::new();
+        for _ in 0..stack_count {
+            let seq = body.u64()?; let epoch = body.u32()?; let raw = u64::from(body.u32()?); let desc = body.u32()?; let depth = body.u32()?;
+            if depth > 63 { return ck("active BEGIN depth"); }
+            reserve(&mut stack, 1)?;
+            stack.push(RawEvent { seq, epoch, raw, desc, kind: EV_BEGIN, depth: depth as u8, frame_owner: 0, frame_id: 0 });
+        }
+        block.runs.insert(lane, Run { lane, epoch, first_seq, events, chunks, known: known != 0, protocol, stack });
+    }
+
+    body.done()?;
+    Ok(block)
 }

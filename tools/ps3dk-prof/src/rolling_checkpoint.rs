@@ -29,7 +29,7 @@ pub(crate) struct State {
     pub header: [u8; 16],
     pub next_chunk: u64,
     pub prefix_bytes: u64,
-    metadata: Vec<Vec<u8>>,
+    pub(crate) metadata: Vec<Vec<u8>>,
     pub rows: BTreeMap<u32, Row>,
     pub tokens: BTreeSet<(u32, u64)>,
 }
@@ -73,6 +73,15 @@ pub(crate) fn snapshot_after(s: &PpuState, header: [u8; 16], chunks: &[Chunk<'_>
         reserve(&mut metadata, 1)?;
         metadata.push(c.raw.to_vec());
     }
+    let mut result = snapshot_cursors(s, header, next_chunk, prefix_bytes, limits, previous)?;
+    result.metadata = metadata;
+    Ok(result)
+}
+
+/// Shared typed cursor snapshot. The caller owns framing and metadata admission.
+pub(crate) fn snapshot_cursors(s: &PpuState, header: [u8; 16], next_chunk: u64,
+    prefix_bytes: u64, limits: Limits, previous: Option<&State>) -> Result<State, Error> {
+    let metadata = Vec::new();
     let mut rows = BTreeMap::new();
     let mut run_count = 0usize;
     for (&inc, l) in &s.capture().lanes {
@@ -159,28 +168,8 @@ pub(crate) fn encode(cp: &State, limits: Limits) -> Result<Vec<u8>, Error> {
     boot.raw(&cp.header)?;
     for raw in &cp.metadata { boot.count(raw.len())?; boot.raw(raw)?; }
     out.section(1, cp.metadata.len(), &boot.bytes)?;
-    let mut body = Write::new(limits.checkpoint_bytes);
-    let mut total_records = 0u64;
-    for (&inc, r) in &cp.rows {
-        let start = body.bytes.len();
-        body.u32(0)?; body.u32(inc)?;
-        for n in [r.written, r.gaps, r.gap_count, r.regerr, r.next_seq, r.max_span,
-            r.last_tb.unwrap_or(0), r.next_frame, r.current_frame.unwrap_or(0),
-            r.last_frame.map_or(0, |f| f.id), r.last_frame.map_or(0, |f| f.seq), r.last_frame.map_or(0, |f| f.tb)] {
-            body.u64(n)?;
-        }
-        body.u32(r.flags)?; body.count(r.stack.len())?; body.count(r.frames.len())?; body.u32(0)?;
-        for s in &r.stack {
-            body.record(&s.begin)?; body.record(&s.parent)?;
-            let (kind, frame) = match s.context { FrameContext::PreFrame => (0, 0), FrameContext::Frame(f) => (1, f), FrameContext::Loss => (2, 0) };
-            body.u32(kind)?; body.u32(u32::from(s.affected))?; body.u64(frame)?;
-        }
-        for &(a, b) in &r.frames { body.u64(a)?; body.u64(b)?; }
-        let len = u32::try_from(body.bytes.len() - start).map_err(|_| Error::Limit("lane row bytes"))?;
-        body.bytes[start..start + 4].copy_from_slice(&len.to_le_bytes());
-        total_records = total_records.checked_add(r.written).ok_or(Error::Limit("cumulative records"))?;
-    }
-    out.section(2, cp.rows.len(), &body.bytes)?;
+    let (row_bytes, total_records) = encode_rows(&cp.rows, limits, None)?;
+    out.section(2, cp.rows.len(), &row_bytes)?;
     let mut tokens = Write::new(limits.checkpoint_bytes);
     for &(owner, frame) in &cp.tokens { tokens.u32(owner)?; tokens.u32(0)?; tokens.u64(frame)?; }
     out.section(3, cp.tokens.len(), &tokens.bytes)?;
@@ -195,6 +184,34 @@ pub(crate) fn encode(cp: &State, limits: Limits) -> Result<Vec<u8>, Error> {
     out.bytes[48..56].copy_from_slice(&total_records.to_le_bytes());
     let crc = crc32(&out.bytes); out.u32(crc)?;
     Ok(out.bytes)
+}
+
+/// The shared row encoding, with optional combined-context chunk counts.
+pub(crate) fn encode_rows(rows: &BTreeMap<u32, Row>, limits: Limits,
+    record_chunks: Option<&BTreeMap<u32, u64>>) -> Result<(Vec<u8>, u64), Error> {
+    let mut body = Write::new(limits.checkpoint_bytes);
+    let mut total_records = 0u64;
+    for (&inc, r) in rows {
+        let start = body.bytes.len();
+        body.u32(0)?; body.u32(inc)?;
+        for n in [r.written, r.gaps, r.gap_count, r.regerr, r.next_seq, r.max_span,
+            r.last_tb.unwrap_or(0), r.next_frame, r.current_frame.unwrap_or(0),
+            r.last_frame.map_or(0, |f| f.id), r.last_frame.map_or(0, |f| f.seq), r.last_frame.map_or(0, |f| f.tb)] {
+            body.u64(n)?;
+        }
+        body.u32(r.flags)?; body.count(r.stack.len())?; body.count(r.frames.len())?; body.u32(0)?;
+        if let Some(counts) = record_chunks { body.u64(*counts.get(&inc).ok_or(Error::Checkpoint("missing RECORDS count"))?)?; }
+        for s in &r.stack {
+            body.record(&s.begin)?; body.record(&s.parent)?;
+            let (kind, frame) = match s.context { FrameContext::PreFrame => (0, 0), FrameContext::Frame(f) => (1, f), FrameContext::Loss => (2, 0) };
+            body.u32(kind)?; body.u32(u32::from(s.affected))?; body.u64(frame)?;
+        }
+        for &(a, b) in &r.frames { body.u64(a)?; body.u64(b)?; }
+        let len = u32::try_from(body.bytes.len() - start).map_err(|_| Error::Limit("lane row bytes"))?;
+        body.bytes[start..start + 4].copy_from_slice(&len.to_le_bytes());
+        total_records = total_records.checked_add(r.written).ok_or(Error::Limit("cumulative records"))?;
+    }
+    Ok((body.bytes, total_records))
 }
 
 struct Read<'a> { bytes: &'a [u8], pos: usize }
@@ -225,7 +242,7 @@ pub(crate) fn decode(bytes: &[u8], limits: Limits) -> Result<State, Error> {
         || u128::from(prefix_bytes) < u128::from(next_chunk) * 20
         || u128::from(prefix_bytes) > u128::from(next_chunk) * u128::from(MAX_CHUNK_LEN + 20) { return ck("checkpoint frontier/length"); }
     let mut cp = State { header: [0; 16], next_chunk, prefix_bytes, metadata: Vec::new(), rows: BTreeMap::new(), tokens: BTreeSet::new() };
-    let mut stack_count = 0usize; let mut run_count = 0usize; let mut written = 0u128;
+    let mut run_count = 0usize; let mut written = 0u128;
     for expected in 1..=3 {
         let kind = c.u16()?; let schema = c.u16()?; let count = c.u32()? as usize; let n = c.u32()? as usize;
         if kind != expected || schema != 1 || c.u32()? != 0 { return ck("unknown/duplicate/noncanonical section"); }
@@ -243,46 +260,8 @@ pub(crate) fn decode(bytes: &[u8], limits: Limits) -> Result<State, Error> {
                 }
             }
             2 => {
-                if count > limits.incarnations { return Err(Error::Limit("incarnations")); }
-                if count > n / 120 { return ck("lane count/length"); }
-                let mut last_inc = 0;
-                for _ in 0..count {
-                    let len = body.u32()? as usize;
-                    if len < 120 { return ck("lane row size"); }
-                    let mut row = Read::new(body.take(len - 4)?);
-                    let inc = row.u32()?;
-                    if inc == 0 || inc <= last_inc { return ck("lane identity order"); } last_inc = inc;
-                    let written_count = row.u64()?; let gaps = row.u64()?; let gap_count = row.u64()?; let regerr = row.u64()?;
-                    let next_seq = row.u64()?; let max_span = row.u64()?; let last_tb = row.u64()?; let next_frame = row.u64()?;
-                    let current_frame = row.u64()?;
-                    let frame = FrameRecord { id: row.u64()?, seq: row.u64()?, tb: row.u64()? };
-                    let bits = row.u32()?; let ns = row.u32()? as usize; let nf = row.u32()? as usize;
-                    if row.u32()? != 0 || bits & !255 != 0 { return ck("lane reserved/flags"); }
-                    stack_count = stack_count.checked_add(ns).ok_or(Error::Limit("stack rows"))?;
-                    run_count = run_count.checked_add(nf).ok_or(Error::Limit("frame runs"))?;
-                    if ns > 256 || stack_count > limits.stack_rows { return Err(Error::Limit("stack rows")); }
-                    if run_count > limits.frame_runs { return Err(Error::Limit("frame runs")); }
-                    let expected_len = 120u128 + (ns as u128) * 80 + (nf as u128) * 16;
-                    if expected_len != len as u128 { return ck("lane variable row length"); }
-                    let mut stack = Vec::new();
-                    for _ in 0..ns {
-                        let begin = RawRecord::decode(row.take(32)?); let parent = RawRecord::decode(row.take(32)?);
-                        let context = row.u32()?; let affected = row.u32()?; let fid = row.u64()?;
-                        if affected > 1 { return ck("stack affected flag"); }
-                        let context = match (context, fid) { (0, 0) => FrameContext::PreFrame, (1, f) => FrameContext::Frame(f),
-                            (2, 0) => FrameContext::Loss, _ => return ck("stack frame context") };
-                        reserve(&mut stack, 1)?; stack.push(StackRow { begin, parent, context, affected: affected != 0 });
-                    }
-                    let mut frames = Vec::new();
-                    for _ in 0..nf { reserve(&mut frames, 1)?; frames.push((row.u64()?, row.u64()?)); }
-                    row.done()?;
-                    if (bits & 1 == 0 && last_tb != 0) || (bits & 2 == 0 && current_frame != 0)
-                        || (bits & 64 == 0 && (frame.id != 0 || frame.seq != 0 || frame.tb != 0)) { return ck("absent lane optional field"); }
-                    cp.rows.insert(inc, Row { written: written_count, gaps, gap_count, regerr, next_seq, max_span,
-                        last_tb: (bits & 1 != 0).then_some(last_tb), next_frame, current_frame: (bits & 2 != 0).then_some(current_frame),
-                        last_frame: (bits & 64 != 0).then_some(frame), flags: bits, stack, frames });
-                    written += u128::from(written_count);
-                }
+                let (rows, _stacks, runs, total) = decode_rows(body.take(n)?, count, limits, None)?;
+                cp.rows = rows; run_count += runs; written += total;
             }
             3 => {
                 if count > limits.frame_runs.saturating_sub(run_count) { return Err(Error::Limit("frame/token identities")); }
@@ -318,6 +297,59 @@ pub(crate) fn decode(bytes: &[u8], limits: Limits) -> Result<State, Error> {
     Ok(cp)
 }
 
+/// Shared structural field decoder. Semantic cursor installation is separate.
+pub(crate) fn decode_rows(bytes: &[u8], count: usize, limits: Limits,
+    mut record_chunks: Option<&mut BTreeMap<u32, u64>>) -> Result<(BTreeMap<u32, Row>, usize, usize, u128), Error> {
+    let base = if record_chunks.is_some() { 128 } else { 120 };
+    let mut body = Read::new(bytes);
+    let mut rows = BTreeMap::new();
+    let mut stack_count = 0usize; let mut run_count = 0usize; let mut written = 0u128;
+    if count > limits.incarnations { return Err(Error::Limit("incarnations")); }
+    if count > bytes.len() / base { return ck("lane count/length"); }
+    let mut last_inc = 0;
+    for _ in 0..count {
+        let len = body.u32()? as usize;
+        if len < base { return ck("lane row size"); }
+        let mut row = Read::new(body.take(len - 4)?);
+        let inc = row.u32()?;
+        if inc == 0 || inc <= last_inc { return ck("lane identity order"); } last_inc = inc;
+        let written_count = row.u64()?; let gaps = row.u64()?; let gap_count = row.u64()?; let regerr = row.u64()?;
+        let next_seq = row.u64()?; let max_span = row.u64()?; let last_tb = row.u64()?; let next_frame = row.u64()?;
+        let current_frame = row.u64()?;
+        let frame = FrameRecord { id: row.u64()?, seq: row.u64()?, tb: row.u64()? };
+        let bits = row.u32()?; let ns = row.u32()? as usize; let nf = row.u32()? as usize;
+        if row.u32()? != 0 || bits & !255 != 0 { return ck("lane reserved/flags"); }
+        stack_count = stack_count.checked_add(ns).ok_or(Error::Limit("stack rows"))?;
+        run_count = run_count.checked_add(nf).ok_or(Error::Limit("frame runs"))?;
+        if ns > 256 || stack_count > limits.stack_rows { return Err(Error::Limit("stack rows")); }
+        if run_count > limits.frame_runs { return Err(Error::Limit("frame runs")); }
+        let chunks = if record_chunks.is_some() { Some(row.u64()?) } else { None };
+        let expected_len = base as u128 + (ns as u128) * 80 + (nf as u128) * 16;
+        if expected_len != len as u128 { return ck("lane variable row length"); }
+        let mut stack = Vec::new();
+        for _ in 0..ns {
+            let begin = RawRecord::decode(row.take(32)?); let parent = RawRecord::decode(row.take(32)?);
+            let context = row.u32()?; let affected = row.u32()?; let fid = row.u64()?;
+            if affected > 1 { return ck("stack affected flag"); }
+            let context = match (context, fid) { (0, 0) => FrameContext::PreFrame, (1, f) => FrameContext::Frame(f),
+                (2, 0) => FrameContext::Loss, _ => return ck("stack frame context") };
+            reserve(&mut stack, 1)?; stack.push(StackRow { begin, parent, context, affected: affected != 0 });
+        }
+        let mut frames = Vec::new();
+        for _ in 0..nf { reserve(&mut frames, 1)?; frames.push((row.u64()?, row.u64()?)); }
+        row.done()?;
+        if (bits & 1 == 0 && last_tb != 0) || (bits & 2 == 0 && current_frame != 0)
+            || (bits & 64 == 0 && (frame.id != 0 || frame.seq != 0 || frame.tb != 0)) { return ck("absent lane optional field"); }
+        rows.insert(inc, Row { written: written_count, gaps, gap_count, regerr, next_seq, max_span,
+            last_tb: (bits & 1 != 0).then_some(last_tb), next_frame, current_frame: (bits & 2 != 0).then_some(current_frame),
+            last_frame: (bits & 64 != 0).then_some(frame), flags: bits, stack, frames });
+        if let (Some(counts), Some(chunks)) = (record_chunks.as_deref_mut(), chunks) { counts.insert(inc, chunks); }
+        written += u128::from(written_count);
+    }
+    body.done()?;
+    Ok((rows, stack_count, run_count, written))
+}
+
 pub(crate) fn restore(cp: &State, limits: Limits) -> Result<PpuState, Error> {
     let flags = u32::from_le_bytes(cp.header[12..].try_into().unwrap()); supported(flags)?;
     let mut s = PpuState::new(&cp.header)?;
@@ -340,6 +372,12 @@ pub(crate) fn restore(cp: &State, limits: Limits) -> Result<PpuState, Error> {
     }
     if cp.next_chunk >= 1 && s.capture().header.is_none() { return ck("missing bootstrap HEADER"); }
     if cp.next_chunk >= 2 && s.capture().clock.is_none() { return ck("missing bootstrap CLOCKS"); }
+    install_cursors(&mut s, cp)?;
+    Ok(s)
+}
+
+/// Install compact rows only after the caller has replayed real metadata.
+pub(crate) fn install_cursors(s: &mut PpuState, cp: &State) -> Result<(), Error> {
     if s.capture().lanes.len() != cp.rows.len() { return ck("lane table does not match declarations"); }
     for (&inc, r) in &cp.rows {
         let declared = s.capture().lanes.get(&inc).ok_or(Error::Checkpoint("undeclared checkpoint lane"))?;
@@ -402,5 +440,5 @@ pub(crate) fn restore(cp: &State, limits: Limits) -> Result<PpuState, Error> {
     for &(owner, _) in &cp.tokens {
         if !s.capture().lanes.contains_key(&owner) { return ck("undeclared prefix token owner"); }
     }
-    Ok(s)
+    Ok(())
 }

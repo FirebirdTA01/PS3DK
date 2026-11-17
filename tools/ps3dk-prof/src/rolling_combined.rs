@@ -1,0 +1,415 @@
+//! Offline combined PPU/WINDOWS and SPU checkpoint boundary.
+//! This does not enable runtime rolling, physical joins, GPU/AUTO/FIFO, or tick/RMAX1
+//! qualification. SPU results explicitly concern causal support only.
+use crate::ext::rolling::causal::{CausalLimits, Finished};
+use crate::profile::{ProfileRecord, TableEntry};
+use crate::rolling::RetainedPpu;
+use std::collections::BTreeMap;
+use crate::model::*;
+use crate::reader::PpuState;
+use crate::rolling_checkpoint as ppu;
+use crate::ext::rolling as spu;
+use crate::rolling_combined_positions as positions;
+#[path = "rolling_combined_checkpoint.rs"]
+mod checkpoint;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub checkpoint_bytes: usize,
+    pub metadata_bytes: usize,
+    pub input_bytes: usize,
+    pub incarnations: usize,
+    pub descriptors: usize,
+    pub spu_domains: usize,
+    pub spu_lanes: usize,
+    pub spu_images: usize,
+    pub frame_runs: usize,
+    pub stack_rows: usize,
+    pub spu_event_runs: usize,
+    /// Actual input PPU physical rows plus SPU events, jointly charged.
+    pub work_events: u64,
+    pub work_items: u64,
+    pub position_temporary_items: usize,
+    pub position_work: u64,
+    /// Cumulative reservation; a position call debits position_work.
+    pub position_total_work: u64,
+}
+impl Default for Limits {
+    fn default() -> Self {
+        Self { checkpoint_bytes: 8 << 20, metadata_bytes: 4 << 20,
+            input_bytes: 64 << 20, incarnations: 4096, descriptors: 4096,
+            spu_domains: 1024, spu_lanes: 1024, spu_images: 1024,
+            frame_runs: 65536, stack_rows: 262144, spu_event_runs: 65536,
+            work_events: 1_000_000, work_items: 1 << 24,
+            position_temporary_items: 262144, position_work: 1 << 20,
+            position_total_work: 1 << 24 }
+    }
+}
+#[derive(Debug)]
+pub enum Error {
+    MissingImplementation,
+    Unsupported { flags: u32, chunk: Option<u32> },
+    Limit(&'static str),
+    Checkpoint(&'static str),
+    Malformed(crate::Malformed),
+    Spu(crate::ext::rolling::Error),
+}
+pub struct ReportOptions<'a> {
+    pub spu_profile_table: &'a [TableEntry],
+    pub causal_limits: CausalLimits,
+}
+pub struct RetainedCombined {
+    pub original_header: [u8; 16],
+    pub original_profile: Option<ProfileRecord>,
+    pub ppu: RetainedPpu,
+    /// Retained endpoints with causal support only; not legacy tick/RMAX1 results.
+    pub spu: Finished,
+    pub first_chunk: u64,
+    pub next_chunk: u64,
+    pub prefix_bytes: u64,
+    pub terminal: bool,
+    pub torn_tail: bool,
+}
+
+impl From<crate::Malformed> for Error { fn from(e: crate::Malformed) -> Self { Self::Malformed(e) } }
+impl From<spu::Error> for Error { fn from(e: spu::Error) -> Self { Self::Spu(e) } }
+impl From<crate::rolling::Error> for Error {
+    fn from(e: crate::rolling::Error) -> Self { match e {
+        crate::rolling::Error::Malformed(m) => Self::Malformed(m),
+        crate::rolling::Error::Checkpoint(s) => Self::Checkpoint(s),
+        crate::rolling::Error::Limit(s) => Self::Limit(s),
+        crate::rolling::Error::Unsupported { flags, chunk } => Self::Unsupported { flags, chunk },
+    } }
+}
+fn bad(rule: Rule, detail: &'static str) -> Error { Error::Malformed(Malformed { rule, detail: detail.into() }) }
+fn ck<T>(detail: &'static str) -> Result<T, Error> { Err(Error::Checkpoint(detail)) }
+fn flags(header: &[u8; 16]) -> u32 { u32::from_le_bytes(header[12..16].try_into().unwrap()) }
+fn admit(header: &[u8; 16]) -> Result<(), Error> {
+    let flags = flags(header);
+    if flags & !(7 | FLAG_WINDOWS) != 0 || !matches!(flags & !FLAG_WINDOWS, 1 | 3 | 7) {
+        return Err(Error::Unsupported { flags, chunk: None });
+    }
+    // Actual header/version validation, without masking or fabricating bytes.
+    let _ = PpuState::new(header)?; Ok(())
+}
+fn ppu_limits(l: Limits) -> crate::rolling::Limits {
+    crate::rolling::Limits { checkpoint_bytes: l.checkpoint_bytes, metadata_bytes: l.metadata_bytes,
+        incarnations: l.incarnations, descriptors: l.descriptors, frame_runs: l.frame_runs,
+        stack_rows: l.stack_rows, work_records: l.work_events }
+}
+fn spu_limits(l: Limits) -> spu::Limits {
+    spu::Limits { checkpoint_bytes: l.checkpoint_bytes, metadata_bytes: l.checkpoint_bytes,
+        sources: l.spu_domains.max(l.spu_lanes).max(l.spu_images), event_runs: l.spu_event_runs,
+        stack_rows: l.stack_rows, work_events: l.work_events }
+}
+fn is_spu(ty: u32) -> bool { matches!(ty, 8..=13 | 15 | 16 | 18) }
+fn is_event(ty: u32) -> bool { matches!(ty, CHUNK_RECORDS | 13) }
+
+/// Framing/shape admission before copying, inventory growth, or typed mutation.
+fn framed<'a>(b: &'a [u8], expected: u64, header: &[u8; 16]) -> Result<Option<crate::rolling::Chunk<'a>>, Error> {
+    if b.len() < 16 { return Ok(None); }
+    let ty = u32::from_le_bytes(b[..4].try_into().unwrap());
+    let len = u32::from_le_bytes(b[4..8].try_into().unwrap());
+    if len > MAX_CHUNK_LEN { return Err(bad(Rule::ChunkLenOverCap, "combined chunk length")); }
+    let total = len as usize + 20; if b.len() < total { return Ok(None); }
+    if crate::hash::crc32(&b[..total - 4]) != u32::from_le_bytes(b[total - 4..total].try_into().unwrap()) {
+        return Err(bad(Rule::ChunkCrc, "original chunk CRC"));
+    }
+    let index = u64::from_le_bytes(b[8..16].try_into().unwrap());
+    if index != expected || index == u64::MAX { return Err(bad(Rule::ChunkSeqOrder, "original chunk index")); }
+    if index == 0 && ty != CHUNK_HEADER { return Err(bad(Rule::HeaderNotChunk0, "missing original HEADER")); }
+    if index == 1 && ty != CHUNK_CLOCKS { return Err(bad(Rule::ClocksNotChunk1, "missing original CLOCKS")); }
+    if index >= 2 && matches!(ty, CHUNK_HEADER | CHUNK_CLOCKS) { return Err(bad(Rule::DuplicateHeaderOrClocks, "repeated bootstrap")); }
+    let flags = flags(header);
+    if flags & 2 != 0 && index == 2 && ty != 17 { return Err(bad(Rule::ProfileMissing, "PROFILE required at original index 2")); }
+    if ty == 17 && (flags & 2 == 0 || index != 2) { return Err(bad(Rule::ProfilePlacement, "PROFILE at wrong original position")); }
+    if !(1..=7).contains(&ty) && !is_spu(ty) && ty != 17
+        && !(flags & FLAG_WINDOWS != 0 && matches!(ty, CHUNK_WINDOW_BEGIN | CHUNK_WINDOW_END)) {
+        return Err(Error::Unsupported { flags, chunk: Some(ty) });
+    }
+    if ty == 18 && flags & 4 == 0 { return Err(Error::Unsupported { flags, chunk: Some(ty) }); }
+    let payload = &b[16..total - 4];
+    if ty == CHUNK_RECORDS {
+        if payload.len() < 8 { return Err(bad(Rule::RecordsLength, "short RECORDS")); }
+        let n = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+        if n == 0 { return Err(bad(Rule::RecordsCountZero, "empty RECORDS")); }
+        if payload.len() as u128 != 8 + 32 * u128::from(n) { return Err(bad(Rule::RecordsLength, "RECORDS count/length")); }
+    }
+    if ty == 13 {
+        if payload.len() < 20 { return Err(bad(Rule::Extension, "short SPU_EVENTS")); }
+        let n = u32::from_le_bytes(payload[16..20].try_into().unwrap());
+        if n == 0 || n > crate::ext::MAX_SPU_EVENTS || payload.len() as u128 != 20 + 8 * u128::from(n) {
+            return Err(bad(Rule::Extension, "SPU_EVENTS count/length"));
+        }
+    }
+    if ty == 8 {
+        let mut r = checkpoint::Read::new(payload); let n = r.u32()?;
+        // This prescan borrows names and rejects another domain family before
+        // even the first domain in the chunk is installed.
+        for _ in 0..n {
+            r.u32()?; let kind = r.take(1)?[0];
+            if kind != crate::ext::KIND_SPU_DEC { return Err(Error::Unsupported { flags, chunk: Some(ty) }); }
+            r.take(43)?; let n = r.u16()? as usize; r.take(n)?;
+        }
+        r.done()?;
+    }
+    Ok(Some(crate::rolling::Chunk { index, ty, payload, raw: &b[..total] }))
+}
+
+struct Budget { limits: Limits, work: u64, events: u64, metadata_used: usize, position_left: u64 }
+impl Budget {
+    fn new(limits: Limits) -> Self { Self { limits, work: 0, events: 0, metadata_used: 16, position_left: limits.position_total_work } }
+    fn charge(&mut self, n: u128) -> Result<(), Error> {
+        let next = u128::from(self.work).checked_add(n).ok_or(Error::Limit("structural work"))?;
+        if next > u128::from(self.limits.work_items) { return Err(Error::Limit("structural work")); }
+        self.work = next as u64; Ok(())
+    }
+    fn bytes(&mut self, n: usize) -> Result<(), Error> { self.charge(n as u128 / 8 + 1) }
+    fn metadata(&mut self, n: usize) -> Result<(), Error> {
+        self.metadata_used = self.metadata_used.checked_add(4).and_then(|x| x.checked_add(n)).ok_or(Error::Limit("metadata bytes"))?;
+        if self.metadata_used > self.limits.metadata_bytes { return Err(Error::Limit("metadata bytes")); } Ok(())
+    }
+    fn events(&mut self, n: u32) -> Result<(), Error> {
+        self.events = self.events.checked_add(u64::from(n)).ok_or(Error::Limit("event work"))?;
+        if self.events > self.limits.work_events { return Err(Error::Limit("event work")); }
+        self.charge(u128::from(n) * 256 + 1)
+    }
+    fn cursor_work(&mut self, rows: &BTreeMap<u32, ppu::Row>, tokens: usize) -> Result<(), Error> {
+        let frames: u128 = rows.values().map(|r| r.frames.len() as u128).sum();
+        let stacks: u128 = rows.values().map(|r| r.stack.len() as u128).sum();
+        self.charge((frames + 1) * (stacks + tokens as u128 + 1) + rows.len() as u128 * 128)
+    }
+    fn membership_work(&mut self, cap: &Capture, prior: Option<&ppu::State>) -> Result<(), Error> {
+        // Admit the counting pass first. Membership helpers below can inspect
+        // both exact imported ranges and frames accepted in this operation.
+        // A count of evicted frame IDs is never expanded here.
+        self.charge(cap.lanes.len() as u128 + cap.spans.len() as u128
+            + prior.map_or(0, |p| p.rows.len()) as u128 + 1)?;
+        let fresh: u128 = cap.lanes.values().map(|l| l.frames.len() as u128).sum();
+        let imported: u128 = prior.into_iter().flat_map(|p| p.rows.values()).map(|r| r.frames.len() as u128).sum();
+        let tokens = cap.spans.iter().filter(|s| s.token.is_some()).count() as u128
+            + prior.map_or(0, |p| p.tokens.len()) as u128;
+        // Use a conservative cross-product before either shared helper scans
+        // membership. A fresh-frame bound also bounds its compact run count.
+        self.charge((fresh + imported + 1) * (tokens + 1))
+    }
+}
+
+struct Lifetime { start: u64, end: Option<u64> }
+struct Live {
+    header: [u8; 16], next: u64, bytes: u64,
+    metadata: Vec<Vec<u8>>, record_chunks: BTreeMap<u32, u64>,
+    ppu: PpuState, spu: spu::Adapter, prior: Option<ppu::State>,
+    lifetimes: BTreeMap<u32, Lifetime>, terminal: bool,
+}
+impl Live {
+    fn new(header: [u8; 16], limits: Limits) -> Result<Self, Error> {
+        admit(&header)?;
+        if limits.metadata_bytes < 16 { return Err(Error::Limit("metadata bytes")); }
+        Ok(Self { header, next: 0, bytes: 0, metadata: Vec::new(), record_chunks: BTreeMap::new(),
+            ppu: PpuState::new(&header)?, spu: spu::Adapter::new(flags(&header), spu_limits(limits))?, prior: None,
+            lifetimes: BTreeMap::new(), terminal: false })
+    }
+    fn state_limits(&self, budget: &mut Budget) -> Result<(), Error> {
+        let cap = self.ppu.capture(); let l = budget.limits;
+        budget.charge(cap.lanes.len() as u128 + 1)?;
+        let (domains, lanes, images, witnesses) = self.spu.combined_counts();
+        let stack = cap.lanes.values().try_fold(witnesses, |n, l| n.checked_add(l.stack.len())).ok_or(Error::Limit("stack rows"))?;
+        if stack > l.stack_rows { return Err(Error::Limit("stack rows")); }
+        if cap.lanes.len() > l.incarnations { return Err(Error::Limit("incarnations")); }
+        if cap.descriptors.len() > l.descriptors { return Err(Error::Limit("descriptors")); }
+        if domains > l.spu_domains || lanes > l.spu_lanes || images > l.spu_images { return Err(Error::Limit("SPU sources")); }
+        Ok(())
+    }
+    fn dispatch(&mut self, c: &crate::rolling::Chunk<'_>, budget: &mut Budget) -> Result<(), Error> {
+        let l = budget.limits;
+        budget.bytes(c.raw.len())?;
+        if matches!(c.ty, CHUNK_THREADS | CHUNK_DESCRIPTORS | 8 | 11 | 12) && c.payload.len() >= 4 {
+            let count = u32::from_le_bytes(c.payload[..4].try_into().unwrap()) as usize;
+            let (d, s, i, _) = self.spu.combined_counts();
+            let (used, cap, name) = match c.ty {
+                CHUNK_THREADS => (self.ppu.capture().lanes.len(), l.incarnations, "incarnations"),
+                CHUNK_DESCRIPTORS => (self.ppu.capture().descriptors.len(), l.descriptors, "descriptors"),
+                8 => (d, l.spu_domains, "SPU sources"), 11 => (i, l.spu_images, "SPU sources"),
+                _ => (s, l.spu_lanes, "SPU sources"),
+            };
+            if count > cap.saturating_sub(used) { return Err(Error::Limit(name)); }
+        }
+        if is_spu(c.ty) {
+            let refs = self.ppu.v1_refs(); self.spu.accept(c.index, c.ty, c.payload, &refs)?;
+        } else if c.ty == 17 { self.ppu.accept_profile(c.index, c.payload)?; }
+        else { self.ppu.accept(c.index, c.ty, c.payload)?; }
+        if matches!(c.ty, CHUNK_THREADS | CHUNK_RETIRED) {
+            budget.charge(self.ppu.capture().lanes.len() as u128 * 32 + 1)?;
+            for (&inc, lane) in &self.ppu.capture().lanes {
+                let lifetime = self.lifetimes.entry(inc).or_insert_with(|| Lifetime { start: c.index + 1, end: None });
+                if lane.retired && lifetime.end.is_none() { lifetime.end = Some(c.index); }
+                self.record_chunks.entry(inc).or_insert(0);
+            }
+        }
+        if c.ty == CHUNK_RECORDS {
+            let inc = u32::from_le_bytes(c.payload[..4].try_into().unwrap());
+            let count = self.record_chunks.get_mut(&inc).ok_or(Error::Checkpoint("RECORDS without declaration"))?;
+            *count = count.checked_add(1).ok_or(Error::Checkpoint("RECORDS count overflow"))?;
+        }
+        self.state_limits(budget)
+    }
+    fn consume(&mut self, bytes: &[u8], terminal_allowed: bool, budget: &mut Budget) -> Result<bool, Error> {
+        if bytes.len() > budget.limits.input_bytes { return Err(Error::Limit("input bytes")); }
+        let mut at = 0;
+        while at < bytes.len() {
+            if self.terminal {
+                let second = bytes.len() - at >= 16 && u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) == CHUNK_TRAILER;
+                return Err(bad(if second { Rule::SecondTrailer } else { Rule::TrailingBytesAfterTrailer }, "bytes after TRAILER"));
+            }
+            let Some(c) = framed(&bytes[at..], self.next, &self.header)? else { return Ok(true); };
+            if c.ty == CHUNK_TRAILER && !terminal_allowed { return ck("TRAILER has no successor checkpoint"); }
+            if is_event(c.ty) {
+                let n = if c.ty == CHUNK_RECORDS { &c.payload[4..8] } else { &c.payload[16..20] };
+                budget.events(u32::from_le_bytes(n.try_into().unwrap()))?;
+            } else { budget.metadata(c.raw.len())?; }
+            self.dispatch(&c, budget)?;
+            if !is_event(c.ty) && c.ty != CHUNK_TRAILER {
+                self.metadata.try_reserve(1).map_err(|_| Error::Limit("metadata allocation"))?;
+                self.metadata.push(c.raw.to_vec());
+            }
+            self.next = self.next.checked_add(1).filter(|&n| n != u64::MAX).ok_or(Error::Checkpoint("chunk frontier overflow"))?;
+            self.bytes = self.bytes.checked_add(c.raw.len() as u64).filter(|&n| n.checked_add(16).is_some()).ok_or(Error::Checkpoint("byte frontier overflow"))?;
+            self.terminal = c.ty == CHUNK_TRAILER; at += c.raw.len();
+        }
+        Ok(false)
+    }
+    fn replay_to(&mut self, metadata: &[Vec<u8>], at: &mut usize, through: u64, support: Option<usize>, budget: &mut Budget) -> Result<(), Error> {
+        while let Some(raw) = metadata.get(*at) {
+            let index = u64::from_le_bytes(raw[8..16].try_into().unwrap()); if index > through { break; }
+            let c = framed(raw, index, &self.header)?.ok_or(Error::Checkpoint("torn metadata"))?;
+            if is_spu(c.ty) && support != Some(*at) { return ck("SPU support inside event block or out of journal order"); }
+            self.dispatch(&c, budget)?; *at += 1;
+        }
+        Ok(())
+    }
+    fn restore(mut saved: checkpoint::Saved, budget: &mut Budget) -> Result<Self, Error> {
+        let mut live = Self::new(saved.ppu.header, budget.limits)?; let mut at = 0;
+        for entry in std::mem::take(&mut saved.journal) {
+            match entry {
+                checkpoint::Entry::Support { index, ordinal } => live.replay_to(&saved.metadata, &mut at, index, Some(ordinal), budget)?,
+                checkpoint::Entry::Block(block) => {
+                    live.replay_to(&saved.metadata, &mut at, block.last, None, budget)?;
+                    budget.charge(block.import_work())?;
+                    live.spu.import_block(block)?;
+                }
+            }
+        }
+        live.replay_to(&saved.metadata, &mut at, saved.ppu.next_chunk.saturating_sub(1), None, budget)?;
+        if at != saved.metadata.len() { return ck("unconsumed metadata"); }
+        let cap = live.ppu.capture();
+        if saved.ppu.next_chunk > 0 && cap.header.is_none() { return ck("missing HEADER"); }
+        if saved.ppu.next_chunk > 1 && cap.clock.is_none() { return ck("missing CLOCKS"); }
+        if saved.ppu.next_chunk > 2 && flags(&live.header) & 2 != 0 && cap.profile.is_none() { return Err(bad(Rule::ProfileMissing, "missing imported PROFILE")); }
+        budget.cursor_work(&saved.ppu.rows, saved.ppu.tokens.len())?;
+        ppu::install_cursors(&mut live.ppu, &saved.ppu)?;
+        live.metadata = saved.metadata; live.record_chunks = saved.record_chunks;
+        live.next = saved.ppu.next_chunk; live.bytes = saved.ppu.prefix_bytes;
+        live.prove(&saved.ppu, budget)?;
+        live.spu.seal_import()?; live.prior = Some(saved.ppu); live.state_limits(budget)?;
+        Ok(live)
+    }
+    fn prove(&self, cursors: &ppu::State, budget: &mut Budget) -> Result<(), Error> {
+        if cursors.rows.len() != self.record_chunks.len() || cursors.rows.len() != self.lifetimes.len() { return ck("combined PPU identity table"); }
+        budget.charge((self.metadata.len() + self.lifetimes.len() + self.spu.journal().len()) as u128 * 32 + 1)?;
+        let block_count = self.spu.journal().iter().filter(|e| matches!(e, spu::Entry::Events(_))).count();
+        let outer_items = self.metadata.len().checked_add(self.lifetimes.len()).and_then(|n| n.checked_add(block_count))
+            .ok_or(Error::Limit("position temporary items"))?;
+        let proof_items = budget.limits.position_temporary_items.checked_sub(outer_items)
+            .ok_or(Error::Limit("position temporary items"))?;
+        let mut p = 0u128; let mut r = 0u128; let mut s = 0u128; let mut e = 0u128;
+        let mut demand = Vec::new(); let mut blocks = Vec::new(); let mut anchors = Vec::new();
+        demand.try_reserve(self.lifetimes.len()).map_err(|_| Error::Limit("position allocation"))?;
+        anchors.try_reserve(self.metadata.len()).map_err(|_| Error::Limit("position allocation"))?;
+        let mut metadata_bytes = 0u128; let mut support_bytes = 0u128;
+        for raw in &self.metadata {
+            anchors.push(u64::from_le_bytes(raw[8..16].try_into().unwrap())); metadata_bytes += raw.len() as u128;
+        }
+        for (&inc, row) in &cursors.rows {
+            let count = *self.record_chunks.get(&inc).ok_or(Error::Checkpoint("missing PPU chunk count"))?;
+            let rows = u128::from(row.written) + u128::from(row.gap_count);
+            if (count == 0) != (rows == 0) || rows < u128::from(count) || rows > u128::from(count) * 32767 { return ck("PPU physical rows/chunk count"); }
+            let lifetime = self.lifetimes.get(&inc).ok_or(Error::Checkpoint("missing PPU lifetime"))?;
+            demand.push(positions::PpuDemand { start: lifetime.start, end: lifetime.end.unwrap_or(self.next), chunks: count });
+            p += u128::from(count); r += rows;
+        }
+        let mut last = None;
+        for entry in self.spu.journal() {
+            match entry {
+                spu::Entry::Support { index, payload, .. } => { support_bytes += payload.len() as u128 + 20; last = Some(*index); }
+                spu::Entry::Events(block) => {
+                    let (chunks, events, _) = block.totals(); s += chunks; e += events;
+                    blocks.try_reserve(1).map_err(|_| Error::Limit("position allocation"))?;
+                    blocks.push(positions::SpuBlock { first: block.first, last: block.last,
+                        chunks: u64::try_from(chunks).map_err(|_| Error::Checkpoint("SPU block chunks overflow"))? });
+                    last = Some(block.last);
+                }
+            }
+        }
+        if u128::from(self.next) != self.metadata.len() as u128 + p + s
+            || u128::from(self.bytes) != metadata_bytes + 28 * p + 32 * r + 40 * s + 8 * e { return ck("combined chunk/byte conservation"); }
+        let (actual_last, actual_bytes, actual_events) = self.spu.combined_totals();
+        if actual_last != last || last.is_some_and(|n| n >= self.next)
+            || u128::from(actual_bytes) != support_bytes + 40 * s + 8 * e || u128::from(actual_events) != e { return ck("SPU aggregate conservation"); }
+        let l = budget.limits;
+        budget.position_left = budget.position_left.checked_sub(l.position_work).ok_or(Error::Limit("position work reservation"))?;
+        positions::verify_positions(self.next, &anchors, &demand, &blocks,
+            positions::Limits { max_temporary_items: proof_items, max_work: l.position_work })
+            .map_err(|e| match e { positions::Error::Limit(s) => Error::Limit(s),
+                positions::Error::Invalid(s) => Error::Checkpoint(s), positions::Error::Infeasible => Error::Checkpoint("infeasible original chunk positions") })
+    }
+    fn snapshot(&self, budget: &mut Budget) -> Result<ppu::State, Error> {
+        budget.membership_work(self.ppu.capture(), self.prior.as_ref())?;
+        if let Some(prior) = &self.prior { budget.cursor_work(&prior.rows, prior.tokens.len() + self.ppu.capture().spans.len())?; }
+        budget.charge(self.ppu.capture().spans.len() as u128 * 64 + self.ppu.capture().lanes.len() as u128 * 128)?;
+        Ok(ppu::snapshot_cursors(&self.ppu, self.header, self.next, self.bytes, ppu_limits(budget.limits), self.prior.as_ref())?)
+    }
+    fn checkpoint(self, budget: &mut Budget) -> Result<Vec<u8>, Error> {
+        let cursors = self.snapshot(budget)?; self.prove(&cursors, budget)?;
+        let bytes = checkpoint::encode(&self, &cursors, budget)?;
+        // These are the actual source validators, including present retired
+        // and SPU finals. Snapshot precedes consuming their active stacks.
+        self.ppu.finish(false)?;
+        if !self.spu.no_frame_references() { return ck("unsupported foreign frame references"); }
+        self.spu.finish(false, false, &BTreeMap::new())?;
+        Ok(bytes)
+    }
+}
+
+pub fn checkpoint_combined(prefix: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
+    let header: [u8; 16] = prefix.get(..16).ok_or(Error::Checkpoint("short original header"))?.try_into().unwrap();
+    let mut budget = Budget::new(limits); let mut live = Live::new(header, limits)?;
+    if live.consume(&prefix[16..], false, &mut budget)? { return ck("prefix ends inside a chunk"); }
+    live.checkpoint(&mut budget)
+}
+pub fn advance_combined(checkpoint: &[u8], payload: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
+    let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
+    let mut live = Live::restore(saved, &mut budget)?;
+    if live.consume(payload, false, &mut budget)? { return ck("advance ends inside a chunk"); }
+    live.checkpoint(&mut budget)
+}
+pub fn read_combined_suffix(checkpoint: &[u8], suffix: &[u8], limits: Limits,
+    options: ReportOptions<'_>) -> Result<RetainedCombined, Error> {
+    let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
+    let mut live = Live::restore(saved, &mut budget)?;
+    let (closed, open) = live.ppu.window_boundary();
+    let first_chunk = live.next; let prefix_bytes = live.bytes;
+    let torn = live.consume(suffix, true, &mut budget)?;
+    let prior = live.prior.take().ok_or(Error::Checkpoint("missing imported cursors"))?;
+    budget.membership_work(live.ppu.capture(), Some(&prior))?;
+    budget.cursor_work(&prior.rows, prior.tokens.len() + live.ppu.capture().spans.len())?;
+    let cap = live.ppu.finish(torn)?;
+    let profile = cap.profile.clone();
+    let classification = crate::profile::classify(profile.as_ref(), options.spu_profile_table, crate::profile::KIND_SPU);
+    if !live.spu.no_frame_references() { return ck("unsupported foreign frame references"); }
+    let spu = live.spu.finish_with_causal(cap.has_trailer(), cap.has_trailer() && !cap.torn(), &BTreeMap::new(),
+        spu::causal::CausalOptions { classification: Some(&classification), limits: options.causal_limits })?;
+    let ppu = crate::rolling::report_retained(cap, &prior, closed, open, live.next)?;
+    Ok(RetainedCombined { original_header: live.header, original_profile: profile, ppu, spu,
+        first_chunk, next_chunk: live.next, prefix_bytes, terminal: live.terminal, torn_tail: torn })
+}

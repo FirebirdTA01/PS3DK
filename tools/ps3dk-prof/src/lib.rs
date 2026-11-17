@@ -34,6 +34,7 @@ pub mod paths;
 pub mod profile;
 pub mod reader;
 pub mod rolling;
+pub mod rolling_combined;
 pub mod rolling_combined_positions;
 mod rolling_checkpoint;
 pub mod rolling_store;
