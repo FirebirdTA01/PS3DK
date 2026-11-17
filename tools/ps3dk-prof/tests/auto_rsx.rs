@@ -2117,6 +2117,57 @@ fn blocked_flip_wait_needs_certain_rsx_overlap() {
     assert!(old.reason.starts_with("unresolved: FIFO wait >= 0"), "{}", old.reason);
 }
 
+/// Two 1023/11 frames on the t = 2 raw map: frame 0 (PPU 10000..110000) submits a clear at raw `prev` that the RSX
+/// runs during frame 1 (PPU 110000..210000); frame 1 has its own clear at raw `own` and one flip-wait scope `scope`.
+fn flip_two_frames(prev: (u64, u64), own: (u64, u64), scope: (u64, u64)) -> File {
+    let list = vec![mark(1, 0, 1, 5000), op(2, 0, prev), mark(3, 0, 2, 50_000), mark(4, 1, 1, 50_500), op(5, 1, own),
+        mark(6, 1, 2, own.1 + 500)];
+    let n = list.len() as u64;
+    let block = |x: &ARow, sc: Option<(u64, u64)>| {
+        let mut c = coverage_p(x, &Blk::default());
+        let mut b = Buf::default();
+        b.u32(0).u32(0).u32(0).u32(0).u64(0).u64(0);
+        c.payload.extend_from_slice(&b.0);
+        c.payload.extend_from_slice(&[0; 64]);
+        if let Some((b0, e0)) = sc {
+            c.payload[12..16].copy_from_slice(&1u32.to_le_bytes());
+            c.payload[56..64].copy_from_slice(&(e0 - b0).to_le_bytes());
+            c.payload[448..456].copy_from_slice(&b0.to_le_bytes());
+            c.payload[456..464].copy_from_slice(&e0.to_le_bytes());
+        }
+        c
+    };
+    let mut r0 = row(0, (10_000, 110_000), 1);
+    r0.flags |= 64;
+    let mut r1 = row(1, (110_000, 210_000), 1);
+    r1.flags |= 64;
+    let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
+        St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, 160), block(&r0, None), block(&r1, Some(scope))];
+    rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
+    rest.push(status(1, status_for(n, 2, 9, 2 * n)));
+    let mut cfg = brk_cfg();
+    cfg.words[4] = 1023;
+    cfg.words[13] = 160;
+    brk_file(cfg, rest)
+}
+
+/// A frame's work is submitted at its end, so the RSX runs it while a LATER frame waits for the flip: the blocked
+/// wait is RSX-bound evidence against its owner's busy time from any frame, not only the waiting frame's own records.
+#[test]
+fn blocked_flip_wait_counts_earlier_frames_rsx_work() {
+    // frame 0's clear runs at raw 56000..100000 = PPU ~112000..200000, inside frame 1's wait 115000..205000; frame 1's
+    // own clear (raw 101000..130000 = PPU ~202000..260000) is busy >= half its frame but overlaps the wait by ~3000
+    let r = analyze(&reader::read(&flip_two_frames((56_000, 100_000), (101_000, 130_000), (115_000, 205_000)).bytes())
+        .expect("reads"));
+    let f = &r.frames[1];
+    assert_eq!(f.verdict, Verdict::RsxBound, "{}", f.reason);
+    assert!(f.reason.starts_with("busy flip wait: RSX busy time >= "), "{}", f.reason);
+    // the earlier frame's work finished before the wait began: no certain overlap, not RSX-bound
+    let r = analyze(&reader::read(&flip_two_frames((6000, 50_000), (101_000, 130_000), (115_000, 205_000)).bytes())
+        .expect("reads"));
+    assert_ne!(r.frames[1].verdict, Verdict::RsxBound, "{}", r.frames[1].reason);
+}
+
 /// The scope block must describe the row's scopes: inside the frame, in order, summing to the row's ticks.
 #[test]
 fn flip_wait_scope_block_is_checked() {

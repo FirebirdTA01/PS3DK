@@ -1836,6 +1836,12 @@ pub fn raw_duration_ppu_bounds(map: &MapState, raw: u64) -> Option<(u64, u64)> {
 /// The PPU ticks of `scopes` that certainly overlap the raw RSX intervals `busy`: each interval is mapped to its inner
 /// bound (latest possible start, earliest possible end) and dropped when that is empty or outside the support.
 pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
+    overlap_merged(&certain_busy_ppu(anchors, m, busy), scopes)
+}
+
+/// RSX busy intervals (raw) mapped to the PPU interval the map certainly places them in (begin's upper bound to
+/// end's lower bound), sorted and merged; intervals outside the map's support or with no certain extent are dropped.
+pub fn certain_busy_ppu(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)]) -> Vec<(u64, u64)> {
     let mut iv: Vec<(u64, u64)> = busy.iter().filter_map(|&(b, e)| {
         let (_, start) = raw_to_ppu_bounds(anchors, m, b)?;
         let (end, _) = raw_to_ppu_bounds(anchors, m, e)?;
@@ -1849,10 +1855,18 @@ pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes:
             _ => merged.push((b, e)),
         }
     }
-    scopes.iter().fold(0u64, |acc, &(sb, se)| merged.iter().fold(acc, |a, &(b, e)| {
-        let (lo, hi) = (b.max(sb), e.min(se));
-        if lo < hi { a.saturating_add(hi - lo) } else { a }
-    }))
+    merged
+}
+
+/// Total time the PPU `scopes` overlap the sorted, merged (disjoint) `merged` intervals.
+fn overlap_merged(merged: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
+    scopes.iter().fold(0u64, |acc, &(sb, se)| {
+        let first = merged.partition_point(|&(_, e)| e <= sb);
+        merged[first..].iter().take_while(|&&(b, _)| b < se).fold(acc, |a, &(b, e)| {
+            let (lo, hi) = (b.max(sb), e.min(se));
+            if lo < hi { a.saturating_add(hi - lo) } else { a }
+        })
+    })
 }
 
 pub fn analyze(cap: &Capture) -> Report {
@@ -1908,6 +1922,21 @@ pub fn analyze(cap: &Capture) -> Report {
             *e = e.saturating_add(u64::from(o.args[4]));
         }
     }
+    // 1023/11 flip-wait evidence: every owner's certain RSX busy time on the PPU clock, from all its timed records
+    // and whole-CALL brackets with valid clocks. A frame's work is submitted at its end and the RSX may run it one or
+    // more frames later, so a flip wait blocks on whatever work of its owner the RSX is running, not only its own.
+    let owner_busy: BTreeMap<u32, Vec<(u64, u64)>> = match &map {
+        MapState::Qualified(m) => {
+            let mut raw: BTreeMap<u32, Vec<(u64, u64)>> = BTreeMap::new();
+            for o in inv.ops.iter().filter(|o| (o.covered() || bracket_ok(o)) && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
+                if let Some((owner, _)) = o.token() {
+                    raw.entry(owner).or_default().push((o.raw_begin, o.raw_end));
+                }
+            }
+            raw.into_iter().map(|(k, v)| (k, certain_busy_ppu(&inv.clocks, m, &v))).collect()
+        }
+        _ => BTreeMap::new(),
+    };
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
@@ -2010,14 +2039,14 @@ pub fn analyze(cap: &Capture) -> Report {
         let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
-        // 1023/11: blocked flip-wait time that certainly overlaps RSX busy time: (overlap, scopes' elapsed), None when
-        // unusable (no scope, more than two, the map unqualified, or a timed record not raw-valid)
+        // 1023/11: blocked flip-wait time that certainly overlaps its owner's RSX busy time, from any frame of that
+        // owner (owner_busy): (overlap, scopes' elapsed), None when unusable (no scope, more than two, the map
+        // unqualified, or a timed record of this frame not raw-valid)
         let flip_overlap = match (&f.flip_wait_at, &map) {
-            (Some(at), MapState::Qualified(m)) if !at.is_empty() && at.len() == f.flip_waits as usize
+            (Some(at), MapState::Qualified(_)) if !at.is_empty() && at.len() == f.flip_waits as usize
                 && f.flip_wait_spanning == 0 && ops.iter().all(|o| o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) => {
-                let busy: Vec<(u64, u64)> = timed_set.iter().map(|o| (o.raw_begin, o.raw_end)).collect();
                 let elapsed = at.iter().fold(0u64, |a, &(b, e)| a.saturating_add(e - b));
-                Some((certain_overlap(&inv.clocks, m, &busy, at), elapsed))
+                Some((overlap_merged(owner_busy.get(&f.owner).map_or(&[][..], |v| &v[..]), at), elapsed))
             }
             _ => None,
         };
