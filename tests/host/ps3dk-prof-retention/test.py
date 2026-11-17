@@ -36,7 +36,11 @@ def main():
     p.add_argument('--cc', default=os.environ.get('CC', 'cc'))
     p.add_argument('--runtime', action='store_true')
     p.add_argument('--sanitize', action='store_true')
+    p.add_argument('--mutate-retain-before-join', action='store_true',
+                   help='compile an isolated ordering mutant; runtime regression must fail')
     args = p.parse_args()
+    if args.mutate_retain_before_join and (not args.runtime or args.red):
+        p.error('ordering mutant requires --runtime without --red')
     args.build_dir.mkdir(parents=True, exist_ok=True)
     exe = args.build_dir.resolve() / 'retention-test'
     cmd = [args.cc, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
@@ -122,21 +126,47 @@ def main():
         shutil.copyfile(ROOT/'sdk/include/ps3dk/prof.h',inc/'prof.h')
         lib=ROOT/'sdk/libps3dkprof/src'
         app=args.build_dir.resolve()/'runtime-test'
+        drain=lib/'core/prof_drain.c'
+        if args.mutate_retain_before_join:
+            text=drain.read_text()
+            anchor=('    if (rc == PS3DK_PROF_OK && p->join_failed)\n'
+                    '        rc = PS3DK_PROF_ETHREAD;   /* after every sink and trailer severity */\n'
+                    '    rc = retain_completed(p, rc);')
+            assert text.count(anchor)==1, 'review retention ordering mutant anchor'
+            drain=args.build_dir.resolve()/'prof_drain-mutant.c'
+            changed=('    rc = retain_completed(p, rc); /* MUTANT: enroll before join failure */\n'
+                     '    if (rc == PS3DK_PROF_OK && p->join_failed)\n'
+                     '        rc = PS3DK_PROF_ETHREAD;')
+            drain.write_text(text.replace(anchor,changed))
         subprocess.run([args.cc,'-std=c11','-O2','-Wall','-Wextra','-Werror','-pthread',
-                        '-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-I',str(inc.parent),
+                        '-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-DPS3DK_PROF_TEST_HOOKS',
+                        '-I',str(inc.parent),'-I',str(lib/'core'),
                         str(HERE/'runtime.c'),str(lib/'core/prof_core.c'),
-                        str(lib/'core/prof_drain.c'),str(lib/'core/prof_version.c'),
+                        str(drain),str(lib/'core/prof_version.c'),
                         str(lib/'pal/pal_host.c'),'-o',str(app),*sanitizers],check=True)
         with tempfile.TemporaryDirectory(prefix='runtime-',dir=args.build_dir) as tmp:
             d=Path(tmp).resolve()
             def emit(name,keep,mode='complete'):
-                subprocess.run([str(app),str(d),name,str(keep),mode],check=True)
+                subprocess.run([str(app),str(d),name,str(keep),mode],check=True,timeout=30)
             emit('app',2,'callback')
             emit('app',0); emit('app',2,'exit')
             untracked={p.name:p.read_bytes() for p in d.glob('*.prof')}
             for i in range(5): emit('app',2,'thread' if i%2 else 'complete')
             assert len(list(d.glob('*.prof')))==len(untracked)+2
             for name,data in untracked.items(): assert (d/name).read_bytes()==data
+            # A closed file with a failed drainer join is not a completed run.
+            ledger=d/'.ps3dk-retain-app.index'
+            prior_index=ledger.read_bytes()
+            prior_files={p.name:p.read_bytes() for p in d.glob('*.prof')}
+            emit('app',2,'joinfail')
+            assert ledger.read_bytes()==prior_index, 'failed join changed the retention index'
+            for name,data in prior_files.items():
+                assert (d/name).is_file() and (d/name).read_bytes()==data, 'failed join evicted an older capture'
+            failed={p.name:p.read_bytes() for p in d.glob('*.prof') if p.name not in prior_files}
+            assert len(failed)==1
+            emit('app',2,'thread')
+            for name,data in failed.items():
+                assert (d/name).read_bytes()==data, 'later completion pruned the failed-join capture'
             lock=d/'.ps3dk-retain-app.lock'; lock.write_bytes(b'held')
             emit('app',2,'lock')
             assert lock.read_bytes()==b'held'

@@ -1,4 +1,5 @@
 #include <ps3dk/prof.h>
+#include "prof_test_hooks.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,8 @@ int main(int argc,char **argv) {
     if(ps3dk_prof_set_capture_retention((uint32_t)strtoul(argv[3],0,10))) return 5;
     ps3dk_prof_config c; ps3dk_prof_config_defaults(&c);
     c.app=argv[2]; c.max_threads=2; c.max_descriptors=8; c.ring_records=512;
-    if(!strcmp(argv[4],"thread")) c.mode=PS3DK_PROF_MODE_THREAD;
+    if(!strcmp(argv[4],"thread") || !strcmp(argv[4],"joinfail")) c.mode=PS3DK_PROF_MODE_THREAD;
+    if(!strcmp(argv[4],"joinfail")) ps3dk_prof_test_hooks.join_fail=1;
     if(!strcmp(argv[4],"callback")) {
         ps3dk_prof_sink_callbacks cb={put,NULL,end,NULL};
         if(ps3dk_prof_set_sink_callbacks(&cb)) return 6;
@@ -26,5 +28,7 @@ int main(int argc,char **argv) {
     ps3dk_prof_thread_end();
     int rc=ps3dk_prof_shutdown();
     printf("shutdown=%d\n",rc);
+    if(!strcmp(argv[4],"joinfail"))
+        return rc==PS3DK_PROF_ETHREAD && ps3dk_prof_test_hooks.join_calls==1 ? 0 : 13;
     return !strcmp(argv[4],"lock") ? (rc==PS3DK_PROF_ERETENTION ? 0 : 11) : (rc ? 12 : 0);
 }

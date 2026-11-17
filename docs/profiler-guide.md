@@ -137,7 +137,9 @@ independent of filenames, modification times, or the timebase resetting after
 a reboot. Existing untracked captures, active files, incomplete captures, and
 other applications' files remain untouched. Callback sinks refuse this option.
 
-Cleanup runs during successful shutdown after the current file closes. It reads
+Cleanup runs during successful shutdown after the current file closes and, in
+THREAD mode, the drainer joins successfully. A failed join leaves the index and
+older files untouched; the failed run remains untracked. Cleanup reads
 and checks candidate files before deleting them, so its IO cost is additional
 shutdown work. `PS3DK_PROF_ERETENTION` means the capture closed but index update
 or cleanup failed; the current capture is kept. An exclusive per-app lock

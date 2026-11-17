@@ -1017,8 +1017,6 @@ close_capture:
         return PS3DK_PROF_ESINKRECOVERED;
     if (p->clock_failed)
         return PS3DK_PROF_ECLOCK;
-    if (p->retention_keep && pal_retain_complete(p->snk.path, p->app, p->tb_at_init, p->retention_keep))
-        return PS3DK_PROF_ERETENTION;
     return PS3DK_PROF_OK;
 }
 
@@ -1036,6 +1034,16 @@ const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void)
 {
     prof *p = ready_prof();
     return p && LD_ACQ(&p->finalization_ready) ? &p->finalization : NULL;
+}
+
+static int retain_completed(prof *p, int result)
+{
+    /* Called by the shutdown owner after the THREAD join result is known.
+     * Failed runs never enter the index or prune earlier completed captures. */
+    if (result == PS3DK_PROF_OK && p->retention_keep &&
+        pal_retain_complete(p->snk.path, p->app, p->tb_at_init, p->retention_keep))
+        return PS3DK_PROF_ERETENTION;
+    return result;
 }
 
 /* Only the winning shutdown calls this, after close and (THREAD mode) join.
@@ -1256,6 +1264,7 @@ int ps3dk_prof_shutdown(void)
         t->in_drain = 0;
         ST_REL(&p->drain_busy, 0u);
         ST_REL(&p->phase, 3u);
+        rc = retain_completed(p, rc);
         publish_finalization(p, rc);
         return rc;
     }
@@ -1270,6 +1279,7 @@ int ps3dk_prof_shutdown(void)
     rc = __atomic_load_n(&p->thread_result, __ATOMIC_ACQUIRE);
     if (rc == PS3DK_PROF_OK && p->join_failed)
         rc = PS3DK_PROF_ETHREAD;   /* after every sink and trailer severity */
+    rc = retain_completed(p, rc);
     publish_finalization(p, rc);
     return rc;
 }

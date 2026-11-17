@@ -201,7 +201,8 @@ int ps3dk_prof_set_sink_callbacks(const ps3dk_prof_sink_callbacks *cb);
 /* Before init, FILE sinks only. 0 (default) disables retention; 1..1024 keeps
  * that many opt-in completed captures for this exact app, in completion order.
  * Untracked, active and incomplete files are untouched. Cleanup runs after
- * successful close, may read old captures, and adds shutdown IO. A failed
+ * successful close and, in THREAD mode, a successful join. It may read old
+ * captures and adds shutdown IO. A failed
  * cleanup returns ERETENTION without deleting the current capture. */
 int ps3dk_prof_set_capture_retention(uint32_t keep_completed);
 int ps3dk_prof_init(const ps3dk_prof_config *cfg);

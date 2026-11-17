@@ -161,6 +161,10 @@ jobs:
         run: |
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --build-dir "$RUNNER_TEMP/capture-retention"
           python3 tests/host/ps3dk-prof-retention/test.py --runtime --sanitize --build-dir "$RUNNER_TEMP/capture-retention-asan"
+          rc=0
+          python3 tests/host/ps3dk-prof-retention/test.py --runtime --mutate-retain-before-join --build-dir "$RUNNER_TEMP/capture-retention-mutant" > "$RUNNER_TEMP/capture-retention-mutant.log" 2>&1 || rc=$?
+          test "$rc" = 1
+          grep -q 'AssertionError: failed join changed the retention index' "$RUNNER_TEMP/capture-retention-mutant.log"
           python3 tests/host/ps3dk-prof-rolling/run.py --build-dir "$RUNNER_TEMP/rolling-store"
           PS3DK_PROF_ROLLING_FIXTURE="$RUNNER_TEMP/rolling-store/rotated.profr" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_store c_produced_rotations_match_committed_view_and_borrowed_payload -- --ignored --exact
           PS3DK_PROF_ROLLING_PPU_PACKER="$RUNNER_TEMP/rolling-store/rolling-ppu-packer" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_file rolling_c_ppu::c_rotations_preserve_genuine_ppu_checkpoint_and_retained_semantics -- --ignored --exact
