@@ -303,6 +303,21 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-address" --sanitize address
           python3 tests/host/ps3dk-prof-runtime/auto-ring-test.py --out "$RUNNER_TEMP/auto-ring-core-thread" --sanitize thread --case core
 
+      - name: Report ring attach and native pre-wrap tail (runtime, not enabled)
+        run: |
+          for case in ring ringwrap; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case init --mutant range-by-sizeof --out "$RUNNER_TEMP/auto-ring-mutant-range-by-sizeof"
+          for mutant in ring-unleased ring-label-unwatched no-label-readback map-failure-reused legacy-whole-pool; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ring --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+          for mutant in no-prewrap cached-current cached-end scan-injected no-wrap-scan-reset custom-callback end-arbitrary; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringwrap --mutant "$mutant" --out "$RUNNER_TEMP/auto-ring-mutant-$mutant"
+          done
+
       - name: Automatic RSX initialization, wire and queue controls
         run: |
           python3 tests/sdk/auto-gcm-init-test.py --out "$RUNNER_TEMP/auto-init"
@@ -310,7 +325,7 @@ jobs:
           python3 tests/sdk/auto-command-size-test.py --out "$RUNNER_TEMP/auto-command-size-address" --sanitize
           python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication"
           python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-address" --sanitize
-          for mutant in flush-before-put wrap-phase2-missing reset-missing; do
+          for mutant in flush-before-put wrap-phase2-missing reset-missing preflush-after-offset; do
             python3 tests/sdk/auto-publication-test.py --out "$RUNNER_TEMP/auto-publication-$mutant" --mutant "$mutant"
           done
           python3 tests/sdk/auto-completion-test.py --out "$RUNNER_TEMP/auto-completion"

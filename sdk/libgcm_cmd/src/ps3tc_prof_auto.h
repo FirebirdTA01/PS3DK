@@ -16,6 +16,18 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *, uint32_t ticket);
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *);
 void ps3dk_prof__auto_publish_after(struct _gcmCtxData *, uint32_t frontier);
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
+/* Report ring (owner contexts only; inert otherwise). prewrap: the native FIFO
+ * wrap, before it computes the tail JUMP from current. preflush: FlushBuffer,
+ * before its barrier and before current becomes PUT. Either may append a
+ * bounded block flush at current inside the tail it reserved by lowering end,
+ * and restores that exact physical end; neither calls a callback, flushes or
+ * waits. Callers re-read current and end afterwards; nothing cached survives. */
+void ps3dk_prof__auto_prewrap(struct _gcmCtxData *);
+void ps3dk_prof__auto_preflush(struct _gcmCtxData *);
+/* Provided by the observed ps3tc_fifo_wrap.o: 1 when the context's callback is
+ * the native two-phase wrap that calls prewrap; any replaced or custom callback
+ * would wrap without it, so recycling refuses. */
+int ps3tc_fifo_wrap_native(const struct _gcmCtxData *);
 /* Public application writes, safe and unsafe forms. kind 1 is a report index,
  * kind 2 a label index. Observation never redirects or suppresses the write. */
 void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
