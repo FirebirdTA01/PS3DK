@@ -1,5 +1,5 @@
-/* Private schema2 accepted-state boundary. Stage A: FIFO/43 plus existing
- * PPU/WINDOWS/SPU; AUTO remains refused. No runtime/public enablement. */
+/* Private schema2 accepted-state boundary. No runtime/public enablement.
+ * AUTO preserves the negotiated legacy/ring formats and refused CONFIG. */
 #ifndef PS3DK_PROF_ROLL_COMBINED2_H
 #define PS3DK_PROF_ROLL_COMBINED2_H
 #include "roll_combined.h"
@@ -13,6 +13,10 @@ extern "C" {
 typedef struct {
     pfm_config shared;
     uint32_t rsx_domains, windows, fifo_membership_runs, accounting_groups;
+    /* Exact original capabilities; never inferred from populated capacities. */
+    uint32_t family_flags;
+    uint32_t auto_final_runs,auto_touched_runs,auto_build_entries,auto_clock_anchors;
+    uint32_t auto_bootstrap_bytes,auto_support_bytes;
 } pfm2_config;
 typedef pfm_layout pfm2_layout;
 /* All capacities explicit. Checked plan includes all pools, replacement scratch

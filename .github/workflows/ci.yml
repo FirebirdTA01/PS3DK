@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [r2, r4a, s2, i1, i2, live-e2e, profile, rolling-runtime, ext-probe, overhead]
+        suite: [r2, r4a, s2, i1, i2, live-e2e, profile, rolling-runtime, rolling-combined, ext-probe, overhead]
     env:
       CARGO_BUILD_JOBS: 4
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -174,6 +174,67 @@ jobs:
           cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_lifecycle --no-run --message-format=json > "$RUNNER_TEMP/rolling-lifecycle-build.jsonl"
           LIFECYCLE_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_runtime_lifecycle" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-lifecycle-build.jsonl")"
           python3 tests/host/ps3dk-prof-rolling/run_runtime_lifecycle_mutants.py --build-dir "$RUNNER_TEMP/rolling-lifecycle-mutants" --rust-test-bin "$LIFECYCLE_EXE"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_spu.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-spu"
+          export PS3DK_PROF_RUNTIME_SPU="$RUNNER_TEMP/rolling-runtime-spu/runtime-spu"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_spu -- --ignored
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_spu --no-run --message-format=json > "$RUNNER_TEMP/rolling-runtime-spu-build.jsonl"
+          RUNTIME_SPU_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_runtime_spu" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-runtime-spu-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_spu_mutants.py --build-dir "$RUNNER_TEMP/rolling-runtime-spu-mutants" --rust-test-bin "$RUNTIME_SPU_EXE"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_retention_budget.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-retention"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_live_rolling.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-live"
+          export PS3DK_PROF_RUNTIME_RETENTION_PPU="$RUNNER_TEMP/rolling-runtime-retention/ppu/runtime-retention-ppu"
+          export PS3DK_PROF_RUNTIME_RETENTION_SPU="$RUNNER_TEMP/rolling-runtime-retention/spu/runtime-retention-spu"
+          export PS3DK_PROF_RUNTIME_LIVE_ROLLING="$RUNNER_TEMP/rolling-runtime-live/runtime-live-rolling"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_retention_budget -- --ignored --test-threads=1
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_retention_budget --no-run --message-format=json > "$RUNNER_TEMP/rolling-retention-build.jsonl"
+          RETENTION_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_runtime_retention_budget" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-retention-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_retention_live_mutants.py --build-dir "$RUNNER_TEMP/rolling-retention-live-mutants" --rust-test-bin "$RETENTION_EXE"
+      - name: Private combined rolling encoders and original-source parity
+        if: matrix.suite == 'rolling-combined'
+        run: |
+          cargo build --manifest-path tools/Cargo.toml -p ps3dk-prof
+          python3 tests/host/ps3dk-prof-rolling/run_combined_spu_source.py --build-dir "$RUNNER_TEMP/combined-source" --reader tools/target/debug/ps3dk-prof
+          export PS3DK_PROF_ROLLING_COMBINED_SOURCE_DIR="$RUNNER_TEMP/combined-source/original"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_spu_source -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_combined_encoder.py --build-dir "$RUNNER_TEMP/combined-encoder"
+          export PS3DK_PROF_ROLLING_COMBINED_ENCODER="$RUNNER_TEMP/combined-encoder/combined-encoder-fixture"
+          export PS3DK_PROF_ROLLING_PPU_SEAM="$RUNNER_TEMP/combined-encoder/ppu-seam-fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_encoder -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_combined_spu_encoder.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-spu"
+          export PS3DK_PROF_ROLLING_COMBINED_SPU_ENCODER="$RUNNER_TEMP/combined-spu/combined-spu-encoder-fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_spu -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_combined_resources.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-resources"
+          export PS3DK_PROF_ROLLING_COMBINED_RESOURCE="$RUNNER_TEMP/combined-resources/combined_resource_fixture"
+          export PS3DK_PROF_ROLLING_COMBINED_OUTPUT="$RUNNER_TEMP/combined-resources/combined_output_fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_resources --test rolling_combined_c_output -- --ignored
+          python3 tests/host/ps3dk-prof-rolling/run_combined2_encoder.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/combined-fifo"
+          export PS3DK_PROF_ROLLING_COMBINED2_ENCODER="$RUNNER_TEMP/combined-fifo/combined2-encoder-fixture"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_metadata.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-metadata"
+          export PS3DK_PROF_ROLLING_COMBINED2_METADATA="$RUNNER_TEMP/combined-metadata/metadata-fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_fifo -- --include-ignored
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_spu --no-run --message-format=json > "$RUNNER_TEMP/combined-spu-build.jsonl"
+          SPU_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_combined_c_spu" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/combined-spu-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_spu_mutant.py --build-dir "$RUNNER_TEMP/combined-spu-mutant" --rust-test "$SPU_EXE"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_fifo --no-run --message-format=json > "$RUNNER_TEMP/combined-fifo-build.jsonl"
+          FIFO_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_combined_c_fifo" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/combined-fifo-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_core_mutants.py --build-dir "$RUNNER_TEMP/combined-core-mutants" --fifo-test "$FIFO_EXE" --spu-test "$SPU_EXE"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --out "$RUNNER_TEMP/rolling-auto-source" --case ringfixture --fixture "$RUNNER_TEMP/rolling-auto-source.prof" --reader tools/target/debug/ps3dk-prof
+          python3 tests/host/ps3dk-prof-rolling/runtime_ring_provenance.py --repo "$GITHUB_WORKSPACE" --runtime-dir "$RUNNER_TEMP/rolling-auto-source" --source "$RUNNER_TEMP/rolling-auto-source.prof" --out "$RUNNER_TEMP/rolling-auto-source.json"
+          python3 tests/host/ps3dk-prof-rolling/build_combined_auto.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-auto"
+          export PS3DK_PROF_ROLLING_COMBINED_AUTO_ENCODER="$RUNNER_TEMP/combined-auto/combined-auto-encoder-fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto --no-run --message-format=json > "$RUNNER_TEMP/combined-auto-build.jsonl"
+          AUTO_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_combined_c_auto" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/combined-auto-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_auto.py --test "$AUTO_EXE" --encoder "$PS3DK_PROF_ROLLING_COMBINED_AUTO_ENCODER" --runtime-source "$RUNNER_TEMP/rolling-auto-source.prof" --provenance "$RUNNER_TEMP/rolling-auto-source.json" --out "$RUNNER_TEMP/combined-auto-parity"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto_formats --test rolling_combined_c_auto_invalid -- --include-ignored --test-threads=1
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto_resources independent_resource_source_and_budget_equations_validate_before_c -- --exact
+          python3 tests/host/ps3dk-prof-rolling/build_combined_auto_resources.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-auto-resources"
+          export PS3DK_PROF_ROLLING_COMBINED_AUTO_RESOURCE="$RUNNER_TEMP/combined-auto-resources/combined-auto-resource-fixture"
+          export PS3DK_PROF_ROLLING_COMBINED_AUTO_WORK="$RUNNER_TEMP/combined-auto-resources/combined-auto-work-fixture"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto_resources -- --ignored --test-threads=1
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto_output complete_mixed_ring_source_has_literal_interior_and_crossing_span_truth -- --exact
+          python3 tests/host/ps3dk-prof-rolling/build_combined_auto_output.py --cc 'cc -fno-pie -no-pie' --sanitize --build-dir "$RUNNER_TEMP/combined-auto-output"
+          export PS3DK_PROF_ROLLING_COMBINED_AUTO_OUTPUT="$RUNNER_TEMP/combined-auto-output/combined-auto-output"
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c_auto_output -- --ignored --test-threads=1
       - name: Completed capture retention and private rolling storage controls
         if: matrix.suite == 'profile'
         run: |
@@ -228,6 +289,7 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py --build-dir "$RUNNER_TEMP/rolling-counter-mutants"
           python3 tests/host/ps3dk-prof-rolling/fifo_mutations.py --build-dir "$RUNNER_TEMP/rolling-fifo-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_auto_mutants.py --build-dir "$RUNNER_TEMP/rolling-auto-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_ring_mutants.py --build-dir "$RUNNER_TEMP/rolling-ring-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_combined_resource_mutants.py --build-dir "$RUNNER_TEMP/rolling-combined-resource-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'

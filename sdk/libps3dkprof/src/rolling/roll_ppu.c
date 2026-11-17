@@ -449,7 +449,7 @@ static int core_accept(void *opaque,const void *accepted,void *prepared,const vo
     case 6:rc=trailer_chunk(c,s,&p);break;
     case 7:rc=retired_chunk(c,s,&p);break;
     case 8:case 9:case 10:case 11:case 12:case 13:case 15:case 16:case 17:case 18:
-    case 31:case 32:case 33:case 43:
+    case 31:case 32:case 33:case 34:case 35:case 36:case 37:case 38:case 43:
         rc=external_metadata==ty?PFR_OK:PFR_INVALID;break;
     case 41:rc=window_begin(c,s,&p);break;
     case 42:rc=window_end(s,&p);break;
@@ -478,9 +478,12 @@ int pfp_core_accept_external(void *opaque,const void *accepted,void *prepared,co
 {
     const state *a=accepted;
     if(result)memset(result,0,sizeof *result);
-    if(!a||a->magic!=ARENA_MAGIC||!(r32(a->header+12)&64)
-       ||!(((type==32||type==43)&&storage==PFP_EXTERNAL_EVENT)
-           ||(type==31&&storage==PFP_EXTERNAL_APPEND)||(type==33&&storage==PFP_EXTERNAL_LATEST)))return PFR_INVALID;
+    if(!a||a->magic!=ARENA_MAGIC
+       ||!(((r32(a->header+12)&64)&&(((type==32||type==43)&&storage==PFP_EXTERNAL_EVENT)
+           ||(type==31&&storage==PFP_EXTERNAL_APPEND)||(type==33&&storage==PFP_EXTERNAL_LATEST)))
+         ||((r32(a->header+12)&128)&&((type==35&&storage==PFP_EXTERNAL_EVENT)
+           ||((type==34||type==36||type==38)&&storage==PFP_EXTERNAL_APPEND)
+           ||(type==37&&storage==PFP_EXTERNAL_LATEST)))))return PFR_INVALID;
     return core_accept(opaque,accepted,prepared,chunk,n,type,storage,result);
 }
 int pfp_prepare(void *opaque,const void *accepted,void *prepared,const void *chunk,size_t n,

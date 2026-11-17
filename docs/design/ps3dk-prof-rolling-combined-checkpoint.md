@@ -452,3 +452,29 @@ copies. Its baseline must pass, and each mutant must compile and fail at its
 expected witness. Compiler errors, missing tests, unrelated panics and process
 failures are not sensitivity evidence. The runner does not rewrite production
 files or weaken test assertions.
+
+The private C schema2 encoder now accepts explicit FIFO/AUTO capabilities in
+`pfm2_config`. It shares the PPU/SPU metadata budget and original chunk order;
+FIFO STATUS and AUTO STATUS replace their own previous records independently.
+AUTO state includes negotiated CONFIG, build populations, frame membership,
+clock support, and both the current and STATUS-observed ring cursors. It stores
+support for evicted operations without replaying those operations as retained
+measurements. Admission and canonical encoding use one checked work budget.
+
+The explicit C AUTO artifact tests compare every original-prefix checkpoint
+with the Rust encoder. They cover CONFIG masks 7/15 through 2047/11, refused
+CONFIG forms, build-versus-execution populations, abandoned builds, whole-CALL
+coverage and tagged ranges. A separate fixture uses the real host AUTO runtime
+to produce 560 ring records, including 520 in one frame, before invoking the C
+checkpoint encoder. Repaired malformed-source controls require ordinary-reader
+refusal first, then unchanged accepted C state and no successor checkpoint.
+These are encoder interoperability tests: they do not connect the rolling
+output consumer to live FIFO/AUTO producers or enable rolling SDK captures.
+
+The physical-output fixture connects this encoder to the real private output
+and store components. Its retained window crosses SPU events, FIFO phases and
+ring generations while preserving an independently checked interior RSX span.
+Capacity and write/sync failures must leave the incoming chunk unacknowledged.
+Direct resource controls exercise exact checkpoint and metadata bounds, build
+and membership pools, clock support, and the shared work allowance before CRC
+scanning. These remain host fixture results, not target filesystem evidence.

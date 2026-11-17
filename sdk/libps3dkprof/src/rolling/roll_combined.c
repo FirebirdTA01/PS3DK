@@ -35,7 +35,7 @@ _Static_assert(_Alignof(context)<=8&&_Alignof(pfp_record_chunks)<=8&&_Alignof(sp
 static int plan_extended(const pfm_config *cfg,uint32_t family,uint32_t rsx,context *c)
 {
     size_t bound=148,n;
-    if(!cfg||cfg->metadata_bytes<16||!cfg->prepare_work||(family!=0&&family!=64)||rsx>64||(!family&&rsx))return PFR_INVALID;
+    if(!cfg||cfg->metadata_bytes<16||!cfg->prepare_work||(family!=0&&family!=64&&family!=128&&family!=192)||rsx>64||(!family&&rsx))return PFR_INVALID;
     memset(c,0,sizeof *c);c->cfg=*cfg;c->family_flags=family;c->rsx_domains=rsx;
     if(!add(&bound,cfg->metadata_bytes-16)||!mul(&bound,cfg->incarnations,128)||!mul(&bound,cfg->ppu_stack_rows,80)
        ||!mul(&bound,cfg->frame_identities,16)||!mul(&bound,cfg->journal_entries,32)||!mul(&bound,cfg->event_runs,64)
@@ -221,9 +221,12 @@ int pfm_core_accept(void *opaque,const void *a,void *b,const void *chunk,size_t 
        ||extra(c,(void *)a)->magic!=SIDE_MAGIC||extra(c,(void *)a)->count>c->cfg.incarnations)return PFR_INVALID;
     flags=r32(v.header+12);
     if(external){
-        if(c->family_flags!=64||external->type!=ty
-           ||!(((ty==32||ty==43)&&external->storage==PFM_EXTERNAL_EVENT)
-                ||(ty==31&&external->storage==PFM_EXTERNAL_APPEND)||(ty==33&&external->storage==PFM_EXTERNAL_LATEST)))return PFR_INVALID;
+        if(external->type!=ty
+           ||!(((c->family_flags&64)&&(((ty==32||ty==43)&&external->storage==PFM_EXTERNAL_EVENT)
+                ||(ty==31&&external->storage==PFM_EXTERNAL_APPEND)||(ty==33&&external->storage==PFM_EXTERNAL_LATEST)))
+             ||((c->family_flags&128)&&((ty==35&&external->storage==PFM_EXTERNAL_EVENT)
+                ||((ty==34||ty==36||ty==38)&&external->storage==PFM_EXTERNAL_APPEND)
+                ||(ty==37&&external->storage==PFM_EXTERNAL_LATEST)))))return PFR_INVALID;
     }
     if(r64(raw+8)!=v.next||!((ty>=1&&ty<=13)||(ty>=15&&ty<=18)||((flags&512)&&(ty==41||ty==42))||external)
        ||((flags&2)&&v.next==2&&ty!=17)||(ty==17&&(!(flags&2)||v.next!=2)))return PFR_INVALID;

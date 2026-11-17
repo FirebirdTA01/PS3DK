@@ -24,9 +24,9 @@ int pfp_core_init(void *, size_t, const pfp_config *, const uint8_t[16], void *,
 int pfp_core_accept(void *, const void *, void *, const void *, size_t,
                     uint32_t external_metadata, pfo_prepared *);
 enum { PFP_EXTERNAL_EVENT=1, PFP_EXTERNAL_APPEND=2, PFP_EXTERNAL_LATEST=3 };
-/* Additive FIFO-only trusted caller seam. Flags/framing/bootstrap remain
- * mandatory. EVENTS32/43 advance N/B only; CONFIG31 appends; STATUS33 removes
- * its prior same-type metadata before appending the new original entry. */
+/* Trusted family caller seam. Flags/framing/bootstrap remain mandatory.
+ * FIFO32/43 and AUTO35 advance N/B only; CONFIG31/34, COVERAGE36 and CLOCK38
+ * append; STATUS33/37 independently replace their prior same-type metadata. */
 int pfp_core_accept_external(void *,const void *,void *,const void *,size_t,
                              uint32_t type,uint32_t storage,pfo_prepared *);
 int pfp_core_view(const void *, const void *, pfp_view *);
