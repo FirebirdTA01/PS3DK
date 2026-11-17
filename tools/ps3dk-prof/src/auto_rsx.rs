@@ -2677,6 +2677,30 @@ fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
 
 /// Per frame and per tag, from the capture's records and rows (no verdict).
 pub fn by_tag(cap: &Capture) -> ByTag {
+    by_tag_range(cap, None)
+}
+
+/// `by_tag` scoped to a frame range (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).  `frame_range = None`
+/// returns every frame, matching `by_tag(cap)`.
+pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<u64>>) -> ByTag {
+    let mut out = by_tag_impl(cap);
+    if let Some(range) = frame_range {
+        out.frames.retain(|f| range.contains(&f.frame));
+    }
+    out
+}
+
+/// Per frame and per tag, from the capture's records and rows, scoped to the
+/// frames of capture window `w` (the viewer's window picker uses this to
+/// scope the Passes page to one capture window).
+pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
+    let Some(last) = w.last_frame else { return ByTag::default() };
+    by_tag_range(cap, Some(w.first_frame..=last))
+}
+
+/// The body of `by_tag`, unscoped.
+fn by_tag_impl(cap: &Capture) -> ByTag {
     let Some(inv) = cap.auto.as_ref() else { return ByTag::default() };
     let tagged = matches!(&inv.config, Some(Config::Attached(a)) if a.tagged());
     let mut out = ByTag { tagged, frames: Vec::new() };
