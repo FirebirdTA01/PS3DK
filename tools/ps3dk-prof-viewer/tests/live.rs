@@ -129,6 +129,16 @@ fn constants_match_the_c_schema() {
     assert_eq!(def("LIVE_T_CLIENT_HELLO"), T_CLIENT_HELLO as u64);
     assert_eq!(def("LIVE_MAGIC"), MAGIC as u64);
     assert_eq!(def("LIVE_VERSION"), VERSION as u64);
+    assert_eq!(def("LIVE_VERSION_MIN"), VERSION_MIN as u64);
+    assert_eq!(def("LIVE_CAP_TRIGGERS"), CAP_TRIGGERS as u64);
+    assert_eq!(def("LIVE_T_CAPTURE_BEGIN"), T_CAPTURE_BEGIN as u64);
+    assert_eq!(def("LIVE_T_CAPTURE_END"), T_CAPTURE_END as u64);
+    assert_eq!(def("LIVE_T_CAPTURE_FRAMES"), T_CAPTURE_FRAMES as u64);
+    assert_eq!(def("LIVE_T_CAPTURE_ACK"), T_CAPTURE_ACK as u64);
+    assert_eq!(def("LIVE_MAX_WINDOW_NAME"), MAX_WINDOW_NAME as u64);
+    assert_eq!(def("LIVE_MAX_WINDOW_FRAMES"), MAX_WINDOW_FRAMES as u64);
+    assert_eq!(def("LIVE_ACK_BYTES"), ACK_BYTES as u64);
+    assert!(h.contains("#define LIVE_CMD_MAX_BYTES (12u + LIVE_MAX_WINDOW_NAME)"));
     assert_eq!(def("LIVE_T_HELLO"), T_HELLO as u64);
     assert_eq!(def("LIVE_MAX_APP"), MAX_APP as u64);
     assert_eq!(def("LIVE_MAX_BUILD_ID"), MAX_BUILD_ID as u64);
@@ -335,12 +345,15 @@ fn any_byte_after_end_fails_and_refuses_publication() {
     assert!(matches!(sess.state, LinkState::Ended(_)));
 }
 
+/// Version 1 keeps its reserved field (version 2 carries the capability bits there: tests/live_triggers.rs).
 #[test]
 fn hello_reserved_bytes_must_be_zero() {
     for i in 4..8 {
         let mut p = hello_payload(b"a", b"", b"x.prof");
+        p[0..2].copy_from_slice(&1u16.to_le_bytes());
         p[i] = 1;
-        let s = run(&frame(T_HELLO, 0, &p));
+        let mut s = Session::asking(MAX_SESSION_BYTES, 1);
+        assert!(!s.feed(&frame(T_HELLO, 0, &p)));
         assert!(
             matches!(failed_with(&s), LinkError::BadFrame(_)),
             "reserved byte {i}"
@@ -407,7 +420,7 @@ fn bad_hellos_fail() {
     let bad = [
         {
             let mut p = hello_payload(b"a", b"", b"x.prof");
-            p[0] = 2; // protocol version 2
+            p[0] = 3; // protocol version 3 (newer than any this viewer asks for)
             p
         },
         hello_payload(&[b'a'; MAX_APP + 1], b"", b"x.prof"),
@@ -474,6 +487,8 @@ fn publish_only_when_every_check_passes() {
 #[test]
 fn local_names_are_generated_and_sanitized() {
     let h = |name: &str| Hello {
+        protocol: VERSION,
+        capabilities: 0,
         agent_version: 1,
         session_id: 0xab,
         app: "a".into(),

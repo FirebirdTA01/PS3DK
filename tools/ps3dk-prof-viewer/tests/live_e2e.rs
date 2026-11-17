@@ -226,3 +226,119 @@ fn the_client_and_the_runtime_live_api_interoperate() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Capture triggers end to end: the viewer's live client against the real runtime through the public live API
+/// (protocol 2).  The app asks for no window; the viewer begins one, is refused a second (EBUSY), ends the first,
+/// then asks for a 5-frame window, and both appear in the published capture, named as sent: the first closed by END,
+/// the second by COUNT.  Needs the serve program built from tests/host/ps3dk-prof-runtime/live_trigger_serve.c:
+/// `LIVE_TRIGGER_SERVE=/path/to/live-trigger-serve cargo test --test live_e2e -- --ignored`.
+#[test]
+#[ignore]
+fn the_client_triggers_capture_windows_in_the_real_runtime() {
+    use ps3dk_prof::{WindowKind, WindowReason};
+    use ps3dk_prof_viewer::live::Command;
+    use ps3dk_prof_viewer::live_triggers::{Availability, Status};
+
+    let serve = std::env::var("LIVE_TRIGGER_SERVE").expect("set LIVE_TRIGGER_SERVE");
+    let dir = std::env::temp_dir().join(format!("ps3dk-live-trigger-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let agent_dir = dir.join("agent");
+    let out = dir.join("out");
+    std::fs::create_dir_all(&agent_dir).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+
+    let mut child = std::process::Command::new(&serve)
+        .arg(&agent_dir)
+        .arg("4")
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start the serve program");
+    let (tx, rx) = mpsc::channel();
+    let stdout = child.stdout.take().unwrap();
+    let mut serve_proc = Serve(child);
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let first = rx.recv_timeout(Duration::from_secs(10)).expect("the serve program printed its port");
+    let port: u16 = first.strip_prefix("PORT ").unwrap().parse().unwrap();
+
+    let mut c = ClientConfig::new("127.0.0.1", port, out.clone());
+    c.parse_every = Duration::from_millis(50);
+    c.ping_every = Duration::from_millis(250);
+    let client = LiveClient::start(c).unwrap();
+    let t0 = Instant::now();
+    while client.view().triggers.availability != Availability::Ready {
+        assert!(t0.elapsed() < Duration::from_secs(10), "{:?}", client.view().triggers);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let await_answer = |what: &str| -> Status {
+        let t = Instant::now();
+        loop {
+            let s = client.view().triggers.status;
+            if !matches!(s, Status::Pending { .. }) {
+                return s;
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "no answer to {what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    client.send(Command::Begin { name: "pc-window".into() }).unwrap();
+    let w1 = match await_answer("Begin") {
+        Status::Acked { window_id, .. } => window_id,
+        s => panic!("{s:?}"),
+    };
+    client.send(Command::Begin { name: "again".into() }).unwrap();
+    match await_answer("the second Begin") {
+        Status::Refused { code, .. } => assert_eq!(code, -2, "EBUSY"),
+        s => panic!("{s:?}"),
+    }
+    std::thread::sleep(Duration::from_millis(50)); // some frames inside the window
+    client.send(Command::End).unwrap();
+    match await_answer("End") {
+        Status::Acked { window_id, command: Command::End } => assert_eq!(window_id, w1),
+        s => panic!("{s:?}"),
+    }
+    client.send(Command::Frames { name: "pc-frames".into(), frames: 5 }).unwrap();
+    let w2 = match await_answer("Frames") {
+        Status::Acked { window_id, .. } => window_id,
+        s => panic!("{s:?}"),
+    };
+    assert_eq!(w2, w1 + 1);
+    while !client.finished() {
+        assert!(t0.elapsed() < Duration::from_secs(40));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let v = client.join();
+    let t1 = Instant::now();
+    let status = loop {
+        if let Some(s) = serve_proc.0.try_wait().unwrap() {
+            break s;
+        }
+        assert!(t1.elapsed() < Duration::from_secs(10), "the serve program did not exit");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let served: Vec<String> = rx.try_iter().collect();
+    let doc = v.doc.as_ref().expect("a final parse");
+    let windows = doc.analysis().expect("analysed").capture.windows.clone();
+    println!("E2E-TRIGGER served: {served:?}, status {status}, windows {windows:?}");
+    let capture = served.iter().find_map(|l| l.strip_prefix("CAPTURE ")).expect("the serve program named its capture");
+    let written = std::fs::read(capture).unwrap();
+    match v.outcome.as_ref().unwrap() {
+        Outcome::Published(p) => assert_eq!(std::fs::read(&p.path).unwrap(), written),
+        o => panic!("{o:?}"),
+    }
+    assert!(status.success(), "every ACK was sent and the live link stopped cleanly");
+    assert_eq!(windows.len(), 2, "only the windows the viewer opened");
+    let a = &windows[0];
+    assert_eq!((a.id, a.name.as_str(), a.kind.clone(), a.reason), (w1, "pc-window", WindowKind::Manual, WindowReason::End));
+    assert!(!a.is_open && !a.incomplete && a.last_frame.unwrap() >= a.first_frame);
+    let b = &windows[1];
+    assert_eq!((b.id, b.name.as_str(), b.kind.clone(), b.reason), (w2, "pc-frames", WindowKind::Frames(5), WindowReason::Count));
+    assert_eq!(b.last_frame.unwrap() - b.first_frame + 1, 5);
+    assert!(b.first_frame > a.last_frame.unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+}
