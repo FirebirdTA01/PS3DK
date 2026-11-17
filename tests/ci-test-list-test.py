@@ -19,6 +19,7 @@ import sys
 # return them to manual-only coverage.
 PROFILER_SUITES = {
     "tests/host/ps3dk-prof-rolling/build_combined_auto.py",
+    "tests/host/ps3dk-prof-rolling/run_combined_auto_mutants.py",
     "tests/host/ps3dk-prof-rolling/build_combined_auto_resources.py",
     "tests/host/ps3dk-prof-rolling/build_combined_auto_output.py",
     "tests/host/ps3dk-prof-rolling/runtime_ring_provenance.py",
