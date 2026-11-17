@@ -298,6 +298,8 @@ static void print_phase_banner(char phase)
 int main(void)
 {
     sys_addr_t host_addr = 0;
+    /* a profiled build records nothing until a capture window opens: record the whole run */
+    (void)PS3DK_PROF_CAPTURE_WHOLE_RUN();
 
     if (gcm_host_buffer_alloc(HOST_HEAP_SIZE, &host_addr) != 0) {
         printf("hello-ppu-prof-auto-verdicts: gcm_host_buffer_alloc failed\n");
