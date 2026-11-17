@@ -2,7 +2,7 @@
 //! exclusions, steady-range medians and mix, computed strictly from the reader's
 //! `ps3dk_prof::auto_rsx::analyze`.
 
-use ps3dk_prof::auto_rsx::{self, FrameView, Report, Verdict, EXCLUSIONS, KINDS};
+use ps3dk_prof::auto_rsx::{self, Config, FrameView, Report, Verdict, EXCLUSIONS, KINDS};
 use ps3dk_prof::model::Capture;
 
 /// The Automatic page view model, holding the analyzed AUTO report and capture clock properties.
@@ -144,6 +144,12 @@ impl AutoView {
     /// Operations dropped past the retention ceiling.
     pub fn ops_dropped(&self) -> u64 {
         self.report.ops_dropped
+    }
+
+    /// The CONFIG's metadata record budget (present on an ATTACHED config) — the reader's
+    /// "metadata {} ... records" value.
+    pub fn metadata_records(&self) -> Option<u32> {
+        self.report.config.as_ref().and_then(Config::attached).map(|a| a.metadata)
     }
 
     /// Converts PPU ticks to milliseconds with 3 decimals.
@@ -443,6 +449,22 @@ pub fn exclusions_breakdown(f: &FrameView) -> Vec<(&'static str, &'static str, u
             let count = f.exclusions[k_idx][c_idx];
             if count > 0 {
                 out.push((*kind, *reason, count));
+            }
+        }
+    }
+    out
+}
+
+/// Report-ring exclusion rows of one frame (2047/11): per kind, the covered visits left untimed
+/// because no MAIN extent was free (`ring_full`) and those whose report-ring state was unknown or
+/// whose recycling was refused (`ring_state`).  Disjoint from the ten `exclusions` columns;
+/// all zero in older captures.
+pub fn ring_exclusions_breakdown(f: &FrameView) -> Vec<(&'static str, &'static str, u64)> {
+    let mut out = Vec::new();
+    for (k_idx, kind) in KINDS.iter().enumerate() {
+        for (reason, count) in [("ring full", f.ring_full[k_idx]), ("unknown ring state", f.ring_state[k_idx])] {
+            if count > 0 {
+                out.push((*kind, reason, count));
             }
         }
     }

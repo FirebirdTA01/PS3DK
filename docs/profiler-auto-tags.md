@@ -107,8 +107,8 @@ PS3DK_PROF_AUTO_OPTIONS_SET(&o);     /* before cellGcmInit, on the thread that c
 cellGcmInit(command_size, io_size, io_address);
 ```
 
-The options are validated and copied at the call (EINVAL for options the attach would refuse; the earlier 32-byte
-struct is accepted and takes the default range reserve) and used by the intercepted `cellGcmInit` in place of the
+The options are validated and copied at the call (EINVAL for options the attach would refuse; the earlier 32- and
+36-byte structs are accepted, the 32-byte one taking the default range reserve) and used by the intercepted `cellGcmInit` in place of the
 defaults. Only an init on the same thread uses them; the first successful init consumes them, and a later call is EBUSY.
 When the init runs on another thread the defaults are used and the capture says so: `auto` prints "pre-init options
 ignored: set on a different thread than cellGcmInit" (STATUS flag 2048, `preinit_options_ignored` in `auto --json`).

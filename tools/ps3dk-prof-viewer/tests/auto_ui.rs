@@ -753,3 +753,149 @@ fn cli_missed_mark_with_zero_lost_rows_matches_display() {
     assert_eq!(json["status"]["frames_lost"], 0);
     assert_display_parity(temp.0.clone());
 }
+
+// ── Ring (2047/11) integration tests ────────────────────────────────────────────
+// These use the reader as the authority: they read the same fields the CLI
+// surfaces (`ps3dk-prof auto --json`: status.ring, status.ring_reject, state,
+// per-frame ring_full/ring_state) and assert the UI's Drawn matches them.
+
+fn ring_fixture_doc(name: &str) -> (Arc<Document>, ps3dk_prof_viewer::auto::AutoView) {
+    let path = fixture_path(name);
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("read {name}: {e}"));
+    let doc = Arc::new(Document::from_bytes(path, &bytes));
+    let v = doc.auto.clone().unwrap_or_else(|| panic!("{name}: no auto view"));
+    assert!(v.has_auto(), "{name}: expects AUTO capability");
+    assert!(v.report.ring.is_some(), "{name}: expects a ring (2047/11) capture");
+    (doc, v)
+}
+
+fn ring_page_drawn(doc: Arc<Document>) -> ps3dk_prof_viewer::auto_ui::Drawn {
+    let mut app = App::new(None);
+    app.page = Page::Automatic;
+    app.doc = Some(doc);
+    let mut ui = Ui::new();
+    ui.frame(vec![], &mut app)
+}
+
+#[test]
+fn ring_clean_fixture_shows_verdict_and_counts() {
+    let (doc, v) = ring_fixture_doc("ring");
+    let drawn = ring_page_drawn(doc);
+
+    // Verdict: FINAL (no lower bounds).
+    assert_eq!(drawn.state, "FINAL", "ring.prof: reader state");
+    assert_eq!(v.report.state, "FINAL");
+    assert!(drawn.is_final);
+
+    // CONFIG partition: mirrors the reader's Ring.
+    let ring = v.report.ring.unwrap();
+    let cfg = drawn.ring_config.as_ref().expect("CONFIG ring partition shown");
+    assert_eq!(cfg.blocks, ring.blocks);
+    assert_eq!(cfg.pairs_per_block, ring.pairs);
+    assert_eq!(cfg.first_report, ring.first);
+    assert_eq!(cfg.label, ring.label);
+    assert_eq!(cfg.main_bytes, ring.bytes);
+    assert_eq!(cfg.extents, ring.slots);
+    assert_eq!(cfg.metadata_records, v.metadata_records().unwrap());
+    assert_eq!(cfg.legacy_pairs, ring.legacy_pairs);
+
+    // STATUS ring counters, mirroring the reader's Status.ring [u64; 8].
+    let s_ring = v.report.status.as_ref().unwrap().ring.unwrap();
+    // RING_STATUS_FIELDS: blocks_issued blocks_retired published_ring_label held_extents
+    //                    copied_bytes flushes_untouched flushes_restored decoded_words
+    let st = drawn.ring_status.as_ref().expect("STATUS ring counters shown");
+    assert_eq!(st.blocks_issued, s_ring[0]);
+    assert_eq!(st.blocks_retired, s_ring[1]);
+    assert_eq!(st.published_ring_label, s_ring[2]);
+    assert_eq!(st.held_extents, s_ring[3]);
+    assert_eq!(st.copied_bytes, s_ring[4]);
+    assert_eq!(st.flushes_untouched, s_ring[5]);
+    assert_eq!(st.flushes_restored, s_ring[6]);
+    assert_eq!(st.decoded_words, s_ring[7]);
+
+    // No decoder rejection.
+    assert!(drawn.ring_reject.is_none());
+
+    // Per-frame exclusions on the >504 frame (frame #0, owner 1: 520 observed clears).
+    let f0 = v.report.frames.iter().find(|f| f.frame == 0).expect("frame #0 present");
+    let f0_row = drawn.rendered_frame_rows.iter().find(|r| r.frame == 0).expect("frame #0 drawn");
+    // The reader counts the >504 draws as covered (not excluded), and this clean capture
+    // has no ring_full or ring_state exclusions.
+    assert_eq!(f0_row.excluded_text, "0");
+    assert!(f0_row.exclusions.iter().all(|(_, reason, _)| *reason != "ring full" && *reason != "unknown ring state"));
+    // The >504 timed draws are displayed (not dropped by any pair cap): observed CLEARs = 520.
+    assert_eq!(f0.observed[2], 520, "frame #0 CLEARs observed (beyond the legacy 504-pair cap)");
+
+    // Parity against the CLI JSON for the same facts.
+    let json = cli_json(&fixture_path("ring"));
+    let w = &json["windows"][0];
+    assert_eq!(w["state"], v.report.state);
+    assert_eq!(w["status"]["ring"]["blocks_issued"], s_ring[0]);
+    assert_eq!(w["status"]["ring"]["blocks_retired"], s_ring[1]);
+    assert_eq!(w["status"]["ring"]["held_extents"], s_ring[3]);
+    assert!(w["status"]["ring"]["decoder_rejected"].is_null(),
+        "ring.prof: decoder_rejected must be null on the clean capture");
+}
+
+#[test]
+fn ring_stopped_fixture_shows_reject_and_lower_bound_verdict() {
+    let (doc, v) = ring_fixture_doc("ring-stopped");
+    let drawn = ring_page_drawn(doc);
+
+    // Verdict: FINAL (lower bounds) — distinct from the clean capture's "FINAL".
+    assert_eq!(drawn.state, "FINAL (lower bounds)", "ring-stopped.prof: reader state");
+    assert_eq!(v.report.state, "FINAL (lower bounds)");
+    assert!(drawn.is_final, "still a FINAL status, with the lower-bound flag");
+
+    // STATUS ring counters.
+    let s_ring = v.report.status.as_ref().unwrap().ring.unwrap();
+    let st = drawn.ring_status.as_ref().expect("STATUS ring counters shown");
+    assert_eq!(st.blocks_issued, s_ring[0]);
+    assert_eq!(st.blocks_retired, s_ring[1]);
+    assert_eq!(st.held_extents, s_ring[3]);
+
+    // Decoder rejection: the reader's reject_reason, verbatim.
+    let reject = v.report.status.as_ref().unwrap().ring_reject.unwrap();
+    let drawn_reject = drawn.ring_reject.as_ref().expect("M2MF decoder rejection shown");
+    assert_eq!(drawn_reject.header, reject[0]);
+    assert_eq!(drawn_reject.offset, reject[1]);
+    let expected_reason = ps3dk_prof::auto_rsx::reject_reason(reject[2]);
+    assert_eq!(drawn_reject.reason_text, expected_reason);
+
+    // Per-frame: a frame with nonzero `ring_state` clears is reported as such.
+    let f_bad = v
+        .report
+        .frames
+        .iter()
+        .find(|f| f.ring_state.iter().any(|&n| n != 0))
+        .expect("a frame with nonzero ring_state");
+    let f_bad_row = drawn
+        .rendered_frame_rows
+        .iter()
+        .find(|r| r.frame == f_bad.frame)
+        .expect("excluded frame drawn");
+    // The per-frame exclusion breakdown includes the reader's report-ring columns for that kind.
+    let (kind, reason, count) = f_bad_row
+        .exclusions
+        .iter()
+        .find(|(_, r, _)| *r == "unknown ring state")
+        .copied()
+        .expect("row breakdown lists 'unknown ring state'");
+    let k = match kind { "ARRAY" => 0, "INDEX" => 1, "CLEAR" => 2, _ => panic!("{kind}") };
+    assert_eq!(count, f_bad.ring_state[k]);
+    // Total excluded for the frame reconciles with the reader's per-frame ring_state sum.
+    let expected_total: u64 = f_bad
+        .excluded
+        .iter()
+        .sum::<u64>();
+    let row_total: u64 = f_bad_row.exclusions.iter().map(|(_, _, c)| *c).sum();
+    assert_eq!(row_total, expected_total,
+        "frame #{} per-frame breakdown must reconcile with reader's excluded total", f_bad.frame);
+    let _ = (kind, reason, count);
+
+    // Parity against the CLI JSON.
+    let json = cli_json(&fixture_path("ring-stopped"));
+    let w = &json["windows"][0];
+    assert_eq!(w["state"], v.report.state);
+    assert_eq!(w["status"]["ring"]["decoder_rejected"]["reason_text"], expected_reason);
+}

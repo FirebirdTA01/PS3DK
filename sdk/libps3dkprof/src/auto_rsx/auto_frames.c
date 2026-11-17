@@ -49,6 +49,16 @@ int auto_frames_outside(auto_frames *q,uint32_t kind)
     return 1;
 }
 
+int auto_frames_ring(auto_frames *q,uint32_t kind,uint32_t which)
+{
+    uint64_t *value;
+    if(!q->active || kind<1 || kind>3 || which>1) return 0;
+    value=which ? &q->live.ring_state[kind-1]:&q->live.ring_full[kind-1];
+    if(*value==UINT64_MAX) {q->live.flags|=4;REL(&q->saturated,1u);}
+    else ++*value;
+    return 1;
+}
+
 int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,int open)
 {
     uint64_t w,r;
@@ -57,6 +67,10 @@ int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,i
         uint64_t remaining=q->live.counts[kind][0];
         if(q->live.outside_timed[kind]>remaining) return 0;
         remaining-=q->live.outside_timed[kind];
+        if(q->live.ring_full[kind]>remaining) return 0;
+        remaining-=q->live.ring_full[kind];
+        if(q->live.ring_state[kind]>remaining) return 0;
+        remaining-=q->live.ring_state[kind];
         for(unsigned column=1;column<12;column++) {
             if(q->live.counts[kind][column]>remaining) return 0;
             remaining-=q->live.counts[kind][column];
