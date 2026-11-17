@@ -252,13 +252,25 @@ function(ps3_target_prof_auto target)
     target_include_directories("${target}" BEFORE PRIVATE "${root}/ppu/include")
     if(NOT "${PS3_PROF_AUTO_ROLLING}" STREQUAL "")
         math(EXPR rolling_bytes "${PS3_PROF_AUTO_ROLLING} * 1048576")
-        set(rolling_source "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto-rolling.c")
+        get_property(rolling_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+        if("C" IN_LIST rolling_languages)
+            set(rolling_extension c)
+        elseif("CXX" IN_LIST rolling_languages)
+            set(rolling_extension cpp)
+        else()
+            message(FATAL_ERROR "PS3_PROF_AUTO_ROLLING requires C or CXX")
+        endif()
+        set(rolling_source "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto-rolling.${rolling_extension}")
         file(WRITE "${rolling_source}"
             "#include <ps3dk/prof_rolling.h>\nPS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS(PS3DK_PROF_ROLLING_AUTO_FIFO_INIT(UINT64_C(${rolling_bytes}), UINT64_C(67108864)));\n")
         # A direct executable input: weak references cannot pull this constant
         # out of an ordinary archive. An app-defined override uses the header
         # macro with this cache option empty; two explicit definitions refuse.
         target_sources("${target}" PRIVATE "${rolling_source}")
+        # Unlike -u, --require-defined refuses an unresolved weak reference.
+        # This is checked by the identity trial link and the final link, so a
+        # missing/skipped generated source cannot silently select append mode.
+        target_link_options("${target}" PRIVATE "-Wl,--require-defined,ps3dk_prof_automatic_rolling_options")
     endif()
     # Force these definitions even for a small link-only consumer. Their
     # presence cannot be mistaken for an unexercised successful link.
