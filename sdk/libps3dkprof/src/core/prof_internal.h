@@ -402,6 +402,7 @@ typedef struct ext_acc {
 #define p_ext_threads_accepted ps3dk_prof__ext_threads_accepted
 #define p_ext_slot_freed ps3dk_prof__ext_slot_freed
 #define p_ext_step3b ps3dk_prof__ext_step3b
+#define p_ext_poll_calibrations ps3dk_prof__ext_poll_calibrations
 #define p_ext_seal ps3dk_prof__ext_seal
 #define p_ext_init ps3dk_prof__ext_init
 int p_ext_emit(prof *p, uint32_t type, const uint8_t *payload, size_t len);
@@ -409,6 +410,7 @@ void p_ext_sink_fail(prof *p, int code);
 void p_ext_threads_accepted(prof *p, const tdecl *t, uint32_t n);
 void p_ext_slot_freed(prof *p, uint32_t slot);
 void p_ext_step3b(prof *p);
+int p_ext_poll_calibrations(prof *p); /* bounded try-lock, read-only lane observations, no sink */
 void p_ext_seal(prof *p);
 int p_ext_init(prof *p); /* the mutex and the adapters, after the block exists; 0 on success */
 /* P3.3 R2 (src/rsx/gpu_runtime.c and the shared pieces of ext_runtime.c) */

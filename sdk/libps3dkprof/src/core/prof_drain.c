@@ -1135,6 +1135,31 @@ void p_quick_exit_drain(void)
     /* drain_busy stays held until _exit */
 }
 
+static void drain_wait(prof *p)
+{
+#ifdef PS3DK_PROF_WITH_SPU
+    uint64_t now, deadline;
+    /* Keep full drains at the configured cadence. Only the read-only calibration
+     * observer runs between them; it cannot enter a sink or consume event slots.
+     * No SPU configuration retains the original single-sleep path. */
+    if (p->spu && pal_mono_now_us(&now) == 0 && now <= UINT64_MAX - p->cfg.drain_interval_us) {
+        uint32_t slices = (p->cfg.drain_interval_us + 999u) / 1000u;
+        deadline = now + p->cfg.drain_interval_us;
+        while (slices-- && now < deadline && !LD_ACQ(&p->wake)) {
+            uint64_t left = deadline - now;
+            pal_sleep_us(left < 1000 ? left : 1000);
+            if (LD_ACQ(&p->wake))
+                break;
+            (void)p_ext_poll_calibrations(p);
+            if (pal_mono_now_us(&now) != 0)
+                break; /* no clock: abandon this optional observation interval */
+        }
+        return;
+    }
+#endif
+    pal_sleep_us(p->cfg.drain_interval_us);
+}
+
 void *p_drain_main(void *arg)
 {
     prof *p = (prof *)arg;
@@ -1158,7 +1183,7 @@ void *p_drain_main(void *arg)
             (void)p_drain_once(p);
             ST_REL(&p->drain_busy, 0u);
         }
-        pal_sleep_us(p->cfg.drain_interval_us);   /* one slice, then the wake flag is checked */
+        drain_wait(p);
     }
     (void)it;   /* read only by the test statistics */
     if (t->slot1 && !t->acked && !t->retired)

@@ -199,6 +199,16 @@ Finalized placement can tighten those bounds using **RMAX1**, an additional rate
 
 Without `ORDER_FINAL`, supported prefix placement is **PROVISIONAL** and uses causal bounds alone. It contributes neither final tick counts nor final placement coverage. More frequent usable drains and brackets may tighten causal bounds, but cannot guarantee placement when identity, order or coverage is missing.
 
+With SPU lanes enabled, THREAD mode checks for published calibration answers between full drains,
+in sleep slices of at most 1 ms. The full-drain interval remains configurable. APP mode can call
+`PS3DK_PROF_SPU_POLL_CALIBRATIONS()` from a helper thread or another polling point between its drains.
+This call uses a try-lock and returns `EBUSY` on contention or callback reentry. It neither writes
+to the sink nor acknowledges SPU ring slots. A coherent observation of the exact outstanding
+answer supplies an earlier PPU upper bound when the corresponding CAL record is later drained;
+the drain timestamp still describes the later ring read. Missed, stale or inconsistent observations
+retain the ordinary bound. Polling cadence does not guarantee bracket width or placement, and
+target overhead and width improvement require a matched console measurement.
+
 No single affine clock fit per epoch is used for this SPU placement. The measured workload captures contradicted that wall-clock model. The decrementer's behavior under descheduling remains an interpretation question: a tick count does not prove CPU execution time or the cause of a stall.
 
 #### RSX zone states

@@ -94,6 +94,12 @@ int ps3dk_prof_spu_lane_create(const char *name, uint32_t image, int owner_self,
  * the slot is released; ETIMEDOUT keeps it charged (call again); ECLOCK: no monotonic clock; EINVAL: a stale handle. */
 int ps3dk_prof_spu_lane_end(uint32_t handle, uint64_t timeout_us, ps3dk_prof_spu_lane_stats *final_or_null);
 int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st);
+/* Observe published calibration answers without draining events or releasing
+ * slots. APP-mode programs may call this from a helper/poll point between frame
+ * drains. One bounded pass, no allocation or sink callback; EBUSY on contention
+ * or callback reentry, ESTOPPED after shutdown/fault. A missed observation keeps
+ * the normal drain-time upper bound; cadence is not a timing guarantee. */
+int ps3dk_prof_spu_poll_calibrations(void);
 
 #define PS3DK_PROF_INIT_EX(cfg, ext) ps3dk_prof_init_ex((cfg), (ext))
 #define PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE(b, l, d, n, out) ps3dk_prof_spu_image_register_table((b), (l), (d), (n), (out))
@@ -101,6 +107,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
 #define PS3DK_PROF_SPU_LANE_CREATE(name, image, self, out) ps3dk_prof_spu_lane_create((name), (image), (self), (out))
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ps3dk_prof_spu_lane_end((h), (t), (out))
 #define PS3DK_PROF_SPU_LANE_STATS(h, st) ps3dk_prof_spu_lane_get_stats((h), (st))
+#define PS3DK_PROF_SPU_POLL_CALIBRATIONS() ps3dk_prof_spu_poll_calibrations()
 
 #else /* off build: nothing runs and no argument is evaluated */
 
@@ -112,6 +119,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
     ((void)sizeof(name), (void)sizeof(image), (void)sizeof(self), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ((void)sizeof(h), (void)sizeof(t), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_STATS(h, st) ((void)sizeof(h), (void)sizeof(st), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_SPU_POLL_CALIBRATIONS() (PS3DK_PROF_ENOTSUP)
 
 #endif
 

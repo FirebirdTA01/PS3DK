@@ -43,13 +43,13 @@ srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'core/prof_ve
 wrap = '-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=posix_memalign,--wrap=aligned_alloc'
 variants = {'plain': [], 'asan': ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
                                   '-fno-omit-frame-pointer'], 'tsan': ['-fsanitize=thread']}
-cases = ['basic-thread', 'basic-app', 'seal-live', 'reentry', 'app-other-thread', 'held-sink', 'sink-failure', 'clock',
+cases = ['calibration-poll', 'calibration-thread', 'basic-thread', 'basic-app', 'seal-live', 'reentry', 'app-other-thread', 'held-sink', 'sink-failure', 'clock',
          'fault-lock', 'fault-unlock-create', 'fault-unlock-stats', 'fault-unlock-image', 'fault-unlock-end',
          'fault-drainer', 'race-1', 'race-2', 'race-3', 'race-4', 'near-wrap-ext', 'near-wrap-v1', 'gen-zero-fresh-slot',
          'threads-sink-failure', 'owner-retired', 'chunk-seq-ext', 'chunk-seq-v1', 'reservation-loss', 'arena-exact',
          'arena-short', 'alloc-lanes', 'alloc-lanes-control', 'unlock-step3b', 'unlock-seal', 'unlock-end-final',
          'corrupt-slot', 'corrupt-line', 'corrupt-seal', 'emul-collision']
-threaded = ['basic-thread', 'basic-app', 'seal-live', 'app-other-thread', 'held-sink', 'race-2', 'race-3',
+threaded = ['calibration-poll', 'calibration-thread', 'basic-thread', 'basic-app', 'seal-live', 'app-other-thread', 'held-sink', 'race-2', 'race-3',
             'sink-failure', 'emul-collision']
 env = dict(os.environ, UBSAN_OPTIONS='halt_on_error=1', ASAN_OPTIONS='detect_leaks=0',
            TSAN_OPTIONS='halt_on_error=0 exitcode=66')
@@ -164,6 +164,40 @@ for cs in threaded:
     if not clean:
         failed.append(f'tsan {cs}')
         print(r.stderr[-2500:], flush=True)
+
+# Guard control: a blocking calibration lock strands an APP helper behind the
+# caller's held extension mutex. A compiler failure or unrelated crash is not a
+# catch; require the deterministic join marker followed by the process timeout.
+core = lib / 'spu/ext_runtime.c'
+text = core.read_text()
+start = text.index('int p_ext_poll_calibrations(prof *p)')
+end = text.index('int ps3dk_prof_spu_poll_calibrations(void)', start)
+part = text[start:end]
+old = 'pal_mutex_trylock(&p->spu_mutex)'
+if part.count(old) != 1:
+    raise SystemExit('poll blocking-lock mutant drift')
+mutant = out / 'poll-blocking-lock.c'
+mutant.write_text(text[:start] + part.replace(old, 'pal_mutex_lock(&p->spu_mutex)') + text[end:])
+exe = out / 'poll-blocking-lock'
+r = subprocess.run([cc, *flags, *[str(mutant if s == core else s) for s in srcs],
+                    *WHOLE_RUN, '-o', str(exe), wrap], capture_output=True, text=True)
+(out / 'poll-blocking-lock.build.log').write_text(r.stdout + r.stderr)
+if r.returncode:
+    raise SystemExit('poll blocking-lock mutant failed to compile')
+d = out / 'poll-blocking-lock-capture'
+d.mkdir()
+try:
+    r = subprocess.run([str(exe), 'calibration-poll', str(d)], capture_output=True, text=True, timeout=5)
+    (out / 'poll-blocking-lock.log').write_text(r.stdout + r.stderr)
+    failed.append('poll blocking-lock mutant survived')
+except subprocess.TimeoutExpired as timeout:
+    stdout = timeout.stdout or b''
+    stdout = stdout.decode(errors='replace') if isinstance(stdout, bytes) else stdout
+    (out / 'poll-blocking-lock.log').write_text(stdout + '\nTIMEOUT\n')
+    if 'POLL waiting for contended observer' not in stdout:
+        failed.append('poll blocking-lock timeout without its join marker')
+    else:
+        print('poll blocking-lock mutant: KILLED at held-mutex join', flush=True)
 
 # the reader (exact exit codes) and the checker on every capture with an expectation (plain build)
 target = a.reader.resolve().parent

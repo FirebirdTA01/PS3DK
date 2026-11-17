@@ -151,7 +151,9 @@ jobs:
           python3 tests/host/ps3dk-prof-spu-int/i1-test.py "$RUNNER_TEMP/i1" --base "$RUNNER_TEMP/i1-base" --reader tools/target/debug/ps3dk-prof
       - name: I2 SPU lane integration
         if: matrix.suite == 'i2'
-        run: python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
+        run: |
+          python3 tests/host/ps3dk-prof-spu/calibration-poll-test.py "$RUNNER_TEMP/calibration-poll"
+          python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'
         run: |
