@@ -695,7 +695,9 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 corrupt(p);
                 return;
             }
-            if (flush_loss(p, l, &w) != 0) {
+            /* Most runs contain no LOSS. Avoid entering its encoder/ledger
+             * path once for every ordinary event when there is nothing to emit. */
+            if (w.pl_count && flush_loss(p, l, &w) != 0) {
                 overflow_finish(p, l, &w);
                 return;
             }
