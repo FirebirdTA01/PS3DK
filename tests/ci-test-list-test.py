@@ -18,6 +18,11 @@ import sys
 # Keep them in the checked inventory so dropping a CI row cannot silently
 # return them to manual-only coverage.
 PROFILER_SUITES = {
+    "tests/host/ps3dk-prof-retention/test.py",
+    "tests/host/ps3dk-prof-rolling/run.py",
+    "tests/host/ps3dk-prof-rolling/mutations.py",
+    "tests/host/ps3dk-prof-runtime/fifo-accounting-mutants.py",
+    "samples/profiling/spurs-job-zones/host-tests/run-host.sh",
     "tests/host/ps3dk-prof-spu/calibration-poll-test.py",
     "tests/host/ps3dk-prof-spu/drain-cost-test.py",
     "tests/host/ps3dk-prof-gpu-int/r2-test.py",

@@ -154,7 +154,15 @@ jobs:
         run: |
           python3 tests/host/ps3dk-prof-spu/calibration-poll-test.py "$RUNNER_TEMP/calibration-poll"
           python3 tests/host/ps3dk-prof-spu/drain-cost-test.py "$RUNNER_TEMP/drain-cost"
+          bash samples/profiling/spurs-job-zones/host-tests/run-host.sh "$RUNNER_TEMP/spurs-job-zones"
           python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
+      - name: Completed capture retention and private rolling storage controls
+        if: matrix.suite == 'profile'
+        run: |
+          python3 tests/host/ps3dk-prof-retention/test.py --runtime --build-dir "$RUNNER_TEMP/capture-retention"
+          python3 tests/host/ps3dk-prof-retention/test.py --runtime --sanitize --build-dir "$RUNNER_TEMP/capture-retention-asan"
+          python3 tests/host/ps3dk-prof-rolling/run.py --build-dir "$RUNNER_TEMP/rolling-store"
+          python3 tests/host/ps3dk-prof-rolling/mutations.py --build-dir "$RUNNER_TEMP/rolling-store-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'
         run: |
@@ -289,6 +297,12 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-reuse" --sanitize thread --mutant early-reuse
           python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-ack" --mutant ack-early
           python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-owner" --mutant owner-drain
+          python3 tests/host/ps3dk-prof-runtime/fifo-test.py --out "$RUNNER_TEMP/fifo-mutant-account-ack" --mutant account-ack-early
+          python3 tests/host/ps3dk-prof-runtime/fifo-accounting-mutants.py --out "$RUNNER_TEMP/fifo-accounting-mutants"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifoaccount --out "$RUNNER_TEMP/fifo-accounting-auto"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifoaccount --sanitize address --out "$RUNNER_TEMP/fifo-accounting-auto-asan"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifoaccount --sanitize thread --out "$RUNNER_TEMP/fifo-accounting-auto-tsan"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case fifoaccount --mutant fifo-frame-acquire --out "$RUNNER_TEMP/fifo-accounting-attach-guard"
 
       - name: Automatic RSX host models
         run: |
