@@ -110,11 +110,13 @@ size_t auto_encode_frame_ring(uint8_t *b,size_t cap,const auto_wire_frame *f)
     return AUTO_FRAME_RING_BYTES;
 }
 size_t auto_encode_status_ring(uint8_t *b,size_t cap,uint32_t instance,uint16_t flags,
-                               const uint64_t counters[15],const uint64_t ring[8])
+                               const uint64_t counters[15],const uint64_t ring[8],const uint32_t reject[3])
 {
-    if(!b || !counters || !ring || cap<AUTO_STATUS_RING_BYTES) return 0;
+    if(!b || !counters || !ring || !reject || cap<AUTO_STATUS_RING_BYTES) return 0;
     if(!auto_encode_status(b,cap,instance,flags,counters)) return 0;
     for(unsigned i=0;i<8;i++) le64(b+128+8*i,ring[i]);
+    for(unsigned i=0;i<3;i++) le32(b+192+4*i,reject[i]);
+    le32(b+204,0);
     return AUTO_STATUS_RING_BYTES;
 }
 

@@ -16,7 +16,8 @@ enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_
 enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
        AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
 enum { AUTO_CONFIG_RING_BYTES=216, AUTO_OP_RING_BYTES=176, AUTO_FRAME_RING_BYTES=528,
-       AUTO_STATUS_RING_BYTES=192, AUTO_KIND_RING_MASK=2047, AUTO_OP_RING=128 };
+       AUTO_STATUS_RING_BYTES=208, AUTO_KIND_RING_MASK=2047, AUTO_OP_RING=128,
+       AUTO_STATUS_RING_REJECT_MAX=10 /* the decoder's rejection reasons 1..10 (AUTO_RING_REJECT_*) */ };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
        AUTO_ALLOCATION_FAILED, AUTO_UNSUPPORTED_CONTEXT, AUTO_STOPPED, AUTO_NO_GCM_INIT };
@@ -185,7 +186,9 @@ size_t auto_encode_status(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t 
 size_t auto_encode_clock(uint8_t *, size_t, const auto_wire_clock *);
 size_t auto_encode_ops_ring(uint8_t *, size_t, uint32_t, const auto_wire_op *, uint32_t);
 size_t auto_encode_frame_ring(uint8_t *, size_t, const auto_wire_frame *);
-/* Tail u64[8]: issued blocks, retired blocks, published label, held extents,
- * copied bytes, untouched-state copies, restored-state copies, decoded words. */
-size_t auto_encode_status_ring(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15], const uint64_t [8]);
+/* Tail u64[8] at 128: issued blocks, retired blocks, published label, held extents,
+ * copied bytes, untouched-state copies, restored-state copies, decoded words; then u32[3] at 192: the decoder's first
+ * rejected header word, its byte offset from the context begin and its reason (all zero: none); u32@204 zero. */
+size_t auto_encode_status_ring(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15], const uint64_t [8],
+                               const uint32_t [3]);
 #endif

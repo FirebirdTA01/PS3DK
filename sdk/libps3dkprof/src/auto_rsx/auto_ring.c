@@ -17,12 +17,13 @@ int auto_ring_init(auto_ring *r, auto_ring_slot *slots, uint32_t capacity, uint3
 }
 
 void auto_ring_stop(auto_ring *r) { REL(&r->invalid,1u); }
+void auto_ring_halt(auto_ring *r) { REL(&r->halted,1u); }
 
 int auto_ring_admit(auto_ring *r, uint64_t frame, uint64_t window, int metadata, auto_ring_ticket *out)
 {
     auto_ring_slot *s;
     uint32_t seq=r->active;
-    if(ACQ(&r->invalid)) return AUTO_RING_INVALID;
+    if(ACQ(&r->invalid) || ACQ(&r->halted)) return AUTO_RING_INVALID;
     if(!out || !metadata) return AUTO_RING_METADATA;
     if(seq) {
         s=&r->slots[(seq-1u)%r->capacity];
@@ -55,6 +56,16 @@ int auto_ring_seal(auto_ring *r, int emitted)
     return 1;
 }
 
+int auto_ring_quarantine(auto_ring *r)
+{
+    uint32_t seq=r->active;
+    auto_ring_halt(r);
+    if(!seq) return 0;
+    REL(&r->slots[(seq-1u)%r->capacity].closed,2u);
+    r->active=0;
+    return 1;
+}
+
 int auto_ring_ready(auto_ring *r, uint32_t seq, uint32_t label, uint32_t frontier)
 {
     uint32_t issued=ACQ(&r->issued),retired=ACQ(&r->retired);
@@ -67,7 +78,10 @@ int auto_ring_ready(auto_ring *r, uint32_t seq, uint32_t label, uint32_t frontie
     auto_ring_slot *s=&r->slots[(seq-1u)%r->capacity];
     uint32_t closed=ACQ(&s->closed);
     if(!closed) return AUTO_RING_PENDING;
-    if(closed!=1 || s->generation!=seq) {auto_ring_stop(r);return AUTO_RING_INVALID;}
+    if(closed>2 || s->generation!=seq) {auto_ring_stop(r);return AUTO_RING_INVALID;}
+    /* quarantined: never read. The producer already stopped the ring (uncertain emission) or halted it (nothing
+     * follows), so refusing it stops nothing: records of earlier blocks read in the same batch still retire. */
+    if(closed==2) return AUTO_RING_INVALID;
     if(label>frontier || label<2u*seq) return AUTO_RING_PENDING;
     s->ready=1;
     return AUTO_RING_OK;

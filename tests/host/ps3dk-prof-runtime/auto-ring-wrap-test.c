@@ -244,7 +244,7 @@ int main(void)
     context.callback=custom;
     assert(!ps3tc_fifo_wrap_native((void *)&context));
     app_flush();
-    assert(context.end==fifo+PHYS && !a->tail.active && a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK);
+    assert(context.end==fifo+PHYS && !a->tail.active && a->ring.halted && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK);
     assert(a->ring.slots[3].closed==2 && a->ring_quarantined==1 && copies==3);
     assert(!ps3dk_prof__auto_test_ring_admit(&context,1));
     puts("AUTO ring physical tail and native pre-wrap flush PASS");

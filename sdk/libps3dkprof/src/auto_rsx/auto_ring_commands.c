@@ -3,24 +3,48 @@
 static const uint32_t registers[9]={0x184,0x188,0x30c,0x310,0x314,0x318,0x31c,0x320,0x324};
 #define METHOD(sub,m,n) (((uint32_t)(n)<<18)|((uint32_t)(sub)<<13)|(m))
 
+static int reject(auto_ring_shadow *s,uint32_t header,uint32_t at,uint32_t reason)
+{
+    if(!s->bad_reason) {s->bad_header=header;s->bad_at=at;s->bad_reason=reason;}
+    s->invalid=1;return 0;
+}
+void auto_ring_shadow_reject(auto_ring_shadow *s,uint32_t header,uint32_t at,uint32_t reason)
+{
+    (void)reject(s,header,at,reason);
+}
+/* The class of a header the decoder does not accept (NONE when it accepts it). Only names the word: the conditions
+ * are exactly the acceptance rule. */
+static uint32_t header_reason(uint32_t h,uint32_t count,size_t left,uint32_t method)
+{
+    const uint32_t allowed=0x40000000u|(2047u<<18)|(7u<<13)|0x1ffcu;
+    if(h&~allowed) {
+        if((h&0xe0000003u)==0x20000000u || (h&0xe0000003u)==1u) return AUTO_RING_REJECT_JUMP;
+        if((h&3u)==2u) return AUTO_RING_REJECT_CALL;
+        if((h&0xffff0003u)==0x00020000u) return AUTO_RING_REJECT_RETURN;
+        return AUTO_RING_REJECT_RESERVED;
+    }
+    if(!count && h) return AUTO_RING_REJECT_EMPTY;
+    if(count>left) return AUTO_RING_REJECT_TRUNCATED;
+    if(!(h&0x40000000u) && count && method+4u*(count-1u)>0x1ffcu) return AUTO_RING_REJECT_RANGE;
+    return AUTO_RING_REJECT_NONE;
+}
+
 int auto_ring_shadow_scan(auto_ring_shadow *s,const uint32_t *p,size_t n)
 {
     size_t at=0;
     if(s->invalid || (!p && n)) return 0;
-    if(UINT64_MAX-s->words<n) {s->invalid=1;return 0;}
+    if(UINT64_MAX-s->words<n) return reject(s,0,s->origin,AUTO_RING_REJECT_COST);
     s->words+=n;
     while(at<n) {
+        const uint32_t where=s->origin+4u*(uint32_t)at;
         uint32_t h=p[at++],count=(h>>18)&2047u,method=h&0x1ffcu,sub=(h>>13)&7u;
-        const uint32_t allowed=0x40000000u|(2047u<<18)|(7u<<13)|0x1ffcu;
-        if((h&~allowed) || (!count && h) || count>n-at ||
-           (!(h&0x40000000u) && count && method+4u*(count-1u)>0x1ffcu)) {
-            s->invalid=1;return 0;
-        }
+        uint32_t why=header_reason(h,count,n-at,method);
+        if(why) return reject(s,h,where,why);
         if(sub==1 && count) {
             s->seen=1;
             for(uint32_t i=0;i<count;i++) {
                 uint32_t m=method+((h&0x40000000u)?0:4u*i);
-                if(!m) {s->invalid=1;return 0;} /* object binding unknown */
+                if(!m) return reject(s,h,where,AUTO_RING_REJECT_BINDING); /* object binding unknown */
                 for(uint32_t j=0;j<9;j++) if(m==registers[j]) {
                     s->value[j]=p[at+i];s->known|=1u<<j;break;
                 }

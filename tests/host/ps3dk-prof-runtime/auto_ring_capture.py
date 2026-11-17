@@ -49,7 +49,17 @@ def record(q):
     return v
 
 
-def verify(data, pending_tail=0):
+def ops(data):
+    out = []
+    for k, b in chunks(data):
+        if k == 35:
+            out += [record(b[16 + 176 * i:16 + 176 * (i + 1)]) for i in range(struct.unpack_from('<I', b, 8)[0])]
+    return out
+
+
+def verify(data, pending_tail=0, held_extents=None):
+    """pending_tail: the trailing ring records left incomplete; held_extents: the extents held at seal (default 1
+    with a pending tail, else 0); any held extent requires LOWER_BOUND."""
     auto = [(k, b) for k, b in chunks(data) if 34 <= k <= 38]
     assert auto and auto[0][0] == 34
     c, r = config(auto[0][1])
@@ -64,7 +74,7 @@ def verify(data, pending_tail=0):
             assert len(b) == 528, 'COVERAGE width'
             rows.append(b)
         elif k == 37:
-            assert len(b) == 192, 'STATUS width'
+            assert len(b) == 208, 'STATUS width'
             status = b
     assert status is not None
     ring = [o for o in ops if o['flags'] & 128]
@@ -127,12 +137,18 @@ def verify(data, pending_tail=0):
     assert flags & 1 and held == issued - retired and issued == prev_gen, 'STATUS ring tail'
     assert published % 2 == 0 and published <= 2 * issued and untouched + restored <= issued
     assert copied <= issued * 32 * r['pairs']
-    if pending_tail:
-        assert held == 1 and flags & 2, 'the block pending at seal holds its extent'
+    if held_extents is None:
+        held_extents = 1 if pending_tail else 0
+    assert held == held_extents, 'held extents at seal'
+    if held:
+        assert flags & 2, 'a held extent at seal is a lower bound'
     else:
-        assert held == 0 and retired == issued
+        assert retired == issued
+    header, at, reason, reserved = struct.unpack_from('<4I', status, 192)
+    assert reserved == 0 and reason <= 10 and (reason or (header, at) == (0, 0)), 'decoder rejection'
     return dict(ring_records=len(ring), blocks_issued=issued, blocks_retired=retired, held=held,
                 copied_bytes=copied, flushes_untouched=untouched, flushes_restored=restored, decoded_words=decoded,
+                rejected=(header, at, reason),
                 max_timed_per_frame=max(timed_by_frame.values()) if timed_by_frame else 0,
                 frames_over_504=sum(1 for v in timed_by_frame.values() if v > 504),
                 exclusions={k: v for k, v in excluded.items() if v}, status_flags=flags, frames=len(rows))

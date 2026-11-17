@@ -41,6 +41,9 @@ int auto_writer_status(auto_writer *, uint16_t flags, const uint64_t counters[15
 /* REPORT_RING CONFIG (ring_bytes nonzero) only, and the only STATUS such a config accepts. ring[8]: issued blocks,
  * retired blocks, published ring label, held extents, copied bytes, untouched-state and restored-state flushes, decoded
  * words. Refused unless retired <= issued, held == issued - retired, the label is even, at most 2 x issued and at
- * least every written ring record's, the copied bytes fit the issued blocks and both flush cases fit them too. */
-int auto_writer_status_ring(auto_writer *, uint16_t flags, const uint64_t counters[15], const uint64_t ring[8]);
+ * least every written ring record's, the copied bytes fit the issued blocks and both flush cases fit them too.
+ * reject[3]: the decoder's first rejected header, its byte offset and reason 1..AUTO_STATUS_RING_REJECT_MAX, or all
+ * zero; a held extent requires LOWER_BOUND on a FINAL status. */
+int auto_writer_status_ring(auto_writer *, uint16_t flags, const uint64_t counters[15], const uint64_t ring[8],
+                            const uint32_t reject[3]);
 #endif

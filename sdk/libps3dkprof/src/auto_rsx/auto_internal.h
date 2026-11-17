@@ -87,7 +87,9 @@ typedef struct auto_ring_memory {
 } auto_ring_memory;
 /* Why recycling stopped (first reason kept): the owner context's callback is not the native FIFO wrap, its end is
  * not the exact one the tail reservation set, the flush could not be emitted (unknown M2MF state or no room), a
- * context reset, or the ring label did not read back zero after its startup reset. A refused or uncertain block is quarantined, never reused. */
+ * context reset, or the ring label did not read back zero after its startup reset. A refused or uncertain block is quarantined, never reused.
+ * The first three are found before any flush word is stored: they halt new admission only, and blocks sealed earlier
+ * still drain and retire. A context reset or a label anomaly stops the ring on both sides. */
 enum { AUTO_RING_REFUSED_CALLBACK=1, AUTO_RING_REFUSED_END, AUTO_RING_REFUSED_EMIT, AUTO_RING_REFUSED_RESET,
        AUTO_RING_REFUSED_LABEL };
 
@@ -179,6 +181,9 @@ typedef struct auto_capture {
     /* owner stores (release), drainer loads: copied bytes, flushes that found the application's M2MF state untouched
      * or restored it, application words decoded (STATUS ring tail) */
     uint64_t ring_copied, ring_untouched, ring_restored, ring_decoded;
+    /* owner stores once, drainer loads: the decoder's first rejected header word, its byte offset from the context
+     * begin, then (release) its AUTO_RING_REJECT_* reason (STATUS ring tail u32 at 192..200) */
+    uint32_t ring_reject[3];
 } auto_capture;
 
 void p_auto_init(prof *p); /* before READY/start_gate publication */

@@ -91,4 +91,33 @@ static void decoder_and_credit(void) {
     assert(auto_ring_tail_take(&t,128,256,&end,46,2));
     end-=4;assert(!auto_ring_tail_release(&t,128,256,&end));assert(end==836); /* foreign mutation stays intact */
 }
-int main(void) { split_transfer_bytes();decoder_and_credit();puts("auto-ring command state and physical credit PASS");return 0; }
+/* The first header the decoder rejects is named: the word, its byte offset from the context begin (the caller's
+ * origin plus its index) and the class. Accepted streams name nothing; later rejections never overwrite it. */
+static void rejection_named(void) {
+    static const struct { uint32_t w[4]; size_t n; uint32_t index,reason; } c[]={
+        {{0,0x20001000u},2,1,AUTO_RING_REJECT_JUMP},
+        {{0x00001001u},1,0,AUTO_RING_REJECT_JUMP},
+        {{0x1002},1,0,AUTO_RING_REJECT_CALL},
+        {{0x00020000u},1,0,AUTO_RING_REJECT_RETURN},
+        {{0x80000000u|M(1,0x184,1),0},2,0,AUTO_RING_REJECT_RESERVED},
+        {{0x40000000u|0x184u},1,0,AUTO_RING_REJECT_EMPTY},
+        {{M(1,0x184,2),0xfeed0000},2,0,AUTO_RING_REJECT_TRUNCATED},
+        {{M(0,0x1ffc,2),0,0},3,0,AUTO_RING_REJECT_RANGE},
+        {{M(6,0x184,1),0,M(1,0,1),123},4,2,AUTO_RING_REJECT_BINDING},
+    };
+    for(unsigned i=0;i<sizeof c/sizeof c[0];i++) {
+        auto_ring_shadow s={0};
+        uint32_t ok[]={M(1,0x184,2),0xfeed0000,0xfeed0001};
+        s.origin=0x40;assert(auto_ring_shadow_scan(&s,ok,3) && !s.bad_reason && !s.bad_header && !s.bad_at);
+        s.origin=0x100;
+        assert(!auto_ring_shadow_scan(&s,c[i].w,c[i].n) && s.invalid);
+        assert(s.bad_reason==c[i].reason && s.bad_header==c[i].w[c[i].index] && s.bad_at==0x100+4*c[i].index);
+        s.origin=0x200;assert(!auto_ring_shadow_scan(&s,ok,3));
+        auto_ring_shadow_reject(&s,0,8,AUTO_RING_REJECT_CURSOR);
+        assert(s.bad_reason==c[i].reason && s.bad_at==0x100+4*c[i].index); /* the first one stays */
+    }
+    auto_ring_shadow s={0};
+    auto_ring_shadow_reject(&s,0,0x80,AUTO_RING_REJECT_CURSOR);
+    assert(s.invalid && s.bad_reason==AUTO_RING_REJECT_CURSOR && s.bad_at==0x80 && !s.bad_header);
+}
+int main(void) { split_transfer_bytes();decoder_and_credit();rejection_named();puts("auto-ring command state and physical credit PASS");return 0; }

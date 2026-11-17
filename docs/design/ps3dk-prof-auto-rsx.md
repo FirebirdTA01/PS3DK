@@ -449,22 +449,42 @@ M2MF state, refused or invalid ring: invalid evidence, the frame stays UNKNOWN),
 and the usual room/metadata/reentry columns; metadata exhaustion is not latched
 either.
 
+Refusals come in two strengths. A flush refused before any of its words is
+stored (the M2MF decoder rejected an owner word, a replaced FIFO callback, an
+`end` that is not the one the reservation set) quarantines the open block and
+halts admission for the rest of the capture; blocks sealed before it were
+copied with known state and still publish, drain and retire. A context reset or
+a ring label anomaly (not zero after its reset, ahead of the issued blocks or
+regressed) stops the ring on both sides: nothing is read or retired afterwards.
+The decoder accepts only complete increment/non-increment packets: a JUMP,
+CALL or RETURN, any other reserved header bit, a zero count on a nonzero header,
+a packet longer than the words written, a method range past 0x1ffc or a
+method-0 object binding on the M2MF subchannel invalidates it for good, and its
+first rejected header word, that word's byte offset from the context begin and
+the reason are reported in STATUS.
+
 Drainer: a ring record is read only when its block's even label is at or below
 the ring's own PUT frontier (committed after the flush, published after PUT);
 then its MAIN copy is read, never the recycled local block. After whole sink
 acceptance it acknowledges the metadata AND the record's exact ordinal; the last
 ordinal frees the extent. A short or failed sink acknowledges nothing. A block
-not published at seal leaves its records INCOMPLETE and its extent held
-(STATUS LOWER_BOUND).
+not published at seal leaves its records INCOMPLETE and its extent held; any
+extent held at seal makes the FINAL STATUS a lower bound (LOWER_BOUND).
 
 Wire: CONFIG 216 bytes (u32 at 176..208 ring bytes, blocks, pairs, first ring
 report, ring label, stride, extents, metadata stride, legacy pairs; u32@212=1
 owner draws only); OPS 176 bytes, flag 128 RING with u32@160 generation,
 u32@164 extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state (0
 untouched, 1 restored), serials 2g-1/2g on the ring label, `published` the ring
-label value read; COVERAGE 528 bytes; STATUS 192 bytes with u64x8 at 128:
+label value read; COVERAGE 528 bytes; STATUS 208 bytes with u64x8 at 128:
 blocks issued, retired, published ring label, held extents, copied bytes,
-untouched and restored flushes, decoded application words. The reader refuses a
+untouched and restored flushes, decoded application words; then u32@192 the
+decoder's first rejected header word, u32@196 its byte offset from the context
+begin, u32@200 the reason (1 JUMP, 2 CALL, 3 RETURN, 4 reserved header bits,
+5 zero count, 6 packet longer than the words written, 7 method range, 8 M2MF
+object binding, 9 scan cursor outside the context, 10 decoder count overflow; all
+three zero when nothing was rejected) and u32@204 zero. The reader shows it as
+`ring decoder rejected header 0x... at +0x...: <reason>`. The reader refuses a
 ring tail on a legacy record, any other width, a non-consecutive ordinal, a
 generation that does not name its extent and block, ring reports outside its
 block or legacy reports inside one, a block spanning frame tokens, and a STATUS
@@ -476,8 +496,8 @@ defaults (2 blocks, 16 MiB, 16,384 records, 256 frame rows): a metadata record
 is 184 bytes and an extent descriptor 40 in ILP32 and LP64 alike, so the ring's
 one page allocation is 16,777,216 MAIN bytes + 3,014,656 metadata + 163,840
 descriptors = 19,955,712, rounded to 20 MiB (20,971,520 bytes, never freed).
-The control allocation is 253,568 bytes in ILP32 (capture 116,336) and 266,752
-in LP64 (capture 129,416), so the full attach footprint is 21,225,088 bytes
+The control allocation is 253,696 bytes in ILP32 (capture 116,368) and 266,752
+in LP64 (capture 129,456), so the full attach footprint is 21,225,216 bytes
 (ILP32) or 21,238,272 bytes (LP64). The M2MF decoder reads every owner command
 word once, at flush, wrap and FlushBuffer boundaries (STATUS decoded_words; the
 host run decoded 585,722 words for 55,110 timed draws, about 10.6 per draw);

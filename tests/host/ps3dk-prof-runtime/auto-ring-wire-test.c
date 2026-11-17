@@ -23,10 +23,14 @@ int main(void)
     assert(auto_encode_frame_ring(b,sizeof b,&f)==528 && u32(b+480)==3 && u32(b+520)==4);
     assert(auto_encode_frame(b,sizeof b,&f)==480);
     uint64_t counters[15]={0},ring[8]={7,3,14,4,224,4,3,99};
-    assert(auto_encode_status_ring(b,sizeof b,1,0,counters,ring)==192);
-    assert(u32(b+128)==7 && u32(b+152)==4 && u32(b+184)==99);
+    uint32_t reject[3]={0x00042000u,0x1234u,8};
     memset(b,0xa5,sizeof b);
-    assert(!auto_encode_status_ring(b,191,1,0,counters,ring) && b[0]==0xa5);
+    assert(auto_encode_status_ring(b,sizeof b,1,0,counters,ring,reject)==208);
+    assert(u32(b+128)==7 && u32(b+152)==4 && u32(b+184)==99);
+    assert(u32(b+192)==0x00042000u && u32(b+196)==0x1234u && u32(b+200)==8 && u32(b+204)==0);
+    memset(b,0xa5,sizeof b);
+    assert(!auto_encode_status_ring(b,207,1,0,counters,ring,reject) && b[0]==0xa5);
+    assert(!auto_encode_status_ring(b,sizeof b,1,0,counters,ring,NULL) && b[0]==0xa5);
     assert(auto_encode_status(b,sizeof b,1,0,counters)==128);
     auto_queue q;auto_queue_entry *entries=calloc(16384,sizeof *entries);assert(entries);
     assert(!auto_queue_init(&q,entries,16384,252));

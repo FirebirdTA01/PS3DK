@@ -90,16 +90,19 @@ int auto_writer_clock(auto_writer *w, const auto_wire_clock *clock)
     return 1;
 }
 
-static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring);
+static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring,
+                         const uint32_t *reject);
 int auto_writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15])
 {
-    return writer_status(w,flags,values,NULL);
+    return writer_status(w,flags,values,NULL,NULL);
 }
-int auto_writer_status_ring(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t ring[8])
+int auto_writer_status_ring(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t ring[8],
+                            const uint32_t reject[3])
 {
-    return ring ? writer_status(w,flags,values,ring):0;
+    return ring && reject ? writer_status(w,flags,values,ring,reject):0;
 }
-static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring)
+static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring,
+                         const uint32_t *reject)
 {
     const auto_wire_config *c;
     uint64_t disposed;
@@ -132,8 +135,10 @@ static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[1
         if(ring[1]>ring[0] || ring[3]!=ring[0]-ring[1] || (ring[2]&1u) || ring[2]>2u*ring[0] ||
            ring[2]<w->ring_published_max || ring[0]>UINT32_MAX || ring[4]>ring[0]*extent ||
            ring[5]>ring[0] || ring[6]>ring[0]-ring[5]) return 0;
+        if((flags&AUTO_FINAL) && !(flags&AUTO_LOWER_BOUND) && ring[3]) return 0;
+        if(reject[2]>AUTO_STATUS_RING_REJECT_MAX || (!reject[2] && (reject[0] || reject[1]))) return 0;
     }
-    n=ring ? auto_encode_status_ring(w->scratch,w->capacity,c->instance,flags,values,ring):
+    n=ring ? auto_encode_status_ring(w->scratch,w->capacity,c->instance,flags,values,ring,reject):
              auto_encode_status(w->scratch,w->capacity,c->instance,flags,values);
     if(!send(w,C_AUTO_STATUS,n)) return 0;
     memcpy(w->prior,values,sizeof w->prior); w->status_seen=1;

@@ -22,7 +22,13 @@ MUTANTS = {
                        'if(issued-ACQ(&r->retired)>=r->blocks)'),
     'lost-mode': ('commands', 'if(s->known&(1u<<i)) {', 'if(i>=2 && (s->known&(1u<<i))) {'),
     'lost-credit': ('commands', '*end=t->visible;', '*end=t->physical;'),
-    'unknown-binding': ('commands', 'if(!m) {s->invalid=1;return 0;}', 'if(!m) {continue;}'),
+    'unknown-binding': ('commands', 'if(!m) return reject(s,h,where,AUTO_RING_REJECT_BINDING);', 'if(!m) continue;'),
+    # a producer-only halt that also stops the consumer, or that still admits
+    'halt-invalidates': ('core', 'void auto_ring_halt(auto_ring *r) { REL(&r->halted,1u); }',
+                         'void auto_ring_halt(auto_ring *r) { REL(&r->invalid,1u); }'),
+    'admit-after-halt': ('core', 'if(ACQ(&r->invalid) || ACQ(&r->halted)) return', 'if(ACQ(&r->invalid)) return'),
+    # the consumer stops the ring at a quarantined block: a ready block of the same batch no longer retires
+    'quarantine-stops': ('core', 'if(closed==2) return AUTO_RING_INVALID;', 'if(closed==2) {auto_ring_stop(r);return AUTO_RING_INVALID;}'),
     'missing-gpu-wait': ('commands', 'p[6]=METHOD(0,0x68,1)', 'p[6]=METHOD(0,0x50,1)'),
     'wrong-pre-copy-label': ('commands', 'barrier(p,label,2u*generation-1u);', 'barrier(p,label,2u*generation);'),
     'ring-overlap': ('layout', 'p.first=report_first+report_count-(uint32_t)(2u*ring);',

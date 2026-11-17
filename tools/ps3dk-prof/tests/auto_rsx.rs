@@ -2246,7 +2246,10 @@ fn ring_records(chunks: &[(u32, Vec<u8>)]) -> Vec<(usize, usize)> {
     out
 }
 fn ring_mutant(edit: impl Fn(&mut Vec<(u32, Vec<u8>)>)) -> Rule {
-    let (head, mut chunks) = ring_split(&fixture("ring"));
+    ring_mutant_of("ring", edit)
+}
+fn ring_mutant_of(name: &str, edit: impl Fn(&mut Vec<(u32, Vec<u8>)>)) -> Rule {
+    let (head, mut chunks) = ring_split(&fixture(name));
     edit(&mut chunks);
     reader::read(&ring_join(&head, &chunks)).expect_err("the mutant must be refused").rule
 }
@@ -2289,6 +2292,7 @@ fn ring_fixture_from_the_host_runtime() {
     let s = inv.last_status.as_ref().unwrap();
     let t = s.ring.expect("STATUS ring tail");
     assert!(t[0] >= 5 && t[1] == t[0] && t[3] == 0 && t[2] == 2 * t[0], "{t:?}");
+    assert_eq!(s.ring_reject, Some([0, 0, 0]), "the decoder rejected nothing");
     let report = analyze(&cap);
     assert_eq!(report.ring, Some(g));
     assert!(report.state.starts_with("FINAL"), "{}", report.state);
@@ -2302,6 +2306,7 @@ fn ring_fixture_from_the_host_runtime() {
     assert!(v["frames"].is_array(), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(v["frames"].as_array().unwrap().iter().all(|f| f["ring_full"]["clear"] == 0 && f["ring_state"]["clear"] == 0));
     assert_eq!(v["status"]["ring"]["blocks_issued"], t[0]);
+    assert!(v["status"]["ring"]["decoder_rejected"].is_null());
 }
 
 #[test]
@@ -2361,5 +2366,51 @@ fn ring_mutants_are_refused() {
         Rule::AutoStatus);
     // a published ring label below the records' own
     assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 144, 2); }),
+        Rule::AutoStatus);
+    // the decoder rejection: an unknown reason, a word without a reason, a nonzero reserved word
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 200, 11); }),
+        Rule::AutoStatus);
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 192, 0x2000_0000); }),
+        Rule::AutoStatus);
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 204, 1); }),
+        Rule::AutoStatus);
+    // the 192-byte STATUS of the first ring captures is no longer this format's
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); c[i].1.truncate(192); }),
+        Rule::AutoStatus);
+}
+
+// tests/fixtures/auto/ring-stopped.prof is the host runtime's `ringstop` capture (auto-runtime-test.py --case ringstop):
+// after four sealed blocks and before any PUT the application writes a header the M2MF decoder rejects (an object
+// binding on the M2MF subchannel). Block 5's flush is refused with nothing stored, admission halts, blocks 1-4 still
+// publish and retire, block 5 stays held: FINAL with LOWER_BOUND, and the rejected word is named.
+#[test]
+fn ring_stopped_capture_reads_as_a_lower_bound() {
+    let cap = reader::read(&fixture("ring-stopped")).unwrap_or_else(|m| panic!("ring-stopped: {m:?}"));
+    let inv = cap.auto.as_ref().unwrap();
+    let s = inv.last_status.as_ref().unwrap();
+    let t = s.ring.expect("STATUS ring tail");
+    assert_eq!((t[0], t[1], t[3]), (5, 4, 1), "{t:?}");
+    assert!(s.is_final() && s.lower_bound());
+    let [header, at, why] = s.ring_reject.expect("2047/11 decoder rejection");
+    assert_eq!((header, why), (0x0004_2000, 8));
+    assert!(at > 0 && at % 4 == 0);
+    let ring: Vec<_> = inv.ops.iter().filter(|o| o.flags & RING != 0).collect();
+    assert_eq!(ring.iter().filter(|o| o.raw_valid()).count(), 4 * 126);
+    assert!(ring.iter().filter(|o| !o.raw_valid()).all(|o| o.ring.unwrap().generation == 5));
+    assert_eq!(ring.iter().filter(|o| !o.raw_valid()).count(), 10);
+    assert_eq!(analyze(&cap).state, "FINAL (lower bounds)");
+    let (code, out) = cli(&["auto", &fixture_path("ring-stopped")]);
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains(&format!("ring decoder rejected header 0x00042000 at +{at:#x}: object binding (method 0) on \
+        the M2MF subchannel")), "{text}");
+    let (code, out) = cli(&["auto", "--json", &fixture_path("ring-stopped")]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let d = &v["windows"][0]["status"]["ring"]["decoder_rejected"];
+    assert_eq!((d["header"].as_u64(), d["offset"].as_u64(), d["reason"].as_u64()),
+        (Some(0x42000), Some(u64::from(at)), Some(8)), "{d}");
+    // a held extent under an exact FINAL, or a named rejection that changes, is refused
+    assert_eq!(ring_mutant_of("ring-stopped", |c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); c[i].1[2] &= !2; }),
         Rule::AutoStatus);
 }

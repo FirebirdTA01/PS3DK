@@ -97,12 +97,13 @@ pub const MASKS_TAG: (u32, u32) = (1023, 11);
 /// pairs; u32@212 = 1: owner-buffer draws only); OPS 176 bytes (flag 128 RING; tail u32@160 block generation,
 /// u32@164 MAIN extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state 0 untouched / 1 restored /
 /// 2 uncertain); COVERAGE 528 bytes (u64 x3 ring_full at 480, u64 x3 ring_state at 504, disjoint from the ten
-/// exclusions); STATUS 192 bytes (u64 x8 at 128, RING_STATUS_FIELDS).
+/// exclusions); STATUS 208 bytes (u64 x8 at 128, RING_STATUS_FIELDS; u32@192 the M2MF decoder's first rejected header
+/// word, u32@196 its byte offset from the context begin, u32@200 the reason, RING_REJECT_REASONS, 0 none; u32@204 0).
 pub const MASKS_RING: (u32, u32) = (2047, 11);
 pub const CONFIG_BYTES_RING: usize = 216;
 pub const OP_BYTES_RING: u32 = 176;
 pub const FRAME_BYTES_RING: usize = 528;
-pub const STATUS_BYTES_RING: usize = 192;
+pub const STATUS_BYTES_RING: usize = 208;
 /// OPS flag of a report-ring record (2047/11 only).
 pub const OP_RING: u16 = 128;
 /// The ring geometry this reader accepts: 126-pair blocks in 4096-byte extents, 2..4 blocks, whole 1 MiB pages up to
@@ -122,6 +123,24 @@ pub const RING_STATUS_FIELDS: [&str; 8] = [
     "flushes_restored",
     "decoded_words",
 ];
+/// STATUS u32@200 of a 2047/11 capture: why the owner-side M2MF decoder stopped accepting the owner's command words
+/// (index 1..=10; 0 none). The decoder never guesses: from then on the ring admits no new block.
+pub const RING_REJECT_REASONS: [&str; 10] = [
+    "JUMP",
+    "CALL",
+    "RETURN",
+    "reserved header bits",
+    "zero count on a nonzero header",
+    "packet longer than the words written",
+    "method range past 0x1ffc",
+    "object binding (method 0) on the M2MF subchannel",
+    "scan cursor outside the context",
+    "decoder word count overflow",
+];
+/// RING_REJECT_REASONS text of a nonzero STATUS reason (validated by the reader).
+pub fn reject_reason(why: u32) -> &'static str {
+    RING_REJECT_REASONS.get((why as usize).wrapping_sub(1)).copied().unwrap_or("unknown")
+}
 /// A frame with ring_state draws: the report ring's state was unknown or recycling was refused (invalid evidence).
 pub const RING_STATE_UNKNOWN: &str = "covered operation(s) excluded: report-ring state unknown or recycling refused";
 /// An AUTO-owned range (TAG): its own report pair from PS3DK_PROF_AUTO_RANGE_BEGIN to _END in the ring.  TOKEN is
@@ -473,6 +492,9 @@ pub struct Status {
     pub counters: [u64; 15],
     /// 2047/11: RING_STATUS_FIELDS.
     pub ring: Option<[u64; 8]>,
+    /// 2047/11: the decoder's first rejected header word, its byte offset from the context begin and its reason
+    /// (RING_REJECT_REASONS index + 1), all zero when it rejected nothing.
+    pub ring_reject: Option<[u32; 3]>,
 }
 impl Status {
     pub fn is_final(&self) -> bool {
@@ -1262,10 +1284,16 @@ impl Reader {
             *v = c.u64()?;
         }
         let mut ring = [0u64; 8];
+        let mut reject = [0u32; 3];
+        let mut reserved = 0;
         if ringed {
             for v in ring.iter_mut() {
                 *v = c.u64()?;
             }
+            for v in reject.iter_mut() {
+                *v = c.u32()?;
+            }
+            reserved = c.u32()?;
         }
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
@@ -1284,7 +1312,7 @@ impl Reader {
             }
             self.result.statuses += 1;
             self.result.final_seen = true;
-            self.result.last_status = Some(Status { flags, counters: n, ring: None });
+            self.result.last_status = Some(Status { flags, counters: n, ring: None, ring_reject: None });
             return Ok(());
         };
         if let Some(p) = &self.result.last_status {
@@ -1337,6 +1365,17 @@ impl Reader {
                     return bad(r, "AUTO_STATUS report-ring counter decreased");
                 }
             }
+            // the decoder's first rejection: a known reason, nothing without one, the reserved word zero, never changed
+            // once named
+            let [header, at, why] = reject;
+            if reserved != 0 || why as usize > RING_REJECT_REASONS.len() || (why == 0 && (header != 0 || at != 0)) {
+                return bad(r, format!("AUTO_STATUS ring decoder rejection {reject:?} reserved {reserved}"));
+            }
+            if let Some(p) = self.result.last_status.as_ref().and_then(|s| s.ring_reject) {
+                if p[2] != 0 && p != reject {
+                    return bad(r, "AUTO_STATUS ring decoder rejection changed");
+                }
+            }
             // exact FINAL: every issued block was read and its extent retired, and every issued block had records
             if fin && !lower && (held != 0 || issued != last_gen) {
                 return bad(r, format!("exact FINAL AUTO_STATUS with {held} held extent(s), {issued} blocks for \
@@ -1365,7 +1404,8 @@ impl Reader {
             self.result.final_seen = true;
         }
         self.result.statuses += 1;
-        self.result.last_status = Some(Status { flags, counters: n, ring: a.ring.map(|_| ring) });
+        self.result.last_status = Some(Status { flags, counters: n, ring: a.ring.map(|_| ring),
+            ring_reject: a.ring.map(|_| reject) });
         Ok(())
     }
 
@@ -2443,6 +2483,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             let fields: Vec<String> = RING_STATUS_FIELDS.iter().zip(t.iter()).map(|(n, v)| format!("{n} {v}")).collect();
             writeln!(out, "report ring: {}", fields.join(", "))?;
         }
+        if let Some([header, at, why]) = s.ring_reject.filter(|x| x[2] != 0) {
+            writeln!(out, "ring decoder rejected header {header:#010x} at +{at:#x}: {}", reject_reason(why))?;
+        }
     }
     if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
         writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
@@ -2568,8 +2611,15 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             o.insert((*n).into(), json!(v));
         }
         if let Some(t) = s.ring {
-            o.insert("ring".into(), serde_json::Value::Object(RING_STATUS_FIELDS.iter().zip(t.iter())
-                .map(|(n, v)| ((*n).to_string(), json!(v))).collect()));
+            let mut ring: serde_json::Map<String, serde_json::Value> = RING_STATUS_FIELDS.iter().zip(t.iter())
+                .map(|(n, v)| ((*n).to_string(), json!(v))).collect();
+            // the decoder's first rejection, null when it rejected nothing
+            ring.insert("decoder_rejected".into(), match s.ring_reject.filter(|x| x[2] != 0) {
+                Some([header, at, why]) => json!({"header": header, "offset": at, "reason": why,
+                    "reason_text": reject_reason(why)}),
+                None => serde_json::Value::Null,
+            });
+            o.insert("ring".into(), serde_json::Value::Object(ring));
         }
         serde_json::Value::Object(o)
     });

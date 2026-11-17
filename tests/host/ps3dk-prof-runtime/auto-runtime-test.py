@@ -45,7 +45,7 @@ RING_MUTANTS={
                           '    a->scan=(uintptr_t)(void *)ctx->begin; /* the wrap resumes at begin; its JUMP is not application state */','',
                           b'a->scan==(uintptr_t)fifo'),
     'custom-callback':('ringwrap','auto_rsx/auto_runtime.c','(LD_ACQ(&a->ring_flush_request) || !ring_native(ctx))','(LD_ACQ(&a->ring_flush_request))',
-                       b'a->ring.invalid && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK'),
+                       b'a->ring.halted && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK'),
     'end-arbitrary':('ringwrap','auto_rsx/auto_runtime.c','a->tail.physical==physical && end==a->tail.visible',
                      'a->tail.physical==physical && end<=physical',
                      b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible-1)'),
@@ -85,14 +85,23 @@ RING_MUTANTS.update({
                          '    if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||\n'
                          '       a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation) return 0;\n',
                          '',b'known==0'),
+    # a refusal found before any flush word was stored stops the ring on both sides: the sealed blocks never retire
+    'halt-as-stop':('ringstop','auto_rsx/auto_runtime.c',
+                    '    if(!a->ring_refusal) a->ring_refusal=reason;\n    auto_ring_halt(&a->ring);',
+                    '    if(!a->ring_refusal) a->ring_refusal=reason;\n    auto_ring_stop(&a->ring);',b'RETIRED(a)==4'),
+    # a held extent at seal not made a lower bound: FINAL claims completeness (checked on the capture)
+    'seal-ignores-held':('ringlabel','auto_rsx/auto_runtime.c','            if(ring[3]) flags|=AUTO_LOWER_BOUND;\n','',None),
 })
-RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3}
+# checked on the capture after a clean run, not by an assertion of the application
+CAPTURE_MUTANTS=('seal-ignores-held',)
+RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5}
 RING_WRAP=('ringwrap',*RING_RUNTIME)
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture'],default='noinit')
-ap.add_argument('--fixture',type=Path,help='ringfixture: copy the capture here')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel'],default='noinit')
+ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
+ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
@@ -135,7 +144,8 @@ def run(name,cmd,cwd=out):
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
-    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call'):
+    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call',
+                                                     *CAPTURE_MUTANTS):
         expected=RING_MUTANTS[a.mutant][4] if a.mutant in RING_MUTANTS else {'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
                   'no-frame-boundary':b'context.current==words+24',
@@ -508,17 +518,45 @@ if a.case=='lease':
     raise SystemExit(0)
 if a.case in RING_RUNTIME:
     passed={'ringrun':b'PASS','ringmeta':b'AUTO ring metadata-full without a frame-tail latch PASS',
-            'ringshort':b'AUTO ring short sink retires nothing PASS','ringfixture':b'AUTO ring fixture PASS'}[a.case]
+            'ringshort':b'AUTO ring short sink retires nothing PASS','ringfixture':b'AUTO ring fixture PASS',
+            'ringstop':b'AUTO ring producer-only stop drains the sealed blocks PASS',
+            'ringlabel':b'AUTO ring stopped with held extents PASS'}[a.case]
     assert result.stdout.endswith(passed+bytes([10])),result.stdout
     print(result.stdout.decode(),end='')
-    if a.case in ('ringrun','ringfixture'):
+    if a.case in ('ringrun','ringfixture','ringstop','ringlabel'):
         import importlib.util
         spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
         check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
         files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
-        summary=check.verify(files[0].read_bytes(),pending_tail=5 if a.case=='ringrun' else 0)
+        data=files[0].read_bytes()
+        try:
+            if a.case=='ringstop':
+                # blocks 1-4 timed and retired, block 5's ten records incomplete and its extent held (LOWER_BOUND); the
+                # decoder's first rejection: the binding header at the offset the application wrote it
+                summary=check.verify(data,pending_tail=10,held_extents=1)
+                at=int(result.stdout.split(b'header written at +')[1].split()[0],16)
+                assert summary['rejected']==(0x00042000,at,8) and summary['blocks_retired']==4,summary
+            elif a.case=='ringlabel':
+                # nothing read: every ring record incomplete, both extents held (LOWER_BOUND), no decoder rejection
+                count=sum(1 for o in check.ops(data) if o['flags']&128)
+                summary=check.verify(data,pending_tail=count,held_extents=2)
+                assert summary['blocks_retired']==0 and summary['rejected']==(0,0,0),summary
+            else:
+                summary=check.verify(data,pending_tail=5 if a.case=='ringrun' else 0)
+        except AssertionError as e:
+            if a.mutant not in CAPTURE_MUTANTS:raise
+            print(a.mutant+' rejected by the capture check: '+str(e));raise SystemExit(0)
+        assert a.mutant not in CAPTURE_MUTANTS,a.mutant+' survived the capture check'
         print(json.dumps(summary,sort_keys=True))
-        if a.case=='ringfixture' and a.fixture:shutil.copyfile(files[0],a.fixture)
+        if a.reader:
+            # the branch reader reads it (exit 0, not MALFORMED); a stopped ring reads as a lower bound
+            r=run('reader',[a.reader,'auto',files[0]],capture_dir)
+            text=r.stdout.decode()
+            if a.case in ('ringstop','ringlabel'):assert 'FINAL (lower bounds)' in text,text
+            if a.case=='ringstop':
+                assert 'ring decoder rejected header 0x00042000 at +%#x: ' % at in text,text
+            print('reader exit 0: '+next(l for l in text.splitlines() if 'FINAL' in l))
+        if a.case in ('ringfixture','ringstop') and a.fixture:shutil.copyfile(files[0],a.fixture)
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else

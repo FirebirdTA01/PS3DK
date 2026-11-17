@@ -8,6 +8,8 @@
 #define auto_ring_ready ps3dk_prof__auto_ring_ready
 #define auto_ring_ack ps3dk_prof__auto_ring_ack
 #define auto_ring_stop ps3dk_prof__auto_ring_stop
+#define auto_ring_halt ps3dk_prof__auto_ring_halt
+#define auto_ring_quarantine ps3dk_prof__auto_ring_quarantine
 
 enum { AUTO_RING_OK, AUTO_RING_PENDING, AUTO_RING_FULL, AUTO_RING_METADATA,
        AUTO_RING_BOUNDARY, AUTO_RING_SERIAL, AUTO_RING_INVALID };
@@ -31,6 +33,7 @@ typedef struct auto_ring {
     uint32_t issued; /* producer release; labels may not exceed twice this */
     uint32_t retired; /* consumer release; frees a MAIN extent, NOT local reports */
     uint32_t invalid; /* sticky, either side can invalidate */
+    uint32_t halted; /* sticky, producer only: no new admission; issued blocks still drain and retire */
     uint32_t active; /* producer only */
     uint32_t highest_label; /* consumer only, every observation is checked */
 } auto_ring;
@@ -47,7 +50,14 @@ int auto_ring_admit(auto_ring *, uint64_t frame, uint64_t window, int metadata_r
 /* After complete flush emission, or on uncertain emission. No rollback of
  * admitted work. A false emitted argument quarantines the ring. */
 int auto_ring_seal(auto_ring *, int emitted);
+/* Both sides: label anomalies and uncertain emission. Nothing is read or retired afterwards. */
 void auto_ring_stop(auto_ring *);
+/* Producer only: admission ends for good, nothing else changes. Blocks issued with complete flushes still become
+ * ready and retire; the consumer refuses a quarantined block (never reads it) without stopping the ring. */
+void auto_ring_halt(auto_ring *);
+/* Producer: the open block's flush was refused before any of it was stored in the command stream. The block closes
+ * uncertain (never read, never reused) and admission halts; blocks sealed earlier still drain. 0 if none open. */
+int auto_ring_quarantine(auto_ring *);
 /* Consumer: put_frontier is a release/acquire-confirmed published even label
  * target. An observed label above that but within issued work defers; it can be
  * the legal PUT/frontier-store race. Future and regressed labels invalidate. */

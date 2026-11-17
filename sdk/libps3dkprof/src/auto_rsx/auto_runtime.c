@@ -462,12 +462,14 @@ static void increment(auto_capture *a,uint64_t *v)
     }
 }
 
-/* Owner only: recycling stops for the rest of the capture. A pending block is quarantined by its caller. */
+/* Owner only: recycling stops for the rest of the capture, nothing is read or retired afterwards (a label anomaly or
+ * uncertain emission). A pending block is quarantined by its caller. */
 static void ring_refuse(auto_capture *a, uint32_t reason)
 {
     if(!a->ring_refusal) a->ring_refusal=reason;
     auto_ring_stop(&a->ring);
 }
+_Static_assert((int)AUTO_STATUS_RING_REJECT_MAX==(int)AUTO_RING_REJECT_MAX, "STATUS names every decoder rejection reason");
 
 static int initialize_device(auto_capture *a)
 {
@@ -489,30 +491,51 @@ static int ring_native(const gpp_ctx *ctx)
 {
     return ps3tc_fifo_wrap_native((const struct _gcmCtxData *)(const void *)ctx);
 }
+/* Owner only: no new block for the rest of the capture, for a refusal found before anything was stored in the
+ * command stream (unknown M2MF state, a replaced callback, an end that is not ours). Blocks whose copies were already
+ * emitted with known state still drain and retire. */
+static void ring_halt(auto_capture *a, uint32_t reason)
+{
+    if(!a->ring_refusal) a->ring_refusal=reason;
+    auto_ring_halt(&a->ring);
+}
+static int ring_stopped(auto_capture *a)
+{
+    return LD_ACQ(&a->ring.invalid) || LD_ACQ(&a->ring.halted);
+}
 /* Owner: decode the owner words written since the cursor. At every hook all words below current are complete. A
- * cursor outside [begin, current] means the ring moved without the native wrap: the shadow is unknown for good. */
+ * cursor outside [begin, current] means the ring moved without the native wrap: the shadow is unknown for good. The
+ * decoder's first rejection (header, offset, reason) is published once for the drainer's STATUS. */
 static void ring_scan(auto_capture *a, gpp_ctx *ctx)
 {
     uintptr_t begin=(uintptr_t)(void *)ctx->begin,cur=(uintptr_t)(void *)ctx->current;
-    if(a->scan<begin || a->scan>cur || ((cur-a->scan)&3u)) a->shadow.invalid=1;
-    else (void)auto_ring_shadow_scan(&a->shadow,(const uint32_t *)(void *)a->scan,(cur-a->scan)/4u);
+    if(a->scan<begin || a->scan>cur || ((cur-a->scan)&3u))
+        auto_ring_shadow_reject(&a->shadow,0,(uint32_t)(cur-begin),AUTO_RING_REJECT_CURSOR);
+    else {
+        a->shadow.origin=(uint32_t)(a->scan-begin);
+        (void)auto_ring_shadow_scan(&a->shadow,(const uint32_t *)(void *)a->scan,(cur-a->scan)/4u);
+    }
     a->scan=cur;
     ST_REL(&a->ring_decoded,a->shadow.words); /* the decoder's cost, snapshot for the drainer's STATUS */
+    if(a->shadow.bad_reason && !a->ring_reject[2]) {
+        a->ring_reject[0]=a->shadow.bad_header;a->ring_reject[1]=a->shadow.bad_at;
+        ST_REL(&a->ring_reject[2],a->shadow.bad_reason);
+    }
 }
 /* Owner, before the first draw of a new block: keep the worst-case flush below the physical end. Only the native
  * wrap releases it before its JUMP; any other callback refuses recycling. */
 static int ring_tail_reserve(auto_capture *a, gpp_ctx *ctx, uint64_t words)
 {
     uintptr_t end=(uintptr_t)(void *)ctx->end;
-    if(!ring_native(ctx)) {ring_refuse(a,AUTO_RING_REFUSED_CALLBACK);return 0;}
+    if(!ring_native(ctx)) {ring_halt(a,AUTO_RING_REFUSED_CALLBACK);return 0;}
     if(end!=clean_end || !auto_ring_tail_take(&a->tail,(uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
                                               &end,AUTO_RING_FLUSH_WORDS,words)) return 0;
     ctx->end=(void *)end;
     return 1;
 }
 /* Owner, no callback, flush or wait: restore the exact physical end, append the open block's flush at current and
- * seal it. Any refusal quarantines the block (uncertain, never reused) and stops recycling; an end that is not
- * exactly ours is left as it is. */
+ * seal it. A refusal before any flush word is stored quarantines the block (uncertain, never reused) and halts new
+ * admission; blocks sealed earlier still drain. An end that is not exactly ours is left as it is. */
 static void ring_flush(auto_capture *a, gpp_ctx *ctx)
 {
     uintptr_t begin=(uintptr_t)(void *)ctx->begin,cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
@@ -522,10 +545,10 @@ static void ring_flush(auto_capture *a, gpp_ctx *ctx)
     ring_scan(a,ctx);
     ST_REL(&a->ring_flush_request,0u);
     if(!auto_ring_tail_release(&a->tail,begin,cur,&end)) {
-        a->tail.active=0;ring_refuse(a,AUTO_RING_REFUSED_END);goto quarantine;
+        a->tail.active=0;ring_halt(a,AUTO_RING_REFUSED_END);goto quarantine;
     }
     ctx->end=(void *)end;
-    if(!ring_native(ctx)) {ring_refuse(a,AUTO_RING_REFUSED_CALLBACK);goto quarantine;}
+    if(!ring_native(ctx)) {ring_halt(a,AUTO_RING_REFUSED_CALLBACK);goto quarantine;}
     if(!a->ring.active) return;
     seq=a->ring.active;slot=(seq-1u)%a->ring.capacity;
     {
@@ -536,7 +559,7 @@ static void ring_flush(auto_capture *a, gpp_ctx *ctx)
                                  a->ring_offset+slot*a->ring_plan.stride,a->ring_plan.first+local*2u*a->ring_plan.pairs,
                                  a->ring.slots[slot].count*32u,a->ring_label,seq);
     }
-    if(!n) {ring_refuse(a,AUTO_RING_REFUSED_EMIT);goto quarantine;}
+    if(!n) {ring_halt(a,AUTO_RING_REFUSED_EMIT);goto quarantine;} /* no word stored */
     ctx->current=(void *)((uint32_t *)(void *)cur+n);
     a->scan=(uintptr_t)(void *)ctx->current; /* the injected packet is never application state */
     a->ring_injected_words+=n;a->ring_flushes++;
@@ -549,7 +572,7 @@ static void ring_flush(auto_capture *a, gpp_ctx *ctx)
     if(!auto_publication_commit(&a->ring_publication,2u*seq)) ring_refuse(a,AUTO_RING_REFUSED_EMIT);
     return;
 quarantine:
-    if(auto_ring_seal(&a->ring,0)) a->ring_quarantined++;
+    if(auto_ring_quarantine(&a->ring)) a->ring_quarantined++;
 }
 
 /* Owner, outside any draw bracket: settle the open block now (frame, window, seal-request, stop and retirement
@@ -570,8 +593,8 @@ static int ring_open(auto_capture *a, gpp_ctx *ctx, uint64_t frame, uint32_t win
     uintptr_t end;
     int r;
     ring_scan(a,ctx);
-    if(a->shadow.invalid) {ring_refuse(a,AUTO_RING_REFUSED_EMIT);return AUTO_RING_INVALID;}
-    if(!ring_tail_reserve(a,ctx,words+4u)) return LD_ACQ(&a->ring.invalid) ? AUTO_RING_INVALID:AUTO_RING_ROOM;
+    if(a->shadow.invalid) {ring_halt(a,AUTO_RING_REFUSED_EMIT);return AUTO_RING_INVALID;}
+    if(!ring_tail_reserve(a,ctx,words+4u)) return ring_stopped(a) ? AUTO_RING_INVALID:AUTO_RING_ROOM;
     r=auto_ring_admit(&a->ring,frame,window,1,t);
     if(r!=AUTO_RING_OK) {
         end=(uintptr_t)(void *)ctx->end;
@@ -598,7 +621,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     auto_ring_ticket t;
     int r;
     if(!initialize_device(a)) {(void)auto_frames_count(&a->coverage,call->kind,10);return 0;}
-    if(LD_ACQ(&a->ring.invalid)) {(void)auto_frames_ring(&a->coverage,call->kind,1);return 0;}
+    if(ring_stopped(a)) {(void)auto_frames_ring(&a->coverage,call->kind,1);return 0;}
     e=auto_queue_claim_snapshot(&a->operations);
     if(!e) {
         uint32_t column=a->operations.refusal==AUTO_QUEUE_METADATA ? 4:
@@ -610,7 +633,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     if(r==AUTO_RING_BOUNDARY) {
         /* another frame or window (an END and reopen show different ids) or a full block: settle it first */
         if(a->ring.active) ring_flush(a,ctx);
-        r=LD_ACQ(&a->ring.invalid) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words,&t);
+        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words,&t);
     }
     if(r!=AUTO_RING_OK) {
         (void)auto_queue_cancel_snapshot(&a->operations);
@@ -2037,13 +2060,19 @@ void p_auto_drain(prof *p, int seal)
         if(capture->ring_plan.blocks) {
             /* REPORT_RING tail: owner values are its release stores; issued/retired the ring's own atomics */
             uint64_t ring[8];
+            uint32_t reject[3]={0,0,0};
             ring[0]=LD_ACQ(&capture->ring.issued);ring[1]=LD_ACQ(&capture->ring.retired);
             ring[2]=auto_publication_read(&capture->ring_publication);ring[3]=ring[0]-ring[1];
             ring[4]=LD_ACQ(&capture->ring_copied);ring[5]=LD_ACQ(&capture->ring_untouched);
             ring[6]=LD_ACQ(&capture->ring_restored);ring[7]=LD_ACQ(&capture->ring_decoded);
             if(ring[1]>ring[0]) ring[1]=ring[0];
             ring[3]=ring[0]-ring[1];
-            if(!auto_writer_status_ring(&writer,flags,totals,ring)) {p_ext_sink_fail(p,-2);return;}
+            /* an extent still held at seal: its records were not all read, the totals are a lower bound */
+            if(ring[3]) flags|=AUTO_LOWER_BOUND;
+            /* the decoder's first rejected header, its byte offset from the context begin and the reason */
+            reject[2]=LD_ACQ(&capture->ring_reject[2]);
+            if(reject[2]) {reject[0]=capture->ring_reject[0];reject[1]=capture->ring_reject[1];}
+            if(!auto_writer_status_ring(&writer,flags,totals,ring,reject)) {p_ext_sink_fail(p,-2);return;}
         } else if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}
         memset(b,0,sizeof b);p_le32(b,1);p_le32(b+4,c->domain);b[8]=2;b[9]=1;
         if(chunk(p,16,b,40)!=0) return;

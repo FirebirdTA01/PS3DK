@@ -68,6 +68,34 @@ static void refusal_and_quarantine(void)
     assert(auto_ring_admit(&r, 1, 1, 1, &t)==AUTO_RING_SERIAL);
 }
 
+/* A producer-only halt (a flush refused before any word was stored): no new admission, the blocks sealed before it
+ * still become ready and retire, and the consumer stops at the quarantined block without reading it. */
+static void halt_drains_sealed_blocks(void)
+{
+    auto_ring r;
+    auto_ring_slot slots[4];
+    auto_ring_ticket t;
+    assert(auto_ring_init(&r, slots, 4, 2, 2));
+    assert(!auto_ring_quarantine(&r) && r.halted && !r.invalid); /* nothing open: the halt alone */
+    assert(auto_ring_init(&r, slots, 4, 2, 2));
+    assert(auto_ring_admit(&r, 1, 1, 1, &t)==AUTO_RING_OK && auto_ring_seal(&r, 1));
+    assert(auto_ring_admit(&r, 2, 1, 1, &t)==AUTO_RING_OK && auto_ring_seal(&r, 1));
+    assert(auto_ring_admit(&r, 3, 1, 1, &t)==AUTO_RING_OK && t.generation==3);
+    assert(auto_ring_quarantine(&r) && !r.active && r.halted && !r.invalid && slots[2].closed==2);
+    assert(auto_ring_admit(&r, 4, 1, 1, &t)==AUTO_RING_INVALID && r.issued==3); /* no admission after the halt */
+    assert(auto_ring_ready(&r, 1, 4, 4)==AUTO_RING_OK && auto_ring_ack(&r, 1, 0, 1) && r.retired==1);
+    assert(auto_ring_ready(&r, 2, 4, 4)==AUTO_RING_OK && auto_ring_ack(&r, 2, 0, 1) && r.retired==2);
+    /* the quarantined one is never read, and refusing it does not stop the ring: a ready block read before it in
+     * the same consumer batch still acknowledges and retires */
+    assert(auto_ring_init(&r, slots, 4, 2, 2));
+    assert(auto_ring_admit(&r, 1, 1, 1, &t)==AUTO_RING_OK && auto_ring_seal(&r, 1));
+    assert(auto_ring_admit(&r, 2, 1, 1, &t)==AUTO_RING_OK && auto_ring_quarantine(&r));
+    assert(auto_ring_ready(&r, 1, 2, 2)==AUTO_RING_OK);
+    assert(auto_ring_ready(&r, 2, 2, 2)==AUTO_RING_INVALID && !r.invalid && !slots[1].ready);
+    assert(auto_ring_ack(&r, 1, 0, 1) && r.retired==1);
+    assert(!auto_ring_ack(&r, 2, 0, 1) && r.retired==1);
+}
+
 typedef struct concurrent { auto_ring r; auto_ring_slot slots[3]; uint32_t label; } concurrent;
 static void *producer(void *arg)
 {
@@ -117,6 +145,7 @@ int main(void)
 {
     generations_and_sink();
     refusal_and_quarantine();
+    halt_drains_sealed_blocks();
     concurrent_wraps();
     puts("auto-ring core: generations, destination ownership, refusal and quarantine PASS");
     return 0;

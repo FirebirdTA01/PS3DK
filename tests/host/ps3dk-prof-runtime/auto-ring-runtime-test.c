@@ -7,7 +7,10 @@
  *          pending at seal (its records INCOMPLETE).
  *   1 meta: a small metadata budget; metadata-full is not latched for the rest of the frame.
  *   2 short: a failing sink acknowledges no ring ordinal (no MAIN extent is retired).
- *   3 fixture: a small complete capture for the reader (two frames, one over 504 draws). */
+ *   3 fixture: a small complete capture for the reader (two frames, one over 504 draws).
+ *   4 stop: a header the decoder rejects, after four sealed blocks and before any PUT: admission halts, the four
+ *          blocks still publish and retire, the fifth is quarantined and held, the decoder names the word.
+ *   5 label: a label anomaly after two published blocks stops the ring with both extents held. */
 #include <assert.h>
 #include <sched.h>
 #include <stdio.h>
@@ -120,11 +123,20 @@ static uint32_t synced;
 int sys_timer_usleep(unsigned long us) {(void)us;gpu_run();synced=1;return 0;}
 
 /* ---- the drainer's pace: delayed every iteration, or held ---- */
-static uint32_t hold,delay;
+static uint32_t hold,delay,parked;
 static void pace(void)
 {
     if(__atomic_load_n(&delay,__ATOMIC_ACQUIRE)) {struct timespec t={0,200000};nanosleep(&t,NULL);}
+    if(__atomic_load_n(&hold,__ATOMIC_ACQUIRE)) __atomic_add_fetch(&parked,1u,__ATOMIC_ACQ_REL);
     while(__atomic_load_n(&hold,__ATOMIC_ACQUIRE)) sched_yield();
+}
+/* hold the drainer and wait until it is parked at its hook: nothing it does afterwards precedes the release */
+__attribute__((unused)) static void park_drainer(void)
+{
+    uint32_t was=__atomic_load_n(&parked,__ATOMIC_ACQUIRE);
+    __atomic_store_n(&hold,1u,__ATOMIC_RELEASE);
+    for(int i=0;i<200000 && __atomic_load_n(&parked,__ATOMIC_ACQUIRE)==was;i++) {struct timespec t={0,100000};nanosleep(&t,NULL);}
+    assert(__atomic_load_n(&parked,__ATOMIC_ACQUIRE)!=was);
 }
 static uint32_t sink_broken,sink_faults;
 static int fault(unsigned long n,long *ret,int *err)
@@ -235,8 +247,7 @@ int main(void)
     ps3dk_prof_test_hooks.auto_ring_memory=&memory;
     ps3dk_prof__auto_gcm_init_result(&context,sizeof fifo,sizeof fifo,fifo,0);
     o.ring_blocks=2;o.ring_bytes=1u<<20;o.frame_records=256;
-    o.ring_records=TEST_RING_MODE==1 ? 1000u:65536u;
-    assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
+    o.ring_records=TEST_RING_MODE==1 ? 1000u:65536u;    assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
     a=ps3dk_prof__auto_test_capture();
     assert(a->ring_plan.slots==256 && a->ring_plan.pairs==126 && a->ring.capacity==256);
     ps3dk_prof__auto_fifo_boundary(&context);
@@ -350,6 +361,42 @@ int main(void)
         assert(__atomic_load_n(&sink_faults,__ATOMIC_ACQUIRE) && RETIRED(a)==retired);
     }
     puts("AUTO ring short sink retires nothing PASS");
+#elif TEST_RING_MODE==4
+    /* RPCS3 r1: the first cellGcmSetFlip wrote a word the M2MF decoder rejects after four sealed blocks and before the
+     * first PUT. Block 5's flush is refused with nothing stored: it is quarantined and new admission halts, while
+     * blocks 1-4, whose copies were emitted with known state, still publish, drain and retire. */
+    {
+        uint32_t *w,at;
+        ps3dk_prof_frame();
+        for(uint32_t i=0;i<4u*126u;i++) draw();
+        assert(a->ring.issued==4 && !a->ring.active && a->ring_flushes==4 && ctrl.put==IO);
+        for(uint32_t i=0;i<10;i++) draw();
+        assert(a->ring.active==5 && a->tail.active);
+        w=reserve(2);w[0]=M(1,0,1);w[1]=0xfeed0000u;   /* an object binding on the M2MF subchannel */
+        at=(uint32_t)((uintptr_t)w-(uintptr_t)fifo);
+        ps3dk_prof_frame();   /* the frame boundary settles block 5: its scan rejects the header */
+        assert(a->shadow.invalid && a->ring_quarantined==1 && a->ring.slots[4].closed==2 && !a->tail.active);
+        for(uint32_t i=0;i<5;i++) draw();   /* refused: ring_state */
+        assert(a->coverage.live.ring_state[2]==5 && a->ring.issued==5);
+        app_flush(0);app_flush(0);   /* the first PUT: blocks 1-4 publish */
+        settle_drainer(a);
+        printf("ring stop: %u blocks issued, %u retired, header written at +%#x\n",a->ring.issued,RETIRED(a),at);
+        assert(RETIRED(a)==4);
+        assert(a->ring.halted && a->ring_refusal==AUTO_RING_REFUSED_EMIT);
+        assert(a->ring_reject[2]==AUTO_RING_REJECT_BINDING && a->ring_reject[0]==M(1,0,1) && a->ring_reject[1]==at);
+    }
+    puts("AUTO ring producer-only stop drains the sealed blocks PASS");
+#elif TEST_RING_MODE==5
+    /* a future ring label after two published blocks: the consumer stops the ring, nothing is read or retired and
+     * both extents stay held at seal */
+    park_drainer();
+    frame(130);ps3dk_prof_frame();app_flush(0);app_flush(0);
+    assert(a->ring.issued==2 && !a->tail.active && RETIRED(a)==0);
+    st32(&labels[a->ring_label],2u*a->ring.issued+2u);
+    __atomic_store_n(&hold,0u,__ATOMIC_RELEASE);
+    settle_drainer(a);
+    assert(a->ring.invalid && RETIRED(a)==0);
+    puts("AUTO ring stopped with held extents PASS");
 #else
     /* fixture: one frame over 504 draws and a small one, all timed and published */
     frame(520);app_flush(1);
