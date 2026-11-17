@@ -73,8 +73,18 @@ The primary result preserves this order: physical/encoder failure, close
 failure, resource exhaustion, source incompleteness, join failure, then
 retention failure. IO, close and join facts are also recorded separately.
 Retention is eligible only after successful terminal commit, close and join.
+Cold inspection counts the original 16-byte header in its metadata limit. The
+PPU encoder's metadata pool excludes those bytes; the combined encoder's pool
+already includes them. Enrollment passes the selected encoder's limit with
+that distinction preserved. A TRAILER changes terminal state without occupying
+the retained metadata pool, so exact-capacity captures can still complete.
 Source completeness and qualified timing remain reader decisions; physical
 SEALED alone is insufficient.
+
+The existing live protocol uses append offsets and cannot stream reused rolling
+slots. Live startup refuses a rolling capture before allocating or starting its
+consumer, using the immutable capture format published at successful init.
+Ordinary append captures keep their existing live behavior.
 
 ## Acceptance tests
 

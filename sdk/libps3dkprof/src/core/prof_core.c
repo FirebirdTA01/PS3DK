@@ -64,6 +64,9 @@ uint64_t ps3dk_prof_test_stats[128];
 /* The capture record: outside g_storage, so a failed init (which clears g_storage) never touches it.  Filled once by
  * the successful init, then published by a release store of g_capture_state; immutable afterwards, never freed. */
 static ps3dk_prof_capture_record g_capture;
+/* Published by g_capture_state with the immutable capture record. Kept out of
+ * the public record ABI; legacy live offsets are valid only for append files. */
+static uint32_t g_capture_rolling;
 static uint32_t g_capture_state;   /* 0 none, 1 FILE sink (record valid), 2 callback sink */
 
 /* ---- primitives --------------------------------------------------------------------------------------------------- */
@@ -1853,6 +1856,9 @@ static void publish_capture_record(const prof *p)
     g_capture.app_len = p->app_len;
     memcpy(g_capture.build_id, p->build_id, p->build_id_len);
     g_capture.build_id_len = p->build_id_len;
+#ifdef P_ROLLING_RUNTIME
+    g_capture_rolling = p->rolling != NULL;
+#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
     if (ps3dk_prof_test_hooks.before_capture_publish)
         ps3dk_prof_test_hooks.before_capture_publish();
@@ -1872,6 +1878,11 @@ int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)
         return PS3DK_PROF_ENOTSUP;
     *out = g_capture;
     return PS3DK_PROF_OK;
+}
+
+int ps3dk_prof__capture_rolling(void)
+{
+    return LD_ACQ(&g_capture_state) == 1u && g_capture_rolling != 0;
 }
 
 static int init_gate(const ps3dk_prof_config *cfg, const void *ext)

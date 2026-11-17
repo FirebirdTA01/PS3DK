@@ -1132,10 +1132,18 @@ static int retain_completed(prof *p, int result)
 #ifdef P_ROLLING_RUNTIME
     if (p->rolling) {
         p_roll_runtime *r = p->rolling;
+        uint64_t metadata;
+        if (result != PS3DK_PROF_OK || !p->retention_keep)
+            return result;
+        /* Cold inspection counts the original 16-byte header in both formats.
+         * The PPU pool excludes it; the combined pool already includes it. */
+        metadata = r->combined_enabled ? r->combined.metadata_bytes :
+                   (uint64_t)r->options.ppu.metadata_bytes + 16u;
+        if (metadata > UINT32_MAX)
+            return PS3DK_PROF_ERETENTION;
         pfi_limits limits = {r->disk.file_bytes, r->disk.slot_bytes,
-                            r->options.store.checkpoint_bytes, r->options.ppu.metadata_bytes};
-        if (result == PS3DK_PROF_OK && p->retention_keep &&
-            pal_retain_complete_kind(p->snk.path, p->app, p->tb_at_init,
+                            r->options.store.checkpoint_bytes, (uint32_t)metadata};
+        if (pal_retain_complete_kind(p->snk.path, p->app, p->tb_at_init,
                                      p->retention_keep, 2u /* PROFR v2 */, &limits))
             return PS3DK_PROF_ERETENTION;
         return result;

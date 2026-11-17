@@ -416,7 +416,7 @@ static int core_accept(void *opaque,const void *accepted,void *prepared,const vo
        ||(a->next==0&&ty!=1)||(a->next==1&&ty!=2)||(a->next>=2&&(ty==1||ty==2)))return PFR_INVALID;
     if(a->next==UINT64_MAX-1||n>UINT64_MAX-16-a->bytes){result->reason=PFR_COUNTER_RANGE;return PFO_RESOURCE;}
     memcpy(s,a,c->layout.arena_bytes);
-    if(ty!=5&&!(external_metadata&&storage==PFP_EXTERNAL_EVENT)){
+    if(ty!=5&&ty!=6&&!(external_metadata&&storage==PFP_EXTERNAL_EVENT)){
         uint32_t old_offset=0,old_bytes=0,retained=s->metadata_used;
         uint8_t *metadata=(uint8_t *)s+c->layout.metadata_offset;
         if(external_metadata&&storage==PFP_EXTERNAL_LATEST){uint32_t at=0,count=0;

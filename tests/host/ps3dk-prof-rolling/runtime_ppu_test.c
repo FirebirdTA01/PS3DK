@@ -164,7 +164,10 @@ static void manifest(const char *kind,int observed)
         options.ppu.incarnations,options.ppu.descriptors,options.ppu.stack_rows,options.ppu.frame_identities,options.ppu.metadata_bytes,options.ppu.checkpoint_bytes)>0,"manifest-write");
     CHECK(!fclose(f),"manifest-close");
 }
-int main(int argc,char **argv)
+#ifndef RUNTIME_PPU_ENTRY
+#define RUNTIME_PPU_ENTRY main
+#endif
+int RUNTIME_PPU_ENTRY(int argc,char **argv)
 {
     ps3dk_prof_config c;const char *kind;int rc;
     if(argc!=3){fputs("usage: runtime-ppu CASE EXISTING_OUTPUT_DIRECTORY\n",stderr);return 2;}

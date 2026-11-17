@@ -26,7 +26,7 @@ RUNNER = Path('tests/host/ps3dk-prof-rolling/run_runtime_lifecycle.py')
 CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_lifecycle_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
 PINS = {
-    DRAIN: 'e00ab67def7678c9315fcf26a0842cae21a9a65dd2a5651cab238fc6be84ba20',
+    DRAIN: '09a6baf8346ce11b58c42e23e9baf93c056ed692088142bd679baea2b01920fe',
     BRIDGE: 'dd91e860e2c615857bcd3310da931441972e8a7c73ea6b0a4657247bb39f2310',
 }
 RUST_TESTS = {
@@ -105,8 +105,8 @@ def specifications():
          [('r->record.join_result = p->join_failed ? PS3DK_PROF_ETHREAD : 0;', 'r->record.join_result = 0;')],
          [native('join-only', 'typed-failure-precedence')]),
         ('enroll_failed_sealed_capture', DRAIN,
-         [('if (result == PS3DK_PROF_OK && p->retention_keep &&\n            pal_retain_complete_kind',
-           'if (p->retention_keep &&\n            pal_retain_complete_kind')],
+         [('if (result != PS3DK_PROF_OK || !p->retention_keep)\n            return result;',
+           'if (!p->retention_keep)\n            return result;')],
          [native('join-only', 'no-enrollment-on-failure-or-resource')]),
         ('worker_enrolls_before_join', DRAIN,
          [('rc = p_quiesce_freeze_seal(p);\n    __atomic_store_n(&p->thread_result',

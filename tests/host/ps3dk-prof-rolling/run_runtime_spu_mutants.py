@@ -27,10 +27,11 @@ RUNNER = Path('tests/host/ps3dk-prof-rolling/run_runtime_spu.py')
 CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_spu_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # Normalized LF pins reviewed after parent gate101 ASan/UBSan and Rust5 GREEN.
-# Existing three sources retain gate97 pins; only the private inline boundary
-# was added in ext_runtime.c. Mandatory isolated baselines still run first.
+# Bridge/SPU retain gate97 pins; ext_runtime has the gate101 inline boundary.
+# CORE repinned after gate107: immutable capture-format publication for live
+# refusal only. Mandatory isolated baselines still run first.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': '808492a6f4392df39f9c4a6fda903fad28812ec1240e34e9739b6add0a262693',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'd18f362aee01ba7cd5bef0140d18a0502521689dadab9ab2181f9079eda28204',
     'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'dd91e860e2c615857bcd3310da931441972e8a7c73ea6b0a4657247bb39f2310',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',

@@ -156,7 +156,10 @@ static void d6_inline_resource(int append)
            "inline-public-result-immutable");
     }
 }
-int main(int argc,char **argv)
+#ifndef RUNTIME_SPU_ENTRY
+#define RUNTIME_SPU_ENTRY main
+#endif
+int RUNTIME_SPU_ENTRY(int argc,char **argv)
 {
     uint32_t image;int append,resource,crossing,inline_resource;prod *a=&d6_producers[0],*b=&d6_producers[1];
     if(argc!=3){fputs("usage: runtime-spu CASE OUTPUT_DIRECTORY\n",stderr);return 2;}
