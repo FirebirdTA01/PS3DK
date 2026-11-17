@@ -3,7 +3,7 @@
 
 Requires unchanged native8 + Rust5 baselines. Only the designated semantic
 assertion counts; compiler errors, signals, deadlines and unrelated failures do
-not. Product pins were reviewed after parent gate101 GREEN, not by this runner.
+not. Product pins were reviewed after parent gate120 GREEN, not by this runner.
 """
 import argparse
 import hashlib
@@ -30,11 +30,11 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # Bridge/SPU retain gate97 pins; ext_runtime has the gate101 inline boundary.
 # CORE repinned after gate107: immutable capture-format publication for live
 # refusal only. Mandatory isolated baselines still run first.
-# CORE/BRIDGE repinned after review against b8704674e: hook-independent
-# p_roll_options type and equivalent P_ROLL_RESOURCE (-33) name only.
+# CORE/BRIDGE repinned after gate120 and review against a79284960: tagged
+# PPU/combined/schema2 selection. Combined witnesses and baseline stay unchanged.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': '8d23adf79b06003980f6782155715c528b80f1a4f59ab7cc783c299edbc26bd7',
-    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'e8fe8af7e0d96d3be486c12e9b54d14561e43480be6884d269c26a4435726d9c',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'f7e69aee0fe5f9fa147e9cbce1b5f7ce673087fc9b0ffa39d5f1f56d1989406c',
+    'sdk/libps3dkprof/src/rolling/roll_runtime.c': '2d9250d67d171b38c5640142f4db15401c42b71ed779cdd02942629411cded46',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',
 }
@@ -91,6 +91,10 @@ def snapshot():
 
 def specifications():
     native = lambda case, marker: dict(mode='native', case=case, marker=f'RUNTIME_SPU_ASSERT[{marker}]')
+    combined_setter = ('int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *o, const pfm_config *m)\n'
+                       '{\n    int rc = gate_enter(G_CONFIGURING);\n    if (rc) return rc;\n'
+                       '    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1 ||\n'
+                       '        (o->enabled && !m)')
     return [
         dict(name='missing_inline_consumer_boundary', edits=[(EXT,
              '#ifdef P_ROLLING_RUNTIME\n'
@@ -118,7 +122,8 @@ def specifications():
              'r->result = P_ROLL_RESOURCE;', 'r->result = PS3DK_PROF_ESINKFAIL;')],
              witness=native('resource', 'SPU-resource-not-sink-failure')),
         dict(name='ppu_prepare_for_combined', edits=[(BRIDGE,
-             'if (m) r->buffers.prepare = pfm_prepare;', 'if (m) r->buffers.prepare = pfp_prepare;')],
+             'if (m) r->buffers.prepare = pfm_prepare;\n#endif\n#ifdef P_ROLLING_SCHEMA2',
+             'if (m) r->buffers.prepare = pfp_prepare;\n#endif\n#ifdef P_ROLLING_SCHEMA2')],
              witness=native('rotation', 'real-combined-init')),
         dict(name='mask_result_original_flags', edits=[(BRIDGE,
              '(uint32_t)head[14] << 16 | (uint32_t)head[15] << 24;',
@@ -127,7 +132,7 @@ def specifications():
         dict(name='mask_initial_checkpoint_flags', edits=[(BRIDGE,
              'if (rc) return PS3DK_PROF_EINVAL;\n    if (pfr_file_bind',
              'if (rc) return PS3DK_PROF_EINVAL;\n'
-             '    if (r->combined_enabled) {\n'
+             '    if (r->selection.kind == P_ROLL_COMBINED) {\n'
              '        uint8_t *bad = (uint8_t *)r->initial;\n'
              '        p_le32(bad + 28, r->record.original_flags & ~6u);\n'
              '        p_le32(bad + initial - 4, p_crc32(bad, initial - 4));\n'
@@ -137,13 +142,17 @@ def specifications():
         # One intentionally joint control: both redundant capacity gates must
         # be bypassed. Never label it two independent guard kills.
         dict(name='allow_conflicting_ppu_capacities', edits=[(CORE,
-             '(o->enabled && !m) || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||\n'
+             combined_setter + ' || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||\n'
              '        o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes)',
-             '(o->enabled && !m))'), (BRIDGE,
-             'if (m && (o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||\n'
+             combined_setter + ')'), (BRIDGE,
+             'if (selection && selection->kind != P_ROLL_PPU &&\n'
+             '             (o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||\n'
              '              o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes))\n'
              '        return PS3DK_PROF_EINVAL;',
-             '/* MUTANT: conflicting PPU capacities also bypassed at planner. */')],
+             'if (selection && selection->kind != P_ROLL_PPU && selection->kind != P_ROLL_COMBINED &&\n'
+             '             (o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||\n'
+             '              o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes))\n'
+             '        return PS3DK_PROF_EINVAL;')],
              witness=native('rotation', 'conflicting-capacities-refused')),
     ]
 
@@ -257,7 +266,7 @@ def main():
         print(json.dumps(dict(observed_pins=candidates, approved_pins_match=APPROVED_PINS == candidates), indent=2))
         for v in changes:
             print(f'{v["name"]}: {v["witness"]["case"]} -> {v["witness"]["marker"]}')
-        print('8 controls; native8 + Rust5 mandatory; no subprocess/build; source pins approved separately after gate101')
+        print('8 controls; native8 + Rust5 mandatory; no subprocess/build; source pins reviewed after gate120')
         return 0
     if os.name != 'posix':
         raise GateError('normal execution requires Linux/WSL')

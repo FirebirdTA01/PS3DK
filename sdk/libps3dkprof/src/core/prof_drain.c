@@ -1137,8 +1137,12 @@ static int retain_completed(prof *p, int result)
             return result;
         /* Cold inspection counts the original 16-byte header in both formats.
          * The PPU pool excludes it; the combined pool already includes it. */
-        metadata = r->combined_enabled ? r->combined.metadata_bytes :
-                   (uint64_t)r->options.ppu.metadata_bytes + 16u;
+        switch (r->selection.kind) {
+        case P_ROLL_COMBINED: metadata = r->selection.limits.combined.metadata_bytes; break;
+        case P_ROLL_SCHEMA2: metadata = r->selection.limits.schema2.shared.metadata_bytes; break;
+        case P_ROLL_PPU: metadata = (uint64_t)r->options.ppu.metadata_bytes + 16u; break;
+        default: return PS3DK_PROF_ERETENTION;
+        }
         if (metadata > UINT32_MAX)
             return PS3DK_PROF_ERETENTION;
         pfi_limits limits = {r->disk.file_bytes, r->disk.slot_bytes,

@@ -14,7 +14,7 @@ static void *part(uint8_t *base, size_t *n, size_t bytes)
     return base ? base + at : (void *)1;
 }
 
-static int layout(const p_roll_options *o, const pfm_config *m, uint8_t *base,
+static int layout(const p_roll_options *o, const p_roll_selection *selection, uint8_t *base,
                   p_roll_runtime *r, size_t *bytes)
 {
     pfr_layout disk;
@@ -22,10 +22,18 @@ static int layout(const p_roll_options *o, const pfm_config *m, uint8_t *base,
     size_t n = 0;
     unsigned i;
     void *v;
+    const pfm_config *m = selection->kind == P_ROLL_COMBINED ? &selection->limits.combined :
+                         selection->kind == P_ROLL_SCHEMA2 ? &selection->limits.schema2.shared : NULL;
     if (m) {
 #ifdef PS3DK_PROF_WITH_SPU
         pfm_layout combined;
-        if (pfm_plan(m, &combined)) return PS3DK_PROF_EINVAL;
+        if (selection->kind == P_ROLL_SCHEMA2) {
+#ifdef P_ROLLING_SCHEMA2
+            if (pfm2_plan(&selection->limits.schema2, &combined)) return PS3DK_PROF_EINVAL;
+#else
+            return PS3DK_PROF_ENOTSUP;
+#endif
+        } else if (pfm_plan(m, &combined)) return PS3DK_PROF_EINVAL;
         memset(&enc, 0, sizeof enc);
         enc.context_bytes = combined.context_bytes;
         enc.arena_bytes = combined.arena_bytes;
@@ -61,30 +69,36 @@ static int layout(const p_roll_options *o, const pfm_config *m, uint8_t *base,
 #ifdef PS3DK_PROF_WITH_SPU
         if (m) r->buffers.prepare = pfm_prepare;
 #endif
+#ifdef P_ROLLING_SCHEMA2
+        if (selection->kind == P_ROLL_SCHEMA2) r->buffers.prepare = pfm2_prepare;
+#endif
     }
     *bytes = n;
     return 0;
 }
 
-int p_roll_plan(const p_roll_options *o, const pfm_config *m, size_t *bytes)
+int p_roll_plan(const p_roll_options *o, const p_roll_selection *selection, size_t *bytes)
 {
-    if (!o || o->size != sizeof *o || o->version != 1 ||
+    if (!o || !bytes || o->size != sizeof *o || o->version != 1 ||
         o->reserved || o->enabled > 1) return PS3DK_PROF_EINVAL;
-    if (m && (o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
+    if (selection && selection->kind != P_ROLL_PPU &&
+             (o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
               o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes))
         return PS3DK_PROF_EINVAL;
     if (!o->enabled) { *bytes = 0; return 0; }
-    return layout(o, m, NULL, NULL, bytes);
+    if (!selection || selection->kind < P_ROLL_PPU || selection->kind > P_ROLL_SCHEMA2)
+        return PS3DK_PROF_EINVAL;
+    return layout(o, selection, NULL, NULL, bytes);
 }
 
-void p_roll_bind(prof *p, void *base, const p_roll_options *o, const pfm_config *m, size_t total)
+void p_roll_bind(prof *p, void *base, const p_roll_options *o, const p_roll_selection *selection, size_t total)
 {
     p_roll_runtime *r = base;
     size_t bytes;
     memset(r, 0, sizeof *r);
     r->options = *o;
-    if (m) { r->combined = *m; r->combined_enabled = 1; }
-    (void)layout(o, m, base, r, &bytes); /* checked before core allocation */
+    r->selection = *selection;
+    (void)layout(o, selection, base, r, &bytes); /* checked before core allocation */
     r->record.size = sizeof r->record; r->record.version = 1;
     r->record.state_bytes = total; r->record.file_bytes = r->disk.file_bytes;
     p->rolling = r;
@@ -125,10 +139,17 @@ int p_roll_start(prof *p, const uint8_t head[16])
     r->record.original_flags = (uint32_t)head[12] | (uint32_t)head[13] << 8 |
                               (uint32_t)head[14] << 16 | (uint32_t)head[15] << 24;
 #ifdef PS3DK_PROF_WITH_SPU
-    if (r->combined_enabled)
-        rc = pfm_init(r->buffers.encoder_ctx, r->encoder.context_bytes, &r->combined,
+    if (r->selection.kind == P_ROLL_COMBINED)
+        rc = pfm_init(r->buffers.encoder_ctx, r->encoder.context_bytes, &r->selection.limits.combined,
                      head, r->buffers.arenas[0], r->encoder.arena_bytes,
                      r->initial, r->options.store.checkpoint_bytes, &initial);
+    else
+#endif
+#ifdef P_ROLLING_SCHEMA2
+    if (r->selection.kind == P_ROLL_SCHEMA2)
+        rc = pfm2_init(r->buffers.encoder_ctx, r->encoder.context_bytes, &r->selection.limits.schema2,
+                      head, r->buffers.arenas[0], r->encoder.arena_bytes,
+                      r->initial, r->options.store.checkpoint_bytes, &initial);
     else
 #endif
     rc = pfp_init(r->buffers.encoder_ctx, r->encoder.context_bytes, &r->options.ppu,

@@ -25,9 +25,16 @@ LIB=ROOT/'sdk/libps3dkprof/src'
 SUPERVISOR=HERE/'run_counter_transfer_mutants.py'
 PROBE=HERE/'runtime_hookfree_probe.c'
 UNITS=['core/prof_core.c','core/prof_drain.c','rolling/roll_runtime.c',
-       'rolling/roll_combined.c','rolling/roll_ppu.c','rolling/roll_retention_inspect.c']
+       'rolling/roll_combined.c','rolling/roll_combined2.c','rolling/roll_ppu.c','rolling/roll_retention_inspect.c']
+PUBLIC_HEADERS={
+    'prof.h':ROOT/'sdk/include/ps3dk/prof.h',
+    'prof_auto.h':ROOT/'sdk/include/ps3dk/prof_auto.h',
+    'prof_fifo.h':ROOT/'sdk/include/ps3dk/prof_fifo.h',
+    'prof_gpu.h':LIB/'rsx/prof_gpu.h',
+}
 RUNTIME='ps3dk_prof__roll_runtime_'
 REQUIRED={RUNTIME+n for n in ['plan','bind','start','accept','flush','finish','publish']}
+SCHEMA2_REQUIRED={'ps3dk_prof__roll_combined2_'+n for n in ['plan','init','prepare']}
 GUARD='ps3dk prof: PS3DK_PROF_TEST_HOOKS is host-only; the LV2 PAL build is hook-free'
 MAX_FILES=16384
 MAX_INPUT=256<<20
@@ -45,7 +52,8 @@ def digest(p):
 
 
 def inventory(sdk,cc,nm):
-    paths={Path(__file__).resolve(),PROBE,SUPERVISOR,ROOT/'sdk/include/ps3dk/prof.h',cc,nm}
+    paths={Path(__file__).resolve(),PROBE,SUPERVISOR,cc,nm,*PUBLIC_HEADERS.values(),
+           ROOT/'sdk/libgcm_cmd/src/ps3tc_fifo_observe.h'}
     for d in [LIB]+([ROOT/'sdk/include',ROOT/'sdk/libgcm_cmd/src',sdk/'ppu/include'] if sdk else []):
         paths.update(p.resolve() for p in d.rglob('*') if p.is_file() and p.suffix in ('.h','.c','.inc'))
     if len(paths)>MAX_FILES:raise GateError('input file ceiling')
@@ -97,7 +105,7 @@ def main():
     pins=inventory(sdk,cc,nm)
     out.mkdir(parents=True,exist_ok=False)
     include=out/'include/ps3dk';include.mkdir(parents=True)
-    shutil.copyfile(ROOT/'sdk/include/ps3dk/prof.h',include/'prof.h')
+    for name,source in PUBLIC_HEADERS.items():shutil.copyfile(source,include/name)
     config=out/'config.h';config.write_text('#define PS3DK_PROF_SDK_VERSION "private-hookfree-compile"\n')
     guard=out/'pal_guard.c';guard.write_text('#include "pal.h"\n')
     spec=importlib.util.spec_from_file_location('hookfree_supervisor',SUPERVISOR)
@@ -105,6 +113,7 @@ def main():
     if sdk:os.environ.update(PS3DEV=str(sdk),PS3DK=str(sdk))
     deadline=time.monotonic()+a.overall_timeout
     report=dict(status='FAIL',mode=a.mode,input_hashes=pins,steps=[],arms=[],
+                public_header_overlay={name:dict(source=str(source),sha256=digest(source)) for name,source in PUBLIC_HEADERS.items()},
                 limits=dict(input_files=MAX_FILES,input_bytes=MAX_INPUT,output_bytes_between_processes=MAX_OUTPUT,
                     log_bytes=supervisor.LOG_LIMIT,command_seconds=a.timeout,overall_seconds=a.overall_timeout,
                     free_floor_bytes=floor,parallel_jobs=1),compile_only=True)
@@ -127,22 +136,23 @@ def main():
         abis=[('host',ctypes.sizeof(ctypes.c_void_p),[])] if not sdk else [('ilp32',4,[]),('lp64',8,['-mlp64'])]
         for abi,pointer,abi_flags in abis:
             common=['-O2','-std=c11','-Wall','-Wextra','-Werror','-Wno-prio-ctor-dtor','-fno-instrument-functions',
-                    '-DPS3DK_PROF=1','-include',config.as_posix()]+abi_flags
-            for directory in [LIB/'core',LIB/'rolling',LIB/'pal',LIB/'spu',LIB/'rsx']:
+                    '-DPS3DK_PROF=1','-include',config.as_posix(),'-I',include.parent.as_posix()]+abi_flags
+            for directory in [LIB/'core',LIB/'rolling',LIB/'pal',LIB/'spu',LIB/'rsx',LIB/'auto_rsx',LIB/'fifo']:
                 common+=['-I',directory.as_posix()]
             if sdk:
                 common+=['-mcpu=cell','-fstack-usage','-I',(ROOT/'sdk/include').as_posix(),
                          '-I',(sdk/'ppu/include').as_posix(),'-I',(ROOT/'sdk/libgcm_cmd/src').as_posix()]
-            else:common+=['-pthread','-I',include.parent.as_posix()]
+            else:common+=['-pthread','-I',(ROOT/'sdk/libgcm_cmd/src').as_posix()]
             # Guard is checked independently from rolling feature admission.
             forbidden=out/(abi+'-forbidden.o')
             run(abi+'-lv2-hooks-rejected',[cc,*common,'-DPS3DK_PROF_PAL_LV2','-DPS3DK_PROF_TEST_HOOKS',
                 '-c',guard.as_posix(),'-o',forbidden.as_posix()],expect_guard=True)
             if forbidden.exists():raise GateError('forbidden PAL build produced an object')
             pal='-DPS3DK_PROF_PAL_LV2' if sdk else '-DPS3DK_PROF_PAL_HOST'
-            for gate in ['off','on','spu']:
+            for gate in ['off','on','spu','auto-ring']:
                 flags=common+[pal]+([] if gate=='off' else ['-DPS3DK_PROF_ROLLING'])
-                if gate=='spu':flags+=['-DPS3DK_PROF_WITH_SPU','-DPS3DK_PROF_WITH_PROFILE']
+                if gate in ('spu','auto-ring'):flags+=['-DPS3DK_PROF_WITH_SPU','-DPS3DK_PROF_WITH_PROFILE']
+                if gate=='auto-ring':flags+=['-DPS3DK_PROF_WITH_FIFO','-DPS3DK_PROF_WITH_AUTO','-DPS3DK_PROF_AUTO_RING']
                 arm=dict(name=abi+'-'+gate,missing=[],units={});report['arms'].append(arm)
                 for unit in UNITS:
                     label=arm['name']+'-'+unit.removesuffix('.c').replace('/','-');obj=out/(label+'.o')
@@ -154,6 +164,14 @@ def main():
                         defined={n for n,t in syms.items() if t.intersection({'T','D'})}
                         if gate=='off' and syms:raise GateError('gate-off runtime object is not empty')
                         if gate!='off':arm['missing']=sorted(REQUIRED-defined)
+                        if gate=='auto-ring':
+                            references={n for n,t in syms.items() if 'U' in t}
+                            if not SCHEMA2_REQUIRED.issubset(references):
+                                raise GateError('hook-free schema2 runtime dispatch references missing: '+label)
+                    if unit=='rolling/roll_combined2.c' and gate=='auto-ring':
+                        defined={n for n,t in syms.items() if t.intersection({'T','D'})}
+                        if not SCHEMA2_REQUIRED.issubset(defined):
+                            raise GateError('schema2 encoder definitions missing: '+label)
                     if gate=='off' and any(n.startswith(RUNTIME) for n in syms):raise GateError('gate-off runtime reference: '+label)
                 if arm['missing']:
                     arm['assertion']='ROLL_HOOKFREE_ASSERT[enabled-runtime-symbols]'

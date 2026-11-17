@@ -7,6 +7,21 @@ admission. The LV2 PAL still rejects test hooks; host behavior and target
 compilation do not establish target runtime behavior or filesystem durability.
 Append output remains the default.
 
+The private AUTO/FIFO selector now connects the real producer drain to the
+schema2 encoder. One tagged selection chooses PPU, PPU/SPU, or managed
+AUTO/FIFO output; rejected setters preserve the previous selection. The
+AUTO/FIFO profile checks the archive's actual family flags before file creation
+and refuses manual GPU attachment. This host acceptance seam is not installed
+as a public options API.
+
+The host protocol fixture runs the native FIFO provider and report-ring command
+executor: 960 draws rotate through real rolling output, while a separate
+capacity case refuses an OPS chunk before queue acknowledgement or MAIN extent
+retirement. After automatic profiling stop, the owner restores its physical
+command-buffer end and ordinary GPU commands continue. The fixture validates
+application M2MF bytes and retained C checkpoints against the original capture.
+It does not establish target filesystem behavior or durability.
+
 ## Configuration and storage
 
 `ps3dk_prof_test_rolling_set` selects the PPU/WINDOWS encoder. The separate

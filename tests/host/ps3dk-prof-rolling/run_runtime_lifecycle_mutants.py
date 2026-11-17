@@ -25,11 +25,11 @@ BRIDGE = Path('sdk/libps3dkprof/src/rolling/roll_runtime.c')
 RUNNER = Path('tests/host/ps3dk-prof-rolling/run_runtime_lifecycle.py')
 CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_lifecycle_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
-# Reviewed against b8704674e: DRAIN guards the callback with TEST_HOOKS;
-# BRIDGE uses hook-independent type/resource aliases. Host mutations unchanged.
+# Repinned after gate120, selection diff reviewed against a79284960.
+# Lifecycle mutation anchors and all exact behavioral witnesses are unchanged.
 PINS = {
-    DRAIN: 'c491df7ace12d8b16ba669900aa40cd345ca7242ac00527604e7430344b420d0',
-    BRIDGE: 'e8fe8af7e0d96d3be486c12e9b54d14561e43480be6884d269c26a4435726d9c',
+    DRAIN: 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
+    BRIDGE: '2d9250d67d171b38c5640142f4db15401c42b71ed779cdd02942629411cded46',
 }
 RUST_TESTS = {
     'actual_thread_automatic_resource_stop_preserves_first_public_join_and_result',

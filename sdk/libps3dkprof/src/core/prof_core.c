@@ -48,8 +48,7 @@ static struct {
     uint32_t retention_keep;
 #ifdef P_ROLLING_RUNTIME
     p_roll_options rolling;
-    pfm_config rolling_combined;
-    uint32_t rolling_combined_enabled;
+    p_roll_selection rolling_selection;
 #endif
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arcs;
@@ -1287,11 +1286,13 @@ int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *o)
     else {
 #ifdef P_ROLLING_RUNTIME
         size_t bytes;
-        rc = p_roll_plan(o, NULL, &bytes);
+        p_roll_selection selection = {0};
+        selection.kind = P_ROLL_PPU;
+        rc = p_roll_plan(o, &selection, &bytes);
         if (!rc) {
             g_pending.rolling = *o;
-            g_pending.rolling_combined_enabled = 0;
-            memset(&g_pending.rolling_combined, 0, sizeof g_pending.rolling_combined);
+            if (!o->enabled) selection.kind = P_ROLL_NONE;
+            g_pending.rolling_selection = selection;
         }
 #else
         rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
@@ -1311,12 +1312,39 @@ int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *
     else {
 #ifdef P_ROLLING_RUNTIME
         size_t bytes;
-        rc = p_roll_plan(o, m, &bytes);
+        p_roll_selection selection = {0};
+        selection.kind = o->enabled ? P_ROLL_COMBINED : P_ROLL_NONE;
+        if (o->enabled) selection.limits.combined = *m;
+        rc = p_roll_plan(o, &selection, &bytes);
         if (!rc) {
             g_pending.rolling = *o;
-            g_pending.rolling_combined_enabled = o->enabled;
-            if (o->enabled) g_pending.rolling_combined = *m;
-            else memset(&g_pending.rolling_combined, 0, sizeof g_pending.rolling_combined);
+            g_pending.rolling_selection = selection;
+        }
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_schema2_set(const ps3dk_prof_test_rolling_options *o, const pfm2_config *m)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1 ||
+        (o->enabled && !m) || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
+        o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        p_roll_selection selection = {0};
+        selection.kind = o->enabled ? P_ROLL_SCHEMA2 : P_ROLL_NONE;
+        if (o->enabled) selection.limits.schema2 = *m;
+        rc = p_roll_plan(o, &selection, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            g_pending.rolling_selection = selection;
         }
 #else
         rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
@@ -1587,10 +1615,13 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
 #endif
 #ifdef P_ROLLING_RUNTIME
     if (g_pending.rolling.enabled) {
+        uint32_t kind = g_pending.rolling_selection.kind;
         if (g_pending.kind == 2
 #ifdef PS3DK_PROF_WITH_SPU
-            || (x.enabled && (!g_pending.rolling_combined_enabled || x.gpu_max))
-            || (g_pending.rolling_combined_enabled && !x.spu)
+            || (kind == P_ROLL_PPU && x.enabled)
+            || (kind == P_ROLL_COMBINED && (!x.spu || x.gpu_max))
+#else
+            || kind != P_ROLL_PPU
 #endif
 #ifdef PS3DK_PROF_WITH_ARCS
             || p->arc_options.max_arcs_per_thread
@@ -1599,8 +1630,22 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
             || 1
 #endif
             ) return PS3DK_PROF_ENOTSUP;
+        if (kind == P_ROLL_SCHEMA2) {
+#if defined(P_ROLLING_SCHEMA2) && defined(PS3DK_PROF_WITH_AUTO)
+            uint32_t families = 128;
+#ifdef PS3DK_PROF_WITH_FIFO
+            families |= 64;
+#endif
+            /* Match the actual original header before allocating/opening.
+             * This private runtime profile admits managed AUTO leases only. */
+            if (!x.enabled || !x.gpu_max || g_pending.rolling_selection.limits.schema2.family_flags != families)
+                return PS3DK_PROF_ENOTSUP;
+#else
+            return PS3DK_PROF_ENOTSUP;
+#endif
+        }
         if (p_roll_plan(&g_pending.rolling,
-                        g_pending.rolling_combined_enabled ? &g_pending.rolling_combined : NULL, &roll_bytes) ||
+                        &g_pending.rolling_selection, &roll_bytes) ||
             take(&off, 1, roll_bytes, &o_roll) || off > P_TOTAL_MAX ||
             (uint64_t)off > g_pending.rolling.max_state_bytes)
             return PS3DK_PROF_EINVAL;
@@ -1611,7 +1656,7 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
         return PS3DK_PROF_ENOMEM;
 #ifdef P_ROLLING_RUNTIME
     if (roll_bytes) p_roll_bind(p, p->block + o_roll, &g_pending.rolling,
-                               g_pending.rolling_combined_enabled ? &g_pending.rolling_combined : NULL, off);
+                               &g_pending.rolling_selection, off);
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     p->block_bytes = off;

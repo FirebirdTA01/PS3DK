@@ -4,6 +4,13 @@
 #define PS3DK_PROF_ROLL_RUNTIME_TYPES_H
 #include "roll_ppu.h"
 #include "roll_combined.h"
+#include "roll_combined2.h"
+
+enum { P_ROLL_NONE, P_ROLL_PPU, P_ROLL_COMBINED, P_ROLL_SCHEMA2 };
+typedef struct {
+    uint32_t kind;
+    union { pfm_config combined; pfm2_config schema2; } limits;
+} p_roll_selection;
 
 typedef struct {
     uint32_t size, version, enabled, reserved;

@@ -26,17 +26,18 @@ INSPECT=Path('sdk/libps3dkprof/src/rolling/roll_retention_inspect.c')
 PINS=(DRAIN,CORE,LIVE,PPU,INSPECT)
 # Normalized LF pins reviewed after gate107 Rust3, ASan/UBSan helpers and
 # exact gate104/105/106 REDs. Baseline still runs before every mutation batch.
-# CORE/DRAIN repinned against b8704674e after private type extraction and
-# TEST_HOOKS callback guard; no retention/live mutation anchor changed.
+# CORE/DRAIN repinned after gate120 and tagged-selection diff against a79284960.
+# Wrong combined metadata still selects the PPU budget; schema2 stays untouched.
 APPROVED_PINS={
-    'sdk/libps3dkprof/src/core/prof_drain.c': 'c491df7ace12d8b16ba669900aa40cd345ca7242ac00527604e7430344b420d0',
-    'sdk/libps3dkprof/src/core/prof_core.c': '8d23adf79b06003980f6782155715c528b80f1a4f59ab7cc783c299edbc26bd7',
+    'sdk/libps3dkprof/src/core/prof_drain.c': 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'f7e69aee0fe5f9fa147e9cbce1b5f7ce673087fc9b0ffa39d5f1f56d1989406c',
     'sdk/libps3dkprof/src/live/live_api.c': 'afed59fbdebb943a757d470863b2aababce7e0cdcb5eca4a3a36adb109235786',
     'sdk/libps3dkprof/src/rolling/roll_ppu.c': '7e5f300519d9fbcc373883763fb9fdd601b1893f789887e4f111a8f7ce0ae3ff',
     'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': 'cb33cb59ad96ff5a4caff334c89f57516efa9f39eee4df5a6f6ec425d65a8dca',
 }
 # Exact reviewed post-budget-fix anchors; no test input is mutated.
-COMBINED_BUDGET_EDIT=('metadata = r->combined_enabled ? r->combined.metadata_bytes :', 'metadata = r->combined_enabled ? r->options.ppu.metadata_bytes :')
+COMBINED_BUDGET_EDIT=('case P_ROLL_COMBINED: metadata = r->selection.limits.combined.metadata_bytes; break;',
+                      'case P_ROLL_COMBINED: metadata = r->options.ppu.metadata_bytes; break;')
 PPU_HEADER_EDIT=('(uint64_t)r->options.ppu.metadata_bytes + 16u;', '(uint64_t)r->options.ppu.metadata_bytes;')
 RTEST=Path('tools/ps3dk-prof/tests/rolling_runtime_retention_budget.rs')
 TESTS={

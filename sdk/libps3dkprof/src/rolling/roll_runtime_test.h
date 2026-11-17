@@ -18,6 +18,9 @@ int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *);
 /* Separate private SPU selector. options.ppu must be entirely zero; combined
  * is the sole semantic capacity source. No manual GPU/AUTO/FIFO admission. */
 int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *, const pfm_config *);
+/* Private AUTO/FIFO profile, with exact original family flags. Managed AUTO
+ * report leases only; manual GPU recording is not admitted by this seam. */
+int ps3dk_prof_test_rolling_schema2_set(const ps3dk_prof_test_rolling_options *, const pfm2_config *);
 /* Errors leave out untouched: ENOTINIT before successful init, ENOTSUP for
  * append, EBUSY until first PUBLIC shutdown publishes after close/join.
  * Automatic stopping does not consume that public claim. Success is immutable.
