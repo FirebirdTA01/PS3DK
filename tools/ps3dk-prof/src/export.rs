@@ -774,3 +774,137 @@ pub fn export_capture<P: AsRef<Path>, Q: AsRef<Path>>(
     }
     Ok(())
 }
+
+/// Export like `export_capture`, but never replace or truncate any existing file: the viewer's "save window / save
+/// range" path.  The export is written to a temporary created exclusively next to `out_path` (a pre-existing file of
+/// that name is skipped, never truncated), then published with a hard link, which fails instead of replacing when
+/// `out_path` exists at that moment.  On a filesystem without hard links the target itself is created exclusively and
+/// written.  Either way a destination that appears at any point before publication is left untouched and the call
+/// fails with `ErrorKind::AlreadyExists`; only the temporary this call created is removed.
+pub fn export_capture_no_clobber<P: AsRef<Path>, Q: AsRef<Path>>(
+    in_path: P,
+    out_path: Q,
+    range: RangeInclusive<u64>,
+) -> Result<(), ExportError> {
+    let bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
+    let exported = export_bytes(&bytes, range)?;
+    publish_no_clobber(&exported, out_path.as_ref(), || {})
+}
+
+fn already_exists(out: &Path) -> ExportError {
+    ExportError::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!("{} already exists; nothing was written", out.display()),
+    ))
+}
+
+/// Writes `bytes` to `out` without ever replacing an existing file.  `before_publish` runs after the temporary is
+/// complete and immediately before the no-replace publication (tests use it to create the destination at that boundary).
+fn publish_no_clobber(bytes: &[u8], out: &Path, before_publish: impl FnOnce()) -> Result<(), ExportError> {
+    use std::io::Write;
+    let name = out
+        .file_name()
+        .ok_or_else(|| ExportError::Usage(format!("{}: the output path has no file name", out.display())))?
+        .to_os_string();
+    // Exclusive temporary creation: an existing file at a candidate name belongs to someone else and is skipped.
+    let mut n = 0u32;
+    let (tmp, mut file) = loop {
+        let mut t = name.clone();
+        t.push(format!(".tmp-{}-{n}", std::process::id()));
+        let p = out.with_file_name(t);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+            Ok(f) => break (p, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1024 => n += 1,
+            Err(e) => return Err(ExportError::Io(e)),
+        }
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ExportError::Io(e));
+    }
+    before_publish();
+    let result = match std::fs::hard_link(&tmp, out) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(already_exists(out)),
+        // No hard links here (e.g. FAT): create the target itself exclusively; remove it only if this call created it.
+        Err(_) => match std::fs::OpenOptions::new().write(true).create_new(true).open(out) {
+            Ok(mut f) => {
+                let w = f.write_all(bytes).and_then(|()| f.sync_all());
+                drop(f);
+                match w {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        let _ = std::fs::remove_file(out);
+                        Err(ExportError::Io(e))
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(already_exists(out)),
+            Err(e) => Err(ExportError::Io(e)),
+        },
+    };
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
+
+#[cfg(test)]
+mod no_clobber_tests {
+    use super::*;
+
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ps3dk-prof-noclobber-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn names(d: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(d).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn no_clobber_refuses_a_destination_that_appears_at_publication() {
+        let d = dir("race");
+        let out = d.join("cap.0..1.prof");
+        let r = publish_no_clobber(b"ours", &out, || std::fs::write(&out, b"theirs").unwrap());
+        match r {
+            Err(ExportError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists, "{e}"),
+            other => panic!("expected AlreadyExists, got {other:?}"),
+        }
+        assert_eq!(std::fs::read(&out).unwrap(), b"theirs", "the destination that appeared is untouched");
+        assert_eq!(names(&d), vec!["cap.0..1.prof".to_string()], "only this call's temporary was removed");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_clobber_refuses_an_existing_destination() {
+        let d = dir("exists");
+        let out = d.join("cap.window_2.prof");
+        std::fs::write(&out, b"theirs").unwrap();
+        assert!(publish_no_clobber(b"ours", &out, || {}).is_err());
+        assert_eq!(std::fs::read(&out).unwrap(), b"theirs");
+        assert_eq!(names(&d), vec!["cap.window_2.prof".to_string()]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_clobber_preserves_precreated_temporaries() {
+        let d = dir("tmp");
+        let out = d.join("cap.3..5.prof");
+        let pid = std::process::id();
+        let old_style = d.join(format!("cap.3..5.prof.tmp-{pid}"));
+        let first_candidate = d.join(format!("cap.3..5.prof.tmp-{pid}-0"));
+        std::fs::write(&old_style, b"keep-a").unwrap();
+        std::fs::write(&first_candidate, b"keep-b").unwrap();
+        publish_no_clobber(b"ours", &out, || {}).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), b"ours");
+        assert_eq!(std::fs::read(&old_style).unwrap(), b"keep-a", "pre-existing temporary not truncated");
+        assert_eq!(std::fs::read(&first_candidate).unwrap(), b"keep-b", "pre-existing temporary not truncated");
+        assert_eq!(names(&d).len(), 3, "no temporary of this call is left behind: {:?}", names(&d));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

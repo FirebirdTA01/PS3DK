@@ -108,7 +108,7 @@ static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[1
     uint64_t disposed;
     unsigned i;
     size_t n;
-    if(!auto_writer_begin(w) || !values || (flags&~2047u)) return 0;
+    if(!auto_writer_begin(w) || !values || (flags&~4095u)) return 0;
     c=auto_config_read(w->config);
     flags|=(uint16_t)auto_config_flags(w->config);
     flags|=w->sticky;
@@ -144,7 +144,7 @@ static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[1
     memcpy(w->prior,values,sizeof w->prior); w->status_seen=1;
     w->sticky=flags&(AUTO_SATURATED|AUTO_STATUS_CONFLICT|AUTO_STATUS_RESET|AUTO_STATUS_SEGMENT_QUARANTINE|
                                 AUTO_STATUS_FRAME_MARK_MISSED|AUTO_STATUS_FRAMES_FLIP|AUTO_STATUS_FRAMES_EXPLICIT|
-                                AUTO_STATUS_SEGMENT_REPLAY);
+                                AUTO_STATUS_SEGMENT_REPLAY|AUTO_STATUS_PREINIT_FOREIGN);
     if(flags&AUTO_FINAL) w->closed=1;
     return 1;
 }

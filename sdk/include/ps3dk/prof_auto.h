@@ -23,9 +23,12 @@ typedef struct ps3dk_prof_auto_options {
     uint32_t metadata_records;  /* 1..1024 operation snapshots */
     uint32_t frame_records;     /* 1..256 coverage snapshots */
     uint32_t max_bytes;         /* actual checked layout must fit; <= 2 MiB */
-    uint32_t range_pairs;       /* report pairs kept for AUTO ranges; 0 the default (16, an eighth of a small pool);
-                                 * at most what leaves 64 pairs for draws and FRAME marks after the whole-CALL reserve
-                                 * (32, a quarter of a small pool) and this one; larger is refused */
+    uint32_t range_pairs;       /* report pairs kept for AUTO ranges; 0 the default (an eighth of the pool, at most
+                                 * 64: 63 with the default 1024 reports; with ring blocks, of the legacy pairs they
+                                 * leave). A range holds its pair until the drainer has
+                                 * read it, so size for the ranges outstanding over the RSX and drainer lag (about
+                                 * three frames), not for one frame. At most what leaves 64 pairs for draws and FRAME
+                                 * marks after the whole-CALL reserve (32, a quarter of a small pool) and this one */
     /* Report ring (owner-buffer draws recycle report blocks through MAIN memory). RESERVED: all four must be 0 in
      * this release, which refuses any other value; 0 keeps the bounded local report pool. */
     uint32_t ring_blocks;       /* 2 or 3 local blocks of 126 pairs (the hardware-tested copy) at the top of the
@@ -64,7 +67,18 @@ typedef struct ps3dk_prof_auto_options {
  *  PS3DK_PROF_AUTO_RANGE_BEGIN(name)   a range timed by its own report pair in the ring: the RSX time between BEGIN
  *  PS3DK_PROF_AUTO_RANGE_END()         and END, independent of per-draw timing. Nesting to depth 4; deeper, a
  *                                      range inside a segment build, one whose END falls in another frame, or one
- *                                      without a pair from the range reserve (16) is refused and counted;
+ *                                      without a pair from the range reserve (range_pairs, default 63) is refused and
+ *                                      counted (per frame in its coverage row when the frame has one). Both are int
+ *                                      expressions: BEGIN 1 when the range was admitted, END 1 when it was
+ *                                      committed, 0 when refused; always 1 without PS3_PROF_AUTO (nothing is
+ *                                      refused there, so BEGIN/END pairing logic is the same in both builds). A refused BEGIN still keeps the nesting balanced: issue its
+ *                                      END whatever BEGIN returned. name is a string literal (the runtime keeps one
+ *                                      descriptor per name/file/line site, 256 sites);
+ *  a capture window opened mid-frame (an immediate SECTION or WHOLE_RUN, from any thread): the owner's first draw
+ *                                      or range in it opens that frame's coverage row from that moment, with no
+ *                                      FRAME marks and always OPEN (its ranges and draws are recorded; the frame
+ *                                      gets no whole-frame verdict). Before the owner's first frame there is no
+ *                                      frame, so ranges are refused (counted only in the run total);
  *  PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name)  the same, and its covered draws get per-draw pairs while
  *  PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() limits per-draw timing to timed ranges (draws outside them are covered but
  *                                      untimed, reason "outside timed range"); without it every draw is timed. */
@@ -72,20 +86,22 @@ typedef struct ps3dk_prof_auto_options {
 void ps3dk_prof_auto_tag(uint32_t tag);
 void ps3dk_prof_auto_timing(uint32_t mode);
 int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc, uint32_t timed);
+/* BEGIN keyed by its call site: the runtime owns the descriptor (name and file must outlive the capture) */
+int ps3dk_prof_auto_range_begin_at(const char *name, const char *file, uint32_t line, uint32_t timed);
 int ps3dk_prof_auto_range_end(void);
-#define PS3DK_PROF_AUTO__RANGE(name, timed) \
-    do { static ps3dk_prof_desc ps3dk_prof__r = {(name), "", __FILE__, (uint32_t)__LINE__, 2u, 0u, 0u}; \
-         (void)ps3dk_prof_auto_range_begin(&ps3dk_prof__r, (timed)); } while (0)
 #define PS3DK_PROF_AUTO_TAG(t) ps3dk_prof_auto_tag((uint32_t)(t))
-#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) PS3DK_PROF_AUTO__RANGE(name, 0u)
-#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) PS3DK_PROF_AUTO__RANGE(name, 1u)
-#define PS3DK_PROF_AUTO_RANGE_END() ((void)ps3dk_prof_auto_range_end())
+#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) ps3dk_prof_auto_range_begin_at((name), __FILE__, (uint32_t)__LINE__, 0u)
+#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) ps3dk_prof_auto_range_begin_at((name), __FILE__, (uint32_t)__LINE__, 1u)
+#define PS3DK_PROF_AUTO_RANGE_END() ps3dk_prof_auto_range_end()
 #define PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() ps3dk_prof_auto_timing(1u)
 #else
+/* a call rather than a bare constant, so a range macro used as a statement raises no unused-value warning */
+static inline int ps3dk_prof__auto_off(void) { return 1; }
+static inline int ps3dk_prof__auto_off_ok(void) { return 0; }
 #define PS3DK_PROF_AUTO_TAG(t) ((void)sizeof(t))
-#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) ((void)sizeof(name))
-#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) ((void)sizeof(name))
-#define PS3DK_PROF_AUTO_RANGE_END() ((void)0)
+#define PS3DK_PROF_AUTO_RANGE_BEGIN(name) ((void)sizeof(name), ps3dk_prof__auto_off())
+#define PS3DK_PROF_AUTO_RANGE_BEGIN_TIMED(name) ((void)sizeof(name), ps3dk_prof__auto_off())
+#define PS3DK_PROF_AUTO_RANGE_END() ps3dk_prof__auto_off()
 #define PS3DK_PROF_AUTO_TIMED_RANGES_ONLY() ((void)0)
 #endif
 
@@ -95,6 +111,22 @@ int ps3dk_prof_shutdown(void);
 #define PS3DK_PROF_AUTO_SEAL() ps3dk_prof_capture_seal()
 #else
 #define PS3DK_PROF_AUTO_SEAL() 0
+#endif
+
+/* Options before cellGcmInit: validated and copied now (the caller's struct need not outlive the call; the earlier
+ * 32- and 36-byte structs are accepted as attach accepts them, 32 taking the default range reserve; ring fields are
+ * validated as attach validates them), then used by the intercepted cellGcmInit in place
+ * of the defaults, so commands written right after init cannot close the window for them. Only an init on the same
+ * thread uses them: another thread's init takes the defaults, and the capture then carries the sticky STATUS flag
+ * PREINIT_FOREIGN (2048; the reader prints "pre-init options ignored"). The first successful init consumes them; a later call
+ * replaces an earlier one. EINVAL for options the attach would refuse, EBUSY once an intercepted cellGcmInit ran,
+ * ENOTINIT before profiler start-up. PS3DK_PROF_AUTO_OPTIONS_SET(o) is 0 and calls nothing without PS3_PROF_AUTO.
+ * The override below is unchanged: after any command write it still refuses (PRIOR_WRITES_UNKNOWN). */
+int ps3dk_prof_auto_options_set(const ps3dk_prof_auto_options *options);
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+#define PS3DK_PROF_AUTO_OPTIONS_SET(o) ps3dk_prof_auto_options_set(o)
+#else
+#define PS3DK_PROF_AUTO_OPTIONS_SET(o) ((void)sizeof(o), ps3dk_prof__auto_off_ok())
 #endif
 
 /* Optional override, on the registered context owner before its first covered

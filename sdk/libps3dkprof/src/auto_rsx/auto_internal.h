@@ -39,8 +39,14 @@ enum { AUTO_SEGMENTS_OPEN=32, AUTO_SEGMENT_POOL=512, AUTO_SEGMENT_NONE=0xfffffff
 /* Report pairs kept for whole-CALL brackets: covered draws and FRAME marks stop taking pairs when only this many
  * are free (fewer with a small pool: a quarter of it). */
 enum { AUTO_CALL_PAIRS=32 };
-/* Report pairs kept for AUTO ranges (an eighth of a small pool), and their nesting limit. */
-enum { AUTO_RANGE_PAIRS=16, AUTO_RANGE_DEPTH=4 };
+/* Report pairs kept for AUTO ranges by default: an eighth of the pool, at most 64 (63 for the default 504-pair pool).
+ * A range's pair stays held until the drainer has read its completed reports, so the reserve bounds the ranges
+ * outstanding across the RSX's lag behind the PPU and the drainer's lag behind the RSX, not one frame's count: about
+ * three frames of 19 ranges fit. Per-draw timing keeps its own pairs whatever the timing mode (a timed range times its
+ * draws), so the reserve does not depend on PS3DK_PROF_AUTO_TIMED_RANGES_ONLY. Also the nesting limit. */
+enum { AUTO_RANGE_PAIRS=64, AUTO_RANGE_DEPTH=4 };
+/* Distinct PS3DK_PROF_AUTO_RANGE_BEGIN sites (name, file, line) the runtime keeps a descriptor for. */
+enum { AUTO_RANGE_SITES=256 };
 /* One covered operation built inside a CALL segment: its report pair is owned
  * from the build; its record is committed at cellGcmSegmentCall (or as an
  * INCOMPLETE record when the segment is rebuilt, never called or called

@@ -85,7 +85,7 @@ int main(void)
         assert(instance==1 && domain==1026 && g_prof->gpu_lifetime==1);
     }
     {
-        /* the range reserve: default 16 (an eighth of a small pool), an explicit size honoured, a size that leaves
+        /* the range reserve: default an eighth of the pool, at most 64, an explicit size honoured, a size that leaves
          * fewer than 64 pairs for draws refused, and the earlier 32-byte struct still accepted with the default */
         ps3dk_prof_auto_options d=PS3DK_PROF_AUTO_OPTIONS_INIT;
         uint32_t reserves[2];
@@ -96,7 +96,7 @@ int main(void)
         d.max_bytes=o.max_bytes=2097152;
         assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==0);
         ps3dk_prof__auto_test_reserves(reserves);
-        assert(reserves[0]==32 && reserves[1]==16);            /* 504 pairs: the default */
+        assert(reserves[0]==32 && reserves[1]==63);            /* 504 pairs: the default, 504/8 */
         d.range_pairs=32;
         assert(ps3dk_prof_auto_attach((void *)&context,&d,&instance,&domain)==0);
         ps3dk_prof__auto_test_reserves(reserves);
@@ -124,7 +124,7 @@ int main(void)
             d.size=32;memcpy(h32,&d,32);                        /* range_pairs is outside a 32-byte struct */
             assert(ps3dk_prof_auto_attach((void *)&context,(const ps3dk_prof_auto_options *)(void *)h32,&instance,&domain)==0);
             ps3dk_prof__auto_test_reserves(reserves);
-            assert(reserves[0]==32 && reserves[1]==16);
+            assert(reserves[0]==32 && reserves[1]==63);         /* the default: 504/8 */
             free(h);free(h32);
         }
         /* only the three published sizes */

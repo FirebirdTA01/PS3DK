@@ -79,7 +79,7 @@ static int defaults_reserved(const ps3dk_prof_auto_options *o)
 }
 
 /* The two reserves for a pool of `pairs`: whole-CALL brackets (32, a quarter of a small pool) and AUTO ranges (the
- * option, or 16 / an eighth of a small pool). 0 when an explicit range reserve leaves fewer than 64 pairs. */
+ * option, or an eighth of the pool, at most 64). 0 when an explicit range reserve leaves fewer than 64 pairs. */
 static uint32_t call_pairs(uint32_t pairs) {return pairs>=4u*AUTO_CALL_PAIRS ? AUTO_CALL_PAIRS:pairs/4u;}
 /* The published option sizes: 32 (no range_pairs), 36 (no ring fields) and the current 52. */
 enum { AUTO_OPTIONS_V32=offsetof(ps3dk_prof_auto_options,range_pairs),
@@ -407,15 +407,64 @@ int ps3dk_prof_auto_attach(ps3dk_prof_gcm_ctx *context, const ps3dk_prof_auto_op
     return attach(context,options,instance,domain,0,0,NULL,0);
 }
 
+/* Options set before cellGcmInit (ps3dk_prof_auto_options_set): a validated copy and the thread that set it. Written
+ * and read only under a CONFIG claim taken while CONFIG is still EMPTY (no intercepted init yet); consumed by the
+ * first successful intercepted init, after which every set is refused. */
+static ps3dk_prof_auto_options preinit;
+static pal_owner preinit_owner;
+static uint32_t preinit_state; /* 0 none, 1 set, 2 consumed */
+/* The first successful init ran on another thread than the setter: the options were ignored (atomic; the drainer
+ * reports it as the sticky STATUS flag PREINIT_FOREIGN). */
+static uint32_t preinit_foreign;
+
+int ps3dk_prof_auto_options_set(const ps3dk_prof_auto_options *options)
+{
+    ps3dk_prof_auto_options copy;
+    auto_ring_plan ring;
+    pal_owner self;
+    size_t records,frames,bytes;
+    uint32_t claim,ring_label;
+    if(!p_ready()) return PS3DK_PROF_ENOTINIT;
+    /* every published size, exactly as attach copies it: never read past the caller's size */
+    if(!options || !options_copy(options,&copy)) return PS3DK_PROF_EINVAL;
+    if(g_tls.in_drain || g_tls.in_gpu) return PS3DK_PROF_EBUSY;
+    if(!layout(&copy,&ring,&ring_label,&records,&frames,&bytes)) return PS3DK_PROF_EINVAL;
+    if(pal_owner_get(&self)!=0) return PS3DK_PROF_ETHREAD;
+    claim=auto_config_begin(&configuration);
+    if(!claim) return PS3DK_PROF_EBUSY;
+    if(claim!=1u) {   /* an intercepted init already ran: CONFIG is no longer EMPTY */
+        auto_config_abort(&configuration,claim);
+        return PS3DK_PROF_EBUSY;
+    }
+    preinit=copy;preinit_owner=self;preinit_state=1u;
+    auto_config_abort(&configuration,claim);
+    return PS3DK_PROF_OK;
+}
+
 void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t command_bytes,
                                     uint32_t io_bytes, const void *io_address, int32_t rc)
 {
-    uint32_t instance,domain;
+    uint32_t instance,domain,claim;
+    ps3dk_prof_auto_options o;
+    int have=0;
     /* Only the selected SDK init wrapper calls this, after extent admission.
      * No original application result is changed by an observer refusal.
      * io_address/io_bytes: the host buffer at IO 0, recorded for the ring decoder. */
     (void)command_bytes;
-    (void)attach(context,NULL,&instance,&domain,1,rc,io_address,io_bytes);
+    memset(&o,0,sizeof o);
+    /* Pre-init options apply only on the thread that set them; the first successful init consumes them either way
+     * (another thread's init takes the defaults). A failed init leaves them for the next one. */
+    if((claim=auto_config_begin(&configuration))!=0) {
+        if(preinit_state==1u) {
+            have=pal_owner_is_self(&preinit_owner);o=preinit;
+            if(!rc) {
+                preinit_state=2u;
+                if(!have) ST_REL(&preinit_foreign,1u);   /* not silent: the defaults were used */
+            }
+        }
+        auto_config_abort(&configuration,claim);
+    }
+    (void)attach(context,have ? &o:NULL,&instance,&domain,1,rc,io_address,io_bytes);
 }
 
 /* A mutable candidate is protected by the same CONFIG claim as attachment.
@@ -1269,7 +1318,8 @@ static void frame_mark(auto_capture *a,uint32_t role)
     gpp_ctx *ctx=a->context;
     auto_queue_entry *e;
     uintptr_t cur=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
-    if(!a->coverage.active || a->active || !c || c->reason || LD_ACQ(&g_prof->stop_latch) ||
+    /* a late row (opened mid-frame) has no mark: its RSX frame span is unknown, never the window's partial span */
+    if(!a->coverage.active || a->coverage.late || a->active || !c || c->reason || LD_ACQ(&g_prof->stop_latch) ||
        !auto_config_can_admit(&configuration)) return;
     if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<48 ||
        !initialize_device(a) || !(e=auto_queue_claim(&a->operations))) {
@@ -1332,6 +1382,27 @@ static void unobserved_build(gpp_ctx *ctx,const ps3tc_auto_call *call)
     history_add(&s->visits,1);history_add(&s->refused,1);history_add(&s->other_refused,1);
 }
 
+/* A capture window opened mid-frame (an immediate SECTION or WHOLE_RUN, opened by the owner or by any other thread,
+ * which never touches AUTO state): the frame in progress got no row at its boundary. The owner's first draw or range
+ * inside the window opens that frame's row here, on the owner thread, with no lock held. The row starts now (nothing
+ * observed before it is backdated into it), carries no FRAME marks and always closes OPEN, so the reader never
+ * judges it as a whole frame. Before the owner's first frame there is no frame to open: nothing is counted per
+ * frame then. */
+static void present_boundary(auto_capture *a);
+static void late_row(auto_capture *a)
+{
+    uint64_t cf;
+    /* both callers already checked the window gate, the owner (slot1) and in_gpu outside a draw bracket */
+    if(a->coverage.active || a->active || LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) return;
+    cf=LD_ACQ(&g_prof->slots[g_tls.slot1-1].cb->current_frame);
+    if(!cf) return;
+    present_boundary(a);   /* a run or scope already open is spanning: it is charged to neither part */
+    if(auto_frames_open_late(&a->coverage,cf-1u,observation_tb())) {
+        a->pool_tail_column=0;
+        a->coverage.live.flags|=AUTO_FRAME_ROW_PRESENT;
+    }
+}
+
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
@@ -1349,6 +1420,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     if(!a) return foreign_begin(ctx,call,caller);
     if(!call || call->kind<1 || call->kind>3) return 0;
     if(g_tls.in_gpu && !a->active) {increment(a,&a->internal_suppressed);return 0;}
+    late_row(a);
     if(!auto_frames_count(&a->coverage,call->kind,0)) increment(a,&a->unassociated);
     if(a->active) { (void)auto_frames_count(&a->coverage,call->kind,5);return 0; }
     if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) {
@@ -2072,6 +2144,7 @@ void p_auto_drain(prof *p, int seal)
         if(!LD_ACQ(&capture->owner_done)) flags|=AUTO_LOWER_BOUND|AUTO_OWNER_UNACK;
         if(LD_ACQ(&capture->segment_quarantine)) flags|=AUTO_STATUS_SEGMENT_QUARANTINE;
         if(LD_ACQ(&capture->segment_replay)) flags|=AUTO_STATUS_SEGMENT_REPLAY;
+        if(LD_ACQ(&preinit_foreign)) flags|=AUTO_STATUS_PREINIT_FOREIGN;
         if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
         if(LD_ACQ(&capture->frames_by_flip)) flags|=AUTO_STATUS_FRAMES_FLIP;
         if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;
@@ -2133,8 +2206,10 @@ static void range_refuse(auto_capture *a)
     if(a->coverage.active && a->coverage.live.ranges_refused!=UINT32_MAX) a->coverage.live.ranges_refused++;
 }
 /* BEGIN: a 2-word timestamp report in the attached ring (current room, no callback) from the range reserve, only
- * on the owner, inside a coverage frame, outside draw brackets and segment builds, at depth 4 or less. A refused
- * range is still pushed (or counted beyond the stack) so END stays balanced. 1 when recorded. */
+ * on the owner, inside a coverage frame, outside draw brackets and segment builds, at depth 4 or less. Inside a
+ * window it is an owner observation (it freezes CONFIG like a draw) and opens a late row for a frame the window
+ * entered mid-frame. Every refusal on the owner (no descriptor included) is still pushed, or counted beyond the
+ * stack, so the caller's END stays balanced: call END after every BEGIN, whatever BEGIN returned. 1 when recorded. */
 int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
 {
     auto_capture *a;
@@ -2143,13 +2218,16 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
     auto_range *r;
     uint32_t idx=0,scope=0;
     uintptr_t cur,end;
-    int pair;
-    if(!desc || !p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;
-    if(!p_window_gate(g_prof)) {   /* outside a window: refused, still pushed so END stays balanced */
+    int pair,gate;
+    if(!p_ready() || g_tls.in_gpu) return 0;
+    gate=p_window_gate(g_prof);
+    if(!(a=owner_capture(NULL,gate))) return 0;
+    if(!gate) {   /* outside a window: refused, still pushed so END stays balanced */
         if(a->range_depth<AUTO_RANGE_DEPTH) {memset(&a->ranges[a->range_depth],0,sizeof a->ranges[0]);a->range_depth++;}
         else a->range_excess++;
         return 0;
     }
+    late_row(a);
     if(a->range_depth>=AUTO_RANGE_DEPTH) {a->range_excess++;range_refuse(a);return 0;}
     r=&a->ranges[a->range_depth++];
     memset(r,0,sizeof *r);
@@ -2158,6 +2236,7 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
     c=auto_config_read(&configuration);ctx=a->context;
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
     for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].open) {range_refuse(a);return 0;} /* a segment build */
+    /* no descriptor (a full site table) is refused by p_gpu_desc below */
     if(!c || c->reason || a->active || a->segment_active || !a->coverage.active || LD_ACQ(&g_prof->stop_latch) ||
        !auto_config_can_admit(&configuration) || (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) ||
        (cur&3u) || cur>end || end-cur<8 || !initialize_device(a) ||
@@ -2224,6 +2303,28 @@ int ps3dk_prof_auto_range_end(void)
     }
     increment(a,&a->ranges_done);
     return 1;
+}
+/* PS3DK_PROF_AUTO_RANGE_BEGIN(_TIMED) as an expression: the runtime keeps one static descriptor per call site
+ * (name, file and line, compared by pointer: string literals), so the macro needs no block-scope static. The table
+ * is touched only on the AUTO owner thread, after owner_capture. A full table refuses the range (still balanced). */
+static ps3dk_prof_desc range_sites[AUTO_RANGE_SITES];
+int ps3dk_prof_auto_range_begin_at(const char *name,const char *file,uint32_t line,uint32_t timed)
+{
+    ps3dk_prof_desc *d=NULL;
+    uint32_t h;
+    if(!p_ready() || g_tls.in_gpu || !owner_capture(NULL,p_window_gate(g_prof))) return 0;
+    if(name && file) {
+        h=(uint32_t)(((uintptr_t)name>>2)^((uintptr_t)file>>4)^line*2654435761u)%AUTO_RANGE_SITES;
+        for(uint32_t n=0;n<AUTO_RANGE_SITES;n++,h=(h+1u)%AUTO_RANGE_SITES) {
+            ps3dk_prof_desc *s=&range_sites[h];
+            if(!s->name) {
+                s->name=name;s->logical_tag="";s->file=file;s->line=line;s->scope=2u;s->state=0;s->reserved=0;
+                d=s;break;
+            }
+            if(s->name==name && s->file==file && s->line==line) {d=s;break;}
+        }
+    }
+    return ps3dk_prof_auto_range_begin(d,timed);
 }
 #ifdef PS3DK_PROF_TEST_HOOKS
 /* The capture's two reserves (whole-CALL brackets, ranges). */

@@ -87,7 +87,7 @@ def main():
     mutations={
         'little-endian': ('b[i]=(uint8_t)(v>>(8*i));', 'b[3-i]=(uint8_t)(v>>(8*i));'),
         'refused-owner': ('if(c->reason) {', 'if(c->reason) { le32(b+16,c->owner);'),
-        'short-config': ('cap < AUTO_CONFIG_BYTES', 'cap < AUTO_CONFIG_BYTES-1'),
+        'short-config': ('cap < bytes', 'cap < bytes-1'),
         'publication-offset': ('le64(q+120,o->published);', 'le64(q+116,o->published);'),
     }
     if a.mutant:
