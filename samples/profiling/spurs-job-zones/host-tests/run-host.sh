@@ -7,10 +7,19 @@ if [ "$#" -ne 1 ]; then
 fi
 case "$1" in /*) ;; *) echo "output directory must be absolute" >&2; exit 2 ;; esac
 sj_tests=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+sj_root=$(CDPATH= cd -- "$sj_tests/../../../.." && pwd)
 sj_out=$1
 sj_cc=${CC:-cc}
 mkdir -p -- "$sj_out"
 python3 -B "$sj_tests/test_verify.py"
+SJ_REG_TEST_TMP="$sj_out" python3 -B "$sj_tests/test_registration_elf.py"
 "$sj_cc" -std=c11 -O2 -Wall -Wextra -Werror "$sj_tests/lifetime.c" -o "$sj_out/lifetime-test"
 "$sj_out/lifetime-test"
-echo "SPURS receipt verifier and native lifetime predicate passed; no target execution claimed"
+sj_reg=$(mktemp -d "$sj_out/registration.XXXXXX")
+python3 -B "$sj_tests/registration_fixture.py" "$sj_reg"
+python3 -B "$sj_tests/../tools/registration_elf.py" "$sj_reg/raw.elf" "$sj_reg/generated-registration.elf"
+"$sj_cc" -std=c11 -O1 -g -Wall -Wextra -Werror \
+    -I"$sj_root/sdk/libps3dkprof/src/spu" "$sj_tests/registration_parse.c" \
+    "$sj_root/sdk/libps3dkprof/src/spu/psp_elf.c" -o "$sj_out/registration-parse"
+"$sj_out/registration-parse" "$sj_reg/raw.elf" "$sj_reg/generated-registration.elf"
+echo "SPURS receipt, registration conversion/native parser and lifetime gates passed; no target execution claimed"

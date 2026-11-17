@@ -79,13 +79,19 @@ foreach(_unit IN LISTS _spu_objects)
 endforeach()
 
 if(SJ_PROFILING)
-    # JOBBIN_WRAP embeds the wrapper under spurs_prof_job_bin. Register the
-    # original ELF instead, with a unique basename to avoid bin2s collisions.
+    # Keep the execution raw ELF/JOBBIN_WRAP/.fixup unchanged. The strict
+    # registration parser rejects -q's retained descriptor RELA metadata.
+    # Validate all already-applied sites before nulling only that non-loadable
+    # section header in a separate, independently identified registration copy.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(_raw "${CMAKE_CURRENT_BINARY_DIR}/spu/spurs_prof_job/spurs_prof_job.bin")
-    set(_elf_copy "${CMAKE_CURRENT_BINARY_DIR}/spurs_prof_job_elf.bin")
-    add_custom_command(OUTPUT "${_elf_copy}"
-        COMMAND ${CMAKE_COMMAND} -E copy "${_raw}" "${_elf_copy}"
-        DEPENDS "${_raw}" VERBATIM)
-    ps3_bin2s(spurs-job-zones "${_elf_copy}")
+    set(_registration "${CMAKE_CURRENT_BINARY_DIR}/spurs_prof_job_registration.bin")
+    set(_registration_receipt "${_registration}.json")
+    set(_registration_tool "${CMAKE_CURRENT_LIST_DIR}/tools/registration_elf.py")
+    add_custom_command(OUTPUT "${_registration}" "${_registration_receipt}"
+        COMMAND "${Python3_EXECUTABLE}" -B "${_registration_tool}" "${_raw}" "${_registration}"
+                --receipt "${_registration_receipt}" --replace
+        DEPENDS "${_raw}" "${_registration_tool}" VERBATIM)
+    ps3_bin2s(spurs-job-zones "${_registration}")
 endif()
 ps3_add_self(spurs-job-zones)

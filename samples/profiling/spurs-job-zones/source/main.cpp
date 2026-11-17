@@ -19,7 +19,7 @@
 #include "spurs_prof_job_bin.h"
 #include "spurs_prof_job_jobheader_bin.h"
 #if SJ_PROFILING
-#include "spurs_prof_job_elf_bin.h"
+#include "spurs_prof_job_registration_bin.h"
 #endif
 
 SYS_PROCESS_PARAM(1001, 0x100000);
@@ -153,8 +153,8 @@ int main()
     std::printf("SPURS_PROF capture=%s session=%016" PRIx64 " build=%s\n",capture.path,capture.session_id,SJ_BUILD_ID);
 #if SJ_PROFILING
     uint32_t image=0;
-    if ((rc=ps3dk_prof_spu_image_register_elf(spurs_prof_job_elf_bin,spurs_prof_job_elf_bin_size,&image)))
-        return fail("register raw ELF",rc);
+    if ((rc=ps3dk_prof_spu_image_register_elf(spurs_prof_job_registration_bin,spurs_prof_job_registration_bin_size,&image)))
+        return fail("register registration ELF",rc);
     for (unsigned i=0;i<SJ_JOBS;++i) {
         char name[32]; std::snprintf(name,sizeof name,"spurs/job/%u",i);
         if ((rc=ps3dk_prof_spu_lane_create(name,image,0,&lanes[i]))) return fail("lane create",rc);

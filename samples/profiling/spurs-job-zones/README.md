@@ -35,9 +35,31 @@ edited or installed. The generated script replaces the driver's default
 `-dT` script via an explicit `-T`.
 
 Two different artifacts are embedded: the jobbin2 wrapper for SPURS execution,
-and the original ELF with section headers for profiler image registration.
-Registration and all six lane creations happen before enqueue. The jobheader
-copy uses the generated sidecar's actual byte count into zeroed storage.
+and `spurs_prof_job_registration.bin` for profiler image registration.
+The raw execution ELF and its `.fixup` remain unchanged. The strict profiler
+parser rejects the descriptor RELA metadata retained by `-Wl,-q`, even though
+its words are already resolved. The sample's Python build adapter validates
+all 15 R_SPU_ADDR32 sites against defined section symbols and signed addends,
+the five descriptor records and their self/name/file fixups. It then nulls
+only that non-loadable relocation section's 40-byte header in a separate copy.
+Every other byte, including all PT_LOAD contents, descriptors and `.fixup`,
+must match the original. Unknown, unresolved or malformed input fails the build;
+the SDK parser's acceptance policy is unchanged. Python 3 is needed for ON builds.
+
+The registration copy has its own whole-file FNV identity, distinct from the
+execution ELF; a GNU build-id-bearing input is refused by this sample policy.
+Its `.bin.json` conversion receipt records both SHA256s, the parser build ID,
+descriptor order and validated relocation sites. Pin that receipt and both
+ELFs in build/run evidence. CMake uses `--replace` only for its generated
+registration output and receipt; validation finishes before atomic publication.
+The CLI otherwise refuses existing output, and always refuses input/output
+aliasing. Validation failure leaves prior outputs untouched and fails the build.
+
+Descriptor `ls_addr` records the linked-image coordinate, not an observed
+runtime LS address. SPURS relocates descriptor self/name/file words with the
+job; event identity is the section-relative index, unchanged when the image
+moves. Registration and all six lane creations happen before enqueue. The
+jobheader copy uses the generated sidecar's actual byte count into zeroed storage.
 
 Before target use, inspect the SPU map, ELF sections/program headers/fixups,
 wrapper output and disassembly. Check descriptor retention and relocation,
@@ -107,7 +129,7 @@ The OFF control uses `--arm OFF`.
 The Python verifier checks receipt semantics only. Separately run the pinned
 public reader's `check` and `spu-ticks --pairs --observations` on the exact
 paired `.prof`; retain stdout, stderr and exit codes. Bind the capture,
-receipt, SELF, raw ELF, jobbin2, maps, extension archive and reader hashes in
+receipt, SELF, raw ELF, registration ELF/conversion receipt, jobbin2, maps, extension archive and reader hashes in
 the external run packet. Inspect six unique lanes, the five named descriptor
 sites, two balanced zone pairs per lane, seven ordinary events, finalization
 and loss/refusal counters. Do not pass `--premise spu-nowrap` or an isolation
@@ -117,8 +139,14 @@ scale merely because this receipt passed.
 failed fini, missing receipt and reuse of a previously successful receipt after
 the same reset helper used by the SPU entry. It is supplied for a later authorized native
 host compile/run; Python tests do not execute that C code or the SPURS sample.
-Linux CI can run `bash host-tests/run-host.sh /absolute/build/output` for both
-the Python verifier and the native C predicate. This does not build a PS3 binary.
+Linux CI can run `bash host-tests/run-host.sh /absolute/build/output` for the
+Python receipt/conversion tests, native C predicate and actual `psp_elf.c`
+acceptance probe over independent synthetic raw/generated ELF fixtures.
+The raw fixture must refuse registration; the generated copy must parse five
+descriptors. Malformed relocation and protected-byte mutations must refuse.
+This does not require an SPU compiler or build a PS3 binary. Before target use,
+run the same `registration_parse.c` probe on the actual build's raw and
+registration ELF, and confirm the generated copy is the one embedded in PPU.
 The target code still needs compile, artifact and runtime checks. Emulator
 dispatch is not hardware evidence. Constant DEC on ordinary HEN must never be
 relabelled zero-cost work; the sample makes no decrementer ownership change
