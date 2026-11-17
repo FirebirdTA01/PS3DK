@@ -39,6 +39,7 @@
 
 #include "../../common/gcm_host_buffer.h"
 
+#include "verdicts_logic.h"
 #include "vpshader_vpo.h"
 #include "fpshader_fpo.h"
 
@@ -277,14 +278,148 @@ static void draw_trivial(CellGcmContextData *ctx)
     cellGcmSetDrawArrays(ctx, GCM_TYPE_QUADS, 0, 4);
 }
 
-static int submit_flip(CellGcmContextData *ctx)
+static CellGcmContextData *g_ctx;
+static av_state g_run;
+static uint64_t g_session_start;
+static uint32_t g_label_v;
+
+static uint64_t now_us(void *u) { (void)u; return (uint64_t)sys_time_get_system_time(); }
+static int flip_done(void *u, uint32_t arg) { (void)u; (void)arg; return cellGcmGetFlipStatus() == 0; }
+static int label_done(void *u, uint32_t v) { (void)u; return cellGcmIsLabelPassed(LABEL_PHASE_E, v) != 0; }
+static void poll_idle(void *u) { (void)u; (void)cellSysutilCheckCallback(); usleep(20); }
+static int quit_requested(void *u) { (void)u; return g_quit_requested; }
+
+static void fail(const char *where)
+{
+    if (!g_run.failed) {
+        printf("AUTOVERDICT FAIL at=%s elapsed_us=%llu\n", where,
+               (unsigned long long)av_since(now_us(0), g_session_start));
+        fflush(stdout);
+    }
+    av_fail(&g_run, where);
+}
+
+/* Terminal operator recovery state: the RSX was not proven idle, so issue no GPU command, do not seal, free, return
+ * or exitspawn. An injected run-hook watchdog can still override this at its own timeout. */
+static void recovery_required(const char *where) __attribute__((noreturn));
+static void recovery_required(const char *where)
+{
+    printf("AUTOVERDICT RECOVERY_REQUIRED at=%s no_seal=1 no_return=1\n", where);
+    fflush(stdout);
+    for (;;)
+        usleep(1000000);
+}
+
+/* Poll until `ready(arg)`, a deadline (recorded as a failure at `where`) or a quit request. */
+static int await_ready(int (*ready)(void *, uint32_t), uint32_t arg, const char *where)
+{
+    av_clock c = { now_us, ready, poll_idle, quit_requested, 0 };
+    int d = av_await(&c, arg, g_session_start, AV_SESSION_US, 1);
+    if (d == AV_QUIT)
+        g_run.quit = 1;
+    else if (d != AV_DONE)
+        fail(where);
+    return d == AV_DONE;
+}
+
+static int g_flip_unqueued; /* the last submission was refused: its reset status awaits no flip */
+
+static int submit_flip(void)
 {
     cellGcmResetFlipStatus();
-    if (cellGcmSetFlip(ctx, (uint8_t)cur_buffer) != 0)
+    if (cellGcmSetFlip(g_ctx, (uint8_t)cur_buffer) != 0) {
+        g_flip_unqueued = 1;
+        fail("submit-flip");
         return 0;
-    cellGcmFlush(ctx);
+    }
+    cellGcmFlush(g_ctx);
     cur_buffer ^= 1u;
     return 1;
+}
+
+static int wait_flip_complete(void)
+{
+    if (cellGcmWaitFlipComplete((uint32_t)AV_WAIT_US) != 0) {
+        fail("wait-flip-complete");
+        return 0;
+    }
+    return 1;
+}
+
+/* Per frame: service system callbacks and check the session budget before submitting anything. */
+static int frame_begin(void)
+{
+    if (cellSysutilCheckCallback() != 0) {
+        fail("sysutil-check");
+        return 0;
+    }
+    if (g_quit_requested)
+        g_run.quit = 1;
+    if (av_since(now_us(0), g_session_start) >= AV_SESSION_US) {
+        fail("session-deadline");
+        return 0;
+    }
+    return !av_stopping(&g_run);
+}
+
+/* Each frame returns 0 after recording a failure (fail); a quit or an earlier stop returns 1 with no work done. */
+static int frame_a(void *u, int i)
+{
+    (void)u; (void)i;
+    if (!frame_begin()) return 1;
+    setup_render_state(g_ctx);
+    cellGcmSetWaitFlip(g_ctx);
+    draw_heavy_quads(g_ctx, HEAVY_PASSES);
+    return submit_flip() && wait_flip_complete();
+}
+
+static int frame_b(void *u, int i)
+{
+    (void)u; (void)i;
+    if (!frame_begin()) return 1;
+    setup_render_state(g_ctx);
+    draw_trivial(g_ctx);
+    /* PPU busy: spin on a busy loop for ~45 ms (non-vsync multiple under HSYNC) */
+    uint64_t start_us = now_us(0);
+    while (av_since(now_us(0), start_us) < 45000) {
+        __asm__ volatile("" ::: "memory");
+    }
+    return submit_flip();
+}
+
+static int frame_c(void *u, int i)
+{
+    (void)u; (void)i;
+    if (!frame_begin()) return 1;
+    setup_render_state(g_ctx);
+    draw_trivial(g_ctx);
+    return submit_flip() && wait_flip_complete();
+}
+
+static int frame_d(void *u, int i)
+{
+    (void)u; (void)i;
+    if (!frame_begin()) return 1;
+    setup_render_state(g_ctx);
+    cellGcmSetWaitFlip(g_ctx);
+    draw_heavy_quads(g_ctx, HEAVY_PASSES);
+    if (!submit_flip()) return 0;
+    return await_ready(flip_done, 0, "flip-status-poll") || g_run.quit;
+}
+
+static int frame_e(void *u, int i)
+{
+    (void)u; (void)i;
+    if (!frame_begin()) return 1;
+    setup_render_state(g_ctx);
+    cellGcmSetWaitFlip(g_ctx);
+    draw_heavy_quads(g_ctx, HEAVY_PASSES);
+    g_label_v++;
+    cellGcmSetWriteBackEndLabel(g_ctx, LABEL_PHASE_E, g_label_v);
+    cellGcmFlush(g_ctx);
+    if (!await_ready(label_done, g_label_v, "label-poll"))
+        return g_run.quit != 0;
+    return submit_flip();
 }
 
 static void print_phase_banner(char phase)
@@ -296,6 +431,14 @@ static void print_phase_banner(char phase)
     }
     printf("AUTOVERDICT phase %c frame=%llu\n", phase, (unsigned long long)tok.frame);
     fflush(stdout);
+}
+
+static void run_phase(char phase, int (*frame)(void *, int))
+{
+    if (av_stopping(&g_run))
+        return;
+    print_phase_banner(phase);
+    (void)av_phase(&g_run, FRAMES_PER_PHASE, frame, 0);
 }
 
 int main(void)
@@ -317,7 +460,7 @@ int main(void)
         return 1;
     }
 
-    CellGcmContextData *ctx = CELL_GCM_CURRENT;
+    g_ctx = CELL_GCM_CURRENT;
     if (cellSysutilRegisterCallback(0, on_sysutil, NULL) != 0) {
         printf("hello-ppu-prof-auto-verdicts: callback registration failed\n");
         return 1;
@@ -335,125 +478,60 @@ int main(void)
     init_shaders();
     init_geometry();
 
+    g_session_start = now_us(0);
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_VSYNC);
-    setup_render_state(ctx);
+    setup_render_state(g_ctx);
 
-    /* Initial flip submission to open Frame 0 */
-    if (!submit_flip(ctx)) {
-        printf("hello-ppu-prof-auto-verdicts: initial flip submission failed\n");
-        return 1;
-    }
+    /* Initial flip submission to open Frame 0. From here on every failure, deadline or quit stops the workload at
+     * once and goes to the exit drain; nothing is retried. */
+    (void)submit_flip();
 
-    /* ---- Phase A: RSX-bound (frames 0..59) ---- */
-    print_phase_banner('A');
-
-    for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
-        if (cellSysutilCheckCallback() != 0) break;
-        setup_render_state(ctx);
-        cellGcmSetWaitFlip(ctx);
-        draw_heavy_quads(ctx, HEAVY_PASSES);
-        submit_flip(ctx);
-        cellGcmWaitFlipComplete(2000000);
-    }
-
-    /* ---- Phase B: PPU busy, RSX not limiting (frames 60..119) ---- */
-    /* Switch to HSYNC flip mode and use 45 ms spin to avoid landing near VSYNC
-     * interval multiples (~33.3 ms / 2 vsyncs), avoiding PPU work vs presentation
-     * pacing ambiguity in profiler analysis. */
+    /* (A) RSX-bound: heavy fragment work behind cellGcmSetWaitFlip, then cellGcmWaitFlipComplete */
+    run_phase('A', frame_a);
+    /* (B) PPU busy, RSX not limiting: HSYNC flips and a 45 ms spin, away from VSYNC interval multiples, so the
+     * frame is not presentation pacing */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_HSYNC);
-    print_phase_banner('B');
-
-    for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
-        if (cellSysutilCheckCallback() != 0) break;
-        setup_render_state(ctx);
-        draw_trivial(ctx);
-        /* PPU busy: spin on a busy loop for ~45 ms (non-vsync multiple under HSYNC) */
-        uint64_t start_us = sys_time_get_system_time();
-        while (sys_time_get_system_time() - start_us < 45000) {
-            __asm__ volatile("" ::: "memory");
-        }
-        submit_flip(ctx);
-    }
-
-    /* ---- Phase C: Pacing (frames 120..179) ---- */
+    run_phase('B', frame_b);
+    /* (C) Pacing: trivial work, VSYNC flip wait on the display */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_VSYNC);
-    print_phase_banner('C');
-
-    for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
-        if (cellSysutilCheckCallback() != 0) break;
-        setup_render_state(ctx);
-        draw_trivial(ctx);
-        submit_flip(ctx);
-        cellGcmWaitFlipComplete(2000000);
-    }
-
-    /* ---- Phase D: RSX-bound waiting by flip polling (frames 180..239) ---- */
+    run_phase('C', frame_c);
+    /* (D) RSX-bound waiting by flip-status polling */
     cellGcmSetFlipMode(CELL_GCM_DISPLAY_HSYNC);
-    print_phase_banner('D');
+    run_phase('D', frame_d);
+    /* (E) RSX-bound waiting by label polling */
+    run_phase('E', frame_e);
 
-    for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
-        if (cellSysutilCheckCallback() != 0) break;
-        setup_render_state(ctx);
-        cellGcmSetWaitFlip(ctx);
-        draw_heavy_quads(ctx, HEAVY_PASSES);
-        submit_flip(ctx);
-        while (cellGcmGetFlipStatus() != 0) {
-            usleep(20);
-        }
-    }
-
-    /* ---- Phase E: RSX-bound waiting by label polling (frames 240..299) ---- */
-    print_phase_banner('E');
-
-    uint32_t label_v = 0;
-
-    for (int i = 0; i < FRAMES_PER_PHASE && !g_quit_requested; i++) {
-        if (cellSysutilCheckCallback() != 0) break;
-        setup_render_state(ctx);
-        cellGcmSetWaitFlip(ctx);
-        draw_heavy_quads(ctx, HEAVY_PASSES);
-        label_v++;
-        cellGcmSetWriteBackEndLabel(ctx, LABEL_PHASE_E, label_v);
-        cellGcmFlush(ctx);
-        while (!cellGcmIsLabelPassed(LABEL_PHASE_E, label_v)) {
-            usleep(20);
-        }
-        submit_flip(ctx);
-    }
-
-    /* Exit sequence: ensure RSX and display state are clean */
-    /* 1. Bounded wait, at most 2 s, polling cellGcmGetFlipStatus() == 0 with usleep(1000) */
-    for (int n = 0; cellGcmGetFlipStatus() != 0 && n < 2000; n++) {
-        usleep(1000);
-    }
-
-    /* 2. FRESH label value written with cellGcmSetWriteBackEndLabel, bounded 2 s fence */
+    /* Exit drain, also after a failure or quit: the last flip must complete and a FRESH label fence must pass, each
+     * within AV_WAIT_US, before anything is sealed or returned. Otherwise the RSX is not proven idle: terminal
+     * recovery. */
+    av_clock c = { now_us, flip_done, poll_idle, quit_requested, 0 };
+    /* After a refused submission the status was reset for a flip that was never queued, so it cannot be awaited;
+     * the fence below still proves the RSX processed every earlier command, including the last queued flip. */
+    int flip_ok = g_flip_unqueued || av_await(&c, 0, g_session_start, AV_DRAIN_US, 0) == AV_DONE;
     int fence_ok = 0;
-    label_v++;
-    cellGcmSetWriteBackEndLabel(ctx, LABEL_PHASE_E, label_v);
-    cellGcmFlush(ctx);
-    for (int n = 0; n < 2000; n++) {
-        if (cellGcmIsLabelPassed(LABEL_PHASE_E, label_v)) {
-            fence_ok = 1;
-            break;
-        }
-        usleep(1000);
+    if (flip_ok) {
+        g_label_v++;
+        cellGcmSetWriteBackEndLabel(g_ctx, LABEL_PHASE_E, g_label_v);
+        cellGcmFlush(g_ctx);
+        c.ready = label_done;
+        fence_ok = av_await(&c, g_label_v, g_session_start, AV_DRAIN_US, 0) == AV_DONE;
     }
-    printf("AUTOVERDICT EXIT fence=%s\n", fence_ok ? "ok" : "timeout");
+    printf("AUTOVERDICT EXIT flip=%s fence=%s\n", flip_ok ? "ok" : "timeout",
+           fence_ok ? "ok" : (flip_ok ? "timeout" : "skipped"));
     fflush(stdout);
+    if (av_exit(flip_ok, fence_ok) != AV_EXIT_SEAL)
+        recovery_required(flip_ok ? "final-fence" : "final-flip");
 
-    /* 3. Unregister the sysutil callback */
     cellSysutilUnregisterCallback(0);
-
-    /* 4. Seal automatic profiler capture before process return */
+    /* Seal the automatic profiler capture before process return; the RSX is idle. */
     PS3DK_PROF_AUTO_SEAL();
 
-    /* 5. Print 'AUTOVERDICT EXIT clean' last */
-    if (!fence_ok) {
+    if (g_run.failed) {
+        printf("AUTOVERDICT EXIT failed at=%s\n", g_run.failed);
+        fflush(stdout);
         return 1;
     }
-
-    printf("AUTOVERDICT EXIT clean\n");
+    printf(g_run.quit ? "AUTOVERDICT EXIT quit\n" : "AUTOVERDICT EXIT clean\n");
     fflush(stdout);
     return 0;
 }
