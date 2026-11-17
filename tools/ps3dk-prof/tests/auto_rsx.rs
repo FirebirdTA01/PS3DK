@@ -2196,3 +2196,170 @@ fn call_covered_reported_in_text_and_json() {
         assert!(fr.get("call_covered").is_none());
     }
 }
+
+// ---- 2047/11: the report ring --------------------------------------------------------------------------------------
+// tests/fixtures/auto/ring.prof is the host runtime's `ringfixture` capture (auto-runtime-test.py --case ringfixture):
+// owner draws through recycled local blocks copied to MAIN extents, one frame over 504 timed draws, the application's
+// own M2MF transfers around block boundaries. The mutants below edit one payload and re-frame the file.
+
+/// The capture's 16-byte header and its chunks as (type, payload).
+fn ring_split(bytes: &[u8]) -> (Vec<u8>, Vec<(u32, Vec<u8>)>) {
+    let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let (mut pos, mut out) = (16usize, Vec::new());
+    while pos < bytes.len() {
+        let (ty, n) = (word(pos), word(pos + 4) as usize);
+        out.push((ty, bytes[pos + 16..pos + 16 + n].to_vec()));
+        pos += 20 + n;
+    }
+    (bytes[..16].to_vec(), out)
+}
+/// The same framing again: sequence numbers from 0 and a fresh CRC over each header and payload.
+fn ring_join(head: &[u8], chunks: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    let mut v = head.to_vec();
+    for (seq, (ty, p)) in chunks.iter().enumerate() {
+        let start = v.len();
+        v.extend_from_slice(&ty.to_le_bytes());
+        v.extend_from_slice(&(p.len() as u32).to_le_bytes());
+        v.extend_from_slice(&(seq as u64).to_le_bytes());
+        v.extend_from_slice(p);
+        let crc = crc32(&v[start..]);
+        v.extend_from_slice(&crc.to_le_bytes());
+    }
+    v
+}
+fn le32(p: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(p[at..at + 4].try_into().unwrap())
+}
+fn put32(p: &mut [u8], at: usize, v: u32) {
+    p[at..at + 4].copy_from_slice(&v.to_le_bytes());
+}
+/// Every OPS record of the capture as (chunk index, byte offset of the record in that payload).
+fn ring_records(chunks: &[(u32, Vec<u8>)]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (i, (ty, p)) in chunks.iter().enumerate() {
+        if *ty == 35 {
+            for k in 0..le32(p, 8) as usize {
+                out.push((i, 16 + 176 * k));
+            }
+        }
+    }
+    out
+}
+fn ring_mutant(edit: impl Fn(&mut Vec<(u32, Vec<u8>)>)) -> Rule {
+    let (head, mut chunks) = ring_split(&fixture("ring"));
+    edit(&mut chunks);
+    reader::read(&ring_join(&head, &chunks)).expect_err("the mutant must be refused").rule
+}
+const RING: u16 = 128;
+fn flags_of(p: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes(p[at + 14..at + 16].try_into().unwrap())
+}
+fn ring_at(c: &[(u32, Vec<u8>)], nth: usize) -> (usize, usize) {
+    ring_records(c).into_iter().filter(|&(i, at)| flags_of(&c[i].1, at) & RING != 0).nth(nth).unwrap()
+}
+fn cfg(c: &[(u32, Vec<u8>)]) -> usize {
+    c.iter().position(|x| x.0 == 34).unwrap()
+}
+fn legacy_at(c: &[(u32, Vec<u8>)]) -> (usize, usize) {
+    ring_records(c).into_iter().find(|&(i, at)| flags_of(&c[i].1, at) & RING == 0).unwrap()
+}
+
+#[test]
+fn ring_fixture_from_the_host_runtime() {
+    let bytes = fixture("ring");
+    // the framing helpers reproduce the file exactly
+    let (head, chunks) = ring_split(&bytes);
+    assert_eq!(ring_join(&head, &chunks), bytes);
+    let cap = reader::read(&bytes).unwrap_or_else(|m| panic!("ring: {m:?}"));
+    let inv = cap.auto.as_ref().unwrap();
+    let Some(Config::Attached(a)) = &inv.config else { panic!() };
+    let g = a.ring.expect("2047/11 ring partition");
+    assert_eq!((a.kind_mask, a.form_mask, g.blocks, g.pairs, g.legacy_pairs), (2047, 11, 2, 126, 252));
+    assert_eq!(g.first, a.report_first + a.report_count - 2 * 2 * 126);
+    let ring: Vec<_> = inv.ops.iter().filter(|o| o.flags & RING != 0).collect();
+    assert!(ring.len() > 504 && ring.iter().all(|o| o.raw_valid() && o.ring.is_some() && o.covered()));
+    assert!(inv.ops.iter().filter(|o| o.flags & RING == 0).all(|o| o.ring.is_none()));
+    // raw timestamps follow GPU execution order across blocks and extents
+    assert!(ring.windows(2).all(|w| w[0].raw_end < w[1].raw_begin && w[0].raw_begin < w[0].raw_end));
+    let mut per_frame = std::collections::BTreeMap::new();
+    for o in &ring {
+        *per_frame.entry(o.frame).or_insert(0u32) += 1;
+    }
+    assert!(per_frame.values().any(|&n| n > 504), "{per_frame:?}");
+    let s = inv.last_status.as_ref().unwrap();
+    let t = s.ring.expect("STATUS ring tail");
+    assert!(t[0] >= 5 && t[1] == t[0] && t[3] == 0 && t[2] == 2 * t[0], "{t:?}");
+    let report = analyze(&cap);
+    assert_eq!(report.ring, Some(g));
+    assert!(report.state.starts_with("FINAL"), "{}", report.state);
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
+        .args(["auto", "--json", &format!("{}/tests/fixtures/auto/ring.prof", env!("CARGO_MANIFEST_DIR"))])
+        .output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout)
+        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&o.stderr)));
+    // one report per capture window
+    let v = &v["windows"][0];
+    assert!(v["frames"].is_array(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(v["frames"].as_array().unwrap().iter().all(|f| f["ring_full"]["clear"] == 0 && f["ring_state"]["clear"] == 0));
+    assert_eq!(v["status"]["ring"]["blocks_issued"], t[0]);
+}
+
+#[test]
+fn ring_mutants_are_refused() {
+    // forged tail: a ring tail on a legacy (FRAME mark) record
+    assert_eq!(ring_mutant(|c| { let (i, at) = legacy_at(c); put32(&mut c[i].1, at + 160, 1); }), Rule::AutoOps);
+    // width: the CONFIG names the 1023/11 record width, or an OPS chunk does
+    assert_eq!(ring_mutant(|c| { let k = cfg(c); put32(&mut c[k].1, 60, 160) }), Rule::AutoConfig);
+    assert_eq!(ring_mutant(|c| { let i = c.iter().position(|x| x.0 == 35).unwrap(); put32(&mut c[i].1, 12, 160); }),
+        Rule::AutoOps);
+    // ordinal: a skipped ordinal with consistent reports
+    assert_eq!(ring_mutant(|c| {
+        let (i, at) = ring_at(c, 3);
+        let p = &mut c[i].1;
+        p[at + 168] += 1;
+        let (b, e) = (le32(p, at + 96), le32(p, at + 100));
+        put32(p, at + 96, b + 2);
+        put32(p, at + 100, e + 2);
+    }), Rule::AutoOps);
+    // partition: the ring blocks moved into the legacy pool, or a legacy record's reports inside a ring block
+    assert_eq!(ring_mutant(|c| { let k = cfg(c); let f = le32(&c[k].1, 188); put32(&mut c[k].1, 188, f - 2); }), Rule::AutoConfig);
+    assert_eq!(ring_mutant(|c| {
+        let f = le32(&c[cfg(c)].1, 188);
+        let (i, at) = legacy_at(c);
+        put32(&mut c[i].1, at + 96, f);
+        put32(&mut c[i].1, at + 100, f + 1);
+    }), Rule::AutoOps);
+    // short sink: an accepted OPS chunk missing from the file
+    let short = ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 35).unwrap(); c.remove(i); });
+    assert!(matches!(short, Rule::AutoOps | Rule::AutoStatus), "{short:?}");
+    // wrap: a generation naming another MAIN extent, or another local block
+    assert_eq!(ring_mutant(|c| {
+        let (i, at) = ring_at(c, 0);
+        let s = le32(&c[i].1, at + 164);
+        put32(&mut c[i].1, at + 164, s + 1);
+    }), Rule::AutoOps);
+    assert_eq!(ring_mutant(|c| { let (i, at) = ring_at(c, 0); c[i].1[at + 170] ^= 1; }), Rule::AutoOps);
+    // window: one record of a block carrying another frame token
+    assert_eq!(ring_mutant(|c| {
+        let (i, at) = ring_at(c, 5);
+        let f = le32(&c[i].1, at + 16);
+        put32(&mut c[i].1, at + 16, f + 1);
+    }), Rule::AutoOps);
+    // provenance: a ring record flagged SEGMENT, or of kind FRAME
+    assert_eq!(ring_mutant(|c| { let (i, at) = ring_at(c, 1); c[i].1[at + 14] |= 64; }), Rule::AutoOps);
+    assert_eq!(ring_mutant(|c| { let (i, at) = ring_at(c, 1); c[i].1[at + 12] = 4; }), Rule::AutoOps);
+    // serials: not the block's shared 2g-1/2g
+    assert_eq!(ring_mutant(|c| {
+        let (i, at) = ring_at(c, 1);
+        let s = le32(&c[i].1, at + 108);
+        put32(&mut c[i].1, at + 108, s + 2);
+    }), Rule::AutoOps);
+    // coverage: a ring_full visit not counted as visited; STATUS: held extents not issued - retired
+    assert_eq!(ring_mutant(|c| { let i = c.iter().position(|x| x.0 == 36).unwrap(); c[i].1[480 + 16] += 1; }),
+        Rule::AutoCoverage);
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); c[i].1[152] += 1; }),
+        Rule::AutoStatus);
+    // a published ring label below the records' own
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 144, 2); }),
+        Rule::AutoStatus);
+}
