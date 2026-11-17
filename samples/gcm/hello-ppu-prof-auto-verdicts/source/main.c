@@ -4,7 +4,10 @@
  * Exercises the automatic RSX profiler's per-frame verdicts on PS3 hardware
  * across five distinct bottleneck phases:
  *   (A) RSX-bound (heavy fragment loops with SetWaitFlip and flip-wait complete)
- *   (B) PPU-bound (trivial RSX work, ~45 ms PPU busy loop per frame under HSYNC)
+ *   (B) PPU busy (trivial RSX work, ~45 ms PPU busy loop per frame under HSYNC).
+ *       The reader answers UNKNOWN "RSX not limiting; PPU work vs presentation
+ *       pacing not distinguished": a PPU-bound verdict needs positive PPU-busy
+ *       evidence, which this capture does not carry.
  *   (C) Pacing (trivial RSX work, VSYNC flip waiting on display hardware)
  *   (D) RSX-bound waiting by flip polling (polling cellGcmGetFlipStatus)
  *   (E) RSX-bound waiting by label polling (polling cellGcmIsLabelPassed on label 200)
@@ -353,7 +356,7 @@ int main(void)
         cellGcmWaitFlipComplete(2000000);
     }
 
-    /* ---- Phase B: PPU-bound (frames 60..119) ---- */
+    /* ---- Phase B: PPU busy, RSX not limiting (frames 60..119) ---- */
     /* Switch to HSYNC flip mode and use 45 ms spin to avoid landing near VSYNC
      * interval multiples (~33.3 ms / 2 vsyncs), avoiding PPU work vs presentation
      * pacing ambiguity in profiler analysis. */
@@ -364,7 +367,7 @@ int main(void)
         if (cellSysutilCheckCallback() != 0) break;
         setup_render_state(ctx);
         draw_trivial(ctx);
-        /* PPU-bound: spin on a busy loop for ~45 ms (non-vsync multiple under HSYNC) */
+        /* PPU busy: spin on a busy loop for ~45 ms (non-vsync multiple under HSYNC) */
         uint64_t start_us = sys_time_get_system_time();
         while (sys_time_get_system_time() - start_us < 45000) {
             __asm__ volatile("" ::: "memory");
