@@ -184,6 +184,34 @@ impl TimelineState {
     pub fn box_active(&self) -> bool {
         self.box_from.is_some()
     }
+
+    /// Switches the state's timeline to capture window `w` (rebuilding its
+    /// tracks from `a.span_in_window`, keeping no user zoom or selection,
+    /// and re-deriving the visible window from the new bar set).  The next
+    /// frame's `sync_foreign` picks up the window's SPU/RSX rows; we clear
+    /// any pick that belonged to a different window.
+    pub fn refresh_windowed(&mut self, a: &Analysis, w: &ps3dk_prof::CaptureWindow) {
+        self.tl = crate::timeline::timeline_window(a, w);
+        self.view = View::fit(&self.tl);
+        self.fit_all = true;
+        self.follow = false;
+        self.foreign = None;
+        self.spu_pick = None;
+        self.box_from = None;
+    }
+
+    /// Switches the state's timeline to the unscoped capture (clearing the
+    /// window-scoped bars, and any SPU/RSX row or zoom that belonged to a
+    /// narrower window).
+    pub fn refresh_unscoped(&mut self, a: &Analysis) {
+        self.tl = crate::timeline::timeline(a);
+        self.view = View::fit(&self.tl);
+        self.fit_all = true;
+        self.follow = false;
+        self.foreign = None;
+        self.spu_pick = None;
+        self.box_from = None;
+    }
 }
 
 pub fn draw(
