@@ -19,7 +19,7 @@ use crate::{rolling, rolling_combined, rolling_store};
 pub const DEFAULT_ANALYSIS_BYTES: usize = 256 << 20;
 /// Conservative analysis work units, including the AUTO cross-product charge;
 /// units are not CPU instructions or a wall-clock deadline.
-pub const DEFAULT_ANALYSIS_WORK: u64 = 1 << 34;
+pub const DEFAULT_ANALYSIS_WORK: u64 = 1 << 38;
 
 /// Explicit desktop policy, without changing conservative library defaults.
 pub fn desktop_limits() -> rolling_combined::Limits {
@@ -54,6 +54,26 @@ pub enum CombinedError {
     Transition { segment: u64 },
     Limit(&'static str),
 }
+
+impl std::fmt::Display for CombinedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Store(error) => write!(f, "rolling physical validation: {error}"),
+            Self::Semantic(crate::rolling_combined::Error::Limit(reason)) =>
+                write!(f, "rolling combined analysis limit: {reason}"),
+            Self::Semantic(error) => write!(f, "rolling combined validation: {error:?}"),
+            Self::EmptyStore => f.write_str("empty rolling store has no semantic checkpoint"),
+            Self::Boundary { segment: Some(segment), field } =>
+                write!(f, "rolling checkpoint boundary mismatch at segment {segment}: {field}"),
+            Self::Boundary { segment: None, field } =>
+                write!(f, "rolling checkpoint boundary mismatch: {field}"),
+            Self::Transition { segment } =>
+                write!(f, "checkpoint does not follow preceding payload at segment {segment}"),
+            Self::Limit(reason) => write!(f, "rolling join admission limit: {reason}"),
+        }
+    }
+}
+impl std::error::Error for CombinedError {}
 
 /// Read one coherent immutable snapshot with one physical root selection.
 /// Every adjacent checkpoint must equal the canonical state after the previous

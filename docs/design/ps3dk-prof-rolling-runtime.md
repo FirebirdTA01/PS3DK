@@ -163,7 +163,7 @@ conservative analysis-storage accounting (`--max-analysis-bytes N`, bytes).
 Dense retained AUTO rows can exceed the library's 64 MiB default analysis
 allowance even in a 21 MiB physical file. The CLI and viewer can use
 `rolling_file::desktop_limits()`; explicit library limits remain unchanged.
-That policy also admits 2^34 conservative analysis work units, configurable
+That policy also admits 2^38 conservative analysis work units, configurable
 with `--max-analysis-work N`. AUTO precharges the product of retained frames,
 operations and supporting evidence, including a conservative constant factor;
 these units are not CPU instructions or a time limit. Both work and storage
