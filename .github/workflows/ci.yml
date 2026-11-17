@@ -168,6 +168,10 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_terminal.py --build-dir "$RUNNER_TEMP/rolling-terminal"
           PS3DK_PROF_ROLLING_TERMINAL_DIR="$RUNNER_TEMP/rolling-terminal/artifacts" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_terminal c_terminal_artifacts_match_version_state_revision_and_frontiers -- --ignored --exact
           python3 tests/host/ps3dk-prof-rolling/terminal_mutations.py --build-dir "$RUNNER_TEMP/rolling-terminal-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_file.py --build-dir "$RUNNER_TEMP/rolling-file"
+          python3 tests/host/ps3dk-prof-rolling/run_file.py --build-dir "$RUNNER_TEMP/rolling-file-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
+          python3 tests/host/ps3dk-prof-rolling/run_file.py --lv2-mock --build-dir "$RUNNER_TEMP/rolling-file-lv2"
+          python3 tests/host/ps3dk-prof-rolling/file_mutations.py --build-dir "$RUNNER_TEMP/rolling-file-mutants"
       - name: Live END close, deadlines and OS/API controls
         if: matrix.suite == 'live-e2e'
         run: |

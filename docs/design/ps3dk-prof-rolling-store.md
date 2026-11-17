@@ -150,8 +150,18 @@ surviving segments from incompatible roots or skips a corrupt interior chunk.
 The adapter must establish ordering of completed syncs relative to later
 writes. This interface and checksum protocol alone do not establish a
 filesystem/device power-loss guarantee or assume any atomic sector size.
-Target sync/resize/64-bit offset behavior still needs validation when PAL
-adapters are implemented.
+Target filesystem sync/resize behavior still needs hardware validation.
+
+The private `roll_file` adapter borrows an exclusively owned read/write file
+descriptor. Its caller serializes access and remains responsible for opening
+and closing it. Host calls use 64-bit positioned IO; LV2 uses the explicit
+64-bit seek, read/write count, file-size and resize interfaces in both PPU
+ABIs. LV2 access can move the descriptor cursor. Every request is checked
+against a fixed extent, at most `INT64_MAX`, before any IO. Each transfer is
+limited to `INT_MAX` bytes; a positive short result is returned to the store,
+while an interrupted call fails without retry. Resize success requires a
+subsequent exact size check. Sparse resizing does not reserve disk capacity.
+The adapter is not yet connected to runtime capture admission.
 
 Opening or reading segments while another owner overwrites slots is not an
 atomic live snapshot. Individual reads revalidate their slot identities and
@@ -168,6 +178,9 @@ directory:
 ```sh
 python3 tests/host/ps3dk-prof-rolling/run.py --build-dir /path/to/local/build
 python3 tests/host/ps3dk-prof-rolling/mutations.py --build-dir /path/to/local/mutations
+python3 tests/host/ps3dk-prof-rolling/run_file.py --build-dir /path/to/local/file
+python3 tests/host/ps3dk-prof-rolling/run_file.py --lv2-mock --build-dir /path/to/local/file-lv2
+python3 tests/host/ps3dk-prof-rolling/file_mutations.py --build-dir /path/to/local/file-mutants
 ```
 
 `--cc` selects a C11 compiler command. The normal runner compiles the real store,
@@ -191,6 +204,16 @@ incomplete root chain, keep writing after IO failure, or omit the slot-sync
 barrier. The mutation runner requires a passing baseline and rejects compiler
 errors as harness failures rather than counting them as killed mutations.
 
+Positioned-file tests use an actual sparse host file above 4 GiB, short writes,
+an interrupted transaction, poisoned-handle refusal and reopening the previous
+committed root. The LV2 test models syscall return shapes, including a wrong
+seek position and an impossible returned count; it does not exercise a PS3
+filesystem. Six mutation controls require assertion failures for offset
+narrowing, missing extent checks, unchecked resize, unchecked seek position
+and unchecked transfer count. Both PPU ABIs also compile the store and adapter
+with warnings treated as errors. These checks do not establish console IO
+behavior or power-loss durability.
+
 ## Work required before enabling rolling captures
 
 The complete feature still requires:
@@ -207,7 +230,7 @@ The complete feature still requires:
   frames. WAIT/FUNC/COUNTERS/frame-evidence support or explicit initialization
   rejection is necessary for configurations advertising those capabilities.
 * Runtime option/ABI work, preallocation/resource limits, a drainer-owned
-  accepted/committed frontier, real FILE PAL adapters, initial metadata
+  accepted/committed frontier, FILE adapter integration, initial metadata
   publication, and correct shutdown/quick-exit behavior.
 * A terminal/resource-stop representation, checkpoint import and analysis in
   the PC reader/viewer, coherent live snapshot negotiation, and completed-file
