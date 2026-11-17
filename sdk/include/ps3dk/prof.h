@@ -46,7 +46,8 @@ extern "C" {
 #define PS3DK_PROF_ENOTSUP        (-17)  /* not supported here: a callback sink, a device not yet measured, an off build */
 #define PS3DK_PROF_ENET           (-18)  /* live: the listener could not be created */
 #define PS3DK_PROF_ETIMEDOUT      (-19)  /* live stop: the agent did not finish in time; call stop again */
-#define PS3DK_PROF_ERETENTION     (-20)  /* capture closed, but completed-file bookkeeping/cleanup failed */
+/* File policy errors use a separate block from the SPU lane's -20..-23. */
+#define PS3DK_PROF_ERETENTION     (-32)  /* capture closed, but completed-file bookkeeping/cleanup failed */
 
 /* Capture windows: the profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO RSX timing, draw report
  * pairs, AUTO ranges) unless a window is open. Frame marks and clock anchors run all the time, so a window keeps the
