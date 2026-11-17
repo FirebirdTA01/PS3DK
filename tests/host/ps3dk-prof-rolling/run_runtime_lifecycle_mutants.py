@@ -25,9 +25,11 @@ BRIDGE = Path('sdk/libps3dkprof/src/rolling/roll_runtime.c')
 RUNNER = Path('tests/host/ps3dk-prof-rolling/run_runtime_lifecycle.py')
 CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_lifecycle_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
+# Reviewed against b8704674e: DRAIN guards the callback with TEST_HOOKS;
+# BRIDGE uses hook-independent type/resource aliases. Host mutations unchanged.
 PINS = {
-    DRAIN: '09a6baf8346ce11b58c42e23e9baf93c056ed692088142bd679baea2b01920fe',
-    BRIDGE: 'dd91e860e2c615857bcd3310da931441972e8a7c73ea6b0a4657247bb39f2310',
+    DRAIN: 'c491df7ace12d8b16ba669900aa40cd345ca7242ac00527604e7430344b420d0',
+    BRIDGE: 'e8fe8af7e0d96d3be486c12e9b54d14561e43480be6884d269c26a4435726d9c',
 }
 RUST_TESTS = {
     'actual_thread_automatic_resource_stop_preserves_first_public_join_and_result',
@@ -95,7 +97,7 @@ def specifications():
          [(wait + '\n            return;', wait + '\n            /* MUTANT: loser repeats preparation. */')],
          [native('thread-auto', 'claimed-before-prepared')]),
         ('collapse_resource_to_sink_error', BRIDGE,
-         [('r->result = PS3DK_PROF_TEST_EROLLRESOURCE;', 'r->result = PS3DK_PROF_ESINKFAIL;')],
+         [('r->result = P_ROLL_RESOURCE;', 'r->result = PS3DK_PROF_ESINKFAIL;')],
          [native('thread-auto', 'public-retrieves-automatic-result')]),
         ('resource_overrides_close_failure', DRAIN,
          [('if (p->snk.close_failed) return PS3DK_PROF_ECLOSE;\n        if (p->rolling->result) return p->rolling->result;',

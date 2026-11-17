@@ -1197,8 +1197,10 @@ static void prepare_stop(prof *p, uint32_t owner)
             while (!LD_ACQ(&p->rolling->stop_prepared)) pal_sleep_us(100);
             return;
         }
+#ifdef PS3DK_PROF_TEST_HOOKS
         if (ps3dk_prof_test_hooks.rolling_stop_claimed)
             ps3dk_prof_test_hooks.rolling_stop_claimed(owner);
+#endif
     }
 #else
     (void)owner;

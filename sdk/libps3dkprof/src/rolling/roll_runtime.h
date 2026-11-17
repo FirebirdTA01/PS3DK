@@ -1,9 +1,9 @@
-/* Private host-only runtime prototype. No public option or default admission. */
+/* Private runtime implementation. No public option or default admission. */
 #ifndef PS3DK_PROF_ROLL_RUNTIME_H
 #define PS3DK_PROF_ROLL_RUNTIME_H
-#if defined(PS3DK_PROF_ROLLING) && defined(PS3DK_PROF_TEST_HOOKS)
+#if defined(PS3DK_PROF_ROLLING)
 #define P_ROLLING_RUNTIME 1
-#include "roll_runtime_test.h"
+#include "roll_runtime_types.h"
 #include "roll_file.h"
 #define p_roll_plan ps3dk_prof__roll_runtime_plan
 #define p_roll_bind ps3dk_prof__roll_runtime_bind
@@ -14,10 +14,10 @@
 #define p_roll_publish ps3dk_prof__roll_runtime_publish
 struct prof;
 typedef struct p_roll_runtime {
-    ps3dk_prof_test_rolling_options options;
+    p_roll_options options;
     pfm_config combined;
     uint32_t combined_enabled;
-    ps3dk_prof_test_rolling_record record;
+    p_roll_record record;
     pfr_layout disk;
     pfp_layout encoder;
     pfr_file file;
@@ -29,8 +29,8 @@ typedef struct p_roll_runtime {
     uint32_t stop_owner, stop_prepared; /* atomic; distinct from public shutdown claim */
     int result;
 } p_roll_runtime;
-int p_roll_plan(const ps3dk_prof_test_rolling_options *, const pfm_config *, size_t *);
-void p_roll_bind(struct prof *, void *, const ps3dk_prof_test_rolling_options *, const pfm_config *, size_t);
+int p_roll_plan(const p_roll_options *, const pfm_config *, size_t *);
+void p_roll_bind(struct prof *, void *, const p_roll_options *, const pfm_config *, size_t);
 int p_roll_start(struct prof *, const uint8_t[16]);
 int p_roll_accept(struct prof *, const void *, size_t);
 int p_roll_flush(struct prof *);

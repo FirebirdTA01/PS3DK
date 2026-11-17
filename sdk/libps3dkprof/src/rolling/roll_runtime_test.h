@@ -6,29 +6,10 @@
 #ifndef PS3DK_PROF_TEST_HOOKS
 #error "private rolling runtime seam requires PS3DK_PROF_TEST_HOOKS"
 #endif
-#include "roll_ppu.h"
-#include "roll_combined.h"
-
-typedef struct {
-    uint32_t size, version, enabled, reserved; /* exact size, version1, enabled0/1 */
-    /* Explicit total fixed runtime-allocation ceiling, including existing core
-     * block and every rolling arena/context/checkpoint/scratch/control region.
-     * Thread stack and allocator implementation overhead are not included. */
-    uint64_t max_state_bytes;
-    pfr_config store;
-    pfp_config ppu;
-} ps3dk_prof_test_rolling_options;
-
-typedef struct {
-    uint32_t size, version, original_flags, reserved;
-    uint64_t accepted_next_chunk, accepted_payload_bytes;
-    uint64_t committed_next_chunk, committed_payload_bytes;
-    uint64_t revision, file_bytes, state_bytes;
-    uint32_t state, reason;
-    int32_t result, io_result, close_result, join_result;
-} ps3dk_prof_test_rolling_record;
-
-enum { PS3DK_PROF_TEST_EROLLRESOURCE = -33 };
+#include "roll_runtime_types.h"
+typedef p_roll_options ps3dk_prof_test_rolling_options;
+typedef p_roll_record ps3dk_prof_test_rolling_record;
+enum { PS3DK_PROF_TEST_EROLLRESOURCE = P_ROLL_RESOURCE };
 /* Pre-init, same serialization/error contract as ordinary setters. Disabled
  * leaves append unchanged; its zero capacities have no default meaning.
  * Enabled requires explicit capacities and a FILE sink. Never mask flags to

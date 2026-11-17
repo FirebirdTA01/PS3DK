@@ -1,9 +1,11 @@
 # Private rolling runtime
 
-This runtime is a host acceptance implementation behind both
-`PS3DK_PROF_ROLLING` and `PS3DK_PROF_TEST_HOOKS`. It is not a public SDK option.
-The LV2 PAL rejects test hooks; passing host tests does not establish target
-runtime behavior or filesystem durability. Append output remains the default.
+The private implementation uses `PS3DK_PROF_ROLLING`; its configuration and
+result test API still requires `PS3DK_PROF_TEST_HOOKS`. Internal types do not
+depend on that test API. There is no public rolling SDK option or default
+admission. The LV2 PAL still rejects test hooks; host behavior and target
+compilation do not establish target runtime behavior or filesystem durability.
+Append output remains the default.
 
 ## Configuration and storage
 
@@ -19,8 +21,10 @@ All capacities are explicit. Before opening a file, checked planners count the
 existing core allocation and the rolling context, two arenas, checkpoint
 buffers, payload, physical-store scratch and control objects against one fixed
 memory ceiling. This private ceiling is at most 64 MiB. It excludes allocator
-overhead and the configured drainer thread stack. There is no allocation to grow
-these pools after READY. The logical file-size bound includes configuration,
+overhead, the configured drainer thread stack, and separately attached producer
+pools such as AUTO/FIFO and report-ring memory. It is not a total profiler or
+process memory limit. The accepted-output pools do not grow after READY;
+producer attachment has its own allocation and bounds. The logical file-size bound includes configuration,
 roots, retained slots and the replacement slot; it is not a disk-block
 reservation or a cumulative-I/O limit.
 

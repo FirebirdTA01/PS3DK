@@ -30,9 +30,11 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # Bridge/SPU retain gate97 pins; ext_runtime has the gate101 inline boundary.
 # CORE repinned after gate107: immutable capture-format publication for live
 # refusal only. Mandatory isolated baselines still run first.
+# CORE/BRIDGE repinned after review against b8704674e: hook-independent
+# p_roll_options type and equivalent P_ROLL_RESOURCE (-33) name only.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': 'd18f362aee01ba7cd5bef0140d18a0502521689dadab9ab2181f9079eda28204',
-    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'dd91e860e2c615857bcd3310da931441972e8a7c73ea6b0a4657247bb39f2310',
+    'sdk/libps3dkprof/src/core/prof_core.c': '8d23adf79b06003980f6782155715c528b80f1a4f59ab7cc783c299edbc26bd7',
+    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'e8fe8af7e0d96d3be486c12e9b54d14561e43480be6884d269c26a4435726d9c',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',
 }
@@ -113,7 +115,7 @@ def specifications():
              '        l->emitted_next += n; l->emitted_events += n;\n        return;\n    }')],
              witness=native('resource', 'resource-before-event-ledger-ack')),
         dict(name='resource_becomes_sink_error', edits=[(BRIDGE,
-             'r->result = PS3DK_PROF_TEST_EROLLRESOURCE;', 'r->result = PS3DK_PROF_ESINKFAIL;')],
+             'r->result = P_ROLL_RESOURCE;', 'r->result = PS3DK_PROF_ESINKFAIL;')],
              witness=native('resource', 'SPU-resource-not-sink-failure')),
         dict(name='ppu_prepare_for_combined', edits=[(BRIDGE,
              'if (m) r->buffers.prepare = pfm_prepare;', 'if (m) r->buffers.prepare = pfp_prepare;')],

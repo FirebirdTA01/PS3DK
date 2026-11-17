@@ -14,7 +14,7 @@ static void *part(uint8_t *base, size_t *n, size_t bytes)
     return base ? base + at : (void *)1;
 }
 
-static int layout(const ps3dk_prof_test_rolling_options *o, const pfm_config *m, uint8_t *base,
+static int layout(const p_roll_options *o, const pfm_config *m, uint8_t *base,
                   p_roll_runtime *r, size_t *bytes)
 {
     pfr_layout disk;
@@ -66,7 +66,7 @@ static int layout(const ps3dk_prof_test_rolling_options *o, const pfm_config *m,
     return 0;
 }
 
-int p_roll_plan(const ps3dk_prof_test_rolling_options *o, const pfm_config *m, size_t *bytes)
+int p_roll_plan(const p_roll_options *o, const pfm_config *m, size_t *bytes)
 {
     if (!o || o->size != sizeof *o || o->version != 1 ||
         o->reserved || o->enabled > 1) return PS3DK_PROF_EINVAL;
@@ -77,7 +77,7 @@ int p_roll_plan(const ps3dk_prof_test_rolling_options *o, const pfm_config *m, s
     return layout(o, m, NULL, NULL, bytes);
 }
 
-void p_roll_bind(prof *p, void *base, const ps3dk_prof_test_rolling_options *o, const pfm_config *m, size_t total)
+void p_roll_bind(prof *p, void *base, const p_roll_options *o, const pfm_config *m, size_t total)
 {
     p_roll_runtime *r = base;
     size_t bytes;
@@ -107,7 +107,7 @@ static int observe(prof *p, int rc)
         r->record.state = store.state;
     }
     if (rc == PFO_RESOURCE) {
-        r->result = PS3DK_PROF_TEST_EROLLRESOURCE;
+        r->result = P_ROLL_RESOURCE;
     } else if (rc != PFR_OK) {
         r->record.io_result = rc;
         r->result = PS3DK_PROF_ESINKFAIL;

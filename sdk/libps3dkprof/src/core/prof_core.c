@@ -47,7 +47,7 @@ static struct {
     ps3dk_prof_sink_callbacks cb;
     uint32_t retention_keep;
 #ifdef P_ROLLING_RUNTIME
-    ps3dk_prof_test_rolling_options rolling;
+    p_roll_options rolling;
     pfm_config rolling_combined;
     uint32_t rolling_combined_enabled;
 #endif
