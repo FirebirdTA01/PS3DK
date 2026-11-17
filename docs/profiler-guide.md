@@ -155,9 +155,21 @@ Retention
 syncs the current file and replacement index before eviction; target filesystem
 power-loss durability, including directory updates, still needs measurement.
 It uses a bounded index buffer of about 25 KiB during shutdown. Retention
-does not cap a running file's size. The separate rolling-store code remains an
-[internal foundation](design/ps3dk-prof-rolling-store.md), with no enabled
-rolling-capture option yet.
+does not cap a running file's size. For managed AUTO/FIFO builds, the separate
+`-DPS3_PROF_AUTO_ROLLING=64` CMake option requests rolling output with a 64 MiB
+file ceiling (alongside `-DPS3_PROF_AUTO=ON`). It generates constant pre-init
+options; no application calls are required. Empty keeps append output.
+The finite preset retains six segments plus a spare and uses about 21 MiB of
+file space. Increasing the ceiling alone does not enlarge the preset's pools.
+Core/extension/rolling writer state has a separate 64 MiB ceiling; AUTO report
+ring and other attach allocations are bounded separately, so this is not a
+total-memory cap. Active SPU lanes and legacy live transport are not supported
+by this first public rolling profile. Metadata or semantic support exhaustion
+stops capture at a whole-chunk boundary with `PS3DK_PROF_ERESOURCE`; it does not
+silently discard an unrepresentable record. See the
+[runtime contract](design/ps3dk-prof-rolling-runtime.md) for custom constant
+options, the post-shutdown result API and the distinction between a committed
+file and target filesystem durability.
 
 **Live view.** The live agent serves this run's FILE-sink capture to one PC viewer at a time over TCP while it grows; it only reads the file, so the writer never waits for a viewer. The network must be initialised first.
 

@@ -1,5 +1,11 @@
 /* Compile-only internal contract. No public setter, executable or runtime enable. */
 #include "prof_internal.h"
+#include <ps3dk/prof_rolling.h>
+_Static_assert(sizeof(ps3dk_prof_rolling_options)==192,"public options size on both ABIs");
+_Static_assert(offsetof(ps3dk_prof_rolling_options,max_capture_bytes)==16,"public options alignment");
+_Static_assert(offsetof(ps3dk_prof_rolling_options,reserved)==152,"public reserved offset");
+_Static_assert(sizeof(ps3dk_prof_rolling_result)==128,"public result size on both ABIs");
+_Static_assert(offsetof(ps3dk_prof_rolling_result,result)==88,"public result error offset");
 #ifndef P_ROLL_EXPECT_POINTER_BYTES
 #error "compile driver must name the expected pointer ABI"
 #endif

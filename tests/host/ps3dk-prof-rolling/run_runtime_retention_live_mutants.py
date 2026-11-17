@@ -28,9 +28,11 @@ PINS=(DRAIN,CORE,LIVE,PPU,INSPECT)
 # exact gate104/105/106 REDs. Baseline still runs before every mutation batch.
 # CORE/DRAIN repinned after gate120 and tagged-selection diff against a79284960.
 # Wrong combined metadata still selects the PPU budget; schema2 stays untouched.
+# Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
+# private mutation semantics unchanged, isolated baselines remain mandatory.
 APPROVED_PINS={
     'sdk/libps3dkprof/src/core/prof_drain.c': 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
-    'sdk/libps3dkprof/src/core/prof_core.c': 'f7e69aee0fe5f9fa147e9cbce1b5f7ce673087fc9b0ffa39d5f1f56d1989406c',
+    'sdk/libps3dkprof/src/core/prof_core.c': '9d9410a1e3666016bad03bd78c8291e228fbab9863ba940c809264c03369fc79',
     'sdk/libps3dkprof/src/live/live_api.c': 'afed59fbdebb943a757d470863b2aababce7e0cdcb5eca4a3a36adb109235786',
     'sdk/libps3dkprof/src/rolling/roll_ppu.c': '7e5f300519d9fbcc373883763fb9fdd601b1893f789887e4f111a8f7ce0ae3ff',
     'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': 'cb33cb59ad96ff5a4caff334c89f57516efa9f39eee4df5a6f6ec425d65a8dca',

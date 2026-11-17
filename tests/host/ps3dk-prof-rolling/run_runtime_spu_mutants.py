@@ -32,9 +32,11 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # refusal only. Mandatory isolated baselines still run first.
 # CORE/BRIDGE repinned after gate120 and review against a79284960: tagged
 # PPU/combined/schema2 selection. Combined witnesses and baseline stay unchanged.
+# Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
+# private mutation semantics unchanged, isolated baselines remain mandatory.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': 'f7e69aee0fe5f9fa147e9cbce1b5f7ce673087fc9b0ffa39d5f1f56d1989406c',
-    'sdk/libps3dkprof/src/rolling/roll_runtime.c': '2d9250d67d171b38c5640142f4db15401c42b71ed779cdd02942629411cded46',
+    'sdk/libps3dkprof/src/core/prof_core.c': '9d9410a1e3666016bad03bd78c8291e228fbab9863ba940c809264c03369fc79',
+    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'd935adf4125e0a3003480bc1eb48eea3197c0e3564285a9eecff4b4d5589f42a',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',
 }
@@ -73,7 +75,7 @@ def inventory():
     paths.update(p.relative_to(ROOT) for p in (ROOT / 'tools/ps3dk-prof/src').rglob('*.rs'))
     paths.update(p.relative_to(ROOT) for p in HERE.glob('runtime_spu*') if p.is_file())
     paths.update(p.relative_to(ROOT) for p in (ROOT / 'tools/ps3dk-prof/tests/common').rglob('*.rs'))
-    paths.update((Path('sdk/include/ps3dk/prof.h'), RUNNER, CTEST, RTEST,
+    paths.update((Path('sdk/include/ps3dk/prof.h'),Path('sdk/include/ps3dk/prof_rolling.h'), RUNNER, CTEST, RTEST,
                   Path('tests/host/ps3dk-prof-spu-int/i2_test.c'),
                   Path('tools/ps3dk-prof/Cargo.toml'), Path('tools/Cargo.lock'),
                   Path(__file__).resolve().relative_to(ROOT)))

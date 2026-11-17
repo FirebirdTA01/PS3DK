@@ -156,7 +156,7 @@ jobs:
           python3 tests/host/ps3dk-prof-spu/drain-cost-test.py "$RUNNER_TEMP/drain-cost"
           bash samples/profiling/spurs-job-zones/host-tests/run-host.sh "$RUNNER_TEMP/spurs-job-zones"
           python3 tests/host/ps3dk-prof-spu-int/i2-test.py "$RUNNER_TEMP/i2" --reader tools/target/debug/ps3dk-prof
-      - name: Private rolling runtime lifecycle and accepted output
+      - name: Rolling runtime lifecycle, public options and accepted output
         if: matrix.suite == 'rolling-runtime'
         run: |
           python3 tests/host/ps3dk-prof-rolling/run_runtime_ppu.py --build-dir "$RUNNER_TEMP/rolling-runtime" --run-native
@@ -196,6 +196,12 @@ jobs:
           export PS3DK_PROF_RUNTIME_SCHEMA2_PREFLIGHT="$RUNNER_TEMP/rolling-schema2-preflight/build/runtime-schema2"
           cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_schema2_preflight -- --ignored --test-threads=1
           python3 tests/host/ps3dk-prof-rolling/run_runtime_hookfree.py --mode host --build-dir "$RUNNER_TEMP/rolling-hookfree"
+          python3 tests/host/ps3dk-prof-rolling/run_public_options.py --build-dir "$RUNNER_TEMP/rolling-public-options"
+          python3 tests/host/ps3dk-prof-rolling/run_automatic_rolling.py --build-dir "$RUNNER_TEMP/rolling-automatic-options"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_schema2.py --public-options --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-public"
+          PS3DK_PROF_RUNTIME_SCHEMA2="$RUNNER_TEMP/rolling-runtime-public/runtime-schema2" PS3DK_PROF_RUNTIME_SCHEMA2_PUBLIC=1 cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_schema2 -- --ignored --test-threads=1
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_schema2.py --public-options --automatic-startup --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-automatic"
+          PS3DK_PROF_RUNTIME_SCHEMA2="$RUNNER_TEMP/rolling-runtime-public/runtime-schema2" PS3DK_PROF_RUNTIME_SCHEMA2_PUBLIC=1 PS3DK_PROF_RUNTIME_SCHEMA2_AUTOMATIC="$RUNNER_TEMP/rolling-runtime-automatic/runtime-schema2" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_schema2 actual_schema2_runtime_preserves_ring_bytes_and_rotates_useful_output -- --ignored --exact
       - name: Private combined rolling encoders and original-source parity
         if: matrix.suite == 'rolling-combined'
         run: |

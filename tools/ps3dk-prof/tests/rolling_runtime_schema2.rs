@@ -16,7 +16,9 @@ fn bounded(path:&Path,cap:usize)->Vec<u8>{
     f.take(cap as u64+1).read_to_end(&mut b).unwrap();assert!(b.len()<=cap);b
 }
 fn run(case:&str)->Run{
-    let exe=std::fs::canonicalize(std::env::var_os("PS3DK_PROF_RUNTIME_SCHEMA2")
+    let automatic=if case=="rotation"{std::env::var_os("PS3DK_PROF_RUNTIME_SCHEMA2_AUTOMATIC")}else{None};
+    if automatic.is_some(){assert!(public_profile(),"automatic fixture uses the public profile");}
+    let exe=std::fs::canonicalize(automatic.or_else(||std::env::var_os("PS3DK_PROF_RUNTIME_SCHEMA2"))
         .expect("set prebuilt actual schema2 runtime helper; no implicit skip")).unwrap();
     static NEXT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
     let id=NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
@@ -25,6 +27,7 @@ fn run(case:&str)->Run{
     std::fs::create_dir(&dir).unwrap();let mut r=Run{dir,meta:Value::Null};
     let out=r.dir.join("stdout.log");let err=r.dir.join("stderr.log");
     let mut c=Command::new(exe).arg(case).arg(&r.dir)
+        .env("PS3DK_SCHEMA2_AUTOMATIC_OUTPUT",&r.dir)
         .stdout(Stdio::from(std::fs::File::create(&out).unwrap()))
         .stderr(Stdio::from(std::fs::File::create(&err).unwrap())).spawn().unwrap();
     let start=std::time::Instant::now();let status=loop{
@@ -77,15 +80,23 @@ fn append(recipe:&str)->Run{
         "terminal source has no next-chunk restart checkpoint");
     eprintln!("schema2 ordinary-first {recipe}: {} real draws, {} original chunks",draws.len(),o.len()-1);r
 }
-fn limits()->rolling_store::Limits{rolling_store::Limits{max_file_bytes:16<<20,max_slot_bytes:2<<20}}
+fn public_profile()->bool{match std::env::var("PS3DK_PROF_RUNTIME_SCHEMA2_PUBLIC"){
+    Err(std::env::VarError::NotPresent)=>false,Ok(s) if s=="1"=>true,_=>panic!("public profile must be absent or 1")}}
+fn file_limit()->usize{if public_profile(){32<<20}else{16<<20}}
+fn limits()->rolling_store::Limits{rolling_store::Limits{max_file_bytes:file_limit() as u64,max_slot_bytes:if public_profile(){4<<20}else{2<<20}}}
 fn source(r:&Run)->(Vec<u8>,Vec<usize>,Box<ps3dk_prof::Analysis>){
     let b=bounded(&r.dir.join("accepted-original.prof"),4<<20);let a=analyse(&b);let o=offsets(&b);
     assert_eq!((0..3).map(|i|u32::from_le_bytes(b[o[i]..o[i]+4].try_into().unwrap())).collect::<Vec<_>>(),vec![1,2,17]);
     (b,o,a)
 }
 fn joined(r:&Run,b:&[u8],o:&[usize],name:&str)->rolling_file::CombinedFile{
-    let bytes=bounded(&r.dir.join(name),16<<20);let p=rolling_store::read(&bytes,limits()).unwrap();
-    assert_eq!(p.config.session,[0x52;16]);assert_eq!(p.config.format_version,2);
+    let bytes=bounded(&r.dir.join(name),file_limit());let p=rolling_store::read(&bytes,limits()).unwrap();
+    if public_profile(){
+        let clock=analyse(b).capture.clock.clone().unwrap();
+        assert_eq!(&p.config.session[..8],&clock.tb_at_init.to_le_bytes());
+        assert_ne!(&p.config.session[8..],&[0;8],"exclusive path/build namespace");
+    }else{assert_eq!(p.config.session,[0x52;16]);}
+    assert_eq!(p.config.format_version,2);
     assert_eq!(p.view.bound_payload_bytes,(o[p.view.next_chunk as usize]-16) as u64);
     assert_eq!(p.view.evicted_payload_bytes,(o[p.view.first_chunk as usize]-16) as u64);
     for s in &p.segments{
@@ -136,5 +147,5 @@ fn actual_schema2_resource_refusal_precedes_metadata_ack_and_main_retirement(){
     let j=terminal(&r,&b,&o,3);assert_eq!(j.store_view.reason,3);assert!(!j.retained.terminal);
     let stopped=joined(&r,&b,&o,"automatic-before-public.profr");
     assert_eq!((stopped.store_view.state,stopped.store_view.reason),(3,3));
-    assert_eq!(bounded(&r.dir.join("automatic-before-public.profr"),16<<20),bounded(&r.dir.join("capture.profr"),16<<20),"public shutdown must not recommit automatic stop");
+    assert_eq!(bounded(&r.dir.join("automatic-before-public.profr"),file_limit()),bounded(&r.dir.join("capture.profr"),file_limit()),"public shutdown must not recommit automatic stop");
 }

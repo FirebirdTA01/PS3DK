@@ -28,6 +28,8 @@ PROFILER_SUITES = {
     "tests/host/ps3dk-prof-rolling/run_runtime_schema2.py",
     "tests/host/ps3dk-prof-rolling/run_runtime_schema2_preflight.py",
     "tests/host/ps3dk-prof-rolling/run_runtime_hookfree.py",
+    "tests/host/ps3dk-prof-rolling/run_public_options.py",
+    "tests/host/ps3dk-prof-rolling/run_automatic_rolling.py",
     "tests/host/ps3dk-prof-rolling/run_runtime_live_rolling.py",
     "tests/host/ps3dk-prof-rolling/run_runtime_retention_live_mutants.py",
     "tests/host/ps3dk-prof-rolling/run_ring_mutants.py",

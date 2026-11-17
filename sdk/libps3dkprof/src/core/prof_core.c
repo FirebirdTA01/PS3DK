@@ -5,6 +5,10 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#include "../../../include/ps3dk/prof_rolling.h"
+#if defined(P_ROLLING_RUNTIME) && defined(PS3DK_PROF_ROLLING_PUBLIC)
+#include "../rolling/roll_public.h"
+#endif
 #ifdef PS3DK_PROF_WITH_AUTO
 #include "../auto_rsx/auto_internal.h"
 #include "../fifo/fifo_account_runtime.h"
@@ -1276,6 +1280,63 @@ int ps3dk_prof_set_capture_retention(uint32_t keep)
     return rc;
 }
 
+int ps3dk_prof_set_rolling_options(const ps3dk_prof_rolling_options *options)
+{
+    int rc=gate_enter(G_CONFIGURING);unsigned i;
+    if(rc)return rc;
+    if(!options||options->size!=192||options->version!=1)rc=PS3DK_PROF_EINVAL;
+    else {
+        for(i=0;i<10&&!options->reserved[i];++i){}
+        if(i!=10||options->mode>1||options->profile>3)rc=PS3DK_PROF_EINVAL;
+        else {
+#if defined(P_ROLLING_RUNTIME) && defined(PS3DK_PROF_ROLLING_PUBLIC)
+            p_roll_options o;p_roll_selection selection;
+            rc=ps3dk_prof__roll_options_decode(options,&o,&selection);
+            if(!rc){g_pending.rolling=o;g_pending.rolling_selection=selection;}
+#else
+            ps3dk_prof_rolling_options append=PS3DK_PROF_ROLLING_OPTIONS_INIT;
+            rc=options->mode ? PS3DK_PROF_ENOTSUP :
+                memcmp(options,&append,sizeof append) ? PS3DK_PROF_EINVAL : PS3DK_PROF_OK;
+#ifdef P_ROLLING_RUNTIME
+            if(!rc){memset(&g_pending.rolling,0,sizeof g_pending.rolling);
+                memset(&g_pending.rolling_selection,0,sizeof g_pending.rolling_selection);}
+#endif
+#endif
+        }
+    }
+    ST_REL(&g_gate,(uint32_t)G_UNINIT);return rc;
+}
+
+int ps3dk_prof_get_rolling_result(ps3dk_prof_rolling_result *out)
+{
+    if(!out||out->size!=128||out->version!=1)return PS3DK_PROF_EINVAL;
+    if(!p_ready())return PS3DK_PROF_ENOTINIT;
+#ifdef P_ROLLING_RUNTIME
+    if(!g_prof->rolling)return PS3DK_PROF_ENOTSUP;
+    if(!LD_ACQ(&g_prof->finalization_ready))return PS3DK_PROF_EBUSY;
+    {
+        const p_roll_record *r=&g_prof->rolling->record;
+        ps3dk_prof_rolling_result v={0};
+        v.size=sizeof v;v.version=1;v.format=1;
+        switch(g_prof->rolling->selection.kind) {
+        case P_ROLL_PPU:v.profile=PS3DK_PROF_ROLLING_PROFILE_PPU;break;
+        case P_ROLL_COMBINED:v.profile=PS3DK_PROF_ROLLING_PROFILE_SPU;break;
+        case P_ROLL_SCHEMA2:v.profile=PS3DK_PROF_ROLLING_PROFILE_AUTO_FIFO;break;
+        default:return PS3DK_PROF_ENOTSUP;
+        }
+        v.original_flags=r->original_flags;v.state=r->state;v.reason=r->reason;
+        v.accepted_next_chunk=r->accepted_next_chunk;v.accepted_payload_bytes=r->accepted_payload_bytes;
+        v.committed_next_chunk=r->committed_next_chunk;v.committed_payload_bytes=r->committed_payload_bytes;
+        v.revision=r->revision;v.file_bytes=r->file_bytes;v.fixed_state_bytes=r->state_bytes;
+        v.result=r->result;v.io_result=r->io_result ? PS3DK_PROF_ESINKFAIL : 0;
+        v.close_result=r->close_result;v.join_result=r->join_result;
+        *out=v;return 0;
+    }
+#else
+    return PS3DK_PROF_ENOTSUP;
+#endif
+}
+
 #ifdef PS3DK_PROF_TEST_HOOKS
 int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *o)
 {
@@ -1639,6 +1700,8 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
             /* Match the actual original header before allocating/opening.
              * This private runtime profile admits managed AUTO leases only. */
             if (!x.enabled || !x.gpu_max || g_pending.rolling_selection.limits.schema2.family_flags != families)
+                return PS3DK_PROF_ENOTSUP;
+            if (x.spu && !g_pending.rolling_selection.limits.schema2.shared.spu_lanes)
                 return PS3DK_PROF_ENOTSUP;
 #else
             return PS3DK_PROF_ENOTSUP;

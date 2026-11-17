@@ -23,7 +23,12 @@ def main():
     p.add_argument('--build-dir', type=Path, required=True)
     p.add_argument('--cc', default='cc')
     p.add_argument('--sanitize', choices=('address', 'undefined'))
+    p.add_argument('--public-options', action='store_true', help='exercise the public preset/setter/result')
+    p.add_argument('--automatic-startup', action='store_true', help='link the real AUTO constructor with the public preset')
+    p.add_argument('--omit-automatic-startup', action='store_true', help='sensitivity control: omit only that constructor')
     a = p.parse_args()
+    if a.automatic_startup and not a.public_options or a.omit_automatic_startup and not a.automatic_startup:
+        p.error('automatic startup requires public options; omission requires automatic startup')
     if os.name != 'posix':
         raise RuntimeError('Linux/WSL host fixture only')
     out = a.build_dir.resolve()
@@ -39,6 +44,8 @@ def main():
     # FIFO and AUTO include <ps3dk/prof_gpu.h>. Its canonical source is
     # installed from src/rsx, and it includes only prof.h plus system stdint.h.
     public_inputs += [lib / 'rsx/prof_gpu.h']
+    if a.public_options:
+        public_inputs += [ROOT/'sdk/include/ps3dk/prof_rolling.h']
     for src in public_inputs:
         shutil.copyfile(src, public / src.name)
     stub = out / 'native-port'
@@ -108,8 +115,15 @@ int32_t gcmAddressToOffset(void *,u32 *);
         'auto_rsx/auto_queue.c', 'auto_rsx/auto_commands.c', 'auto_rsx/auto_completion.c', 'auto_rsx/auto_frames.c',
         'auto_rsx/auto_clock.c', 'auto_rsx/auto_ring.c', 'auto_rsx/auto_ring_commands.c', 'auto_rsx/auto_ring_layout.c')]
     sources += [HERE / 'runtime_schema2_test.c']
-    # No auto_startup constructor and no fake observer bridge: this main calls
-    # actual core init after installing its pending private options.
+    if a.public_options:
+        flags += ['-DTEST_PUBLIC_OPTIONS','-DPS3DK_PROF_ROLLING_PUBLIC']
+        sources += [lib/'rolling/roll_public.c']
+    if a.automatic_startup:
+        flags += ['-DTEST_AUTOMATIC_STARTUP']
+        if not a.omit_automatic_startup:
+            sources += [lib/'auto_rsx/auto_startup.c']
+    # No fake observer bridge. The automatic arm lets product constructor100
+    # install options and initialize; the other arms explicitly call real init.
     wraps = ['ps3dk_prof__pal_alloc', 'ps3dk_prof__pal_open_excl', 'ps3dk_prof__pal_open_rw_excl',
              'ps3dk_prof__roll_combined2_init', 'ps3dk_prof__roll_output_accept',
              'ps3dk_prof__fifo_emit_chunk', 'ps3dk_prof__auto_queue_ack', 'ps3dk_prof__auto_ring_ack']

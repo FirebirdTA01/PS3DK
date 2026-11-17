@@ -136,6 +136,19 @@ int p_roll_start(prof *p, const uint8_t head[16])
     p_roll_runtime *r = p->rolling;
     size_t initial;
     int rc;
+#ifdef PS3DK_PROF_ROLLING_PUBLIC
+    /* Bind physical slots to this exclusive capture, not an app-supplied ID.
+     * This is an accidental-mix namespace, not cryptographic authentication.
+     * The original HEADER/CLOCKS identity is still checked independently. */
+    {
+        uint8_t empty[16]={0};
+        if(!memcmp(r->options.store.session,empty,sizeof empty)) {
+            uint64_t path=p_fnv(p->fnv_build,p->snk.path,strlen(p->snk.path));
+            p_le64(r->options.store.session,p->tb_at_init);
+            p_le64(r->options.store.session+8,path);
+        }
+    }
+#endif
     r->record.original_flags = (uint32_t)head[12] | (uint32_t)head[13] << 8 |
                               (uint32_t)head[14] << 16 | (uint32_t)head[15] << 24;
 #ifdef PS3DK_PROF_WITH_SPU

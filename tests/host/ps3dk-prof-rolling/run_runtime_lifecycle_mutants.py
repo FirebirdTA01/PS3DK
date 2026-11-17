@@ -27,9 +27,11 @@ CTEST = Path('tests/host/ps3dk-prof-rolling/runtime_lifecycle_test.c')
 RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
 # Repinned after gate120, selection diff reviewed against a79284960.
 # Lifecycle mutation anchors and all exact behavioral witnesses are unchanged.
+# Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
+# private mutation semantics unchanged, isolated baselines remain mandatory.
 PINS = {
     DRAIN: 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
-    BRIDGE: '2d9250d67d171b38c5640142f4db15401c42b71ed779cdd02942629411cded46',
+    BRIDGE: 'd935adf4125e0a3003480bc1eb48eea3197c0e3564285a9eecff4b4d5589f42a',
 }
 RUST_TESTS = {
     'actual_thread_automatic_resource_stop_preserves_first_public_join_and_result',
@@ -62,7 +64,7 @@ def inventory():
     paths = [p.relative_to(ROOT) for p in (ROOT / 'sdk/libps3dkprof/src').rglob('*')
              if p.is_file() and p.suffix in ('.c', '.h')]
     paths += [p.relative_to(ROOT) for p in (ROOT / 'tools/ps3dk-prof/src').rglob('*.rs')]
-    paths += [Path('sdk/include/ps3dk/prof.h'), RUNNER, CTEST, RTEST,
+    paths += [Path('sdk/include/ps3dk/prof.h'),Path('sdk/include/ps3dk/prof_rolling.h'), RUNNER, CTEST, RTEST,
               Path('tests/host/ps3dk-prof-rolling/runtime_ppu_test.c'),
               Path(__file__).resolve().relative_to(ROOT), Path('tools/ps3dk-prof/Cargo.toml'), Path('tools/Cargo.lock')]
     paths = sorted(set(paths))

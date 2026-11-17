@@ -5,6 +5,17 @@ if(_ps3_auto_try OR NOT PS3_PROF_AUTO)
 endif()
 include_guard(GLOBAL)
 set(PS3_PROF_AUTO_ROOT "${PS3DK}" CACHE PATH "SDK prefix holding the automatic observation providers")
+set(PS3_PROF_AUTO_ROLLING "" CACHE STRING "Optional rolling capture file ceiling in MiB (24..4096); empty keeps append")
+if(NOT "${PS3_PROF_AUTO_ROLLING}" STREQUAL "")
+    if(NOT "${PS3_PROF_AUTO_ROLLING}" MATCHES "^[1-9][0-9]*$" OR
+       "${PS3_PROF_AUTO_ROLLING}" STRGREATER "9999")
+        message(FATAL_ERROR "PS3_PROF_AUTO_ROLLING must be a decimal MiB ceiling in 24..4096, or empty")
+    endif()
+    string(LENGTH "${PS3_PROF_AUTO_ROLLING}" _ps3_rolling_digits)
+    if(_ps3_rolling_digits GREATER 4 OR PS3_PROF_AUTO_ROLLING LESS 24 OR PS3_PROF_AUTO_ROLLING GREATER 4096)
+        message(FATAL_ERROR "PS3_PROF_AUTO_ROLLING must be a decimal MiB ceiling in 24..4096, or empty")
+    endif()
+endif()
 if(CMAKE_VERSION VERSION_LESS 3.21)
     message(FATAL_ERROR "Automatic RSX observation requires CMake 3.21 or newer")
 endif()
@@ -239,6 +250,16 @@ function(ps3_target_prof_auto target)
     endif()
     set_property(TARGET "${target}" PROPERTY LINK_LIBRARIES "${selected}")
     target_include_directories("${target}" BEFORE PRIVATE "${root}/ppu/include")
+    if(NOT "${PS3_PROF_AUTO_ROLLING}" STREQUAL "")
+        math(EXPR rolling_bytes "${PS3_PROF_AUTO_ROLLING} * 1048576")
+        set(rolling_source "${CMAKE_CURRENT_BINARY_DIR}/${target}-auto-rolling.c")
+        file(WRITE "${rolling_source}"
+            "#include <ps3dk/prof_rolling.h>\nPS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS(PS3DK_PROF_ROLLING_AUTO_FIFO_INIT(UINT64_C(${rolling_bytes}), UINT64_C(67108864)));\n")
+        # A direct executable input: weak references cannot pull this constant
+        # out of an ordinary archive. An app-defined override uses the header
+        # macro with this cache option empty; two explicit definitions refuse.
+        target_sources("${target}" PRIVATE "${rolling_source}")
+    endif()
     # Force these definitions even for a small link-only consumer. Their
     # presence cannot be mistaken for an unexercised successful link.
     target_link_options("${target}" PRIVATE "-Wl,-u,__ps3dk_prof_auto_startup_anchor,-u,ps3dk_prof__auto_gcm_init_result,-u,ps3dk_prof__auto_begin,-u,ps3dk_prof__auto_end,-u,ps3dk_prof__auto_encode_ops,-u,ps3dk_prof__auto_queue_claim,-u,ps3dk_prof_fifo_attach,-u,ps3dk_prof_fifo_detach,-u,ps3tc_fifo_wrap_callback,-u,rsxDrawVertexArray,-u,rsxDrawIndexArray,-u,rsxClearSurface")

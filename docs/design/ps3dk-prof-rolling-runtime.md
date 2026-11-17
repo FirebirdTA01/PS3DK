@@ -1,18 +1,63 @@
-# Private rolling runtime
+# Rolling capture runtime
 
-The private implementation uses `PS3DK_PROF_ROLLING`; its configuration and
-result test API still requires `PS3DK_PROF_TEST_HOOKS`. Internal types do not
-depend on that test API. There is no public rolling SDK option or default
-admission. The LV2 PAL still rejects test hooks; host behavior and target
+The implementation uses `PS3DK_PROF_ROLLING`. The managed AUTO/FIFO archive
+also enables `PS3DK_PROF_ROLLING_PUBLIC`; manual PPU/SPU selectors remain private
+host-test interfaces. Internal types do not depend on those test interfaces.
+The LV2 PAL still rejects test hooks; host behavior and target
 compilation do not establish target runtime behavior or filesystem durability.
 Append output remains the default.
 
-The private AUTO/FIFO selector now connects the real producer drain to the
+The AUTO/FIFO selector connects the real producer drain to the
 schema2 encoder. One tagged selection chooses PPU, PPU/SPU, or managed
 AUTO/FIFO output; rejected setters preserve the previous selection. The
 AUTO/FIFO profile checks the archive's actual family flags before file creation
 and refuses manual GPU attachment. This host acceptance seam is not installed
-as a public options API.
+as the manual PPU/SPU options API.
+
+## Automatic option and public result
+
+With `PS3_PROF_AUTO=ON`, set `PS3_PROF_AUTO_ROLLING=64` in CMake to request a
+64 MiB file ceiling. Empty keeps append output. The accepted integer range is
+24..4096 MiB. CMake adds a constant C translation unit directly to the executable;
+it does not add an application constructor or require calls after `cellGcmInit`.
+The AUTO constructor at priority 100 reads this object before initialization.
+An invalid explicit configuration prints one `rolling configuration refused`
+TTY line and skips initialization, with no append fallback.
+
+Applications needing other finite budgets may instead leave that cache option
+empty and define `ps3dk_prof_automatic_rolling_options` with
+`PS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS` from `<ps3dk/prof_rolling.h>`.
+The object has external C linkage and constant storage; it belongs in a direct
+executable input, since a weak reference does not extract an ordinary archive
+member. Defining both forms is a link error. `ps3dk_prof_set_rolling_options`
+copies options under the pre-init gate; a rejected update preserves the prior
+configuration. Calling it from main is too late for automatic startup.
+
+The public options and result structures are respectively 192 and 128 bytes on
+both PPU ABIs. Size, version and reserved fields are checked. The first public
+profile is managed AUTO/FIFO with no active SPU lanes; mixed active SPU/AUTO and
+manual PPU/SPU remain later profiles. Manual GPU attachment, callbacks, legacy
+ARC automatic capture and legacy live rolling streams are refused.
+
+The finite AUTO preset retains six physical segments plus one replacement slot,
+with 2 MiB checkpoints, 1,048,596-byte payload capacity and a 64 MiB fixed-state
+ceiling. The file uses about 21 MiB; a larger ceiling alone does not enlarge its
+slots or semantic pools. Three retained slots were insufficient to keep useful
+timed OPS through the tested finalization sequence, so the runtime test requires
+retained raw RSX records with the six-slot preset. This is not a minimum retained
+time guarantee. Semantic history and metadata have independent finite budgets;
+reaching one stops at the last accepted whole chunk with `PS3DK_PROF_ERESOURCE`.
+Epoch and journal capacities are nonzero even without SPU lanes because RSX
+DOMAIN/EPOCH records use that shared support.
+
+`ps3dk_prof_get_rolling_result` requires size 128 and version 1 and becomes
+available after the first public shutdown has joined and published finalization.
+It reports accepted and committed frontiers separately, physical state and
+reason, and the primary result with separate IO/close/join results. Refusals
+leave the destination unchanged. A SEALED root does not override a failed close,
+join or retention result. Physical sessions use the initialization timebase plus
+a path/build hash to distinguish exclusive captures; this is protection against
+accidental mixing, not authentication. Original HEADER/CLOCKS checks remain.
 
 The host protocol fixture runs the native FIFO provider and report-ring command
 executor: 960 draws rotate through real rolling output, while a separate
@@ -21,6 +66,10 @@ retirement. After automatic profiling stop, the owner restores its physical
 command-buffer end and ordinary GPU commands continue. The fixture validates
 application M2MF bytes and retained C checkpoints against the original capture.
 It does not establish target filesystem behavior or durability.
+The automatic variant uses the real priority-100 constructor and its default
+core configuration, with only the host output directory, clock and worker
+barrier supplied by the test port. It retains useful raw RSX operations after
+rotation; omitting the constructor fails before main can use rolling output.
 
 ## Configuration and storage
 
@@ -44,11 +93,12 @@ roots, retained slots and the replacement slot; it is not a disk-block
 reservation or a cumulative-I/O limit.
 
 Rolling output requires a FILE sink and exclusive creation of a `.profr` file.
-The combined selector requires SPU support and refuses manual GPU domains.
+The private PPU/SPU selector requires SPU support. The public AUTO/FIFO selector
+instead requires the managed AUTO/FIFO archive and refuses active SPU lanes.
+Both refuse manual GPU domains.
 Callbacks, ARC output, and the current wait/function/counter configurations are
-not admitted. AUTO/FIFO encoders and readers do not by themselves enable those
-families in this runtime. Original file flags are never masked to fit an
-encoder.
+not admitted. AUTO/FIFO admission uses its explicit profile and the archive's
+family configuration. Original file flags are never masked to fit an encoder.
 
 The original HEADER and CLOCKS, plus PROFILE when present, are accepted and
 committed before a THREAD consumer is created or READY is published. The same
@@ -64,7 +114,7 @@ read-index and event-ledger acknowledgements. A committed physical frontier is
 a separate fact. A failed semantic or resource check cannot acknowledge the
 candidate, even if earlier chunks were accepted.
 
-Resource exhaustion records the private typed result -33. It does not become a
+Resource exhaustion records `PS3DK_PROF_ERESOURCE` (-33). It does not become a
 generic sink error or manufacture a terminal TRAILER. Stopping is serviced only
 after emission has returned to a consumer boundary with family locks released.
 The public APP drain and the THREAD consumer flush at their boundaries. The
@@ -117,6 +167,7 @@ refusal before producer acknowledgement, and inline lane-end stopping before
 the first public shutdown. Mutation runners require their named semantic
 witnesses; compile errors, crashes and timeouts are not successful detections.
 
-These tests establish host behavior only. Production options, target runtime
-integration, AUTO/FIFO runtime admission and target storage measurements remain
-separate work before this can be advertised as rolling SDK capture support.
+These tests establish host behavior only. Both PPU ABIs also compile and link
+the installed AUTO archive with the generated constant options. Target storage
+measurements and a reviewed target run remain separate release gates; host
+tests and successful links do not establish them.

@@ -25,10 +25,11 @@ LIB=ROOT/'sdk/libps3dkprof/src'
 SUPERVISOR=HERE/'run_counter_transfer_mutants.py'
 PROBE=HERE/'runtime_hookfree_probe.c'
 UNITS=['core/prof_core.c','core/prof_drain.c','rolling/roll_runtime.c',
-       'rolling/roll_combined.c','rolling/roll_combined2.c','rolling/roll_ppu.c','rolling/roll_retention_inspect.c']
+       'rolling/roll_combined.c','rolling/roll_combined2.c','rolling/roll_ppu.c','rolling/roll_retention_inspect.c','rolling/roll_public.c','auto/startup.c']
 PUBLIC_HEADERS={
     'prof.h':ROOT/'sdk/include/ps3dk/prof.h',
     'prof_auto.h':ROOT/'sdk/include/ps3dk/prof_auto.h',
+    'prof_rolling.h':ROOT/'sdk/include/ps3dk/prof_rolling.h',
     'prof_fifo.h':ROOT/'sdk/include/ps3dk/prof_fifo.h',
     'prof_gpu.h':LIB/'rsx/prof_gpu.h',
 }
@@ -152,9 +153,9 @@ def main():
             for gate in ['off','on','spu','auto-ring']:
                 flags=common+[pal]+([] if gate=='off' else ['-DPS3DK_PROF_ROLLING'])
                 if gate in ('spu','auto-ring'):flags+=['-DPS3DK_PROF_WITH_SPU','-DPS3DK_PROF_WITH_PROFILE']
-                if gate=='auto-ring':flags+=['-DPS3DK_PROF_WITH_FIFO','-DPS3DK_PROF_WITH_AUTO','-DPS3DK_PROF_AUTO_RING']
+                if gate=='auto-ring':flags+=['-DPS3DK_PROF_WITH_FIFO','-DPS3DK_PROF_WITH_AUTO','-DPS3DK_PROF_AUTO_RING','-DPS3DK_PROF_ROLLING_PUBLIC']
                 arm=dict(name=abi+'-'+gate,missing=[],units={});report['arms'].append(arm)
-                for unit in UNITS:
+                for unit in UNITS+(['auto_rsx/auto_startup.c'] if gate=='auto-ring' else []):
                     label=arm['name']+'-'+unit.removesuffix('.c').replace('/','-');obj=out/(label+'.o')
                     run(label,[cc,*flags,'-c',(LIB/unit).as_posix(),'-o',obj.as_posix()])
                     syms=symbols(run(label+'-symbols',[nm,'-g','--format=posix',obj.as_posix()]))

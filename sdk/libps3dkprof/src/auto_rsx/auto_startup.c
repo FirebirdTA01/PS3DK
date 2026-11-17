@@ -2,6 +2,9 @@
  * The selector forces the anchor and supplies pinned pre-link identities. */
 #include "auto_internal.h"
 #include "prof_spu.h"
+#include "../../../include/ps3dk/prof_rolling.h"
+
+extern const ps3dk_prof_rolling_options ps3dk_prof_automatic_rolling_options __attribute__((weak));
 
 static uint32_t active;
 void __ps3dk_prof_auto_startup_anchor(void) {}
@@ -20,6 +23,12 @@ __attribute__((constructor(100))) static void automatic_start(void)
 {
     ps3dk_prof_config cfg;
     ps3dk_prof_ext_config ext={0};
+    if(&ps3dk_prof_automatic_rolling_options &&
+       ps3dk_prof_set_rolling_options(&ps3dk_prof_automatic_rolling_options)!=PS3DK_PROF_OK) {
+        static const char message[]="ps3prof: rolling configuration refused; automatic capture not initialized\n";
+        diagnostic(message,sizeof message-1);
+        return;
+    }
     ps3dk_prof_config_defaults(&cfg);
     cfg.mode=PS3DK_PROF_MODE_THREAD;
     cfg.auto_register=1;

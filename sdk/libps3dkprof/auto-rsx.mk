@@ -3,7 +3,8 @@
 AUTORSX_MEMBERS := auto_runtime auto_startup auto_config auto_wire auto_writer auto_queue \
                    auto_commands auto_completion auto_frames auto_clock \
                    auto_ring auto_ring_commands auto_ring_layout
-AUTORSX_NAMES := $(EXT_MEMBERS) $(FIFO_MEMBERS) $(AUTORSX_MEMBERS)
+AUTORSX_ROLLING_MEMBERS := roll_runtime roll_public roll_output roll_ppu roll_combined roll_combined2
+AUTORSX_NAMES := $(EXT_MEMBERS) $(FIFO_MEMBERS) $(AUTORSX_MEMBERS) $(AUTORSX_ROLLING_MEMBERS)
 AUTORSX_DIR := $(BUILD)/auto-rsx
 AUTO_PROFILE_ID ?= AUTO-RSX
 AUTO_SOURCE_COMMIT ?= $(shell git rev-parse HEAD)
@@ -14,7 +15,7 @@ define AUTORSX_VARIANT
 AUTORSX_DIR_$(1) := $$(AUTORSX_DIR)/$(1)
 AUTORSX_OBJECTS_$(1) := $$(addprefix $$(AUTORSX_DIR_$(1))/,$$(addsuffix .o,$$(AUTORSX_NAMES)))
 AUTORSX_FLAGS_$(1) := $$(EXT_FLAGS_$(1)) -DPS3DK_PROF_WITH_PROFILE -DPS3DK_PROF_WITH_FIFO=1 \
-                      -DPS3DK_PROF_WITH_AUTO=1 -Isrc/fifo -Isrc/auto_rsx -I../libgcm_cmd/src
+                      -DPS3DK_PROF_WITH_AUTO=1 -DPS3DK_PROF_ROLLING=1 -DPS3DK_PROF_ROLLING_PUBLIC=1 -Isrc/fifo -Isrc/auto_rsx -Isrc/rolling -I../libgcm_cmd/src
 AUTORSX_CONFIG_$(1) := $$(AUTORSX_DIR_$(1))/profile-identity.cfg
 $$(AUTORSX_CONFIG_$(1)): FORCE
 	@mkdir -p "$$(@D)"
@@ -49,7 +50,7 @@ install-auto-rsx: auto-rsx
 	    python3 tools/archive_digest.py verify "$(PS3DK)/ppu/lib$$sub/libps3dkprof_auto.a" \
 	        --id "$(AUTO_PROFILE_ID)" --premises "$(PROF_PREMISES)" --kinds "$(PROF_KINDS)" || exit 1; \
 	done
-	install -m 0644 ../include/ps3dk/prof.h ../include/ps3dk/prof_auto.h ../include/ps3dk/prof_fifo.h $(EXT_PUB_HEADERS) "$(PS3DK)/ppu/include/ps3dk/"
+	install -m 0644 ../include/ps3dk/prof.h ../include/ps3dk/prof_auto.h ../include/ps3dk/prof_fifo.h ../include/ps3dk/prof_rolling.h $(EXT_PUB_HEADERS) "$(PS3DK)/ppu/include/ps3dk/"
 
 # Run after libgcm_cmd install-auto. Seal only a complete installed pair of
 # providers; default archives are never destinations of this explicit target.

@@ -10,6 +10,11 @@
 #include "roll_runtime_test.h"
 #include "roll_runtime.h"
 #include "roll_combined2.h"
+#ifdef TEST_PUBLIC_OPTIONS
+#include "roll_public.h"
+#pragma weak ps3dk_prof_set_rolling_options
+#pragma weak ps3dk_prof_get_rolling_result
+#endif
 #include <inttypes.h>
 #include <pthread.h>
 
@@ -68,6 +73,19 @@ static void s2_pace(void)
     s2_parked=0;S2(!pthread_cond_broadcast(&s2_cond),"worker-released");
     S2(!pthread_mutex_unlock(&s2_lock),"worker-unlock");
 }
+#ifdef TEST_AUTOMATIC_STARTUP
+PS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS(PS3DK_PROF_ROLLING_AUTO_FIFO_INIT(UINT64_C(67108864),UINT64_C(67108864)));
+/* Test-port setup only: choose the isolated FILE directory and deterministic
+ * clock/worker barrier. Product constructor100 must perform options/init and
+ * thread registration itself, using its unchanged default core configuration. */
+__attribute__((constructor(99))) static void s2_prepare_automatic_port(void)
+{
+    s2_out=getenv("PS3DK_SCHEMA2_AUTOMATIC_OUTPUT");S2(s2_out&&*s2_out,"automatic-output-directory");
+    ps3dk_prof_test_hooks.drainer_after_snapshot=s2_pace;
+    ps3dk_prof_test_hooks.clock=auto_test_timebase;
+    S2(ps3dk_prof_set_sink_path(s2_out)==0,"automatic-sink-path");
+}
+#endif
 static void s2_pause(void)
 {
     struct timespec until;S2(!clock_gettime(CLOCK_REALTIME,&until),"barrier-clock");until.tv_sec+=20;
@@ -117,7 +135,13 @@ static void s2_copy(const char *name)
 {
     char p[1200];uint8_t b[8192];size_t n;uint64_t total=0;FILE *in,*out;
     s2_path(p,sizeof p,name);in=fopen(s2_capture,"rb");out=fopen(p,"wbx");S2(in&&out,"snapshot-open");
-    while((n=fread(b,1,sizeof b,in))!=0){total+=n;S2(total<=16u*1024u*1024u,"snapshot-bound");S2(fwrite(b,1,n,out)==n,"snapshot-write");}
+    while((n=fread(b,1,sizeof b,in))!=0){total+=n;
+#ifdef TEST_PUBLIC_OPTIONS
+        S2(total<=32u*1024u*1024u,"public-preset-snapshot-bound");
+#else
+        S2(total<=16u*1024u*1024u,"snapshot-bound");
+#endif
+        S2(fwrite(b,1,n,out)==n,"snapshot-write");}
     S2(!ferror(in)&&!fclose(in)&&!fclose(out),"snapshot-close");
 }
 int __real_ps3dk_prof__roll_combined2_init(void *,size_t,const pfm2_config *,const uint8_t[16],void *,size_t,void *,size_t,size_t *);
@@ -184,18 +208,47 @@ static void s2_setup(int enabled,int resource)
     s2_config.rsx_domains=1;s2_config.windows=8;s2_config.fifo_membership_runs=64;s2_config.accounting_groups=8;s2_config.family_flags=192;
     s2_config.auto_final_runs=64;s2_config.auto_touched_runs=64;s2_config.auto_build_entries=resource?1:64;
     s2_config.auto_clock_anchors=64;s2_config.auto_bootstrap_bytes=32768;s2_config.auto_support_bytes=65536;
+#ifdef TEST_PUBLIC_OPTIONS
+    ps3dk_prof_rolling_options public_options=PS3DK_PROF_ROLLING_AUTO_FIFO_INIT(UINT64_C(67108864),UINT64_C(67108864));
+    p_roll_selection selected;
+    if(resource)public_options.auto_build_entries=1;
+    S2(ps3dk_prof__roll_options_decode(&public_options,&s2_options,&selected)==0,"public-preset-plan");
+    s2_config=selected.limits.schema2;
+#endif
     S2(pfm2_plan(&s2_config,&semantic)==PFR_OK,"actual-schema2-plan");S2(pfr_plan(&s2_options.store,&s2_layout)==PFR_OK,"actual-physical-plan");
     s2_options.store.max_bytes=s2_layout.file_bytes;
     ps3dk_prof_test_hooks.drainer_after_snapshot=s2_pace;ps3dk_prof_test_hooks.write_fault=NULL;
     ps3dk_prof_test_hooks.clock=auto_test_timebase;
+#ifndef TEST_AUTOMATIC_STARTUP
     S2(ps3dk_prof_set_sink_path(s2_out)==0,"sink-path");
-    if(enabled){S2(ps3dk_prof_test_rolling_schema2_set!=NULL,"missing-private-schema2-selector");
-        S2(ps3dk_prof_test_rolling_schema2_set(&s2_options,&s2_config)==0,"real-schema2-selector");}
-    S2(ps3dk_prof_init_ex(&c,&x)==0,"real-schema2-core-init");s2_pause();
+    if(enabled){
+#ifdef TEST_PUBLIC_OPTIONS
+        S2(ps3dk_prof_set_rolling_options!=NULL&&ps3dk_prof_get_rolling_result!=NULL,"missing-public-rolling-API");
+        ps3dk_prof_rolling_result not_ready={0};not_ready.size=sizeof not_ready;not_ready.version=1;
+        S2(ps3dk_prof_get_rolling_result(&not_ready)==PS3DK_PROF_ENOTINIT,"public-result-before-init");
+        S2(ps3dk_prof_set_rolling_options(&public_options)==0,"public-preset-setter");
+#else
+        S2(ps3dk_prof_test_rolling_schema2_set!=NULL,"missing-private-schema2-selector");
+        S2(ps3dk_prof_test_rolling_schema2_set(&s2_options,&s2_config)==0,"real-schema2-selector");
+#endif
+    }
+    S2(ps3dk_prof_init_ex(&c,&x)==0,"real-schema2-core-init");
+#else
+    (void)c;(void)x;
+    S2(enabled&&!resource,"automatic-rotation-only");
+    S2(g_prof&&g_prof->rolling,"automatic-init-before-main");
+    S2(g_prof->cfg.max_threads==64&&g_prof->cfg.max_descriptors==1024&&g_prof->cfg.ring_records==4096,
+       "automatic-default-core-configuration");
+    S2(ps3dk_prof_set_rolling_options(&public_options)==PS3DK_PROF_EALREADY,"automatic-options-already-consumed");
+#endif
+    s2_pause();
     S2(s2_rw==(unsigned)enabled&&s2_append==(unsigned)!enabled,"actual-FILE-mode");
     s2_init_allocs=LD_ACQ(&s2_allocs);s2_init_bytes=LD_ACQ(&s2_alloc_bytes);
     if(enabled){S2(s2_chunks==3,"bootstrap-before-worker");s2_copy("ready.profr");}
-    S2(ps3dk_prof_thread_begin("schema2-owner")==0&&PS3DK_PROF_CAPTURE_WHOLE_RUN()==0,"real-owner-window");
+#ifndef TEST_AUTOMATIC_STARTUP
+    S2(ps3dk_prof_thread_begin("schema2-owner")==0,"real-owner-register");
+#endif
+    S2(PS3DK_PROF_CAPTURE_WHOLE_RUN()==0,"real-owner-window");
 }
 static const auto_capture *s2_attach(void)
 {
@@ -278,6 +331,19 @@ int main(int argc,char **argv)
         S2(result.state_bytes<=s2_options.max_state_bytes&&result.file_bytes==s2_layout.file_bytes,"explicit-core-state-and-physical-caps");
         S2(!result.io_result&&!result.close_result&&!result.join_result,"no-hidden-terminal-error");s2_copy("capture.profr");
         ps3dk_prof_test_rolling_record repeat;S2(ps3dk_prof_shutdown()==PS3DK_PROF_EALREADY&&ps3dk_prof_test_rolling_result(&repeat)==0&&!memcmp(&result,&repeat,sizeof result),"public-result-immutable");
+#ifdef TEST_PUBLIC_OPTIONS
+        ps3dk_prof_rolling_result public_result={0},again;public_result.size=sizeof public_result;public_result.version=1;
+        S2(ps3dk_prof_get_rolling_result(&public_result)==0,"actual-public-result");
+        S2(public_result.profile==3&&public_result.format==1&&public_result.original_flags==707&&
+           public_result.result==result.result&&public_result.state==result.state&&public_result.reason==result.reason&&
+           public_result.accepted_next_chunk==s2_chunks&&public_result.committed_next_chunk==s2_chunks&&
+           public_result.accepted_payload_bytes==s2_bytes&&public_result.committed_payload_bytes==s2_bytes&&
+           public_result.file_bytes==result.file_bytes&&public_result.fixed_state_bytes==result.state_bytes&&
+           !public_result.io_result&&!public_result.close_result&&!public_result.join_result,"public-result-original-frontiers");
+        again=public_result;S2(ps3dk_prof_get_rolling_result(&again)==0&&!memcmp(&again,&public_result,sizeof again),"public-result-repeat");
+        again.size--;public_result=again;
+        S2(ps3dk_prof_get_rolling_result(&again)==PS3DK_PROF_EINVAL&&!memcmp(&again,&public_result,sizeof again),"public-result-invalid-untouched");
+#endif
     }else s2_copy("capture.prof");
     if(s2_audit){S2(!fclose(s2_audit),"original-audit-close");s2_audit=NULL;}
     s2_path(p,sizeof p,"result.json");f=fopen(p,"wbx");S2(f,"manifest-open");
