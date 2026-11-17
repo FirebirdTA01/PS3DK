@@ -3,6 +3,7 @@
 #include "auto_wire.h"
 #define auto_frames_init ps3dk_prof__auto_frames_init
 #define auto_frames_open ps3dk_prof__auto_frames_open
+#define auto_frames_open_late ps3dk_prof__auto_frames_open_late
 #define auto_frames_count ps3dk_prof__auto_frames_count
 #define auto_frames_unsupported ps3dk_prof__auto_frames_unsupported
 #define auto_frames_close ps3dk_prof__auto_frames_close
@@ -15,8 +16,9 @@ typedef struct auto_frames {
     uint32_t capacity,instance,owner;
     uint64_t write_idx,read_idx,lost;
     uint32_t saturated;
-    /* owner only; queued snapshots are immutable until whole sink acceptance */
-    uint32_t active,seen;
+    /* owner only; queued snapshots are immutable until whole sink acceptance. late: the active row was opened
+     * after its frame began (auto_frames_open_late) */
+    uint32_t active,seen,late;
     uint64_t last;
     auto_wire_frame live;
 } auto_frames;
@@ -24,6 +26,9 @@ int auto_frames_init(auto_frames *,auto_wire_frame *,uint32_t capacity,uint32_t 
 /* Opens monotonically increasing identities, including frame zero. A previous
  * unclosed frame is emitted OPEN, never silently certified as exactly closed. */
 int auto_frames_open(auto_frames *,uint64_t frame,uint64_t tb);
+/* auto_frames_open for a frame already in progress (a capture window opened mid-frame): tb is the time the row
+ * opened, not the frame's start, and the row always closes OPEN, so it never certifies a whole frame. */
+int auto_frames_open_late(auto_frames *,uint64_t frame,uint64_t tb);
 /* Columns match COVERAGE: 0 visit, 1 observed, 2..11 disjoint exclusions.
  * A visit and its outcome must reconcile before closure. No active frame means
  * false, so the caller records an unassociated visit rather than inventing one. */

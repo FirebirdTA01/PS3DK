@@ -119,7 +119,7 @@ static void status_refusals(void) {
     memset(counters,0,sizeof counters); counters[14]=505;
     assert(!auto_writer_status(&writer,AUTO_LOWER_BOUND,counters));
     counters[14]=0;
-    assert(!auto_writer_status(&writer,2048,counters)); /* 64..1024 are defined (segments, frame marks, frame sources, replay); 2048 is unknown */
+    assert(!auto_writer_status(&writer,4096,counters)); /* 64..2048 are defined (segments, frame marks, frame sources, replay, pre-init options ignored); 4096 is unknown */
     assert(!auto_writer_status(&writer,AUTO_OWNER_UNACK,counters));
     assert(!auto_writer_status(&writer,AUTO_SATURATED,counters));
 }

@@ -360,6 +360,8 @@ jobs:
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-selector-test.py --out "$RUNNER_TEMP/auto-selector"
+          python3 tests/host/ps3dk-prof-runtime/auto-macros-test.py --out "$RUNNER_TEMP/auto-macros"
+          python3 tests/host/ps3dk-prof-runtime/auto-macros-test.py --out "$RUNNER_TEMP/auto-macros-void" --mutant void-macros
           python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config"
           python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config-address" --sanitize address
           python3 tests/sdk/auto-config-test.py --out "$RUNNER_TEMP/auto-config-thread" --sanitize thread
@@ -371,7 +373,7 @@ jobs:
           for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue windowcallafter flips present spanning fifofail fifopre fifopost seal; do
+          for case in noinit lease init race ops conflict reset stop stopvisit frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue windowcallafter windowlate flips present spanning fifofail fifopre fifopost seal preinit preinitthread preinitold preinitfail; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -398,6 +400,15 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowqueue --mutant queue-unreserved --out "$RUNNER_TEMP/auto-runtime-queue-unreserved-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowhandoffu --mutant opener-token-off --out "$RUNNER_TEMP/auto-runtime-opener-token-off-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowcallafter --mutant call-outside-gate --out "$RUNNER_TEMP/auto-runtime-call-outside-gate-mutant"
+          for mutant in late-range-off late-draw-off late-exact late-marks; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case windowlate --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
+          done
+          for mutant in preinit-ignored preinit-after-init preinit-no-validate; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinit --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitthread --mutant preinit-any-thread --out "$RUNNER_TEMP/auto-runtime-preinit-any-thread-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitthread --mutant preinit-foreign-silent --out "$RUNNER_TEMP/auto-runtime-preinit-foreign-silent-mutant"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case preinitfail --mutant preinit-consume-on-fail --out "$RUNNER_TEMP/auto-runtime-preinit-consume-on-fail-mutant"
           for mutant in tag-silent tag-at-call range-end-silent; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case tags --mutant "$mutant" --out "$RUNNER_TEMP/auto-runtime-$mutant-mutant"
           done

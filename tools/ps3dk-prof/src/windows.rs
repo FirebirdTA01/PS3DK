@@ -195,7 +195,11 @@ impl Reader {
             WINDOW_REASON_COUNT => {
                 match open.kind {
                     WindowKind::Frames(expected) => {
-                        let span = last_frame - open.first_frame + 1;
+                        let span = (last_frame - open.first_frame).checked_add(1)
+                            .ok_or_else(|| Malformed {
+                                rule: Rule::Windows,
+                                detail: format!("window {id}: reason COUNT span overflow"),
+                            })?;
                         if span != expected as u64 {
                             return malformed(
                                 Rule::Windows,

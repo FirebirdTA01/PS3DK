@@ -64,7 +64,7 @@ int auto_frames_close(auto_frames *q,uint32_t owner,uint64_t frame,uint64_t tb,i
         if(remaining) return 0;
     }
     q->live.tb_end=tb;q->live.flags|=2;
-    if(open || tb<q->live.tb_begin) q->live.flags|=16;
+    if(open || q->late || tb<q->live.tb_begin) q->live.flags|=16;
     w=ACQ(&q->write_idx);r=ACQ(&q->read_idx);
     q->active=0;
     if(w==UINT64_MAX || w-r>=q->capacity) {
@@ -87,7 +87,14 @@ int auto_frames_open(auto_frames *q,uint64_t frame,uint64_t tb)
     memset(&q->live,0,sizeof q->live);
     q->live.flags=1;q->live.instance=q->instance;q->live.owner=q->owner;
     q->live.frame=frame;q->live.tb_begin=tb;
-    q->active=q->seen=1;q->last=frame;
+    q->active=q->seen=1;q->last=frame;q->late=0;
+    return 1;
+}
+
+int auto_frames_open_late(auto_frames *q,uint64_t frame,uint64_t tb)
+{
+    if(!auto_frames_open(q,frame,tb)) return 0;
+    q->late=1;
     return 1;
 }
 

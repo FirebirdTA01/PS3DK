@@ -133,6 +133,9 @@ pub const ST_FRAMES_EXPLICIT: u16 = 512;
 /// 63/11: a CALL segment whose build carried timed draws was called again without a rebuild.  Its embedded report
 /// writes ran again and may have overwritten other records' timestamps, so no frame of the capture has a verdict.
 pub const ST_SEGMENT_REPLAY: u16 = 1024;
+/// 1023/11: options set before cellGcmInit on another thread than the attaching init were ignored (defaults used).
+pub const ST_PREINIT_FOREIGN: u16 = 2048;
+pub const PREINIT_FOREIGN: &str = "pre-init options ignored: set on a different thread than cellGcmInit";
 pub const CK_VALID: u16 = 1;
 pub const CK_TIMEOUT: u16 = 2;
 pub const CK_REGRESSION: u16 = 4;
@@ -626,13 +629,14 @@ impl Reader {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
-                // is the default (16, an eighth of a small pool) or an option that leaves 64 pairs for draws
+                // is the default (an eighth of the pool, at most 64; 16 at most before the reserve was resized, which
+                // the option bound below still admits) or an option that leaves 64 pairs for draws
                 if wide != ((kinds, forms) == MASKS_TAG) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
                 }
                 if wide {
                     let call = if pairs >= 128 { 32 } else { pairs / 4 };
-                    let default = if pairs >= 128 { 16 } else { pairs / 8 };
+                    let default = (pairs / 8).min(64);
                     let max = pairs.saturating_sub(call + 64);
                     if r6 != 0 || call_pairs != call || (range_pairs != default && range_pairs > max) {
                         return bad(r, format!("AUTO_CONFIG reserves CALL {call_pairs} ranges {range_pairs} for {pairs} pairs"));
@@ -1067,6 +1071,7 @@ impl Reader {
         c.done()?;
         let cfg = self.result.config.clone().expect("checked by chunk()");
         let known = match cfg.attached() {
+            Some(a) if a.tagged() => 4095,
             Some(a) if a.build_frames() => 2047,
             Some(a) if a.segments_covered() => 1023,
             _ => 63,
@@ -1091,7 +1096,7 @@ impl Reader {
                 }
             }
             for sticky in [ST_SATURATED, ST_RESOURCE_CONFLICT, ST_CONTEXT_RESET, ST_SEGMENT_QUARANTINE, ST_FRAME_MARK_MISSED,
-                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY] {
+                ST_FRAMES_FLIP, ST_FRAMES_EXPLICIT, ST_SEGMENT_REPLAY, ST_PREINIT_FOREIGN] {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
@@ -1610,6 +1615,107 @@ pub struct Report {
     pub frames: Vec<FrameView>,
     pub refusal: Option<&'static str>,
     pub export: Option<crate::model::ExportRecord>,
+    /// Attached captures without a FINAL STATUS only (None when sealed, so sealed output is unchanged): the
+    /// unrecorded tail and the capture totals as recorded or UNAVAILABLE.
+    pub unsealed: Option<Unsealed>,
+}
+
+/// Capture-level facts of an attached capture with no FINAL STATUS. The runtime queues only closed rows, so the
+/// live frame is generally not in the file and the last retained row is not the capture's last frame: what follows
+/// it is unrecorded, never assumed absent. A row is called OPEN only when the file itself marks it (FR_OPEN: the
+/// writer implied its closure, at a frame opened over an unclosed one or at the shutdown close).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unsealed {
+    /// The last retained frame row (owner, frame); None when no row was retained.
+    pub last_row: Option<(u32, u64)>,
+    /// The file marks that last row OPEN.
+    pub last_row_open: bool,
+    /// Retained rows the file marks OPEN.
+    pub open_rows: u64,
+    /// The capture-level tail fact ("tail not recorded: ...").
+    pub tail: String,
+    /// Capture totals, in TOTALS order, then ranges_refused for 1023/11 captures.
+    pub totals: Vec<CaptureTotal>,
+}
+
+/// One capture total of an unsealed capture: the last recorded STATUS counter (a STATUS that is not FINAL, so the
+/// capture total is at least this) or UNAVAILABLE with the reason. The sum over retained rows is never a capture
+/// total; where it is shown (ranges_refused) it is partial evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureTotal {
+    pub name: &'static str,
+    pub value: Option<u64>,
+    /// Where the value comes from, or why it is unavailable.
+    pub note: String,
+    /// ranges_refused only: the AUTO ranges refused counted in retained rows (COVERAGE u32@440).
+    pub retained_rows: Option<u64>,
+}
+
+impl Unsealed {
+    pub fn total(&self, name: &str) -> Option<&CaptureTotal> {
+        self.totals.iter().find(|t| t.name == name)
+    }
+}
+
+/// Capture totals an unsealed capture reports from its last STATUS: (name, STATUS counter index).
+pub const TOTALS: [(&str, usize); 4] =
+    [("operations_written", 2), ("operations_dropped", 3), ("frames_written", 5), ("frames_lost", 6)];
+
+pub const TOTAL_LAST_STATUS: &str = "last STATUS, not FINAL: the capture total is at least this";
+pub const TOTAL_NO_STATUS: &str = "no STATUS recorded";
+/// No writer records a capture-level count of refused AUTO ranges: STATUS carries none, and a range refused while no
+/// coverage frame is open counts in no row.
+pub const RANGES_REFUSED_UNRECORDED: &str = "no capture-level count is recorded (STATUS has none; a range refused \
+with no open frame counts in no row)";
+
+fn unsealed_facts(inv: &Inventory, tagged: bool) -> Unsealed {
+    let last = inv.frames.last();
+    let tail = match last {
+        None => "tail not recorded: no frame row retained; frames may exist (no FINAL status)".to_string(),
+        Some(f) if f.flags & FR_OPEN != 0 => format!("tail not recorded: frames after #{} (owner {}) may exist (no \
+            FINAL status); row #{} is marked OPEN in the file (closure implied, end not observed)", f.frame, f.owner,
+            f.frame),
+        Some(f) => format!("tail not recorded: frames after #{} (owner {}) may exist (no FINAL status; the writer \
+            queues only closed rows, so a live frame is not in the file)", f.frame, f.owner),
+    };
+    let status = inv.last_status.as_ref();
+    let mut totals: Vec<CaptureTotal> = TOTALS.iter().map(|&(name, i)| CaptureTotal {
+        name,
+        value: status.map(|s| s.counters[i]),
+        note: (if status.is_some() { TOTAL_LAST_STATUS } else { TOTAL_NO_STATUS }).to_string(),
+        retained_rows: None,
+    }).collect();
+    if tagged {
+        let sum = inv.frames.iter().fold(0u64, |a, f| a.saturating_add(u64::from(f.ranges_refused)));
+        totals.push(CaptureTotal {
+            name: "ranges_refused",
+            value: None,
+            note: RANGES_REFUSED_UNRECORDED.to_string(),
+            retained_rows: Some(sum),
+        });
+    }
+    Unsealed {
+        last_row: last.map(|f| (f.owner, f.frame)),
+        last_row_open: last.is_some_and(|f| f.flags & FR_OPEN != 0),
+        open_rows: inv.frames.iter().filter(|f| f.flags & FR_OPEN != 0).count() as u64,
+        tail,
+        totals,
+    }
+}
+
+/// The capture totals line of an unsealed capture.
+fn totals_text(u: &Unsealed) -> String {
+    let parts: Vec<String> = u.totals.iter().map(|t| {
+        let mut s = match t.value {
+            Some(v) => format!("{} >= {v} ({})", t.name, t.note),
+            None => format!("{} UNAVAILABLE ({})", t.name, t.note),
+        };
+        if let Some(n) = t.retained_rows {
+            s.push_str(&format!(", {n} in retained rows (partial)"));
+        }
+        s
+    }).collect();
+    format!("capture totals: {}", parts.join("; "))
 }
 
 impl Report {
@@ -1767,6 +1873,9 @@ pub fn analyze(cap: &Capture) -> Report {
         ..Report::default()
     };
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
+    if !inv.final_seen {
+        rep.unsealed = Some(unsealed_facts(inv, attached.tagged()));
+    }
     let build = attached.build_frames();
     // Bounded verdicts for untimed draws come with the bracketed-clock writer (127/11); older captures keep their
     // exact rules and output.
@@ -2233,7 +2342,14 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0) {
         writeln!(out, "SEGMENT REPLAY: {SEGMENT_REPLAY}; every frame is UNKNOWN")?;
     }
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        writeln!(out, "{PREINIT_FOREIGN} (the defaults were used)")?;
+    }
     writeln!(out, "frames delimited by: {}", frame_source(r))?;
+    if let Some(u) = &r.unsealed {
+        writeln!(out, "{}", u.tail)?;
+        writeln!(out, "{}", totals_text(u))?;
+    }
     writeln!(out, "operations: {} parsed, {} raw-valid", r.ops_parsed, r.ops_valid)?;
     writeln!(out, "note: {INTERVAL_NOTE}")?;
     let failed = r.clocks.iter().filter(|a| a.flags != CK_VALID).count();
@@ -2258,6 +2374,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             f.rsx_frame_ppu.map_or("UNKNOWN".into(), |(a, b)| format!("{a}..{b}")),
             f.presentation.as_ref().map_or("not observed".into(), presentation_text),
             f.fifo_wait.map_or("UNKNOWN".into(), |x| format!(">= {x}")))?;
+        if r.unsealed.is_some() && f.flags & FR_OPEN != 0 {
+            writeln!(out, "  row OPEN in the file: the writer implied its closure; its end was not observed")?;
+        }
         if r.build_frames {
             if r.call_bracket {
                 writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
@@ -2387,6 +2506,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if f.call_brackets != 0 {
             v["call_brackets"] = json!(f.call_brackets);
         }
+        if r.unsealed.is_some() {
+            // unsealed captures only, so sealed captures keep their exact JSON: OPEN only where the file marks it
+            v["row_state"] = json!(if f.flags & FR_OPEN != 0 { "OPEN" } else { "CLOSED" });
+        }
         if r.tagged {
             v["flip_wait_intervals"] = json!(f.flip_wait_at.as_ref().map(|at| at.iter()
                 .map(|&(b,e)| json!({"tb_begin":b,"tb_end":e})).collect::<Vec<_>>()));
@@ -2457,10 +2580,37 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
         v["segment_replay"] = json!(r.status.as_ref().is_some_and(|s| s.flags & ST_SEGMENT_REPLAY != 0));
+    if r.status.as_ref().is_some_and(|s| s.flags & ST_PREINIT_FOREIGN != 0) {
+        v["preinit_options_ignored"] = json!(PREINIT_FOREIGN);
+    }
     }
     if r.ops_dropped != 0 {
         // only when the reader could not retain every record, so complete captures keep their exact JSON
         v["operations"]["dropped"] = json!(r.ops_dropped);
+    }
+    if let Some(u) = &r.unsealed {
+        // attached captures without a FINAL STATUS only, so sealed captures keep their exact JSON
+        v["sealed"] = json!(false);
+        v["tail"] = json!({
+            "recorded": false,
+            "last_row": u.last_row.map(|(owner, frame)| json!({"owner": owner, "frame": frame})),
+            "last_row_open": u.last_row_open,
+            "open_rows": u.open_rows,
+            "text": u.tail,
+        });
+        let mut totals = serde_json::Map::new();
+        for t in &u.totals {
+            let mut o = match t.value {
+                Some(n) => json!({"value": n, "at_least": true, "source": t.note}),
+                None => json!({"value": null, "reason": t.note}),
+            };
+            if let Some(n) = t.retained_rows {
+                o["retained_rows"] = json!(n);
+                o["retained_rows_note"] = json!("refusals counted in retained rows only: partial, not a capture total");
+            }
+            totals.insert(t.name.to_string(), o);
+        }
+        v["capture_totals"] = serde_json::Value::Object(totals);
     }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
@@ -2659,6 +2809,8 @@ pub struct TagFrame {
 pub struct ByTag {
     pub tagged: bool,
     pub frames: Vec<TagFrame>,
+    /// Unsealed captures only (no FINAL STATUS): the tail fact; the summaries then cover the retained rows only.
+    pub tail: Option<String>,
 }
 
 fn merged(mut iv: Vec<(u64, u64)>) -> u64 {
@@ -2706,7 +2858,11 @@ pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
 fn by_tag_impl(cap: &Capture) -> ByTag {
     let Some(inv) = cap.auto.as_ref() else { return ByTag::default() };
     let tagged = matches!(&inv.config, Some(Config::Attached(a)) if a.tagged());
-    let mut out = ByTag { tagged, frames: Vec::new() };
+    let tail = match &inv.config {
+        Some(Config::Attached(a)) if !inv.final_seen => Some(unsealed_facts(inv, a.tagged()).tail),
+        _ => None,
+    };
+    let mut out = ByTag { tagged, frames: Vec::new(), tail };
     if !tagged {
         return out;
     }
@@ -2903,6 +3059,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         return writeln!(out, "no tags: the capture's writer does not record them (CONFIG before 1023/11)");
     }
     writeln!(out, "{BY_TAG_NOTE}")?;
+    if let Some(t) = &b.tail {
+        writeln!(out, "{t}; the summary covers the retained rows only")?;
+    }
     for f in &b.frames {
         writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
         for (t, r) in &f.tags {
@@ -2954,8 +3113,12 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med, "raw_p95": hi})).collect();
     let range_occurrences: Vec<serde_json::Value> = range_occurrence_summary(b).into_iter().map(|(name, (frames, occurrences, incl, excl, unavail))| json!({
         "name": name, "frames": frames, "occurrences": occurrences, "inclusive_sum": incl, "exclusive_sum": excl, "exclusive_unavailable": unavail})).collect();
-    let v = json!({"schema": 2, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
+    let mut v = json!({"schema": 2, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
         "summary": {"tags": tags, "ranges": ranges, "range_occurrences": range_occurrences}});
+    if let Some(t) = &b.tail {
+        // unsealed captures only, so sealed captures keep their exact JSON
+        v["tail"] = json!(t);
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }
@@ -2972,7 +3135,7 @@ mod tests {
 
     #[test]
     fn p95_single_frame_matches_value() {
-        let b = ByTag { tagged: true, frames: vec![one(0xa, 42)] };
+        let b = ByTag { tagged: true, frames: vec![one(0xa, 42)], tail: None };
         let s = tag_summary(&b);
         assert_eq!(*s.get(&0xa).unwrap(), (1, 1, 42, 42, 42));
     }
@@ -2980,7 +3143,7 @@ mod tests {
     #[test]
     fn p95_odd_count_picks_rank95() {
         let frames: Vec<TagFrame> = vec![one(0xa, 40), one(0xa, 10), one(0xa, 30), one(0xa, 50), one(0xa, 20)];
-        let b = ByTag { tagged: true, frames };
+        let b = ByTag { tagged: true, frames, tail: None };
         let s = tag_summary(&b);
         let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
         assert_eq!((frames_n, ops), (5, 5), "5 frames, 1 op each");
@@ -2992,7 +3155,7 @@ mod tests {
     #[test]
     fn p95_even_count_picks_rank95() {
         let frames: Vec<TagFrame> = vec![one(0xa, 30), one(0xa, 10), one(0xa, 40), one(0xa, 20)];
-        let b = ByTag { tagged: true, frames };
+        let b = ByTag { tagged: true, frames, tail: None };
         let s = tag_summary(&b);
         let (frames_n, ops, busy, med, hi) = *s.get(&0xa).unwrap();
         assert_eq!((frames_n, ops), (4, 4));
@@ -3129,7 +3292,7 @@ mod tests {
                                                     parent: None, exclusive_raw: Some(e - b), reason: None };
         // two same-name ranges in ONE frame
         let f = TagFrame { owner: 1, frame: 7, range_occurrences: vec![occ(0, 10), occ(20, 25)], ..TagFrame::default() };
-        let b = ByTag { tagged: true, frames: vec![f] };
+        let b = ByTag { tagged: true, frames: vec![f], tail: None };
         let mut text = Vec::new();
         write_by_tag_text(&mut text, &b).unwrap();
         let text = String::from_utf8(text).unwrap();
