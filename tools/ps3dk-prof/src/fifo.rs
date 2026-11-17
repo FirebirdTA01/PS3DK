@@ -1,4 +1,4 @@
-//! FIFO wrap phase events (file_flags bit 6, chunk types 31-33; docs/design/ps3dk-prof-fifo.md).
+//! FIFO wrap phase events (file_flags bit 6, chunk types 31-33) and optional owner accounting (type43).
 //!
 //! PPU timebase wall time of the GCM context owner between wrap-protocol boundaries.  Nothing here is GPU busy or
 //! idle time, and a frame token is an owner association, never a GPU execution frame.  Pairing is exact or absent: a
@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
+
+#[path = "fifo_accounting.rs"]
+pub mod accounting;
 
 pub const FLAG_FIFO: u32 = 64;
 pub const CHUNK_FIFO_CONFIG: u32 = 31;
@@ -40,8 +43,8 @@ const JUMP_BIT_LIMIT: u32 = 0x2000_0000;
 
 /// Reader policy limits for RETAINED FIFO evidence.  Exhaustion is a named refusal; validation never relaxes.
 ///
-/// Both limits are retention-admission accounting: `events` caps the events kept, and `admission_ops` is charged only
-/// when a validated chunk's events are admitted to retention.  Neither bounds the parser's total work or its transient
+/// Both limits are retention-admission accounting: `events` caps retained wrap events plus accounting rows, and
+/// `admission_ops` charges 16 per admitted event/row. Neither bounds the parser's total work or its transient
 /// per-chunk validation allocation: every chunk is still decoded and validated after a refusal (so a malformed chunk
 /// later in the file is still MALFORMED), and that work is not charged.
 #[derive(Debug, Clone, Copy)]
@@ -119,6 +122,7 @@ impl Status {
 
 #[derive(Debug, Clone, Default)]
 pub struct Inventory {
+    pub accounting: accounting::Inventory,
     pub config: Option<Config>,
     /// Retained events (all events parsed, unless `refusal` names a budget).
     pub events: Vec<Event>,
@@ -174,6 +178,7 @@ impl Reader {
         cap: &Capture,
         rsx_domains: &BTreeSet<u32>,
         declared: &BTreeSet<u32>,
+        windows: Option<&crate::windows::Reader>,
     ) -> Result<(), Malformed> {
         if self.result.final_seen {
             return bad(rule_of(ty), format!("FIFO chunk type {ty} after the FINAL status"));
@@ -182,8 +187,30 @@ impl Reader {
             CHUNK_FIFO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_FIFO_EVENTS => self.events(payload),
             CHUNK_FIFO_STATUS => self.status(payload, cap.export.as_ref()),
+            accounting::CHUNK => self.accounting(payload, cap, windows),
             _ => unreachable!("FIFO chunk type {ty}"),
         }
+    }
+
+    fn accounting(&mut self, payload: &[u8], cap: &Capture, windows: Option<&crate::windows::Reader>)
+        -> Result<(), Malformed>
+    {
+        let Some(cfg) = self.result.config.as_ref() else {
+            return bad(Rule::FifoEvents, "FIFO_ACCOUNTING before FIFO_CONFIG");
+        };
+        let row = self.result.accounting.decode(payload, cfg, cap, windows)?;
+        if self.result.refusal.is_none() {
+            let retained = self.result.events.len() as u64 + self.result.accounting.rows.len() as u64;
+            if retained >= self.budgets.events {
+                self.result.refusal = Some("FIFO accounting retention budget");
+            } else if self.result.admission_ops_used.saturating_add(16) > self.budgets.admission_ops {
+                self.result.refusal = Some("FIFO retention admission budget");
+            } else {
+                self.result.admission_ops_used += 16;
+                self.result.accounting.rows.push(row);
+            }
+        }
+        Ok(())
     }
 
     fn config(&mut self, payload: &[u8], cap: &Capture, rsx: &BTreeSet<u32>, declared: &BTreeSet<u32>)
@@ -436,7 +463,8 @@ impl Reader {
         self.last_valid_tb = valid_tb;
         let charge = n.saturating_mul(16);
         if self.result.refusal.is_none() {
-            if (self.result.events.len() as u64).saturating_add(n) > self.budgets.events {
+            if (self.result.events.len() as u64).saturating_add(self.result.accounting.rows.len() as u64)
+                .saturating_add(n) > self.budgets.events {
                 self.result.refusal = Some("FIFO event retention budget");
             } else if self.result.admission_ops_used.saturating_add(charge) > self.budgets.admission_ops {
                 self.result.refusal = Some("FIFO retention admission budget");
@@ -570,6 +598,7 @@ fn rule_of(ty: u32) -> Rule {
     match ty {
         CHUNK_FIFO_CONFIG => Rule::FifoConfig,
         CHUNK_FIFO_EVENTS => Rule::FifoEvents,
+        accounting::CHUNK => Rule::FifoEvents,
         _ => Rule::FifoStatus,
     }
 }
@@ -613,6 +642,7 @@ pub struct WrapView {
 
 #[derive(Debug, Clone, Default)]
 pub struct Report {
+    pub accounting: accounting::Inventory,
     pub capability: bool,
     pub coverage: &'static str,
     pub config: Option<Config>,
@@ -661,9 +691,11 @@ pub fn analyze(cap: &Capture) -> Report {
         visible_enter: inv.visible_enter,
         visible_exit: inv.visible_exit,
         refusal: inv.refusal,
+        accounting: inv.accounting.clone(),
         ..Report::default()
     };
     if inv.refusal.is_some() {
+        rep.accounting.rows.clear();
         return rep;
     }
     let last_event = inv.events.last().map_or(0, |e| e.seq);
@@ -774,7 +806,20 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             token_text(w.token), w.tail_off, w.requested_words, phase_text(&w.phase1), phase_text(&w.phase2),
             phase_text(&w.outer))?;
     }
-    writeln!(out, "{NOT_ENABLED}")
+    if r.accounting.parsed != 0 {
+        writeln!(out, "{}", accounting::SCOPE)?;
+        writeln!(out, "owner accounting: PARTIAL_ROWS; {} parsed, {} known missing; absent/tail frames UNAVAILABLE",
+            r.accounting.parsed, r.accounting.known_missing)?;
+        for row in &r.accounting.rows {
+            if row.reasons == 0 {
+                writeln!(out, "owner {}/{}: prepared {} bytes, published {} bytes, wraps {}", row.owner, row.frame,
+                    row.prepared, row.published, row.wraps)?;
+            } else {
+                writeln!(out, "owner {}/{}: UNAVAILABLE (reasons {:#x})", row.owner, row.frame, row.reasons)?;
+            }
+        }
+        Ok(())
+    } else { writeln!(out, "{NOT_ENABLED}") }
 }
 
 fn json_phase(p: &Phase) -> serde_json::Value {
@@ -794,7 +839,7 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "requested_words": w.requested_words, "first_seq": w.first_seq, "last_seq": w.last_seq,
         "phase1": json_phase(&w.phase1), "phase2": json_phase(&w.phase2), "outer": json_phase(&w.outer),
     })).collect();
-    let v = serde_json::json!({
+    let mut v = serde_json::json!({
         "schema": 1,
         "capability": r.capability,
         "coverage_status": r.coverage,
@@ -815,6 +860,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "wraps": wraps,
         "not_enabled": ["register samples","prepared/published bytes","RSX-reached markers","supply-gap views"],
     });
+    if r.accounting.parsed != 0 {
+        v["owner_accounting"] = r.accounting.json();
+        v["not_enabled"] = serde_json::json!(["register samples","RSX-reached markers","supply-gap views"]);
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }

@@ -16,8 +16,8 @@ import zlib
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal'],default='noinit')
-ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
+ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal'],default='noinit')
+ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
@@ -25,7 +25,7 @@ ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-f
                                   'owner-is-opener','queue-unreserved','opener-token-off','call-outside-gate'])
 a=ap.parse_args()
 operations=a.case in ('ops','conflict','reset','frames')
-if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
+if a.mutant:assert a.case=={'fifo-frame-acquire':'fifoaccount','reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
@@ -58,6 +58,10 @@ def run(name,cmd,cwd=out):
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
+    if name=='run' and a.mutant=='fifo-frame-acquire':
+        assert r.returncode==-6 and b'FIFO frame metadata requires attached publication' in r.stderr,(r.returncode,r.stderr.decode())
+        print('fifo-frame-acquire rejected by pre-publication metadata assertion')
+        raise SystemExit(0)
     if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call'):
         expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
@@ -109,6 +113,7 @@ if a.case!='noinit':flags+=['-DPS3DK_PROF_TEST_HOOKS']
 if operations or a.case in ('stop','stopvisit'):
     flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'frames':0}[a.case])]
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
+if a.case=='fifoaccount':flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
 if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
@@ -161,7 +166,12 @@ sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_h
 objects=[]
 for rel in sources:
     source=src/rel;obj=out/(source.stem+'.o')
-    if a.mutant in ('fifo-publish','fifo-cancel','fifo-freeze') and rel=='fifo/fifo_runtime.c':
+    if a.mutant=='fifo-frame-acquire' and rel=='fifo/fifo_runtime.c':
+        code=source.read_text()
+        old='    if (LD_ACQ(&g_fifo.state) != FS_ATTACHED) return;\n'
+        assert code.count(old)==1
+        source=out/'fifo_runtime.c';source.write_bytes(code.replace(old,'').encode())
+    elif a.mutant in ('fifo-publish','fifo-cancel','fifo-freeze') and rel=='fifo/fifo_runtime.c':
         code=source.read_text()
         if a.mutant=='fifo-publish':
             old='if(CAS_ACQREL(&g_fifo.state,&expected,(uint32_t)FS_ATTACHED))'
@@ -325,8 +335,11 @@ run('archive',['ar','rcsD',out/'libauto.a',*objects,out/'prof_identity.o'])
 # Owner-only fake observer registry. It measures installation and removal, not
 # target command-buffer admission, device progress or timestamp correctness.
 (out/'bridge.c').write_text('''#include "ps3tc_fifo_observe.h"
+#include "gpu_port_gcm.h"
 unsigned auto_test_fifo_installs,auto_test_fifo_removes;
-int auto_test_fifo_fail;
+int auto_test_fifo_fail,auto_test_fifo_native;
+volatile uint32_t auto_test_fifo_put=4096;
+uint64_t ps3tc_fifo_observe_suppressed(void) {return 0;}
 static struct _gcmCtxData *context;
 const ps3tc_fifo_observer *auto_test_fifo_observer;
 int ps3tc_fifo_observe_install(struct _gcmCtxData *c,const ps3tc_fifo_observer *o,uint32_t *b,uint32_t *e) {
@@ -336,6 +349,11 @@ int ps3tc_fifo_observe_install(struct _gcmCtxData *c,const ps3tc_fifo_observer *
 int ps3tc_fifo_observe_remove(struct _gcmCtxData *c,const ps3tc_fifo_observer *o) {
  if(c!=context || o!=auto_test_fifo_observer)return -1;
  context=0;auto_test_fifo_observer=0;++auto_test_fifo_removes;return 0;
+}
+int ps3tc_fifo_observe_account_snapshot(struct _gcmCtxData *c,uint32_t *current,uint32_t *put) {
+ if(c!=context || !auto_test_fifo_native)return -1;
+ gpp_ctx *gc=(gpp_ctx *)(void *)c;
+ *current=4096+(uint32_t)(gc->current-gc->begin)*4;*put=auto_test_fifo_put;return 0;
 }
 const unsigned char ps3dk_prof__auto_mechanism[32]={42};
 const unsigned char ps3dk_prof__auto_build_binding[32]={99};
@@ -353,6 +371,7 @@ unsigned test_fw_status(void) {++auto_test_fw_polls;if(auto_test_fw_pending>0) {
 ''',encoding='utf-8')
 application='#include <stdio.h>\nint main(void) { puts("application complete"); return 0; }\n'
 assert 'prof' not in application
+if a.case=='fifoaccount':application=Path(__file__).with_name('auto-fifo-accounting-test.c').read_text()
 if a.case=='lease':application=Path(__file__).with_name('auto-lease-test.c').read_text()
 if a.case=='init':application=Path(__file__).with_name('auto-attach-test.c').read_text()
 if a.case=='race':application=Path(__file__).with_name('auto-attach-race-test.c').read_text()
@@ -399,6 +418,7 @@ if a.case=='segcapacity':
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
 assert result.stdout==(b'AUTO initial attach and override without device writes PASS\n' if a.case=='init'
+                       else b'AUTO native FIFO accounting PASS\n' if a.case=='fifoaccount'
                        else b'AUTO actual marker producer and cumulative completion PASS\n' if operations
                        else b'AUTO in-flight owner seal retains claim and lower bound PASS\n' if a.case=='stop'
                        else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
@@ -445,6 +465,14 @@ if a.case in ('race','fifopre'):
     assert not any(k==6 or 34<=k<=38 for k,b in chunks),'no trailer or partial AUTO state'
     assert not any(31<=k<=33 for k,b in chunks),'no unpublished FIFO state'
     print('real capture attach/seal race: incomplete file, no resurrected reservation PASS')
+    raise SystemExit(0)
+if a.case=='fifoaccount':
+    rows=[struct.unpack('<HHIIIII7Q',b) for k,b in chunks if k==43]
+    assert len(rows)==3,rows
+    assert rows[0][9:12]==(216,208,2) and rows[0][6]==0,rows
+    assert rows[1][9:12]==(144,104,0) and rows[1][6]==0,rows
+    assert rows[2][9:12]==(0,0,0) and rows[2][6]&1,rows
+    print('AUTO native FIFO accounting wire PASS')
     raise SystemExit(0)
 auto=[(k,b) for k,b in chunks if 34<=k<=38]
 OP=160 # OPS record width of this writer (CONFIG 63/11): 128 bytes plus the build tail

@@ -79,6 +79,10 @@ void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t off
 __attribute__((noinline))
 static int32_t ps3tc_gcm_invoke_callback(CellGcmContextData *ctx, uint32_t count)
 {
+#ifdef PS3TC_PROF_AUTO
+    extern void ps3dk_prof__fifo_account_check_context(void *);
+    ps3dk_prof__fifo_account_check_context(ctx);
+#endif
     return ctx->callback(ctx, count);
 }
 

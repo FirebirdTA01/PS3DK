@@ -413,7 +413,8 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let auto_ty = r.auto.is_some()
             && (crate::auto_rsx::CHUNK_AUTO_CONFIG..=crate::auto_rsx::CHUNK_AUTO_CLOCK).contains(&ty);
         let fifo_ty = r.fifo.is_some()
-            && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
+            && ((crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty)
+                || ty == crate::fifo::accounting::CHUNK);
         let export_ty = ty == crate::model::CHUNK_EXPORT;
         let windows_ty = r.windows.is_some()
             && (ty == crate::model::CHUNK_WINDOW_BEGIN || ty == crate::model::CHUNK_WINDOW_END);
@@ -480,13 +481,20 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
                 x.declarations().domains.values().filter(|d| d.kind == crate::ext::KIND_RSX_TIMESTAMP)
                     .map(|d| d.id).collect()
             });
-            r.fifo.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared)?;
+            r.fifo.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared, r.windows.as_ref())?;
             pos += total;
             index += 1;
             continue;
         }
         if windows_ty {
             r.windows.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            if ty == crate::model::CHUNK_WINDOW_END {
+                if let Some(fifo) = r.fifo.as_ref() {
+                    if let Some(window) = r.windows.as_ref().unwrap().windows.last() {
+                        fifo.result.accounting.window_closed(window)?;
+                    }
+                }
+            }
             pos += total;
             index += 1;
             continue;

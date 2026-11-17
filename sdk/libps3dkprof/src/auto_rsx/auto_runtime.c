@@ -17,6 +17,25 @@ static auto_capture *capture;
 static gpp_ctx *clean_context;
 static uintptr_t clean_begin, clean_current, clean_end;
 
+/* Owner-only bridge predicate. Validate publication and immutable owner fields
+ * before reading capture, which can still be replaced by its owner during an
+ * initialization override. No lock, PAL call, allocation or device access.
+ * Report-ring integration replaces ONLY the final visible-end predicate with
+ * its validated active-tail predicate; these identity guards stay in place. */
+int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end)
+{
+    auto_capture *a;
+    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED ||
+        g_tls.slot1 != g_fifo.owner_slot + 1u || g_tls.incarnation != g_fifo.owner_inc ||
+        g_tls.generation != g_fifo.owner_gen || g_tls.acked || g_tls.retired || g_tls.in_drain)
+        return 0;
+    a = capture;
+    if (!a || a->context != ctx || a->owner_incarnation != g_tls.incarnation ||
+        a->owner_generation != g_tls.generation || (uintptr_t)registered_physical_end != clean_end)
+        return 0;
+    return (uintptr_t)visible_end == clean_end;
+}
+
 static int label_valid(uint32_t n) { return n==64 || (n>=69 && n<=254); }
 
 /* The defaults (no options: the automatic attach at cellGcmInit) must stay inside the profiler's reservation of
@@ -213,6 +232,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
          * Keep its capture/lease alive; only the unpublished FIFO is cancelled. */
         return PS3DK_PROF_ESTOPPED;
     }
+    ps3dk_prof__fifo_account_native_start(gc);
     *instance=1;*domain=id;
     return PS3DK_PROF_OK;
 fail:
@@ -1079,6 +1099,7 @@ void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontie
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 {
     if(!context || !p_ready()) return;
+    ps3dk_prof__fifo_account_unknown(context);
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,1);
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
 }
@@ -1138,6 +1159,7 @@ static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
         frame_mark(a,AUTO_FRAME_END);
     }
     if(!auto_frames_close(&a->coverage,owner,frame,observation_tb(),0)) return 0;
+    ps3dk_prof__fifo_account_native_end(a->context,owner,frame,ps3dk_prof__fifo_owner_window());
     if(frame%64u==63) sample_clock(a,frame);
     return 1;
 }

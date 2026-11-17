@@ -7,6 +7,7 @@
 #include "prof_internal.h"
 #ifdef PS3DK_PROF_WITH_AUTO
 #include "../auto_rsx/auto_internal.h"
+#include "../fifo/fifo_account_runtime.h"
 #endif
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
@@ -907,8 +908,12 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
+#ifdef PS3DK_PROF_WITH_AUTO
+    uint64_t fifo_window_before = ps3dk_prof__fifo_owner_window();
+#endif
     p_window_frame(p, t->slot1, t->incarnation, fid);   /* a window opens or closes here, before AUTO sees it */
 #ifdef PS3DK_PROF_WITH_AUTO
+    ps3dk_prof__fifo_account_native_frame(fid,fifo_window_before,ps3dk_prof__fifo_owner_window());
     p_auto_frame(fid,tb);
 #endif
 }
@@ -944,6 +949,21 @@ static void win_lock(prof *p)
         z = 0;
 }
 static void win_unlock(prof *p) { __atomic_store_n(&p->window_lock, 0u, __ATOMIC_RELEASE); }
+#ifdef PS3DK_PROF_WITH_AUTO
+/* Copy identity under its existing lock; release before touching GCM. Never
+ * retain the lock across a reserve/callback/PUT or observer call. */
+uint64_t ps3dk_prof__fifo_owner_window(void)
+{
+    prof *p = g_prof;
+    uint64_t id = 0;
+    if (!p || !g_tls.slot1) return 0;
+    win_lock(p);
+    if (p->window_open && p->win.owner_slot1 == g_tls.slot1 && p->win.owner_inc == g_tls.incarnation)
+        id = p->win.id;
+    win_unlock(p);
+    return id;
+}
+#endif
 static void w_le16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); }
 static void w_le32(uint8_t *b, uint32_t v) { for (unsigned i = 0; i < 4; i++) b[i] = (uint8_t)(v >> (8 * i)); }
 static void w_le64(uint8_t *b, uint64_t v) { for (unsigned i = 0; i < 8; i++) b[i] = (uint8_t)(v >> (8 * i)); }

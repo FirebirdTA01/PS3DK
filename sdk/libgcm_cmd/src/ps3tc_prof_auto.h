@@ -16,6 +16,9 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *, uint32_t ticket);
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *);
 void ps3dk_prof__auto_publish_after(struct _gcmCtxData *, uint32_t frontier);
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
+/* Exact owner FIFO IO offset; independent of AUTO report publication serials. */
+void ps3dk_prof__fifo_account_native_publish(void *ctx, uint32_t offset);
+int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end);
 /* Public application writes, safe and unsafe forms. kind 1 is a report index,
  * kind 2 a label index. Observation never redirects or suppresses the write. */
 void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
