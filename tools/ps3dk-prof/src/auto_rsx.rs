@@ -2695,8 +2695,19 @@ pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<
 /// frames of capture window `w` (the viewer's window picker uses this to
 /// scope the Passes page to one capture window).
 pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
-    // A still-open window (no last frame yet) covers every frame from its first one onward.
-    by_tag_range(cap, Some(w.first_frame..=w.last_frame.unwrap_or(u64::MAX)))
+    if w.is_open {
+        // A still-open window covers every frame from its first one onward.
+        return by_tag_range(cap, Some(w.first_frame..=u64::MAX));
+    }
+    match w.last_frame {
+        Some(last) => by_tag_range(cap, Some(w.first_frame..=last)),
+        // A closed window with no last frame holds zero frames: it selects nothing.
+        None => {
+            let mut out = by_tag_impl(cap);
+            out.frames.clear();
+            out
+        }
+    }
 }
 
 /// The body of `by_tag`, unscoped.
@@ -2785,8 +2796,17 @@ fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::
         }
         true
     }).collect();
+    // Any DEEPER occurrence inside this span whose own chain is incomplete (an unresolved parent at depth + 1, or an
+    // orphan further down with a missing level in between) may hold time of this one that cannot be assigned.
     let contained_unresolved: Vec<bool> = (0..n).map(|i| {
-        (0..n).any(|c| occs[c].depth == occs[i].depth + 1 && parent_idx[c].is_none() && contains(&occs[i], &occs[c]))
+        (0..n).any(|c| occs[c].depth > occs[i].depth && !chain_complete[c] && contains(&occs[i], &occs[c]))
+    }).collect();
+    // Children must be pairwise disjoint for inclusive minus their sum to be this occurrence's own time: overlapping
+    // siblings double-count their shared span (a sum <= inclusive does not establish disjointness).
+    let children_overlap: Vec<Option<(u64, u64, u64, u64)>> = (0..n).map(|i| {
+        let mut kids: Vec<(u64, u64)> = (0..n).filter(|&c| parent_idx[c] == Some(i)).map(|c| (occs[c].begin, occs[c].end)).collect();
+        kids.sort_unstable();
+        kids.windows(2).find(|w| w[1].0 < w[0].1).map(|w| (w[0].0, w[0].1, w[1].0, w[1].1))
     }).collect();
     let child_sums: Vec<u64> = (0..n).map(|i| {
         (0..n).filter(|&c| parent_idx[c] == Some(i)).fold(0u64, |a, c| a.saturating_add(occs[c].inclusive_raw))
@@ -2802,6 +2822,11 @@ fn reconstruct_range_occurrences(ops: &[Op], descriptors: &BTreeMap<u32, crate::
         if contained_unresolved[i] {
             occs[i].exclusive_raw = None;
             if occs[i].reason.is_none() { occs[i].reason = Some("a nested range inside this one has no resolved parent — exclusive unavailable".into()); }
+            continue;
+        }
+        if let Some((a, b, c, d)) = children_overlap[i] {
+            occs[i].exclusive_raw = None;
+            if occs[i].reason.is_none() { occs[i].reason = Some(format!("own children [{a},{b}] and [{c},{d}] overlap — exclusive unavailable")); }
             continue;
         }
         let child_sum = child_sums[i];
@@ -2858,18 +2883,20 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     }).collect()
 }
 
-/// Whole-window summary per range name (t_f77eb7ed, EMP G): the occurrences count, the sum of each occurrence's
-/// inclusive raw span, the sum of each occurrence's exclusive raw span (where available), and the count of
-/// occurrences whose exclusive could not be reconstructed from retained records.
-pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64)> {
-    let mut per: BTreeMap<String, (u64, u64, u64, u64)> = BTreeMap::new();
+/// Whole-window summary per range name (t_f77eb7ed, EMP G): (distinct (owner, frame) pairs the name occurs in,
+/// occurrences, sum of each occurrence's inclusive raw span, sum of each occurrence's exclusive raw span where
+/// available, occurrences whose exclusive could not be reconstructed from retained records).
+pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
+    let mut per: BTreeMap<String, (u64, u64, u64, u64, u64)> = BTreeMap::new();
+    let mut seen: std::collections::BTreeSet<(String, u32, u64)> = std::collections::BTreeSet::new();
     for f in &b.frames {
         for r in &f.range_occurrences {
             let entry = per.entry(r.name.clone()).or_default();
-            entry.0 += 1;
-            entry.1 = entry.1.saturating_add(r.inclusive_raw);
-            if let Some(e) = r.exclusive_raw { entry.2 = entry.2.saturating_add(e); }
-            else { entry.3 += 1; }
+            if seen.insert((r.name.clone(), f.owner, f.frame)) { entry.0 += 1; }
+            entry.1 += 1;
+            entry.2 = entry.2.saturating_add(r.inclusive_raw);
+            if let Some(e) = r.exclusive_raw { entry.3 = entry.3.saturating_add(e); }
+            else { entry.4 += 1; }
         }
     }
     per
@@ -2908,8 +2935,8 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     for (name, (n, count, raw, med, hi)) in range_summary(b) {
         writeln!(out, "  range {name}: {n} frame(s), {count} range(s), sum {raw}, median per frame {med}, p95 per frame {hi}")?;
     }
-    for (name, (frames, inclusive_sum, exclusive_sum, exclusive_unavailable)) in range_occurrence_summary(b) {
-        writeln!(out, "  range {name}: {frames} frame(s), inclusive sum {inclusive_sum}, exclusive sum {exclusive_sum}, exclusive unavailable {exclusive_unavailable}")?;
+    for (name, (frames, occurrences, inclusive_sum, exclusive_sum, exclusive_unavailable)) in range_occurrence_summary(b) {
+        writeln!(out, "  range {name}: {frames} frame(s), {occurrences} occurrence(s), inclusive sum {inclusive_sum}, exclusive sum {exclusive_sum}, exclusive unavailable {exclusive_unavailable}")?;
     }
     Ok(())
 }
@@ -2933,8 +2960,8 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
     let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({
         "name": name, "frames": n, "count": count, "raw_sum": raw, "raw_median": med, "raw_p95": hi})).collect();
-    let range_occurrences: Vec<serde_json::Value> = range_occurrence_summary(b).into_iter().map(|(name, (frames, incl, excl, unavail))| json!({
-        "name": name, "frames": frames, "inclusive_sum": incl, "exclusive_sum": excl, "exclusive_unavailable": unavail})).collect();
+    let range_occurrences: Vec<serde_json::Value> = range_occurrence_summary(b).into_iter().map(|(name, (frames, occurrences, incl, excl, unavail))| json!({
+        "name": name, "frames": frames, "occurrences": occurrences, "inclusive_sum": incl, "exclusive_sum": excl, "exclusive_unavailable": unavail})).collect();
     let v = json!({"schema": 2, "tagged": b.tagged, "note": BY_TAG_NOTE, "frames": frames,
         "summary": {"tags": tags, "ranges": ranges, "range_occurrences": range_occurrences}});
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
@@ -3076,6 +3103,50 @@ mod tests {
         let ops = vec![ro(1, 0, 100, 200), ro(1, 1, 90, 210), ro(2, 2, 150, 160)];
         let r = reconstruct_range_occurrences(&ops, &desc);
         assert!(r.iter().filter(|o| o.depth == 1).all(|o| o.exclusive_raw.is_none() && o.reason.is_some()), "{r:?}");
+    }
+
+    #[test]
+    fn orphan_deeper_descendant_blocks_the_ancestors_exclusive() {
+        let desc = dmap(&[("top", 0), ("deep", 1)]);
+        // depth 1 [0,100] contains a depth-3 [10,20] with no depth-2 occurrence: the depth-1 exclusive is not 100
+        let ops = vec![ro(1, 0, 0, 100), ro(3, 1, 10, 20)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let top = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(top.exclusive_raw, None, "{top:?}");
+        assert!(top.reason.is_some(), "{top:?}");
+    }
+
+    #[test]
+    fn overlapping_sibling_children_block_the_parents_exclusive() {
+        let desc = dmap(&[("p", 0), ("c", 1)]);
+        // parent [0,100] with depth-2 children [10,30] and [20,40]: each resolves uniquely, but they overlap, so
+        // 100 - (20 + 20) = 60 is not the parent's own time
+        let ops = vec![ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 20, 40)];
+        let r = reconstruct_range_occurrences(&ops, &desc);
+        let p = r.iter().find(|o| o.depth == 1).unwrap();
+        assert_eq!(p.exclusive_raw, None, "{p:?}");
+        assert_eq!(p.reason.as_deref(), Some("own children [10,30] and [20,40] overlap — exclusive unavailable"));
+        // touching (not overlapping) children still give a numeric exclusive
+        let ok = reconstruct_range_occurrences(&[ro(1, 0, 0, 100), ro(2, 1, 10, 30), ro(2, 1, 30, 40)], &desc);
+        assert_eq!(ok.iter().find(|o| o.depth == 1).unwrap().exclusive_raw, Some(70));
+    }
+
+    #[test]
+    fn range_occurrence_summary_counts_frames_and_occurrences_separately() {
+        let occ = |b: u64, e: u64| RangeOccurrence { name: "pass".into(), depth: 1, begin: b, end: e, inclusive_raw: e - b,
+                                                    parent: None, exclusive_raw: Some(e - b), reason: None };
+        // two same-name ranges in ONE frame
+        let f = TagFrame { owner: 1, frame: 7, range_occurrences: vec![occ(0, 10), occ(20, 25)], ..TagFrame::default() };
+        let b = ByTag { tagged: true, frames: vec![f] };
+        let mut text = Vec::new();
+        write_by_tag_text(&mut text, &b).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("range pass: 1 frame(s), 2 occurrence(s), inclusive sum 15"), "{text}");
+        let mut js = Vec::new();
+        write_by_tag_json(&mut js, &b).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&js).unwrap();
+        let row = &v["summary"]["range_occurrences"][0];
+        assert_eq!((row["frames"].as_u64(), row["occurrences"].as_u64()), (Some(1), Some(2)), "{row}");
     }
 
     #[test]

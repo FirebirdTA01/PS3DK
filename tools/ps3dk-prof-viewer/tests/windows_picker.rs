@@ -127,3 +127,29 @@ fn sibling_path_keeps_stem_and_parent() {
     assert_eq!(out2, std::path::Path::new("/var/lib/ps3/myrun.0..9.prof"));
     assert_eq!(out2.parent().unwrap(), std::path::Path::new("/var/lib/ps3"));
 }
+
+/// A closed window with no last frame holds zero frames and selects nothing (it is not an open window); a populated
+/// window after it still selects exactly its frames; only a genuinely open window extends to the capture's end.
+#[test]
+fn closed_empty_window_selects_nothing_and_only_open_extends() {
+    let a = analysis(&fixture("windows"));
+    let w2 = a.capture.windows.iter().find(|w| w.id == 2).expect("window 2").clone();
+    let mut closed_empty = w2.clone();
+    closed_empty.last_frame = None;
+    closed_empty.is_open = false;
+    let none = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, &closed_empty);
+    assert!(none.frames.is_empty(), "closed empty window selected frames {:?}",
+            none.frames.iter().map(|f| f.frame).collect::<Vec<_>>());
+
+    let populated = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, &w2);
+    assert_eq!(populated.frames.iter().map(|f| f.frame).collect::<Vec<_>>(), vec![3, 4, 5]);
+
+    let mut open = w2.clone();
+    open.last_frame = None;
+    open.is_open = true;
+    let all = ps3dk_prof::auto_rsx::by_tag(&a.capture);
+    let open_frames: Vec<u64> = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, &open).frames.iter().map(|f| f.frame).collect();
+    let expect: Vec<u64> = all.frames.iter().map(|f| f.frame).filter(|&f| f >= 3).collect();
+    assert_eq!(open_frames, expect, "an open window runs from its first frame to the end");
+    assert!(open_frames.len() > 3, "the open window reaches past frame 5");
+}

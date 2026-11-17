@@ -467,8 +467,10 @@ impl App {
     }
 
     /// Writes a single frame or a frame range of an open capture as a standalone
-    /// `.prof` next to the capture itself, using the reader's `export_capture`.
-    /// Never overwrites an existing file (the target must not exist).
+    /// `.prof` next to the capture itself, using the reader's no-clobber export.
+    /// Never overwrites an existing file: the `exists()` check is only an early
+    /// message; the export itself publishes without replacing (a target that
+    /// appears later is still refused) and never truncates a stray temporary.
     pub fn save_frame_range(&mut self, lo: u64, hi: u64) {
         let Some(doc) = self.doc.clone() else { return };
         if lo > hi {
@@ -480,10 +482,10 @@ impl App {
             self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
             return;
         }
-        match ps3dk_prof::export_capture(&doc.path, &out, lo..=hi) {
-            Ok(()) => self.save_result = Some((false, format!("Saved {}", out.display()))),
-            Err(e) => self.save_result = Some((true, format!("Save failed: {e}"))),
-        }
+        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, lo..=hi) {
+            Ok(()) => (false, format!("Saved {}", out.display())),
+            Err(e) => save_failed(&out, e),
+        });
     }
 
     /// Saves the selected window (its [first_frame, last_frame]) as a standalone
@@ -507,10 +509,10 @@ impl App {
             self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
             return;
         }
-        match ps3dk_prof::export_capture(&doc.path, &out, w.first_frame..=last) {
-            Ok(()) => self.save_result = Some((false, format!("Saved window {} as {}", id, out.display()))),
-            Err(e) => self.save_result = Some((true, format!("Save failed: {e}"))),
-        }
+        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, w.first_frame..=last) {
+            Ok(()) => (false, format!("Saved window {} as {}", id, out.display())),
+            Err(e) => save_failed(&out, e),
+        });
     }
 
     /// Rebuilds the window-scoped Passes view for the current `self.window`.
@@ -576,6 +578,9 @@ impl App {
                 });
             },
         );
+        // The spinners edit locals; keep the edits for the next UI frame.
+        self.save_range_from = from;
+        self.save_range_to = to;
         if do_save {
             if from > to {
                 self.save_result = Some((true, "the frame range must start at or before its end".into()));
@@ -587,6 +592,17 @@ impl App {
         if close {
             self.save_range_modal = false;
         }
+    }
+}
+
+/// The status line for a failed save: an existing (or newly appeared) target
+/// says nothing was written; anything else is the export's own error.
+fn save_failed(out: &std::path::Path, e: ps3dk_prof::ExportError) -> (bool, String) {
+    match e {
+        ps3dk_prof::ExportError::Io(io) if io.kind() == std::io::ErrorKind::AlreadyExists => {
+            (true, format!("{} already exists; nothing was written", out.display()))
+        }
+        e => (true, format!("Save failed: {e}")),
     }
 }
 
@@ -1529,3 +1545,105 @@ pub fn finish_live(caps: &mut Captures, o: &Outcome) -> (bool, String) {
 #[cfg(test)]
 #[path = "polish_tests.rs"]
 mod polish_tests;
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    /// A private copy of the `windows` fixture (frames 3..5 are present) as `<dir>/capture.prof`.
+    fn capture(tag: &str) -> (PathBuf, PathBuf) {
+        let d = std::env::temp_dir().join(format!("ps3dk-prof-viewer-save-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let src = format!("{}/../ps3dk-prof/tests/fixtures/auto/windows.prof", env!("CARGO_MANIFEST_DIR"));
+        let p = d.join("capture.prof");
+        std::fs::copy(src, &p).unwrap();
+        (d, p)
+    }
+
+    fn find(out: &egui::FullOutput, want: &str) -> Option<egui::Rect> {
+        fn walk(s: &egui::Shape, want: &str, r: &mut Option<egui::Rect>) {
+            match s {
+                egui::Shape::Text(t) if t.galley.job.text == want => *r = Some(t.galley.rect.translate(t.pos.to_vec2())),
+                egui::Shape::Vec(xs) => xs.iter().for_each(|x| walk(x, want, r)),
+                _ => {}
+            }
+        }
+        let mut r = None;
+        for s in &out.shapes { walk(&s.shape, want, &mut r); }
+        r
+    }
+
+    fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    /// Spinner edits survive later UI frames, and Save uses the edited bounds (not the prefill).
+    #[test]
+    fn save_range_dialog_keeps_edits_across_frames() {
+        let (d, p) = capture("dialog");
+        let mut app = App::new(Some(p));
+        assert!(app.doc.is_some(), "{:?}", app.error);
+        app.save_range_from = 3;
+        app.save_range_to = 5;
+        app.save_range_modal = true;
+        let ctx = egui::Context::default();
+        ui::install(&ctx);
+        let mut t = 0.0;
+        let mut frame = |app: &mut App, events: Vec<egui::Event>| {
+            t += 0.05;
+            ctx.run(egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+                time: Some(t),
+                events,
+                ..Default::default()
+            }, |ctx| app.save_range_dialog(ctx))
+        };
+        let mut out = frame(&mut app, vec![]);
+        for _ in 0..3 { out = frame(&mut app, vec![]); }
+        let first = find(&out, "3").expect("the First frame spinner shows 3").center();
+        frame(&mut app, vec![egui::Event::PointerMoved(first), button(first, true)]);
+        frame(&mut app, vec![button(first, false)]);
+        frame(&mut app, vec![]);
+        // The click selected the spinner's text; typing replaces it, then several plain UI frames follow.
+        frame(&mut app, vec![egui::Event::Text("5".into())]);
+        for _ in 0..4 { out = frame(&mut app, vec![]); }
+        assert_eq!((app.save_range_from, app.save_range_to), (5, 5), "the edited bounds persist across frames");
+        let save = find(&out, "Save").expect("Save button").center();
+        frame(&mut app, vec![egui::Event::PointerMoved(save), button(save, true)]);
+        frame(&mut app, vec![button(save, false)]);
+        assert!(!app.save_range_modal, "Save closes the dialog");
+        assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+        assert!(d.join("capture.5..5.prof").is_file(), "saved with the edited bounds");
+        assert!(!d.join("capture.3..5.prof").exists(), "not with the prefill");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A stray temporary at the old predictable name is neither truncated nor renamed over the target.
+    #[test]
+    fn save_frame_range_preserves_a_precreated_temporary() {
+        let (d, p) = capture("tmp");
+        let mut app = App::new(Some(p));
+        let stray = d.join(format!("capture.3..5.prof.tmp-{}", std::process::id()));
+        std::fs::write(&stray, b"not ours").unwrap();
+        app.save_frame_range(3, 5);
+        assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+        assert_eq!(std::fs::read(&stray).unwrap(), b"not ours", "the stray temporary is untouched");
+        let saved = std::fs::read(d.join("capture.3..5.prof")).unwrap();
+        assert!(ps3dk_prof::reader::read(&saved).is_ok(), "the target is the exported capture");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An existing target is refused and left byte-for-byte as it was.
+    #[test]
+    fn save_window_refuses_an_existing_target() {
+        let (d, p) = capture("exists");
+        let mut app = App::new(Some(p));
+        let target = d.join("capture.window_2.prof");
+        std::fs::write(&target, b"theirs").unwrap();
+        app.save_window(2);
+        assert!(matches!(&app.save_result, Some((true, m)) if m.contains("already exists")), "{:?}", app.save_result);
+        assert_eq!(std::fs::read(&target).unwrap(), b"theirs");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
