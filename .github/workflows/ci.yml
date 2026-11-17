@@ -175,6 +175,12 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output"
           python3 tests/host/ps3dk-prof-rolling/run_output.py --build-dir "$RUNNER_TEMP/rolling-output-asan" --cc 'cc -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -no-pie'
           python3 tests/host/ps3dk-prof-rolling/output_mutations.py --build-dir "$RUNNER_TEMP/rolling-output-mutants"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_fixture.py --build-dir "$RUNNER_TEMP/rolling-combined-c"
+          PS3DK_PROF_ROLLING_COMBINED_FIXTURE_DIR="$RUNNER_TEMP/rolling-combined-c/c-combined" cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c c_accepted_output_mixed_checkpoints_and_store_match_original_source -- --ignored --exact
+          cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_combined_c --no-run --message-format=json > "$RUNNER_TEMP/rolling-combined-build.jsonl"
+          PARITY_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_combined_c" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-combined-build.jsonl")"
+          python3 tests/host/ps3dk-prof-rolling/combined_fixture_mutations.py --build-dir "$RUNNER_TEMP/rolling-combined-c-mutants" --parity-exe "$PARITY_EXE"
+          python3 tests/host/ps3dk-prof-rolling/run_combined_file_mutants.py --build-dir "$RUNNER_TEMP/rolling-combined-file-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_positions_mutants.py --build-dir "$RUNNER_TEMP/rolling-positions-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py --build-dir "$RUNNER_TEMP/rolling-counter-mutants"
           python3 tests/host/ps3dk-prof-rolling/fifo_mutations.py --build-dir "$RUNNER_TEMP/rolling-fifo-mutants"

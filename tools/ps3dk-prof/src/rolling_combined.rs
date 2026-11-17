@@ -1,10 +1,11 @@
 //! Offline combined PPU/WINDOWS and SPU checkpoint boundary.
-//! This does not enable runtime rolling, physical joins, GPU/AUTO/FIFO, or tick/RMAX1
-//! qualification. SPU results explicitly concern causal support only.
+//! The physical join is exposed through `rolling_file::read_combined`. This does
+//! not enable runtime rolling, GPU/AUTO/FIFO, or tick/RMAX1 qualification. SPU
+//! results explicitly concern causal support only.
 use crate::ext::rolling::causal::{CausalLimits, Finished};
 use crate::profile::{ProfileRecord, TableEntry};
 use crate::rolling::RetainedPpu;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use crate::model::*;
 use crate::reader::PpuState;
 use crate::rolling_checkpoint as ppu;
@@ -70,6 +71,29 @@ pub struct RetainedCombined {
     pub terminal: bool,
     pub torn_tail: bool,
 }
+
+/// Only the physical reader constructs this bounded borrowed chain. Original
+/// chunk framing remains checked again when the semantic state accepts bytes.
+pub(crate) struct SegmentInput<'a> {
+    pub segment: u64,
+    pub first_chunk: u64,
+    pub next_chunk: u64,
+    pub checkpoint: &'a [u8],
+    pub payload: &'a [u8],
+}
+pub(crate) struct ChainBounds {
+    pub first_chunk: u64,
+    pub next_chunk: u64,
+    pub evicted_payload_bytes: u64,
+    pub bound_payload_bytes: Option<u64>,
+}
+pub(crate) enum ChainError {
+    Semantic(Error),
+    Boundary { segment: Option<u64>, field: &'static str },
+    Transition { segment: u64 },
+    Limit(&'static str),
+}
+impl From<Error> for ChainError { fn from(error: Error) -> Self { Self::Semantic(error) } }
 
 impl From<crate::Malformed> for Error { fn from(e: crate::Malformed) -> Self { Self::Malformed(e) } }
 impl From<spu::Error> for Error { fn from(e: spu::Error) -> Self { Self::Spu(e) } }
@@ -156,9 +180,13 @@ fn framed<'a>(b: &'a [u8], expected: u64, header: &[u8; 16]) -> Result<Option<cr
     Ok(Some(crate::rolling::Chunk { index, ty, payload, raw: &b[..total] }))
 }
 
-struct Budget { limits: Limits, work: u64, events: u64, metadata_used: usize, position_left: u64 }
+struct Budget { limits: Limits, work: u64, events: u64, metadata_used: usize, input_used: usize, position_left: u64 }
 impl Budget {
-    fn new(limits: Limits) -> Self { Self { limits, work: 0, events: 0, metadata_used: 16, position_left: limits.position_total_work } }
+    fn new(limits: Limits) -> Self { Self { limits, work: 0, events: 0, metadata_used: 16, input_used: 0, position_left: limits.position_total_work } }
+    fn input(&mut self, n: usize) -> Result<(), Error> {
+        self.input_used = self.input_used.checked_add(n).ok_or(Error::Limit("input bytes"))?;
+        if self.input_used > self.limits.input_bytes { return Err(Error::Limit("input bytes")); } Ok(())
+    }
     fn charge(&mut self, n: u128) -> Result<(), Error> {
         let next = u128::from(self.work).checked_add(n).ok_or(Error::Limit("structural work"))?;
         if next > u128::from(self.limits.work_items) { return Err(Error::Limit("structural work")); }
@@ -196,6 +224,7 @@ impl Budget {
 }
 
 struct Lifetime { start: u64, end: Option<u64> }
+struct ReportBoundary { closed: BTreeSet<u32>, open: Option<u32>, first_chunk: u64, prefix_bytes: u64 }
 struct Live {
     header: [u8; 16], next: u64, bytes: u64,
     metadata: Vec<Vec<u8>>, record_chunks: BTreeMap<u32, u64>,
@@ -255,7 +284,7 @@ impl Live {
         self.state_limits(budget)
     }
     fn consume(&mut self, bytes: &[u8], terminal_allowed: bool, budget: &mut Budget) -> Result<bool, Error> {
-        if bytes.len() > budget.limits.input_bytes { return Err(Error::Limit("input bytes")); }
+        budget.input(bytes.len())?;
         let mut at = 0;
         while at < bytes.len() {
             if self.terminal {
@@ -369,15 +398,39 @@ impl Live {
         budget.charge(self.ppu.capture().spans.len() as u128 * 64 + self.ppu.capture().lanes.len() as u128 * 128)?;
         Ok(ppu::snapshot_cursors(&self.ppu, self.header, self.next, self.bytes, ppu_limits(budget.limits), self.prior.as_ref())?)
     }
-    fn checkpoint(self, budget: &mut Budget) -> Result<Vec<u8>, Error> {
+    fn canonical_boundary(&self, budget: &mut Budget) -> Result<Vec<u8>, Error> {
+        if self.terminal { return ck("TRAILER has no successor checkpoint"); }
         let cursors = self.snapshot(budget)?; self.prove(&cursors, budget)?;
-        let bytes = checkpoint::encode(&self, &cursors, budget)?;
+        checkpoint::encode(self, &cursors, budget)
+    }
+    fn checkpoint(self, budget: &mut Budget) -> Result<Vec<u8>, Error> {
+        let bytes = self.canonical_boundary(budget)?;
         // These are the actual source validators, including present retired
         // and SPU finals. Snapshot precedes consuming their active stacks.
         self.ppu.finish(false)?;
         if !self.spu.no_frame_references() { return ck("unsupported foreign frame references"); }
         self.spu.finish(false, false, &BTreeMap::new())?;
         Ok(bytes)
+    }
+    fn report_boundary(&self) -> ReportBoundary {
+        let (closed, open) = self.ppu.window_boundary();
+        ReportBoundary { closed, open, first_chunk: self.next, prefix_bytes: self.bytes }
+    }
+    fn finish_retained(mut self, boundary: ReportBoundary, torn: bool, budget: &mut Budget,
+        options: ReportOptions<'_>) -> Result<RetainedCombined, Error> {
+        let prior = self.prior.take().ok_or(Error::Checkpoint("missing imported cursors"))?;
+        budget.membership_work(self.ppu.capture(), Some(&prior))?;
+        budget.cursor_work(&prior.rows, prior.tokens.len() + self.ppu.capture().spans.len())?;
+        let cap = self.ppu.finish(torn)?;
+        let profile = cap.profile.clone();
+        let classification = crate::profile::classify(profile.as_ref(), options.spu_profile_table, crate::profile::KIND_SPU);
+        if !self.spu.no_frame_references() { return ck("unsupported foreign frame references"); }
+        let spu = self.spu.finish_with_causal(cap.has_trailer(), cap.has_trailer() && !cap.torn(), &BTreeMap::new(),
+            spu::causal::CausalOptions { classification: Some(&classification), limits: options.causal_limits })?;
+        let ppu = crate::rolling::report_retained(cap, &prior, boundary.closed, boundary.open, self.next)?;
+        Ok(RetainedCombined { original_header: self.header, original_profile: profile, ppu, spu,
+            first_chunk: boundary.first_chunk, next_chunk: self.next, prefix_bytes: boundary.prefix_bytes,
+            terminal: self.terminal, torn_tail: torn })
     }
 }
 
@@ -397,19 +450,64 @@ pub fn read_combined_suffix(checkpoint: &[u8], suffix: &[u8], limits: Limits,
     options: ReportOptions<'_>) -> Result<RetainedCombined, Error> {
     let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
     let mut live = Live::restore(saved, &mut budget)?;
-    let (closed, open) = live.ppu.window_boundary();
-    let first_chunk = live.next; let prefix_bytes = live.bytes;
+    let boundary = live.report_boundary();
     let torn = live.consume(suffix, true, &mut budget)?;
-    let prior = live.prior.take().ok_or(Error::Checkpoint("missing imported cursors"))?;
-    budget.membership_work(live.ppu.capture(), Some(&prior))?;
-    budget.cursor_work(&prior.rows, prior.tokens.len() + live.ppu.capture().spans.len())?;
-    let cap = live.ppu.finish(torn)?;
-    let profile = cap.profile.clone();
-    let classification = crate::profile::classify(profile.as_ref(), options.spu_profile_table, crate::profile::KIND_SPU);
-    if !live.spu.no_frame_references() { return ck("unsupported foreign frame references"); }
-    let spu = live.spu.finish_with_causal(cap.has_trailer(), cap.has_trailer() && !cap.torn(), &BTreeMap::new(),
-        spu::causal::CausalOptions { classification: Some(&classification), limits: options.causal_limits })?;
-    let ppu = crate::rolling::report_retained(cap, &prior, closed, open, live.next)?;
-    Ok(RetainedCombined { original_header: live.header, original_profile: profile, ppu, spu,
-        first_chunk, next_chunk: live.next, prefix_bytes, terminal: live.terminal, torn_tail: torn })
+    live.finish_retained(boundary, torn, &mut budget, options)
+}
+
+/// One imported state and one budget for the entire selected physical window.
+/// Intermediate canonical bytes are compared without discarding retained work.
+pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds, limits: Limits,
+    options: ReportOptions<'_>) -> Result<RetainedCombined, ChainError> {
+    if segments.len() > 64 { return Err(ChainError::Limit("retained segments")); }
+    let first = segments.first().ok_or(ChainError::Boundary { segment: None, field: "empty segment chain" })?;
+    let mut total = 0usize;
+    for segment in segments {
+        if segment.checkpoint.len() > limits.checkpoint_bytes { return Err(ChainError::Limit("checkpoint bytes")); }
+        total = total.checked_add(segment.payload.len()).ok_or(ChainError::Limit("input bytes"))?;
+        if total > limits.input_bytes { return Err(ChainError::Limit("input bytes")); }
+    }
+    let total = u64::try_from(total).map_err(|_| ChainError::Limit("input bytes"))?;
+    let expected_bytes = bounds.evicted_payload_bytes.checked_add(total)
+        .ok_or(ChainError::Boundary { segment: None, field: "end byte frontier overflow" })?;
+    let mut budget = Budget::new(limits);
+    let saved = checkpoint::decode(first.checkpoint, &mut budget)?;
+    let mut live = Live::restore(saved, &mut budget)?;
+    if live.next != bounds.first_chunk || live.next != first.first_chunk {
+        return Err(ChainError::Boundary { segment: Some(first.segment), field: "first chunk" });
+    }
+    if live.bytes != bounds.evicted_payload_bytes {
+        return Err(ChainError::Boundary { segment: Some(first.segment), field: "evicted prefix bytes" });
+    }
+    // Preserve these baselines once. A subsequent checkpoint is evidence to
+    // compare, never a replacement for the state that owns retained events.
+    let boundary = live.report_boundary();
+    for (i, segment) in segments.iter().enumerate() {
+        if live.next != segment.first_chunk {
+            return Err(ChainError::Boundary { segment: Some(segment.segment), field: "segment first chunk" });
+        }
+        if live.consume(segment.payload, true, &mut budget)? {
+            return Err(Error::Checkpoint("physical segment ends inside a chunk").into());
+        }
+        if live.next != segment.next_chunk {
+            return Err(ChainError::Boundary { segment: Some(segment.segment), field: "segment next chunk" });
+        }
+        if let Some(next) = segments.get(i + 1) {
+            // This also rejects a terminal segment followed by an empty slot.
+            let canonical = live.canonical_boundary(&mut budget)?;
+            budget.bytes(next.checkpoint.len())?;
+            if canonical.as_slice() != next.checkpoint {
+                return Err(ChainError::Transition { segment: next.segment });
+            }
+        }
+    }
+    if live.next != bounds.next_chunk {
+        return Err(ChainError::Boundary { segment: None, field: "next chunk" });
+    }
+    if live.bytes != expected_bytes || bounds.bound_payload_bytes.is_some_and(|n| n != live.bytes) {
+        return Err(ChainError::Boundary { segment: None, field: "end byte frontier" });
+    }
+    // Only this final consuming validation produces a report. Canonical
+    // intermediate equality alone is not a verdict on original source finals.
+    Ok(live.finish_retained(boundary, false, &mut budget, options)?)
 }

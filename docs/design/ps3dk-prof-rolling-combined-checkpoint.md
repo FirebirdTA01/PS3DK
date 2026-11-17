@@ -1,8 +1,9 @@
 # Offline combined PPU/SPU restart checkpoint
 
 This is an internal host-side checkpoint format for the admitted PPU/WINDOWS
-and SPU record families. It does not enable an SDK rolling sink, a physical
-container join, live capture, or the complete maximum-capture-bytes feature.
+and SPU record families. `rolling_file::read_combined` joins this format to an
+offline PS3DKROL v1/v2 physical snapshot. It does not enable an SDK rolling
+sink, live capture, or the complete maximum-capture-bytes feature.
 GPU/RSX, AUTO, FIFO, waits, function samples, counters and dependency/proof
 families remain outside this format.
 
@@ -26,7 +27,8 @@ chunk positions do not authenticate that history or reconstruct omitted raw
 events. Actual retained chunks pass the ordinary validators at their original
 indices. A segment transition is established only when canonical advancement
 has been performed and its resulting bytes compared with the next checkpoint.
-This API does not itself perform that physical-chain comparison.
+The single-prefix APIs do not perform physical-chain comparison; the file
+entry point performs it for every adjacent pair in the selected window.
 
 The position proof establishes that there exists a disjoint allocation of
 omitted PPU and SPU event chunks consistent with the exact metadata positions,
@@ -293,8 +295,8 @@ passing the remainder to the pure checker.
 
 A public operation owns one budget across its import, suffix/advance and
 publication stages. Each position invocation reserves its configured maximum
-work from the cumulative proof budget; unused units are not refunded. A future
-physical-chain reader must preserve an outer budget across selected segments.
+work from the cumulative proof budget; unused units are not refunded. The
+physical-chain reader preserves that budget across all selected segments.
 Calling independent public operations does not create such a chain budget.
 
 `checkpoint_bytes` is an encoded-state limit, not a total process-memory cap.
@@ -308,6 +310,55 @@ individual buffer's cap before a later total-size check fails. Raw retained
 events/spans are bounded by input/event/work limits, not checkpoint size.
 Collection capacities and allocator overhead can exceed logical entry counts.
 No exact resident-memory promise is made.
+
+## Offline physical chain contract
+
+`rolling_file::read_combined(bytes, store_limits, limits, options)` accepts a
+coherent immutable snapshot supplied by the caller. It calls the physical
+reader once and uses exactly that selected root chain. Physical recovery can
+choose an older valid root when a newer physical commit is damaged; a semantic
+failure in the selected chain never causes an additional fallback.
+
+The first imported checkpoint must match the selected root's original first
+chunk and evicted-payload byte count. These are checked after typed import and
+the exact conservation/position proof. They bind bounded prefix claims to the
+physical window; they do not authenticate evicted events or establish an
+additional semantic session identity absent from the checkpoint schema.
+
+All selected payloads update one live PPU/SPU state at their original indices.
+At each segment boundary, canonical checkpoint bytes are encoded from that
+state and compared byte for byte with the next stored checkpoint. Repaired
+physical and checkpoint CRCs cannot substitute for equality. The reader does
+not re-import the next checkpoint, discard retained events, or move the report
+baseline. Thus complete work and crossing spans in every selected slot remain
+in the same retained report.
+
+A genuine original TRAILER is allowed only in the last segment. A later
+segment rejects even if its payload is empty. No successor checkpoint is
+fabricated after a TRAILER. Each segment's first/next original indices, the
+root's final original index, and the exact final byte frontier are checked.
+For v2 the accepted byte frontier also equals `bound_payload_bytes`. Shared
+source-final validators run before any retained report is returned; canonical
+equality at an intermediate boundary is not by itself a source-final verdict.
+
+`CombinedFile.store_view` and `.retained` expose separate evidence. Physical
+v1 state 0 is unspecified. V2 OPEN, SEALED and STOPPED_RESOURCE retain their
+physical meanings and reason codes. SEALED does not manufacture missing
+original TRAILER/source finals. OPEN may contain complete original semantic
+evidence. STOPPED_RESOURCE does not turn semantic admission failure into a
+successful partial report. A physically empty root has no semantic checkpoint
+and returns `EmptyStore` even when SEALED.
+
+The semantic join borrows checkpoint and payload slices. It adds at most 64
+segment descriptors to the physical reader's at most 128 temporary descriptors;
+it does not concatenate payloads. One canonical checkpoint buffer and bounded
+encoder temporaries coexist with the live state. Encoded lengths and the
+checked total payload size are admitted before import. Input bytes, actual
+events, cumulative metadata, structural work and position reservations apply
+to the entire selected chain, including comparisons and final reporting.
+Empty segments still consume canonical-proof work. The default reservation
+admits at most sixteen position proofs, including initial import: a legal
+64-slot physical chain can require explicitly larger semantic work limits.
 
 ## Validation boundaries
 
@@ -323,4 +374,26 @@ The pure position checker has separate small-frontier exhaustive comparison,
 huge-demand and mutation controls. Existing standalone PPU, advancement, SPU
 structural and causal targets remain regression gates for shared helper
 extraction. These controls establish the offline subset's tested behavior;
-they do not establish runtime, full-family or physical-chain completion.
+they do not establish runtime or full-family completion.
+
+`tests/rolling_combined_file.rs` validates its original mixed source with the
+ordinary reader and builds physical roots/slots independently. Named controls
+cover three retained slots after rotation, every original first-cut boundary,
+crossing spans and full-source causal bounds, canonical transition forgery,
+prefix byte/index binding, empty/support-only segments, physical recovery,
+terminal/source-final distinctions and cumulative chain budgets.
+
+The explicit artifact test in `tests/rolling_combined_c.rs` uses the independent
+C accepted-record model in `combined_fixture.c`. It compares thirteen C
+checkpoint encodings with direct original-prefix encodings and reads the
+actual C physical store into the retained report. This is stronger than an
+opaque-checkpoint C packer but remains a fixture-level interoperability check,
+not runtime integration or a proof for every producer history. Its ignored
+status requires an explicit artifact invocation; an ordinary suite alone does
+not establish that parity.
+
+`run_combined_file_mutants.py` runs the existing named witnesses on isolated
+copies. Its baseline must pass, and each mutant must compile and fail at its
+expected witness. Compiler errors, missing tests, unrelated panics and process
+failures are not sensitivity evidence. The runner does not rewrite production
+files or weaken test assertions.
