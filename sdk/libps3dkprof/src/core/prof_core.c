@@ -5,6 +5,7 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#include "prof_frame_hook.h"
 #ifdef PS3DK_PROF_WITH_AUTO
 #include "../auto_rsx/auto_internal.h"
 #endif
@@ -869,6 +870,9 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *h)
 
 /* ---- frames (5.6) -------------------------------------------------------------------------------------------------- */
 
+static void (*g_frame_hook)(void);   /* prof_frame_hook.h */
+void ps3dk_prof__set_frame_hook(void (*fn)(void)) { __atomic_store_n(&g_frame_hook, fn, __ATOMIC_RELEASE); }
+
 void ps3dk_prof_frame(void)
 {
     tls_state *t = &g_tls;
@@ -906,6 +910,11 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
+    {
+        void (*hook)(void) = __atomic_load_n(&g_frame_hook, __ATOMIC_ACQUIRE);
+        if (hook)
+            hook();   /* live capture triggers (prof_frame_hook.h): before this mark's window step */
+    }
     p_window_frame(p, t->slot1, t->incarnation, fid);   /* a window opens or closes here, before AUTO sees it */
 #ifdef PS3DK_PROF_WITH_AUTO
     p_auto_frame(fid,tb);
