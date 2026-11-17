@@ -38,21 +38,57 @@ fn reserve<T>(v: &mut Vec<T>, n: usize) -> Result<(), Error> {
     v.try_reserve(n).map_err(|_| Error::Limit("checkpoint allocation"))
 }
 
+/// The serialized bootstrap budget is cumulative across the cut. Terminal
+/// metadata is charged too, even though it cannot enter a successor checkpoint.
+pub(crate) fn check_metadata_budget(previous: Option<&State>, chunks: &[Chunk<'_>], limits: Limits)
+    -> Result<(), Error> {
+    let mut bytes = 16usize;
+    if bytes > limits.metadata_bytes { return Err(Error::Limit("metadata bytes")); }
+    let prior = previous.into_iter().flat_map(|p| p.metadata.iter().map(Vec::len));
+    let new = chunks.iter().filter(|c| c.ty != CHUNK_RECORDS).map(|c| c.raw.len());
+    for len in prior.chain(new) {
+        bytes = bytes.checked_add(4).and_then(|n| n.checked_add(len)).ok_or(Error::Limit("metadata bytes"))?;
+        if bytes > limits.metadata_bytes { return Err(Error::Limit("metadata bytes")); }
+    }
+    Ok(())
+}
+
 pub(crate) fn snapshot(s: &PpuState, header: [u8; 16], chunks: &[Chunk<'_>], next_chunk: u64,
     prefix_bytes: u64, limits: Limits) -> Result<State, Error> {
+    snapshot_after(s, header, chunks, next_chunk, prefix_bytes, limits, None)
+}
+
+/// Extend compact state directly. Only active prefix spans are present in `s`;
+/// historical event rows and closed spans are never rehydrated.
+pub(crate) fn snapshot_after(s: &PpuState, header: [u8; 16], chunks: &[Chunk<'_>], next_chunk: u64,
+    prefix_bytes: u64, limits: Limits, previous: Option<&State>) -> Result<State, Error> {
+    check_metadata_budget(previous, chunks, limits)?;
     let mut metadata = Vec::new();
-    let mut bytes = 16usize;
+    if let Some(previous) = previous {
+        for raw in &previous.metadata {
+            reserve(&mut metadata, 1)?; metadata.push(raw.clone());
+        }
+    }
     for c in chunks.iter().filter(|c| c.ty != CHUNK_RECORDS) {
-        bytes = bytes.checked_add(c.raw.len() + 4).ok_or(Error::Limit("metadata bytes"))?;
-        if bytes > limits.metadata_bytes { return Err(Error::Limit("metadata bytes")); }
         reserve(&mut metadata, 1)?;
         metadata.push(c.raw.to_vec());
     }
     let mut rows = BTreeMap::new();
     let mut run_count = 0usize;
     for (&inc, l) in &s.capture().lanes {
+        let prior = previous.and_then(|p| p.rows.get(&inc));
         let mut frames: Vec<(u64, u64)> = Vec::new();
+        if let Some(prior) = prior {
+            for &run in &prior.frames {
+                run_count = run_count.checked_add(1).ok_or(Error::Limit("frame runs"))?;
+                if run_count > limits.frame_runs { return Err(Error::Limit("frame runs")); }
+                reserve(&mut frames, 1)?; frames.push(run);
+            }
+        }
         for f in &l.frames {
+            // Restore retains the actual last prefix FRAME for shared reader
+            // context. It is already in the exact membership runs above.
+            if frames.last().is_some_and(|last| last.0 <= f.id && f.id <= last.1) { continue; }
             if let Some(last) = frames.last_mut().filter(|last| last.1.checked_add(1) == Some(f.id)) {
                 last.1 = f.id;
             } else {
@@ -76,13 +112,18 @@ pub(crate) fn snapshot(s: &PpuState, header: [u8; 16], chunks: &[Chunk<'_>], nex
             | (u32::from(l.frame_ids_exhausted) << 2) | (u32::from(l.gap_since_frame) << 3)
             | (u32::from(l.base_unknown) << 4) | (u32::from(l.clock_anomaly) << 5)
             | (u32::from(!l.frames.is_empty()) << 6) | (u32::from(l.retired) << 7);
-        rows.insert(inc, Row { written: l.written, gaps: u64::try_from(l.gap_sum).map_err(|_| Error::Checkpoint("gap range"))?,
-            gap_count: l.gap_count, regerr: l.regerr_records, next_seq: l.expected_seq, max_span: s.max_span(inc),
+        let add = |a: u64, b: u64| a.checked_add(b).ok_or(Error::Checkpoint("prefix counter overflow"));
+        let gaps = u64::try_from(l.gap_sum).map_err(|_| Error::Checkpoint("gap range"))?;
+        rows.insert(inc, Row { written: add(prior.map_or(0, |r| r.written), l.written)?,
+            gaps: add(prior.map_or(0, |r| r.gaps), gaps)?,
+            gap_count: add(prior.map_or(0, |r| r.gap_count), l.gap_count)?,
+            regerr: add(prior.map_or(0, |r| r.regerr), l.regerr_records)?, next_seq: l.expected_seq, max_span: s.max_span(inc),
             last_tb: l.last_tb, next_frame: l.next_frame_id, current_frame: l.current_frame,
             last_frame: l.frames.last().copied(), flags, stack, frames });
     }
     let mut tokens = BTreeSet::new();
-    for (owner, frame) in s.capture().spans.iter().filter_map(|s| s.token) {
+    let prior_tokens = previous.into_iter().flat_map(|p| p.tokens.iter().copied());
+    for (owner, frame) in prior_tokens.chain(s.capture().spans.iter().filter_map(|s| s.token)) {
         if rows.get(&owner).is_some_and(|r| r.frames.iter().any(|&(a, b)| a <= frame && frame <= b)) { continue; }
         tokens.insert((owner, frame));
         if tokens.len() > limits.frame_runs.saturating_sub(run_count) { return Err(Error::Limit("frame/token identities")); }

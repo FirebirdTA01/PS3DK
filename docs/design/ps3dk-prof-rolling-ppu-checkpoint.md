@@ -6,13 +6,23 @@ enabled SDK capture mode. It is independent of the physical store described in
 currently connects the runtime sink, reader file dispatch, CLI, viewer, or live
 protocol to rolling capture. The complete rolling-capture task remains open.
 
-The Rust `ps3dk_prof::rolling` module exposes two operations:
+The Rust `ps3dk_prof::rolling` module exposes three operations:
 
 * `checkpoint_ppu(prefix, limits)` accepts an original 16-byte file header and
   a whole original chunk prefix, without TRAILER. It returns a typed checkpoint.
 * `read_ppu_suffix(checkpoint, suffix, limits)` accepts that checkpoint and
   original framed chunks starting at its exact next chunk sequence. It returns
   `RetainedPpu`, not a legacy full-capture `Analysis`.
+* `advance_ppu(checkpoint, payload, limits)` advances over whole original
+  chunks and returns the canonical next checkpoint. An empty payload preserves
+  the checkpoint bytes. Torn payloads and a terminal TRAILER are refused.
+
+Advancement merges cumulative counters, exact frame membership and pending
+token obligations with the existing compact state. It does not reconstruct
+evicted events. A segment-chain consumer must compare the returned bytes with
+the next stored checkpoint before claiming that transition was verified.
+Merely decoding both checkpoints is insufficient. The earliest retained
+checkpoint is still a producer claim about the evicted prefix.
 
 Only PPU records and optional WINDOWS are supported: original file flags must
 be zero or `FLAG_WINDOWS`. Other families, including SPU, ORDER, GPU, AUTO, FIFO,
@@ -82,6 +92,12 @@ metadata bytes, 4096 incarnations, 4096 descriptors, 65536 combined frame runs
 and unresolved token identities, 262144 active stack rows, and one million
 input record rows per operation. Per-lane stacks cannot exceed 256 rows.
 Exhaustion returns an error; it does not waive a validation rule.
+
+The metadata limit is cumulative for creation, advancement and suffix reads:
+`16 + sum(4 + original_framed_chunk_length)` over all prefix and newly read
+non-RECORDS chunks. The four bytes are the bootstrap length field. Terminal
+WINDOW_END/TRAILER metadata also consumes this budget, even though no next
+checkpoint is created. Admission occurs before processing suffix chunks.
 
 Original chunk payloads retain the existing 1 MiB cap. Before collecting a
 RECORDS chunk, the scanner requires positive `n` and exact payload length

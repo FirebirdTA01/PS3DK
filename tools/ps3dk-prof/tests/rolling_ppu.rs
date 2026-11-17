@@ -290,3 +290,16 @@ fn independent_resource_limits_refuse_without_relaxing_validation() {
     limits = Limits::default(); limits.stack_rows = 0;
     assert!(matches!(rolling::checkpoint_ppu(&f.bytes()[..cut(&f, 6)], limits), Err(Error::Limit(_))));
 }
+
+#[test]
+fn terminal_suffix_cannot_reset_the_cumulative_metadata_budget() {
+    let f = fixture(); let (cp, tail) = checkpoint(&f, 6);
+    let boot = section(&cp, 1);
+    let prefix_metadata = u32::from_le_bytes(cp[boot + 8..boot + 12].try_into().unwrap()) as usize;
+    let limits = Limits { metadata_bytes: prefix_metadata, ..Limits::default() };
+    // The existing bootstrap fits exactly; the small suffix also fits when
+    // counted alone. WINDOW_END and TRAILER must instead share the old budget.
+    assert!(rolling::read_ppu_suffix(&cp, &[], limits).is_ok());
+    assert!(matches!(rolling::read_ppu_suffix(&cp, &tail, limits), Err(Error::Limit(_))),
+        "a terminal suffix must not gain a second independent metadata budget");
+}

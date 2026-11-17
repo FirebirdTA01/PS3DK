@@ -155,10 +155,34 @@ pub fn checkpoint_ppu(prefix: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
     let (chunks, torn, next) = scan(&prefix[16..], 0, flags, limits)?;
     if torn { return Err(Error::Checkpoint("prefix ends inside a chunk")); }
     if chunks.iter().any(|c| c.ty == CHUNK_TRAILER) { return Err(Error::Checkpoint("checkpoint after TRAILER")); }
+    checkpoint::check_metadata_budget(None, &chunks, limits)?;
     for c in &chunks { state.accept(c.index, c.ty, c.payload)?; state_limits(&state, limits)?; }
     let cp = checkpoint::snapshot(&state, header, &chunks, next, (prefix.len() - 16) as u64, limits)?;
     // Retired entries already present must conserve even though there is no
     // TRAILER yet. Snapshot before finish, which intentionally clears stacks.
+    state.finish(false)?;
+    checkpoint::encode(&cp, limits)
+}
+
+/// Advance a checkpoint over whole original chunks, without reconstructing
+/// evicted event history. The result is canonical: compare its bytes against
+/// the next segment's checkpoint to verify that segment-chain transition.
+/// An empty payload is an identity. A TRAILER is terminal and has no successor
+/// checkpoint; torn payloads cannot establish a checkpoint boundary.
+pub fn advance_ppu(bytes: &[u8], payload: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
+    let previous = checkpoint::decode(bytes, limits)?;
+    let flags = u32::from_le_bytes(previous.header[12..].try_into().unwrap());
+    let (chunks, torn, next) = scan(payload, previous.next_chunk, flags, limits)?;
+    if torn { return Err(Error::Checkpoint("advance ends inside a chunk")); }
+    if chunks.iter().any(|c| c.ty == CHUNK_TRAILER) { return Err(Error::Checkpoint("TRAILER has no successor checkpoint")); }
+    checkpoint::check_metadata_budget(Some(&previous), &chunks, limits)?;
+    let mut state = checkpoint::restore(&previous, limits)?;
+    for c in &chunks { state.accept(c.index, c.ty, c.payload)?; state_limits(&state, limits)?; }
+    let prefix_bytes = previous.prefix_bytes.checked_add(payload.len() as u64)
+        .ok_or(Error::Checkpoint("prefix byte frontier overflow"))?;
+    let cp = checkpoint::snapshot_after(&state, previous.header, &chunks, next, prefix_bytes, limits, Some(&previous))?;
+    // Includes exact prefix + retained accounting for any final entries; no
+    // event rows are recreated to make these checks pass.
     state.finish(false)?;
     checkpoint::encode(&cp, limits)
 }
@@ -169,6 +193,7 @@ pub fn read_ppu_suffix(bytes: &[u8], suffix: &[u8], limits: Limits) -> Result<Re
     let cp = checkpoint::decode(bytes, limits)?;
     let flags = u32::from_le_bytes(cp.header[12..].try_into().unwrap());
     let (chunks, torn, next) = scan(suffix, cp.next_chunk, flags, limits)?;
+    checkpoint::check_metadata_budget(Some(&cp), &chunks, limits)?;
     let mut state = checkpoint::restore(&cp, limits)?;
     let (closed, open) = state.window_boundary();
     for c in &chunks { state.accept(c.index, c.ty, c.payload)?; state_limits(&state, limits)?; }
