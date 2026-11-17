@@ -2,12 +2,13 @@
 //! and steady-range summary, drawn with egui from [`crate::auto`].
 
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use ps3dk_prof::auto_rsx::{MapState, Verdict};
+use ps3dk_prof::auto_rsx::{MapState, Verdict, reject_reason};
 use ps3dk_ui as ui;
 
 use crate::app::Page;
 use crate::auto::{
-    exclusions_breakdown, presentation_share, sort_frames, AutoView, FrameSortColumn, VerdictFilter,
+    exclusions_breakdown, presentation_share, ring_exclusions_breakdown, sort_frames, AutoView,
+    FrameSortColumn, VerdictFilter,
 };
 use crate::timeline_ui::TimelineState;
 
@@ -122,6 +123,8 @@ pub struct Drawn {
     pub empty: bool,
     pub empty_message: String,
     pub map_state: String,
+    /// The reader's capture state, verbatim ("FINAL", "FINAL (lower bounds)", "PROVISIONAL: ...").
+    pub state: String,
     pub is_final: bool,
     pub ops_dropped: u64,
     pub frame_marks_missed: bool,
@@ -136,6 +139,46 @@ pub struct Drawn {
     pub rendered_frame_rows: Vec<RenderedRow>,
     pub selected_frame: Option<u64>,
     pub jumped_timeline: Option<(u64, u64)>,
+    /// Report-ring (2047/11) fields as recorded by the reader: the CONFIG partition, the STATUS
+    /// counters and the M2MF decoder rejection.  All empty when the capture is not ringed.
+    pub ring_config: Option<RingConfigDrawn>,
+    pub ring_status: Option<RingStatusDrawn>,
+    pub ring_reject: Option<RingRejectDrawn>,
+}
+
+/// The report-ring partition negotiated in CONFIG (2047/11); `ps3dk-prof auto` "report ring: ...".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RingConfigDrawn {
+    pub blocks: u32,
+    pub pairs_per_block: u32,
+    pub first_report: u32,
+    pub label: u32,
+    pub main_bytes: u32,
+    pub extents: u32,
+    pub metadata_records: u32,
+    pub legacy_pairs: u32,
+}
+
+/// The report-ring STATUS counters (2047/11); `ps3dk-prof auto` "report ring: blocks_issued ...".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RingStatusDrawn {
+    pub blocks_issued: u64,
+    pub blocks_retired: u64,
+    pub published_ring_label: u64,
+    pub held_extents: u64,
+    pub copied_bytes: u64,
+    pub flushes_untouched: u64,
+    pub flushes_restored: u64,
+    pub decoded_words: u64,
+}
+
+/// The M2MF decoder's first rejected header (2047/11); `ps3dk-prof auto` "ring decoder rejected header ...".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RingRejectDrawn {
+    pub header: u32,
+    pub offset: u32,
+    /// `ps3dk_prof::auto_rsx::reject_reason(reason)` of the reader, verbatim.
+    pub reason_text: String,
 }
 
 /// Returns the theme color for a verdict.
@@ -360,21 +403,22 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
             });
         });
 
-        // Final vs Provisional
+        // Final vs Provisional / lower bounds.  The reader's state string names the verdict exactly.
         drawn.is_final = v.is_final();
+        drawn.state = v.report.state.clone();
         fact_row(c, "Capture state", |v_ui| {
             v_ui.horizontal_top(|h| {
-                if v.is_final() {
-                    auto_badge(h, "FINAL", ui::Tone::Success);
-                    h.add_space(ui::SPACE_XS);
-                    let text = "Closed with complete stop / finalization";
-                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
+                // The badge names FINAL or PROVISIONAL; the text adds the reader's state only when it says more
+                // than the badge (e.g. "FINAL (lower bounds)").
+                let (badge, tone, plain) = if v.is_final() {
+                    ("FINAL", ui::Tone::Success, "Closed with complete stop / finalization")
                 } else {
-                    auto_badge(h, "PROVISIONAL", ui::Tone::Warning);
-                    h.add_space(ui::SPACE_XS);
-                    let text = "Provisional snapshot / open session";
-                    h.add(egui::Label::new(text).wrap()).on_hover_text(text);
-                }
+                    ("PROVISIONAL", ui::Tone::Warning, "Provisional snapshot / open session")
+                };
+                auto_badge(h, badge, tone);
+                h.add_space(ui::SPACE_XS);
+                let text = if drawn.state == badge { plain.to_string() } else { drawn.state.clone() };
+                h.add(egui::Label::new(&text).wrap()).on_hover_text(&text);
             });
         });
 
@@ -414,7 +458,75 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
         fact_row(c, "Coverage rows lost", |v_ui| {
             auto_badge(v_ui, &format!("{lost} LOST"), if lost == 0 { ui::Tone::Neutral } else { ui::Tone::Danger });
         });
+
+        // Report ring (2047/11): only ringed captures negotiate it.
+        draw_report_ring(c, v, drawn);
     });
+}
+
+/// Adds the report-ring (2047/11) facts to the CAPTURE FACTS card: the CONFIG partition and the
+/// STATUS counters (blocks issued/retired, held extents) plus the M2MF decoder's first rejection,
+/// all read straight from the reader.  Absence of a row means the capture is not ringed.
+fn draw_report_ring(c: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn) {
+    let Some(ring) = v.report.ring else {
+        drawn.ring_config = None;
+        drawn.ring_status = None;
+        drawn.ring_reject = None;
+        return;
+    };
+    // CONFIG partition: the reader's "report ring: ... (owner-buffer draws only)" line.  A ringed capture
+    // always carries an ATTACHED config (the ring geometry is part of it).
+    let metadata_records = v.metadata_records().unwrap_or(0);
+    let config_text = format!(
+        "{} blocks of {} pairs from report {}, label {}; budgets {} MAIN bytes in {} extents and {} metadata records; {} legacy pairs (owner-buffer draws only)",
+        ring.blocks, ring.pairs, ring.first, ring.label, ring.bytes, ring.slots, metadata_records, ring.legacy_pairs
+    );
+    drawn.ring_config = Some(RingConfigDrawn {
+        blocks: ring.blocks,
+        pairs_per_block: ring.pairs,
+        first_report: ring.first,
+        label: ring.label,
+        main_bytes: ring.bytes,
+        extents: ring.slots,
+        metadata_records,
+        legacy_pairs: ring.legacy_pairs,
+    });
+    fact_row(c, "Report ring", |v_ui| {
+        v_ui.horizontal_top(|h| {
+            h.label(config_text.clone()).on_hover_text(&config_text);
+        });
+    });
+
+    // STATUS counters: the reader's "report ring: blocks_issued ..., ..." line.
+    let mut status_text = None;
+    if let Some(t) = v.report.status.as_ref().and_then(|s| s.ring) {
+        let fields: Vec<String> = ps3dk_prof::auto_rsx::RING_STATUS_FIELDS
+            .iter().zip(t.iter()).map(|(n, val)| format!("{n} {val}"))
+            .collect();
+        status_text = Some(fields.join(", "));
+        drawn.ring_status = Some(RingStatusDrawn {
+            blocks_issued: t[0], blocks_retired: t[1], published_ring_label: t[2], held_extents: t[3],
+            copied_bytes: t[4], flushes_untouched: t[5], flushes_restored: t[6], decoded_words: t[7],
+        });
+    }
+    if let Some(text) = status_text {
+        fact_row(c, "Report ring status", |v_ui| {
+            v_ui.horizontal_top(|h| { h.label(&text).on_hover_text(&text); });
+        });
+    }
+
+    // M2MF decoder's first rejected header: the reader's "ring decoder rejected header ..." line.
+    if let Some([header, at, why]) = v.report.status.as_ref().and_then(|s| s.ring_reject).filter(|x| x[2] != 0) {
+        let text = format!("ring decoder rejected header {header:#010x} at +{at:#x}: {}", reject_reason(why));
+        drawn.ring_reject = Some(RingRejectDrawn { header, offset: at, reason_text: reject_reason(why).to_string() });
+        fact_row(c, "Report ring decoder", |v_ui| {
+            v_ui.horizontal_top(|h| {
+                auto_badge(h, "REJECTED", ui::Tone::Danger);
+                h.add_space(ui::SPACE_XS);
+                h.label(&text).on_hover_text(&text);
+            });
+        });
+    }
 }
 
 fn draw_verdict_strip(
@@ -827,7 +939,10 @@ fn draw_frames_table(
                             let ex_total: u64 = f.excluded.iter().sum();
                             let excluded_text = ex_total.to_string();
                             let exclusions = exclusions_breakdown(f);
-                            let tip_lines: Vec<String> = exclusions.iter()
+                            let ring_exclusions = ring_exclusions_breakdown(f);
+                            let mut all_exclusions = exclusions;
+                            all_exclusions.extend(ring_exclusions.iter().cloned());
+                            let tip_lines: Vec<String> = all_exclusions.iter()
                                 .map(|(k, r, c)| format!("{k}: {c} ({r})")).collect();
                             let text = RichText::new(&excluded_text);
                             g.label(if ex_total > 0 { text.color(pal.warning) } else { text })
@@ -844,7 +959,7 @@ fn draw_frames_table(
                             drawn.rendered_frame_rows.push(RenderedRow {
                                 frame: f.frame, verdict: f.verdict.key().into(), interval_text,
                                 span_text, busy_text, reason: f.reason.clone(), excluded_text,
-                                exclusions, call_covered_text, presentation_text,
+                                exclusions: all_exclusions, call_covered_text, presentation_text,
                             });
 
                             g.end_row();
@@ -956,8 +1071,9 @@ fn draw_frame_detail(
                 }
             });
 
-        // Exclusions breakdown table
-        let breakdown = exclusions_breakdown(f);
+        // Exclusions breakdown table (the ten columns plus the report-ring columns of a 2047/11 frame)
+        let mut breakdown = exclusions_breakdown(f);
+        breakdown.extend(ring_exclusions_breakdown(f));
         if !breakdown.is_empty() {
             d.add_space(ui::SPACE_XS);
             ui::section_label(d, "EXCLUDED DRAWS");
