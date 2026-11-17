@@ -13,9 +13,9 @@
  *   -jump    overflow refusal + 120 frames from mapped main memory, each a
  *            CALLed segment that JUMPs to a second sub-segment, which RETURNs
  *            (GCM_SEG_VARIANT_JUMP)
- *   -ring    600 owner-buffer clears per frame for the AUTO report ring; the
- *            first 3 flips print the flip words and IO offset 0 (GCM_SEG_PROBE)
- *            (GCM_SEG_VARIANT_RING)
+ *   -ring    600 owner-buffer clears per frame for the AUTO report ring
+ *            (GCM_SEG_VARIANT_RING); built with -DGCM_SEG_RING_PROBE, the first
+ *            3 flips print the flip words and IO offset 0 (GCM_SEG_PROBE)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
 #include <cell/gcm/gcm_segment.h>
@@ -345,9 +345,11 @@ static void ring_attach(void)
     puts("GCM_SEG_RING attach skipped (not a PS3_PROF_AUTO build)");
 #endif
 }
+#ifdef GCM_SEG_RING_PROBE
 /* Flip probe (first PROBE_FLIPS frames): the words cellGcmSetFlip writes into the owner buffer, every CALL among
  * them with the word after it, and the first PROBE_WORDS words at IO offset 0 before SetFlip, after it and after
- * the flip completed. GCM_SEG_PROBE lines; an all-zero row of 8 words is not printed. */
+ * the flip completed. GCM_SEG_PROBE lines; an all-zero row of 8 words is not printed. Off in the default -ring
+ * build, so a timing run prints nothing extra. */
 enum { PROBE_FLIPS = 3, PROBE_WORDS = 1024, PROBE_SPAN = 160 };
 static uint32_t probe_pre[PROBE_WORDS], probe_post[PROBE_WORDS], probe_first[PROBE_WORDS];
 static void probe_copy(uint32_t *to, const void *io0)
@@ -415,6 +417,7 @@ static int ring_flip_probe(CellGcmContextData *ctx, SegDisplay *d, unsigned flip
     d->buffer_id ^= 1u;
     return 1;
 }
+#endif
 static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st, uint32_t host)
 {
     for (unsigned frame = 0; frame < RING_FRAMES && !quit_requested; ++frame) {
@@ -423,8 +426,13 @@ static int run_ring_phase(CellGcmContextData *ring, PhaseStats *st, uint32_t hos
             cellGcmSetClearColor(ring, 0xff000000u | ((frame * 7u + i) & 0xffu) << 8);
             cellGcmSetClearSurface(ring, CELL_GCM_CLEAR_R | CELL_GCM_CLEAR_G | CELL_GCM_CLEAR_B | CELL_GCM_CLEAR_A);
         }
+#ifdef GCM_SEG_RING_PROBE
         if (frame < PROBE_FLIPS ? !ring_flip_probe(ring, &disp, frame, host)
                                 : !seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { puts("GCM_SEG_FAIL ring flip"); return 0; }
+#else
+        (void)host;
+        if (!seg_display_flip(ring, &disp, SEG_FLIP_POLLS)) { puts("GCM_SEG_FAIL ring flip"); return 0; }
+#endif
         st->frames++;
         cellSysutilCheckCallback();
     }

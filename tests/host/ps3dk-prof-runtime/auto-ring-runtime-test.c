@@ -10,7 +10,11 @@
  *   3 fixture: a small complete capture for the reader (two frames, one over 504 draws).
  *   4 stop: a header the decoder rejects, after four sealed blocks and before any PUT: admission halts, the four
  *          blocks still publish and retire, the fifth is quarantined and held, the decoder names the word.
- *   5 label: a label anomaly after two published blocks stops the ring with both extents held. */
+ *   5 label: a label anomaly after two published blocks stops the ring with both extents held.
+ *   6 flip: the context begins 4 KiB into the cellGcmInit host buffer (IO 0); each flip CALLs a default-state routine
+ *          at IO 0 (synthetic, the firmware's layout) that rebinds subchannel 1 to M2MF and sets IN/OUT, changed
+ *          between two flips: the shadow stays valid, the flush restores the routine's IN/OUT, every draw is timed.
+ *   7 segment: the same layout, a CALL into the command buffer (an application segment): refused, admission halts. */
 #include <assert.h>
 #include <sched.h>
 #include <stdio.h>
@@ -35,13 +39,22 @@ int32_t ps3tc_fifo_wrap_callback(struct _gcmCtxData *,uint32_t);
 
 #define WORDS 8192u
 #define PHYS (WORDS-4u)
+#if TEST_RING_MODE>=6
+/* the cellGcmInit host buffer: IO offset 0, a reserved prefix, then the command buffer (the context) */
+#define PREFIX 1024u
+static uint32_t host[PREFIX+WORDS];
+#define fifo (host+PREFIX)
+#define IO (4u*PREFIX)
+#else
+static uint32_t fifo[WORDS];
 #define IO 0x40000u
+#endif
 #define MAIN_IO 0x0c000000u
 #define VRAM 65536u
 #define M(sub,m,n) (((uint32_t)(n)<<18)|((uint32_t)(sub)<<13)|(m))
 
 static uint64_t reports[2048][2];
-static uint32_t labels[256],fifo[WORDS];
+static uint32_t labels[256];
 static gpp_ctx context;
 static uint8_t *main_ring;
 static uint32_t main_bytes;
@@ -87,6 +100,7 @@ static void apply(uint32_t sub,uint32_t m,uint32_t v)
         else if(m==0x1800) st64(&reports[(v&0xffffffu)/16u][0],++gpu_clock);
         return;
     }
+    if(sub>1 && TEST_RING_MODE>=6) return;   /* the routine's other subchannels */
     assert(sub==1 && m<0x1000);
     m2mf[m/4u]=v;
     if(m!=0x328) return;
@@ -108,10 +122,28 @@ static void apply(uint32_t sub,uint32_t m,uint32_t v)
         app_transfers++;
     }
 }
+/* one CALL level: a routine in the host buffer's reserved prefix, run to its RET */
+static void gpu_call(uint32_t target)
+{
+#if TEST_RING_MODE>=6
+    const uint32_t *w=host+target/4u;
+    assert(target<IO);
+    for(;;) {
+        uint32_t h=*w++,n=(h>>18)&2047u,m=h&0x1ffcu,sub=(h>>13)&7u;
+        if(h==0x00020000u) return;
+        assert(!(h&0xa0000003u) && w+n<=host+PREFIX);
+        for(uint32_t i=0;i<n;i++) apply(sub,m+((h&0x40000000u) ? 0:4u*i),w[i]);
+        w+=n;
+    }
+#else
+    (void)target;abort();
+#endif
+}
 static void gpu_run_to(uint32_t target)
 {
     while(ctrl.get!=target) {
         uint32_t *w=at(ctrl.get),h=w[0],n=(h>>18)&2047u,m=h&0x1ffcu,sub=(h>>13)&7u;
+        if((h&3u)==2u) {gpu_call(h&~3u);ctrl.get+=4u;continue;}
         if(h&0x20000000u) {ctrl.get=h&~0x20000000u;continue;}
         for(uint32_t i=0;i<n;i++) apply(sub,m+((h&0x40000000u) ? 0:4u*i),w[1+i]);
         ctrl.get+=4u*(1u+n);
@@ -226,6 +258,23 @@ __attribute__((unused)) static void frame(uint32_t draws)
     }
 }
 
+/* ---- modes 6, 7: a default-state routine at IO 0 (synthetic, the firmware's layout, not its words) and the flip ---- */
+#if TEST_RING_MODE>=6
+static void install_routine(uint32_t in,uint32_t out)
+{
+    const uint32_t r[]={M(0,0,1),0x31337000u,M(0,0x180,2),0x66604200u,0xfeed0000u,M(7,0,1),0xcafebabeu,
+                        M(1,0,1),0x31337303u,M(1,0x180,3),0x66604200u,in,out,
+                        M(3,0,1),0x313371c3u,M(3,0x180,2),0x66604200u,0xfeed0000u,0x00020000u};
+    memset(host,0,4u*PREFIX);memcpy(host,r,sizeof r);
+}
+/* the flip's owner words: buffer id, NOPs, CALL IO 0, then (decoding resumes) an application offset pair */
+static void flip_words(uint32_t id,uint32_t target,uint32_t src,uint32_t dst)
+{
+    uint32_t *w=reserve(12);
+    w[0]=M(7,0x944,1);w[1]=id;w[2]=0;w[3]=0;w[4]=target|2u;
+    w[5]=M(1,0x30c,2);w[6]=src;w[7]=dst;w[8]=M(7,0x924,1);w[9]=0x80000100u|id;w[10]=0;w[11]=0;
+}
+#endif
 /* before the profiler's startup constructor (100) starts the drain thread that reads these hooks */
 __attribute__((constructor(99))) static void install_hooks(void)
 {
@@ -245,7 +294,11 @@ int main(void)
     ctrl.put=ctrl.get=IO;
     ps3dk_prof_test_hooks.gpu_gpp_dev=&device;
     ps3dk_prof_test_hooks.auto_ring_memory=&memory;
-    ps3dk_prof__auto_gcm_init_result(&context,sizeof fifo,sizeof fifo,fifo,0);
+#if TEST_RING_MODE>=6
+    ps3dk_prof__auto_gcm_init_result(&context,4u*WORDS,(uint32_t)sizeof host,host,0);
+#else
+    ps3dk_prof__auto_gcm_init_result(&context,4u*WORDS,4u*WORDS,fifo,0);
+#endif
     o.ring_blocks=2;o.ring_bytes=1u<<20;o.frame_records=256;
     o.ring_records=TEST_RING_MODE==1 ? 1000u:65536u;    assert(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0);
     a=ps3dk_prof__auto_test_capture();
@@ -397,6 +450,51 @@ int main(void)
     settle_drainer(a);
     assert(a->ring.invalid && RETIRED(a)==0);
     puts("AUTO ring stopped with held extents PASS");
+#elif TEST_RING_MODE==6
+    /* two flips, each CALLing the routine at IO 0, the routine changed between them; every block restores the
+     * routine's IN/OUT and the application's offsets written after the CALL */
+    {
+        static const uint32_t in[2]={0xfeed0001u,0xaaaa0001u},out[2]={0xfeed0000u,0xbbbb0000u};
+        uint32_t draws=0;
+        xfer_mode(256,64,3);   /* the application's own IN/OUT and format before the first flip */
+        for(uint32_t f=0;f<2;f++) {
+            uint32_t restored=(uint32_t)a->ring_restored;
+            install_routine(in[f],out[f]);
+            ps3dk_prof_frame();
+            for(uint32_t i=0;i<130;i++) {draw();draws++;}   /* a full block, then one open across the flip */
+            flip_words(f,0,0x40u+f,0x80u+f);
+            for(uint32_t i=0;i<10;i++) {draw();draws++;}
+            ps3dk_prof_frame();   /* settles the open block: its flush restores the state after the routine */
+            app_flush(0);app_flush(0);
+            settle_drainer(a);
+            printf("flip %u: shadow invalid %u reason %u, IN %08x OUT %08x src %#x, restored %u\n",f,a->shadow.invalid,
+                   a->ring_reject[2],m2mf[0x184/4],m2mf[0x188/4],m2mf[0x30c/4],(uint32_t)a->ring_restored-restored);
+            assert(!a->shadow.invalid && !a->ring_reject[2] && !a->ring.halted && !a->ring.invalid);
+            assert(m2mf[0x184/4]==in[f] && m2mf[0x188/4]==out[f] && m2mf[0x30c/4]==0x40u+f && m2mf[0x310/4]==0x80u+f);
+            assert(a->ring_restored>restored && RETIRED(a)==a->ring.issued);
+        }
+        printf("%u draws, %u blocks issued, %u retired, ring_state %llu\n",draws,a->ring.issued,RETIRED(a),
+               (unsigned long long)a->coverage.live.ring_state[2]);
+        assert(a->coverage.live.ring_state[2]==0 && a->ring.issued==4);
+    }
+    puts("AUTO ring flip CALL into the reserved prefix PASS");
+#elif TEST_RING_MODE==7
+    /* a CALL into the command buffer is an application segment, never decoded: refused, admission halts */
+    {
+        uint32_t at;
+        install_routine(0xfeed0001u,0xfeed0000u);
+        ps3dk_prof_frame();
+        for(uint32_t i=0;i<10;i++) draw();
+        at=(uint32_t)(4u*(context.current-context.begin))+16u;
+        flip_words(0,IO+0x100u,0x40u,0x80u);   /* its target: 0x100 bytes into the context */
+        ps3dk_prof_frame();
+        assert(a->shadow.invalid && a->ring_quarantined==1 && a->ring.halted);
+        printf("segment CALL: reason %u header %08x at +%#x (written at +%#x)\n",a->ring_reject[2],a->ring_reject[0],
+               a->ring_reject[1],at);
+        assert(a->ring_reject[2]==AUTO_RING_REJECT_CALL_TARGET && a->ring_reject[0]==((IO+0x100u)|2u) &&
+               a->ring_reject[1]==at);
+    }
+    puts("AUTO ring CALL into an application segment refused PASS");
 #else
     /* fixture: one frame over 504 draws and a small one, all timed and published */
     frame(520);app_flush(1);

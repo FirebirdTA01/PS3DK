@@ -305,7 +305,7 @@ jobs:
 
       - name: Report ring attach and native pre-wrap tail (runtime, not enabled)
         run: |
-          for case in ring ringwrap ringrun ringmeta ringshort ringstop ringlabel; do
+          for case in ring ringwrap ringrun ringmeta ringshort ringstop ringlabel ringflip ringsegment; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
@@ -327,6 +327,8 @@ jobs:
           # a refused flush halts admission only (sealed blocks retire); a held extent at seal is a lower bound
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringstop --mutant halt-as-stop --out "$RUNNER_TEMP/auto-ring-mutant-halt-as-stop"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringlabel --mutant seal-ignores-held --out "$RUNNER_TEMP/auto-ring-mutant-seal-ignores-held"
+          # the flip's CALL into the reserved prefix needs the init's io_address record
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringflip --mutant flip-unrecorded --out "$RUNNER_TEMP/auto-ring-mutant-flip-unrecorded"
 
       - name: Automatic RSX initialization, wire and queue controls
         run: |

@@ -124,8 +124,10 @@ pub const RING_STATUS_FIELDS: [&str; 8] = [
     "decoded_words",
 ];
 /// STATUS u32@200 of a 2047/11 capture: why the owner-side M2MF decoder stopped accepting the owner's command words
-/// (index 1..=10; 0 none). The decoder never guesses: from then on the ring admits no new block.
-pub const RING_REJECT_REASONS: [&str; 10] = [
+/// (index 1..=16; 0 none). The decoder never guesses: from then on the ring admits no new block. It follows a CALL
+/// only into the firmware-reserved prefix of the cellGcmInit host buffer (IO 0 up to the context start), one level;
+/// 11..16 name what it refused there. CALL (2) without an init record.
+pub const RING_REJECT_REASONS: [&str; 16] = [
     "JUMP",
     "CALL",
     "RETURN",
@@ -136,6 +138,12 @@ pub const RING_REJECT_REASONS: [&str; 10] = [
     "object binding (method 0) on the M2MF subchannel",
     "scan cursor outside the context",
     "decoder word count overflow",
+    "CALL at or past the context start (an application segment)",
+    "CALL inside the reserved-prefix routine",
+    "JUMP inside the reserved-prefix routine",
+    "reserved-prefix routine packet crossing the context start",
+    "no RET in the reserved-prefix routine before the context start",
+    "reserved-prefix routine binds the M2MF subchannel to another object",
 ];
 /// RING_REJECT_REASONS text of a nonzero STATUS reason (validated by the reader).
 pub fn reject_reason(why: u32) -> &'static str {

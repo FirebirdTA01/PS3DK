@@ -2368,7 +2368,7 @@ fn ring_mutants_are_refused() {
     assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 144, 2); }),
         Rule::AutoStatus);
     // the decoder rejection: an unknown reason, a word without a reason, a nonzero reserved word
-    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 200, 11); }),
+    assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 200, 17); }),
         Rule::AutoStatus);
     assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); put32(&mut c[i].1, 192, 0x2000_0000); }),
         Rule::AutoStatus);
@@ -2377,6 +2377,22 @@ fn ring_mutants_are_refused() {
     // the 192-byte STATUS of the first ring captures is no longer this format's
     assert_eq!(ring_mutant(|c| { let i = c.iter().rposition(|x| x.0 == 37).unwrap(); c[i].1.truncate(192); }),
         Rule::AutoStatus);
+}
+
+// The decoder's reasons 11..16: a CALL into the cellGcmInit host buffer's reserved prefix that it refused, each named;
+// 17 is not a reason (the STATUS check refuses it).
+#[test]
+fn ring_reject_reasons_name_the_reserved_prefix_refusals() {
+    use ps3dk_prof::auto_rsx::{reject_reason, RING_REJECT_REASONS};
+    assert_eq!(RING_REJECT_REASONS.len(), 16);
+    assert_eq!(reject_reason(2), "CALL");
+    assert_eq!(reject_reason(11), "CALL at or past the context start (an application segment)");
+    assert_eq!(reject_reason(12), "CALL inside the reserved-prefix routine");
+    assert_eq!(reject_reason(13), "JUMP inside the reserved-prefix routine");
+    assert_eq!(reject_reason(14), "reserved-prefix routine packet crossing the context start");
+    assert_eq!(reject_reason(15), "no RET in the reserved-prefix routine before the context start");
+    assert_eq!(reject_reason(16), "reserved-prefix routine binds the M2MF subchannel to another object");
+    assert_eq!(reject_reason(17), "unknown");
 }
 
 // tests/fixtures/auto/ring-stopped.prof is the host runtime's `ringstop` capture (auto-runtime-test.py --case ringstop):

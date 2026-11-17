@@ -145,7 +145,7 @@ def verify(data, pending_tail=0, held_extents=None):
     else:
         assert retired == issued
     header, at, reason, reserved = struct.unpack_from('<4I', status, 192)
-    assert reserved == 0 and reason <= 10 and (reason or (header, at) == (0, 0)), 'decoder rejection'
+    assert reserved == 0 and reason <= 16 and (reason or (header, at) == (0, 0)), 'decoder rejection'
     return dict(ring_records=len(ring), blocks_issued=issued, blocks_retired=retired, held=held,
                 copied_bytes=copied, flushes_untouched=untouched, flushes_restored=restored, decoded_words=decoded,
                 rejected=(header, at, reason),

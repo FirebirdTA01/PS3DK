@@ -16,6 +16,18 @@ static auto_writer writer;
 static auto_capture *capture;
 static gpp_ctx *clean_context;
 static uintptr_t clean_begin, clean_current, clean_end;
+/* The init record for the report ring's M2MF decoder: the EA of IO offset 0 (cellGcmInit's host buffer) and the
+ * context start's IO offset, kept only when the context begins inside that buffer at a word boundary after a
+ * nonempty prefix. 0 (no record): the decoder refuses every CALL. */
+static uintptr_t clean_io;
+static uint32_t clean_start;
+static void init_record(const gpp_ctx *gc, const void *io_address, uint32_t io_bytes, uintptr_t *io, uint32_t *start)
+{
+    uintptr_t base=(uintptr_t)io_address,begin=(uintptr_t)(void *)gc->begin;
+    *io=0;*start=0;
+    if(!base || (base&3u) || begin<=base || ((begin-base)&3u) || begin-base>io_bytes) return;
+    *io=base;*start=(uint32_t)(begin-base);
+}
 
 static int label_valid(uint32_t n) { return n==64 || (n>=69 && n<=254); }
 /* The one known-end predicate: end is the registered physical end, or exactly the visible end that the report ring's
@@ -222,7 +234,8 @@ static uint32_t ring_attach(auto_capture *a, const ps3dk_prof_auto_options *o, c
 #endif
 
 static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *options,
-                  uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc)
+                  uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc,
+                  const void *io_address, uint32_t io_bytes)
 {
     const ps3dk_prof_auto_options defaults=PS3DK_PROF_AUTO_OPTIONS_INIT;
     ps3dk_prof_auto_options normalized;
@@ -236,6 +249,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     uint32_t claim=0,lease=0,id=0,reason=0;
     size_t records=0,frames=0,bytes=0;
     int rc=PS3DK_PROF_EINVAL,locked=0,fifo_prepared=0;
+    uintptr_t io=clean_io;
+    uint32_t start=clean_start;
     if(instance) *instance=0;
     if(domain) *domain=0;
     if(!instance || !domain) return rc;
@@ -297,6 +312,9 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
         queue_reserves(next,o,&ring);
     }
     next->ring_label=ring_label;next->scan=(uintptr_t)(void *)gc->current;
+    /* the init's record (an override reuses it: the context is the one initialized) */
+    if(initial) init_record(gc,io_address,io_bytes,&io,&start);
+    next->shadow.io=(const uint32_t *)(void *)io;next->shadow.start=start;
     for(uint32_t i=0;i<AUTO_SEGMENT_POOL;i++) next->segment_pool[i].next=i+1<AUTO_SEGMENT_POOL ? i+1:AUTO_SEGMENT_NONE;
     next->segment_free=0;next->segment_pending=AUTO_SEGMENT_NONE;
     gpp_bind(&next->operations_device,&next->operations_port);
@@ -345,6 +363,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     if(initial) {
         clean_context=gc;clean_begin=(uintptr_t)(void *)gc->begin;
         clean_current=(uintptr_t)(void *)gc->current;clean_end=(uintptr_t)(void *)gc->end;
+        clean_io=io;clean_start=start;
     }
     if(!auto_config_commit(&configuration,claim,&config)) {
         capture=NULL;
@@ -385,7 +404,7 @@ fail:
 int ps3dk_prof_auto_attach(ps3dk_prof_gcm_ctx *context, const ps3dk_prof_auto_options *options,
                           uint32_t *instance, uint32_t *domain)
 {
-    return attach(context,options,instance,domain,0,0);
+    return attach(context,options,instance,domain,0,0,NULL,0);
 }
 
 void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t command_bytes,
@@ -393,9 +412,10 @@ void ps3dk_prof__auto_gcm_init_result(ps3dk_prof_gcm_ctx *context, uint32_t comm
 {
     uint32_t instance,domain;
     /* Only the selected SDK init wrapper calls this, after extent admission.
-     * No original application result is changed by an observer refusal. */
-    (void)command_bytes;(void)io_bytes;(void)io_address;
-    (void)attach(context,NULL,&instance,&domain,1,rc);
+     * No original application result is changed by an observer refusal.
+     * io_address/io_bytes: the host buffer at IO 0, recorded for the ring decoder. */
+    (void)command_bytes;
+    (void)attach(context,NULL,&instance,&domain,1,rc,io_address,io_bytes);
 }
 
 /* A mutable candidate is protected by the same CONFIG claim as attachment.

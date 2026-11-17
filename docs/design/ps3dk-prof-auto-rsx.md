@@ -463,6 +463,30 @@ method-0 object binding on the M2MF subchannel invalidates it for good, and its
 first rejected header word, that word's byte offset from the context begin and
 the reason are reported in STATUS.
 
+One CALL is followed: into the reserved prefix of the cellGcmInit host buffer.
+That buffer is IO offset 0; the context begins after a firmware-reserved prefix
+(4 KiB, IO 0x1000) that the command buffer never covers and no wrap jumps into.
+The firmware writes a default-state routine there once, at init: it binds the
+subchannels' objects (subchannel 1 to the M2MF object 0x31337303), sets their
+DMA contexts (M2MF 0x180 notify, 0x184 IN, 0x188 OUT) and ends in RET, with no
+JUMP or nested CALL. Every cellGcmSetFlip CALLs it (word 0x00000002, IO 0).
+The init wrapper's io_address and the context begin are recorded at the
+automatic attach (an override reuses the record); the record exists only when
+the context begins inside that buffer, word aligned, after a nonempty prefix
+within its io size. On a CALL from the owner words whose target is below the
+context start's offset, the decoder reads the routine at io_address + target,
+at most (start - target)/4 words, through the same packet decoder (its
+subchannel-1 binding and register writes update the shadow), requires a RET
+inside that bound and resumes after the CALL. It is read again on every CALL,
+never cached. Refused, each with its own reason: a target at or past the
+context start (an application segment), a CALL or JUMP inside the routine (the
+RSX allows one CALL level), a packet crossing the context start, no RET before
+it, and a subchannel-1 binding to any object but M2MF. Without a record every
+CALL is refused as before (reason 2), and a RET in the owner words stays
+refused (3). Inside a routine the reported header is the routine word (the
+CALL itself for a refused target or a missing RET) and the offset is the
+CALL's.
+
 Drainer: a ring record is read only when its block's even label is at or below
 the ring's own PUT frontier (committed after the flush, published after PUT);
 then its MAIN copy is read, never the recycled local block. After whole sink
@@ -482,8 +506,11 @@ untouched and restored flushes, decoded application words; then u32@192 the
 decoder's first rejected header word, u32@196 its byte offset from the context
 begin, u32@200 the reason (1 JUMP, 2 CALL, 3 RETURN, 4 reserved header bits,
 5 zero count, 6 packet longer than the words written, 7 method range, 8 M2MF
-object binding, 9 scan cursor outside the context, 10 decoder count overflow; all
-three zero when nothing was rejected) and u32@204 zero. The reader shows it as
+object binding, 9 scan cursor outside the context, 10 decoder count overflow,
+11 CALL at or past the context start, 12 CALL inside the reserved-prefix
+routine, 13 JUMP inside it, 14 a routine packet crossing the context start,
+15 no RET before the context start, 16 a routine binding subchannel 1 to
+another object; all three zero when nothing was rejected) and u32@204 zero. The reader shows it as
 `ring decoder rejected header 0x... at +0x...: <reason>`. The reader refuses a
 ring tail on a legacy record, any other width, a non-consecutive ordinal, a
 generation that does not name its extent and block, ring reports outside its
@@ -496,10 +523,11 @@ defaults (2 blocks, 16 MiB, 16,384 records, 256 frame rows): a metadata record
 is 184 bytes and an extent descriptor 40 in ILP32 and LP64 alike, so the ring's
 one page allocation is 16,777,216 MAIN bytes + 3,014,656 metadata + 163,840
 descriptors = 19,955,712, rounded to 20 MiB (20,971,520 bytes, never freed).
-The control allocation is 253,696 bytes in ILP32 (capture 116,368) and 266,752
-in LP64 (capture 129,456), so the full attach footprint is 21,225,216 bytes
+The control allocation is 253,696 bytes in ILP32 (capture 116,376) and 266,752
+in LP64 (capture 129,472), so the full attach footprint is 21,225,216 bytes
 (ILP32) or 21,238,272 bytes (LP64). The M2MF decoder reads every owner command
-word once, at flush, wrap and FlushBuffer boundaries (STATUS decoded_words; the
+word once, at flush, wrap and FlushBuffer boundaries, plus the reserved-prefix
+routine at each flip's CALL (STATUS decoded_words counts both; the
 host run decoded 585,722 words for 55,110 timed draws, about 10.6 per draw);
 its PPU time per word is not yet measured on hardware. Each block adds one
 flush of 28 words plus 2 per restored register (at most 46).

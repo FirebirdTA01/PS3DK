@@ -22,7 +22,17 @@ MUTANTS = {
                        'if(issued-ACQ(&r->retired)>=r->blocks)'),
     'lost-mode': ('commands', 'if(s->known&(1u<<i)) {', 'if(i>=2 && (s->known&(1u<<i))) {'),
     'lost-credit': ('commands', '*end=t->visible;', '*end=t->physical;'),
-    'unknown-binding': ('commands', 'if(!m) return reject(s,h,where,AUTO_RING_REJECT_BINDING);', 'if(!m) continue;'),
+    'unknown-binding': ('commands', 'if(!depth) return reject(s,h,where,AUTO_RING_REJECT_BINDING);', 'if(!depth) continue;'),
+    # the CALL into the reserved prefix of the cellGcmInit host buffer: its routine skipped, read without the bound or
+    # one word past it, a nested CALL followed, any subchannel-1 binding accepted, the routine decoded once and cached
+    'skip-callee': ('commands', '    return packets(s,s->io+target/4u,(s->start-target)/4u,depth,call,call_at);\n',
+                    '    (void)depth;return 1;\n'),
+    'unbounded-routine': ('commands', '(s->start-target)/4u,depth,call,call_at);', 'SIZE_MAX/4u,depth,call,call_at);'),
+    'bound-plus-one': ('commands', '(s->start-target)/4u,depth,call,call_at);', '(s->start-target)/4u+1u,depth,call,call_at);'),
+    'call-depth-two': ('commands', 'if(why==AUTO_RING_REJECT_CALL && depth<1)', 'if(why==AUTO_RING_REJECT_CALL && depth<2)'),
+    'any-binding': ('commands', 'if(p[at+i]!=AUTO_RING_M2MF_OBJECT) return reject(s,h,call_at,AUTO_RING_REJECT_ROUTINE_BINDING);', ''),
+    'cached-routine': ('commands', '    return packets(s,s->io+target/4u,(s->start-target)/4u,depth,call,call_at);\n',
+                       '    {\n        /* a routine decoded once and its effect replayed on every later CALL */\n        static auto_ring_shadow memo;static int cached;static uint64_t cost;\n        if(!cached) {\n            memo=*s;memo.known=0;\n            if(!packets(&memo,s->io+target/4u,(s->start-target)/4u,depth,call,call_at))\n                return reject(s,call,call_at,memo.bad_reason);\n            cost=memo.words-s->words;cached=1;\n        }\n        s->words+=cost;\n        for(uint32_t j=0;j<9;j++) if(memo.known&(1u<<j)) {s->value[j]=memo.value[j];s->known|=1u<<j;}\n        return 1;\n    }\n'),
     # a producer-only halt that also stops the consumer, or that still admits
     'halt-invalidates': ('core', 'void auto_ring_halt(auto_ring *r) { REL(&r->halted,1u); }',
                          'void auto_ring_halt(auto_ring *r) { REL(&r->invalid,1u); }'),

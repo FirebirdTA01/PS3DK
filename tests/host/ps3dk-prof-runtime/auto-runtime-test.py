@@ -91,15 +91,21 @@ RING_MUTANTS.update({
                     '    if(!a->ring_refusal) a->ring_refusal=reason;\n    auto_ring_stop(&a->ring);',b'RETIRED(a)==4'),
     # a held extent at seal not made a lower bound: FINAL claims completeness (checked on the capture)
     'seal-ignores-held':('ringlabel','auto_rsx/auto_runtime.c','            if(ring[3]) flags|=AUTO_LOWER_BOUND;\n','',None),
+    # the init's io_address not recorded: the flip's CALL into the reserved prefix is refused
+    'flip-unrecorded':('ringflip','auto_rsx/auto_runtime.c','    if(initial) init_record(gc,io_address,io_bytes,&io,&start);\n',
+                       '    if(initial && 0) init_record(gc,io_address,io_bytes,&io,&start);\n',
+                       b'!a->shadow.invalid && !a->ring_reject[2]'),
 })
 # checked on the capture after a clean run, not by an assertion of the application
 CAPTURE_MUTANTS=('seal-ignores-held',)
-RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5}
+RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5,'ringflip':6,
+              'ringsegment':7}
 RING_WRAP=('ringwrap',*RING_RUNTIME)
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel'],default='noinit')
+ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','flips','present','spanning','fifofail','fifopre','fifopost','seal','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
+                                  'ringsegment'],default='noinit')
 ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
 ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
@@ -520,10 +526,12 @@ if a.case in RING_RUNTIME:
     passed={'ringrun':b'PASS','ringmeta':b'AUTO ring metadata-full without a frame-tail latch PASS',
             'ringshort':b'AUTO ring short sink retires nothing PASS','ringfixture':b'AUTO ring fixture PASS',
             'ringstop':b'AUTO ring producer-only stop drains the sealed blocks PASS',
-            'ringlabel':b'AUTO ring stopped with held extents PASS'}[a.case]
+            'ringlabel':b'AUTO ring stopped with held extents PASS',
+            'ringflip':b'AUTO ring flip CALL into the reserved prefix PASS',
+            'ringsegment':b'AUTO ring CALL into an application segment refused PASS'}[a.case]
     assert result.stdout.endswith(passed+bytes([10])),result.stdout
     print(result.stdout.decode(),end='')
-    if a.case in ('ringrun','ringfixture','ringstop','ringlabel'):
+    if a.case in ('ringrun','ringfixture','ringstop','ringlabel','ringflip'):
         import importlib.util
         spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
         check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
@@ -541,6 +549,11 @@ if a.case in RING_RUNTIME:
                 count=sum(1 for o in check.ops(data) if o['flags']&128)
                 summary=check.verify(data,pending_tail=count,held_extents=2)
                 assert summary['blocks_retired']==0 and summary['rejected']==(0,0,0),summary
+            elif a.case=='ringflip':
+                # every draw timed across both flips, every extent retired, nothing rejected: an exact FINAL
+                summary=check.verify(data)
+                assert summary['rejected']==(0,0,0) and summary['held']==0 and summary['ring_records']==280,summary
+                assert not summary['status_flags']&2 and summary['blocks_retired']==4,summary
             else:
                 summary=check.verify(data,pending_tail=5 if a.case=='ringrun' else 0)
         except AssertionError as e:
@@ -553,6 +566,7 @@ if a.case in RING_RUNTIME:
             r=run('reader',[a.reader,'auto',files[0]],capture_dir)
             text=r.stdout.decode()
             if a.case in ('ringstop','ringlabel'):assert 'FINAL (lower bounds)' in text,text
+            if a.case=='ringflip':assert 'FINAL' in text and 'lower bound' not in text,text
             if a.case=='ringstop':
                 assert 'ring decoder rejected header 0x00042000 at +%#x: ' % at in text,text
             print('reader exit 0: '+next(l for l in text.splitlines() if 'FINAL' in l))

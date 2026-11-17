@@ -29,22 +29,40 @@ static uint32_t header_reason(uint32_t h,uint32_t count,size_t left,uint32_t met
     return AUTO_RING_REJECT_NONE;
 }
 
-int auto_ring_shadow_scan(auto_ring_shadow *s,const uint32_t *p,size_t n)
+/* Inside a reserved-prefix routine the bound is the context start, so a packet longer than the words left crosses
+ * it; flow other than RET is a nested CALL or a JUMP. */
+static uint32_t routine_reason(uint32_t why)
+{
+    return why==AUTO_RING_REJECT_CALL ? AUTO_RING_REJECT_ROUTINE_CALL : why==AUTO_RING_REJECT_JUMP ?
+           AUTO_RING_REJECT_ROUTINE_JUMP : why==AUTO_RING_REJECT_TRUNCATED ? AUTO_RING_REJECT_ROUTINE_BOUND : why;
+}
+static int routine(auto_ring_shadow *s,uint32_t call,uint32_t call_at,unsigned depth);
+/* One packet stream. Depth 0: the n owner words, origin-relative. Depth 1: a reserved-prefix routine of at most n
+ * words, entered by the CALL word `call` at byte offset call_at, which must end in RET within them. Both decode
+ * the same packets: subchannel-1 registers update the shadow; a subchannel-1 binding is refused in the owner words
+ * and, in a routine, accepted only for the M2MF object. */
+static int packets(auto_ring_shadow *s,const uint32_t *p,size_t n,unsigned depth,uint32_t call,uint32_t call_at)
 {
     size_t at=0;
-    if(s->invalid || (!p && n)) return 0;
-    if(UINT64_MAX-s->words<n) return reject(s,0,s->origin,AUTO_RING_REJECT_COST);
-    s->words+=n;
     while(at<n) {
         const uint32_t where=s->origin+4u*(uint32_t)at;
         uint32_t h=p[at++],count=(h>>18)&2047u,method=h&0x1ffcu,sub=(h>>13)&7u;
         uint32_t why=header_reason(h,count,n-at,method);
-        if(why) return reject(s,h,where,why);
+        if(why==AUTO_RING_REJECT_CALL && depth<1) {if(!routine(s,h,where,depth+1u)) return 0;continue;}
+        if(depth && h==AUTO_RING_RET) {
+            if(UINT64_MAX-s->words<at) return reject(s,call,call_at,AUTO_RING_REJECT_COST);
+            s->words+=at;return 1;
+        }
+        if(why) return depth ? reject(s,h,call_at,routine_reason(why)):reject(s,h,where,why);
         if(sub==1 && count) {
             s->seen=1;
             for(uint32_t i=0;i<count;i++) {
                 uint32_t m=method+((h&0x40000000u)?0:4u*i);
-                if(!m) return reject(s,h,where,AUTO_RING_REJECT_BINDING); /* object binding unknown */
+                if(!m) {
+                    if(!depth) return reject(s,h,where,AUTO_RING_REJECT_BINDING); /* object binding unknown */
+                    if(p[at+i]!=AUTO_RING_M2MF_OBJECT) return reject(s,h,call_at,AUTO_RING_REJECT_ROUTINE_BINDING);
+                    continue;
+                }
                 for(uint32_t j=0;j<9;j++) if(m==registers[j]) {
                     s->value[j]=p[at+i];s->known|=1u<<j;break;
                 }
@@ -52,7 +70,23 @@ int auto_ring_shadow_scan(auto_ring_shadow *s,const uint32_t *p,size_t n)
         }
         at+=count;
     }
-    return 1;
+    return depth ? reject(s,call,call_at,AUTO_RING_REJECT_ROUTINE_UNTERMINATED):1;
+}
+/* A CALL from the owner words: followed only below the context start, read from memory every time. */
+static int routine(auto_ring_shadow *s,uint32_t call,uint32_t call_at,unsigned depth)
+{
+    const uint32_t target=call&~3u;
+    if(!s->io) return reject(s,call,call_at,AUTO_RING_REJECT_CALL); /* no init record */
+    if(target>=s->start) return reject(s,call,call_at,AUTO_RING_REJECT_CALL_TARGET);
+    return packets(s,s->io+target/4u,(s->start-target)/4u,depth,call,call_at);
+}
+
+int auto_ring_shadow_scan(auto_ring_shadow *s,const uint32_t *p,size_t n)
+{
+    if(s->invalid || (!p && n)) return 0;
+    if(UINT64_MAX-s->words<n) return reject(s,0,s->origin,AUTO_RING_REJECT_COST);
+    s->words+=n;
+    return packets(s,p,n,0,0,0);
 }
 
 size_t auto_ring_restore(const auto_ring_shadow *s,uint32_t *p,size_t capacity)
