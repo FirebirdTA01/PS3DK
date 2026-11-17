@@ -2695,19 +2695,11 @@ pub fn by_tag_range(cap: &Capture, frame_range: Option<std::ops::RangeInclusive<
 /// frames of capture window `w` (the viewer's window picker uses this to
 /// scope the Passes page to one capture window).
 pub fn by_tag_window(cap: &Capture, w: &crate::model::CaptureWindow) -> ByTag {
-    if w.is_open {
-        // A still-open window covers every frame from its first one onward.
-        return by_tag_range(cap, Some(w.first_frame..=u64::MAX));
-    }
-    match w.last_frame {
-        Some(last) => by_tag_range(cap, Some(w.first_frame..=last)),
-        // A closed window with no last frame holds zero frames: it selects nothing.
-        None => {
-            let mut out = by_tag_impl(cap);
-            out.frames.clear();
-            out
-        }
-    }
+    // The same membership rule as every other `--window` view (CaptureWindow::contains_frame): an open window's
+    // last_frame is the last frame the reader observed, and a window with no last frame holds no frames.
+    let mut out = by_tag_impl(cap);
+    out.frames.retain(|f| w.contains_frame(f.frame));
+    out
 }
 
 /// The body of `by_tag`, unscoped.

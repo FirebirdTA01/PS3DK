@@ -144,12 +144,21 @@ fn closed_empty_window_selects_nothing_and_only_open_extends() {
     let populated = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, &w2);
     assert_eq!(populated.frames.iter().map(|f| f.frame).collect::<Vec<_>>(), vec![3, 4, 5]);
 
-    let mut open = w2.clone();
-    open.last_frame = None;
-    open.is_open = true;
+    // An open window as the reader builds it: last_frame is the last frame observed, so it reaches the end.
     let all = ps3dk_prof::auto_rsx::by_tag(&a.capture);
+    let max = all.frames.iter().map(|f| f.frame).max().expect("tagged frames");
+    let mut open = w2.clone();
+    open.last_frame = Some(max);
+    open.is_open = true;
     let open_frames: Vec<u64> = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, &open).frames.iter().map(|f| f.frame).collect();
     let expect: Vec<u64> = all.frames.iter().map(|f| f.frame).filter(|&f| f >= 3).collect();
-    assert_eq!(open_frames, expect, "an open window runs from its first frame to the end");
+    assert_eq!(open_frames, expect, "an open window runs from its first frame to the last observed one");
     assert!(open_frames.len() > 3, "the open window reaches past frame 5");
+
+    // Parity with the CLI's --window views: the same predicate decides membership for every window shape.
+    for w in a.capture.windows.iter().chain([&closed_empty, &open]) {
+        let got: Vec<u64> = ps3dk_prof::auto_rsx::by_tag_window(&a.capture, w).frames.iter().map(|f| f.frame).collect();
+        let want: Vec<u64> = all.frames.iter().map(|f| f.frame).filter(|&f| w.contains_frame(f)).collect();
+        assert_eq!(got, want, "window {} matches CaptureWindow::contains_frame", w.id);
+    }
 }
