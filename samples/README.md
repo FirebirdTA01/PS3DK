@@ -38,6 +38,13 @@ per-SPE job telemetry and raw GPU timestamp reports on non-DEX homebrew consoles
 It currently requires the candidate profiler SDK; the raw device readings are
 not yet a calibrated system timeline. Profiling can be disabled for comparison.
 
+[`spurs-job-zones`](profiling/spurs-job-zones/README.md) is a finite candidate
+proof of explicit SPU zones inside job-queue jobs. Each job has a distinct lane,
+uses the job context's DMA tag, and returns a lane-bound receipt after successful
+writer finalization. ON/OFF controls and one/two enabled-SPU configurations are
+provided. Its firmware execution and decrementer behavior still require target
+validation; a successful build is not that validation.
+
 ## toolchain/
 
 Validate the toolchain, `libsysbase` lv2 glue, and .sys_proc_param ABI.
