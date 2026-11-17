@@ -45,6 +45,14 @@ A pair returns to the reserve only after the RSX has passed it and its record ha
 frame behind, two frames' ranges are in flight at once, so plan for roughly half the reserve per frame and check that
 `ranges_refused` stays 0.
 
+`ranges_refused` is a per-frame count. No capture-wide count is recorded: STATUS has none, and a range refused while
+no frame is open is counted in no frame. For a capture without a FINAL status (unsealed), `auto` prints a
+`tail not recorded` line and a `capture totals` line. In `auto --json` such a capture also carries `sealed: false`,
+`tail` and `capture_totals`, and every frame object carries `row_state`. Each capture total is `{"value": null,
+"reason": ...}` unless a STATUS was recorded. In that case `value` is the last STATUS counter and `at_least` is true.
+`capture_totals.ranges_refused.retained_rows` is the sum over the frames that were kept, which is a partial count. A
+frame is `OPEN` only when its row is marked open in the file. Sealed captures print exactly what they printed before.
+
 ```c
 PS3DK_PROF_AUTO_RANGE_BEGIN("scene");
 PS3DK_PROF_AUTO_RANGE_BEGIN("shadow");      /* nested; depth 2 of 4 */

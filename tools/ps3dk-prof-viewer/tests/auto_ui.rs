@@ -456,7 +456,8 @@ fn missed_marks_and_lost_rows_are_independent() {
     let mut ui = Ui::new();
     let drawn = ui.frame(vec![], &mut app);
     assert!(drawn.frame_marks_missed);
-    assert_eq!(drawn.coverage_rows_lost, 0);
+    assert_eq!(drawn.coverage_rows_lost, Some(0));
+    assert!(drawn.tail_text.is_none(), "a sealed capture has no tail fact");
     let mut doc = Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
     let s = doc.auto.as_mut().unwrap().report.status.as_mut().unwrap();
     s.flags &= !auto_rsx::ST_FRAME_MARK_MISSED;
@@ -464,7 +465,35 @@ fn missed_marks_and_lost_rows_are_independent() {
     app.install(Arc::new(doc), true);
     let drawn = ui.frame(vec![], &mut app);
     assert!(!drawn.frame_marks_missed);
-    assert_eq!(drawn.coverage_rows_lost, 7);
+    assert_eq!(drawn.coverage_rows_lost, Some(7));
+}
+
+/// An unsealed capture (no FINAL STATUS): the page shows the reader's capture totals as UNAVAILABLE rather than
+/// zero and names the unrecorded tail; it reads the reader's fields and derives nothing.
+#[test]
+fn unsealed_capture_shows_unavailable_totals_and_the_tail() {
+    let mut doc = Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+    let v = doc.auto.as_mut().unwrap();
+    v.report.status = None;
+    let tail = "tail not recorded: frames after #3 (owner 1) may exist".to_string();
+    v.report.unsealed = Some(auto_rsx::Unsealed {
+        last_row: Some((1, 3)),
+        last_row_open: false,
+        open_rows: 0,
+        tail: tail.clone(),
+        totals: auto_rsx::TOTALS.iter().map(|&(name, _)| auto_rsx::CaptureTotal {
+            name,
+            value: None,
+            note: auto_rsx::TOTAL_NO_STATUS.into(),
+            retained_rows: None,
+        }).collect(),
+    });
+    let mut app = App::new(None);
+    app.install(Arc::new(doc), true);
+    let drawn = Ui::new().frame(vec![], &mut app);
+    assert_eq!(drawn.coverage_rows_lost, None, "UNAVAILABLE, not 0");
+    assert_eq!(drawn.tail_text.as_deref(), Some(tail.as_str()));
+    assert!(!drawn.is_final);
 }
 
 #[test]
@@ -571,7 +600,7 @@ fn assert_display_parity(path: PathBuf) {
     );
     assert_eq!(
         drawn.coverage_rows_lost,
-        golden["status"]["frames_lost"].as_u64().unwrap_or(0)
+        golden["status"]["frames_lost"].as_u64()
     );
     assert_eq!(
         drawn.is_final,
