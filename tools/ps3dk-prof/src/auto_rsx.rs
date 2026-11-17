@@ -6,6 +6,9 @@
 //! map this capture qualified itself (its own CLOCK anchors, an exact affine feasible set and both H-SPLIT hold-out
 //! parities); there is no nominal rate.  A frame verdict needs complete covered population, raw-valid operations, a
 //! qualified map and wait evidence; anything missing is UNKNOWN with the missing input named.
+#[path = "rolling_auto.rs"]
+pub mod rolling;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
@@ -1267,6 +1270,15 @@ pub enum MapState {
 /// feasible bounded positive slope, and in each H-SPLIT parity at least one DECISIVE held-out anchor with zero
 /// contradictions.  No extrapolation: conversions are allowed only inside [fmin, fmax].
 pub fn qualify(inv: &Inventory) -> MapState {
+    let n = inv.clocks.iter().filter(|a| a.flags == CK_VALID).count() as u64;
+    let mut m = Meter::new(
+        clockmap::solve_budget(n).saturating_add(split_budget(n).saturating_mul(2)),
+        Limit::Capture,
+    );
+    qualify_with_meter(inv, &mut m)
+}
+
+pub(crate) fn qualify_with_meter(inv: &Inventory, m: &mut Meter) -> MapState {
     let un = |s: String| MapState::Unqualified(s);
     if inv.config.as_ref().and_then(Config::attached).is_none() {
         return un("no attached AUTO configuration".into());
@@ -1302,11 +1314,7 @@ pub fn qualify(inv: &Inventory) -> MapState {
         return un(format!("{} distinct anchor coordinate(s), fewer than 4", distinct.len()));
     }
     let n = obs.len() as u64;
-    let mut m = Meter::new(
-        clockmap::solve_budget(n).saturating_add(split_budget(n).saturating_mul(2)),
-        Limit::Capture,
-    );
-    let model = match clockmap::solve(&mut m, &obs) {
+    let model = match clockmap::solve(m, &obs) {
         Ok(Solved::Compatible(model)) => model,
         Ok(Solved::Inconsistent) => return un("anchors inconsistent with one affine map".into()),
         Ok(Solved::NoObservations) => return un("no anchors".into()),
@@ -1318,7 +1326,7 @@ pub fn qualify(inv: &Inventory) -> MapState {
     }
     let mut decisive = [0u64; 2];
     for (k, even) in [false, true].into_iter().enumerate() {
-        match split_holdout(&mut m, &obs, even) {
+        match split_holdout(m, &obs, even) {
             Ok(SplitOutcome::Checked { held, .. }) => {
                 if let Some(h) = held.iter().find(|h| h.contradicted) {
                     return un(format!("H-SPLIT {} hold-out anchor ordinal {} contradicted",
@@ -1749,11 +1757,47 @@ pub fn certain_overlap(anchors: &[Anchor], m: &Map, busy: &[(u64, u64)], scopes:
     }))
 }
 
+pub(crate) struct AnalysisSupport<'a> {
+    pub built: &'a BTreeMap<(u32, u64), [u64; 3]>,
+    pub abandoned: &'a BTreeMap<(u32, u64), u64>,
+    pub call_built: &'a BTreeMap<(u32, u64), u64>,
+    pub rows: &'a BTreeMap<(u32, u64), &'a Coverage>,
+    pub provenance_clean: bool,
+    pub last_frame: Option<(u32, u64)>,
+    pub fifo_wait: &'a dyn Fn(u32, u64) -> Result<u64, String>,
+}
+
 pub fn analyze(cap: &Capture) -> Report {
     let Some(inv) = cap.auto.as_ref() else {
         return Report { state: "UNSUPPORTED".into(), ..Report::default() };
     };
-    let mut rep = Report {
+    if inv.config.as_ref().and_then(Config::attached).is_none() {
+        return base_report(inv, cap.export.as_ref());
+    }
+    let build = inv.config.as_ref().and_then(Config::attached).is_some_and(Attached::build_frames);
+    let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
+    let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
+    let map = qualify(inv);
+    let fifo = crate::fifo::analyze(cap);
+    let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
+    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
+        && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
+    let mut call_built: BTreeMap<(u32, u64), u64> = BTreeMap::new();
+    for o in inv.ops.iter().filter(|o| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
+        if let Some(b) = o.build {
+            let e = call_built.entry(b).or_default();
+            *e = e.saturating_add(u64::from(o.args[4]));
+        }
+    }
+    let wait = |owner, frame| fifo_wait(cap, &fifo, owner, frame);
+    analyze_inventory(inv, cap.export.as_ref(), AnalysisSupport {
+        built: &built, abandoned: &abandoned, call_built: &call_built, rows: &rows,
+        provenance_clean, last_frame: inv.frames.last().map(|f| (f.owner, f.frame)), fifo_wait: &wait,
+    }, map)
+}
+
+fn base_report(inv: &Inventory, export: Option<&crate::model::ExportRecord>) -> Report {
+    Report {
         capability: true,
         state: inv.state(),
         config: inv.config.clone(),
@@ -1763,9 +1807,14 @@ pub fn analyze(cap: &Capture) -> Report {
         ops_dropped: inv.ops_dropped,
         clocks: inv.clocks.clone(),
         refusal: inv.refusal,
-        export: cap.export.clone(),
+        export: export.cloned(),
         ..Report::default()
-    };
+    }
+}
+
+pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::ExportRecord>,
+    support: AnalysisSupport<'_>, map: MapState) -> Report {
+    let mut rep = base_report(inv, export);
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
     let build = attached.build_frames();
     // Bounded verdicts for untimed draws come with the bracketed-clock writer (127/11); older captures keep their
@@ -1777,28 +1826,16 @@ pub fn analyze(cap: &Capture) -> Report {
     rep.busy_rule = busy_rule;
     rep.tagged = attached.tagged();
     rep.call_bracket = attached.call_bracket();
-    let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
-    let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
-    let map = qualify(inv);
-    let fifo = crate::fifo::analyze(cap);
+    let AnalysisSupport { built, abandoned, call_built, rows, provenance_clean, last_frame, fifo_wait } = support;
     let status_ok = inv.final_seen && inv.refusal.is_none();
     let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
     // A segment build none of whose draws were timed leaves no record naming its build frame, so a CALL of it
     // cannot be traced back to that frame's evidence. Treat such unrepresented draws as merely untimed only when
     // the capture shows no invalid-evidence exclusion anywhere and no segment quarantine; otherwise they refuse.
-    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
-        && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
     // 255/11: whole-CALL brackets with valid timestamps.  Each one times every draw its CALL executed, so the draws it
     // names as without a record of their own are not untimed in the calling frame, and those refused while building
     // are not untimed in their build frame (they ran inside the bracket, not there).
     let bracket_ok = |o: &Op| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0;
-    let mut call_built: BTreeMap<(u32, u64), u64> = BTreeMap::new();
-    for o in inv.ops.iter().filter(|o| bracket_ok(o)) {
-        if let Some(b) = o.build {
-            let e = call_built.entry(b).or_default();
-            *e = e.saturating_add(u64::from(o.args[4]));
-        }
-    }
     for f in &inv.frames {
         let mine = |o: &&Op| o.token() == Some((f.owner, f.frame));
         let ops: Vec<&Op> = inv.ops.iter().filter(mine).filter(|o| o.covered()).collect();
@@ -1895,10 +1932,10 @@ pub fn analyze(cap: &Capture) -> Report {
                 v.rsx_frame_ppu = Some((sat(&floor_mul(e - b, &m.slope_lo)), sat(&ceil_mul(e - b, &m.slope_hi))));
             }
         }
-        let wait = fifo_wait(cap, &fifo, f.owner, f.frame);
+        let wait = fifo_wait(f.owner, f.frame);
         v.fifo_wait = wait.as_ref().ok().copied();
         let d = f.tb_end.saturating_sub(f.tb_begin);
-        let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
+        let last = last_frame == Some((f.owner, f.frame));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
         // 1023/11: blocked flip-wait time that certainly overlaps RSX busy time: (overlap, scopes' elapsed), None when
