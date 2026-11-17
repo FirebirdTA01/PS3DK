@@ -104,11 +104,11 @@ int main(void) {
     ps3dk_prof_frame();
 #elif TEST_PREINIT_MODE==2
     {
-        ps3dk_prof_auto_options *old=malloc(32);
+        void *old=malloc(32);                                                   /* exactly 32 bytes: ASan sees any read past the old struct */
         assert(old);
         o.size=32;o.report_first=1024;o.report_count=512;
         memcpy(old,&o,32);
-        assert(ps3dk_prof_auto_options_set(old)==PS3DK_PROF_OK);
+        assert(ps3dk_prof_auto_options_set((const ps3dk_prof_auto_options *)old)==PS3DK_PROF_OK);
         free(old);
     }
     init(0);
