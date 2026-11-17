@@ -439,16 +439,18 @@ The same window controls are available in the GUI. With a capture open, the app 
   selected keeps only that window's data: the Automatic page shows the report and the RSX busy bars for the window's
   frames; the Frames page recomputes each owner's counts, sum and percentiles from the window's slots only, and keeps
   only the work its frames claim; the Timeline limits its bars and frame markers to the window. Selecting **All frames**
-  restores the unscoped views.
+  restores the unscoped views. Choosing a window refits the Timeline; during a live session, new data keeps the selected
+  window, follow mode and zoom.
 
 - **Save window… / Save range….** Both write a standalone capture next to the open file, using the same exporter as
   `ps3dk-prof export`, and never touch the source capture. **Save window…** writes the selected window as
   `<name>.window_<id>.prof`; **Save range…** writes the chosen frame range as `<name>.<first>..<last>.prof` (its
-  dialog is prefilled with the selected window's frames, or the whole capture when no window is selected). Both refuse
-  to replace a file that already exists — a new save reports where it went, and a refused one names the existing target
-  — so an existing sibling is only ever written over after it is renamed or removed.
+  dialog is prefilled with the selected window's frames, or the whole capture when no window is selected). Neither ever
+  replaces an existing file: the status line names the file a save wrote, or the existing file that made it refuse. To
+  save again under the same name, rename or remove the earlier file first.
+
 - **Overview.** The **WINDOWS** section lists each window — id, name, kind, frames, and its end reason, flagged when it
-  is still open or was only recorded partially.
+  is still open or the reader marks it incomplete.
 
 ### 5.4 Limits
 
