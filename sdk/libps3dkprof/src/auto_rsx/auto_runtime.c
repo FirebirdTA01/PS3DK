@@ -14,6 +14,10 @@ static auto_writer writer;
 /* Only the configuring owner writes these while CONFIG is WRITING. The
  * drainer reads capture only after acquiring FROZEN with an attached CONFIG. */
 static auto_capture *capture;
+/* Published after a successful attach. This identity permits rejecting foreign
+ * observations without claiming or reading the mutable candidate. Incarnations
+ * are never reused, and the owner is still verified under the CONFIG claim. */
+static uint32_t candidate_owner_incarnation;
 static gpp_ctx *clean_context;
 static uintptr_t clean_begin, clean_current, clean_end;
 /* The init record for the report ring's M2MF decoder: the EA of IO offset 0 (cellGcmInit's host buffer) and the
@@ -404,6 +408,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
         g_tls.in_gpu=0;
         return PS3DK_PROF_ESTOPPED;
     }
+    ST_REL(&candidate_owner_incarnation,g_tls.incarnation);
     pal_free(prior); /* no observation or device write can precede this override */
     g_tls.in_gpu=0;
     if(fifo_prepared && p_fifo_auto_publish()!=PS3DK_PROF_OK) {
@@ -507,13 +512,19 @@ static auto_capture *owner_capture(gpp_ctx *ctx, int observe)
     if(!g_tls.slot1 || g_tls.acked || g_tls.retired || g_tls.in_drain) return NULL;
     if(!c) {
         if(!p_ready() || !observe || g_tls.in_gpu) return NULL;
+        /* A foreign retirement must not hold WRITING while the real owner's
+         * one-shot stop acknowledgement tries to settle its AUTO state. */
+        if(LD_ACQ(&candidate_owner_incarnation)!=g_tls.incarnation) return NULL;
         claim=auto_config_begin(&configuration);
-        if(!claim) return NULL;
-        a=capture;
-        int owned=a && (!ctx || a->context==ctx) && a->owner_incarnation==g_tls.incarnation &&
-                  a->owner_generation==g_tls.generation && pal_owner_is_self(&a->owner);
-        auto_config_abort(&configuration,claim);
-        if(!owned || !auto_config_freeze(&configuration)) return NULL;
+        if(claim) {
+            a=capture;
+            int owned=a && (!ctx || a->context==ctx) && a->owner_incarnation==g_tls.incarnation &&
+                      a->owner_generation==g_tls.generation && pal_owner_is_self(&a->owner);
+            auto_config_abort(&configuration,claim);
+            if(!owned || !auto_config_freeze(&configuration)) return NULL;
+        }
+        /* Seal may have frozen CONFIG between the first read and the claim.
+         * Use that immutable snapshot; a still-WRITING candidate remains NULL. */
         c=auto_config_read(&configuration);
     }
     if(!c || c->reason) return NULL;
