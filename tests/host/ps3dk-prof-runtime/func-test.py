@@ -61,7 +61,7 @@ base = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-prio-ctor-
 if a.sanitize:
     base += ['-fsanitize=' + ('address,undefined' if a.sanitize == 'address' else 'thread'),
              '-fno-sanitize-recover=all', '-ftls-model=local-exec']
-lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c',
+lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c',
                          'func/func_runtime.c', 'func/func_hooks.c']]
 if a.ext:
     base += ['-DPS3DK_PROF_WITH_SPU', '-DPS3DK_PROF_WITH_PROFILE', '-I', src / 'pal', '-I', src / 'spu', '-I', src / 'rsx']

@@ -12,6 +12,7 @@
 
 /* Archive names: internals export only under the reserved ps3dk_prof__ prefix (as pal.h does). */
 #define psp_drain ps3dk_prof__psp_drain
+#define psp_poll_calibrations ps3dk_prof__psp_poll_calibrations
 #define psp_drain_declare ps3dk_prof__psp_drain_declare
 #define psp_drain_ends ps3dk_prof__psp_drain_ends
 #define psp_image_add ps3dk_prof__psp_image_add
@@ -106,6 +107,11 @@ typedef struct psp_lane {
     uint16_t out_id;
     uint64_t out_tb0;
     uint32_t out_epoch, out_waits;
+    /* Read-only early observation of this request's publication. The cache is
+     * private; it neither accepts a snapshot nor releases any ring slots. */
+    uint16_t cal_seen_id;
+    uint32_t cal_seen_epoch;
+    uint64_t cal_seen_gen, cal_seen_w, cal_seen_tb;
     uint64_t stale, cancelled, unstable;
     /* order records (psp_ppu_order): LANE_CREATED's tb, the cursor at the last DRAINED decision (admitted or not),
      * the lane's accepted records of kinds 1-4 and its refused ones, and which of its two reserved records (LANE_CREATED,
@@ -219,6 +225,10 @@ void psp_drain_declare(psp_ppu *p);
 int psp_lane_step(psp_ppu *p, uint32_t lane); /* returns 1 when the lane's drain cycle completed */
 void psp_drain_ends(psp_ppu *p);
 void psp_drain(psp_ppu *p);
+/* Serialized with all other lane-table access. At most one publication read per
+ * outstanding request/lane; never calls the sink, writes device memory, issues
+ * a request or acknowledges slots. Invalid/torn observations are simply skipped. */
+void psp_poll_calibrations(psp_ppu *p);
 /* lifetime: request (after a successful join), then poll; free happens in poll after the drainer released */
 void psp_lane_end_request(psp_ppu *p, uint32_t lane);
 int psp_lane_end_poll(psp_ppu *p, uint32_t lane, uint32_t max_waits);

@@ -12,7 +12,7 @@ import sys
 
 ARCHIVES = ('libps3dkprof_auto.a', 'libgcm_cmd_prof_auto.a', 'libps3dkprof_ext_live.a')
 HEADERS = ('ps3dk/prof.h', 'ps3dk/prof_spu.h', 'ps3dk/psp_desc.h', 'ps3dk/prof_gpu.h',
-           'ps3dk/prof_fifo.h', 'ps3dk/prof_auto.h', 'cell/gcm.h', 'cell/gcm/ps3tc_fifo_wrap.h')
+           'ps3dk/prof_fifo.h', 'ps3dk/prof_auto.h', 'ps3dk/prof_rolling.h', 'cell/gcm.h', 'cell/gcm/ps3tc_fifo_wrap.h')
 MANIFEST = 'prof-auto.json'
 REQUIRED = {
     '__ps3dk_prof_auto_startup_anchor': (ARCHIVES[0], 'auto_startup.o'),

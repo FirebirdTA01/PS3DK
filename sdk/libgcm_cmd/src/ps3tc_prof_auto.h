@@ -16,6 +16,8 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *, uint32_t ticket);
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *);
 void ps3dk_prof__auto_publish_after(struct _gcmCtxData *, uint32_t frontier);
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
+/* Exact owner FIFO IO offset; independent of AUTO report publication serials. */
+void ps3dk_prof__fifo_account_native_publish(void *ctx, uint32_t offset);
 /* Report ring (owner contexts only; inert otherwise). prewrap: the native FIFO
  * wrap, before it computes the tail JUMP from current. preflush: FlushBuffer,
  * before its barrier and before current becomes PUT. Either may append a

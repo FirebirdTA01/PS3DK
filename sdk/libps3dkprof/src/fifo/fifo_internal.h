@@ -20,12 +20,14 @@
 #include "../core/prof_internal.h"
 #include <ps3dk/prof_fifo.h>
 #include "ps3tc_fifo_observe.h"
+#include "fifo_account.h"
+#include "fifo_account_runtime.h"
 
 #ifndef PS3DK_PROF_WITH_SPU
 #error "the FIFO wrap observer needs the domain extension (PS3DK_PROF_WITH_SPU)"
 #endif
 
-enum { C_FIFO_CONFIG = 31, C_FIFO_EVENTS = 32, C_FIFO_STATUS = 33 };
+enum { C_FIFO_CONFIG = 31, C_FIFO_EVENTS = 32, C_FIFO_STATUS = 33, C_FIFO_ACCOUNTING = 43 };
 enum { FS_NONE = 0, FS_ATTACHING = 1, FS_ATTACHED = 2, FS_DETACHED = 3, FS_CLOSED = 4, FS_SEALED = 5 };
 enum { FE_TOKEN = 1, FE_CLOCK_INVALID = 2 };
 enum { FST_FINAL = 1, FST_LOWER_BOUND = 2, FST_SATURATED = 4, FST_OWNER_UNACK = 8 };
@@ -39,6 +41,21 @@ enum { FST_FINAL = 1, FST_LOWER_BOUND = 2, FST_SATURATED = 4, FST_OWNER_UNACK = 
 #define FIFO_MAX_MIN     (FIFO_RING_MIN * FIFO_REC_BYTES + FIFO_CONTROL)
 #define FIFO_MAX_MAX     16777216u
 #define FIFO_EVENTS_MAX  ((P_CHUNK_CAP - 16u) / FIFO_REC_BYTES)
+
+/* Uses the already charged 4096-byte control block, not extra allocation.
+ * Single owner writes core/seq/enabled/suppressed, RELEASE publishes rows;
+ * serialized drainer ACQUIRE reads rows and RELEASE acknowledges whole sink
+ * acceptance. Overflow drops newest; seq retains the attempted row identity.
+ * No accounting inventory completeness claim, even following FIFO FINAL. */
+#define FIFO_ACCOUNT_ROWS 16u
+typedef struct fifo_account_storage {
+    fifo_account core;
+    uint64_t seq, suppressed;
+    uint32_t enabled;
+    uint64_t write_idx, read_idx;
+    fifo_account_row rows[FIFO_ACCOUNT_ROWS];
+} fifo_account_storage;
+_Static_assert(sizeof(fifo_account_storage) <= FIFO_CONTROL, "FIFO accounting fits charged control block");
 
 /* One ring slot: the native record, encoded little-endian by the drainer. */
 typedef struct fifo_rec {
@@ -56,6 +73,7 @@ typedef struct fifo_capture {
     void *ctx;
     uint8_t *block;
     fifo_rec *ring;
+    fifo_account_storage *account;
     pal_owner owner;
     ps3tc_fifo_observer reg;
     /* atomics */
@@ -103,7 +121,8 @@ void ps3dk_prof__auto_fifo_boundary(void *ctx);
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 /* point 1: inside the owner callback, before admission (kind in `v`); point 2: attach, every validation passed, before
- * the instance claim; point 3: attach, claimed and installed, before the publication */
+ * the instance claim; point 3: attach, claimed and installed, before the publication;
+ * point 4: AUTO deferred publication; point 5: native frame, immediately before context metadata access */
 extern void (*ps3dk_prof__fifo_test_hook)(unsigned point, unsigned v);
 void ps3dk_prof__fifo_test_seed(uint64_t attempted); /* the owner's attempt counter (the ceiling controls) */
 uint64_t ps3dk_prof__fifo_test_read_idx(void);

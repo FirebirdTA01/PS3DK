@@ -46,6 +46,9 @@ extern "C" {
 #define PS3DK_PROF_ENOTSUP        (-17)  /* not supported here: a callback sink, a device not yet measured, an off build */
 #define PS3DK_PROF_ENET           (-18)  /* live: the listener could not be created */
 #define PS3DK_PROF_ETIMEDOUT      (-19)  /* live stop: the agent did not finish in time; call stop again */
+/* File policy errors use a separate block from the SPU lane's -20..-23. */
+#define PS3DK_PROF_ERETENTION     (-32)  /* capture closed, but completed-file bookkeeping/cleanup failed */
+#define PS3DK_PROF_ERESOURCE      (-33)  /* rolling stopped at a whole-chunk boundary: a configured bound was reached */
 
 /* Capture windows: the profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO RSX timing, draw report
  * pairs, AUTO ranges) unless a window is open. Frame marks and clock anchors run all the time, so a window keeps the
@@ -197,6 +200,13 @@ void ps3dk_prof_config_defaults(ps3dk_prof_config *cfg);
  * shutdown, wait for it. */
 int ps3dk_prof_set_sink_path(const char *path);
 int ps3dk_prof_set_sink_callbacks(const ps3dk_prof_sink_callbacks *cb);
+/* Before init, FILE sinks only. 0 (default) disables retention; 1..1024 keeps
+ * that many opt-in completed captures for this exact app, in completion order.
+ * Untracked, active and incomplete files are untouched. Cleanup runs after
+ * successful close and, in THREAD mode, a successful join. It may read old
+ * captures and adds shutdown IO. A failed
+ * cleanup returns ERETENTION without deleting the current capture. */
+int ps3dk_prof_set_capture_retention(uint32_t keep_completed);
 int ps3dk_prof_init(const ps3dk_prof_config *cfg);
 int ps3dk_prof_shutdown(void);
 int ps3dk_prof_drain(void);

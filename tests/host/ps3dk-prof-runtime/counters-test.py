@@ -38,7 +38,7 @@ def build(out, counters, cc):
         (inc / h).write_bytes((ROOT / "sdk/include/ps3dk" / h).read_bytes())
     flags = ["-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror", "-pthread", "-Wno-prio-ctor-dtor",
              "-DPS3DK_PROF=1", "-DPS3DK_PROF_PAL_HOST", "-I", str(inc.parent), "-I", str(SRC / "core")]
-    files = [SRC / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
+    files = [SRC / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c", "rolling/roll_file.c", "rolling/roll_retention_inspect.c", "rolling/roll_store.c")]
     if counters:
         flags.append("-DPS3DK_PROF_WITH_COUNTERS=1")
         files += sorted((SRC / "counters").glob("*.c"))
@@ -125,7 +125,7 @@ def build_lock(out, cc, src, name):
              "-I", str(inc.parent), "-I", str(src / "core")]
     if os.environ.get("SANITIZE"):
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-ftls-model=local-exec"]
-    files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
+    files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c", "rolling/roll_file.c", "rolling/roll_retention_inspect.c", "rolling/roll_store.c")]
     files += sorted((src / "counters").glob("*.c"))
     cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_lock_test.c")), *WHOLE_RUN, "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)

@@ -253,6 +253,8 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
         return PS3DK_PROF_ESTOPPED;
     if (rc != PS3DK_PROF_OK)
         return rc == PS3DK_PROF_ENOTSUP ? PS3DK_PROF_ENOTSUP : rc; /* ENOTSUP: a callback sink, no file */
+    if (ps3dk_prof__capture_rolling())
+        return PS3DK_PROF_ENOTSUP; /* append byte offsets cannot serve reused slots */
     if (!live_os_capture_supported(rec.path))
         return PS3DK_PROF_ENOTSUP;
     if (g_api_state != API_NEVER)

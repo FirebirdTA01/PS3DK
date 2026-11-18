@@ -14,9 +14,11 @@
  *            CALLed segment that JUMPs to a second sub-segment, which RETURNs
  *            (GCM_SEG_VARIANT_JUMP)
  *   -ring    600 owner-buffer clears per frame for the AUTO report ring
- *            (GCM_SEG_VARIANT_RING): its own attach selects the ring, or, in a
- *            PS3_PROF_AUTO_RING=ON build, the automatic attach already did and
- *            it only prints the build option; built with -DGCM_SEG_RING_PROBE, the first
+ *            (GCM_SEG_VARIANT_RING); GCM_SEG_RING_FRAME_COUNT defaults to 30
+ *            (1..2000) and permits longer rolling-retention probes without
+ *            changing GCM setup. Its own attach selects the ring unless
+ *            PS3_PROF_AUTO_RING=ON already selected it automatically;
+ *            built with -DGCM_SEG_RING_PROBE, the first
  *            3 flips print the flip words and IO offset 0 (GCM_SEG_PROBE)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
@@ -334,7 +336,13 @@ static int large_check(CellGcmContextData *ring, uint32_t *mem)
 #if defined(GCM_SEG_VARIANT_RING)
 /* -ring: owner-buffer clears only, RING_DRAWS per frame (above the 504-pair local ceiling), timed through the AUTO
  * report ring when the SDK was built with it. The attach precedes every device write of the application. */
-enum { RING_FRAMES = 30, RING_DRAWS = 600 };
+#ifndef GCM_SEG_RING_FRAME_COUNT
+#define GCM_SEG_RING_FRAME_COUNT 30
+#endif
+#if GCM_SEG_RING_FRAME_COUNT < 1 || GCM_SEG_RING_FRAME_COUNT > 2000
+#error GCM_SEG_RING_FRAME_COUNT must be between 1 and 2000
+#endif
+enum { RING_FRAMES = GCM_SEG_RING_FRAME_COUNT, RING_DRAWS = 600 };
 #if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
 #include <ps3dk/prof_auto.h>
 /* Defined by the generated unit of a PS3_PROF_AUTO_RING=ON build: the automatic attach already selected the ring. */

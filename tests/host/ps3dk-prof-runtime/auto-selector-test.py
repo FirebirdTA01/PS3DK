@@ -16,7 +16,7 @@ OUT = None
 
 
 class Selector(unittest.TestCase):
-    def configure(self, name, enabled=True, libraries='', extra='', nested=False):
+    def configure(self, name, enabled=True, libraries='', extra='', nested=False, rolling=None):
         base = OUT/name
         base.mkdir(parents=True, exist_ok=False)
         sdk = base/'sdk with space'
@@ -47,6 +47,7 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/selected.txt" CONTENT
 '''.replace('@LIBRARIES@', libraries).replace('@EXTRA@', extra)
         project = f'''cmake_minimum_required(VERSION 3.21)
 set(PS3_PROF_AUTO {'ON' if enabled else 'OFF'})
+{('set(PS3_PROF_AUTO_ROLLING "'+rolling+'")') if rolling is not None else ''}
 set(PS3DK "{sdk.as_posix()}")
 set(CMAKE_PROJECT_INCLUDE "{(ROOT/'cmake/ps3-prof-auto.cmake').as_posix()}")
 project(consumer C)
@@ -171,6 +172,29 @@ project(consumer C)
         # top-level non-GLOBAL imported targets were always visible to the walk and stay accepted
         result, _ = self.configure('top-import', libraries='engine', extra=imported.replace('@G@', ''))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rolling_generates_constant_direct_input_only_when_requested(self):
+        result, _ = self.configure('rolling-off')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(list((OUT/'rolling-off/build').rglob('*rolling*.c')))
+        result, _ = self.configure('rolling-on', rolling='64')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        source = OUT/'rolling-on/build/app-auto-rolling.c'
+        self.assertTrue(source.is_file(), 'AUTO_ROLLING_ASSERT[missing-constant-input]')
+        text = source.read_text()
+        self.assertIn('#include <ps3dk/prof_rolling.h>', text)
+        self.assertIn('PS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS', text)
+        self.assertIn('PS3DK_PROF_ROLLING_AUTO_FIFO_INIT', text)
+        self.assertIn('67108864', text)
+        self.assertNotIn('constructor', text)
+        make = (OUT/'rolling-on/build/CMakeFiles/app.dir/build.make').read_text()
+        self.assertIn('app-auto-rolling.c', make)
+
+    def test_invalid_explicit_rolling_never_falls_back_to_append(self):
+        for i, value in enumerate(('0', '-1', '1.5', 'OFF', '64;128', '999999999999999999999')):
+            result, _ = self.configure('rolling-bad-'+str(i), rolling=value)
+            self.assertNotEqual(result.returncode, 0, 'accepted invalid rolling limit '+value)
+            self.assertIn('PS3_PROF_AUTO_ROLLING', result.stderr)
 
     def test_conflicting_variants_and_launcher_refuse(self):
         for name, libs, extra in (

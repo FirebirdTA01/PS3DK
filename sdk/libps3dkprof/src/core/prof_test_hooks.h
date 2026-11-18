@@ -104,6 +104,9 @@ typedef struct ps3dk_prof_test_hooks_t {
     void (*before_capture_publish)(void);
     /* Called by shutdown right after it wins its claim, before it locks anything or sets the stop latch. */
     void (*after_shutdown_claim)(void);
+    /* Private rolling lifecycle: after stop-owner CAS, before locks or Ft.
+     * owner=1 public shutdown, owner=2 automatic consumer-boundary stop. */
+    void (*rolling_stop_claimed)(uint32_t owner);
     int live_ephemeral_port;           /* ps3dk_prof_live_start binds port 0 (an ephemeral port), for host tests */
     uint16_t live_listen_port;         /* nonzero: ps3dk_prof_live_start binds 127.0.0.1 on this port (wins) */
     unsigned join_calls;               /* host PAL: pal_thread_join calls, counted (controlling thread only) */

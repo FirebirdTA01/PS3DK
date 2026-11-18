@@ -15,6 +15,7 @@ set(src "${repo}/sdk/libps3dkprof/src")
 # Candidate-source row, intentionally NOT an installed-profiler archive test.
 add_library(profiler-files-candidate STATIC
   "${src}/core/prof_core.c" "${src}/core/prof_drain.c" "${src}/pal/pal_lv2.c"
+  "${src}/rolling/roll_file.c" "${src}/rolling/roll_retention_inspect.c" "${src}/rolling/roll_store.c"
   "${src}/hooks/arcs.c" "${src}/core/prof_arcs_stream.c"
   "${src}/core/prof_arcs_export.c" "${src}/core/prof_arcs_file.c")
 target_include_directories(profiler-files-candidate PUBLIC "${repo}/sdk/include" "${src}/core")

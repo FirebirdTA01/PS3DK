@@ -35,6 +35,7 @@ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
 #ifdef PS3TC_PROF_AUTO
 	__sync();
 	ps3dk_prof__auto_publish_after(context,frontier);
+	ps3dk_prof__fifo_account_native_publish(context,offset);
 #endif
 }
 

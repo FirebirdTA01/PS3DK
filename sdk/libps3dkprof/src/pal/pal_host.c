@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include "capture_retention.h"
 
 #ifdef PS3DK_PROF_TEST_HOOKS
 #include "../core/prof_test_hooks.h"

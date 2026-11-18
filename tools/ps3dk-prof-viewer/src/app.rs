@@ -42,6 +42,14 @@ pub enum Page {
     RsxFrames,
     /// One frame snapshot (`App::shown`).
     Snapshot,
+    /// The retained window of a rolling capture (`.profr`).
+    Rolling,
+}
+
+/// A rolling capture being opened on a background thread.
+pub struct RollingJob {
+    pub path: PathBuf,
+    rx: std::sync::mpsc::Receiver<Result<crate::rolling_doc::RollingDoc, String>>,
 }
 
 /// The Connect dialog's fields.
@@ -113,6 +121,12 @@ pub struct App {
     pub save_range_modal: bool,
     /// A save-window / save-range result line, shown in the status bar.
     pub save_result: Option<(bool, String)>,
+    /// The open rolling capture (retained window only); exclusive with `doc`.
+    pub rolling: Option<Arc<crate::rolling_doc::RollingDoc>>,
+    /// A rolling open still running on its background thread.
+    pub rolling_job: Option<RollingJob>,
+    /// The bounds every rolling open uses (the library's desktop policy by default).
+    pub rolling_limits: crate::rolling_doc::OpenLimits,
 }
 
 /// Turns the dialog's fields into a checked client config, changing
@@ -210,6 +224,9 @@ impl App {
             save_range_to: 0,
             save_range_modal: false,
             save_result: None,
+            rolling: None,
+            rolling_job: None,
+            rolling_limits: crate::rolling_doc::OpenLimits::desktop(),
         };
         if let Some(p) = open {
             app.open(p);
@@ -218,6 +235,11 @@ impl App {
     }
 
     pub fn open(&mut self, path: PathBuf) {
+        // The kind is decided by content, not by the extension.
+        if crate::rolling_doc::sniff(&path).unwrap_or(false) {
+            self.open_rolling(path);
+            return;
+        }
         match std::fs::read(&path) {
             Ok(bytes) => {
                 // Ends any live session: Drop only requests the disconnect;
@@ -225,6 +247,11 @@ impl App {
                 self.end_captures();
                 self.live = None;
                 let doc = Arc::new(Document::from_bytes(path.clone(), &bytes));
+                self.rolling = None;
+                self.rolling_job = None;
+                if self.page == Page::Rolling {
+                    self.page = Page::Overview;
+                }
                 self.install(doc, true);
                 self.error = None;
                 self.sessions += 1;
@@ -238,6 +265,82 @@ impl App {
             }
             Err(e) => self.error = Some(format!("{}: {e}", path.display())),
         }
+    }
+
+    /// Opens a rolling capture on a background thread, bounded by `rolling_limits`.  The current document and
+    /// any live session are replaced at once; the page shows the open in progress, then the retained window or the
+    /// reader's refusal.
+    pub fn open_rolling(&mut self, path: PathBuf) {
+        self.end_captures();
+        self.live = None;
+        self.clear_document();
+        self.error = None;
+        self.rolling = None;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let limits = self.rolling_limits;
+        let p = path.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::rolling_doc::open(&p, limits));
+        });
+        self.rolling_job = Some(RollingJob { path, rx });
+        self.page = Page::Rolling;
+    }
+
+    /// Takes a finished rolling open, if any.  True while one is still running.
+    pub fn poll_rolling(&mut self) -> bool {
+        let Some(job) = self.rolling_job.as_ref() else { return false };
+        let got = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("the rolling reader thread ended without a result".into())
+            }
+        };
+        self.finish_rolling(got);
+        false
+    }
+
+    /// Blocks until the running rolling open (if any) finishes, then takes its result (tests).
+    pub fn wait_rolling(&mut self) {
+        let Some(job) = self.rolling_job.as_ref() else { return };
+        let got = job
+            .rx
+            .recv()
+            .unwrap_or_else(|_| Err("the rolling reader thread ended without a result".into()));
+        self.finish_rolling(got);
+    }
+
+    fn finish_rolling(&mut self, got: Result<crate::rolling_doc::RollingDoc, String>) {
+        let Some(job) = self.rolling_job.take() else { return };
+        match got {
+            Ok(d) => {
+                self.rolling = Some(Arc::new(d));
+                self.error = None;
+            }
+            Err(e) => {
+                self.rolling = None;
+                self.error = Some(format!("{}: {e}", job.path.display()));
+            }
+        }
+    }
+
+    /// Drops the open capture document and every view built from it.
+    fn clear_document(&mut self) {
+        self.doc = None;
+        self.timeline = None;
+        self.frames.reset(None);
+        self.hot = crate::hotpaths_ui::HotState::default();
+        self.rsx = crate::rsx_ui::RsxState::default();
+        self.waits = crate::waits_ui::WaitState::default();
+        self.auto = crate::auto_ui::AutoState::default();
+        self.zone_rows.clear();
+        self.selected_zone = None;
+        self.window = None;
+        self.passes_window = None;
+        self.auto_window = None;
+        self.frames_window = None;
+        self.save_result = None;
+        self.save_range_modal = false;
     }
 
     /// Shows a document. `fresh` is a different capture (reset the views);
@@ -321,15 +424,12 @@ impl App {
             generation: 0,
             bookmarks_done: false,
         });
-        self.doc = None;
-        self.timeline = None;
-        self.frames.reset(None);
-        self.hot = crate::hotpaths_ui::HotState::default();
-        self.rsx = crate::rsx_ui::RsxState::default();
-        self.waits = crate::waits_ui::WaitState::default();
-        self.auto = crate::auto_ui::AutoState::default();
-        self.zone_rows.clear();
-        self.selected_zone = None;
+        self.clear_document();
+        self.rolling = None;
+        self.rolling_job = None;
+        if self.page == Page::Rolling {
+            self.page = Page::Overview;
+        }
         self.error = None;
         self.last_host = host;
         Ok(())
@@ -483,7 +583,8 @@ impl App {
 
     fn pick_file(&mut self) {
         if let Some(p) = rfd::FileDialog::new()
-            .add_filter("ps3dk-prof capture", &["prof"])
+            .add_filter("ps3dk-prof capture", &["prof", "profr"])
+            .add_filter("All files", &["*"])
             .pick_file()
         {
             self.open(p);
@@ -741,8 +842,18 @@ fn verdict_word(t: VerdictTone) -> &'static str {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // A dropped file opens like Open... (its content decides the kind).
+        if let Some(p) = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone())) {
+            self.open(p);
+        }
+        if self.poll_rolling() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         if let Some(path) = self.screenshot.clone() {
-            self.screenshot_frames += 1;
+            // A screenshot shows the finished open, not its progress.
+            if self.rolling_job.is_none() {
+                self.screenshot_frames += 1;
+            }
             if self.screenshot_frames == 5 {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
             }
@@ -776,6 +887,13 @@ impl eframe::App for App {
                 Some(h) => format!("{} (live)", h.file_name),
                 None => "connecting…".to_string(),
             })),
+            None if self.rolling_job.is_some() => Some(egui::WidgetText::from("opening rolling capture…")),
+            None if self.rolling.is_some() => self.rolling.as_ref().map(|d| {
+                egui::WidgetText::from(format!(
+                    "{} (rolling, retained window)",
+                    d.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                ))
+            }),
             None => self.doc.as_ref().map(|d| {
                 egui::WidgetText::from(
                     d.path
@@ -944,6 +1062,7 @@ impl eframe::App for App {
             let _ = l.client.send(cmd);
         }
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
+        let rolling_open = self.rolling.is_some() || self.rolling_job.is_some();
         let rsx_count = self.rsx_count();
         let mut side_act = None;
         let shown_id = self.shown.as_ref().filter(|_| self.page == Page::Snapshot).map(|s| s.id);
@@ -952,7 +1071,18 @@ impl eframe::App for App {
             ctx,
             |side| {
                 ui::nav_section(side, "CAPTURE");
-                if ui::nav_item(side, self.page == Page::Overview, "📋", "Overview", None).clicked()
+                if rolling_open {
+                    if ui::nav_item(side, self.page == Page::Rolling, "🔁", crate::rolling_ui::TITLE, None).clicked() {
+                        self.page = Page::Rolling;
+                    }
+                    // Pages that need a complete capture stay listed so their absence is explained, not silent.
+                    ui::nav_section(side, "NEEDS A COMPLETE CAPTURE");
+                    for (pg, name) in crate::rolling_ui::CAPTURE_PAGES {
+                        if ui::nav_item(side, self.page == *pg, "—", name, None).clicked() {
+                            self.page = *pg;
+                        }
+                    }
+                } else if ui::nav_item(side, self.page == Page::Overview, "📋", "Overview", None).clicked()
                 {
                     self.page = Page::Overview;
                 }
@@ -1021,6 +1151,21 @@ impl eframe::App for App {
                     None => format!("{} bytes received, {} parses", v.received, v.parses),
                 },
             ),
+            _ if self.rolling_job.is_some() => ui::status_bar(
+                ctx,
+                ui::Tone::Neutral,
+                &self.rolling_job.as_ref().map(|j| j.path.display().to_string()).unwrap_or_default(),
+                "opening rolling capture…",
+            ),
+            _ if self.rolling.is_some() => {
+                let d = self.rolling.as_ref().expect("checked");
+                ui::status_bar(
+                    ctx,
+                    ui::Tone::Neutral,
+                    &d.path.display().to_string(),
+                    &format!("{} bytes (rolling: retained window only)", d.summary.file_bytes),
+                )
+            }
             _ => match &self.doc {
                 Some(d) => ui::status_bar(
                     ctx,
@@ -1036,6 +1181,24 @@ impl eframe::App for App {
             self.snapshot_action(a);
         }
         let page = self.page;
+        // A rolling capture has no Document: its own page, or the needs-a-capture empty state.
+        if self.doc.is_none() && (self.rolling.is_some() || self.rolling_job.is_some()) {
+            let rolling = self.rolling.clone();
+            ui::page(ctx, |p| match (&rolling, page) {
+                (None, _) => ui::empty_state(
+                    p,
+                    "Opening rolling capture…",
+                    "The reader is validating the retained segments.",
+                ),
+                (Some(d), Page::Rolling) => crate::rolling_ui::page(p, d),
+                (Some(_), _) => ui::empty_state(
+                    p,
+                    crate::rolling_ui::NEEDS_CAPTURE_TITLE,
+                    crate::rolling_ui::NEEDS_CAPTURE_BODY,
+                ),
+            });
+            return;
+        }
         if page == Page::Snapshot {
             if let Some(s) = self.shown.clone() {
                 let mut act = None;
@@ -1079,7 +1242,7 @@ impl eframe::App for App {
             None => ui::empty_state(
                 p,
                 "Open a capture",
-                "Choose a .prof file written by libps3dkprof, or Connect to an app running the live agent.",
+                "Choose a .prof or rolling .profr file written by libps3dkprof (or drop one here), or Connect to an app running the live agent.",
             ),
             Some(d) => match &d.state {
                 DocState::Malformed { diagnosis } => {
@@ -1091,6 +1254,11 @@ impl eframe::App for App {
                     ui::field_message(p, ui::Tone::Danger, diagnosis);
                 }
                 DocState::Analysed(a) => match page {
+                    Page::Rolling => ui::empty_state(
+                        p,
+                        "Not a rolling capture",
+                        "This page is for a .profr rolling capture; this file is a complete capture.",
+                    ),
                     Page::Snapshot => ui::empty_state(p, "No frame snapshot selected", "Use Capture full frame on a measured frame, or open a saved snapshot from the sidebar."),
                     Page::Overview | Page::Timeline => {
                         draw_overview(p, a, &d.ext, &d.rsx.get(a))

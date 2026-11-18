@@ -53,7 +53,7 @@ def main():
         run([a.ar,'rcsD',archive,obj])
         run([sys.executable,root/'tools/archive_digest.py','verify',archive,*common])
     members=run([a.ar,'t',archive]).decode().splitlines()
-    required={'prof_core.o','prof_drain.o','pal_lv2.o','wait_config.o','wait_runtime.o','wait_writer.o','wait_startup.o'}
+    required={'prof_core.o','prof_drain.o','pal_lv2.o','roll_file.o','roll_retention_inspect.o','roll_store.o','wait_config.o','wait_runtime.o','wait_writer.o','wait_startup.o'}
     if not required.issubset(members) or len(members)!=len(set(members)):
         raise ValueError('missing or repeated wait archive members')
     if ('startup.o' in members)!=(a.mode=='auto') or ('prof_identity.o' in members)!=(a.mode=='ext'):

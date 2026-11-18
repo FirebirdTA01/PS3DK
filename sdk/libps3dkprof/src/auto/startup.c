@@ -2,6 +2,9 @@
  * Compile this object and all runtime dependencies without compiler hooks.
  * Contract: docs/design/ps3dk-prof-auto-lifecycle.md. */
 #include "../core/prof_internal.h"
+#include "../../../include/ps3dk/prof_rolling.h"
+
+extern const ps3dk_prof_rolling_options ps3dk_prof_automatic_rolling_options __attribute__((weak));
 
 static uint32_t active;
 
@@ -28,6 +31,14 @@ static void diagnostic(const char *text, unsigned long size)
 __attribute__((constructor(100))) static void automatic_start(void)
 {
     ps3dk_prof_config cfg;
+    /* Legacy ARC automatic archives deliberately reject enabled rolling.
+     * Never silently fall back to an append file for an explicit request. */
+    if (&ps3dk_prof_automatic_rolling_options &&
+        ps3dk_prof_set_rolling_options(&ps3dk_prof_automatic_rolling_options) != PS3DK_PROF_OK) {
+        static const char message[] = "ps3prof: rolling configuration refused; automatic capture not initialized\n";
+        diagnostic(message, sizeof message - 1);
+        return;
+    }
     /* Runs after libc's runtime ladder (heap83, syscalls84, metaLock85,
      * finalization86) and libstdc++90/98, before ordinary user constructors101.
      * Libc locks are live. THREAD mode starts the drainer before user ctors

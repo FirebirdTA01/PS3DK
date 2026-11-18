@@ -10,6 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::model::*;
 use crate::wire::Cursor;
 
+/// Standalone family-only typed restart adapter; not a rolling file loader.
+#[path = "rolling_ext_state.rs"]
+pub mod rolling;
+
 pub const CHUNK_DOMAIN: u32 = 8;
 pub const CHUNK_EPOCH: u32 = 9;
 pub const CHUNK_CALIBRATION: u32 = 10;

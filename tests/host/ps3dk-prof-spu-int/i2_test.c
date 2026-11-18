@@ -20,6 +20,14 @@
 #include "prof_test_hooks.h"
 #include "psp_host_emul.h"
 #include "psp_spu.h"
+#include "psp_ppu.h"
+#include "prof_internal.h"
+
+extern int ps3dk_prof_spu_poll_calibrations(void) __attribute__((weak));
+static int poll_calibrations(void)
+{
+    return ps3dk_prof_spu_poll_calibrations ? ps3dk_prof_spu_poll_calibrations() : PS3DK_PROF_ENOTSUP;
+}
 
 unsigned ps3dk_prof__test_decl_acc_valid(unsigned slot);
 
@@ -279,6 +287,103 @@ static int start(uint32_t mode, uint32_t lanes)
 
 /* ---- cases ---- */
 
+static void *poll_other(void *arg)
+{
+    *(int *)arg = poll_calibrations();
+    return NULL;
+}
+
+static void calibration_capture(prod *p, const char *name)
+{
+    prod *lanes[] = {p};
+    CHECK(take_capture(name) == 0, "capture");
+    write_truth(name, lanes, 1);
+    FILE *e = expect(name);
+    CHECK(e != NULL, "expectation file");
+    if (e) {
+        fprintf(e, "exit 0\nverdict complete\nsources 1\nlane %u COMPLETE 1 1 %llu 0\nlosses %u\n",
+                p->lane.handle, (unsigned long long)p->ntruth, p->lane.handle);
+        fclose(e);
+    }
+}
+
+static int calibration_poll(void)
+{
+    static prod p;
+    pthread_t th;
+    int other = 77;
+    CHECK(poll_calibrations() == PS3DK_PROF_ENOTINIT, "poll before init");
+    CHECK(start(PS3DK_PROF_MODE_APP, 1) == 0, "start");
+    CHECK(ps3dk_prof_thread_begin("main") == 0, "thread_begin");
+    ps3dk_prof_zone z = PS3DK_PROF_ZONE_BEGIN("ppu");
+    PS3DK_PROF_ZONE_END(z);
+    CHECK(ps3dk_prof_spu_lane_create("poll", g_image, 0, &p.lane) == 0, "create");
+    CHECK(prod_init(&p, 0) == PSP_OK, "producer init");
+    CHECK(ps3dk_prof_drain() == 0, "initial request");
+    ev(&p, 1); ev(&p, 0);
+    CHECK(psp_spu_flush(&p.s) == PSP_OK, "answer");
+    CHECK(pal_mutex_lock(&g_prof->spu_mutex) == 0, "hold extension lock");
+    pthread_create(&th, NULL, poll_other, &other);
+    puts("POLL waiting for contended observer");
+    fflush(stdout);
+    pthread_join(th, NULL); /* a blocking-lock mutant times out here */
+    CHECK(other == PS3DK_PROF_EBUSY, "contended poll rc %d", other);
+    CHECK(pal_mutex_unlock(&g_prof->spu_mutex) == 0, "release extension lock");
+    uint64_t read = psp_rd64(at(p.lane.ea_ctl) + PSP_A_READ_IDX);
+    CHECK(poll_calibrations() == 0, "observe calibration");
+    CHECK(psp_rd64(at(p.lane.ea_ctl) + PSP_A_READ_IDX) == read, "poll released slots");
+    CHECK(g_prof->spu->lanes[0].cal_seen_id == p.s.cal_answered && p.s.cal_answered,
+          "no cached answer");
+    CHECK(psp_spu_fini(&p.s) == PSP_OK, "fini");
+    CHECK(ps3dk_prof_spu_lane_end(p.lane.handle, 1000000, NULL) == 0, "end");
+    CHECK(g_prof->spu->lanes[0].cal_seen_id == 0, "retired cache survived slot free");
+    ps3dk_prof_thread_end();
+    CHECK(ps3dk_prof_shutdown() == 0, "shutdown");
+    CHECK(poll_calibrations() == PS3DK_PROF_ESTOPPED, "poll after shutdown");
+    calibration_capture(&p, "i2-calibration-poll");
+    return 0;
+}
+
+static int calibration_thread(void)
+{
+    static prod p;
+    ps3dk_prof_config c = cfg(PS3DK_PROF_MODE_THREAD);
+    ps3dk_prof_ext_config x = ext(1, 0);
+    c.drain_interval_us = 500000;
+    CHECK(ps3dk_prof_set_sink_path(g_out) == 0 && ps3dk_prof_init_ex(&c, &x) == 0, "init");
+    CHECK(ps3dk_prof_thread_begin("main") == 0, "thread_begin");
+    ps3dk_prof_zone z = PS3DK_PROF_ZONE_BEGIN("ppu");
+    PS3DK_PROF_ZONE_END(z);
+    CHECK(ps3dk_prof_spu_image_register_table((const uint8_t *)"\x01i2", 3, g_desc, 1, &g_image) == 0, "image");
+    CHECK(ps3dk_prof_spu_lane_create("poll", g_image, 0, &p.lane) == 0, "lane");
+    CHECK(prod_init(&p, 0) == PSP_OK, "producer init");
+    uint64_t deadline = now_us() + 3000000;
+    uint16_t req = 0, observed = 0;
+    while (!req && now_us() < deadline) {
+        psp_emul_line_lock(p.lane.ea_ctl);
+        req = psp_rd16(at(p.lane.ea_ctl) + PSP_A_CAL_REQ);
+        psp_emul_line_unlock(p.lane.ea_ctl);
+        if (!req) usleep(1000);
+    }
+    CHECK(req, "drainer issued request");
+    ev(&p, 1); ev(&p, 0);
+    CHECK(psp_spu_flush(&p.s) == PSP_OK, "answer");
+    deadline = now_us() + 2000000;
+    while (!observed && now_us() < deadline) {
+        CHECK(pal_mutex_lock(&g_prof->spu_mutex) == 0, "inspect lock");
+        observed = g_prof->spu->lanes[0].cal_seen_id;
+        CHECK(pal_mutex_unlock(&g_prof->spu_mutex) == 0, "inspect unlock");
+        if (!observed) usleep(1000);
+    }
+    CHECK(observed == req && req, "THREAD wait did not observe request %u (got %u)", req, observed);
+    CHECK(psp_spu_fini(&p.s) == PSP_OK, "fini");
+    CHECK(ps3dk_prof_spu_lane_end(p.lane.handle, 2000000, NULL) == 0, "end");
+    ps3dk_prof_thread_end();
+    CHECK(ps3dk_prof_shutdown() == 0, "shutdown");
+    calibration_capture(&p, "i2-calibration-thread");
+    return 0;
+}
+
 /* run n producers to completion with the runtime in mode; owner_self for the first lane; lane_end each */
 static int basic(uint32_t mode, int n, const char *name)
 {
@@ -454,7 +559,7 @@ static atomic_long g_release_us;
 static unsigned char *g_cbuf;
 static size_t g_clen;
 static ps3dk_prof_spu_lane g_lane_for_cb;
-static int g_reentry_rc[3][4];
+static int g_reentry_rc[3][5];
 static void reentry_probe(int which)
 {
     ps3dk_prof_spu_lane sentinel;
@@ -466,6 +571,7 @@ static void reentry_probe(int which)
     g_reentry_rc[which][1] = ps3dk_prof_spu_lane_get_stats(g_lane_for_cb.handle, &st);
     g_reentry_rc[which][2] = ps3dk_prof_spu_lane_end(g_lane_for_cb.handle, 0, &st);
     g_reentry_rc[which][3] = ps3dk_prof_spu_image_register_table((const uint8_t *)"\x01x", 2, g_desc, 1, &img);
+    g_reentry_rc[which][4] = poll_calibrations();
     CHECK(((unsigned char *)&sentinel)[0] == 0xAB && img == 77 && ((unsigned char *)&st)[0] == 0xCD,
           "callback %d: outputs were written", which);
 }
@@ -534,7 +640,7 @@ static int reentry(void)
     CHECK(ps3dk_prof_spu_lane_end(p.lane.handle, 1000000, NULL) == 0, "end after the callbacks");
     CHECK(ps3dk_prof_shutdown() == 0, "shutdown");
     for (int w = 0; w < 3; w++)
-        for (int k = 0; k < 4; k++)
+        for (int k = 0; k < 5; k++)
             CHECK(g_reentry_rc[w][k] == PS3DK_PROF_EBUSY, "callback %d call %d rc %d", w, k, g_reentry_rc[w][k]);
     CHECK(atomic_load(&g_reentry_done), "the write callback probe ran");
     return 0;
@@ -1238,7 +1344,11 @@ int main(int argc, char **argv)
         return 2;
     g_case = argv[1];
     g_out = argv[2];
-    if (!strcmp(g_case, "basic-thread"))
+    if (!strcmp(g_case, "calibration-poll"))
+        calibration_poll();
+    else if (!strcmp(g_case, "calibration-thread"))
+        calibration_thread();
+    else if (!strcmp(g_case, "basic-thread"))
         basic(PS3DK_PROF_MODE_THREAD, 3, "i2-basic-thread");
     else if (!strcmp(g_case, "basic-app"))
         basic(PS3DK_PROF_MODE_APP, 2, "i2-basic-app");

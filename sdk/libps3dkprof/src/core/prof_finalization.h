@@ -31,4 +31,7 @@ const struct ps3dk_prof_finalization *ps3dk_prof__finalization(void);
  * the profiler is not ready.  A snapshot: it does not arbitrate a start racing a shutdown, which the caller
  * serializes (init, live_start, shutdown and live_stop are never concurrent). */
 int ps3dk_prof__shutdown_claimed(void);
+/* Immutable format fact published with a successful FILE capture. Zero before
+ * publication and for append/callback sinks; no path-suffix inference. */
+int ps3dk_prof__capture_rolling(void);
 #endif

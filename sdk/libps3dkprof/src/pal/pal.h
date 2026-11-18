@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "../rolling/roll_retention_inspect.h"
 
 /* The PAL keeps short names in the source; the archive exports them only under the reserved ps3dk_prof__ prefix. */
 #define pal_alloc ps3dk_prof__pal_alloc
@@ -104,6 +105,16 @@ int pal_open_rw_excl(const char *path, int *fd, int *err);
 long pal_read(int fd, void *buf, unsigned long n, int *err);
 int pal_rewind(int fd, int *err);
 int pal_sync(int fd, int *err);
+#define pal_retain_complete ps3dk_prof__pal_retain_complete
+#define pal_retain_complete_kind ps3dk_prof__pal_retain_complete_kind
+/* Cold path after successful FILE close; an error keeps the current capture.
+ * Only files this opt-in protocol recorded as completed can be removed. */
+int pal_retain_complete(const char *path, const char *app, uint64_t session, unsigned keep);
+/* One completion order across PROF=1 and PROFR=2. Runtime semantic completion,
+ * successful close/join and result OK remain caller preconditions. Rolling
+ * inspection needs explicit limits, including when pruning an older PROFR. */
+int pal_retain_complete_kind(const char *path, const char *app, uint64_t session,
+                             unsigned keep, uint32_t format, const pfi_limits *limits);
 /* The errno-class codes the core compares *err against come from the platform's own errno.h, in every build, so
  * the host and LV2 builds each compare against their own values (review 2026-10-22 02:49, O2). */
 #define PAL_EINTR EINTR

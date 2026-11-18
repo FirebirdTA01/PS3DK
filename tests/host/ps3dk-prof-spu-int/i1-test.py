@@ -57,7 +57,7 @@ def build(label, r, extra, spu, test_src, links):
     d.mkdir()
     flags = ['-std=c11', '-O1', '-g', '-pthread', '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS',
              *inc, *warn, *extra]
-    srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'pal/pal_host.c', test_src]
+    srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'pal/pal_host.c', lib / 'rolling/roll_file.c', lib / 'rolling/roll_retention_inspect.c', lib / 'rolling/roll_store.c', test_src]
     if (lib / 'core/prof_version.c').exists():  # absent from a base tree that predates the member
         srcs.append(lib / 'core/prof_version.c')
     if '-DPS3DK_PROF_WITH_ARCS' in extra:

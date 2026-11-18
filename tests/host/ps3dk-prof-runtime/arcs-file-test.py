@@ -48,7 +48,7 @@ if a.sanitize:
     flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-ftls-model=local-exec']
 exe = out / 'file-test'
 r = run('compile', [os.environ.get('CC', 'cc'), *flags, src / 'core/prof_arcs_file.c',
-                    src / 'pal/pal_host.c', here / 'arcs_file_test.c', '-o', exe])
+                    src / 'pal/pal_host.c', src / 'rolling/roll_file.c', src / 'rolling/roll_retention_inspect.c', src / 'rolling/roll_store.c', here / 'arcs_file_test.c', '-o', exe])
 assert r.returncode == 0, r.stderr.decode()
 cases = ['normal', 'empty', 'invalid', 'path-boundary', 'trailing', 'path-boundary-trailing', 'root-path',
          'collision-spool', 'collision-output',
@@ -80,7 +80,7 @@ if passed != len(cases) or a.red:
     raise SystemExit(passed != len(cases))
 if a.reader:
     exe = out / 'file-integration'
-    sources = ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'hooks/arcs.c',
+    sources = ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c', 'hooks/arcs.c',
                'core/prof_arcs_stream.c', 'core/prof_arcs_export.c', 'core/prof_arcs_file.c']
     r = run('integration-compile', [os.environ.get('CC', 'cc'), *flags,
             '-DPS3DK_PROF=1', '-DPS3DK_PROF_WITH_ARCS=1', '-DPS3DK_PROF_TEST_HOOKS',

@@ -17,6 +17,10 @@
 		/* The Cell target compiler calls compact [entry32, toc32] descriptors.
 		 * A real call gives it ownership of argument homes and saved state,
 		 * and exposes the callback's context updates to the optimizer. */
+#ifdef PS3TC_PROF_AUTO
+        extern void ps3dk_prof__fifo_account_check_context(void *);
+        ps3dk_prof__fifo_account_check_context(context);
+#endif
 		return context->callback(context, count);
 	}
 	

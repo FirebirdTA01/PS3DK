@@ -22,6 +22,7 @@ shutil.copyfile(root / 'sdk/include/ps3dk/prof.h', inc / 'prof.h')
 src = root / 'sdk/libps3dkprof/src'
 here = Path(__file__).parent
 sources = [src / 'core/prof_core.c', src / 'core/prof_drain.c', src / 'core/prof_version.c', src / 'pal/pal_host.c',
+           src / 'rolling/roll_file.c', src / 'rolling/roll_retention_inspect.c', src / 'rolling/roll_store.c',
            src / 'live/live_agent.c', src / 'live/live_os_host.c', src / 'live/live_api.c', here / 'live_trigger_test.c']
 cc = os.environ.get('CC', 'cc')
 base = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread', '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST',

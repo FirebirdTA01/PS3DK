@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(hello-ppu-gcm-call-return C)
 include(ps3-self)
+set(GCM_SEG_RING_FRAME_COUNT 30 CACHE STRING "Bounded frame count for the ring retention probe (1..2000)")
+if(NOT GCM_SEG_RING_FRAME_COUNT MATCHES "^[0-9]+$" OR
+   GCM_SEG_RING_FRAME_COUNT LESS 1 OR GCM_SEG_RING_FRAME_COUNT GREATER 2000)
+    message(FATAL_ERROR "GCM_SEG_RING_FRAME_COUNT must be between 1 and 2000")
+endif()
 
 # One SELF per variant.  The default runs only main-memory segments (plus the
 # overflow refusal, which issues no CALL); -local checks that a segment in
@@ -19,7 +24,8 @@ foreach(variant "" "-local" "-large" "-jump" "-ring")
         target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_JUMP=1)
     elseif(variant STREQUAL "-ring")
         # owner-buffer clears above the local report ceiling, for the AUTO report ring (inert unless profiled)
-        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_RING=1)
+        target_compile_definitions(${t} PRIVATE GCM_SEG_VARIANT_RING=1
+            GCM_SEG_RING_FRAME_COUNT=${GCM_SEG_RING_FRAME_COUNT})
     else()
         set(id GCMS00001)
     endif()

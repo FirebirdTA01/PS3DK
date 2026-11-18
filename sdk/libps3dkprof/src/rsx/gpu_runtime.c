@@ -607,6 +607,12 @@ int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32
         return PS3DK_PROF_ENOTINIT;
     if (!p->gpu_max)
         return PS3DK_PROF_ENOTSUP;
+#ifdef P_ROLLING_RUNTIME
+    /* The private rolling profile retains managed AUTO operations, not the
+     * manual GPU zone/calibration protocol. Refuse before claiming resources. */
+    if (p->rolling)
+        return PS3DK_PROF_ENOTSUP;
+#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
     dev = (const prg_port *)ps3dk_prof_test_hooks.gpu_port;
     gdev = (const gpp_dev *)ps3dk_prof_test_hooks.gpu_gpp_dev;

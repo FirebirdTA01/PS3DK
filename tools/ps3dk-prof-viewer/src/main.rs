@@ -11,10 +11,10 @@ fn main() -> eframe::Result<()> {
         println!("ps3dk-prof-viewer {}", ps3dk_version::VERSION);
         return Ok(());
     }
-    // ps3dk-prof-viewer [--page=overview|timeline|zones|frames|paths|waits] [--view=START:LEN]
+    // ps3dk-prof-viewer [--page=overview|timeline|zones|frames|paths|waits|rolling] [--view=START:LEN]
     //                   [--graph=bars|lines|distribution|map]
     //                   [--connect=IP:PORT] [--capture-dir=DIR] [--min-size]
-    //                   [capture.prof]
+    //                   [capture.prof | rolling.profr]
     // --view sets the timeline window in ticks from the capture start (for
     // screenshots and bug reports); --connect starts a live session at once,
     // as the Connect dialog would, saving captures in the default folder.
@@ -29,7 +29,10 @@ fn main() -> eframe::Result<()> {
         let (t0, dt) = a.strip_prefix("--view=")?.split_once(':')?;
         Some((t0.parse::<f64>().ok()?, dt.parse::<f64>().ok()?))
     });
-    let page = if args.iter().any(|a| a == "--page=zones") {
+    let explicit_page = args.iter().any(|a| a.starts_with("--page="));
+    let page = if args.iter().any(|a| a == "--page=rolling") {
+        Page::Rolling
+    } else if args.iter().any(|a| a == "--page=zones") {
         Page::Zones
     } else if args.iter().any(|a| a == "--page=timeline") {
         Page::Timeline
@@ -103,7 +106,10 @@ fn main() -> eframe::Result<()> {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
             let mut app = App::new(open);
-            app.page = page;
+            // Without --page the open decides (a rolling file opens on its own page).
+            if explicit_page {
+                app.page = page;
+            }
             app.screenshot = screenshot;
             if let Some(g) = graph {
                 app.frames.mode = g;

@@ -74,6 +74,9 @@ static void ps3tc_fifo_publish_after(void *arg, uint32_t frontier)
  * all on the context owner thread (the bridge's precondition), so plain
  * fields suffice. */
 static ps3tc_fifo_obs_state g_obs;
+static const void *g_account_begin, *g_account_end;
+static uint32_t g_account_begin_off;
+static gcmControlRegister volatile *g_account_control;
 
 static uint64_t ps3tc_fifo_tb(void *arg)
 {
@@ -259,9 +262,15 @@ int ps3tc_fifo_observe_install(struct _gcmCtxData *ctx, const ps3tc_fifo_observe
         return -1;
     if (gcmAddressToOffset((void *)ctx->begin, &b) != 0 || gcmAddressToOffset((void *)ctx->end, &e) != 0)
         return -1;
-    return ps3tc_fifo_obs_install(&g_obs, ctx, obs, b, e,
+    int rc = ps3tc_fifo_obs_install(&g_obs, ctx, obs, b, e,
                                   (uint64_t)((uintptr_t)(void *)ctx->end - (uintptr_t)(void *)ctx->begin),
                                   begin_off, end_off);
+    if (rc == 0) {
+        g_account_begin = ctx->begin; g_account_end = ctx->end;
+        g_account_begin_off = b;
+        g_account_control = gcmGetControlRegister();
+    }
+    return rc;
 }
 
 int ps3tc_fifo_observe_remove(struct _gcmCtxData *ctx, const ps3tc_fifo_observer *obs)
@@ -269,5 +278,22 @@ int ps3tc_fifo_observe_remove(struct _gcmCtxData *ctx, const ps3tc_fifo_observer
     return ps3tc_fifo_obs_remove(&g_obs, ctx, obs);
 }
 
+int ps3tc_fifo_observe_account_snapshot(struct _gcmCtxData *ctx, uint32_t *current, uint32_t *put)
+{
+    uintptr_t c, b, e;
+    if (!ctx || !current || !put || !g_obs.reg.event || g_obs.ctx != ctx || !g_account_control ||
+        ctx->callback != (gcmContextCallback)(uintptr_t)lv2_fn_to_callback_ea(ps3tc_fifo_wrap_callback) ||
+        ctx->begin != g_account_begin) return -1;
+#ifdef PS3TC_PROF_AUTO
+    if (!ps3dk_prof__auto_fifo_end_known(ctx, g_account_end, ctx->end)) return -1;
+#else
+    if (ctx->end != g_account_end) return -1;
+#endif
+    c = (uintptr_t)(void *)ctx->current; b = (uintptr_t)g_account_begin; e = (uintptr_t)(void *)ctx->end;
+    if (((c | e) & 3u) || e < b || e > (uintptr_t)g_account_end || c < b || c > e) return -1;
+    *current = g_account_begin_off + (uint32_t)(c - b);
+    *put = g_account_control->put;
+    return 0;
+}
 uint64_t ps3tc_fifo_observe_suppressed(void) { return g_obs.suppressed; }
 #endif

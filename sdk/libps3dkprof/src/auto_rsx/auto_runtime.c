@@ -48,7 +48,14 @@ static int end_clean(const auto_capture *a, uintptr_t end)
  * registered physical end is the attach-time end. Only then the shared predicate decides. */
 int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end)
 {
-    const auto_capture *a=capture;
+    const auto_capture *a;
+    /* Acquire published FIFO ownership before reading capture: an init-time
+     * override can still replace it. Preserve the accounting bridge guards. */
+    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED ||
+        g_tls.slot1 != g_fifo.owner_slot + 1u || g_tls.incarnation != g_fifo.owner_inc ||
+        g_tls.generation != g_fifo.owner_gen || g_tls.acked || g_tls.retired || g_tls.in_drain)
+        return 0;
+    a=capture;
     if(!a || !ctx || (void *)a->context!=ctx) return 0;
     if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||
        a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation) return 0;
@@ -404,6 +411,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
          * Keep its capture/lease alive; only the unpublished FIFO is cancelled. */
         return PS3DK_PROF_ESTOPPED;
     }
+    ps3dk_prof__fifo_account_native_start(gc);
     *instance=1;*domain=id;
     return PS3DK_PROF_OK;
 fail:
@@ -1579,6 +1587,7 @@ void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontie
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 {
     if(!context || !p_ready()) return;
+    ps3dk_prof__fifo_account_unknown(context);
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,1);
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
 #ifdef PS3DK_PROF_AUTO_RING
@@ -1684,6 +1693,7 @@ static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame)
         frame_mark(a,AUTO_FRAME_END);
     }
     if(!auto_frames_close(&a->coverage,owner,frame,observation_tb(),0)) return 0;
+    ps3dk_prof__fifo_account_native_end(a->context,owner,frame,ps3dk_prof__fifo_owner_window());
     if(frame%64u==63) sample_clock(a,frame);
     return 1;
 }
