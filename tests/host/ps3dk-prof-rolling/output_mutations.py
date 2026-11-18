@@ -12,10 +12,10 @@ CASES = [
     ("wrong_trailer_kind", "short", "pfo_accept(f.out,status,24)==PFR_OK", [
         ("#define TRAILER 6u", "#define TRAILER 7u")]),
     ("rotate_before_preflight", "refused", "calls==f.m->writes+f.m->syncs", [
-        ("    memset(&prepared,0,sizeof prepared);", "    if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}\n    memset(&prepared,0,sizeof prepared);")]),
+        ("    rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;", "    if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}\n    rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;")]),
     ("ack_before_commit", "faults", "a.accepted_next_chunk==b.accepted_next_chunk", [
-        ("if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}",
-         "if(n>o->b.payload_capacity-o->v.pending_bytes){o->v.accepted_next_chunk=next;o->v.accepted_payload_bytes=bytes;rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}")]),
+        ("if(n>o->b.payload_capacity-o->v.pending_bytes||(pressure&&o->v.pending_bytes)){",
+         "if(n>o->b.payload_capacity-o->v.pending_bytes||(pressure&&o->v.pending_bytes)){o->v.accepted_next_chunk=next;o->v.accepted_payload_bytes=bytes;")]),
     ("checkpoint_after_payload", "rotations", "r64(seg.checkpoint)==seg.first_chunk", [
         ("pfr_commit(o->store,o->b.checkpoints[0],o->start_bytes,o->b.payload,o->v.pending_bytes)",
          "pfr_commit(o->store,o->b.checkpoints[1],o->accepted_bytes,o->b.payload,o->v.pending_bytes)")]),
@@ -29,8 +29,8 @@ CASES = [
     ("accept_aliased_input", "inputs", "pfo_accept(f.out,f.payload,24)==PFR_INVALID", [
         ("||!separate(o,raw,n)", "||(!separate(o,raw,n)&&!raw)")]),
     ("ignore_checkpoint_growth", "refused", "pfo_accept(f.out,p,24)!=PFR_OK", [
-        ("if(prepared.checkpoint_bytes>o->b.checkpoint_capacity)return stopping(o,PFR_CHECKPOINT_BYTES);",
-         "if(prepared.checkpoint_bytes>o->b.checkpoint_capacity)prepared.checkpoint_bytes=o->accepted_bytes;")]),
+        ("if(prepared->checkpoint_bytes>o->b.checkpoint_capacity)return stopping(o,PFR_CHECKPOINT_BYTES);",
+         "if(prepared->checkpoint_bytes>o->b.checkpoint_capacity)prepared->checkpoint_bytes=o->accepted_bytes;")]),
 ]
 
 def main():

@@ -21,15 +21,15 @@ import tomllib
 
 sys.dont_write_bytecode = True
 PINS = {
-    "tools/ps3dk-prof/src/rolling_auto.rs": "7400d5a8fc2c11aceeafab81ffffd51e505d0b2539a3f1bda7588edff800af1b",
-    "tools/ps3dk-prof/src/auto_rsx.rs": "de2fe9aa337b55ee613dfba11322bd2ee88ac3bbf233335434a7dbce49db9bb8",
-    "tools/ps3dk-prof/src/rolling_combined.rs": "a1b4d34ecb502cfb44f8dd9c0c6b6c2293442ada84640905227a41b6af6da9f5",
-    "tools/ps3dk-prof/src/rolling_combined_families.rs": "2413aa5cc43702686f20581f4bba620a16c520e4becd1e9e320c7530ada96bf3",
-    "tools/ps3dk-prof/tests/rolling_auto_ring.rs": "849f4dc947766fe7269ae17ab961de78bf6370cf5551820d6535c64f9a014744",
-    "tools/ps3dk-prof/tests/common/mod.rs": "017b82c022e5cc48fc28200ef03a715694a6d494326f061e3f2d55b5472f86ce",
-    "tools/ps3dk-prof/tests/fifo_support/mod.rs": "85499b092bd730184c938f5bc02d8e7f5f425c3502d048dc2079312fcf7dbed7",
-    "tools/ps3dk-prof/tests/combined_auto_support/mod.rs": "0d9c924347dbf994c1e69e115be4781462d7dfc105feed6c4f39a231d9b17fec",
-    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": "0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece",
+    "tools/ps3dk-prof/src/rolling_auto.rs": 'cde2c1bb4dd8ec9fe90925c6f5b911ec42f2bd6664dfc0d344acd22694bec1d0',
+    "tools/ps3dk-prof/src/auto_rsx.rs": 'd8b622344804fcfb6f5b22fc97ae929ab6237b6a2b58bb3160747bddf7dd8380',
+    "tools/ps3dk-prof/src/rolling_combined.rs": '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
+    "tools/ps3dk-prof/src/rolling_combined_families.rs": 'c12ee3549813d5d970b45a921bf01aa370754b634c47a8d5761e492793ce10de',
+    "tools/ps3dk-prof/tests/rolling_auto_ring.rs": '849f4dc947766fe7269ae17ab961de78bf6370cf5551820d6535c64f9a014744',
+    "tools/ps3dk-prof/tests/common/mod.rs": '017b82c022e5cc48fc28200ef03a715694a6d494326f061e3f2d55b5472f86ce',
+    "tools/ps3dk-prof/tests/fifo_support/mod.rs": '85499b092bd730184c938f5bc02d8e7f5f425c3502d048dc2079312fcf7dbed7',
+    "tools/ps3dk-prof/tests/combined_auto_support/mod.rs": 'aeda010c8eca42b020f79c754a0279765f6f90f474b54326c04756016a80d993',
+    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": '0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece',
 }
 AUTO = "tools/ps3dk-prof/src/rolling_auto.rs"
 SHARED = "tools/ps3dk-prof/src/auto_rsx.rs"

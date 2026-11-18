@@ -82,7 +82,12 @@ fn verify_container(f:&File,o:Options,bytes:&[u8])->rolling_store::View {
     }
     if store.segments.is_empty(){assert!(matches!(rolling_file::read_ppu(bytes,store_limits(),limits(o)),Err(rolling_file::Error::EmptyStore)));}
     else{
-        let joined=rolling_file::read_ppu(bytes,store_limits(),limits(o)).expect("all retained PPU segments join canonically");
+        // TRAILER consumes reader analysis space, but no writer metadata slot.
+        // Add only the terminal bytes actually present in the retained range.
+        let mut analysis=limits(o);
+        analysis.metadata_bytes+=f.chunks[store.view.first_chunk as usize..store.view.next_chunk as usize]
+            .iter().filter(|c|c.ty==T_TRAILER).map(|c|c.payload.len()+24).sum::<usize>();
+        let joined=rolling_file::read_ppu(bytes,store_limits(),analysis).expect("all retained PPU segments join canonically");
         assert_eq!((joined.retained.first_chunk,joined.retained.next_chunk,joined.retained.prefix_bytes),
             (store.view.first_chunk,store.view.next_chunk,store.view.evicted_payload_bytes));
     }
@@ -168,7 +173,7 @@ fn actual_c_ppu_output_pending_bootstrap_and_empty_flush_are_explicit() {
 fn actual_c_ppu_output_every_cap_stops_before_candidate_and_preserves_tail() {
     let f=resources();let bytes=f.bytes();let base=Options{flush_each:0,..Default::default()};
     let k=(0..f.chunks.len()).map(|i|rolling::checkpoint_ppu(&bytes[..offset(&f,i)],limits(base)).unwrap().len()).max().unwrap() as u32;
-    let m=f.chunks.iter().filter(|c|c.ty!=T_RECORDS).map(|c|c.payload.len()+24).sum::<usize>() as u32;
+    let m=f.chunks.iter().filter(|c|!matches!(c.ty,T_RECORDS|T_TRAILER)).map(|c|c.payload.len()+24).sum::<usize>() as u32;
     let exact=Options{cfg:[2,3,2,1,m,k],..base};let accepted=run(&f,exact,"exact capacities");verify(&accepted,&f,exact);assert_eq!(signed(&accepted.trace,"stop_rc"),0);
     for (field,value,reason) in [(0,1,3),(1,2,3),(2,1,2),(3,0,3),(4,m-1,4),(5,k-1,1)] {
         let mut o=exact;o.cfg[field]=value;let got=run(&f,o,&format!("resource field {field}, late candidate row remains unaccepted"));let v=verify(&got,&f,o);

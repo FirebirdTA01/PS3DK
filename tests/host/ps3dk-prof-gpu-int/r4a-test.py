@@ -26,6 +26,9 @@ usage: r4a-test.py OUT --reader READER"""
 import argparse
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 import shutil
 import struct
 import subprocess
@@ -248,8 +251,7 @@ def tsan_reports(tag, src, extra):
 
 
 tsan_reports('plain-executor', lib, ['-DR4A_PLAIN_EXEC'])
-nb = out / 'src-seam-bypass'
-shutil.copytree(lib, nb)
+nb = copy_runtime(lib, out / 'seam-bypass')
 p = nb / 'rsx/gpu_port_gcm.c'
 s = p.read_text()
 old = '#define GPP_LD32(pc, a) ((pc)->dev->ld32(a))'
@@ -342,20 +344,20 @@ MUT = [
 ]
 for name, f, old, new, mode_c, case, text in MUT:
     md = out / f'mut-{name}'
-    shutil.copytree(lib, md / 'src')
+    mut_src = copy_runtime(lib, md / 'runtime')
     harness = None
     if f == 'HARNESS':
         harness = md / 'r4a_int.c'
         shutil.copy(here / 'r4a_int.c', harness)
         p = harness
     else:
-        p = md / 'src' / f
+        p = mut_src / f
     s = p.read_text()
     if s.count(old) != 1:
         row(f'mutant {name}', False, f'edit matched {s.count(old)} times')
         continue
     p.write_text(s.replace(old, new))
-    exe = build(md, md / 'src', mode_c, 'plain', harness=harness)
+    exe = build(md, mut_src, mode_c, 'plain', harness=harness)
     if not exe:
         row(f'mutant {name}', False, 'INVALID: build failed')
         continue

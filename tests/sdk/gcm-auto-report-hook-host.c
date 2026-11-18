@@ -9,6 +9,8 @@
 
 #ifdef PS3TC_PROF_AUTO
 static unsigned calls, kinds[4], indices[4];
+/* Context accounting is orthogonal to the report-resource hook under test. */
+void ps3dk_prof__fifo_account_check_context(void *ctx) { if (!ctx) abort(); }
 #ifdef __cplusplus
 extern "C"
 #endif

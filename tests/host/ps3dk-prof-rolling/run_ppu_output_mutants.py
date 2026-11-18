@@ -22,14 +22,15 @@ ROOT = HERE.parents[2]
 IMPL = ROOT / 'sdk/libps3dkprof/src/rolling'
 RUST = ROOT / 'tools/ps3dk-prof/tests/rolling_ppu_c_output.rs'
 PINS = {
-    'roll_output.c': '8e54c64c83cc9242e36dd9d555a88af82af715975bdb6973946abccb5feed787',
+    'roll_output.c': 'e89b59db4399461d336bef56de21d4a53236e48358500723fe3437a3315a73fb',
     # Verified shared-family extraction: standalone pfp_prepare still calls
     # core_accept(external_metadata=0), then the same PFRCKP01 envelope;
     # core_sections(counts=NULL) preserves standalone 120-byte lane rows.
-    # All eight mutation sites remain in unchanged roll_output.c.
-    'roll_ppu.c': '37c3dc29c1a486c69816840ee34c3132be570b25a2785920675052a64a052245',
-    'roll_ppu_internal.h': '6282c7128aeee1fcc738cb62b0c2977acbe180b8114d408a86469476f5859230',
-    'roll_store.c': '4ce68eadd1f52a5307d90b211dc93abe2b497440df489da34b22767bd578951d',
+    # Candidate preflight moved to a helper and rotation gained support pressure;
+    # the mutations below still violate the same eight ownership boundaries.
+    'roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
+    'roll_ppu_internal.h': '2f0515bb61c2fc71630e49e83efee3f36cb58ac396f3b53195d2880280d24fa0',
+    'roll_store.c': '849c0dbc3b390cbfbff7c653e08041cde8a83de28000eca40eae1f31bd3b5c01',
 }
 PREFIX = 'actual_c_ppu_output_'
 ROTATE = PREFIX + 'rotates_and_preserves_useful_retained_spans'
@@ -59,17 +60,19 @@ def read_bounded(path, cap=1048576):
 
 
 def specifications():
-    rotation = 'if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}'
+    rotation = 'if(n>o->b.payload_capacity-o->v.pending_bytes||(pressure&&o->v.pending_bytes)){\n        rc=pfo_flush(o);if(rc!=PFR_OK)return rc;'
     return [
         ('acknowledge_failed_rotation', FAULT, 'C_SEMANTIC[accepted-state-immutable]', [
-            (rotation, 'if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK){'
-             'o->v.accepted_next_chunk=next;o->v.accepted_payload_bytes=bytes;return rc;}}')]),
+            (rotation, 'if(n>o->b.payload_capacity-o->v.pending_bytes||(pressure&&o->v.pending_bytes)){\n        rc=pfo_flush(o);if(rc!=PFR_OK){'
+             'o->v.accepted_next_chunk=next;o->v.accepted_payload_bytes=bytes;return rc;}')]),
         ('successor_as_segment_start', ROTATE, 'SEMANTIC[checkpoint-precedes-payload]', [
             ('rc=pfr_commit(o->store,o->b.checkpoints[0],o->start_bytes,o->b.payload,o->v.pending_bytes);',
              'if(!o->v.terminal){memcpy(o->b.checkpoints[0],o->b.checkpoints[1],o->accepted_bytes);o->start_bytes=o->accepted_bytes;}\n'
              '    rc=pfr_commit(o->store,o->b.checkpoints[0],o->start_bytes,o->b.payload,o->v.pending_bytes);')]),
         ('rotate_before_resource_preflight', CAPS, 'C_SEMANTIC[refused-pending-immutable]', [
-            ('memset(&prepared,0,sizeof prepared);', rotation + '\n    memset(&prepared,0,sizeof prepared);')]),
+            ('    rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;',
+             '    if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}\n'
+             '    rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;')]),
         ('skip_resource_tail_flush', CAPS, 'SEMANTIC[resource-tail-before-terminal]', [
             ('rc=pfo_flush(o);if(rc!=PFR_OK)return rc;\n    rc=pfr_get_view(o->store,&v);',
              'if(o->v.phase!=PFO_STOPPING){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}\n    rc=pfr_get_view(o->store,&v);')]),

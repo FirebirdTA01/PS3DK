@@ -21,16 +21,16 @@ import tomllib
 
 sys.dont_write_bytecode = True
 PINS = {
-    "tools/ps3dk-prof/src/rolling_auto.rs": "7400d5a8fc2c11aceeafab81ffffd51e505d0b2539a3f1bda7588edff800af1b",
-    "tools/ps3dk-prof/src/auto_rsx.rs": "de2fe9aa337b55ee613dfba11322bd2ee88ac3bbf233335434a7dbce49db9bb8",
-    "tools/ps3dk-prof/tests/rolling_auto.rs": "c808139f94b17aed6e75258a78003ff78281a9b9f0c48273b5e33ce9aca3bbf8",
-    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": "0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece",
+    "tools/ps3dk-prof/src/rolling_auto.rs": 'cde2c1bb4dd8ec9fe90925c6f5b911ec42f2bd6664dfc0d344acd22694bec1d0',
+    "tools/ps3dk-prof/src/auto_rsx.rs": 'd8b622344804fcfb6f5b22fc97ae929ab6237b6a2b58bb3160747bddf7dd8380',
+    "tools/ps3dk-prof/tests/rolling_auto.rs": 'e37e3dd5c9647e881a97b0854c24bca21851cd25c6acd9dcab755357114d8f46',
+    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": '0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece',
 }
 AUTO = "tools/ps3dk-prof/src/rolling_auto.rs"
 SHARED = "tools/ps3dk-prof/src/auto_rsx.rs"
 TEST = "tools/ps3dk-prof/tests/rolling_auto.rs"
 SUPERVISOR = "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py"
-TEST_COUNT = 29
+TEST_COUNT = 30
 MAX_INPUT_FILES = 512
 MAX_INPUT_BYTES = 32 << 20
 MAX_OUTPUT_BYTES = 2 << 30
@@ -66,37 +66,37 @@ def controls(inputs):
             (AUTO, "if contains(&r.boundary_frames,key){unavailable.push(Unavailable::BoundaryExecution);}", "// MUTANT: omit execution boundary qualifier")]),
         ("m05_fifo_boundary_zero", "prefix_fifo_wait_does_not_become_zero_when_coverage_is_retained", 192, None, [
             (AUTO, "f.boundary_frames.iter().any(|r|r.owner==key.0 && r.first<=key.1 && key.1<=r.last)", "false")]),
-        ("m06_status_snapshot_feasibility", "saved_provisional_status_uses_its_snapshot_not_newer_prefix_census", 273, None, [
+        ("m06_status_snapshot_feasibility", "saved_provisional_status_uses_its_snapshot_not_newer_prefix_census", 291, None, [
             (AUTO, 'if snapshot.iter().zip(current).any(|(p,c)|*p>c) || (snapshot[0]==ops && (snapshot[3]!=last_op || snapshot[4]!=max_snapshot)) && status_len!=0{return ck("STATUS snapshot bounds");}', '// MUTANT: omit STATUS upper/census bounds'),
             (AUTO, " || snapshot[3]<snapshot[0]", ""),
             (AUTO, 'ops.checked_sub(snapshot[0]).ok_or(Error::Checkpoint("STATUS operation split"))?', 'ops.saturating_sub(snapshot[0])')]),
         ("m07_exact_source_final", final, 150, None, [
             (SHARED, "if !ops_ok || !frames_ok || n[10] != self.result.clocks_parsed {", "if false {")]),
-        ("m08_bootstrap_identity", "changed_bootstrap_and_unavailable_owner_cannot_seed_restart", 235, None, [
+        ("m08_bootstrap_identity", "changed_bootstrap_and_unavailable_owner_cannot_seed_restart", 253, None, [
             (AUTO, 'if current_boot.len()<bootstrap.len() || current_boot[..bootstrap.len()]!=bootstrap{return Err(Error::Context("bootstrap identity"));}', '// MUTANT: ignore original bootstrap identity')]),
-        ("m09_schema_version_and_canonical_guard", schema, 316, "accepted mutation at 8", [
+        ("m09_schema_version_and_canonical_guard", schema, 334, "accepted mutation at 8", [
             (AUTO, "2=>RING_CHECKPOINT_FIXED", "2=>CHECKPOINT_FIXED"),
             (AUTO, 'if encode(&s,l,m)?.as_slice()!=b{return ck("noncanonical checkpoint");}', 'let _ = encode(&s,l,m)?; // MUTANT: omit canonical comparison')]),
-        ("m10_operation_id_feasibility", schema, 316, "accepted mutation at 64", [
+        ("m10_operation_id_feasibility", schema, 334, "accepted mutation at 64", [
             (AUTO, " || last_op<ops", "")]),
-        ("m11_byte_census", schema, 316, "accepted mutation at 144", [
+        ("m11_byte_census", schema, 334, "accepted mutation at 144", [
             (AUTO, " || bytes!=u128::from(get64(b,144))", "")]),
-        ("m12_chunk_census", schema, 316, "accepted mutation at 152", [
+        ("m12_chunk_census", schema, 334, "accepted mutation at 152", [
             (AUTO, "chunks!=u128::from(get64(b,152)) || ", "")]),
-        ("m13_historical_work_census", schema, 316, "accepted mutation at 32", [
+        ("m13_historical_work_census", schema, 334, "accepted mutation at 32", [
             (AUTO, " || history!=u128::from(get64(b,32))", "")]),
-        ("m14_actual_work_limit", budget, 226, None, [
+        ("m14_actual_work_limit", budget, 244, None, [
             (AUTO, 'if n>u128::from(self.left) || n>u128::from(self.outer.remaining()) {return Err(Error::Limit("actual work"));}\n        self.left-=n as u64;self.outer.used+=n as u64;Ok(())',
              'self.outer.used=self.outer.used.saturating_add(n as u64);Ok(())')]),
-        ("m15_checkpoint_byte_admission", budget, 223, None, [
+        ("m15_checkpoint_byte_admission", budget, 241, None, [
             (AUTO, " || bytes+340>l.checkpoint_bytes as u128", ""),
             (AUTO, "size>l.checkpoint_bytes as u128 || ", ""),
             (AUTO, 'if n>l.checkpoint_bytes as u128{return Err(Error::Limit("checkpoint bytes"));}', '// MUTANT: omit encoded-byte cap\n')]),
-        ("m16_anchor_support_limit", budget, 221, None, [
+        ("m16_anchor_support_limit", budget, 239, None, [
             (AUTO, 'if i.kind==38 && self.clocks.len()>=l.anchors{return Err(Error::Limit("anchors"));}', '// MUTANT: omit anchor support cap')]),
-        ("m17_original_full_mask", "all_ten_bit_full_masks_are_either_preserved_or_explicitly_unsupported", 297, None, [
+        ("m17_original_full_mask", "all_ten_bit_full_masks_are_either_preserved_or_explicitly_unsupported", 315, None, [
             (AUTO, "put32(&mut b,44,get32(&s.header,12));", "put32(&mut b,44,get32(&s.header,12)&!64);")]),
-        ("m18_short_ring_config_classification", "old_negotiated_config_forms_preserve_identity_and_short_ring_config_refuses", 245, None, [
+        ("m18_short_ring_config_classification", "old_negotiated_config_forms_preserve_identity_and_short_ring_config_refuses", 263, None, [
             (AUTO, 'if i.kind==34 && i.payload.len()==216{', 'if i.kind==34 && i.payload.len()==160 && get32(i.payload,24)==2047{return Err(Error::Unsupported(2047));}\n            if i.kind==34 && i.payload.len()==216{')]),
         ("m19_prefix_clock_regression", "failed_prefix_clock_is_preserved_and_regression_disqualifies_map", 206, None, [
             (SHARED, "} else if inv.clocks.iter().any(|a| a.flags == CK_REGRESSION) {", "} else if false {")]),
@@ -104,20 +104,20 @@ def controls(inputs):
             (AUTO, 'if f.first_chunk!=r.first_chunk || f.next_chunk!=r.next_chunk{return Err(Error::Context("FIFO cut/frontier"));}', '// MUTANT: ignore FIFO cut identity')]),
         ("m21_source_final_fence", final, 153, None, [
             (SHARED, "if self.result.final_seen {", "if false {")]),
-        ("m22_status_id_delta_capacity", "status_snapshot_ids_have_capacity_for_every_later_record_not_just_chunks", 379,
+        ("m22_status_id_delta_capacity", "status_snapshot_ids_have_capacity_for_every_later_record_not_just_chunks", 397,
          "two records cannot fit after parsed ID100 through ID101", [
             (AUTO, 'if status_len!=0 && u128::from(ops)+u128::from(snapshot[3])>u128::from(last_op)+u128::from(snapshot[0]){return ck("STATUS operation ID capacity");}', '// MUTANT: omit parsed ID delta capacity')]),
-        ("m23_refused_status_census", "refused_config_status_census_is_zero_or_its_single_final", 399,
+        ("m23_refused_status_census", "refused_config_status_census_is_zero_or_its_single_final", 417,
          "REFUSED has no legal earlier non-final status", [
             (AUTO, 'if matches!(s.reader.result.config,Some(Config::Refused{..})) && statuses>1{return ck("REFUSED STATUS count");}', '// MUTANT: omit REFUSED status count'),
             (AUTO, 'if statuses>index.checked_sub(config_index).ok_or(Error::Checkpoint("STATUS before CONFIG"))?{return ck("STATUS position capacity");}', '// MUTANT: bypass redundant positional rejection for REFUSED witness')]),
-        ("m24_operation_packet_capacity", "one_ops_chunk_cannot_claim_more_rows_than_the_negotiated_wire_capacity", 421,
+        ("m24_operation_packet_capacity", "one_ops_chunk_cannot_claim_more_rows_than_the_negotiated_wire_capacity", 439,
          "one list cannot hold max+1 rows", [
             (AUTO, 'if u128::from(ops)>u128::from(op_chunks)*u128::from(max_rows){return ck("operation packet capacity");}', '// MUTANT: omit list byte capacity')]),
-        ("m25_status_atomic_packet_split", "a_status_cannot_split_one_original_ops_chunk_into_two_sides", 436,
+        ("m25_status_atomic_packet_split", "a_status_cannot_split_one_original_ops_chunk_into_two_sides", 454,
          "one atomic list cannot contain both pre-STATUS and post-STATUS records", [
             (AUTO, 'if u128::from(min_chunks(snapshot[0]))+u128::from(min_chunks(after))>u128::from(op_chunks){return ck("STATUS atomic packet split");}', '// MUTANT: omit atomic packet split')]),
-        ("m26_status_position_capacity", "status_count_fits_after_config_through_its_actual_last_position", 456,
+        ("m26_status_position_capacity", "status_count_fits_after_config_through_its_actual_last_position", 474,
          "two STATUS chunks cannot occupy the single slot after CONFIG", [
             (AUTO, 'if statuses>index.checked_sub(config_index).ok_or(Error::Checkpoint("STATUS before CONFIG"))?{return ck("STATUS position capacity");}', '// MUTANT: omit status position capacity')]),
     ]

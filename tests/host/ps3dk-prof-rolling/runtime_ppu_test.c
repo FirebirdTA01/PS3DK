@@ -128,7 +128,19 @@ static void zone(ps3dk_prof_desc *desc)
     CHECK(z.kind==ZK_PUSHED,"real-zone-admitted");ps3dk_prof_zone_end(&z);
 }
 static void drain_ok(void)
-{CHECK(ps3dk_prof_drain()==PS3DK_PROF_OK,"real-app-drain");CHECK(extent(capture)==physical.file_bytes,"fixed-file-extent-after-drain");}
+{
+    CHECK(ps3dk_prof_drain()==PS3DK_PROF_OK,"real-app-drain");
+    /* This private artifact test controls the retained cut positions. Ordinary
+     * drain passes now batch until byte capacity; they do not commit a slot.
+     * Explicitly flush these chosen cuts rather than restoring drain-per-slot
+     * I/O or weakening the independent Rust span/eviction assertions. */
+#ifdef P_ROLLING_RUNTIME
+    CHECK(p_roll_flush(g_prof)==PS3DK_PROF_OK,"explicit-artifact-cut");
+#else
+    CHECK(0,"gate-off-cannot-reach-rolling-cut");
+#endif
+    CHECK(extent(capture)==physical.file_bytes,"fixed-file-extent-after-drain");
+}
 static void finished(int expected,uint32_t state,uint32_t reason)
 {
     ps3dk_prof_test_rolling_record again;

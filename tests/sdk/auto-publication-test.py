@@ -19,8 +19,11 @@ f=importlib.util.module_from_spec(spec);spec.loader.exec_module(f)
 bodies='\n'.join(f.extract(source,'void RSX_FUNC('+name+')') for name in ('ResetCommandBuffer','FlushBuffer','Finish'))
 protocol=(root/'sdk/libgcm_cmd/src/ps3tc_fifo_wrap_protocol.h').read_text()
 if a.mutant=='flush-before-put':
-    bodies=bodies.replace('ctrl->put = offset;\n#ifdef PS3TC_PROF_AUTO\n\t__sync();\n\tps3dk_prof__auto_publish_after(context,frontier);',
-                          '#ifdef PS3TC_PROF_AUTO\n\t__sync();\n\tps3dk_prof__auto_publish_after(context,frontier);\n\tctrl->put = offset;\n#else\n\tctrl->put = offset;')
+    old='ctrl->put = offset;\n#ifdef PS3TC_PROF_AUTO\n\t__sync();\n\tps3dk_prof__auto_publish_after(context,frontier);\n\tps3dk_prof__fifo_account_native_publish(context,offset);\n#endif'
+    assert bodies.count(old)==1
+    # Keep the FIFO hook inside AUTO in both arms; only move PUT after the
+    # publication hook. The OFF executable is an unchanged positive control.
+    bodies=bodies.replace(old,'#ifdef PS3TC_PROF_AUTO\n\t__sync();\n\tps3dk_prof__auto_publish_after(context,frontier);\n\tctrl->put = offset;\n\tps3dk_prof__fifo_account_native_publish(context,offset);\n#else\n\tctrl->put = offset;\n#endif')
 elif a.mutant=='wrap-phase2-missing':
     protocol=protocol.replace('p->publish_after(p->arg, frontier2);','(void)frontier2;')
 elif a.mutant=='preflush-after-offset':
@@ -41,11 +44,14 @@ typedef uint32_t u32;
 typedef struct _gcmCtxData { uint32_t *begin,*current,*end; } gcmContextData;
 typedef struct { volatile uint32_t get,put,ref; } gcmControlRegister;
 static gcmControlRegister ctrl;
-static unsigned syncs,pre,post,resets,jumps,preflushes;
+static unsigned syncs,pre,post,resets,jumps,preflushes,accounted;
 static uint32_t expected_put,old_put;
 static gcmControlRegister *gcmGetControlRegister(void) { return &ctrl; }
 static int gcmAddressToOffset(uint32_t *p,uint32_t *v) { (void)p;assert(preflushes==TEST_AUTO*(pre+1));*v=expected_put;return 0; }
 void ps3dk_prof__auto_preflush(struct _gcmCtxData *c) { (void)c;assert(!syncs && ctrl.put==old_put);preflushes++; }
+void ps3dk_prof__fifo_account_native_publish(void *c,uint32_t offset) {
+ assert(c && offset==expected_put && ctrl.put==expected_put && post==accounted+1);accounted++;
+}
 static void __sync(void) { ++syncs; }
 static void usleep(unsigned n) { (void)n;ctrl.get=ctrl.put; }
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *c) {
@@ -86,6 +92,7 @@ int main(void) {
  test_FlushBuffer(&c);assert(ctrl.put==16 && pre==TEST_AUTO && post==TEST_AUTO);
  old_put=ctrl.put;expected_put=24;syncs=0;
  test_Finish(&c,42);assert(ctrl.ref==42 && pre==TEST_AUTO*2 && post==TEST_AUTO*2);
+ assert(accounted==TEST_AUTO*2);
  test_ResetCommandBuffer(&c);assert(ctrl.put==0x1000 && ctrl.get==0x1000 && c.current==c.begin);
  assert(resets==TEST_AUTO && jumps==1);
  ctrl.get=ctrl.put=0;

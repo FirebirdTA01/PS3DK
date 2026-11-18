@@ -151,6 +151,10 @@ fn accepted(f: &File, cfg: [u32; 6], label: &str) -> Vec<Vec<u8>> {
     let source = f.bytes(); assert_eq!(f.chunks.last().unwrap().ty, T_TRAILER);
     let full = match load(&source) { Outcome::Analysed(a) => a, Outcome::Malformed(m) => panic!("{label}: invalid independent source: {m}") };
     let l = cfg_limits(cfg);
+    // The writer stores no TRAILER. The independent suffix reader also parses
+    // that terminal chunk, so its analysis allowance includes those bytes.
+    let analysis = rolling::Limits { metadata_bytes: l.metadata_bytes
+        + f.chunks.last().unwrap().payload.len() + 24, ..l };
     let references: Vec<_> = (0..f.chunks.len()).map(|cut|
         rolling::checkpoint_ppu(&source[..offset(f, cut)], l).unwrap_or_else(|e| panic!("{label}: independent cut {cut}: {e:?}"))).collect();
     let (_tmp, out, run) = invoke(f, cfg, label);
@@ -164,7 +168,7 @@ fn accepted(f: &File, cfg: [u32; 6], label: &str) -> Vec<Vec<u8>> {
     for (cut, expected) in references.into_iter().enumerate() {
         let cp = read_bounded(&out.join(format!("cut-{cut:06}.ckp")), cfg[5] as usize);
         assert_eq!(cp, expected, "{label}: canonical C state at cut {cut}");
-        let r = rolling::read_ppu_suffix(&cp, &source[offset(f, cut)..], l)
+        let r = rolling::read_ppu_suffix(&cp, &source[offset(f, cut)..], analysis)
             .unwrap_or_else(|e| panic!("{label}: original suffix at cut {cut}: {e:?}"));
         assert_eq!(r.incomplete, full.capture.incomplete, "{label}: incomplete is not promoted by terminal");
         for (&inc, lane) in &full.capture.lanes {
@@ -350,11 +354,11 @@ fn c_general_ppu_capacity_exact_fit_and_refusal_preserve_accepted_state() {
     let f=original();let bytes=f.bytes();let references:Vec<_>=(0..f.chunks.len()).map(|i|
         rolling::checkpoint_ppu(&bytes[..offset(&f,i)],limits()).unwrap()).collect();
     let required=references.iter().map(Vec::len).max().unwrap() as u32;
-    let metadata=f.chunks.iter().filter(|c|c.ty!=T_RECORDS).map(|c|c.payload.len()+24).sum::<usize>() as u32;
+    let metadata=f.chunks.iter().filter(|c|!matches!(c.ty,T_RECORDS|T_TRAILER)).map(|c|c.payload.len()+24).sum::<usize>() as u32;
     let mut exact=DEFAULT;exact[0]=1;exact[1]=3;exact[2]=2;exact[3]=1;exact[4]=metadata;exact[5]=required;
     accepted(&f,exact,"exact configured successor/metadata/stack/identity capacities");
     for (field,value,reason,label) in [(0,0,3,"incarnation cap"),(1,2,3,"descriptor cap"),(2,1,2,"active stack cap"),
-        (3,0,3,"frame identity cap"),(4,metadata-1,4,"terminal metadata still charged"),(5,required-1,1,"successor checkpoint byte cap")] {
+        (3,0,3,"frame identity cap"),(4,metadata-1,4,"stored metadata one byte short"),(5,required-1,1,"successor checkpoint byte cap")] {
         let mut cfg=exact;cfg[field]=value;
         refused(&f,cfg,&format!("refused (-7,-7), reason {reason}"),label);
     }

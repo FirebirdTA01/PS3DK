@@ -52,19 +52,28 @@ int __wrap_ps3dk_prof__roll_runtime_flush(prof *p)
     int rc;if(!observed_prof)observed_prof=p;
     if(inject_bootstrap_sync){CHECK(!g_prof,"bootstrap-fault-before-publication");inject_bootstrap_sync=0;fail_sync_after=1;}
     rc=__real_ps3dk_prof__roll_runtime_flush(p);
-    if(g_prof==p&&p->cfg.mode==PS3DK_PROF_MODE_THREAD){
-        lock_schedule();
-        /* FRAME + the complete BEGIN/PARENT/END pair and both descriptors must
-         * already be accepted. An earlier frame-only worker pass is not the
-         * useful-prefix barrier, regardless of producer/worker scheduling. */
-        if(prefix_pause&&!prefix_ready&&!rc&&p->dr.written[0]>=4&&p->dr.desc_emitted>=2){
-            CHECK(!pal_depth,"outer-flush-has-no-runtime-locks");prefix_ready=1;changed();
-            while(!prefix_release)CHECK(!pthread_cond_wait(&schedule_cv,&schedule_mutex),"prefix-barrier");
-        }
-        if(rc==PS3DK_PROF_TEST_EROLLRESOURCE){resource_seen=1;changed();}
-        unlock_schedule();
-    }
     return rc;
+}
+/* Size-triggered output no longer flushes on every worker pass. Observe a
+ * resource refusal at accept, without parking while an emitter holds a lock. */
+int __real_ps3dk_prof__roll_runtime_accept(prof *,const void *,size_t);
+int __wrap_ps3dk_prof__roll_runtime_accept(prof *p,const void *data,size_t bytes)
+{
+    int rc=__real_ps3dk_prof__roll_runtime_accept(p,data,bytes);
+    if(rc==PS3DK_PROF_TEST_EROLLRESOURCE){lock_schedule();resource_seen=1;changed();unlock_schedule();}
+    return rc;
+}
+/* The worker's ordinary sleep is after its drain pass and all PAL locks.
+ * Commit exactly the fixture's useful-prefix cut, then park the worker there.
+ * Production still batches every other pass until capacity or shutdown. */
+static void prefix_boundary(prof *p)
+{
+    if(!prefix_pause||prefix_ready||p->dr.written[0]<4||p->dr.desc_emitted<2)return;
+    CHECK(!pal_depth,"outer-flush-has-no-runtime-locks");
+    CHECK(__real_ps3dk_prof__roll_runtime_flush(p)==0,"explicit-lifecycle-prefix-cut");
+    lock_schedule();prefix_ready=1;changed();
+    while(!prefix_release)CHECK(!pthread_cond_wait(&schedule_cv,&schedule_mutex),"prefix-barrier");
+    unlock_schedule();
 }
 static void stop_claimed(uint32_t owner)
 {
@@ -87,6 +96,8 @@ void __wrap_ps3dk_prof__pal_sleep_us(uint64_t us)
     if(us==100&&observed_prof&&observed_prof->rolling){lock_schedule();
         if(hold_owner&&claim_ready&&LD_ACQ(&observed_prof->rolling->stop_owner)&&!LD_ACQ(&observed_prof->rolling->stop_prepared)){stop_wait_seen=1;changed();}
         unlock_schedule();}
+    if(observed_prof&&g_prof==observed_prof&&g_tls.in_drain&&
+       us==observed_prof->cfg.drain_interval_us)prefix_boundary(observed_prof);
     __real_ps3dk_prof__pal_sleep_us(us);
 }
 int __real_ps3dk_prof__pal_thread_join(pal_thread);

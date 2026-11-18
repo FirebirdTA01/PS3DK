@@ -35,8 +35,8 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': '9d9410a1e3666016bad03bd78c8291e228fbab9863ba940c809264c03369fc79',
-    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'd935adf4125e0a3003480bc1eb48eea3197c0e3564285a9eecff4b4d5589f42a',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'd3ef8a105899e764fd15401a4b55127b9fb838f83dd4ebd2f8acdba765307cab',
+    'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'bb7b76245a7134a77281e057138606ea532b3ca59caaaeda04834d9e1cb681ea',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',
 }
@@ -132,8 +132,8 @@ def specifications():
              '(uint32_t)head[14] << 16 | (uint32_t)head[15] << 24;\n    r->record.original_flags &= ~6u;')],
              witness=native('rotation', 'whole-original-flags-and-result')),
         dict(name='mask_initial_checkpoint_flags', edits=[(BRIDGE,
-             'if (rc) return PS3DK_PROF_EINVAL;\n    if (pfr_file_bind',
-             'if (rc) return PS3DK_PROF_EINVAL;\n'
+             'if (pfr_file_bind',
+             ''
              '    if (r->selection.kind == P_ROLL_COMBINED) {\n'
              '        uint8_t *bad = (uint8_t *)r->initial;\n'
              '        p_le32(bad + 28, r->record.original_flags & ~6u);\n'

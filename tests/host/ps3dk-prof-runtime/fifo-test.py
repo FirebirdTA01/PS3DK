@@ -14,6 +14,9 @@ persist the open phase's boundaries; `gpuzone` does the same with the wrap insid
 pinned in a GPU call), the realistic held state: the owner holds no profiler mutex across any GCM reserve."""
 import argparse, json, os, shutil, struct, subprocess, zlib
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
 WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
@@ -51,8 +54,7 @@ MUTANTS = {
 if a.mutant:
     rel, edits, want_mode, want_san = MUTANTS[a.mutant]
     assert want_san is None or a.sanitize == want_san, f'mutant {a.mutant} is a {want_san} control'
-    shutil.copytree(src, out / 'source')
-    src = out / 'source'
+    src = copy_runtime(src, out / 'mutant')
     text = (src / rel).read_text()
     for old, new in edits:
         assert text.count(old) == 1, (a.mutant, old)

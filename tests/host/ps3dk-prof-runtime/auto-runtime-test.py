@@ -121,6 +121,9 @@ ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','igno
                                   'preinit-ignored','preinit-after-init','preinit-any-thread','preinit-no-validate',
                                   'preinit-consume-on-fail','preinit-foreign-silent',*RING_MUTANTS])
 a=ap.parse_args()
+if a.reader:
+    # Capture checks run from the capture directory, not the caller's cwd.
+    a.reader=a.reader.resolve(strict=True)
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant in RING_MUTANTS:assert a.case==RING_MUTANTS[a.mutant][0] and not a.sanitize
 elif a.mutant:assert a.case=={'fifo-frame-acquire':'fifoaccount','reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
@@ -470,7 +473,18 @@ for rel in sources:
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
     if a.mutant in RING_MUTANTS and rel==RING_MUTANTS[a.mutant][1]:
         code=source.read_text();old,new=RING_MUTANTS[a.mutant][2:4];assert code.count(old)==1,a.mutant
-        source=out/source.name;source.write_bytes(code.replace(old,new).encode())
+        code=code.replace(old,new)
+        if a.mutant=='end-known-foreign':
+            # FIFO integration added an earlier identity gate. Break the whole
+            # foreign-thread admission boundary, not just its redundant check.
+            guard='''    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED ||
+        g_tls.slot1 != g_fifo.owner_slot + 1u || g_tls.incarnation != g_fifo.owner_inc ||
+        g_tls.generation != g_fifo.owner_gen || g_tls.acked || g_tls.retired || g_tls.in_drain)
+        return 0;
+'''
+            assert code.count(guard)==1
+            code=code.replace(guard,'    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED) return 0;\n')
+        source=out/source.name;source.write_bytes(code.encode())
     run('compile-'+source.stem,[cc,*flags,'-c',source,'-o',obj]);objects.append(obj)
 run('archive-members',['ar','rcsD',out/'members.a',*objects])
 digest=root/'sdk/libps3dkprof/tools/archive_digest.py'
