@@ -93,7 +93,8 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
         ''.join('[[bin]]\nname = "%s"\n' % b for b in rust_bins))
     for name in ['tools/target/release/' + b for b in rust_bins] + [
                  'tools/sprx-linker/sprxlinker',
-                 'tools/rsx-cg-compiler/build/rsx-cg-compiler', 'tools/rsx-cg-compiler/build/cgnv2elf']:
+                 'tools/rsx-cg-compiler/build/rsx-cg-compiler', 'tools/rsx-cg-compiler/build/rsxcg2elf',
+                 'tools/rsx-cg-compiler/build/cgnv2elf']:
         destination = repo / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2('/bin/true', destination)
@@ -111,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
     prefix.mkdir()
     build = scratch / 'build'
     (build / 'host-tools-linux/rsx-cg-compiler').mkdir(parents=True)
-    for tool in ('rsx-cg-compiler', 'cgnv2elf'):
+    for tool in ('rsx-cg-compiler', 'rsxcg2elf', 'cgnv2elf'):
         shutil.copy2('/bin/true', build / 'host-tools-linux/rsx-cg-compiler' / tool)
     env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ['PATH'],
                PS3DEV=str(prefix), PS3_BUILD_ROOT=str(build))
@@ -123,7 +124,12 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
         assert builder.is_file() and os.access(builder, os.X_OK), f"psgl-shader-builder not installed: {builder}"
         ver_res = run([str(builder), '--version'], scratch, env)
         assert ver_res.stdout.strip() == f"psgl-shader-builder {expected_version}", ver_res.stdout
+        archiver = bin_dir / 'rsxcg2elf'
+        assert archiver.is_file() and not archiver.is_symlink(), f"rsxcg2elf not installed: {archiver}"
+        alias = bin_dir / 'cgnv2elf'
+        assert alias.is_symlink() and os.readlink(alias) == 'rsxcg2elf', f"cgnv2elf alias not a link to rsxcg2elf: {alias}"
     print('linux-pkg: PASS installer supplies working pkg and psgl-shader-builder in both prefixes')
+    print('linux-pkg: PASS installer links cgnv2elf to rsxcg2elf in both prefixes')
 
     # Execute the actual release build/staging bodies, including tar creation.
     run(['bash', '-euo', 'pipefail', '-c', release_step('Build pkg')], repo, env)
@@ -144,8 +150,14 @@ with tempfile.TemporaryDirectory(prefix='linux pkg install ') as directory:
         extracted_builder.chmod(0o755)
         ver_res = run([str(extracted_builder), '--version'], scratch, env)
         assert ver_res.stdout.strip() == f"psgl-shader-builder {expected_version}", ver_res.stdout
+
+        archiver_member = package.getmember('ps3-sdk-tools-test-linux-x86_64/bin/rsxcg2elf')
+        assert archiver_member.isfile() and archiver_member.mode & 0o111
+        alias_member = package.getmember('ps3-sdk-tools-test-linux-x86_64/bin/cgnv2elf')
+        assert alias_member.issym() and alias_member.linkname == 'rsxcg2elf', (alias_member.type, alias_member.linkname)
     round_trip(extracted, scratch, env)
     print('linux-pkg: PASS release tarball contains working native pkg and psgl-shader-builder')
+    print('linux-pkg: PASS release tarball ships rsxcg2elf with cgnv2elf as a symlink to it')
 
     # A failed native SHA-1 test must stop installation, even after a good build.
     (repo / 'tools/sfo-pkg/sha1-test.c').write_text(

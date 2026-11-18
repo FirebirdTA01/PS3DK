@@ -170,17 +170,32 @@ target_include_directories(rsx-cg-compiler PRIVATE
 )
 
 # ----------------------------------------------------------------------------
-# cgnv2elf — standalone converter that packs .vpo / .fpo containers into an
-# ELF shader archive.  Plain C++17; shares only the generated version.h.
+# rsxcg2elf — standalone converter that packs .vpo / .fpo containers
+# into an ELF shader archive.  Plain C++17; shares only the generated
+# version.h.
+#
+# cgnv2elf is its compatibility name for existing Makefiles: a byte-for-byte
+# copy of the executable written beside it after every link (a copy, not a
+# link, so it also survives Windows zips).  The program only looks at the
+# name it was started under for one extra --help/--version line.  The
+# cgnv2elf target builds both, so `--target cgnv2elf` keeps working.
 # ----------------------------------------------------------------------------
 
-add_executable(cgnv2elf
+add_executable(rsxcg2elf
     ${SRC_DIR}/cgnv2elf/cgnv2elf.cpp
 )
+add_custom_command(TARGET rsxcg2elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:rsxcg2elf>
+            $<TARGET_FILE_DIR:rsxcg2elf>/cgnv2elf${CMAKE_EXECUTABLE_SUFFIX}
+    COMMENT "Copying rsxcg2elf to its compatibility name cgnv2elf"
+    VERBATIM
+)
+add_custom_target(cgnv2elf ALL DEPENDS rsxcg2elf)
 
 add_executable(fp-register-remap-test EXCLUDE_FROM_ALL tests/fp_register_remap_test.cpp)
 target_include_directories(fp-register-remap-test PRIVATE ${SRC_DIR})
 
-target_include_directories(cgnv2elf PRIVATE
+target_include_directories(rsxcg2elf PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h
 )

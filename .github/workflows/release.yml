@@ -153,7 +153,7 @@ jobs:
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
               -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler cgnv2elf
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf
 
       - name: Build psgl-shader-builder
         run: |
@@ -185,6 +185,7 @@ jobs:
             "tools/target/release/$bin" --version
           done
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
+          tools/rsx-cg-compiler/build/rsxcg2elf --version
           tools/rsx-cg-compiler/build/cgnv2elf --version
           build/host-tools-linux/psgl-shader-builder/psgl-shader-builder --version
           # sprx-linker has no --version yet; just confirm it's a runnable ELF.
@@ -208,7 +209,10 @@ jobs:
           # C/C++ binaries.
           cp tools/sprx-linker/sprxlinker "$stage/bin/"
           cp tools/rsx-cg-compiler/build/rsx-cg-compiler "$stage/bin/"
-          cp tools/rsx-cg-compiler/build/cgnv2elf "$stage/bin/"
+          cp tools/rsx-cg-compiler/build/rsxcg2elf "$stage/bin/"
+          # cgnv2elf: compatibility name for existing Makefiles, a relative
+          # symlink in the tarball (tar keeps it).
+          ln -s rsxcg2elf "$stage/bin/cgnv2elf"
           cp build/host-tools-linux/psgl-shader-builder/psgl-shader-builder "$stage/bin/"
           cp build/host-tools-linux/sfo-pkg/pkg "$stage/bin/"
           # PSL1GHT-derived tools and data files, the same set the Windows
@@ -228,6 +232,7 @@ jobs:
           [ "$missing" -eq 0 ]
           # Strip everything (best-effort).
           for f in "$stage/bin/"*; do
+            [ -L "$f" ] && continue   # the cgnv2elf alias; its target is stripped
             case "$f" in *.py|*.xml|*.PNG) ;; *) strip "$f" || true ;; esac
           done
           # Bundle a tiny README that lists runtime deps.
@@ -250,7 +255,8 @@ jobs:
           Runtime dependencies (dynamic):
             * sprxlinker         — libelf, libz, libzstd
             * rsx-cg-compiler    — libstdc++ (system)
-            * cgnv2elf           — libstdc++ (system)
+            * rsxcg2elf          — libstdc++ (system); cgnv2elf is a
+                                   symlink to it, for existing Makefiles
             * pkg                - glibc
             * make_self, make_self_npdrm, make_sprx, package_finalize
                                  - libgmp, libcrypto (OpenSSL 3), libz
