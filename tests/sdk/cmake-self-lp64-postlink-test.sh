@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ps3_add_self must pass --lp64 to sprxlinker for every LP64 executable.
 #
-# An LP64 SELF needs `sprxlinker --lp64` so import call sites get their TOC
-# restore. The LP64 toolchain file sets PS3_SPRXLINKER_FLAGS=--lp64 for the
+# sprxlinker finds import call sites by stub shape, so `--lp64` no longer changes
+# its output; ps3_add_self still passes it to LP64 targets for compatibility with
+# older sprxlinker builds, and this test keeps that contract. The LP64 toolchain file sets PS3_SPRXLINKER_FLAGS=--lp64 for the
 # whole project; a target that opts into LP64 itself (-mlp64 in its link
 # options under the ILP32 toolchain file, as samples that build both ABIs do)
 # used to be post-linked without it.
