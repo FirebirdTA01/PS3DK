@@ -144,6 +144,41 @@ static uint32_t crc32(const uint8_t *p, size_t n)
     while (n--) c = (c >> 8) ^ crc_table[(c ^ *p++) & 255u];
     return ~c;
 }
+/* Columns of a linear map over GF(2), applied to a reflected CRC state. */
+static uint32_t crc_apply(const uint32_t columns[32], uint32_t state)
+{
+    uint32_t result = 0;
+    unsigned bit = 0;
+    while (state) {
+        if (state & 1u) result ^= columns[bit];
+        state >>= 1; ++bit;
+    }
+    return result;
+}
+/* Append n known-zero bytes without reading padding. The internal CRC state
+ * (before final complement) advances linearly on zero input. Start with the
+ * one-zero-byte operator and square it for successive bits of n. Bounded
+ * 256-byte matrix scratch, logarithmic work, no initialization/global state.
+ * Readers still validate the actual padding bytes and full content CRC. */
+static uint32_t crc32_zeros(uint32_t crc, size_t n)
+{
+    uint32_t power[32], square[32];
+    uint32_t c = ~crc;
+    unsigned i;
+    if (!n) return crc;
+    for (i = 0; i < 32; ++i) {
+        uint32_t bit = UINT32_C(1) << i;
+        power[i] = (bit >> 8) ^ crc_table[bit & 255u];
+    }
+    for (;;) {
+        if (n & 1u) c = crc_apply(power, c);
+        n >>= 1;
+        if (!n) break;
+        for (i = 0; i < 32; ++i) square[i] = crc_apply(power, power[i]);
+        memcpy(power, square, sizeof power);
+    }
+    return ~c;
+}
 static int zeros(const uint8_t *p, size_t n)
 { while (n--) if (*p++) return 0; return 1; }
 static int overlaps(const void *a, size_t an, const void *b, size_t bn)
@@ -514,7 +549,15 @@ int pfr_commit(pfr_store *s, const void *checkpoint, size_t cn, const void *payl
     next.view.next_chunk = frontier; next.view.retained_segments = count + 1u;
     next.view.first_segment = next.entries[0].segment; next.view.first_chunk = next.entries[0].first;
     p = s->scratch; f = p + s->layout.slot_bytes - SLOT_FOOT;
-    memset(p, 0, s->layout.slot_bytes);
+    used = SLOT_HEAD + (uint32_t)cn + (uint32_t)pn;
+    prefix = s->used[slot] > used ? s->used[slot] : used;
+    /* Initialize exactly what is written. Scratch also holds roots and read
+     * slots, so no previous scratch contents are trusted. Disk bytes beyond
+     * prefix are already zero from format/last reuse; open conservatively
+     * sets every slot watermark to the whole body for its first reuse. */
+    memset(p, 0, SLOT_HEAD);
+    memset(p + used, 0, prefix - used);
+    memset(f, 0, SLOT_FOOT);
     if (cn) memcpy(p + SLOT_HEAD, checkpoint, cn);
     if (pn) memcpy(p + SLOT_HEAD + cn, payload, pn);
     cc = crc32(p + SLOT_HEAD, cn); pc = crc32(p + SLOT_HEAD + cn, pn);
@@ -524,9 +567,8 @@ int pfr_commit(pfr_store *s, const void *checkpoint, size_t cn, const void *payl
     w32(p + 64, cc); w32(p + 68, pc); w32(p + 80, crc32(p, 80));
     memcpy(f, "PFRCMIT1", 8); w64(f + 8, e->segment); w64(f + 16, e->segment + 2);
     w64(f + 24, e->first); w64(f + 32, e->next); w32(f + 40, cc); w32(f + 44, pc);
-    w32(f + 48, crc32(p, s->layout.slot_bytes - SLOT_FOOT)); w32(f + 60, crc32(f, 60));
-    used = SLOT_HEAD + (uint32_t)cn + (uint32_t)pn;
-    prefix = s->used[slot] > used ? s->used[slot] : used;
+    w32(f + 48, crc32_zeros(crc32(p, used), s->layout.slot_bytes - SLOT_FOOT - used));
+    w32(f + 60, crc32(f, 60));
     if (io_write(s, slot_offset(s, slot), p, prefix) != PFR_OK
         || io_write(s, slot_offset(s, slot) + s->layout.slot_bytes - SLOT_FOOT, f, SLOT_FOOT) != PFR_OK
         || s->io.sync(s->io.ctx))

@@ -37,6 +37,8 @@ def main():
         subprocess.run(shlex.split(args.cc) + ["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-pedantic",
                        "-I", str(impl), str(HERE / "store_crc_test.c"), "-o", str(crc_exe)], check=True)
         subprocess.run([str(crc_exe)], check=True)
+        subprocess.run([sys.executable, str(HERE / "run_commit_cpu.py"),
+                        "--cc", args.cc, "--mutants", "--build-dir", str(out / "commit-cpu")], check=True)
         subprocess.run([sys.executable, str(HERE / "decode.py"), "--self-test",
                         "--expect-rotations", str(out / "rotated.profr")], check=True)
         # Explicitly consumed by the ignored Rust semantic parity acceptance

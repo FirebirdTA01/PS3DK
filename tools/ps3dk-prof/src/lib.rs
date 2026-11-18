@@ -61,4 +61,4 @@ pub mod export;
 pub mod gmon;
 mod wire;
 
-pub use export::{export_bytes, export_capture, export_capture_no_clobber, ExportError};
+pub use export::{export_bytes, export_bytes_no_clobber, export_capture, export_capture_no_clobber, ExportError};
