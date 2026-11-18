@@ -3,6 +3,8 @@
 This guide covers the PS3DK profiler from the console side (the libraries an application links and the API it calls)
 and the PC side (the `ps3dk-prof-viewer` app and the `ps3dk-prof` command line). Every option, default and limit here
 is taken from the code in this tree; the design documents under `docs/design/` hold the formats and the full contracts.
+The complete app-side API (every function, macro, type and result code, with its PC app equivalent) is in the
+[profiler API reference](profiler-api.md).
 
 Status: beta. The live API and the SPU/RSX extension are marked EXPERIMENTAL in their headers.
 
@@ -392,6 +394,9 @@ process uses the directory).
 
 ## 5. Hard-coding features in app code
 
+This section shows the common calls. Every entry, with its parameters, results, threading rules and PC app
+equivalent, is in the [profiler API reference](profiler-api.md).
+
 ### 5.1 Init and shutdown
 
 ```c
@@ -665,8 +670,11 @@ Today several PC app features depend on app code or a specific build:
 | Capture RSX frame | no | no | no |
 
 Work in progress to close these gaps: an opt-in live auto-start so the PC app can connect to and control any
-profiler build without app code (t_276ffda7), and the follow-up cards t_6dd7fb83, t_2873fe00, t_3ea33a77, t_dd5b7ce1,
-t_9d1f2c10 and t_149a6545.
+profiler build without app code (t_276ffda7); a default capture window (t_7adaacd4); per-capture timing choices
+(t_6dd7fb83); SPU, zone and function switches (t_2873fe00); until-marker windows (t_3ea33a77); finishing a capture
+from the PC (t_dd5b7ce1); startup settings (t_9d1f2c10); rolling captures in the viewer (t_149a6545, t_914a084f); and
+RSX frame capture requested from the PC app (t_1eec0d29). The [API reference](profiler-api.md#16-parallels-app-api-and-pc-app)
+lists each app call next to its PC app equivalent.
 
 ### 6.10 Troubleshooting
 
