@@ -334,6 +334,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringlabel --mutant seal-ignores-held --out "$RUNNER_TEMP/auto-ring-mutant-seal-ignores-held"
           # the flip's CALL into the reserved prefix needs the init's io_address record
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringflip --mutant flip-unrecorded --out "$RUNNER_TEMP/auto-ring-mutant-flip-unrecorded"
+          # the build-option ring constant (PS3_PROF_AUTO_RING): sizes, setter precedence, start-up refusal, OFF unchanged
+          for case in ringopt ringopt2 ringoptset ringoptsetring ringoptbad ringoptoff; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
+          done
 
       - name: Automatic RSX initialization, wire and queue controls
         run: |
@@ -393,6 +398,7 @@ jobs:
           python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-relaxed" --sanitize thread --mutant relaxed-publication
           python3 tests/host/ps3dk-prof-runtime/auto-link-check-test.py
           python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-option-cmake-test.py --out "$RUNNER_TEMP/auto-ring-option-cmake"
           python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
           for mutant in compile-as-driver internal-definitions positional-inputs; do
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
