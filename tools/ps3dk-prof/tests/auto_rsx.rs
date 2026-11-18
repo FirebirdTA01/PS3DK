@@ -135,7 +135,7 @@ impl ACfg {
         b.u64(self.freq).u64(self.allocated).u64(self.ceiling).u32(self.premise).u32(self.lease);
         b.0.extend_from_slice(&[0x2a; 32]);
         b.0.extend_from_slice(&[0x63; 32]);
-        if self.flags == 0 && self.words[4] == 1023 {
+        if self.flags == 0 && (self.words[4] == 1023 || self.words[4] == 3071) {
             // the tag writer's reserves: whole-CALL 32, ranges 16 (504 pairs), then zero
             let pairs = self.words[10];
             let (call, ranges) = if pairs >= 128 { (32, 16) } else { (pairs / 4, pairs / 8) };
@@ -1798,11 +1798,18 @@ fn busy_frame_labels(clears: &[(u64, u64)], flip: Blk, label: Option<(Blk, u32, 
     if masks & 512 != 0 {
         cov.payload.extend_from_slice(&[0; 64]); // timed-range block and flip-wait scope block: empty
     }
+    if masks & 2048 != 0 {
+        cov.payload.extend_from_slice(&[0; 64]); // range refusals by reason: none
+    }
     let width = if masks & 512 != 0 { 160 } else { 144 };
     let mut rest = vec![events(&frame_wrap(1, 1, 20_000, 20_000, 10_000, 7)),
         St::new(1, 6, 6, 0, 6, 1, 1, 0).chunk(), ops_w(&list, width), cov];
     rest.extend(anchors().into_iter().map(|mut a| { a.labels = (0, 2 * a.id); clock(&a) }));
-    rest.push(status(1, status_for(n, 1, 9, 2 * n)));
+    let mut st = status(1, status_for(n, 1, 9, 2 * n));
+    if masks & 2048 != 0 {
+        st.payload.extend_from_slice(&[0; 128]); // the capture's range refusals by reason: none
+    }
+    rest.push(st);
     let mut cfg = brk_cfg();
     cfg.words[4] = masks;
     if masks & 512 != 0 {
@@ -3006,4 +3013,180 @@ fn unsealed_capture_marks_the_open_row_the_file_carries() {
     assert_eq!(v["tail"]["last_row_open"], true);
     assert_eq!(v["capture_totals"]["ranges_refused"]["retained_rows"], 0);
     assert!(v["capture_totals"]["ranges_refused"]["value"].is_null());
+}
+
+// ---- range refusals by reason (CONFIG 3071/11 and 4095/11) -----------------------------------------------------------
+
+const RR_NAMES: [&str; 10] = ["depth", "segment_build", "state", "no_frame", "ring", "no_descriptor", "no_pair",
+    "other_frame", "no_metadata", "unmatched_end"];
+
+/// One 3071/11 frame row (frame 0) whose range-refusal tail at 480 holds `row` (slots 10..15 `extra`), u32@440
+/// `total`, and a STATUS whose tail at 128 holds `totals` (slots 10..15 `status_extra`): Some(true) FINAL,
+/// Some(false) a STATUS that is not FINAL, None no STATUS.
+fn reasons_file(row: [u32; 10], total: u32, totals: [u64; 10], status: Option<bool>, extra: u32, status_extra: u64)
+    -> File {
+    let mut f = busy_frame(&[(6000, 36_000)], polls(30_000), None, 3071);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let r = &mut f.chunks[at].payload;
+    assert_eq!(r.len(), 544);
+    r[440..444].copy_from_slice(&total.to_le_bytes());
+    for (i, v) in row.iter().enumerate() {
+        r[480 + 4 * i..484 + 4 * i].copy_from_slice(&v.to_le_bytes());
+    }
+    r[480 + 40..484 + 40].copy_from_slice(&extra.to_le_bytes());
+    let st = f.chunks.iter().position(|c| c.ty == 37).unwrap();
+    let s = &mut f.chunks[st].payload;
+    assert_eq!(s.len(), 256);
+    for (i, v) in totals.iter().enumerate() {
+        s[128 + 8 * i..136 + 8 * i].copy_from_slice(&v.to_le_bytes());
+    }
+    s[128 + 80..136 + 80].copy_from_slice(&status_extra.to_le_bytes());
+    match status {
+        Some(true) => {}
+        Some(false) => s[2..4].copy_from_slice(&0u16.to_le_bytes()),
+        None => {
+            f.chunks.remove(st);
+        }
+    }
+    f
+}
+const RR_ROW: [u32; 10] = [1, 0, 0, 0, 2, 0, 3, 0, 1, 0];
+const RR_TOTALS: [u64; 10] = [1, 0, 4, 2, 2, 0, 3, 0, 1, 1];
+
+/// A 3071/11 capture names its refusals by reason per row and as capture totals, in text and JSON (inventory and
+/// by-tag); the CONFIG names the masks and the reader keeps them.
+#[test]
+fn range_refusals_by_reason_are_read() {
+    let f = reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 0, 0);
+    let cap = reader::read(&f.bytes()).expect("reads");
+    let inv = cap.auto.as_ref().unwrap();
+    let a = inv.config.as_ref().and_then(Config::attached).unwrap();
+    assert!(a.range_reasons() && a.tagged() && !a.ringed() && a.frame_width() == 544 && a.status_width() == 256);
+    assert_eq!(inv.frames[0].range_refused, Some(RR_ROW));
+    let s = inv.last_status.as_ref().unwrap();
+    assert_eq!((s.range_refused, s.ranges_refused()), (Some(RR_TOTALS), Some(14)));
+    let (r, text, v) = totals_outputs(&f);
+    assert_eq!(r.frames[0].range_refused, Some(RR_ROW));
+    assert!(text.lines().any(|l| l == "AUTO ranges refused: 14 (depth 1, state 4, no_frame 2, ring 2, no_pair 3, \
+        no_metadata 1, unmatched_end 1)"), "{text}");
+    assert!(text.lines().any(|l| l == "  AUTO ranges refused: 7 (depth 1, ring 2, no_pair 3, no_metadata 1)"), "{text}");
+    assert_eq!(v["status"]["ranges_refused"], 14);
+    for (i, n) in RR_NAMES.iter().enumerate() {
+        assert_eq!(v["status"]["ranges_refused_by_reason"][n], RR_TOTALS[i], "{n}");
+        assert_eq!(v["frames"][0]["ranges_refused_by_reason"][n], RR_ROW[i], "{n}");
+    }
+    assert_eq!(v["frames"][0]["ranges_refused"], 7);
+    let b = ps3dk_prof::auto_rsx::by_tag(&cap);
+    assert_eq!(b.frames[0].range_refused, Some(RR_ROW));
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_by_tag_json(&mut out, &b).unwrap();
+    let j: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(j["frames"][0]["ranges_refused_by_reason"]["no_pair"], 3);
+    let mut out = Vec::new();
+    ps3dk_prof::auto_rsx::write_by_tag_text(&mut out, &b).unwrap();
+    assert!(String::from_utf8(out).unwrap().contains("  AUTO ranges refused: 7 (depth 1, ring 2, no_pair 3, no_metadata 1)"));
+    // a row without refusals prints no line; its JSON still names every reason
+    let (_, text, v) = totals_outputs(&reasons_file([0; 10], 0, [0; 10], Some(true), 0, 0));
+    assert!(text.lines().any(|l| l == "AUTO ranges refused: 0"), "{text}");
+    assert!(!text.contains("  AUTO ranges refused"), "{text}");
+    assert_eq!(v["frames"][0]["ranges_refused_by_reason"].as_object().unwrap().len(), 10);
+}
+
+/// Older captures read exactly as before: no reason fields in rows, STATUS, by-tag or the capture totals.
+#[test]
+fn range_reasons_absent_from_older_captures() {
+    let p = fixture_path("tags");
+    let (code, out) = cli(&["auto", "--json", &p]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert!(v["status"].get("ranges_refused").is_none() && v["status"].get("ranges_refused_by_reason").is_none());
+    assert!(v["frames"].as_array().unwrap().iter().all(|f| f.get("ranges_refused_by_reason").is_none()));
+    let by: serde_json::Value = serde_json::from_slice(&cli(&["auto", "--by-tag", "--json", &p]).1).unwrap();
+    assert!(by["frames"].as_array().unwrap().iter().all(|f| f.get("ranges_refused_by_reason").is_none()));
+    let (_, text) = cli(&["auto", &p]);
+    assert!(!String::from_utf8_lossy(&text).contains("AUTO ranges refused"));
+    let cap = reader::read(&fixture("tags")).unwrap();
+    let inv = cap.auto.as_ref().unwrap();
+    assert!(inv.frames.iter().all(|f| f.range_refused.is_none()));
+    assert!(inv.last_status.as_ref().unwrap().range_refused.is_none());
+    // a 1023/11 unsealed capture keeps its UNAVAILABLE capture total, with no reasons
+    let (r, _, v) = totals_outputs(&totals_file(3, false, Some(false)));
+    let t = r.unsealed.as_ref().unwrap().total("ranges_refused").unwrap();
+    assert!(t.value.is_none() && t.by_reason.is_none() && t.note == ps3dk_prof::auto_rsx::RANGES_REFUSED_UNRECORDED);
+    assert!(v["capture_totals"]["ranges_refused"].get("by_reason").is_none());
+}
+
+/// An unsealed 3071/11 capture reports the last STATUS totals as a lower bound, by reason; without a STATUS the total
+/// is UNAVAILABLE because none was recorded (not because the writer cannot record one).
+#[test]
+fn unsealed_range_totals_come_from_the_last_status() {
+    let (r, text, v) = totals_outputs(&reasons_file(RR_ROW, 7, RR_TOTALS, Some(false), 0, 0));
+    let t = r.unsealed.as_ref().unwrap().total("ranges_refused").unwrap();
+    assert_eq!((t.value, t.by_reason, t.retained_rows), (Some(14), Some(RR_TOTALS), Some(7)));
+    let line = text.lines().find(|l| l.starts_with("capture totals")).unwrap();
+    assert!(line.contains("ranges_refused >= 14 (") && line.contains("by reason 14 (depth 1, state 4"), "{line}");
+    assert!(text.contains("AUTO ranges refused: 14 (") && text.contains("(last STATUS, not FINAL: at least this)"));
+    assert_eq!(v["capture_totals"]["ranges_refused"]["value"], 14);
+    assert_eq!(v["capture_totals"]["ranges_refused"]["at_least"], true);
+    assert_eq!(v["capture_totals"]["ranges_refused"]["by_reason"]["state"], 4);
+    let (r, _, v) = totals_outputs(&reasons_file(RR_ROW, 7, RR_TOTALS, None, 0, 0));
+    let t = r.unsealed.as_ref().unwrap().total("ranges_refused").unwrap();
+    assert!(t.value.is_none() && t.by_reason.is_none() && t.note == ps3dk_prof::auto_rsx::TOTAL_NO_STATUS);
+    assert_eq!(v["capture_totals"]["ranges_refused"]["retained_rows"], 7);
+}
+
+/// The tails are checked: the reasons sum to u32@440 unless the row is SATURATED, reserved slots are zero, and a
+/// STATUS total is never below its reason's sum over the rows (unless SATURATED) nor below the previous STATUS.
+#[test]
+fn range_reason_tails_are_checked() {
+    let refuse = |f: &File, want: Rule, what: &str| {
+        let e = reader::read(&f.bytes()).expect_err(what);
+        assert_eq!(e.rule, want, "{what}: {e:?}");
+    };
+    refuse(&reasons_file(RR_ROW, 6, RR_TOTALS, Some(true), 0, 0), Rule::AutoCoverage, "reasons do not sum to u32@440");
+    refuse(&reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 1, 0), Rule::AutoCoverage, "a reserved row slot");
+    refuse(&reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 0, 1), Rule::AutoStatus, "a reserved STATUS slot");
+    let mut low = RR_TOTALS;
+    low[6] = 2; // no_pair below the row's 3
+    refuse(&reasons_file(RR_ROW, 7, low, Some(true), 0, 0), Rule::AutoStatus, "a total below the rows");
+    // a SATURATED row is not reconciled
+    let mut f = reasons_file(RR_ROW, u32::MAX, RR_TOTALS, Some(true), 0, 0);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    let flags = u16::from_le_bytes([f.chunks[at].payload[2], f.chunks[at].payload[3]]) | 4;
+    f.chunks[at].payload[2..4].copy_from_slice(&flags.to_le_bytes());
+    assert!(reader::read(&f.bytes()).is_ok(), "a SATURATED row");
+    // two STATUS: the second may not decrease a total
+    let mut f = reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 0, 0);
+    let st = f.chunks.iter().position(|c| c.ty == 37).unwrap();
+    let mut first = f.chunks[st].clone();
+    first.payload[2..4].copy_from_slice(&0u16.to_le_bytes());
+    first.payload[128 + 16..136 + 16].copy_from_slice(&5u64.to_le_bytes()); // state 5, then 4
+    f.chunks.insert(st, first);
+    refuse(&f, Rule::AutoStatus, "a decreasing total");
+    // the widths are negotiated: a 3071/11 row of 480 bytes or a 128-byte STATUS is refused
+    let mut f = reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 0, 0);
+    let at = f.chunks.iter().position(|c| c.ty == 36).unwrap();
+    f.chunks[at].payload.truncate(480);
+    refuse(&f, Rule::AutoCoverage, "a 480-byte row under 3071/11");
+    let mut f = reasons_file(RR_ROW, 7, RR_TOTALS, Some(true), 0, 0);
+    let st = f.chunks.iter().position(|c| c.ty == 37).unwrap();
+    f.chunks[st].payload.truncate(128);
+    refuse(&f, Rule::AutoStatus, "a 128-byte STATUS under 3071/11");
+}
+
+/// RANGE_REASONS (2048) is admitted only on 1023/11 (3071) and 2047/11 (4095); any other pair with it is refused,
+/// and 3071 needs the 176-byte CONFIG.
+#[test]
+fn range_reason_masks_are_negotiated() {
+    for bad in [2048 | 511, 2048 | 255, 2048 | 7] {
+        let mut f = busy_frame(&[(6000, 36_000)], polls(30_000), None, 3071);
+        let c = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+        f.chunks[c].payload[24..28].copy_from_slice(&(bad as u32).to_le_bytes());
+        assert_eq!(reader::read(&f.bytes()).expect_err("unknown masks").rule, Rule::AutoConfig, "{bad}");
+    }
+    // 3071/11 with the 160-byte CONFIG of the older pairs
+    let mut f = busy_frame(&[(6000, 36_000)], polls(30_000), None, 3071);
+    let c = f.chunks.iter().position(|c| c.ty == 34).unwrap();
+    f.chunks[c].payload.truncate(160);
+    assert_eq!(reader::read(&f.bytes()).expect_err("short CONFIG").rule, Rule::AutoConfig);
 }

@@ -109,6 +109,58 @@ pub const FRAME_BYTES_RING: usize = 528;
 pub const STATUS_BYTES_RING: usize = 208;
 /// OPS flag of a report-ring record (2047/11 only).
 pub const OP_RING: u16 = 128;
+/// The range-reason writer: kind mask bit 2048 RANGE_REASONS on top of 1023/11 (3071/11) or of the report ring
+/// 2047/11 (4095/11). COVERAGE rows gain a tail of u32 x16 (480 -> 544; ring 528 -> 592): slot r-1 counts the AUTO
+/// ranges refused in the frame for reason r (RANGE_REASONS), slots 10..15 zero, and unless the row is SATURATED their
+/// sum is u32@440. STATUS gains u64 x16 (128 -> 256; ring 208 -> 336): the capture totals by reason, never decreasing,
+/// each at least that reason's sum over the rows. Readers that know only the older pairs refuse them at CONFIG.
+pub const MASKS_REASONS: (u32, u32) = (3071, 11);
+pub const MASKS_RING_REASONS: (u32, u32) = (4095, 11);
+pub const FRAME_BYTES_REASONS: usize = 544;
+pub const FRAME_BYTES_RING_REASONS: usize = 592;
+pub const STATUS_BYTES_REASONS: usize = 256;
+pub const STATUS_BYTES_RING_REASONS: usize = 336;
+/// Wire slots of the range-reason tails (RANGE_REASONS uses the first ten).
+pub const RANGE_SLOTS: usize = 16;
+/// Why an AUTO range was refused, in wire order (slot r-1 = reason r; stable, never renumbered). DEPTH: BEGIN nested
+/// deeper than 4; SEGMENT_BUILD: BEGIN while a segment build was open; STATE: the capture admitted nothing (CONFIG
+/// refused or invalidated, inside a draw bracket, stopping, admission closed, device not initialized); NO_FRAME: no
+/// coverage frame was open (counted in STATUS only); RING: the ring was not clean or had no room; NO_DESCRIPTOR: a
+/// full site table; NO_PAIR: no range-reserve report pair free; OTHER_FRAME: END in another frame than its BEGIN;
+/// NO_METADATA: END could not claim its pair's metadata entry; UNMATCHED_END: END with no BEGIN open.
+pub const RANGE_REASONS: [&str; 10] = [
+    "depth",
+    "segment_build",
+    "state",
+    "no_frame",
+    "ring",
+    "no_descriptor",
+    "no_pair",
+    "other_frame",
+    "no_metadata",
+    "unmatched_end",
+];
+
+/// "N (reason a, reason b)" naming only the nonzero reasons; "0" when none.
+pub fn reasons_text<T: Copy + Into<u64>>(by: &[T; 10]) -> String {
+    let total = by.iter().fold(0u64, |a, &b| a.saturating_add(b.into()));
+    let named: Vec<String> = RANGE_REASONS.iter().zip(by.iter()).filter(|(_, v)| (**v).into() != 0)
+        .map(|(n, &v)| format!("{n} {}", v.into())).collect();
+    if named.is_empty() { total.to_string() } else { format!("{total} ({})", named.join(", ")) }
+}
+
+/// "N (reason a, ...)" for one row: N is the row's own count (u32@440), the reasons its nonzero slots.
+pub fn row_reasons_text(total: u32, by: &[u32; 10]) -> String {
+    let named: Vec<String> = RANGE_REASONS.iter().zip(by.iter()).filter(|&(_, &v)| v != 0)
+        .map(|(n, v)| format!("{n} {v}")).collect();
+    if named.is_empty() { total.to_string() } else { format!("{total} ({})", named.join(", ")) }
+}
+
+/// Every reason by name, in wire order (JSON objects keep the reasons even when zero).
+pub fn reasons_json<T: Copy + Into<u64>>(by: &[T; 10]) -> serde_json::Value {
+    serde_json::Value::Object(RANGE_REASONS.iter().zip(by.iter())
+        .map(|(n, &v)| ((*n).to_string(), serde_json::json!(v.into()))).collect())
+}
 /// The ring geometry this reader accepts: 126-pair blocks in 4096-byte extents, 2..4 blocks, whole 1 MiB pages up to
 /// 256 MiB, at most 65,536 metadata records.
 pub const RING_PAIRS: u32 = 126;
@@ -360,6 +412,22 @@ impl Attached {
     pub fn ringed(&self) -> bool {
         self.kind_mask & 1024 != 0
     }
+    /// AUTO range refusals by reason in COVERAGE rows and STATUS (CONFIG 3071/11 or 4095/11).
+    pub fn range_reasons(&self) -> bool {
+        self.kind_mask & 2048 != 0
+    }
+    /// The COVERAGE row width this CONFIG negotiated.
+    pub fn frame_width(&self) -> usize {
+        let base = if self.ringed() { FRAME_BYTES_RING } else if self.tagged() { FRAME_BYTES_TAG }
+            else if self.label_polls() { FRAME_BYTES_LABEL }
+            else if self.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        if self.range_reasons() { base + 4 * RANGE_SLOTS } else { base }
+    }
+    /// The STATUS width this CONFIG negotiated.
+    pub fn status_width(&self) -> usize {
+        let base = if self.ringed() { STATUS_BYTES_RING } else { STATUS_BYTES };
+        if self.range_reasons() { base + 8 * RANGE_SLOTS } else { base }
+    }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
         if self.ringed() { OP_BYTES_RING } else if self.tagged() { OP_BYTES_TAG }
@@ -470,6 +538,8 @@ pub struct Coverage {
     /// invalid evidence). Disjoint from the ten exclusions; zero for older captures.
     pub ring_full: [u64; 3],
     pub ring_state: [u64; 3],
+    /// 3071/11 and 4095/11 rows: the AUTO ranges refused in this frame by reason (RANGE_REASONS order); None before.
+    pub range_refused: Option<[u32; 10]>,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -509,8 +579,14 @@ pub struct Status {
     /// 2047/11: the decoder's first rejected header word, its byte offset from the context begin and its reason
     /// (RING_REJECT_REASONS index + 1), all zero when it rejected nothing.
     pub ring_reject: Option<[u32; 3]>,
+    /// 3071/11 and 4095/11: the capture's AUTO ranges refused by reason (RANGE_REASONS order); None before.
+    pub range_refused: Option<[u64; 10]>,
 }
 impl Status {
+    /// The capture's AUTO ranges refused (the saturating sum of the reasons), when this STATUS records them.
+    pub fn ranges_refused(&self) -> Option<u64> {
+        self.range_refused.map(|r| r.iter().fold(0u64, |a, &b| a.saturating_add(b)))
+    }
     pub fn is_final(&self) -> bool {
         self.flags & ST_FINAL != 0
     }
@@ -616,6 +692,9 @@ pub struct Reader {
     ring_valid_state: Option<u32>,
     /// 2047/11 exported capture: the EXPORT ring accounting (kept generations need not start at 1 or be adjacent).
     export_ring: Option<crate::model::ExportRing>,
+    /// 3071/11 and 4095/11: the per-reason sums of the AUTO ranges refused over the rows parsed (saturating). A
+    /// STATUS total is at least its reason's sum (rows a rolling restart did not parse only lower it).
+    row_reasons: [u64; 10],
 }
 
 /// Private continuation state for an ordinary (non-EXPORT) ring source. The
@@ -660,6 +739,7 @@ impl Reader {
             last_ring: None,
             ring_valid_state: None,
             export_ring: None,
+            row_reasons: [0; 10],
         }
     }
 
@@ -774,6 +854,7 @@ impl Reader {
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
                     && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET && (kinds, forms) != MASKS_CALL
                     && (kinds, forms) != MASKS_LABEL && (kinds, forms) != MASKS_TAG && (kinds, forms) != MASKS_RING
+                    && (kinds, forms) != MASKS_REASONS && (kinds, forms) != MASKS_RING_REASONS
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -786,22 +867,24 @@ impl Reader {
                 if !label_valid(op_label) || !label_valid(clock_label) || op_label == clock_label {
                     return bad(r, format!("AUTO_CONFIG labels {op_label}/{clock_label}"));
                 }
-                let metadata_max = if (kinds, forms) == MASKS_RING { RING_METADATA_MAX } else { 1024 };
+                // the range-reason bit adds only the refusal tails: every other rule is its base pair's
+                let base_masks = if kinds & 2048 != 0 { (kinds & !2048, forms) } else { (kinds, forms) };
+                let metadata_max = if base_masks == MASKS_RING { RING_METADATA_MAX } else { 1024 };
                 if !(1..=metadata_max).contains(&metadata) || !(1..=256).contains(&frame_capacity) {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
-                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET
-                    || (kinds, forms) == MASKS_CALL || (kinds, forms) == MASKS_LABEL { OP_BYTES_BUILD }
-                    else if (kinds, forms) == MASKS_TAG { OP_BYTES_TAG }
-                    else if (kinds, forms) == MASKS_RING { OP_BYTES_RING } else { OP_BYTES };
+                let negotiated = if base_masks == MASKS_BUILD || base_masks == MASKS_BRACKET
+                    || base_masks == MASKS_CALL || base_masks == MASKS_LABEL { OP_BYTES_BUILD }
+                    else if base_masks == MASKS_TAG { OP_BYTES_TAG }
+                    else if base_masks == MASKS_RING { OP_BYTES_RING } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
                 // is the default (an eighth of the pool, at most 64; 16 at most before the reserve was resized, which
                 // the option bound below still admits) or an option that leaves 64 pairs for draws
-                if (wide && !ringed) != ((kinds, forms) == MASKS_TAG) || ringed != ((kinds, forms) == MASKS_RING) {
+                if (wide && !ringed) != (base_masks == MASKS_TAG) || ringed != (base_masks == MASKS_RING) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
                 }
                 // an export of a report-ring capture carries the EXPORT ring accounting, and only such an export does
@@ -1206,9 +1289,7 @@ impl Reader {
     fn coverage(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::AutoCoverage;
         let cfg = self.attached().clone();
-        let width = if cfg.ringed() { FRAME_BYTES_RING } else if cfg.tagged() { FRAME_BYTES_TAG }
-            else if cfg.label_polls() { FRAME_BYTES_LABEL }
-            else if cfg.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        let width = cfg.frame_width();
         if payload.len() != width {
             return bad(r, format!("AUTO_COVERAGE is {} bytes, not {width}", payload.len()));
         }
@@ -1272,6 +1353,12 @@ impl Reader {
             }
             for v in ring_state.iter_mut() {
                 *v = c.u64()?;
+            }
+        }
+        let mut slots = [0u32; RANGE_SLOTS];
+        if cfg.range_reasons() {
+            for v in slots.iter_mut() {
+                *v = c.u32()?;
             }
         }
         c.done()?;
@@ -1354,6 +1441,21 @@ impl Reader {
                 }
             }
         }
+        // the range-reason tail: ten reasons, the rest zero; unless SATURATED their sum is the row's u32@440
+        let reasons: [u32; 10] = slots[..10].try_into().expect("ten slots");
+        if cfg.range_reasons() {
+            let sum = reasons.iter().fold(0u64, |a, &b| a + u64::from(b));
+            if slots[10..].iter().any(|&x| x != 0) {
+                return bad(r, format!("{at}: reserved range-refusal slot {:?}", &slots[10..]));
+            }
+            if flags & FR_SATURATED == 0 && sum != u64::from(ranges_refused) {
+                return bad(r, format!("{at}: ranges refused by reason {reasons:?} do not sum to {ranges_refused}"));
+            }
+            for (k, &v) in reasons.iter().enumerate() {
+                let t = &mut self.row_reasons[k];
+                *t = t.saturating_add(u64::from(v));
+            }
+        }
         self.last_frame = Some((owner, frame));
         self.last_lost = lost;
         self.result.frames_parsed += 1;
@@ -1369,14 +1471,17 @@ impl Reader {
             segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
             label_polls: cfg.label_polls().then_some((label, label_index, one)),
             outside_timed: outside, ranges_refused,
-            flip_wait_at: cfg.tagged().then(|| scope_at[..recorded].to_vec()), ring_full, ring_state });
+            flip_wait_at: cfg.tagged().then(|| scope_at[..recorded].to_vec()), ring_full, ring_state,
+            range_refused: cfg.range_reasons().then_some(reasons) });
         Ok(())
     }
 
     fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
-        let ringed = self.result.config.as_ref().and_then(Config::attached).is_some_and(Attached::ringed);
-        let width = if ringed { STATUS_BYTES_RING } else { STATUS_BYTES };
+        let att = self.result.config.as_ref().and_then(Config::attached);
+        let ringed = att.is_some_and(Attached::ringed);
+        let reasoned = att.is_some_and(Attached::range_reasons);
+        let width = att.map_or(STATUS_BYTES, Attached::status_width);
         if payload.len() != width {
             return bad(r, format!("AUTO_STATUS is {} bytes, not {width}", payload.len()));
         }
@@ -1400,7 +1505,14 @@ impl Reader {
             }
             reserved = c.u32()?;
         }
+        let mut slots = [0u64; RANGE_SLOTS];
+        if reasoned {
+            for v in slots.iter_mut() {
+                *v = c.u64()?;
+            }
+        }
         c.done()?;
+        let range_refused: Option<[u64; 10]> = reasoned.then(|| slots[..10].try_into().expect("ten slots"));
         let cfg = self.result.config.clone().expect("checked by chunk()");
         let known = match cfg.attached() {
             Some(a) if a.tagged() => 4095,
@@ -1418,7 +1530,8 @@ impl Reader {
             }
             self.result.statuses += 1;
             self.result.final_seen = true;
-            self.result.last_status = Some(Status { flags, counters: n, ring: None, ring_reject: None });
+            self.result.last_status = Some(Status { flags, counters: n, ring: None, ring_reject: None,
+                range_refused: None });
             return Ok(());
         };
         if let Some(p) = &self.result.last_status {
@@ -1432,6 +1545,21 @@ impl Reader {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
+            }
+        }
+        if let Some(totals) = range_refused {
+            let was = self.result.last_status.as_ref().and_then(|s| s.range_refused);
+            for (k, &v) in totals.iter().enumerate() {
+                if was.is_some_and(|w| v < w[k]) {
+                    return bad(r, format!("AUTO_STATUS ranges refused ({}) decreased", RANGE_REASONS[k]));
+                }
+                if flags & ST_SATURATED == 0 && v < self.row_reasons[k] {
+                    return bad(r, format!("AUTO_STATUS ranges refused ({}) {v} below the rows' {}", RANGE_REASONS[k],
+                        self.row_reasons[k]));
+                }
+            }
+            if slots[10..].iter().any(|&x| x != 0) {
+                return bad(r, format!("AUTO_STATUS reserved range-refusal slot {:?}", &slots[10..]));
             }
         }
         let lower = flags & ST_LOWER_BOUND != 0;
@@ -1519,7 +1647,7 @@ impl Reader {
         }
         self.result.statuses += 1;
         self.result.last_status = Some(Status { flags, counters: n, ring: a.ring.map(|_| ring),
-            ring_reject: a.ring.map(|_| reject) });
+            ring_reject: a.ring.map(|_| reject), range_refused });
         Ok(())
     }
 
@@ -1965,6 +2093,8 @@ pub struct FrameView {
     /// 1023/11: visits left untimed outside timed ranges (ARRAY, INDEX, CLEAR) and AUTO ranges refused in the frame.
     pub outside_timed: [u64; 3],
     pub ranges_refused: u32,
+    /// 3071/11 and 4095/11: `ranges_refused` by reason (RANGE_REASONS order); None for older writers.
+    pub range_refused: Option<[u32; 10]>,
     /// 2047/11: visits untimed for want of a MAIN extent (ring_full) and with unknown ring state (ring_state).
     pub ring_full: [u64; 3],
     pub ring_state: [u64; 3],
@@ -2044,6 +2174,8 @@ pub struct CaptureTotal {
     pub note: String,
     /// ranges_refused only: the AUTO ranges refused counted in retained rows (COVERAGE u32@440).
     pub retained_rows: Option<u64>,
+    /// ranges_refused only, 3071/11 and 4095/11: the last STATUS totals by reason (RANGE_REASONS order).
+    pub by_reason: Option<[u64; 10]>,
 }
 
 impl Unsealed {
@@ -2079,14 +2211,20 @@ fn unsealed_facts(inv: &Inventory, tagged: bool) -> Unsealed {
         value: status.map(|s| s.counters[i]),
         note: (if status.is_some() { TOTAL_LAST_STATUS } else { TOTAL_NO_STATUS }).to_string(),
         retained_rows: None,
+        by_reason: None,
     }).collect();
     if tagged {
         let sum = inv.frames.iter().fold(0u64, |a, f| a.saturating_add(u64::from(f.ranges_refused)));
+        // 3071/11 and 4095/11 record the capture total by reason in STATUS; older writers record none
+        let reasoned = matches!(&inv.config, Some(Config::Attached(a)) if a.range_reasons());
+        let by_reason = status.and_then(|s| s.range_refused);
         totals.push(CaptureTotal {
             name: "ranges_refused",
-            value: None,
-            note: RANGES_REFUSED_UNRECORDED.to_string(),
+            value: status.and_then(Status::ranges_refused),
+            note: (if by_reason.is_some() { TOTAL_LAST_STATUS } else if reasoned { TOTAL_NO_STATUS }
+                else { RANGES_REFUSED_UNRECORDED }).to_string(),
             retained_rows: Some(sum),
+            by_reason,
         });
     }
     Unsealed {
@@ -2105,6 +2243,9 @@ fn totals_text(u: &Unsealed) -> String {
             Some(v) => format!("{} >= {v} ({})", t.name, t.note),
             None => format!("{} UNAVAILABLE ({})", t.name, t.note),
         };
+        if let Some(by) = &t.by_reason {
+            s.push_str(&format!(", by reason {}", reasons_text(by)));
+        }
         if let Some(n) = t.retained_rows {
             s.push_str(&format!(", {n} in retained rows (partial)"));
         }
@@ -2412,6 +2553,7 @@ pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::E
             flip_wait_at: f.flip_wait_at.clone(),
             outside_timed: f.outside_timed,
             ranges_refused: f.ranges_refused,
+            range_refused: f.range_refused,
             ring_full: f.ring_full,
             ring_state: f.ring_state,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
@@ -2811,6 +2953,10 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if let Some([header, at, why]) = s.ring_reject.filter(|x| x[2] != 0) {
             writeln!(out, "ring decoder rejected header {header:#010x} at +{at:#x}: {}", reject_reason(why))?;
         }
+        if let Some(by) = &s.range_refused {
+            writeln!(out, "AUTO ranges refused: {}{}", reasons_text(by),
+                if s.is_final() { "" } else { " (last STATUS, not FINAL: at least this)" })?;
+        }
     }
     if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
         writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
@@ -2864,6 +3010,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         }
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
+        }
+        if let Some(by) = f.range_refused.as_ref().filter(|_| f.ranges_refused != 0) {
+            writeln!(out, "  AUTO ranges refused: {}", row_reasons_text(f.ranges_refused, by))?;
         }
         if let Some((c, l, one)) = f.label_polls {
             writeln!(out, "  label polling: {} run(s) ({} ticks of bounded gaps, largest one label {}), {} broken, {} across a frame boundary, label {}", c.runs, c.ticks, one, c.broken, c.spanning,
@@ -2956,6 +3105,11 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             });
             o.insert("ring".into(), serde_json::Value::Object(ring));
         }
+        if let Some(by) = &s.range_refused {
+            // 3071/11 and 4095/11 only, so older captures keep their exact JSON
+            o.insert("ranges_refused".into(), json!(s.ranges_refused()));
+            o.insert("ranges_refused_by_reason".into(), reasons_json(by));
+        }
         serde_json::Value::Object(o)
     });
     let map = match &r.map {
@@ -3003,6 +3157,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             // the exclusion reason "outside timed range", per kind, and the refused AUTO ranges
             v["outside_timed_range"] = json!({"array":f.outside_timed[0],"index":f.outside_timed[1],"clear":f.outside_timed[2]});
             v["ranges_refused"] = json!(f.ranges_refused);
+            if let Some(by) = &f.range_refused {
+                v["ranges_refused_by_reason"] = reasons_json(by);
+            }
         }
         if r.ring.is_some() {
             // 2047/11: untimed for want of a MAIN extent (capacity) and with unknown ring state (invalid evidence)
@@ -3107,6 +3264,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
                 Some(n) => json!({"value": n, "at_least": true, "source": t.note}),
                 None => json!({"value": null, "reason": t.note}),
             };
+            if let Some(by) = &t.by_reason {
+                o["by_reason"] = reasons_json(by);
+            }
             if let Some(n) = t.retained_rows {
                 o["retained_rows"] = json!(n);
                 o["retained_rows_note"] = json!("refusals counted in retained rows only: partial, not a capture total");
@@ -3307,6 +3467,8 @@ pub struct TagFrame {
     pub outside_timed_range: [u64; 3],
     /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
     pub ranges_refused: u32,
+    /// 3071/11 and 4095/11: `ranges_refused` by reason (RANGE_REASONS order); None for older writers.
+    pub range_refused: Option<[u32; 10]>,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
@@ -3373,7 +3535,7 @@ fn by_tag_impl(cap: &Capture) -> ByTag {
     for f in &inv.frames {
         let key = (f.owner, f.frame);
         let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
-        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, ..TagFrame::default() };
+        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, range_refused: f.range_refused, ..TagFrame::default() };
         let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
         tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
         tf.unrepresented = f.segment_unrepresented;
@@ -3567,6 +3729,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     }
     for f in &b.frames {
         writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
+        if let Some(by) = f.range_refused.as_ref().filter(|_| f.ranges_refused != 0) {
+            writeln!(out, "  AUTO ranges refused: {}", row_reasons_text(f.ranges_refused, by))?;
+        }
         for (t, r) in &f.tags {
             writeln!(out, "  tag {t:#x}: ops {} busy {} untimed in CALL brackets {}", r.ops, r.busy_raw, r.untimed_in_calls)?;
         }
@@ -3597,7 +3762,7 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
 
 pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::Result<()> {
     use serde_json::json;
-    let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| json!({
+    let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| (f, json!({
         "owner": f.owner, "frame": f.frame, "untimed": f.untimed, "unrepresented": f.unrepresented,
         "outside_timed_range": {"array": f.outside_timed_range[0], "index": f.outside_timed_range[1], "clear": f.outside_timed_range[2]},
         "ranges_refused": f.ranges_refused,
@@ -3609,7 +3774,13 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
             "inclusive_raw": r.inclusive_raw, "parent": r.parent,
             "exclusive_raw": r.exclusive_raw, "reason": r.reason,
         })).collect::<Vec<_>>(),
-    })).collect();
+    }))).map(|(f, mut v)| {
+        if let Some(by) = &f.range_refused {
+            // 3071/11 and 4095/11 only, so older captures keep their exact JSON
+            v["ranges_refused_by_reason"] = reasons_json(by);
+        }
+        v
+    }).collect();
     let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med, hi))| json!({
         "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
     let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({

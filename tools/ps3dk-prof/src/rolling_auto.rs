@@ -508,7 +508,7 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     let config_len=get32(b,216) as usize;let status_len=get32(b,220) as usize;
     let projected=fixed==PROJECTED_CHECKPOINT_FIXED;
     let ringed=fixed==RING_CHECKPOINT_FIXED || (projected&&config_len==216);
-    if (if ringed{config_len!=216 || !matches!(status_len,0|208)}else{!matches!(config_len,0|160|176) || !matches!(status_len,0|128)})
+    if (if ringed{config_len!=216 || !matches!(status_len,0|208|336)}else{!matches!(config_len,0|160|176) || !matches!(status_len,0|128|256)})
         || (config_len!=0)!=(flags&1!=0) || (status_len!=0)!=(flags&2!=0){return ck("optional lengths");}
     let (ring,ring_snapshot)=if ringed{m.charge(256)?;(decode_ring(&b[320..416])?,decode_ring(&b[416..512])?)}else{(RingRestart::default(),RingRestart::default())};
     let nr=get32(b,224) as usize;let nt=get32(b,228) as usize;let nb=get32(b,232) as usize;let na=get32(b,236) as usize;
@@ -552,7 +552,7 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     if s.ringed()!=ringed{return ck("ring checkpoint/config version");}
     let finals=runs(&mut d,nr,m)?;let touched=runs(&mut d,nt,m)?;let mut imported=BTreeMap::new();let mut metadata=Vec::new();let mut previous=None;
     for _ in 0..nb{m.charge(64)?;let h=d.take(80)?;let k=(get32(h,0),get64(h,8));let present=get32(h,4);let width=get32(h,64) as usize;
-        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480|528) || (width!=0)!=(present!=0)
+        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480|528|544|592) || (width!=0)!=(present!=0)
             || (if projected{get32(h,68)>1 || get64(h,72)>=next}else{get32(h,68)!=0 || get64(h,72)!=0}){return ck("build entry encoding");}previous=Some(k);
         let index=get64(h,56);if (width==0 && index!=0) || (width!=0 && index>=next){return ck("build coverage position");}
         if projected&&width!=0&&get64(h,72)<index{return ck("build use before coverage");}
@@ -670,9 +670,11 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     s.reader.last_op=last_op;s.reader.result.max_snapshot=max_snapshot;s.snapshot=snapshot;s.op_chunks=op_chunks;s.next=next;
     if !s.reader.install_ring_restart(ring){return ck("ring current cursor context");}s.ring_snapshot=ring_snapshot;
     let counts=s.counts();let chunks=u128::from(s.config.is_some())+u128::from(counts.op_chunks)+u128::from(counts.frames)+u128::from(counts.clocks)+u128::from(counts.statuses);
-    let mut bytes=s.config.as_ref().map_or(0,|x|20+x.payload.len() as u128)+36*u128::from(op_chunks)+(if ringed{228}else{148})*u128::from(statuses)+116*u128::from(counts.clocks);
-    if let Some(a)=s.reader.result.config.as_ref().and_then(Config::attached){
-        let width=if a.ringed(){528}else if a.tagged(){480}else if a.label_polls(){416}else if a.presentation_scopes(){384}else{352};
+    let attached=s.reader.result.config.as_ref().and_then(Config::attached);
+    let status_width=attached.map_or(128,|a|a.status_width()) as u128;
+    let mut bytes=s.config.as_ref().map_or(0,|x|20+x.payload.len() as u128)+36*u128::from(op_chunks)+(20+status_width)*u128::from(statuses)+116*u128::from(counts.clocks);
+    if let Some(a)=attached{
+        let width=a.frame_width() as u128;
         bytes+=u128::from(a.op_width())*u128::from(ops)+(20+width)*u128::from(counts.frames);
     }else if ops!=0 || counts.frames!=0 || counts.clocks!=0{return ck("nonattached census");}
     let history=chunks+u128::from(ops)+u128::from(counts.frames);
@@ -790,9 +792,9 @@ impl CombinedAdapter {
         let s=&self.state;let config=s.reader.result.config.as_ref().and_then(Config::attached);
         CombinedSummary{counts:s.counts(),config:s.config.as_ref().map(|x|x.index),
             status:s.status.as_ref().map(|x|x.index),status_chunks:self.status_chunks,status_ops:s.snapshot[0],
-            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),status_width:if s.ringed(){208}else{128},domain:config.map(|c|c.domain),
+            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),status_width:config.map_or(128,|c|c.status_width() as u32),domain:config.map(|c|c.domain),
             projection:s.projection.map(|p|(p.floor,p.retired,p.before_status)),
-            coverage_width:config.map_or(0,|a|if a.ringed(){528}else if a.tagged(){480}else if a.label_polls(){416}else if a.presentation_scopes(){384}else{352})}
+            coverage_width:config.map_or(0,|a|a.frame_width() as u32)}
     }
     pub(crate) fn support(&self)->impl Iterator<Item=&Original>{
         self.state.config.iter().chain(self.state.status.iter()).chain(self.state.builds.values().filter_map(|b|b.raw.as_ref())).chain(self.state.clocks.iter())
