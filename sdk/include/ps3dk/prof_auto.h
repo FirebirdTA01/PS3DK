@@ -34,7 +34,13 @@ typedef struct ps3dk_prof_auto_options {
      * nothing. ring_blocks nonzero selects the ring; it then allocates, once per process, ring_bytes of MAIN extents
      * plus its metadata and descriptors in whole 1 MiB pages (20 MiB at the defaults: 16 MiB of extents, 16,384
      * records). The CMake option PS3_PROF_AUTO_RING=ON sets them with no source change (ps3dk_prof_auto_ring_options
-     * below). Segment draws, frame marks, whole-CALL brackets and ranges keep the local pool. */
+     * below). Segment draws, frame marks, whole-CALL brackets and ranges keep the local pool.
+     * ON when every owner-buffer draw must be timed: busy frames over the ~504-pair per-frame cap, per-draw or per-pass
+     * RSX cost, per-tag totals without untimed draws. OFF (default) when memory is tight (the ring's pages change the
+     * memory you may be measuring), when frame-level verdicts and ranges are enough, or when draws come mostly from
+     * CALL segments (they keep the local pool). Sizing (docs/profiler-guide.md): extents of 126 draws (4 KiB), records
+     * for the draws outstanding over about three frames; too small shows as untimed draws counted under ring_full or
+     * metadata capacity, and extents still held at seal make the capture FINAL (lower bounds). */
     uint32_t ring_blocks;       /* 2 or 3 local blocks of 126 pairs (the hardware-tested copy) at the top of the
                                  * range; the rest stay legacy and must be nonempty, so 3 needs over 378 pairs and 4
                                  * (504 pairs, the whole 1024-report maximum) is always refused */

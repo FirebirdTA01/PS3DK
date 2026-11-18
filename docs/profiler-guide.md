@@ -483,7 +483,21 @@ By default the timed draws of a frame are bounded by the local report pool (504 
 cmake ... -DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON [-DPS3_PROF_AUTO_RING_MB=16] [-DPS3_PROF_AUTO_RING_RECORDS=16384]
 ```
 
-`PS3_PROF_AUTO_RING_MB` is the MAIN extent size in whole MiB (1..256, default 16) and `PS3_PROF_AUTO_RING_RECORDS` the number of operation records (1..65536, default 16384). The ring allocates once per process, in whole 1 MiB pages, the extents plus its metadata and descriptors: 20 MiB at the defaults. A size outside these ranges stops the configure. Each executable gets a small generated source (`<target>-auto-ring.c`, or `.cpp` in a C++-only project) holding these values, and its link requires that definition, so it cannot be dropped silently. Options set with `PS3DK_PROF_AUTO_OPTIONS_SET` before `cellGcmInit` still win (zero ring fields there mean no ring). Draws inside CALL segments, frame marks, whole-CALL brackets and ranges keep using the local pool. When the ring has no free extent, a draw is left untimed and counted under `ring_full`. A ring that cannot be used (unknown M2MF state, a context reset) leaves later draws untimed and counted under `ring_state`. Both are listed in the coverage row. Design: the report ring section of `docs/design/ps3dk-prof-auto-rsx.md`.
+Turn it ON when you need every owner-buffer draw timed:
+
+- busy frames whose draws exceed the per-frame cap of about 504 pairs, so later draws of the frame come out untimed ("report capacity");
+- the RSX cost of each draw or of each pass, not only frame-level marks;
+- totals per tag (`PS3DK_PROF_AUTO_TAG`) without untimed draws missing from them.
+
+Leave it OFF (the default) when:
+
+- the build is memory-tight: the ring takes about 16 MiB of MAIN extents plus metadata at the defaults (20 MiB of pages in all), and it changes the memory numbers you may be measuring;
+- frame-level verdicts, frame marks and ranges are enough;
+- the draws come mostly from CALL segments, which keep using the shared local pool with or without the ring.
+
+`PS3_PROF_AUTO_RING_MB` is the MAIN extent size in whole MiB (1..256, default 16) and `PS3_PROF_AUTO_RING_RECORDS` the number of operation records (1..65536, default 16384). The ring allocates once per process, in whole 1 MiB pages, the extents plus its metadata and descriptors: 20 MiB at the defaults (3 MiB with `PS3_PROF_AUTO_RING_MB=2` and 4096 records). A size outside these ranges stops the configure.
+
+Sizing: one 4096-byte extent holds one block of 126 draws, so each MiB holds 256 blocks (32,256 draws). Extents are freed once the drainer has written their draws. Records are held from a draw until it is written, too. Size both for the draws outstanding across the RSX's and the drainer's lag (about three frames): records at least three frames' owner-buffer draws, and extents at least that many draws divided by 126. The defaults cover about 5,000 such draws per frame. A ring that is too small does not fail the run. When no extent is free, the draw is untimed and counted under `ring_full`. When no record is free, it is counted under "metadata capacity". Both counts are per frame in the coverage row, and admission resumes as soon as the drainer frees space. Extents still held when the capture is sealed (draws not yet written) leave those records incomplete, and the capture then reads `FINAL (lower bounds)`. If you see `ring_full`, metadata-capacity counts or a lower-bound FINAL, raise `PS3_PROF_AUTO_RING_MB` or `PS3_PROF_AUTO_RING_RECORDS`. Each executable gets a small generated source (`<target>-auto-ring.c`, or `.cpp` in a C++-only project) holding these values, and its link requires that definition, so it cannot be dropped silently. Options set with `PS3DK_PROF_AUTO_OPTIONS_SET` before `cellGcmInit` still win (zero ring fields there mean no ring). Draws inside CALL segments, frame marks, whole-CALL brackets and ranges keep using the local pool. When the ring has no free extent, a draw is left untimed and counted under `ring_full`. A ring that cannot be used (unknown M2MF state, a context reset) leaves later draws untimed and counted under `ring_state`. Both are listed in the coverage row. Design: the report ring section of `docs/design/ps3dk-prof-auto-rsx.md`.
 
 To attribute RSX time to passes and programs (tags, the fragment-program offset, exact named ranges and timed-ranges-only timing), see [profiler-auto-tags.md](profiler-auto-tags.md).
 
