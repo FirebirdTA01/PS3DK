@@ -61,12 +61,12 @@ is not the release bar. Language beyond that surface is available only
 through named, opt-in [extensions](#extensions).
 
 The same CMake project also builds a second executable,
-**`rsx-cg-archive`** (alias `cgnv2elf`), which packs `.vpo`/`.fpo` containers into one ELF32 shader archive (see
-[Shader archive packer](#shader-archive-packer-rsx-cg-archive)).
+**`rsxcg2elf`** (alias `cgnv2elf`), which packs `.vpo`/`.fpo` containers into one ELF32 shader archive (see
+[Shader archive packer](#shader-archive-packer-rsxcg2elf)).
 
 ## Install and locate
 
-Every SDK release installs `rsx-cg-compiler` and `rsx-cg-archive` (with its `cgnv2elf` alias) into
+Every SDK release installs `rsx-cg-compiler` and `rsxcg2elf` (with its `cgnv2elf` alias) into
 `$PS3DEV/bin` and `$PS3DK/bin`. On Windows the release zip ships
 `rsx-cg-compiler.exe`.
 
@@ -408,9 +408,9 @@ one row per 16-byte instruction slot (fragment inline constant blocks are
 printed as rows too). The `Entry point` / `Stage` / `IR functions` lines are
 also printed when a container is written; build systems can ignore stdout.
 
-### Shader archive packer (rsx-cg-archive)
+### Shader archive packer (rsxcg2elf)
 
-`rsx-cg-archive` is the second executable built from
+`rsxcg2elf` is the second executable built from
 `tools/rsx-cg-compiler/CMakeLists.txt`. It is also installed under its
 former name, `cgnv2elf`, as a compatibility alias for existing Makefiles;
 both names take the same options and write the same archive. It is
@@ -420,7 +420,7 @@ installed next to `rsx-cg-compiler` in `$PS3DEV/bin` and `$PS3DK/bin`
 relocatable shader archive.
 
 ```
-rsx-cg-archive [-q|--quiet] [-s|--no-sem] [-e] input [output]
+rsxcg2elf [-q|--quiet] [-s|--no-sem] [-e] input [output]
 ```
 
 | Option | Effect |
@@ -440,12 +440,12 @@ Short options can be combined (`-qs`). Unknown options are ignored with a
 in case-insensitive name order and skips files that are not shader
 containers. Without `output` the archive is written to
 `<dir of input>/out<extension of input>`, for example
-`rsx-cg-archive shaders/` writes `out` beside the folder and
-`rsx-cg-archive vp.vpo` writes `out.vpo`. The archive is written to a
+`rsxcg2elf shaders/` writes `out` beside the folder and
+`rsxcg2elf vp.vpo` writes `out.vpo`. The archive is written to a
 temporary file and renamed into place, so a failure never leaves a partial archive.
 
 ```
-rsx-cg-archive build/shaders build/shaders.elf
+rsxcg2elf build/shaders build/shaders.elf
 wrote build/shaders.elf: 2 program(s), 1234 bytes
 ```
 
