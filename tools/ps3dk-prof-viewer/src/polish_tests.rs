@@ -42,7 +42,7 @@ fn empty_pages_explain_the_recorded_absence() {
                 egui::CentralPanel::default().show(ctx, |p| { match page {
                     Page::Overview => draw_overview(p, a, &d.ext, &d.rsx.get(a)),
                     Page::Zones => draw_zones(p, a, &mut vec![], &mut (ZoneColumn::Name, false), &mut None),
-                    Page::Frames => { frames_ui::draw(p, a, d.frames.as_ref().unwrap(), &mut Default::default(), None, Some(&d.foreign)); },
+                    Page::Frames => { frames_ui::draw(p, a, d.frames.as_ref().unwrap(), &mut Default::default(), None, Some(&d.foreign), d.auto.as_ref()); },
                     Page::HotPaths => { crate::hotpaths_ui::page(p, d.hot.as_ref().unwrap(), &mut Default::default(), a, &d.foreign_hot, &d.func_paths); },
                     Page::Waits => crate::waits_ui::page(p, d.waits.as_ref().unwrap(), &mut Default::default(), &mut Default::default()),
                     Page::Fifo => crate::fifo_ui::page(p, d.fifo.as_ref().unwrap(), &mut Default::default()),
