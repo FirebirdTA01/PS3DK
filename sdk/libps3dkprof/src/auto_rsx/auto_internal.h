@@ -31,6 +31,8 @@ extern const uint8_t ps3dk_prof__auto_mechanism[32];
 extern const uint8_t ps3dk_prof__auto_build_binding[32];
 extern const char ps3dk_prof__auto_build_id[];
 extern const char ps3dk_prof__auto_app[];
+/* Start-up only, before profiler initialization: the build-option ring defaults (PS3_PROF_AUTO_RING). */
+int ps3dk_prof__auto_build_ring(const ps3dk_prof_auto_ring_options *ring);
 
 /* Up to 32 distinct segments per capture; their built operations share one pool at least as large as the report-
  * pair pool (report_count <= 1024, 16 for clocks: at most 504 pairs), so report pairs, not the pool, bound how many

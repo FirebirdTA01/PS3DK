@@ -123,7 +123,7 @@ static int ring_options(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, 
     return auto_ring_layout(o->report_first,o->report_count,o->ring_blocks,o->ring_bytes,o->ring_records,
                             sizeof(auto_queue_entry),sizeof(auto_ring_slot),ring);
 #else
-    return 0; /* reserved until the ring writer, drainer and reader are integrated */
+    return 0; /* a library built without the ring (the shipped AUTO archives have it) */
 #endif
 }
 static int layout(const ps3dk_prof_auto_options *o, auto_ring_plan *ring, uint32_t *ring_label,
@@ -233,6 +233,26 @@ static uint32_t ring_attach(auto_capture *a, const ps3dk_prof_auto_options *o, c
 }
 #endif
 
+/* Build-option report ring (CMake PS3_PROF_AUTO_RING, prof_auto.h): the executable's generated constant, validated by
+ * the start-up constructor before profiler initialization (no other thread of this library exists then; read-only
+ * afterwards). Accepted, it is the defaults plus its ring fields, used by every attach without options. */
+static ps3dk_prof_auto_options build_defaults;
+static uint32_t build_ring;
+int ps3dk_prof__auto_build_ring(const ps3dk_prof_auto_ring_options *r)
+{
+    ps3dk_prof_auto_options o=PS3DK_PROF_AUTO_OPTIONS_INIT;
+    auto_ring_plan ring;
+    uint32_t label;
+    size_t records,frames,bytes;
+    if(!r || r->size!=sizeof *r || !r->ring_blocks || !r->ring_bytes || !r->ring_records) return PS3DK_PROF_EINVAL;
+    o.ring_blocks=r->ring_blocks;o.ring_bytes=r->ring_bytes;o.ring_records=r->ring_records;
+    /* a library without the ring refuses it here too: never a silent run without it */
+    if(!layout(&o,&ring,&label,&records,&frames,&bytes) || !ring.blocks || !defaults_reserved(&o))
+        return PS3DK_PROF_EINVAL;
+    build_defaults=o;build_ring=1u;
+    return PS3DK_PROF_OK;
+}
+
 static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *options,
                   uint32_t *instance, uint32_t *domain, int initial, int32_t application_rc,
                   const void *io_address, uint32_t io_bytes)
@@ -257,7 +277,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
     if(g_tls.in_drain || g_tls.in_gpu) return PS3DK_PROF_EBUSY;
     p=p_ready() ? g_prof:NULL;
     if(!p) return PS3DK_PROF_ENOTINIT;
-    if(!options_copy(options ? options:&defaults,&normalized) ||
+    if(!options_copy(options ? options:build_ring ? &build_defaults:&defaults,&normalized) ||
        !layout(o,&ring,&ring_label,&records,&frames,&bytes)) return rc;
     if(!options && !defaults_reserved(o)) return rc; /* defaults never take application indices */
     /* Become a participant before owning mutable configuration or entering a

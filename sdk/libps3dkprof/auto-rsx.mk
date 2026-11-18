@@ -10,11 +10,12 @@ AUTO_SOURCE_COMMIT ?= $(shell git rev-parse HEAD)
 vpath %.c src/auto_rsx
 
 .PHONY: auto-rsx install-auto-rsx install-auto-package
+# PS3DK_PROF_AUTO_RING: the report ring is compiled in, dormant (nothing allocated) unless the options select it.
 define AUTORSX_VARIANT
 AUTORSX_DIR_$(1) := $$(AUTORSX_DIR)/$(1)
 AUTORSX_OBJECTS_$(1) := $$(addprefix $$(AUTORSX_DIR_$(1))/,$$(addsuffix .o,$$(AUTORSX_NAMES)))
 AUTORSX_FLAGS_$(1) := $$(EXT_FLAGS_$(1)) -DPS3DK_PROF_WITH_PROFILE -DPS3DK_PROF_WITH_FIFO=1 \
-                      -DPS3DK_PROF_WITH_AUTO=1 -Isrc/fifo -Isrc/auto_rsx -I../libgcm_cmd/src
+                      -DPS3DK_PROF_WITH_AUTO=1 -DPS3DK_PROF_AUTO_RING=1 -Isrc/fifo -Isrc/auto_rsx -I../libgcm_cmd/src
 AUTORSX_CONFIG_$(1) := $$(AUTORSX_DIR_$(1))/profile-identity.cfg
 $$(AUTORSX_CONFIG_$(1)): FORCE
 	@mkdir -p "$$(@D)"
