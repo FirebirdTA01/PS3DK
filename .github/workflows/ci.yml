@@ -479,7 +479,7 @@ jobs:
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
               -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
       - name: Validate rsx-cg-compiler --version
         run: |
@@ -2089,7 +2089,7 @@ jobs:
               -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
       - name: Validate --version
         run: |

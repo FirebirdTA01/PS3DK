@@ -174,24 +174,24 @@ target_include_directories(rsx-cg-compiler PRIVATE
 # into an ELF shader archive.  Plain C++17; shares only the generated
 # version.h.
 #
-# cgnv2elf is its compatibility name for existing Makefiles: a byte-for-byte
-# copy of the executable written beside it after every link (a copy, not a
-# link, so it also survives Windows zips).  The program only looks at the
-# name it was started under for one extra --help/--version line.  The
-# cgnv2elf target builds both, so `--target cgnv2elf` keeps working.
+# cgnv2elf is its compatibility name for existing Makefiles: the cgnv2elf
+# target writes a byte-for-byte copy of the executable beside it (a copy,
+# not a link, so it also survives Windows zips) and is part of `all`.  The
+# program only looks at the name it was started under for one extra
+# --help/--version line.
 # ----------------------------------------------------------------------------
 
 add_executable(rsxcg2elf
     ${SRC_DIR}/cgnv2elf/cgnv2elf.cpp
 )
-add_custom_command(TARGET rsxcg2elf POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-            $<TARGET_FILE:rsxcg2elf>
-            $<TARGET_FILE_DIR:rsxcg2elf>/cgnv2elf${CMAKE_EXECUTABLE_SUFFIX}
+set(RSXCG2ELF_ALIAS ${CMAKE_CURRENT_BINARY_DIR}/cgnv2elf${CMAKE_EXECUTABLE_SUFFIX})
+add_custom_command(OUTPUT ${RSXCG2ELF_ALIAS}
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:rsxcg2elf> ${RSXCG2ELF_ALIAS}
+    DEPENDS rsxcg2elf
     COMMENT "Copying rsxcg2elf to its compatibility name cgnv2elf"
     VERBATIM
 )
-add_custom_target(cgnv2elf ALL DEPENDS rsxcg2elf)
+add_custom_target(cgnv2elf ALL DEPENDS ${RSXCG2ELF_ALIAS})
 
 add_executable(fp-register-remap-test EXCLUDE_FROM_ALL tests/fp_register_remap_test.cpp)
 target_include_directories(fp-register-remap-test PRIVATE ${SRC_DIR})

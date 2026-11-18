@@ -558,7 +558,7 @@ EOF
     cmake -S "$src" -B "$obj" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$tc" \
         -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$obj" --target rsx-cg-compiler rsxcg2elf
+    cmake --build "$obj" --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
     # cgnv2elf.exe is the compatibility name for existing Makefiles: a real
     # copy of rsxcg2elf.exe that the build writes beside it (symlinks
