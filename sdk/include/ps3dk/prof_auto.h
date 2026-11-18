@@ -29,8 +29,18 @@ typedef struct ps3dk_prof_auto_options {
                                  * read it, so size for the ranges outstanding over the RSX and drainer lag (about
                                  * three frames), not for one frame. At most what leaves 64 pairs for draws and FRAME
                                  * marks after the whole-CALL reserve (32, a quarter of a small pool) and this one */
-    /* Report ring (owner-buffer draws recycle report blocks through MAIN memory). RESERVED: all four must be 0 in
-     * this release, which refuses any other value; 0 keeps the bounded local report pool. */
+    /* Report ring, opt-in (owner-buffer draws recycle report blocks through MAIN memory, so their per-draw timing is
+     * not bounded by the local pool). All four 0 (the default) keeps the bounded local report pool and allocates
+     * nothing. ring_blocks nonzero selects the ring; it then allocates, once per process, ring_bytes of MAIN extents
+     * plus its metadata and descriptors in whole 1 MiB pages (20 MiB at the defaults: 16 MiB of extents, 16,384
+     * records). The CMake option PS3_PROF_AUTO_RING=ON sets them with no source change (ps3dk_prof_auto_ring_options
+     * below). Segment draws, frame marks, whole-CALL brackets and ranges keep the local pool.
+     * ON when every owner-buffer draw must be timed: busy frames over the ~504-pair per-frame cap, per-draw or per-pass
+     * RSX cost, per-tag totals without untimed draws. OFF (default) when memory is tight (the ring's pages change the
+     * memory you may be measuring), when frame-level verdicts and ranges are enough, or when draws come mostly from
+     * CALL segments (they keep the local pool). Sizing (docs/profiler-guide.md): extents of 126 draws (4 KiB), records
+     * for the draws outstanding over about three frames; too small shows as untimed draws counted under ring_full or
+     * metadata capacity, and extents still held at seal make the capture FINAL (lower bounds). */
     uint32_t ring_blocks;       /* 2 or 3 local blocks of 126 pairs (the hardware-tested copy) at the top of the
                                  * range; the rest stay legacy and must be nonempty, so 3 needs over 378 pairs and 4
                                  * (504 pairs, the whole 1024-report maximum) is always refused */
@@ -43,6 +53,29 @@ typedef struct ps3dk_prof_auto_options {
  * <cell/gcm/ps3tc_gcm_labels.h> (labels 240..247, reports 0..511 and 1024..2047), so they never collide with the
  * application's labels (64, 69..239, 248..254) or reports (512..1023); the attach refuses defaults that would. */
 #define PS3DK_PROF_AUTO_OPTIONS_INIT {52u,1024u,1024u,247u,246u,1024u,256u,2097152u,0u,0u,0u,0u,0u}
+
+/* Build-time report ring (CMake PS3_PROF_AUTO_RING=ON, with PS3_PROF_AUTO_RING_MB and PS3_PROF_AUTO_RING_RECORDS):
+ * the selector compiles a generated translation unit into each executable that defines the constant
+ * ps3dk_prof_automatic_ring_options with PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS, and links it with
+ * --require-defined, so a missing definition is a link error. The AUTO start-up reads it through a weak reference
+ * before profiler initialization; absent (the option OFF) nothing changes. Present, it is validated as the attach
+ * validates the ring fields (an invalid one prints a diagnostic and the automatic capture is not initialized) and its
+ * fields replace the ring fields of the defaults: the automatic attach uses them unless pre-init options
+ * (PS3DK_PROF_AUTO_OPTIONS_SET) apply, which always win, and an override with NULL options uses them too. */
+typedef struct ps3dk_prof_auto_ring_options {
+    uint32_t size;              /* sizeof(ps3dk_prof_auto_ring_options) = 16 */
+    uint32_t ring_blocks;       /* 2 or 3, as ps3dk_prof_auto_options.ring_blocks (the generated constant: 2) */
+    uint32_t ring_bytes;        /* MAIN extents: whole 1 MiB pages, 1..256 MiB (0 is refused here) */
+    uint32_t ring_records;      /* 1..65536 operation snapshots (0 is refused here) */
+} ps3dk_prof_auto_ring_options;
+#define PS3DK_PROF_AUTO_RING_OPTIONS_INIT(bytes, records) {16u, 2u, (uint32_t)(bytes), (uint32_t)(records)}
+#ifdef __cplusplus
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS(...) \
+    extern "C" const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options = __VA_ARGS__
+#else
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS(...) \
+    const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options = __VA_ARGS__
+#endif
 
 /* Extra command words the automatic profiler writes inside a CALL segment around each covered draw or clear
  * (one 2-word timestamp report before it, one after it), whether the segment is written through

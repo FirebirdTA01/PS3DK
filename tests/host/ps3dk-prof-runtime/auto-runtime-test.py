@@ -101,11 +101,14 @@ CAPTURE_MUTANTS=('seal-ignores-held',)
 RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5,'ringflip':6,
               'ringsegment':7}
 RING_WRAP=('ringwrap',*RING_RUNTIME)
+# The build-option ring constant (PS3_PROF_AUTO_RING): auto-ring-option-test.c modes. ringofftoday is ringoptoff
+# built without the ring compiled in (the archive before the ring shipped), whose CONFIG ringoptoff must match.
+RING_OPTION={'ringopt':0,'ringopt2':1,'ringoptset':2,'ringoptsetring':3,'ringoptbad':4,'ringoptoff':5,'ringofftoday':5}
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
 ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
-                                  'ringsegment'],default='noinit')
+                                  'ringsegment',*RING_OPTION],default='noinit')
 ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
 ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
 ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
@@ -249,6 +252,9 @@ if a.case=='labels':
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
 if a.case in ('ring',*RING_WRAP):flags+=['-DGPP_HOST_DEVMEM','-DPS3DK_PROF_AUTO_RING=1']
+if a.case in RING_OPTION:
+    flags+=['-DGPP_HOST_DEVMEM','-DTEST_RINGOPT_MODE='+str(RING_OPTION[a.case])]
+    if a.case!='ringofftoday':flags+=['-DPS3DK_PROF_AUTO_RING=1']
 if a.case in RING_RUNTIME:
     flags+=['-DTEST_RING_MODE='+str(RING_RUNTIME[a.case])]
     # the application's host stand-in for PUT's barrier is a seq_cst fence, which GCC warns about under TSan
@@ -517,6 +523,7 @@ if a.case=='ring':application=Path(__file__).with_name('auto-ring-attach-test.c'
 if a.case=='ringwrap':application=Path(__file__).with_name('auto-ring-wrap-test.c').read_text()
 if a.case in RING_RUNTIME:application=Path(__file__).with_name('auto-ring-runtime-test.c').read_text()
 if a.case in ('preinit','preinitthread','preinitold','preinitfail'):application=Path(__file__).with_name('auto-preinit-test.c').read_text()
+if a.case in RING_OPTION:application=Path(__file__).with_name('auto-ring-option-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
 extra=[]
 if a.case in RING_WRAP:
@@ -615,6 +622,30 @@ if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else
                                    b'AUTO ring physical tail and native pre-wrap flush PASS')+bytes([10])),result.stdout
     print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case in RING_OPTION:
+    assert result.stdout.endswith(b'AUTO build-option ring PASS'+bytes([10])),result.stdout
+    print(result.stdout.decode(),end='')
+    files=list(capture_dir.glob('*.prof'))
+    if a.case=='ringoptbad':
+        # refused loudly at start-up: the diagnostic, no initialization, no capture
+        assert b'ps3prof: PS3_PROF_AUTO_RING options refused' in result.stderr and not files,(result.stderr,files)
+        print(result.stderr.decode(),end='')
+        raise SystemExit(0)
+    assert len(files)==1,files
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
+    check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
+    configs=[b for k,b in check.chunks(files[0].read_bytes()) if k==34]
+    assert len(configs)==1,len(configs)
+    (out/'config.bin').write_bytes(configs[0])
+    if a.case=='ringoptoff':
+        # the same program without the ring compiled in: CONFIG byte-identical (no ring partition, no ring budget)
+        today=out/'today'
+        argv=['python3',__file__,'--case','ringofftoday','--out',today]+(['--sanitize',a.sanitize] if a.sanitize else [])
+        r=run('ringofftoday',argv)
+        assert (today/'config.bin').read_bytes()==configs[0],'CONFIG differs from the build without the ring'
+        print('CONFIG (%d bytes) identical to the build without the ring compiled in' % len(configs[0]))
     raise SystemExit(0)
 if a.case=='segmetatail':
     assert result.returncode==0 and result.stdout==b'AUTO metadata exhaustion latches the frame tail PASS\n',result.stdout
