@@ -19,7 +19,8 @@ typedef struct {
     uint8_t bytes[MEM_BYTES];
     uint8_t durable[MEM_BYTES];
     uint64_t length, largest_end;
-    uint64_t durable_length;
+    uint64_t durable_length, written;
+    unsigned syncs;
     unsigned calls, fail_call, sync_fail_call, short_limit;
     size_t tear;
     int io_failed, buffered;
@@ -55,6 +56,7 @@ static int64_t wr(void *ctx, uint64_t off, const void *buf, size_t n)
     }
     if (m->short_limit && take > m->short_limit) take = m->short_limit;
     memcpy(m->bytes + (size_t)off, buf, take);
+    m->written += take;
     if (off + take > m->largest_end) m->largest_end = off + take;
     return (int64_t)take;
 }
@@ -71,6 +73,7 @@ static int sync_file(void *ctx)
 {
     memory *m = ctx;
     ++m->calls;
+    ++m->syncs;
     if (m->io_failed || m->sync_fail_call == m->calls || m->fail_call == m->calls) {
         m->io_failed = 1;
         return -1;
@@ -143,6 +146,50 @@ static int commit(fixture *f, uint64_t seq)
     uint8_t p[24], cp[8];
     chunk(p, seq); put64(cp, seq);
     return pfr_commit(f->s, cp, sizeof cp, p, sizeof p);
+}
+static void test_compact_writes(memory *m, unsigned version)
+{
+    fixture f; unsigned i; uint64_t before; unsigned syncs;
+    uint8_t cp[128], payload[24]; pfr_view view;
+    memset(m, 0, sizeof *m);
+    /* resize promises length, not zero-filled storage. */
+    memset(m->bytes, 0xa5, sizeof m->bytes); attach(&f, m);
+    REQUIRE((version == 1 ? pfr_format : pfr_format_v2)
+        (f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+    for (i = 12288; i < m->length; ++i) REQUIRE(m->bytes[i] == 0);
+    memset(cp, 0xbd, sizeof cp);
+    for (i = 0; i < 4; ++i) {
+        chunk(payload, i); before = m->written; syncs = m->syncs;
+        REQUIRE(pfr_commit(f.s, cp, sizeof cp, payload, sizeof payload) == PFR_OK);
+        REQUIRE(m->written - before == 96 + 128 + 24 + 64 + 4096);
+        REQUIRE(m->syncs - syncs == 2);
+    }
+    /* First shorter reuse clears exactly the former used prefix. Next reuse
+     * can shrink again. Reading every slot checks the padding CRC as well. */
+    for (i = 4; i < 12; ++i) {
+        pfr_segment seg; unsigned j;
+        before = m->written;
+        REQUIRE(commit(&f, i) == PFR_OK);
+        REQUIRE(m->written - before == (i < 8 ? 248u : 128u) + 64 + 4096);
+        for (j = 0; j < 3; ++j) REQUIRE(pfr_get_segment(f.s, j, &seg) == PFR_OK);
+    }
+    destroy(&f); attach(&f, m);
+    REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+    /* The spare may contain an interrupted long write absent from either
+     * retained root. Open must not infer its high-water mark from roots. */
+    memset(m->bytes + 12288 + 500, 0xcd, 200);
+    for (i = 12; i < 20; ++i) {
+        pfr_segment seg; unsigned j;
+        before = m->written; syncs = m->syncs;
+        REQUIRE(commit(&f, i) == PFR_OK);
+        REQUIRE(m->written - before == (i < 16 ? 4096u : 192u) + 4096);
+        REQUIRE(m->syncs - syncs == 2);
+        for (j = 0; j < 3; ++j) REQUIRE(pfr_get_segment(f.s, j, &seg) == PFR_OK);
+    }
+    destroy(&f); attach(&f, m);
+    REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+    REQUIRE(pfr_get_view(f.s, &view) == PFR_OK && view.next_chunk == 20 && !view.recovered);
+    destroy(&f);
 }
 static void check_tail(fixture *f, uint64_t next)
 {
@@ -337,17 +384,65 @@ static void test_corruption(memory *base, memory *work)
     memcpy(work, base, sizeof *work); attach(&f, work); f.cfg.session[0] ^= 1;
     REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_CORRUPT); destroy(&f);
 }
+static void test_compact_faults(memory *m)
+{
+    const size_t tears[] = {0, 1, 63, 127, 247, 4095, SIZE_MAX};
+    unsigned version, reopen, buffered, stage, i; size_t t;
+    /* Five stages: used prefix, footer, slot sync, root, root sync. Cover both
+     * the warm shortened write and the conservative full-body reopened write. */
+    for (version = 1; version <= 2; ++version)
+    for (reopen = 0; reopen < 2; ++reopen)
+    for (buffered = 0; buffered < 2; ++buffered)
+    for (stage = 1; stage <= 5; ++stage)
+    for (t = 0; t < sizeof tears / sizeof tears[0]; ++t) {
+        fixture f; uint8_t cp[128], payload[24]; pfr_view v;
+        memset(m, 0, sizeof *m); m->buffered = (int)buffered; attach(&f, m);
+        REQUIRE((version == 1 ? pfr_format : pfr_format_v2)
+            (f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+        memset(cp, 0xbd, sizeof cp);
+        for (i = 0; i < 4; ++i) {
+            chunk(payload, i);
+            REQUIRE(pfr_commit(f.s, cp, sizeof cp, payload, sizeof payload) == PFR_OK);
+        }
+        if (reopen) {
+            destroy(&f); attach(&f, m);
+            REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+        }
+        reset_fault(m); m->fail_call = stage; m->tear = tears[t];
+        REQUIRE(commit(&f, 4) == PFR_IO);
+        REQUIRE(commit(&f, 4) == PFR_FAILED);
+        destroy(&f);
+        if (buffered) { memcpy(m->bytes, m->durable, sizeof m->bytes); m->length = m->durable_length; }
+        reset_fault(m); attach(&f, m);
+        REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+        REQUIRE(pfr_get_view(f.s, &v) == PFR_OK);
+        REQUIRE(v.next_chunk == 4 || (!buffered && v.next_chunk == 5));
+        for (i = 0; i < v.retained_segments; ++i) {
+            pfr_segment seg;
+            REQUIRE(pfr_get_segment(f.s, i, &seg) == PFR_OK);
+        }
+        /* Resume after every interrupted prefix/footer/root, not just read it. */
+        REQUIRE(commit(&f, v.next_chunk) == PFR_OK);
+        destroy(&f); attach(&f, m);
+        REQUIRE(pfr_open(f.s, &f.io, &f.cfg, f.scratch, f.layout.scratch_bytes) == PFR_OK);
+        { pfr_view after; REQUIRE(pfr_get_view(f.s, &after) == PFR_OK && after.next_chunk == v.next_chunk + 1); }
+        destroy(&f);
+    }
+}
 int main(int argc, char **argv)
 {
     memory *a = malloc(sizeof *a), *b = malloc(sizeof *b);
     REQUIRE(a && b);
     test_layout();
+    test_compact_writes(a, 1);
+    test_compact_writes(a, 2);
     test_rotations_and_short_writes(a, argc > 1 ? argv[1] : NULL);
     test_bad_inputs(a);
     test_torn_commits(a, b);
     test_torn_format(b);
     test_volatile_power_cuts(a, b);
     test_corruption(a, b);
+    test_compact_faults(a);
     free(b); free(a);
     puts("PASS rolling physical-store foundation (semantic checkpoints not tested)");
     return 0;

@@ -128,10 +128,28 @@ independent evidence for the contents of an evicted prefix.
 
 ## Commit and recovery
 
+Format explicitly zeroes every slot before publishing the empty root; file
+resize alone does not establish zero padding. The handle remembers the used
+prefix length for each physical slot (65 bounded `uint32_t` entries). A commit
+writes `max(previous_used, new_used)` bytes from the start of that slot, then
+its fixed 64-byte footer. Here `used = 96 + checkpoint_bytes + payload_bytes`.
+This clears an older, longer record without rewriting untouched zero slack.
+Only after root publication succeeds does the remembered length become
+`new_used`. Any failed IO poisons the handle as before.
+
+After reopen, the first reuse of **each** physical slot writes its entire body
+plus footer: an interrupted spare write may be longer than either root says.
+Later reuses can again write only the required prefix. This changes neither
+the physical format nor the two sync operations per commit. The CRC still
+covers all zero padding, using a fixed 1 KiB byte-lookup table; CRC CPU work
+still scales with slot size even when fewer bytes are written. Target drain
+time, lag and dropped records must therefore be measured separately from the
+host adapter's byte count. Formatting writes the bounded file once up front.
+
 For each commit:
 
 1. Choose a slot absent from the current valid root, before removing any entry.
-2. Write the complete new slot and call the adapter's sync operation.
+2. Write the used slot prefix and fixed footer, then call the adapter's sync operation.
 3. Write the alternate root, adding the new segment and removing the oldest
    entry if the retained set is full; sync again.
 4. Publish the new in-memory committed root only after both stages succeed.

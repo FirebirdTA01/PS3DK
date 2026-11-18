@@ -24,8 +24,15 @@ MUTATIONS = [
     ("keeps_writing_after_io_failure", "static int poison(pfr_store *s) { s->failed = 1; return PFR_IO; }",
      "static int poison(pfr_store *s) { (void)s; return PFR_IO; }"),
     ("publishes_root_before_slot_sync",
-     "if (io_write(s, slot_offset(s, slot), p, s->layout.slot_bytes) != PFR_OK || s->io.sync(s->io.ctx))",
-     "if (io_write(s, slot_offset(s, slot), p, s->layout.slot_bytes) != PFR_OK)"),
+     "f, SLOT_FOOT) != PFR_OK\n        || s->io.sync(s->io.ctx))",
+     "f, SLOT_FOOT) != PFR_OK)"),
+    ("format_leaves_dirty_slack",
+     "if (io_write(s, slot_offset(s, slot), s->scratch, s->layout.slot_bytes) != PFR_OK)",
+     "if (slot == UINT32_MAX && io_write(s, slot_offset(s, slot), s->scratch, s->layout.slot_bytes) != PFR_OK)"),
+    ("shorter_reuse_leaves_old_bytes", "prefix = s->used[slot] > used ? s->used[slot] : used;", "prefix = used;"),
+    ("reopen_trusts_torn_spare", "s->used[k] = s->layout.slot_bytes - SLOT_FOOT;", "s->used[k] = 0;"),
+    ("never_updates_slot_watermark", "s->used[slot] = used;", "s->used[slot] = 0;"),
+    ("writes_all_reserved_slack", "prefix = s->used[slot] > used ? s->used[slot] : used;", "prefix = s->layout.slot_bytes - SLOT_FOOT;"),
 ]
 
 def main():
