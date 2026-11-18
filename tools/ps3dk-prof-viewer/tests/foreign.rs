@@ -464,7 +464,7 @@ fn no_clock_draw_path_says_no_clock() {
     for _ in 0..3 {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |p| {
-                draw(p, &a, &ix, &mut st, None, Some(&slot));
+                draw(p, &a, &ix, &mut st, None, Some(&slot), None);
             });
         });
     }
@@ -1369,7 +1369,7 @@ mod graph_modes {
             for _ in 0..3 {
                 let _ = ctx.run(egui::RawInput::default(), |ctx| {
                     egui::CentralPanel::default().show(ctx, |p| {
-                        draw(p, &a, &ix, st, None, Some(slot));
+                        draw(p, &a, &ix, st, None, Some(slot), None);
                     });
                 });
             }
@@ -1474,7 +1474,7 @@ mod graph_modes {
         for _ in 0..3 {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |p| {
-                    last = draw(p, a, ix, &mut st, None, Some(slot));
+                    last = draw(p, a, ix, &mut st, None, Some(slot), None);
                 });
             });
         }

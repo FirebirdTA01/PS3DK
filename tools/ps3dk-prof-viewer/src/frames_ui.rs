@@ -5,6 +5,7 @@ use eframe::egui::{self, Align2, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use ps3dk_prof::Analysis;
 use ps3dk_ui as ui;
 
+use crate::auto_lane::{AutoFrame, AutoLane};
 use crate::frames::{
     frame_tables, glyph, scale, slot_at, summary, visible_slots, Budget, FramesIndex, Glyph, LaneTable, Selection,
     SlotKind, Table,
@@ -73,9 +74,10 @@ fn slot_text(k: &SlotKind, tb: TimeBase) -> String {
     }
 }
 
-/// What one repaint drew, for tests: the graph's screen rectangle (None without a graph) and whether the budget
-/// selector and the budget line were shown.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// What one repaint drew, for tests: the graph's screen rectangle (None without a graph), the budget
+/// selector, the budget line, the display mode, the non-bar mode's work, the distribution-fallback
+/// count, and the RSX lane mark per owner slot (the drawn per-frame `rsx_busy_ppu.lo`).
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Drawn {
     pub graph: Option<Rect>,
     pub budget_selector: bool,
@@ -86,9 +88,18 @@ pub struct Drawn {
     pub work: usize,
     /// Lanes whose distribution was refused, shown as a Fit p99 fallback note (Lines and Distribution).
     pub fit_fallback: usize,
+    /// The RSX busy-time lane of the owner being drawn, aligned with the owner slots; `None` when the
+    /// capture has no automatic observation or this owner has no AUTO frame (nothing to draw in that case).
+    /// Each slot that is drawn carries the reader's `rsx_busy_ppu.lo` when mapped, or the reader's
+    /// reason when it is not.  Unmapped frames are never 0 and are never omitted.
+    pub auto_lane: Option<crate::auto_lane::AutoLane>,
 }
 
-/// Draws the page.
+/// Draws the page.  `auto` is the matching Automatic page report for this capture and scope (window-scoped
+/// when a capture window is selected, full otherwise): its per-frame `rsx_busy_ppu` lower bounds feed the
+/// page's RSX lane.  `None` means the capture has no automatic observation (or the selected owner has no
+/// AUTO frame): no RSX lane is drawn in either case.  The lane reuses the already-analyzed report, so no
+/// second reader pass runs here.
 pub fn draw(
     p: &mut egui::Ui,
     a: &Analysis,
@@ -96,6 +107,7 @@ pub fn draw(
     st: &mut FramesState,
     timeline: Option<&mut TimelineState>,
     foreign: Option<&ForeignSlot>,
+    auto: Option<&crate::auto::AutoView>,
 ) -> Drawn {
     let pal = ui::Palette::of(p);
     let tb = TimeBase::of(a);
@@ -140,6 +152,11 @@ pub fn draw(
         if !o.valid {
             ui::field_message(p, ui::Tone::Warning, &format!("Owner {} is NOT VALID: {}", o.incarnation, o.reasons));
         }
+        // The RSX lane (automatic observation only): the reader's per-frame RSX busy lower bounds for this
+        // owner, aligned to the owner slots.  `None` when the capture has no automatic observation or this
+        // owner has no AUTO frame — nothing to draw either case.  Reuses the already-analyzed report.
+        let auto_lane = auto.and_then(|av| AutoLane::build(&av.report.frames, o));
+        drawn.auto_lane = auto_lane.clone();
         p.horizontal_wrapped(|h| {
             h.label(egui::RichText::new("Budget").strong());
             if ix.freq_hz.is_some() {
@@ -326,6 +343,12 @@ pub fn draw(
                     let strips = Strips { o, slot_w, width, budget_ticks, selected: st.sel.frame };
                     strips.draw(p, v, viewport, &painted, &pal);
                 }
+                // The RSX lane: the reader's per-frame RSX busy lower bounds, against the same budget line and
+                // value scale.  Unavailable frames are marks with the reader's reason on hover, never 0 ms.
+                if let Some(lane) = auto_lane.as_ref() {
+                    let r = RsxLane { o, lane, slot_w, width, budget_ticks, selected: st.sel.frame };
+                    r.draw(p, viewport, &painted, &pal);
+                }
             });
         }
         st.painted = painted;
@@ -412,6 +435,80 @@ pub fn draw(
         draw_unattributed(p, ix);
     });
     drawn
+}
+
+/// The RSX lane strip: one row under the PPU graph, one mark per owner slot, drawn against the same
+/// budget line and value scale the PPU bars use.  A mapped frame (the reader's `rsx_busy_ppu.lo`) is
+/// a bar from 0 to that bound — the part above the budget line in red; an unmapped frame is a hollow
+/// "unavailable" mark with the reader's own reason on hover, never a 0 ms bar.
+const RSX_STRIP_H: f32 = 40.0;
+const RSX_LABEL_H: f32 = 13.0;
+
+struct RsxLane<'o> {
+    o: &'o Owner,
+    lane: &'o AutoLane,
+    slot_w: f32,
+    width: f32,
+    budget_ticks: Option<f64>,
+    selected: Option<u64>,
+}
+
+impl RsxLane<'_> {
+    fn draw(&self, p: &mut egui::Ui, viewport: Rect, painted: &std::ops::Range<usize>, pal: &ui::Palette) {
+        let span = RSX_STRIP_H - RSX_LABEL_H - 4.0;
+        let (rect, resp) = p.allocate_exact_size(Vec2::new(self.width, RSX_STRIP_H), Sense::hover());
+        let painter = p.painter_at(rect);
+        painter.rect_filled(rect, 2.0, pal.surface);
+        let base = rect.bottom() - 2.0;
+        // The strip's value scale (ticks per pixel), the same construction the PPU graph uses: cover the
+        // largest busy bound and, when a budget is chosen, the budget line.  All are PPU ticks, so the
+        // budget line lands at exactly the budget value and the over/under split is judged against it.
+        let max_lo = self.lane.slots.iter().find_map(|a| a.as_ref().and_then(|af| match af {
+            AutoFrame::Busy(lo) => Some(*lo),
+            AutoFrame::Unavailable(_) => None,
+        })).unwrap_or(0);
+        let top = (max_lo as f64).max(self.budget_ticks.unwrap_or(0.0)).max(1.0);
+        let px = span / (top as f32); // pixels per tick within the strip
+        let y = |t: u64| -> f32 { base - (t as f32 * px).max(0.0) };
+        let budget_y = self.budget_ticks.map(|t| base - (t as f32 * px).max(0.0));
+        let label = "RSX busy (automatic; lower bound)";
+        painter.text(Pos2::new(rect.left() + viewport.min.x + 4.0, rect.top() + 1.0), Align2::LEFT_TOP, label, FontId::proportional(11.0), pal.text);
+        // The budget line the PPU bars are judged against, at the same value in this strip's scale.
+        if let Some(by) = budget_y {
+            painter.line_segment([Pos2::new(rect.left(), by), Pos2::new(rect.right(), by)], Stroke::new(1.0_f32, pal.danger));
+        }
+        for i in painted.clone() {
+            let x0 = rect.left() + i as f32 * self.slot_w;
+            let col = Rect::from_min_max(Pos2::new(x0 + 1.0, rect.top() + 1.0), Pos2::new(x0 + self.slot_w - 1.0, base));
+            let Some(af) = self.lane.slots.get(i).and_then(|a| a.as_ref().cloned()) else { continue };
+            match af {
+                AutoFrame::Busy(lo) => {
+                    let top_y = y(lo);
+                    if let Some(by) = budget_y {
+                        // The within-budget part (0 to the line) is accent; the over-budget part (the line to
+                        // lo) red — the same split the PPU bars show, only for the RSX busy bound.
+                        painter.rect_filled(Rect::from_min_max(Pos2::new(x0 + 1.0, by.min(base)), Pos2::new(x0 + self.slot_w - 1.0, base)), 1.0, pal.accent);
+                        if top_y < by {
+                            painter.rect_filled(Rect::from_min_max(Pos2::new(x0 + 1.0, top_y), Pos2::new(x0 + self.slot_w - 1.0, by)), 1.0, pal.danger);
+                        }
+                    } else {
+                        painter.rect_filled(Rect::from_min_max(Pos2::new(x0 + 1.0, top_y), Pos2::new(x0 + self.slot_w - 1.0, base)), 1.0, pal.accent);
+                    }
+                }
+                AutoFrame::Unavailable(why) => {
+                    // Unavailable: a hollow mark in the band, never a 0 bar.  The reader's reason is the hover
+                    // tooltip (the same sentence the Automatic page prints for that frame).
+                    let cy = rect.top() + RSX_LABEL_H + (span * 0.5);
+                    painter.circle_stroke(Pos2::new(x0 + self.slot_w / 2.0, cy), 3.0, Stroke::new(1.5_f32, pal.warning));
+                    let _ = p.interact(col, p.id().with(("auto_rsx_lane_unav", i)), Sense::hover()).on_hover_text(why);
+                }
+            }
+            if self.selected == Some(self.o.slots[i].frame) {
+                painter.rect_stroke(col, 1.0, Stroke::new(1.5_f32, pal.text));
+            }
+        }
+        let _ = resp;
+    }
 }
 
 const STRIP_H: f32 = 48.0;

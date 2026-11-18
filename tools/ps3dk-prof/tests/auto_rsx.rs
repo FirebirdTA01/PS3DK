@@ -3,6 +3,7 @@
 //! tests/fixtures/auto are captures written by the host runtime controls (tests/host/ps3dk-prof-runtime/
 //! auto-runtime-test.py) with synthetic device facts; the synthetic files below are encoded byte by byte here.
 mod common;
+mod auto_support;
 mod fifo_support;
 use common::*;
 use fifo_support::*;
@@ -2217,6 +2218,47 @@ fn recorded_flip_wait_positions_in_json() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(std::path::Path::new(&dir).join("presentation-partial.prof"),f.bytes()).unwrap();
     }
+}
+
+/// The Frames page's RSX lane shares the reader's per-frame numbers.  The committed fixture
+/// `auto_support::qualified_busy` carries: frame 0 a covered CLEAR (RSX busy 30 000 raw, mapped to a PPU
+/// lower/upper bound), frame 1 a frame with no covered operation (RSX busy unavailable; the reader's reason
+/// carries), frame 2 a base PPU frame with no AUTO row (not an AUTO frame at all).  This test pins exactly
+/// those reader verdicts and regenerates the committed fixture from the same wire builder.
+#[test]
+fn frames_rsx_lane_fixture_pins_the_reader_verdicts() {
+    use ps3dk_prof::auto_rsx::busy_timeline;
+    let f = auto_support::qualified_busy();
+    // Regenerate the committed fixture from the wire builder (asserting byte equality keeps it checked in).
+    let path = format!("{}/tests/fixtures/auto/frames-rsx-lane.prof", env!("CARGO_MANIFEST_DIR"));
+    std::fs::write(&path, f.bytes()).expect("write frames-rsx-lane.prof");
+    let cap = reader::read(&f.bytes()).expect("reads");
+    let r = analyze(&cap);
+    let Some(MapState::Qualified(m)) = &r.map else { panic!("expected a qualified clock map, got {:?}", r.map) };
+    assert!(m.fmin > 0, "the clock map is qualified");
+    let busy = |frame: u64| r.frames.iter().find(|v| v.owner == OWNER && v.frame == frame).expect("an AUTO frame");
+    // frame 0: the covered CLEAR maps to a PPU busy lower bound; the busy bar timeline agrees.
+    let f0 = busy(0);
+    let Some((lo, hi)) = f0.rsx_busy_ppu else { panic!("frame 0 rsx_busy_ppu: {f0:?}") };
+    assert!(lo <= hi, "busy bound {lo}..={hi}");
+    assert_eq!(f0.rsx_busy_raw, Some(30_000), "frame 0 raw busy is the covered CLEAR span");
+    let timeline = busy_timeline(&cap, &r);
+    assert!(timeline.bars.iter().any(|b| b.owner == OWNER && b.frame == 0 && b.raw_begin == 6_000 && b.raw_end == 36_000),
+        "a busy bar covers frame 0's CLEAR span");
+    // frame 1: no covered operation -> the bound is unavailable and the reader's own reason explains why.
+    let f1 = busy(1);
+    assert!(f1.rsx_busy_ppu.is_none(), "frame 1 must be unavailable, got {:?}", f1.rsx_busy_ppu);
+    assert!(!f1.reason.is_empty(), "unavailable verdict carries the reader's reason");
+    // frame 2: a base PPU frame with no AUTO coverage row -> not an AUTO frame; the lane leaves it unmarked.
+    assert!(r.frames.iter().all(|v| v.frame != 2), "frame 2 has no AUTO row, so the lane marks it unavailable-free");
+    // The JSON the Automatic page and `auto --json` print carry the same per-frame facts the lane reads.
+    let mut out = Vec::new();
+    write_json(&mut out, &r).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let j0 = json["frames"].as_array().unwrap().iter().find(|v| v["frame"] == 0).unwrap();
+    assert_eq!(j0["rsx_busy_ppu"]["lo"], lo, "the viewer's drawn value is the reader's rsx_busy_ppu.lo");
+    let j1 = json["frames"].as_array().unwrap().iter().find(|v| v["frame"] == 1).unwrap();
+    assert!(j1["rsx_busy_ppu"].is_null(), "frame 1 has no bound in the shared JSON either");
 }
 
 /// The inner PPU bound of a raw timestamp comes from the nearest anchors and contains the anchor's own bracket.
