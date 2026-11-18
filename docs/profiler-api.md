@@ -128,10 +128,13 @@ if (PS3DK_PROF_INIT(&cfg) != PS3DK_PROF_OK) { /* run unprofiled */ }
 
 Sets the stop latch, waits up to `quiesce_timeout_us` for recording threads, drains, closes an open window (reason
 SHUTDOWN), writes the trailer, calls `flush` and `close`, and returns the run's result: `OK`; `ENOTQUIESCED`;
-`ESEQLIMIT`; `ESINKRECOVERED`; `ESINKFAIL` (no trailer); `ECLOSE` (close failed: the run fails); `ECLOCK`; `ETHREAD`;
-`ERETENTION`; `ENOTINIT`; `EALREADY` (second call); `EPERM` (APP mode, not the init thread).
-Caller-serialized. Off build: `OK`. A rolling capture reports its own outcome, including `ERESOURCE`, through
-`ps3dk_prof_get_rolling_result` (section 13).
+`ESEQLIMIT`; `ESINKRECOVERED`; `ESINKFAIL` (sink failure or no trailer); `ECLOSE` (close failed: the run fails);
+`ECLOCK`; `ETHREAD` (THREAD mode: the drainer join failed on an otherwise OK run); `ERETENTION` (only on an otherwise
+OK run with retention set); `ERESOURCE` (rolling output stopped at a configured bound, unless a sink or close failure
+replaces it); `ENOTINIT`; `EALREADY` (second call, also after `quick_exit` claimed shutdown); `EPERM` (APP mode, not
+the init thread); `EBUSY` (called from inside the drainer, e.g. a sink callback).
+Caller-serialized. Off build: `OK`. For a rolling capture the same value is published in
+`ps3dk_prof_get_rolling_result().result` (section 13).
 PC app equivalent: none yet (finish capture, card t_dd5b7ce1). Disconnect only ends the PC session.
 
 ### `int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)` / `PS3DK_PROF_GET_CAPTURE_RECORD(out)`
@@ -159,8 +162,10 @@ the opened file.
 ### `int ps3dk_prof_thread_begin(const char *name)` / `PS3DK_PROF_THREAD_BEGIN(name)`
 
 Registers the calling thread (a slot out of `max_threads`). Call before the thread's first zone, unless
-`auto_register` is 1. Returns `OK`; `EALREADY` (already registered); `EFULL` (no slot, or incarnation ids
-exhausted); `ENOTINIT`; `ESTOPPED`; `EBUSY` (inside a drain); `ETHREAD`. Wait-observation archives register the init
+`auto_register` is 1. Returns, in check order: `ENOTINIT` (not initialized); `EALREADY` (this thread is already
+registered); `ESTOPPED` (this thread already acknowledged a stop, or shutdown has begun); `ETHREAD` (the thread lock
+or the OS thread id could not be obtained); `EFULL` (no free slot, or incarnation ids exhausted; counted as an
+unregistered refusal); `OK`. A thread that called `ps3dk_prof_thread_end` may register again. Wait-observation archives register the init
 thread as `init` automatically. Off build: `OK`.
 PC app equivalent: none.
 
@@ -356,19 +361,21 @@ typedef struct ps3dk_prof_spu_lane_stats {
 } ps3dk_prof_spu_lane_stats;
 ```
 
-Common results for the lane calls: `ENOTINIT`; `ENOTSUP` (initialized without lanes); `EBUSY` inside a drain or sink
-callback; `ESTOPPED` after a terminal extension fault, the shutdown claim or the seal. Outputs are written only on
-success.
+Common results for every lane call: `ENOTINIT` (not initialized; it takes priority over argument errors);
+`ENOTSUP` (initialized without lanes); `EBUSY` (inside a drain, sink callback or GPU call, or the extension lock
+could not be taken); `ESTOPPED` (a terminal extension fault, the shutdown claim or the seal, or the closing unlock
+failed). When only the closing unlock fails, `register_*` and `lane_create` still write `*image` / `*out` and
+`lane_end` still writes `*final_or_null`: that output is diagnostic, not permission to use the lane.
 
 | Function / macro | What it does | Results |
 |---|---|---|
-| `int ps3dk_prof_init_ex(const ps3dk_prof_config *cfg, const ps3dk_prof_ext_config *ext)` / `PS3DK_PROF_INIT_EX` | `ps3dk_prof_init` with extensions; `ext` NULL or disabled is exactly `ps3dk_prof_init` | as init |
-| `int ps3dk_prof_spu_image_register_table(const uint8_t *build_id, uint32_t build_len, const ps3dk_prof_spu_desc *descs, uint32_t n, uint32_t *image)` / `PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE` | copies a descriptor table for one SPU image | `EFULL` (32 images), `EINVAL`, `ENOMEM` (arena full) |
-| `int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *image)` / `PS3DK_PROF_SPU_IMAGE_REGISTER_ELF` | registers from the SPU ELF bytes' `ps3dkprof_spudesc` section; the ELF may be freed afterwards | `EINVAL` (ELF rules), else as table |
-| `int ps3dk_prof_spu_lane_create(const char *name, uint32_t image, int owner_self, ps3dk_prof_spu_lane *out)` / `PS3DK_PROF_SPU_LANE_CREATE` | creates a lane; `owner_self` 1 binds it to the calling thread | `EFULL` (lane limits), `EINVAL` |
-| `int ps3dk_prof_spu_lane_end(uint32_t handle, uint64_t timeout_us, ps3dk_prof_spu_lane_stats *final_or_null)` / `PS3DK_PROF_SPU_LANE_END` | retires a lane once its producer can never touch it again (SPU group joined, or job fini plus a completion receipt) | `OK`; `ESTOPPED` (sealed); `ETIMEDOUT` (call again); `ECLOCK`; `EINVAL` (stale handle) |
-| `int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st)` / `PS3DK_PROF_SPU_LANE_STATS` | copies lane counters | as above |
-| `int ps3dk_prof_spu_poll_calibrations(void)` / `PS3DK_PROF_SPU_POLL_CALIBRATIONS()` | observes published calibration answers between drains (APP mode helper) | `EBUSY` on contention, `ESTOPPED` |
+| `int ps3dk_prof_init_ex(const ps3dk_prof_config *cfg, const ps3dk_prof_ext_config *ext)` / `PS3DK_PROF_INIT_EX` | `ps3dk_prof_init` with extensions; `ext` NULL or disabled is exactly `ps3dk_prof_init` | as init, plus `EINVAL` (bad `ext`: size, reserved, ranges, a disabled part with nonzero fields, or the extension exceeding `spu_mem_max`), `ENOTSUP` (rolling output with an unsupported extension combination), `ENOMEM` (block allocation or extension mutex init) |
+| `int ps3dk_prof_spu_image_register_table(const uint8_t *build_id, uint32_t build_len, const ps3dk_prof_spu_desc *descs, uint32_t n, uint32_t *image)` / `PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE` | copies a descriptor table for one SPU image | `EINVAL` (NULL argument; `build_len` not 1..64; `n` not 1..4096; a name or file that is not ASCII up to 512 bytes; an entry over the chunk size; the table changed during the copy); `ESTOPPED` (shutdown or seal); `EFULL` (32 images); `ENOMEM` (image arena full); `OK` |
+| `int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *image)` / `PS3DK_PROF_SPU_IMAGE_REGISTER_ELF` | registers from the SPU ELF bytes' `ps3dkprof_spudesc` section; the ELF may be freed afterwards | `EINVAL` (NULL argument or any ELF rule), else as table |
+| `int ps3dk_prof_spu_lane_create(const char *name, uint32_t image, int owner_self, ps3dk_prof_spu_lane *out)` / `PS3DK_PROF_SPU_LANE_CREATE` | creates a lane; `owner_self` 1 binds it to the calling thread | `EINVAL` (NULL `out`; `owner_self` not 0/1; `owner_self` 1 on an unregistered thread; unknown image; name not ASCII 1..31); `ESTOPPED` (shutdown or seal); `EFULL` (lifetime, live, epoch or loss budget, or no free lane entry); `ENOMEM` (`spu_mem_max` reached: unended lanes stay charged); `OK` |
+| `int ps3dk_prof_spu_lane_end(uint32_t handle, uint64_t timeout_us, ps3dk_prof_spu_lane_stats *final_or_null)` / `PS3DK_PROF_SPU_LANE_END` | retires a lane once its producer can never touch it again (SPU group joined, or job fini plus a completion receipt) | works after the seal. `OK` (released); `ESTOPPED` (the lane was finalized by the seal, or an unlock failed); `ETIMEDOUT` (lane still charged: call again); `ECLOCK`; `EINVAL` (stale or already ended handle) |
+| `int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st)` / `PS3DK_PROF_SPU_LANE_STATS` | copies lane counters; `*st` written only on `OK` | `EINVAL` (NULL `st`, stale handle); `OK` |
+| `int ps3dk_prof_spu_poll_calibrations(void)` / `PS3DK_PROF_SPU_POLL_CALIBRATIONS()` | observes published calibration answers between drains (APP mode helper) | never waits. `EBUSY` (lock contention, or inside a drain or GPU call); `ESTOPPED` (shutdown, fault, seal); `OK` |
 
 Off build: every macro returns `ENOTSUP`. Descriptor capacity: 16 bytes per descriptor in ILP32, 24 in LP64, plus
 strings.
@@ -391,10 +398,16 @@ typedef struct ps3dk_prof_spu_writer { /* opaque */ uint32_t desc_count, bad_ind
 | `int ps3dk_prof_spu_fini(w)` / `PS3DK_PROF_SPU_FINI(w)` | final flush; closes the writer |
 | `int ps3dk_prof_spu_dec_write(w, uint32_t v)` / `PS3DK_PROF_SPU_DEC_WRITE(w, v)` | writes the decrementer (only with `OWN_DEC`, outside zones) |
 
-SPU results: `PS3DK_PROF_SPU_OK` 0, `_EBUSY` -2 (a blocking event is enabled; retry), `_EINVAL` -5, `_ECLOSED` -15
-(lane already attached / writer closed), `_ENOTSUP` -17 (dec_write without OWN_DEC; every macro in an off build),
-`_EAGAIN` -20 (flush and retry), `_EFAULT` -21 (terminal MFC or descriptor-index fault), `_EEXHAUSTED` -22
-(counters spent), `_EDEPTH` -23 (dec_write inside a zone). One writer per SPU thread, not reentrant. Off build: the
+SPU result codes: `PS3DK_PROF_SPU_OK` 0, `_EBUSY` -2, `_EINVAL` -5, `_ECLOSED` -15, `_ENOTSUP` -17, `_EAGAIN` -20,
+`_EFAULT` -21, `_EEXHAUSTED` -22, `_EDEPTH` -23. Per call:
+
+| Call | Results |
+|---|---|
+| attach | `_EINVAL` (NULL or misaligned writer/staging, tag > 31, `ls_cap` odd or not 4..4096, `ring_slots` not a power of two in 8..2^20, unaligned EAs, unknown flags, staging overlapping the writer, a bad descriptor section); `_EBUSY` (a blocking event is enabled: retry on the same writer); `_ECLOSED` (the lane already had a producer); `_EFAULT` (an MFC status was wrong); `_OK` |
+| flush | `_EFAULT` (a fault latched earlier, including a bad descriptor index, or an MFC or ring check failed); `_ECLOSED` (not attached, or closed); `_EBUSY` (a blocking event is enabled); `_EEXHAUSTED` (generation/write counters spent); `_OK` (published, or nothing to publish) |
+| fini | `_ECLOSED` (not attached, or already closed); `_EBUSY`; `_EFAULT`; `_OK`. Never `_EEXHAUSTED`: an exhausted writer still closes |
+| dec_write | `_EDEPTH` (a zone open or a BEGIN suppressed; checked first, not cured by flushing); `_ENOTSUP` (no `OWN_DEC`); `_EBUSY` / `_ECLOSED` / `_EFAULT` (from its flush or preflight); `_EAGAIN` (earlier events unpublished, ring nearly full, or counters spent: flush and retry); `_OK`. An `_EFAULT` after the write leaves the decrementer written |
+| begin / end / mark | void; an index outside the attached descriptor count records nothing, counts `bad_index` and latches `_EFAULT` | One writer per SPU thread, not reentrant. Off build: the
 writer is a 1-byte struct, zone begin yields 0, and the other macros return `_ENOTSUP`.
 
 ```c
@@ -432,17 +445,23 @@ typedef struct ps3dk_prof_gpu_stats {
 } ps3dk_prof_gpu_stats;
 ```
 
-| Function / macro | What it does | Extra results |
+Internal faults and anomalies are reported as `ESTOPPED`; sequence or depth overflow as `ESEQLIMIT`.
+
+| Function / macro | What it does | Results beyond the common ones |
 |---|---|---|
-| `int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32_t report_count, uint32_t label, uint32_t *gpu)` | attaches a domain (id 1026..1089) to a quiescent context with a report range (2..`gpu_report_slots_max`) and a label | `EINVAL` (overlap, range), `EFULL` (no slot / 64 ids used) |
-| `int ps3dk_prof_gpu_begin(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc, ps3dk_prof_gpu_zone *out)` / `PS3DK_PROF_GPU_ZONE_BEGIN(gpu, ctx, name, zone)` | begins a GPU zone (descriptor scope 2) | `EINVAL` (NULL out; scope) |
-| `int ps3dk_prof_gpu_end(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_gpu_zone *zone)` / `PS3DK_PROF_GPU_ZONE_END(gpu, ctx, zone)` | ends it | |
-| `int ps3dk_prof_gpu_mark(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc)` / `PS3DK_PROF_GPU_MARK(gpu, ctx, name)` | a point marker | |
-| `int ps3dk_prof_gpu_frame(uint32_t gpu, ps3dk_prof_token frame)` | associates the domain's work with a frame token (or NONE) | `EBUSY` (owner entries leased) |
-| `int ps3dk_prof_gpu_calibrate(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)` | records an RSX/PPU clock bracket | |
-| `int ps3dk_prof_gpu_detach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)` | requests detach; the drainer finalizes | `ETIMEDOUT` (call again), `ESTOPPED` |
-| `int ps3dk_prof_gpu_release(uint32_t gpu, uint32_t *released_or_null)` | returns the reports and label for reuse; the context must be idle | `EBUSY` while not retired |
-| `int ps3dk_prof_gpu_get_stats(uint32_t gpu, ps3dk_prof_gpu_stats *st)` | copies counters | |
+| `int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32_t report_count, uint32_t label, uint32_t *gpu)` | attaches a domain (id 1026..1089) to a quiescent context with a report range (2..`gpu_report_slots_max`) and a label Does not use the common checks: `EBUSY` (inside a drain or GPU call); `ENOTINIT`; `ENOTSUP` (no GPU domains, or a rolling capture); `EINVAL` (NULL `ctx`/`gpu`; `report_count` not 2..`gpu_report_slots_max`; reports beyond 2048; `label` not 64..255; overlap with another domain or the AUTO lease); `ESTOPPED` (fault, shutdown, seal, or a failed unlock: then `*gpu` is still written and the slot is quarantined); `EFULL` (64 lifetime ids used, or no free slot); `ETHREAD`; `OK` |
+| `int ps3dk_prof_gpu_begin(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc, ps3dk_prof_gpu_zone *out)` / `PS3DK_PROF_GPU_ZONE_BEGIN(gpu, ctx, name, zone)` | begins a GPU zone (descriptor scope 2) | `EINVAL` (NULL `out`; scope not 2; NULL or refused descriptor); `ETHREAD` (unregistered thread); `ESEQLIMIT` (nesting or sequence overflow); `ESTOPPED` (domain not admitted). Outside a capture window it returns `OK` with an INERT zone and checks nothing else |
+| `int ps3dk_prof_gpu_end(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_gpu_zone *zone)` / `PS3DK_PROF_GPU_ZONE_END(gpu, ctx, zone)` | ends it | `EINVAL` (NULL or INERT zone, another domain's zone, or not the innermost open zone); `ESEQLIMIT`; `ESTOPPED` |
+| `int ps3dk_prof_gpu_mark(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, ps3dk_prof_desc *desc)` / `PS3DK_PROF_GPU_MARK(gpu, ctx, name)` | a point marker | `EINVAL` (NULL or refused descriptor, scope not 2); `ETHREAD`; `ESEQLIMIT` (mark depth 64 or sequence overflow); `ESTOPPED` |
+| `int ps3dk_prof_gpu_frame(uint32_t gpu, ps3dk_prof_token frame)` | associates the domain's work with a frame token (or NONE) | `EINVAL` (nonzero `reserved`; owner 0 with a nonzero frame; an unknown owner; a frame that thread has not ended yet); `EBUSY` (every owner entry still leased); `ESTOPPED` (shutdown, lock failure) |
+| `int ps3dk_prof_gpu_calibrate(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)` | records an RSX/PPU clock bracket | `EBUSY` (a calibration already active, or no free report slot or bracket credit); `ECLOCK` (clock failed or did not advance); `ETIMEDOUT` (deadline reached); `ESTOPPED` (not admitted, fault, anomaly, or cancelled by finalization) |
+| `int ps3dk_prof_gpu_detach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, uint64_t timeout_us)` | requests detach; the drainer finalizes | `ETIMEDOUT` (still pending: call again); `ECLOCK`; `ESTOPPED` (fault, sealing or sealed; also replaces `OK` if a fault latched during the wait); `OK` once retired |
+| `int ps3dk_prof_gpu_release(uint32_t gpu, uint32_t *released_or_null)` | returns the reports and label for reuse; the context must be idle | `EBUSY` (not retired, a call in flight, the detach still being acknowledged, or already released); `ESTOPPED` (lock or unlock failure: `*released_or_null` may still be 1); `OK` |
+| `int ps3dk_prof_gpu_get_stats(uint32_t gpu, ps3dk_prof_gpu_stats *st)` | copies counters | `EINVAL` (NULL `st`); `ESTOPPED` (lock or unlock failure, `*st` not written); `OK` |
+
+Common results (every call except attach): `EBUSY` (inside a drain or another GPU call, or too many concurrent
+users of the domain); `ENOTINIT`; `ENOTSUP` (no GPU domains); `ESTOPPED` (extension fault; shutdown for producer
+calls); `EINVAL` (stale or zero handle, or a different `ctx`); `EPERM` (not the thread that attached the domain).
 
 Off build: the three macros return `ENOTSUP`; the functions are declared in every build but exist only in the
 extension archives.
@@ -586,12 +605,15 @@ int ps3dk_prof_fifo_detach(uint32_t instance);
 ```
 
 `attach` on the GCM context owner (the thread that attached GPU domain `gpu` for `ctx`), registered, context
-quiescent; NULL options take the defaults. Returns `OK` with a nonzero instance; on refusal `*instance` is 0 and
-nothing is allocated: `EBUSY` (inside a drain, sink or GPU call); `ENOTINIT`; `ENOTSUP` (no GPU domains); `EPERM`
-(APP mode or no drain thread); `EINVAL` (options, ceiling, domain, ctx, ring); `ESTOPPED`; `ETHREAD`; `EFULL` (second
-attach); `ENOMEM`.
-`detach` on the owner: removes the observer, never waits. `EBUSY` inside the observer callback; `EPERM` from another
-thread; `EINVAL` (other instance); `ESTOPPED` (sealed).
+quiescent; NULL options take the defaults. Returns `OK` with a nonzero instance; on refusal `*instance` is 0:
+`EBUSY` (inside a drain or GPU call); `ENOTINIT`; `ENOTSUP` (no GPU domains); `EPERM` (APP mode, no drain thread
+yet, or not the thread that owns the domain); `EINVAL` (NULL `ctx`/`instance`; bad `size`/`reserved`; ring or ceiling
+out of range; a stale domain or another `ctx`; the GCM bridge refused the ring); `ESTOPPED` (shutdown, a sealed
+instance, or the seal won); `ETHREAD` (unregistered thread, or owner identity failed); `EFULL` (a second attach in the
+capture); `ENOMEM`.
+`detach` on the owner: removes the observer, never waits, and makes no init check. `EINVAL` (0 or another instance,
+or not attached); `EPERM` (another thread); `EBUSY` (inside the observer callback); `EALREADY` (already detached or
+closed); `ESTOPPED` (sealed: the observer is removed and its storage stays allocated); `OK`.
 AUTO builds contain FIFO observation without these calls.
 PC app equivalent: none. The FIFO wrap waits page shows the events.
 
@@ -621,14 +643,19 @@ Archive: `libps3dkprof_func.a` or `libps3dkprof_ext_func.a`, with sources compil
 typedef struct ps3dk_prof_func_config {
     uint32_t size;          /* sizeof(ps3dk_prof_func_config) */
     uint32_t max_bytes;     /* bound on all function-path storage; default 8 MiB */
-    uint32_t max_actors;    /* 1..min(1024, max_threads); default min(max_threads, 8) */
+    uint32_t max_actors;    /* 1..min(1024, max_threads); default at init min(max_threads, 8) */
     uint32_t node_capacity; /* 4..16384 per actor, including the LOST node; default 4096 */
     uint32_t stack_depth;   /* 4..256; default 256 */
     uint32_t reserved;      /* 0 */
 } ps3dk_prof_func_config;
 ```
 
-Zero fields take the defaults. Before init. Returns `OK`; `EINVAL`; `EBUSY`; `EALREADY` (after init).
+Without a call, every field takes its default at init. A 0 field also takes its default, except `max_actors`:
+`ps3dk_prof_func_configure` checks the layout before the thread count is known, so it refuses `max_actors` 0 with
+`EINVAL`; set it explicitly (1..1024). Before init. Returns `OK`; `EINVAL` (NULL, wrong `size`, nonzero `reserved`,
+a field out of range, or a layout larger than `max_bytes`); `EBUSY` (another setter or init running); `EALREADY`
+(after init). Init fails with `EINVAL` if `max_actors` exceeds `max_threads` or the layout does not fit, and
+`ENOMEM` if the storage cannot be allocated.
 PC app equivalent: none yet (functions switch, card t_2873fe00; startup knobs, card t_9d1f2c10). Hot paths ->
 Functions (automatic) shows the trees.
 
