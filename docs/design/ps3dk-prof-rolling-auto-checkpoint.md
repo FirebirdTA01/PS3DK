@@ -31,7 +31,10 @@ of every advertised family. A joined reader needs a separate complete admission
 and position proof. EXPORT contexts are refused.
 
 Attached CONFIG pairs are 7/15, 15/11, 31/11, 63/11, 127/11, 255/11, 511/11,
-1023/11 and ordinary-source ring 2047/11; both existing REFUSED widths are
+1023/11, ordinary-source ring 2047/11 and their range-reason forms 3071/11 and
+4095/11 (544/592-byte COVERAGE and 256/336-byte STATUS payloads, kept as written,
+with the same tail checks as the reader except the per-reason row sums, which a
+bounded checkpoint does not keep); both existing REFUSED widths are
 supported. Ring CONFIG requires its original 216-byte payload. A short 160-byte
 2047 CONFIG is malformed. EXPORT remains refused: sparse export generations and
 source export provenance are not inferred from rolling eviction.
@@ -85,7 +88,7 @@ historical run is expanded into individual frame IDs.
 A build entry has 80 fixed bytes: owner:u32, COVERAGE presence:u32, frame:u64,
 three u64 kind populations, abandoned:u64, valid whole-CALL build-excluded:u64,
 coverage index:u64, coverage payload length:u32, zero:u32, zero:u64; then its
-optional original 352/384/416/480/528-byte coverage payload. Keys are unique and
+optional original 352/384/416/480/528/544/592-byte coverage payload. Keys are unique and
 sorted. A 104-byte anchor entry is original index:u64 plus the original 96-byte
 payload. Failed observations remain in support, in original order.
 
@@ -109,6 +112,7 @@ CONFIG216 and optional STATUS208; its variable sections start at512, in the
 same order as schema1. Its length equation substitutes532 for340 above. The
 extra192 bytes count toward checkpoint, support and temporary limits. This
 inner version does not introduce a new public capture flag or outer slot schema.
+CONFIG 4095/11 uses version2 too, with optional STATUS336.
 
 Two 96-byte typed cursors occupy320..415 and416..511: current state and state at
 the last actual STATUS. Relative offsets within each cursor are:

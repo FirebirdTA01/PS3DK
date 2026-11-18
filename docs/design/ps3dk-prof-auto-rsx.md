@@ -408,6 +408,46 @@ record, per range name the ranges and their raw time, and a whole-window
 summary (sum, median per frame). Untimed ring draws carry no record and so no
 tag; they are counted per frame only.
 
+### Range refusals by reason (CONFIG 3071/11 and 4095/11)
+
+Kind mask bit 2048 RANGE_REASONS is set on top of 1023/11 (3071/11) or of the
+report ring 2047/11 (4095/11); every other rule of the base pair applies
+unchanged. It adds two tails of 16 slots each, where slot r-1 holds reason r and
+slots 10..15 are zero:
+
+- COVERAGE: u32 x16 after the base row (at 480; 4095/11 at 528), so rows are 544
+  bytes (4095/11: 592). These are the refusals of ranges in this frame by
+  reason. Unless the row is SATURATED (u16@2 flag 4) they sum to u32@440. A
+  count that reaches 0xffffffff stays there and marks the row SATURATED.
+- STATUS: u64 x16 after the base STATUS (at 128; 4095/11 at 208), so STATUS is
+  256 bytes (4095/11: 336). These are the capture totals by reason. They never
+  decrease, and unless the STATUS is SATURATED each one is at least that
+  reason's sum over the rows. The STATUS after a REFUSED CONFIG is still 128 bytes.
+
+| r | Reason | Refused when |
+|---|---|---|
+| 1 | depth | a BEGIN would nest deeper than 4 |
+| 2 | segment_build | a BEGIN while a segment build is open |
+| 3 | state | a BEGIN or END while the capture admits nothing (CONFIG refused or invalidated, a segment emitter active, stopping, admission closed, device not initialized) |
+| 4 | no_frame | a BEGIN or END with no coverage frame open; counted in STATUS only, there is no row |
+| 5 | ring | a BEGIN or END without a clean ring, aligned room, or room for its words |
+| 6 | no_descriptor | a BEGIN without a name descriptor (a full site table) |
+| 7 | no_pair | a BEGIN with no range-reserve pair free |
+| 8 | other_frame | an END in another frame than its BEGIN |
+| 9 | no_metadata | an END whose held pair finds no metadata entry |
+| 10 | unmatched_end | an END with no BEGIN open |
+
+The checks run in this order, and the first one that fails names the reason. A
+BEGIN outside a capture window is not a refusal. The END of a depth refusal is
+not counted again. Reasons are never renumbered or reused. A reader that knows
+only the older pairs refuses 3071/11 and 4095/11 at CONFIG, and older captures
+read exactly as before. `auto` prints `AUTO ranges refused: N (reason n, ...)`
+after STATUS, and the same line under each row that refused a range. `auto
+--json` adds `status.ranges_refused` and `status.ranges_refused_by_reason`, and
+adds `ranges_refused_by_reason` to frames (`auto --by-tag --json` too). For an
+unsealed capture, `capture_totals.ranges_refused` takes its value and
+`by_reason` from the last STATUS.
+
 
 Fixed 128 bytes: schema u16 at 0, flags u16 at 2, instance u32 at 4. Fifteen u64
 fields from offset 8 are: last admitted id, admitted, operations written,

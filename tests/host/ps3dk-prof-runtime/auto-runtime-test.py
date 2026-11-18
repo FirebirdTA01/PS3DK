@@ -51,6 +51,17 @@ RING_MUTANTS={
                      b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible-1)'),
 }
 RING_MUTANTS.update({
+    # range refusals by reason (rangereasons): two reasons merged, a row count skipped, the STATUS tail not encoded,
+    # the runtime's totals not handed to the STATUS
+    'range-merge-pair-descriptor':('rangereasons','auto_rsx/auto_runtime.c','why=AUTO_RR_NO_PAIR;',
+                                   'why=AUTO_RR_DESCRIPTOR;',b'total[i]==was_total[i]+(i+1==r)'),
+    'range-row-uncounted':('rangereasons','auto_rsx/auto_runtime.c',
+                           'if(f->range_refused[reason-1u]!=UINT32_MAX) f->range_refused[reason-1u]++;','(void)0;',
+                           b'row[i]==was_row[i]+(in_row && i+1==r)'),
+    'range-status-dropped':('rangereasons','auto_rsx/auto_wire.c',
+                            'if(ranges) for(i=0;i<AUTO_RANGE_REASONS;i++) le64(b+128+8*i,ranges[i]);','(void)0;',b''),
+    'range-totals-unwritten':('rangereasons','auto_rsx/auto_runtime.c',
+                              'ranges[i]=LD_ACQ(&capture->range_reasons[i]);','ranges[i]=0;',b''),
     # the shadow is not brought up to date before a flush: the split Mode/Format is lost, the app transfer misfires
     'flush-no-scan':('ringrun','auto_rsx/auto_runtime.c','    ring_scan(a,ctx);\n    ST_REL(&a->ring_flush_request,0u);',
                      '    ST_REL(&a->ring_flush_request,0u);',b"dst>=MAIN_IO && dst-MAIN_IO+len<=main_bytes"),
@@ -97,7 +108,7 @@ RING_MUTANTS.update({
                        b'!a->shadow.invalid && !a->ring_reject[2]'),
 })
 # checked on the capture after a clean run, not by an assertion of the application
-CAPTURE_MUTANTS=('seal-ignores-held',)
+CAPTURE_MUTANTS=('seal-ignores-held','range-status-dropped','range-totals-unwritten')
 RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5,'ringflip':6,
               'ringsegment':7}
 RING_WRAP=('ringwrap',*RING_RUNTIME)
@@ -107,7 +118,7 @@ RING_OPTION={'ringopt':0,'ringopt2':1,'ringoptset':2,'ringoptsetring':3,'ringopt
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','stopvisitseal','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
+ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','stopvisitseal','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','rangereasons','rangesat','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
                                   'ringsegment',*RING_OPTION],default='noinit')
 ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
 ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
@@ -229,7 +240,7 @@ if a.case=='fifoaccount':flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
 if a.case in ('stopvisit','stopvisitseal'):flags+=['-DTEST_STOP_VISIT=1']
 if a.case=='stopvisitseal':flags+=['-DTEST_STOP_SEAL=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','rangereasons','rangesat','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -240,7 +251,8 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','windowlate','preinit','preinitthread','preinitold','preinitfail'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case=='rangesat':flags+=['-DTEST_RANGE_SATURATE=1']
+if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','rangereasons','rangesat','windowlate','preinit','preinitthread','preinitold','preinitfail'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate'):
     flags+=['-DTEST_WINDOW_MODE='+str({'windows':0,'windowseal':1,'windowwhole':2,'windownone':4,'windowprebuild':5,
                                        'windowhandoff':6,'windowhandoffu':7,'windowqueue':8,'windowcallafter':9,'windowlate':10}[a.case])]
@@ -558,6 +570,7 @@ if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-f
 if a.case=='segnested':application=Path(__file__).with_name('auto-segment-call-in-bracket-test.c').read_text()
 if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate'):application=Path(__file__).with_name('auto-window-runtime-test.c').read_text()
 if a.case=='tags':application=Path(__file__).with_name('auto-tag-runtime-test.c').read_text()
+if a.case in ('rangereasons','rangesat'):application=Path(__file__).with_name('auto-range-reasons-test.c').read_text()
 if a.case=='labels':application=Path(__file__).with_name('auto-label-poll-runtime-test.c').read_text()
 if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
@@ -714,6 +727,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO segment CALL inside a draw bracket PASS\n' if a.case=='segnested'
                        else b'AUTO whole-CALL brackets: 407 timed draws, 32 brackets from the reserve, the 33rd refused PASS\n' if a.case=='callbracket'
                        else b'AUTO tags, fragment programs, ranges and timed ranges PASS\n' if a.case=='tags'
+                       else b'AUTO range refusals by reason PASS\n' if a.case in ('rangereasons','rangesat')
                        else b'AUTO capture windows PASS\n' if a.case in ('windows','windowseal')
                        else b'AUTO whole-run window PASS\n' if a.case=='windowwhole'
                        else b'AUTO no window PASS\n' if a.case=='windownone'
@@ -776,7 +790,7 @@ if a.case=='fifopost':
     raise SystemExit(0)
 if a.case=='segbuild':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and struct.unpack_from('<I',config,60)[0]==OP
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP
     owner=struct.unpack_from('<I',config,16)[0]
     records=[]
     for k,b in auto:
@@ -794,7 +808,7 @@ if a.case=='segbuild':
     assert seg==[(67,1,1,1,(0,owner,1,0)),(67,1,6,2,(0,owner,1,0)),(67,1,6,2,(1,owner,1,0)),
                  (64|4|16,0,7,0,(2,owner,1,0))],seg
     assert all(r['tail']==(0,0,0,0) for r in records if not r['flags']&64)
-    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==480 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==544 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep==[0,3,0xffffffff],unrep
     rflags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -806,8 +820,8 @@ if a.case=='segbuild':
     raise SystemExit(0)
 if a.case=='segnested':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
-    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==480 for b in rows)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
+    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==544 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
@@ -816,7 +830,7 @@ if a.case=='segnested':
     raise SystemExit(0)
 if a.case=='callbracket':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     owner=struct.unpack_from('<I',config,16)[0]
     calls=[]
     for k,b in auto:
@@ -940,7 +954,7 @@ if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild'
     raise SystemExit(0)
 if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     config=[b for k,b in auto if k==34][-1]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and len(config)==176,len(config)
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and len(config)==176,len(config)
     want={'preinit':100,'preinitthread':63,'preinitold':31,'preinitfail':100}[a.case]
     assert struct.unpack_from('<2I',config,160)==(32,want),struct.unpack_from('<2I',config,160)
     status=struct.unpack_from('<H',[b for k,b in auto if k==37][-1],2)[0]
@@ -956,7 +970,7 @@ if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     raise SystemExit(0)
 if a.case=='tags':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and struct.unpack_from('<I',config,60)[0]==OP==160
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP==160
     recs=[]
     for k,b in auto:
         if k!=35:continue
@@ -989,7 +1003,7 @@ if a.case=='tags':
     # tag 0xd
     assert [x[:3] for x in rng]==[(0,2,0),(0,1,0),(0,4,0),(0,3,0),(0,2,0),(0,1,0),(0,1,0)]+[(1,1,0)]*55,rng
     assert all(x[3]==0xd for x in rng),rng
-    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==480 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==544 for b in rows)
     tail=[struct.unpack_from('<3QII',b,416) for b in rows]
     assert tail[0]==(0,0,0,3,0),tail[0]
     # the boundary range, eight ranges past the reserve, the timed and inner ranges once it is spent, and the 257
@@ -997,11 +1011,71 @@ if a.case=='tags':
     assert tail[1]==(0,0,3,11+257,0),tail[1]
     print('real capture: tags, fragment programs, ranges and the outside-timed reason PASS')
     raise SystemExit(0)
+def range_wire_check(auto,sat):
+    """rangereasons/rangesat: the COVERAGE tails and STATUS totals on the wire, then through the reader."""
+    # CONFIG 3071/11: 544-byte rows with the reason tail at 480, 256-byte STATUS with the totals at 128
+    REASONS=['depth','segment_build','state','no_frame','ring','no_descriptor','no_pair','other_frame','no_metadata',
+             'unmatched_end']
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP==160
+    assert struct.unpack_from('<I',config,164)[0]==4,'the range reserve option'
+    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==544 for b in rows),[len(b) for b in rows]
+    tails=[struct.unpack_from('<16I',b,480) for b in rows]
+    totals=[struct.unpack_from('<I',b,440)[0] for b in rows]
+    assert all(t[10:]==(0,)*6 for t in tails),tails
+    want0=[0xffffffff if sat else 1,1,1,0,1,9 if sat else 5,0,0,0,1]
+    assert list(tails[0][:10])==want0,tails[0]
+    assert list(tails[1][:10])==[0,0,0,0,0,0,1,1,3,0],tails[1]
+    assert totals[1]==5 and sum(tails[1][:10])==5,totals
+    flags0=struct.unpack_from('<H',rows[0],2)[0]
+    if sat:
+        # the preset DEPTH count and row total reached UINT32_MAX and stick there: the row is SATURATED
+        assert totals[0]==0xffffffff and flags0&4,(totals[0],hex(flags0))
+    else:
+        assert totals[0]==10 and sum(tails[0][:10])==10 and not flags0&4,(totals[0],hex(flags0))
+    status=[b for k,b in auto if k==37]
+    assert len(status)==1 and len(status[0])==256,[len(b) for b in status]
+    st=status[0];sflags=struct.unpack_from('<H',st,2)[0]
+    capture_total=struct.unpack_from('<16Q',st,128)
+    # the capture totals: every refusal, NO_FRAME included (it counts in no row)
+    assert list(capture_total[:10])==[2 if sat else 1,1,1,1,1,9 if sat else 5,1,1,3,1] and capture_total[10:]==(0,)*6,capture_total
+    assert bool(sflags&4)==sat and sflags&1,hex(sflags)
+    if a.reader:
+        rd=run('reader-json',[a.reader,'auto','--json',files[0]])
+        assert rd.returncode==0,rd.stderr.decode()
+        doc=json.loads(rd.stdout)
+        doc=doc['windows'][0] if 'windows' in doc else doc   # every capture has a whole-run window
+        by=doc['status']['ranges_refused_by_reason']
+        assert [by[n] for n in REASONS]==list(capture_total[:10]),by
+        assert doc['status']['ranges_refused']==sum(capture_total[:10])
+        fr=[f['ranges_refused_by_reason'] for f in doc['frames']]
+        assert [fr[0][n] for n in REASONS]==want0 and [fr[1][n] for n in REASONS]==list(tails[1][:10]),fr
+        tag=run('reader-by-tag',[a.reader,'auto','--by-tag','--json',files[0]])
+        assert tag.returncode==0,tag.stderr.decode()
+        tf=json.loads(tag.stdout)['frames']
+        assert [tf[1]['ranges_refused_by_reason'][n] for n in REASONS]==list(tails[1][:10]),tf
+        text=run('reader-text',[a.reader,'auto',files[0]])
+        assert text.returncode==0 and b'AUTO ranges refused: ' in text.stdout,text.stdout.decode()
+        line=next(l for l in text.stdout.decode().splitlines() if l.startswith('AUTO ranges refused: '))
+        rows_text=[l.strip() for l in text.stdout.decode().splitlines() if l.startswith('  AUTO ranges refused: ')]
+        assert rows_text[-1]=='AUTO ranges refused: 5 (no_pair 1, other_frame 1, no_metadata 3)',rows_text
+        assert line.startswith('AUTO ranges refused: %d ('%sum(capture_total[:10])) and 'no_frame 1' in line,line
+        print('reader: '+line)
+if a.case in ('rangereasons','rangesat'):
+    sat=a.case=='rangesat'
+    try:
+        range_wire_check(auto,sat)
+    except AssertionError as e:
+        if a.mutant not in CAPTURE_MUTANTS:raise
+        print(a.mutant+' rejected by the capture check: '+str(e)[:200]);raise SystemExit(0)
+    assert a.mutant not in CAPTURE_MUTANTS,a.mutant+' survived the capture check'
+    print('real capture: AUTO range refusals by reason in rows and STATUS%s PASS'%(' (saturated row)' if sat else ''))
+    raise SystemExit(0)
 if a.case=='labels':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36]
-    assert len(rows)>=3 and all(len(b)==480 for b in rows),[len(b) for b in rows]
+    assert len(rows)>=3 and all(len(b)==544 for b in rows),[len(b) for b in rows]
     block=[struct.unpack_from('<4IQQ',b,384) for b in rows[:3]]
     # frame 0: two complete runs (labels 70 and 80: several), two broken, the one-label total (u64@408) below the
     # sum; frame 1: one complete run (label 90 through the address form), two broken (the 90 -> 91 switch and an
@@ -1040,7 +1114,7 @@ if a.case=='extsegments':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11),'CONFIG kind/form masks of the build-frame writer'
+    assert struct.unpack_from('<2I',config,24)==(3071,11),'CONFIG kind/form masks of the build-frame writer'
     assert struct.unpack_from('<I',config,60)[0]==OP,'CONFIG record width'
     records=[]
     for k,b in auto:
@@ -1074,7 +1148,7 @@ if a.case=='segments':
     assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
     for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
-        assert len(b)==480 and struct.unpack_from('<H',b,2)[0]==3|64
+        assert len(b)==544 and struct.unpack_from('<H',b,2)[0]==3|64
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
@@ -1087,9 +1161,9 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
-    assert all(len(b)==480 for b in rows)
+    assert all(len(b)==544 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
     assert flags==[1|2|32|64]*19+[1|2|16|32|64,1|2|16|64,1|2|64],flags # flip rows; flip 19 closed OPEN by the explicit call
     # hand-written polls are polling cadence, never flip-wait scopes: one complete run per flip frame
@@ -1118,10 +1192,10 @@ if a.case=='flips':
     raise SystemExit(0)
 if a.case in ('present','spanning'):
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
-    assert len(rows)==n and all(len(b)==480 for b in rows),[len(b) for b in rows]
+    assert len(rows)==n and all(len(b)==544 for b in rows),[len(b) for b in rows]
     assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(n))
     MS=1000000
     def present(b):
@@ -1234,7 +1308,7 @@ if operations:
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
         for i,b in enumerate(rows):
-            assert len(b)==480 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
+            assert len(b)==544 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
             assert struct.unpack_from('<Q',b,16)[0]==i
             assert struct.unpack_from('<Q',b,24)[0]<=struct.unpack_from('<Q',b,32)[0]
             assert not any(struct.unpack_from('<24Q',b,64))
@@ -1257,11 +1331,12 @@ if operations:
     raise SystemExit(0)
 assert [k for k,b in auto]==[34,37], 'AUTO_NO_INIT_CONFIG_STATUS'
 config,status=auto[0][1],auto[1][1]
-assert len(config)==176 and len(status)==128
+# the STATUS after an ATTACHED CONFIG carries the range-refusal totals (3071/11); after a REFUSED one it does not
+assert len(config)==176 and len(status)==(128 if struct.unpack_from('<H',config,2)[0]==1 else 256)
 assert struct.unpack_from('<IIQ',config,160)[2]==0
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,1023,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,3071,11)
     assert struct.unpack_from('<I',config,60)[0]==OP
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
@@ -1300,7 +1375,8 @@ else:
     assert config[160:]==bytes(16)
 clocks=[b for k,b in chunks if k==2];assert len(clocks)==1
 assert struct.unpack_from('<Q',config,64)[0]==struct.unpack_from('<Q',clocks[0],12)[0]>0
-assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(120)
+# a zero FINAL STATUS: 128 bytes after a REFUSED CONFIG, 256 (with the zero range-refusal totals) after an attached one
+assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(len(status)-8)
 assert chunks[-1][0]==6, 'complete capture trailer'
 if a.case=='seal':
     err_src=out/'main_err.c'

@@ -2189,6 +2189,8 @@ void p_auto_drain(prof *p, int seal)
         if(LD_ACQ(&capture->frame_marks_missed)) flags|=AUTO_STATUS_FRAME_MARK_MISSED;
         if(LD_ACQ(&capture->frames_by_flip)) flags|=AUTO_STATUS_FRAMES_FLIP;
         if(LD_ACQ(&capture->frames_by_explicit)) flags|=AUTO_STATUS_FRAMES_EXPLICIT;
+        uint64_t ranges[AUTO_RANGE_REASONS];
+        for(unsigned i=0;i<AUTO_RANGE_REASONS;i++) ranges[i]=LD_ACQ(&capture->range_reasons[i]);
         if(LD_ACQ(&capture->saturated) || LD_ACQ(&capture->coverage.saturated) ||
            LD_ACQ(&capture->clocks.saturated)) flags|=AUTO_LOWER_BOUND|AUTO_SATURATED;
         if(capture->ring_plan.blocks) {
@@ -2206,8 +2208,8 @@ void p_auto_drain(prof *p, int seal)
             /* the decoder's first rejected header, its byte offset from the context begin and the reason */
             reject[2]=LD_ACQ(&capture->ring_reject[2]);
             if(reject[2]) {reject[0]=capture->ring_reject[0];reject[1]=capture->ring_reject[1];}
-            if(!auto_writer_status_ring(&writer,flags,totals,ring,reject)) {p_ext_sink_fail(p,-2);return;}
-        } else if(!auto_writer_status(&writer,flags,totals)) {p_ext_sink_fail(p,-2);return;}
+            if(!auto_writer_status_ring(&writer,flags,totals,ring,reject,ranges)) {p_ext_sink_fail(p,-2);return;}
+        } else if(!auto_writer_status(&writer,flags,totals,ranges)) {p_ext_sink_fail(p,-2);return;}
         memset(b,0,sizeof b);p_le32(b,1);p_le32(b+4,c->domain);b[8]=2;b[9]=1;
         if(chunk(p,16,b,40)!=0) return;
         capture->final_declared=1;
@@ -2241,10 +2243,20 @@ void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context,uint32_t offs
     if(!s || s->external) s=segment_at(a,(gpp_ctx *)(void *)context);
     if(s && s->open) s->fp=offset;
 }
-static void range_refuse(auto_capture *a)
+/* One refused range, by reason (AUTO_RR_*): the capture totals (STATUS) and, inside a coverage frame, its row. A row
+ * count that reaches UINT32_MAX sticks there and marks the row SATURATED. */
+static void range_refuse(auto_capture *a,uint32_t reason)
 {
     increment(a,&a->ranges_refused);
-    if(a->coverage.active && a->coverage.live.ranges_refused!=UINT32_MAX) a->coverage.live.ranges_refused++;
+    increment(a,&a->range_reasons[reason-1u]);
+    if(a->coverage.active) {
+        auto_wire_frame *f=&a->coverage.live;
+        if(f->ranges_refused!=UINT32_MAX) f->ranges_refused++;
+        if(f->range_refused[reason-1u]!=UINT32_MAX) f->range_refused[reason-1u]++;
+        if(f->ranges_refused==UINT32_MAX || f->range_refused[reason-1u]==UINT32_MAX) {
+            f->flags|=4;ST_REL(&a->coverage.saturated,1u);
+        }
+    }
 }
 /* BEGIN: a 2-word timestamp report in the attached ring (current room, no callback) from the range reserve, only
  * on the owner, inside a coverage frame, outside draw brackets and segment builds, at depth 4 or less. Inside a
@@ -2269,21 +2281,27 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
         return 0;
     }
     late_row(a);
-    if(a->range_depth>=AUTO_RANGE_DEPTH) {a->range_excess++;range_refuse(a);return 0;}
+    if(a->range_depth>=AUTO_RANGE_DEPTH) {a->range_excess++;range_refuse(a,AUTO_RR_DEPTH);return 0;}
     r=&a->ranges[a->range_depth++];
     memset(r,0,sizeof *r);
     r->timed=timed ? 1u:0u;
     if(r->timed) a->timed_open++;  /* a timed range times its draws even when its own record is refused */
     c=auto_config_read(&configuration);ctx=a->context;
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
-    for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].open) {range_refuse(a);return 0;} /* a segment build */
-    /* no descriptor (a full site table) is refused by p_gpu_desc below */
-    if(!c || c->reason || a->active || a->segment_active || !a->coverage.active || LD_ACQ(&g_prof->stop_latch) ||
-       !auto_config_can_admit(&configuration) || (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) ||
-       (cur&3u) || cur>end || end-cur<8 || !initialize_device(a) ||
-       p_gpu_desc(g_prof,desc,&idx,&scope)!=PS3DK_PROF_OK ||
-       (pair=auto_queue_take_class_pair(&a->operations,AUTO_PAIR_RANGE))<0) {
-        range_refuse(a);return 0;
+    for(uint32_t i=0;i<a->segments_used;i++) if(a->segments[i].open) {range_refuse(a,AUTO_RR_SEGMENT);return 0;}
+    /* the checks run in their original order (device initialization, the descriptor and the pair take effects);
+     * the first that fails names the reason. No descriptor (a full site table) is refused by p_gpu_desc. */
+    {
+        uint32_t why=0;
+        if(!c || c->reason || a->active || a->segment_active) why=AUTO_RR_STATE;
+        else if(!a->coverage.active) why=AUTO_RR_NO_FRAME;
+        else if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) why=AUTO_RR_STATE;
+        else if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<8)
+            why=AUTO_RR_RING;
+        else if(!initialize_device(a)) why=AUTO_RR_STATE;
+        else if(p_gpu_desc(g_prof,desc,&idx,&scope)!=PS3DK_PROF_OK) why=AUTO_RR_DESCRIPTOR;
+        else if((pair=auto_queue_take_class_pair(&a->operations,AUTO_PAIR_RANGE))<0) why=AUTO_RR_NO_PAIR;
+        if(why) {range_refuse(a,why);return 0;}
     }
     r->ok=1;r->pair=(uint32_t)pair;r->desc=idx;r->tag=a->tag;r->frame=a->coverage.live.frame;
     a->operations_device.write_timer(a->operations_device.ctx,c->report_first+16+(uint32_t)pair*2,PRG_POISON);
@@ -2307,19 +2325,27 @@ int ps3dk_prof_auto_range_end(void)
     uint32_t report,depth;
     if(!p_ready() || g_tls.in_gpu || !(a=owner_capture(NULL,0))) return 0;
     if(a->range_excess) {a->range_excess--;return 0;}
-    if(!a->range_depth) {range_refuse(a);return 0;}
+    if(!a->range_depth) {range_refuse(a,AUTO_RR_UNMATCHED);return 0;}
     depth=a->range_depth;
     r=a->ranges[--a->range_depth];
     if(r.timed && a->timed_open) a->timed_open--;
     if(!r.ok) return 0;
     c=auto_config_read(&configuration);ctx=a->context;report=c->report_first+16+r.pair*2;
     cur=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
-    if(c->reason || a->active || a->segment_active || !a->coverage.active || a->coverage.live.frame!=r.frame ||
-       LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration) ||
-       (uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<24 ||
-       !(e=auto_queue_claim_held(&a->operations,r.pair,0))) {
-        auto_queue_quarantine_pair(&a->operations,r.pair);ST_REL(&a->segment_quarantine,1u);
-        range_refuse(a);return 0;
+    {
+        uint32_t why=0;
+        e=NULL;
+        if(c->reason || a->active || a->segment_active) why=AUTO_RR_STATE;
+        else if(!a->coverage.active) why=AUTO_RR_NO_FRAME;
+        else if(a->coverage.live.frame!=r.frame) why=AUTO_RR_OTHER_FRAME;
+        else if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) why=AUTO_RR_STATE;
+        else if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<24)
+            why=AUTO_RR_RING;
+        else if(!(e=auto_queue_claim_held(&a->operations,r.pair,0))) why=AUTO_RR_METADATA;
+        if(why) {
+            auto_queue_quarantine_pair(&a->operations,r.pair);ST_REL(&a->segment_quarantine,1u);
+            range_refuse(a,why);return 0;
+        }
     }
     segment_report(ctx,report+1);
     {
@@ -2378,6 +2404,31 @@ void ps3dk_prof__auto_test_ranges(uint64_t out[4])
 {
     const auto_capture *a=capture;
     out[0]=a ? a->ranges_done:0;out[1]=a ? a->ranges_refused:0;out[2]=a ? a->range_depth:0;out[3]=a ? a->tag:0;
+}
+/* Owner thread only: the capture's range refusals by reason (AUTO_RR_* - 1), the open row's (zero without one), and
+ * out[0] 1 while a coverage row is open, out[1] that row's flags. */
+void ps3dk_prof__auto_test_range_reasons(uint64_t total[AUTO_RANGE_REASONS],uint32_t row[AUTO_RANGE_REASONS],
+                                         uint32_t out[2])
+{
+    const auto_capture *a=capture;
+    for(unsigned i=0;i<AUTO_RANGE_REASONS;i++) {
+        total[i]=a ? a->range_reasons[i]:0;
+        row[i]=a && a->coverage.active ? a->coverage.live.range_refused[i]:0;
+    }
+    out[0]=a && a->coverage.active;out[1]=a && a->coverage.active ? a->coverage.live.flags:0;
+}
+/* Owner thread only: mark a segment emitter active (1) or not (0), the state only a draw bracket reaches otherwise,
+ * so a range BEGIN meets the capture's admission state (STATE). */
+void ps3dk_prof__auto_test_segment_active(int on)
+{
+    if(capture) capture->segment_active=on ? &capture->segments[0]:NULL;
+}
+/* Owner thread only: preset the open row's count of one reason and its total (saturation tests). */
+void ps3dk_prof__auto_test_row_reason(uint32_t reason,uint32_t value,uint32_t total)
+{
+    if(capture && capture->coverage.active && reason>=1u && reason<=AUTO_RANGE_REASONS) {
+        capture->coverage.live.range_refused[reason-1u]=value;capture->coverage.live.ranges_refused=total;
+    }
 }
 #endif
 #if defined(PS3DK_PROF_TEST_HOOKS) && defined(PS3DK_PROF_AUTO_RING)

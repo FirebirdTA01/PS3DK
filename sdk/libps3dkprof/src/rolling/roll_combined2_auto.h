@@ -4,7 +4,7 @@
 typedef struct {
     uint32_t owner,width;uint64_t frame,records[3],abandoned,call_excluded,index,last_use;
     uint32_t touched,reserved;
-    uint8_t raw[528];
+    uint8_t raw[592];
 } au_build;
 typedef struct {uint64_t index;uint8_t raw[96];} au_clock;
 typedef struct {
@@ -12,7 +12,7 @@ typedef struct {
     uint32_t flags,last_owner,last_anchor,reserved;
     uint64_t config_index,status_index,last_op,max_snapshot,last_frame,last_lost,last_coverage;
     uint64_t ops,op_chunks,frames,clocks,statuses,bytes,chunks,history,status_chunks,snapshot[5];
-    uint8_t config[216],status[208],ring[96],ring_snapshot[96];
+    uint8_t config[216],status[336],ring[96],ring_snapshot[96];
     uint64_t floor,retired_frames,retired_clocks,retired_status_frames,retired_status_clocks;
     uint64_t final_frame[2];
     uint64_t marker_frame,marker_index;
@@ -26,6 +26,16 @@ static int au_ringed(const au_state *s){return s->config_bytes==216;}
 static uint32_t au_mask(const au_state *s){return r16(s->config+2)?0:r32(s->config+24);}
 static int au_label(uint32_t n){return n==64||(n>=69&&n<=254);}
 static uint32_t au_width(const au_state *s){return s->config_bytes?r32(s->config+60):0;}
+/* RANGE_REASONS (kind bit 2048, 3071/11 or 4095/11): COVERAGE gains u32 x16 and STATUS u64 x16 after their base. */
+static uint32_t au_frame_width(const au_state *s)
+{
+    uint32_t mask=au_mask(s),w=au_ringed(s)?528:(mask&512)?480:(mask&256)?416:(mask&16)?384:352;
+    return (mask&2048)?w+64:w;
+}
+static uint32_t au_status_width(const au_state *s)
+{
+    return (au_ringed(s)?208u:128u)+((au_mask(s)&2048)?128u:0u);
+}
 static int au_run(fi_run *runs,uint32_t *count,uint32_t cap,uint32_t owner,uint64_t frame,int unique)
 {
     uint32_t start=0,end,n;uint64_t first=frame,last=frame;
@@ -63,7 +73,9 @@ static int au_config(au_state *s,const uint8_t *p,size_t n,uint64_t hz,int owner
     }
     if(r16(p+2)||!r32(p+8)||!r32(p+12)||!r32(p+16)||!r32(p+20)||!owner||!domain)return PFR_INVALID;
     mask=r32(p+24);ring=n==216;
-    if(mask!=7&&mask!=15&&mask!=31&&mask!=63&&mask!=127&&mask!=255&&mask!=511&&mask!=1023&&mask!=2047)return PFR_INVALID;
+    if(mask!=7&&mask!=15&&mask!=31&&mask!=63&&mask!=127&&mask!=255&&mask!=511&&mask!=1023&&mask!=2047
+       &&mask!=3071&&mask!=4095)return PFR_INVALID;
+    mask&=~2048u; /* the range-reason bit changes only the COVERAGE/STATUS tails */
     width=mask==2047?176:mask==1023?160:mask>=63?144:128;
     if(r32(p+28)!=(mask==7?15u:11u)||r32(p+60)!=width
        ||n!=(mask==2047?216u:mask==1023?176u:160u))return PFR_INVALID;
@@ -177,7 +189,7 @@ static int au_coverage(au_state *s,au_pools pools,const pfm2_config *cfg,const u
 {
     int ring=au_ringed(s),rc;uint16_t flags=r16(p+2);uint32_t owner=r32(p+8),scopes=r32(p+12),k,j,mask=au_mask(s);
     uint64_t frame=r64(p+16),begin=r64(p+24),end=r64(p+32),lost=r64(p+48),sum;au_build *entry;
-    uint32_t width=ring?528:(mask&512)?480:(mask&256)?416:(mask&16)?384:352;
+    uint32_t width=au_frame_width(s),base=ring?528:480;
     unsigned owner_slot=owner!=0;
     if(n!=width||r16(p)!=1||r32(p+4)!=r32(s->config+4)||(flags&~(mask!=7?127u:31u))||!(flags&2)
        ||((flags&1)?owner!=r32(s->config+16):owner!=0)||(!(flags&64)&&(scopes||r64(p+56)))
@@ -203,6 +215,12 @@ static int au_coverage(au_state *s,au_pools pools,const pfm2_config *cfg,const u
             else if(b||e)return PFR_INVALID;
         }
         if(scopes<=2&&sum!=r64(p+56))return PFR_INVALID;
+    }
+    if(mask&2048){
+        /* ten reasons then six zero slots; unless SATURATED they sum to u32@440 */
+        sum=0;
+        for(j=0;j<10;++j)sum+=r32(p+base+4*j);
+        if(!au_zero(p+base+40,24)||(!(flags&4)&&sum!=r32(p+440)))return PFR_INVALID;
     }
     for(k=0;k<3;++k){
         const uint8_t *row=p+64+96*k;sum=0;
@@ -247,7 +265,7 @@ static int au_clock_accept(au_state *s,au_pools pools,const pfm2_config *cfg,con
 static int au_status(au_state *s,const uint8_t *p,size_t n)
 {
     uint64_t value[15],sum;uint16_t flags;unsigned j;int ring=au_ringed(s),lower,final;
-    if(n!=(ring?208u:128u)||r16(p)!=1||r32(p+4)!=r32(s->config+4))return PFR_INVALID;
+    if(n!=(r16(s->config+2)==1?128u:au_status_width(s))||r16(p)!=1||r32(p+4)!=r32(s->config+4))return PFR_INVALID;
     flags=r16(p+2);lower=(flags&2)!=0;final=(flags&1)!=0;
     if(r16(s->config+2)==1){
         if(flags!=1||!au_zero(p+8,120))return PFR_INVALID;
@@ -261,6 +279,12 @@ static int au_status(au_state *s,const uint8_t *p,size_t n)
     if(s->status_bytes&&((r16(s->status+2)&UINT16_C(4084))&~flags))return PFR_INVALID;
     if(!(flags&4)){sum=value[2];if(!plus64(&sum,value[3])||!plus64(&sum,value[4])||sum>value[1]||(!lower&&sum!=value[1]))return PFR_INVALID;}
     if(value[0]<s->last_op||value[13]<s->max_snapshot||value[13]>UINT32_MAX||value[14]>r32(s->config+48)||value[10]>value[9])return PFR_INVALID;
+    if(au_mask(s)&2048){
+        /* range refusals by reason: never decreasing, six zero slots */
+        size_t at=ring?208:128;
+        if(!au_zero(p+at+80,48))return PFR_INVALID;
+        if(s->status_bytes)for(j=0;j<10;++j)if(r64(p+at+8*j)<r64(s->status+at+8*j))return PFR_INVALID;
+    }
     if(ring){
         uint64_t issued=r64(p+128),retired=r64(p+136),published=r64(p+144),held=r64(p+152),untouched=r64(p+168),restored=r64(p+176);
         uint32_t reason=r32(p+200);sum=untouched;

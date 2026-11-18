@@ -10,7 +10,8 @@ ROOT=Path(__file__).resolve().parents[2]
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',action='store_true')
-ap.add_argument('--mutant',choices=['retry-sink','refused-data','early-account','omit-conflict','publication-regression'])
+ap.add_argument('--mutant',choices=['retry-sink','refused-data','early-account','omit-conflict','publication-regression',
+                                  'ranges-below-rows','ranges-decrease'])
 a=ap.parse_args()
 src=ROOT/'sdk/libps3dkprof/src/auto_rsx'
 assert (src/'auto_writer.c').is_file(), 'AUTO_WRITER_IMPLEMENTATION'
@@ -23,7 +24,11 @@ mutants={
     'refused-data': ('if(c->reason) {', 'if(c->reason>10) {', '!auto_writer_begin(&writer)'),
     'early-account': ('w->operations_written+=count;', 'w->operations_written+=count;', 'writer.failed && writer.operations_written==0'),
     'omit-conflict': ('flags|=(uint16_t)auto_config_flags(w->config);', '(void)auto_config_flags(w->config);', 'output.data[4][2]==AUTO_STATUS_CONFLICT'),
-    'publication-regression': ('values[13]<w->publication_max', 'values[13]>UINT64_MAX', '!auto_writer_status(&writer,0,counters)'),
+    'publication-regression': ('values[13]<w->publication_max', 'values[13]>UINT64_MAX', '!auto_writer_status(&writer,0,counters,ranges)'),
+    # a STATUS total below the rows written, or below the prior STATUS, must be refused
+    'ranges-below-rows': ('if(!(flags&AUTO_SATURATED) && ranges[i]<w->row_ranges[i]) return 0;', '',
+                          '!below_rows'),
+    'ranges-decrease': ('if(w->status_seen && ranges[i]<w->prior_ranges[i]) return 0;', '', '!decreased'),
 }
 if a.mutant:
     old,new,expected=mutants[a.mutant]

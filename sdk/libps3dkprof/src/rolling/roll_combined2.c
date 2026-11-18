@@ -73,9 +73,9 @@ static int plan(const pfm2_config *cfg,context *c)
     if(!plus64(&bound,48+128))return PFR_INVALID;
     if((cfg->family_flags&64)&&(!plus64(&bound,128+404)||!times64(&bound,cfg->fifo_membership_runs,32)
        ||!times64(&bound,cfg->accounting_groups,40)))return PFR_INVALID;
-    if((cfg->family_flags&128)&&(!plus64(&bound,32+532+216+208)||!plus64(&bound,cfg->auto_bootstrap_bytes)
+    if((cfg->family_flags&128)&&(!plus64(&bound,32+532+216+336)||!plus64(&bound,cfg->auto_bootstrap_bytes)
        ||!times64(&bound,(uint64_t)cfg->auto_final_runs+cfg->auto_touched_runs,24)
-       ||!times64(&bound,cfg->auto_build_entries,608)||!times64(&bound,cfg->auto_clock_anchors,104)))return PFR_INVALID;
+       ||!times64(&bound,cfg->auto_build_entries,80+592)||!times64(&bound,cfg->auto_clock_anchors,104)))return PFR_INVALID;
     if(bound>UINT32_MAX||bound>cfg->shared.checkpoint_bytes)return PFR_INVALID;
     n=sizeof *c;if(!partition(&n,1,c->core_layout.context_bytes,&c->core_offset)
        ||!partition(&n,0,1,&end))return PFR_INVALID;
@@ -132,9 +132,9 @@ static int encode(const context *c,const void *a,void *output,size_t capacity,si
        ||!times64(&expected_bytes,f->event_chunks,36)||!times64(&expected_bytes,f->events,96)
        ||!times64(&expected_bytes,old_status,100)||!times64(&expected_bytes,f->parsed,100)
        ||!times64(&expected_bytes,au->op_chunks,36)||!times64(&expected_bytes,au->ops,au_width(au))
-       ||!times64(&expected_bytes,au->statuses?au->statuses-1:0,au_ringed(au)?228:148)
+       ||!times64(&expected_bytes,au->statuses?au->statuses-1:0,20+au_status_width(au))
        ||!times64(&expected_bytes,au->retired_clocks,116)
-       ||!times64(&expected_bytes,au->retired_frames,20+(au_ringed(au)?528:(au_mask(au)&512)?480:(au_mask(au)&256)?416:(au_mask(au)&16)?384:352))
+       ||!times64(&expected_bytes,au->retired_frames,20+au_frame_width(au))
        ||!times64(&expected_bytes,s->retired_windows,104))return PFR_COUNTER_RANGE;
     if(expected_chunks!=v.ppu.next||expected_bytes!=v.ppu.bytes)return PFR_INVALID;
     memset(b,0,fixed);memcpy(b,"PFRMIX01",8);w16(b+8,c->retained_slots?3:2);w16(b+10,(uint16_t)fixed);w32(b+12,6);memcpy(b+16,v.ppu.header,16);
@@ -329,7 +329,7 @@ static int project_prepared(const context *c,void *b,uint64_t floor)
     rc=au_project_state(s,auto_pools(c,b),&c->cfg,floor);if(rc)return rc;
     expected_chunks=s->retired_frames-expected_chunks;expected_bytes=s->retired_clocks-expected_bytes;
     chunks=expected_chunks+expected_bytes;
-    bytes=expected_chunks*(20+(au_ringed(s)?528:(au_mask(s)&512)?480:(au_mask(s)&256)?416:(au_mask(s)&16)?384:352))
+    bytes=expected_chunks*(20+au_frame_width(s))
         +expected_bytes*116;
     chunks+=(side_state->retired_windows-old_windows)*2;bytes+=(side_state->retired_windows-old_windows)*104;
     filter.c=c;filter.arena=b;

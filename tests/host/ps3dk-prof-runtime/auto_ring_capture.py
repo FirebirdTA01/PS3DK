@@ -1,4 +1,4 @@
-"""Independent check of a REPORT_RING (2047/11) AUTO capture, written from the wire description in auto_wire.h, not
+"""Independent check of a REPORT_RING AUTO capture (4095/11: 2047/11 plus the range-refusal tails), written from the wire description in auto_wire.h, not
 from the reader. verify() raises AssertionError on any violation and returns a summary."""
 import struct
 import zlib
@@ -25,7 +25,7 @@ def config(b):
     assert len(b) == 216 and struct.unpack_from('<HH', b) == (1, 0), 'ring CONFIG width/refusal'
     c = dict(zip(('masks', 'first', 'count', 'op_label', 'clock_label', 'pairs', 'metadata', 'frames', 'width'),
                  ((struct.unpack_from('<II', b, 24)),) + struct.unpack_from('<8I', b, 32)))
-    assert c['masks'] == (2047, 11) and c['width'] == 176
+    assert c['masks'] == (4095, 11) and c['width'] == 176
     r = dict(zip(('bytes', 'blocks', 'pairs', 'first', 'label', 'stride', 'slots', 'metadata_stride', 'legacy',
                   'owner_only'), struct.unpack_from('<10I', b, 176)))
     assert r['owner_only'] == 1 and 2 <= r['blocks'] <= 4 and r['pairs'] == 126
@@ -71,10 +71,10 @@ def verify(data, pending_tail=0, held_extents=None):
             assert len(b) == 16 + 176 * n
             ops += [record(b[16 + 176 * i:16 + 176 * (i + 1)]) for i in range(n)]
         elif k == 36:
-            assert len(b) == 528, 'COVERAGE width'
+            assert len(b) == 592, 'COVERAGE width'
             rows.append(b)
         elif k == 37:
-            assert len(b) == 208, 'STATUS width'
+            assert len(b) == 336, 'STATUS width'
             status = b
     assert status is not None
     ring = [o for o in ops if o['flags'] & 128]
@@ -116,6 +116,7 @@ def verify(data, pending_tail=0, held_extents=None):
         assert all(o['flags'] & 2 for o in ring), 'every ring record timed'
     excluded = dict.fromkeys(EXCLUSIONS + ('ring_full', 'ring_state', 'outside'), 0)
     observed_by_frame = {}
+    refused_rows = [0] * 10
     for b in rows:
         flags, frame = struct.unpack_from('<H', b, 2)[0], struct.unpack_from('<Q', b, 16)[0]
         for kind in range(3):
@@ -131,6 +132,13 @@ def verify(data, pending_tail=0, held_extents=None):
             excluded['ring_state'] += state
             excluded['outside'] += outside
             observed_by_frame[frame] = observed_by_frame.get(frame, 0) + counts[1]
+        # range refusals by reason at 528: ten reasons, six zero slots, summing to u32@440 unless SATURATED
+        reasons = struct.unpack_from('<16I', b, 528)
+        assert reasons[10:] == (0,) * 6, 'reserved range-refusal slots'
+        if not flags & 4:
+            assert sum(reasons[:10]) == struct.unpack_from('<I', b, 440)[0], 'range refusals by reason'
+        for i, n in enumerate(reasons[:10]):
+            refused_rows[i] += n
     flags = struct.unpack_from('<H', status, 2)[0]
     tail = struct.unpack_from('<8Q', status, 128)
     issued, retired, published, held, copied, untouched, restored, decoded = tail
@@ -144,6 +152,9 @@ def verify(data, pending_tail=0, held_extents=None):
         assert flags & 2, 'a held extent at seal is a lower bound'
     else:
         assert retired == issued
+    refused = struct.unpack_from('<16Q', status, 208)
+    assert refused[10:] == (0,) * 6, 'reserved STATUS range-refusal slots'
+    assert flags & 4 or all(t >= n for t, n in zip(refused, refused_rows)), 'STATUS refusals below the rows'
     header, at, reason, reserved = struct.unpack_from('<4I', status, 192)
     assert reserved == 0 and reason <= 16 and (reason or (header, at) == (0, 0)), 'decoder rejection'
     return dict(ring_records=len(ring), blocks_issued=issued, blocks_retired=retired, held=held,
