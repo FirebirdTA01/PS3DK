@@ -30,7 +30,11 @@ PINS = {
     # the mutations below still violate the same eight ownership boundaries.
     'roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
     'roll_ppu_internal.h': '2f0515bb61c2fc71630e49e83efee3f36cb58ac396f3b53195d2880280d24fa0',
-    'roll_store.c': '849c0dbc3b390cbfbff7c653e08041cde8a83de28000eca40eae1f31bd3b5c01',
+    # Reviewed prefix initialization / zero-tail CRC extension: slot bytes,
+    # write lengths, slot-sync then root-sync, poison and reopen rules remain
+    # unchanged. All eight edits below target roll_output.c; their checkpoint,
+    # acceptance, resource-tail and terminal-state witnesses remain applicable.
+    'roll_store.c': 'a1a3b7afb0f3d52ec8cae5d3efbadfecf808390106ea4e6967a3aae37433644d',
 }
 PREFIX = 'actual_c_ppu_output_'
 ROTATE = PREFIX + 'rotates_and_preserves_useful_retained_spans'
