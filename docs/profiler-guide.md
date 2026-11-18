@@ -362,8 +362,11 @@ With `PS3_PROF_AUTO=ON`. Empty (default) keeps an append capture. A value is the
 segments.
 
 - Cost: the preset keeps six segments plus a spare, uses about 21 MiB of file space and about 16 MB of pre-allocated
-  writer memory, and rewrites one segment slot per commit with two sync operations. Core/extension/writer state has a
-  separate 64 MiB ceiling.
+  writer memory, and rewrites one segment slot per commit with two sync operations. A commit clears only the
+  overwritten prefix of the slot and extends the used-data CRC over the known-zero padding without rescanning it (the
+  stored bytes and the two-sync publication order are unchanged; readers still check the padding). Target commit
+  timings after that change are pending: measure drainer time, lag and dropped records on the target before using
+  rolling for a heavy workload. Core/extension/writer state has a separate 64 MiB ceiling.
 - Turn it on when: long sessions could fill the HDD, soak tests or playtests where only the recent past matters, or a
   capture must stay within a fixed disk budget.
 - Leave it off when: you want whole-run totals or every frame, you record SPU lanes (refused), you need the live link
@@ -634,6 +637,14 @@ domain with solid cores, whiskers for timing uncertainty, possible and extrapola
 the page. Bookmarks are written next to the saved capture as `<name>.frames.txt`. Limits: 64 snapshots per session,
 1 GiB accounted memory across sessions.
 
+In AUTO builds the snapshot also has an `rsx.auto` row with the retained draw, CALL and range records, placed through
+the reader's qualified AUTO clock map within its interpolation support. Their execution-frame tokens select the frame,
+including CALL-segment draws built in an earlier frame. A ranges-only capture shows recorded ranges, not individual
+draw bars. Untimed draws and records with unavailable timing stay counts, with reasons; replayed segments or invalid
+clock evidence are never drawn. The AUTO-declared RSX domain with no extension events says **timed by AUTO records**,
+pointing to `rsx.auto` for clock validity, and a PPU lane holding only frame marks says **no zones in this build**.
+These labels do not claim complete coverage or per-draw state.
+
 **Capture RSX frame** (requesting an RSX frame capture from the PC) is not available: there is no request button or
 live command. The RSX frames page lists capture markers already in a file.
 
@@ -642,8 +653,13 @@ live command. The RSX frames page lists capture markers already in a file.
 With a capture open, the app bar has a window picker (**All frames** or `window N — name`). A window scopes the
 Passes, Automatic, Frames and Timeline pages to its frames. **Save window…** writes `<name>.window_<id>.prof` and
 **Save range…** writes `<name>.<first>..<last>.prof` next to the open file, with the same exporter as
-`ps3dk-prof export`. Neither overwrites an existing file. They work on a capture opened from disk: after a live
-session, open the saved `.prof` first.
+`ps3dk-prof export`. Neither overwrites an existing file: the status line names the file written, or the existing
+file that made the save refuse.
+
+In a live session the saves go into the folder chosen in **Connect…** and use the received bytes behind the displayed
+document, even if the session's saved file was moved or changed. Only the reader-accepted prefix is exported: a torn
+trailing chunk and bytes received after that snapshot are left out. Saving still works after **Disconnect** when an
+early prefix was accepted; a session that failed validation refuses the export with a reason.
 
 ### 6.8 Rolling captures
 

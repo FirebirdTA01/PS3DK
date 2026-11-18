@@ -783,7 +783,7 @@ There is no app-side API for snapshots or exporting part of a capture.
 | Action | Where |
 |---|---|
 | Freeze one frame | PC app **Capture full frame** (Snapshot page) |
-| Write one window or a frame range as its own `.prof` | PC app **Save window…** / **Save range…** on an opened file; `ps3dk-prof export --window W \| --frame N \| --frames A..B in.prof out.prof` |
+| Write one window or a frame range as its own `.prof` | PC app **Save window…** / **Save range…** on an opened file or a live session (live: the accepted prefix, into the Connect folder); `ps3dk-prof export --window W \| --frame N \| --frames A..B in.prof out.prof` |
 | List windows | Overview WINDOWS; `ps3dk-prof windows` |
 
 ---
@@ -843,5 +843,5 @@ There is no app-side API for snapshots or exporting part of a capture.
 | `get_rolling_result` | Rolling page of an opened `.profr` | available (offline) |
 | RSX frame capture | RSX frames page lists captures in a file | none yet: request from the PC t_1eec0d29 |
 | `PS3DK_PROF_FRAME`, `PS3DK_PROF_AUTO_TAG`, AUTO ranges, GPU zones, counters, FIFO attach | none (app-defined data) | app only |
-| none | **Capture full frame** | PC only |
-| none | **Save window…** / **Save range…** | PC only (file opened from disk); also `ps3dk-prof export` |
+| none | **Capture full frame** (AUTO builds add an `rsx.auto` row) | PC only |
+| none | **Save window…** / **Save range…** | PC only (opened file or live session); also `ps3dk-prof export` |

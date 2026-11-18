@@ -176,6 +176,7 @@ pub fn page(p: &mut egui::Ui, s: &FrameSnapshot, drawn: &mut Drawn) -> Option<Ac
                 crate::capture::Status::Observed => ui::Tone::Success,
                 crate::capture::Status::Partial => ui::Tone::Warning,
                 crate::capture::Status::NoData => ui::Tone::Neutral,
+                crate::capture::Status::AutoRecords | crate::capture::Status::NoZones => ui::Tone::Neutral,
                 crate::capture::Status::Unmappable => ui::Tone::Danger,
             });
             h.label(egui::RichText::new(&*l.name).strong());
@@ -331,7 +332,10 @@ pub fn details(s: &FrameSnapshot, b: &CBar) -> Vec<String> {
             _ => "POSSIBLE: unclaimed; its bounds may overlap this frame",
         }
     ));
-    let unit = if foreign { "source ticks" } else { "ticks" };
+    let unit = if lane.id == crate::capture::LaneId::Auto { "raw RSX ticks" } else if foreign { "source ticks" } else { "ticks" };
+    if lane.id == crate::capture::LaneId::Auto {
+        out.push("AUTO interval between RSX timestamp markers; overlapping operations and ranges are not additive".into());
+    }
     out.push(match b.inclusive {
         Some(i) => format!("inclusive {i} {unit}"),
         None => "inclusive: unknown".into(),
