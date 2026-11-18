@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(hello-ppu-gcm-call-return C)
 include(ps3-self)
-set(GCM_SEG_RING_FRAME_COUNT 30 CACHE STRING "Bounded frame count for the ring retention probe (1..300)")
+set(GCM_SEG_RING_FRAME_COUNT 30 CACHE STRING "Bounded frame count for the ring retention probe (1..2000)")
 if(NOT GCM_SEG_RING_FRAME_COUNT MATCHES "^[0-9]+$" OR
-   GCM_SEG_RING_FRAME_COUNT LESS 1 OR GCM_SEG_RING_FRAME_COUNT GREATER 300)
-    message(FATAL_ERROR "GCM_SEG_RING_FRAME_COUNT must be between 1 and 300")
+   GCM_SEG_RING_FRAME_COUNT LESS 1 OR GCM_SEG_RING_FRAME_COUNT GREATER 2000)
+    message(FATAL_ERROR "GCM_SEG_RING_FRAME_COUNT must be between 1 and 2000")
 endif()
 
 # One SELF per variant.  The default runs only main-memory segments (plus the

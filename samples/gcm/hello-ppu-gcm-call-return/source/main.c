@@ -15,7 +15,7 @@
  *            (GCM_SEG_VARIANT_JUMP)
  *   -ring    600 owner-buffer clears per frame for the AUTO report ring
  *            (GCM_SEG_VARIANT_RING); GCM_SEG_RING_FRAME_COUNT defaults to 30
- *            (1..300) and permits longer rolling-retention probes without
+ *            (1..2000) and permits longer rolling-retention probes without
  *            changing GCM setup. Its own attach selects the ring unless
  *            PS3_PROF_AUTO_RING=ON already selected it automatically;
  *            built with -DGCM_SEG_RING_PROBE, the first
@@ -339,8 +339,8 @@ static int large_check(CellGcmContextData *ring, uint32_t *mem)
 #ifndef GCM_SEG_RING_FRAME_COUNT
 #define GCM_SEG_RING_FRAME_COUNT 30
 #endif
-#if GCM_SEG_RING_FRAME_COUNT < 1 || GCM_SEG_RING_FRAME_COUNT > 300
-#error GCM_SEG_RING_FRAME_COUNT must be between 1 and 300
+#if GCM_SEG_RING_FRAME_COUNT < 1 || GCM_SEG_RING_FRAME_COUNT > 2000
+#error GCM_SEG_RING_FRAME_COUNT must be between 1 and 2000
 #endif
 enum { RING_FRAMES = GCM_SEG_RING_FRAME_COUNT, RING_DRAWS = 600 };
 #if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
