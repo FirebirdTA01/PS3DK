@@ -60,13 +60,13 @@ Differences, including optimisation differences, are tracked; byte identity
 is not the release bar. Language beyond that surface is available only
 through named, opt-in [extensions](#extensions).
 
-The same CMake project also builds a second executable, the **ELF shader
-archive packer**, which packs `.vpo`/`.fpo` containers into one ELF32
-archive (see [Shader archive packer](#shader-archive-packer)).
+The same CMake project also builds a second executable,
+**`rsx-cg-archive`** (alias `cgnv2elf`), which packs `.vpo`/`.fpo` containers into one ELF32 shader archive (see
+[Shader archive packer](#shader-archive-packer-rsx-cg-archive)).
 
 ## Install and locate
 
-Every SDK release installs `rsx-cg-compiler` (plus the archive packer) into
+Every SDK release installs `rsx-cg-compiler` and `rsx-cg-archive` (with its `cgnv2elf` alias) into
 `$PS3DEV/bin` and `$PS3DK/bin`. On Windows the release zip ships
 `rsx-cg-compiler.exe`.
 
@@ -408,18 +408,19 @@ one row per 16-byte instruction slot (fragment inline constant blocks are
 printed as rows too). The `Entry point` / `Stage` / `IR functions` lines are
 also printed when a container is written; build systems can ignore stdout.
 
-### Shader archive packer
+### Shader archive packer (rsx-cg-archive)
 
-The second executable built from `tools/rsx-cg-compiler/CMakeLists.txt`
-(installed next to `rsx-cg-compiler`; its source is under
-`tools/rsx-cg-compiler/src/` in its own subdirectory) packs one container or
-a folder of containers into one big-endian ELF32 relocatable shader archive:
-one symbol per program named after its input file, a shader table, each
-program's microcode in its own `.text` section, and a parameter table per
-program rebuilt as a tree from the container's flattened parameter names.
+`rsx-cg-archive` is the second executable built from
+`tools/rsx-cg-compiler/CMakeLists.txt`. It is also installed under its
+former name, `cgnv2elf`, as a compatibility alias for existing Makefiles;
+both names take the same options and write the same archive. It is
+installed next to `rsx-cg-compiler` in `$PS3DEV/bin` and `$PS3DK/bin`
+(`.exe` on Windows). It packs one
+`.vpo`/`.fpo` container, or a folder of them, into one big-endian ELF32
+relocatable shader archive.
 
 ```
-<packer> [-q|--quiet] [-s|--no-sem] [-e] input [output]
+rsx-cg-archive [-q|--quiet] [-s|--no-sem] [-e] input [output]
 ```
 
 | Option | Effect |
@@ -427,16 +428,51 @@ program rebuilt as a tree from the container's flattened parameter names.
 | `-q`, `--quiet` | Print nothing on success (also silences unknown-option warnings). |
 | `-s`, `--no-sem` | Omit parameter semantics. |
 | `-e` | Keep the file extension in symbol names. |
-| `-u`, `--no-unref` | Refused (exit 1): dropping unreferenced parameters is not supported. |
-| `-v`, `-V`, `--version` | Print the version (same as the compiler's) and exit. |
+| `-u`, `--no-unref` | Refused (`-u/--no-unref is not supported`, exit 1): dropping unreferenced parameters is not supported. |
+| `-v`, `-V`, `--version` | Print the tool name and version (the same SDK version as the compiler) and exit. |
 | `-h`, `--help` | Print help and exit. |
+| `--` | End of options. |
+
+Short options can be combined (`-qs`). Unknown options are ignored with a
+`warning: ignoring unknown option ...` message.
 
 `input` is one container or a folder; a folder converts every regular file
 in case-insensitive name order and skips files that are not shader
 containers. Without `output` the archive is written to
-`<dir of input>/out<extension of input>`. The archive is written to a
-temporary file and renamed into place, so a failure never leaves a partial
-archive. Unknown options are ignored with a warning.
+`<dir of input>/out<extension of input>`, for example
+`rsx-cg-archive shaders/` writes `out` beside the folder and
+`rsx-cg-archive vp.vpo` writes `out.vpo`. The archive is written to a
+temporary file and renamed into place, so a failure never leaves a partial archive.
+
+```
+rsx-cg-archive build/shaders build/shaders.elf
+wrote build/shaders.elf: 2 program(s), 1234 bytes
+```
+
+On success it prints `wrote <output>: N program(s), N bytes` (unless
+`-q`) and exits 0. If no input is a shader container it still writes an
+empty archive but reports `no shader programs in ...` and exits 1. An
+unreadable input or a malformed container (`couldn't open ...`, fields out
+of range, offsets past the end of the file) exits 1.
+
+Archive layout (all values big-endian):
+
+| Part | Contents |
+|---|---|
+| ELF header | `ELFCLASS32`, `ELFDATA2MSB`, `EI_OSABI` `0x13`, `EI_ABIVERSION` 1, `ET_REL`, `e_machine` `0x528e`; section headers at offset `0x34` |
+| `.shstrtab` | section names |
+| `.note` | one note: a fixed 12-byte name, type 0, and a 4-byte descriptor holding the tool revision (6365); unchanged by the rename |
+| `.strtab` | parameter names, semantics and symbol names |
+| `.const` | 16-byte default-value vectors, appended per program |
+| `.symtab` | one symbol per program, named after its input file (without the extension unless `-e`) |
+| `.shadertab` | one 0x1c-byte entry per program (profile and header) |
+| `.text%04d`, `.paramtab%04d` | per program i: its microcode verbatim, and its parameter table |
+
+The parameter table rebuilds the parameter tree from the container's
+flattened names (`light.color`, `k[1][2]`, `m[0]` for a matrix row) and holds
+one record per tree node plus type, resource-index, default and semantic
+tables. Section data follows the section header table in order, each
+section aligned to its `sh_addralign`.
 
 ## PSGL fixed-function shader library
 
