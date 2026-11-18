@@ -191,6 +191,15 @@ span on a representative run. Use custom constant options to change segment
 or support capacities; raising only the ceiling does not enlarge the file.
 The finite preset retains six segments plus a spare and uses about 21 MiB of
 file space. Increasing the ceiling alone does not enlarge the preset's pools.
+Formatting writes that bounded file once. Later commits write the used slot
+prefix (clearing any longer previous record), its footer and one root page,
+with two sync operations. Reopening requires a full clear on each slot's first
+reuse. In the default-cap host schedule with 600 draws per frame, byte rotation
+occurred every 9–10 frames: about 1.05 MB written per commit, or 6.53 MB/s and
+12.4 syncs/s when normalized to 60 fps. The six retained segments held 52 frames
+at the end of that schedule. These are adapter byte counts, not PS3 HDD timings;
+CRC still scans the full slot using a byte table. Measure drainer CPU time, lag
+and dropped records on the target before choosing rolling for a heavy workload.
 Core/extension/rolling writer state has a separate 64 MiB ceiling; AUTO report
 ring and other attach allocations are bounded separately, so this is not a
 total-memory cap. Active SPU lanes and legacy live transport are not supported
