@@ -13,6 +13,8 @@ struct pfo_output {
     pfo_view v;
     unsigned arena;
     size_t start_bytes, accepted_bytes;
+    pfo_pressure pressure;
+    pfo_project project;
 };
 typedef struct { const void *p; size_t n; } area;
 static int valid(area a) { return a.p && a.n && a.n <= UINTPTR_MAX - (uintptr_t)a.p; }
@@ -69,6 +71,11 @@ int pfo_get_view(const pfo_output *o,pfo_view *v){
     if(!v)return PFR_INVALID;
     *v=o->v;return PFR_OK;
 }
+int pfo_support(pfo_output *o,pfo_pressure pressure,pfo_project project){
+    if(!o||o->ready!=READY||o->v.phase!=PFO_READY||o->v.accepted_next_chunk
+       ||o->pressure||o->project||!pressure||!project)return PFR_INVALID;
+    o->pressure=pressure;o->project=project;return PFR_OK;
+}
 int pfo_flush(pfo_output *o){
     pfr_view v;int rc=usable(o);
     if(rc!=PFR_OK)return rc;
@@ -80,11 +87,32 @@ int pfo_flush(pfo_output *o){
         return poison(o,PFR_CORRUPT);
     o->v.committed_next_chunk=v.next_chunk;o->v.committed_payload_bytes=v.bound_payload_bytes;
     o->v.pending_bytes=0;
+    if(!o->v.terminal&&o->project){size_t written=0;void *swap;
+        rc=o->project(o->b.encoder_ctx,o->b.arenas[o->arena],o->b.arenas[o->arena^1u],
+            v.first_chunk,o->b.checkpoints[2],o->b.checkpoint_capacity,&written);
+        if(rc!=PFR_OK||!written||written>o->b.checkpoint_capacity)return poison(o,PFR_INVALID);
+        swap=o->b.checkpoints[1];o->b.checkpoints[1]=o->b.checkpoints[2];o->b.checkpoints[2]=swap;
+        o->accepted_bytes=written;o->arena^=1u;o->v.accepted_arena=o->b.arenas[o->arena];
+    }
     if(!o->v.terminal){memcpy(o->b.checkpoints[0],o->b.checkpoints[1],o->accepted_bytes);o->start_bytes=o->accepted_bytes;}
     return PFR_OK;
 }
+static int candidate(pfo_output *o,const void *raw,size_t n,pfo_prepared *prepared){
+    int rc;const uint8_t *p=raw;
+    memset(prepared,0,sizeof *prepared);
+    rc=o->b.prepare(o->b.encoder_ctx,o->b.arenas[o->arena],o->b.arenas[o->arena^1u],
+        raw,n,o->b.checkpoints[2],o->b.checkpoint_capacity,prepared);
+    if(rc==PFO_RESOURCE){
+        if(prepared->reason<PFR_CHECKPOINT_BYTES||prepared->reason>PFR_COUNTER_RANGE)return poison(o,PFR_INVALID);
+        return stopping(o,prepared->reason);
+    }
+    if(rc!=PFR_OK||prepared->reason||prepared->terminal!=(u32(p)==TRAILER))return poison(o,PFR_INVALID);
+    if(prepared->checkpoint_bytes>o->b.checkpoint_capacity)return stopping(o,PFR_CHECKPOINT_BYTES);
+    if((prepared->terminal&&prepared->checkpoint_bytes)||(!prepared->terminal&&!prepared->checkpoint_bytes))return poison(o,PFR_INVALID);
+    return PFR_OK;
+}
 int pfo_accept(pfo_output *o,const void *raw,size_t n){
-    const uint8_t *p=raw;pfo_prepared prepared;void *swap;uint64_t next,bytes;int rc=usable(o);
+    const uint8_t *p=raw;pfo_prepared prepared;void *swap;uint64_t next,bytes;int pressure=0,rc=usable(o);
     if(rc!=PFR_OK)return rc;
     if(o->v.phase==PFO_STOPPING)return PFO_RESOURCE;
     if(o->v.terminal)return PFR_END;
@@ -94,19 +122,20 @@ int pfo_accept(pfo_output *o,const void *raw,size_t n){
     if(o->v.accepted_next_chunk==UINT64_MAX||n>UINT64_MAX-o->v.accepted_payload_bytes)
         return stopping(o,PFR_COUNTER_RANGE);
     next=o->v.accepted_next_chunk+1;bytes=o->v.accepted_payload_bytes+n;
-    memset(&prepared,0,sizeof prepared);
-    rc=o->b.prepare(o->b.encoder_ctx,o->b.arenas[o->arena],o->b.arenas[o->arena^1u],
-        raw,n,o->b.checkpoints[2],o->b.checkpoint_capacity,&prepared);
-    if(rc==PFO_RESOURCE){
-        if(prepared.reason<PFR_CHECKPOINT_BYTES||prepared.reason>PFR_COUNTER_RANGE)return poison(o,PFR_INVALID);
-        return stopping(o,prepared.reason);
+    rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;
+    if(o->pressure&&!prepared.terminal){
+        pressure=o->pressure(o->b.encoder_ctx,o->b.arenas[o->arena^1u]);
+        if(pressure!=0&&pressure!=1)return poison(o,PFR_INVALID);
     }
-    if(rc!=PFR_OK||prepared.reason||prepared.terminal!=(u32(p)==TRAILER))return poison(o,PFR_INVALID);
-    if(prepared.checkpoint_bytes>o->b.checkpoint_capacity)return stopping(o,PFR_CHECKPOINT_BYTES);
-    if((prepared.terminal&&prepared.checkpoint_bytes)||(!prepared.terminal&&!prepared.checkpoint_bytes))return poison(o,PFR_INVALID);
     /* Do not acknowledge or swap state until any required old-segment commit
      * succeeds. The prepared checkpoint occupies its own third buffer. */
-    if(n>o->b.payload_capacity-o->v.pending_bytes){rc=pfo_flush(o);if(rc!=PFR_OK)return rc;}
+    if(n>o->b.payload_capacity-o->v.pending_bytes||(pressure&&o->v.pending_bytes)){
+        rc=pfo_flush(o);if(rc!=PFR_OK)return rc;
+        /* Projection uses the other arena/third checkpoint, replacing the
+         * preflight candidate. Revalidate it against the projected predecessor
+         * before acknowledging it; it has not entered any physical segment. */
+        if(o->project){rc=candidate(o,raw,n,&prepared);if(rc!=PFR_OK)return rc;}
+    }
     memcpy((uint8_t *)o->b.payload+o->v.pending_bytes,raw,n);
     if(!prepared.terminal){swap=o->b.checkpoints[1];o->b.checkpoints[1]=o->b.checkpoints[2];o->b.checkpoints[2]=swap;o->accepted_bytes=prepared.checkpoint_bytes;}
     o->arena^=1u;o->v.accepted_arena=o->b.arenas[o->arena];

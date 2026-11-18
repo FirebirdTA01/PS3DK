@@ -70,6 +70,28 @@ fn rolling_cli_lists_actual_retained_ppu_data_and_declares_eviction() {
 }
 
 #[test]
+fn rolling_cli_exposes_retained_segment_fill_without_inventing_commit_reasons() {
+    let (b, _) = ppu_store(2);
+    let physical = ps3dk_prof::rolling_store::read(&b, ps3dk_prof::rolling_store::Limits {
+        max_file_bytes: b.len() as u64, max_slot_bytes: b.len() as u32,
+    }).unwrap();
+    let v = json(&Scratch::new().run(&b, &["--json"]));
+    assert_eq!(v["physical"]["segment_payload_capacity"], physical.config.payload_bytes);
+    let rows = v["retained"]["segment_layout"].as_array().expect("original physical boundaries");
+    assert_eq!(rows.len(), physical.segments.len());
+    for (row, segment) in rows.iter().zip(&physical.segments) {
+        assert_eq!(row["segment"], segment.segment);
+        assert_eq!(row["first_chunk"], segment.first_chunk);
+        assert_eq!(row["next_chunk"], segment.next_chunk);
+        assert_eq!(row["payload_bytes"], segment.payload.len());
+        let first_bytes = u32::from_le_bytes(segment.payload[4..8].try_into().unwrap()) as u64 + 20;
+        assert_eq!(row["first_original_chunk_bytes"], first_bytes);
+        assert_eq!(row["commit_trigger"]["value"], Value::Null);
+        assert_eq!(row["commit_trigger"]["reason"], "not recorded in the physical format");
+    }
+}
+
+#[test]
 fn rolling_cli_open_and_resource_states_are_not_reported_as_sealed() {
     let t = Scratch::new();
     for (state, label) in [(1, "OPEN"), (3, "STOPPED_RESOURCE")] {

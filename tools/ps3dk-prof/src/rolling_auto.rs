@@ -8,6 +8,8 @@ use super::{Anchor, Config, Coverage, FrameView, MapState, Op, Status, RingResta
 pub const CHECKPOINT_MAGIC: &[u8; 8] = b"PFRAUTO1";
 pub const CHECKPOINT_FIXED: usize = 320;
 const RING_CHECKPOINT_FIXED: usize = 512;
+const PROJECTED_CHECKPOINT_FIXED: usize = 608;
+const CLOCK_PREDECESSORS: usize = 8;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
@@ -104,6 +106,9 @@ pub struct Retained {
     pub boundary_frames: Vec<FrameRun>,
     pub prefix_unassociated: bool,
     pub invalid_exclusion_seen: bool,
+    /// Version-3 retained-support frontier; None keeps the whole-prefix map contract.
+    pub support_floor: Option<u64>,
+    pub sticky_clock_refusal: bool,
     last_frame: Option<(u32, u64)>,
 }
 
@@ -132,6 +137,7 @@ pub struct FrameResult { pub view: FrameView, pub unavailable: Vec<Unavailable> 
 #[derive(Debug)]
 pub struct Report {
     pub map: MapState,
+    pub retained_support: bool,
     pub intervals: Vec<Interval>,
     pub frames: Vec<FrameResult>,
 }
@@ -162,7 +168,12 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 type Key = (u32, u64);
-struct Build { value: BuildSupport, raw: Option<Original> }
+struct Build { value: BuildSupport, raw: Option<Original>, touched: bool, last_use: u64 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Projection {
+    floor: u64, retired: [u64;2], before_status: [u64;2], sticky_clock: bool,
+    final_frame: [Option<u64>;2], marker: Option<(u64,u64)>,
+}
 struct State {
     reader: super::Reader,
     header: [u8;16], bootstrap: Vec<Original>, frequency: Option<u64>, next: u64,
@@ -171,6 +182,7 @@ struct State {
     finals: Vec<FrameRun>, touched: Vec<FrameRun>, unassociated: bool, invalid: bool,
     builds: BTreeMap<Key,Build>, clocks: Vec<Original>,
     ops: Vec<Located<Op>>, frames: Vec<Located<Coverage>>,
+    projection: Option<Projection>,
 }
 struct Meter<'a> { outer: &'a mut WorkBudget, left: u64 }
 impl Meter<'_> {
@@ -309,19 +321,19 @@ impl State {
         Ok(Self{reader:super::Reader::new(super::Budgets{max_ops:u64::MAX,max_frames:u64::MAX,max_clocks:u64::MAX}),
             header:*refs.original_header,bootstrap:context_mode(refs,next,l,m,combined)?,frequency:refs.capture.clock.as_ref().map(|c|c.freq_hz),next:0,
             history:0,bytes:0,chunks:0,op_chunks:0,config:None,status:None,snapshot:[0;5],ring_snapshot:RingRestart::default(),last_coverage:0,
-            finals:Vec::new(),touched:Vec::new(),unassociated:false,invalid:false,builds:BTreeMap::new(),clocks:Vec::new(),ops:Vec::new(),frames:Vec::new()})
+            finals:Vec::new(),touched:Vec::new(),unassociated:false,invalid:false,builds:BTreeMap::new(),clocks:Vec::new(),ops:Vec::new(),frames:Vec::new(),projection:None})
     }
     fn counts(&self)->Counts {let r=&self.reader.result;Counts{ops:r.ops_parsed,op_chunks:self.op_chunks,frames:r.frames_parsed,clocks:r.clocks_parsed,statuses:r.statuses}}
     fn snap(&self)->[u64;5]{let r=&self.reader.result;[r.ops_parsed,r.frames_parsed,r.clocks_parsed,self.reader.last_op,r.max_snapshot]}
     fn ringed(&self)->bool{self.reader.result.config.as_ref().and_then(Config::attached).is_some_and(super::Attached::ringed)}
-    fn fixed(&self)->usize{if self.ringed(){RING_CHECKPOINT_FIXED}else{CHECKPOINT_FIXED}}
+    fn fixed(&self)->usize{if self.projection.is_some(){PROJECTED_CHECKPOINT_FIXED}else if self.ringed(){RING_CHECKPOINT_FIXED}else{CHECKPOINT_FIXED}}
     fn entry(&mut self,k:Key,l:Limits,m:&mut Meter<'_>)->Result<&mut Build,Error>{
         m.charge(1+self.builds.len() as u128)?;
         if !self.builds.contains_key(&k) {
             if self.builds.len()>=l.build_entries{return Err(Error::Limit("build entries"));}
             let size=self.footprint()+80;if size>l.checkpoint_bytes as u128 || size.saturating_sub(340)>l.support_bytes as u128{return Err(Error::Limit("build storage"));}
         }
-        Ok(self.builds.entry(k).or_insert_with(||Build{value:BuildSupport{owner:k.0,frame:k.1,records:[0;3],abandoned:0,call_excluded:0,coverage:None},raw:None}))
+        Ok(self.builds.entry(k).or_insert_with(||Build{value:BuildSupport{owner:k.0,frame:k.1,records:[0;3],abandoned:0,call_excluded:0,coverage:None},raw:None,touched:false,last_use:0}))
     }
     fn footprint(&self)->u128 {
         self.fixed() as u128+20+self.bootstrap.iter().map(|x|16+x.payload.len() as u128).sum::<u128>()
@@ -334,6 +346,36 @@ impl State {
         if n.saturating_sub(340)>l.support_bytes as u128{return Err(Error::Limit("support bytes"));}
         // Includes typed/raw duplication, tree overhead and retained projections.
         if 8*n+1024*(self.ops.len()+self.frames.len()) as u128>l.temporary_bytes as u128{return Err(Error::Limit("temporary bytes"));}Ok(())
+    }
+    fn project_support(&mut self,floor:u64,l:Limits,m:&mut Meter<'_>)->Result<(),Error>{
+        let mut p=self.projection.ok_or(Error::Checkpoint("projection on legacy checkpoint"))?;
+        if floor<p.floor || floor>self.next{return ck("projection frontier order");}
+        m.charge(32+4*self.builds.len() as u128+2*self.clocks.len() as u128)?;
+        let cursors=[self.reader.ring_restart(),self.ring_snapshot];
+        let mut removed=[0u64;2];let mut before=[0u64;2];let status=self.status.as_ref().map(|s|s.index);
+        self.builds.retain(|&k,e|{
+            let last=p.final_frame[usize::from(k.0!=0)];
+            let pin=last==Some(k.1) || (e.raw.is_none()&&last.is_none_or(|f|k.1>f))
+                || cursors.iter().any(|c|c.last.is_some_and(|(_,_,(flag,owner,frame))|flag!=0&&(owner,frame)==k));
+            if e.last_use>=floor||pin{return true;}
+            if let Some(raw)=&e.raw{removed[0]+=1;if status.is_some_and(|s|raw.index<s){before[0]+=1;}}
+            false
+        });
+        self.finals.clear();self.touched.clear();
+        for (&k,e) in &self.builds{
+            if e.raw.is_some(){insert(&mut self.finals,k,l.membership_runs,m)?;}
+            if e.touched{insert(&mut self.touched,k,l.membership_runs,m)?;}
+        }
+        if let Some((frame,_))=p.marker{
+            let owner=self.reader.result.config.as_ref().and_then(Config::attached).ok_or(Error::Checkpoint("marker without CONFIG"))?.owner;
+            insert(&mut self.touched,(owner,frame),l.membership_runs,m)?;
+        }
+        let old=self.clocks.partition_point(|a|a.index<floor);
+        let drop=old.saturating_sub(CLOCK_PREDECESSORS);
+        removed[1]=drop as u64;before[1]=self.clocks[..drop].iter().filter(|a|status.is_some_and(|s|a.index<s)).count() as u64;
+        self.clocks.drain(..drop);self.reader.result.clocks.drain(..drop);
+        for i in 0..2{p.retired[i]=add(p.retired[i],removed[i])?;p.before_status[i]=add(p.before_status[i],before[i])?;}
+        p.floor=floor;self.projection=Some(p);self.bound(l)
     }
     fn apply(&mut self,refs:Refs<'_>,input:&[Input<'_>],next:u64,l:Limits,m:&mut Meter<'_>,retain:bool)->Result<(),Error>{
         if next<self.next{return Err(Error::Order);}let mut prev=None;let mut bytes=0u128;
@@ -360,25 +402,43 @@ impl State {
                 34=>self.config=Some(original(i)),
                 35=>{self.op_chunks+=1;let ops=std::mem::take(&mut self.reader.result.ops);
                     for o in ops {
-                        if let Some(k)=o.token(){insert(&mut self.touched,k,l.membership_runs,m)?;}else{self.unassociated=true;}
+                        if let Some(k)=o.token(){
+                            insert(&mut self.touched,k,l.membership_runs,m)?;
+                            if self.projection.is_some(){
+                                if o.kind==4{self.projection.as_mut().unwrap().marker=Some((k.1,i.index));}
+                                else{let b=self.entry(k,l,m)?;b.touched=true;b.last_use=i.index;}
+                            }
+                        }else{self.unassociated=true;}
                         if o.covered(){let key=if o.flags&super::OP_SEGMENT!=0{o.build}else{o.token()};if let Some(k)=key{
-                            let b=self.entry(k,l,m)?;let j=usize::from(o.kind-1);b.value.records[j]=add(b.value.records[j],1)?;
+                            let b=self.entry(k,l,m)?;b.last_use=i.index;let j=usize::from(o.kind-1);b.value.records[j]=add(b.value.records[j],1)?;
                             if o.flags&super::OP_SEGMENT!=0 && o.call==0{b.value.abandoned=add(b.value.abandoned,1)?;}
                         }}
                         if o.kind==super::KIND_CALL && o.raw_valid() && o.flags&super::OP_CLOCK_INVALID==0 {if let Some(k)=o.build{
-                            let b=self.entry(k,l,m)?;b.value.call_excluded=b.value.call_excluded.saturating_add(u64::from(o.args[4]));}}
+                            let b=self.entry(k,l,m)?;b.last_use=i.index;b.value.call_excluded=b.value.call_excluded.saturating_add(u64::from(o.args[4]));}}
                         if retain{self.ops.push(Located{index:i.index,value:o});}
                     }
                 },
                 36=>{let f=self.reader.result.frames.pop().ok_or(Error::Checkpoint("decoder coverage"))?;
+                    if let Some(p)=&mut self.projection{
+                        let slot=usize::from(f.owner!=0);
+                        if p.final_frame[slot].is_some_and(|old|f.frame<=old){return source(36,"projected coverage chronology");}
+                        p.final_frame[slot]=Some(f.frame);
+                    }
                     if !insert(&mut self.finals,(f.owner,f.frame),l.membership_runs,m)?{return source(36,"a second final row");}
                     self.reader.finals.clear();self.last_coverage=i.index;
                     self.invalid|=f.invalid_evidence();
-                    let b=self.entry((f.owner,f.frame),l,m)?;b.raw=Some(original(i));b.value.coverage=Some(Located{index:i.index,value:f.clone()});
+                    let touched=contains(&self.touched,(f.owner,f.frame));
+                    let b=self.entry((f.owner,f.frame),l,m)?;b.last_use=i.index;b.touched|=touched;b.raw=Some(original(i));b.value.coverage=Some(Located{index:i.index,value:f.clone()});
                     if retain{self.frames.push(Located{index:i.index,value:f});}
                 },
-                37=>{self.snapshot=self.snap();self.ring_snapshot=self.reader.ring_restart();self.status=Some(original(i));},
-                38=>self.clocks.push(original(i)),_=>unreachable!(),
+                37=>{self.snapshot=self.snap();self.ring_snapshot=self.reader.ring_restart();self.status=Some(original(i));
+                    if let Some(p)=&mut self.projection{p.before_status=p.retired;}
+                },
+                38=>{if let Some(p)=&mut self.projection{
+                        let flags=u16::from_le_bytes(i.payload[2..4].try_into().unwrap());
+                        let bracket=self.reader.result.config.as_ref().and_then(Config::attached).is_some_and(super::Attached::clock_bracket);
+                        p.sticky_clock|=flags==super::CK_REGRESSION || (!bracket&&flags!=super::CK_VALID);
+                    }self.clocks.push(original(i));},_=>unreachable!(),
             }
             self.history=history;self.bytes=framed;self.chunks=chunks;self.bound(l)?;
         }self.next=next;self.bound(l)
@@ -387,8 +447,15 @@ impl State {
 fn encode(s:&State,l:Limits,m:&mut Meter<'_>)->Result<Vec<u8>,Error>{
     s.bound(l)?;let size=usize::try_from(s.footprint()).map_err(|_|Error::Limit("checkpoint size"))?;m.charge(size as u128)?;
     let fixed=s.fixed();let mut b=vec![0;fixed];b[..8].copy_from_slice(CHECKPOINT_MAGIC);
-    put32(&mut b,8,if s.ringed(){2}else{1});put32(&mut b,12,fixed as u32);put64(&mut b,16,size as u64);
+    put32(&mut b,8,if s.projection.is_some(){3}else if s.ringed(){2}else{1});put32(&mut b,12,fixed as u32);put64(&mut b,16,size as u64);
     if s.ringed(){encode_ring(&mut b[320..416],s.reader.ring_restart());encode_ring(&mut b[416..512],s.ring_snapshot);}
+    if let Some(p)=s.projection{
+        for (at,n) in [(512,p.floor),(520,p.retired[0]),(528,p.retired[1]),(536,p.before_status[0]),(544,p.before_status[1])]{put64(&mut b,at,n);}
+        put32(&mut b,552,u32::from(p.sticky_clock));put32(&mut b,556,CLOCK_PREDECESSORS as u32);
+        put64(&mut b,560,p.final_frame[0].unwrap_or(0));put64(&mut b,568,p.final_frame[1].unwrap_or(0));
+        put32(&mut b,576,u32::from(p.final_frame[0].is_some())|2*u32::from(p.final_frame[1].is_some()));
+        if let Some((frame,index))=p.marker{put32(&mut b,580,1);put64(&mut b,584,frame);put64(&mut b,592,index);}
+    }
     put64(&mut b,24,s.next);put64(&mut b,32,s.history);let r=&s.reader.result;
     let flags=u32::from(s.config.is_some())|u32::from(s.status.is_some())*2|u32::from(s.reader.last_frame.is_some())*4
         |u32::from(r.final_seen)*8|u32::from(s.invalid)*16|u32::from(s.unassociated)*32|u32::from(s.frequency.is_some())*64;
@@ -406,7 +473,8 @@ fn encode(s:&State,l:Limits,m:&mut Meter<'_>)->Result<Vec<u8>,Error>{
     for r in s.finals.iter().chain(s.touched.iter()){push32(&mut b,r.owner);push32(&mut b,0);push64(&mut b,r.first);push64(&mut b,r.last);}
     for e in s.builds.values(){let v=&e.value;push32(&mut b,v.owner);push32(&mut b,u32::from(e.raw.is_some()));push64(&mut b,v.frame);
         for n in v.records {push64(&mut b,n);}push64(&mut b,v.abandoned);push64(&mut b,v.call_excluded);push64(&mut b,e.raw.as_ref().map_or(0,|x|x.index));
-        push32(&mut b,e.raw.as_ref().map_or(0,|x|x.payload.len()) as u32);push32(&mut b,0);push64(&mut b,0);
+        push32(&mut b,e.raw.as_ref().map_or(0,|x|x.payload.len()) as u32);
+        push32(&mut b,if s.projection.is_some(){u32::from(e.touched)}else{0});push64(&mut b,if s.projection.is_some(){e.last_use}else{0});
         if let Some(x)=&e.raw{b.extend_from_slice(&x.payload);}
     }
     for a in &s.clocks{push64(&mut b,a.index);b.extend_from_slice(&a.payload);}let c=crc(&b);push32(&mut b,c);
@@ -432,13 +500,14 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     if b.len()<340{return ck("short checkpoint");}
     if 8*b.len() as u128>l.temporary_bytes as u128{return Err(Error::Limit("import temporary bytes"));}
     m.charge(b.len() as u128*2)?;
-    let fixed=match get32(b,8){1=>CHECKPOINT_FIXED,2=>RING_CHECKPOINT_FIXED,_=>return ck("checkpoint version")};
+    let fixed=match get32(b,8){1=>CHECKPOINT_FIXED,2=>RING_CHECKPOINT_FIXED,3 if combined=>PROJECTED_CHECKPOINT_FIXED,_=>return ck("checkpoint version")};
     if b.len()<fixed+20{return ck("short ring checkpoint");}
     if &b[..8]!=CHECKPOINT_MAGIC || get32(b,12)!=fixed as u32 || get64(b,16)!=b.len() as u64
         || crc(&b[..b.len()-4])!=get32(b,b.len()-4) || b[248..320].iter().any(|x|*x!=0){return ck("header/CRC/reserved");}
     let flags=get32(b,40);let next=get64(b,24);if flags&!127!=0 || next>target{return ck("flags/frontier");}
     let config_len=get32(b,216) as usize;let status_len=get32(b,220) as usize;
-    let ringed=fixed==RING_CHECKPOINT_FIXED;
+    let projected=fixed==PROJECTED_CHECKPOINT_FIXED;
+    let ringed=fixed==RING_CHECKPOINT_FIXED || (projected&&config_len==216);
     if (if ringed{config_len!=216 || !matches!(status_len,0|208)}else{!matches!(config_len,0|160|176) || !matches!(status_len,0|128)})
         || (config_len!=0)!=(flags&1!=0) || (status_len!=0)!=(flags&2!=0){return ck("optional lengths");}
     let (ring,ring_snapshot)=if ringed{m.charge(256)?;(decode_ring(&b[320..416])?,decode_ring(&b[416..512])?)}else{(RingRestart::default(),RingRestart::default())};
@@ -449,6 +518,21 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     let mut d=Decode{b:&b[..b.len()-4],at:fixed};let original_header:[u8;16]=d.take(16)?.try_into().unwrap();
     if &original_header!=refs.original_header || get32(&original_header,12)!=get32(b,44){return Err(Error::Context("original file header"));}
     let mut s=State::new_mode(refs,target,l,m,combined)?;let current_boot=s.bootstrap.clone();let current_frequency=s.frequency;
+    if projected{
+        let floor=get64(b,512);let retired=[get64(b,520),get64(b,528)];let before_status=[get64(b,536),get64(b,544)];
+        let present=get32(b,576);let marker_present=get32(b,580);
+        // Schema3 emits only own-next frontiers: the floor is the checkpoint next.
+        if floor!=next || retired.iter().any(|&n|n>floor) || retired.iter().zip(before_status).any(|(&all,prior)|prior>all)
+            || get32(b,552)>1 || get32(b,556)!=CLOCK_PREDECESSORS as u32 || present>3 || marker_present>1
+            || b[600..608].iter().any(|&n|n!=0)
+            || (present&1==0&&get64(b,560)!=0) || (present&2==0&&get64(b,568)!=0)
+            || (marker_present==0&&(get64(b,584)!=0||get64(b,592)!=0))
+            || (marker_present!=0&&get64(b,592)>=next)
+            || (!ringed&&b[320..512].iter().any(|&n|n!=0)){return ck("projection header/census");}
+        s.projection=Some(Projection{floor,retired,before_status,sticky_clock:get32(b,552)!=0,
+            final_frame:[(present&1!=0).then(||get64(b,560)),(present&2!=0).then(||get64(b,568))],
+            marker:(marker_present!=0).then(||(get64(b,584),get64(b,592)))});
+    }
     let nboot=get32(b,240) as usize;if nboot>3{return ck("bootstrap count");}let start=d.at;let mut bootstrap=Vec::new();
     for p in 0..nboot{let h=d.take(16)?;let index=get64(h,0);let kind=get32(h,8);let n=get32(h,12) as usize;
         if index!=p as u64 || index>=next || kind!=[1,2,17][p] || n>1_048_576{return ck("bootstrap chronology/size");}
@@ -468,12 +552,14 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     if s.ringed()!=ringed{return ck("ring checkpoint/config version");}
     let finals=runs(&mut d,nr,m)?;let touched=runs(&mut d,nt,m)?;let mut imported=BTreeMap::new();let mut metadata=Vec::new();let mut previous=None;
     for _ in 0..nb{m.charge(64)?;let h=d.take(80)?;let k=(get32(h,0),get64(h,8));let present=get32(h,4);let width=get32(h,64) as usize;
-        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480|528) || (width!=0)!=(present!=0) || get32(h,68)!=0 || get64(h,72)!=0{return ck("build entry encoding");}previous=Some(k);
+        if previous.is_some_and(|p|p>=k) || present>1 || !matches!(width,0|352|384|416|480|528) || (width!=0)!=(present!=0)
+            || (if projected{get32(h,68)>1 || get64(h,72)>=next}else{get32(h,68)!=0 || get64(h,72)!=0}){return ck("build entry encoding");}previous=Some(k);
         let index=get64(h,56);if (width==0 && index!=0) || (width!=0 && index>=next){return ck("build coverage position");}
+        if projected&&width!=0&&get64(h,72)<index{return ck("build use before coverage");}
         let payload=d.take(width)?.to_vec();let raw=(width!=0).then_some(Original{index,kind:36,payload});
         if let Some(x)=&raw{metadata.push(x.clone());}
         let value=BuildSupport{owner:k.0,frame:k.1,records:[get64(h,16),get64(h,24),get64(h,32)],abandoned:get64(h,40),call_excluded:get64(h,48),coverage:None};
-        imported.insert(k,Build{value,raw});
+        imported.insert(k,Build{value,raw,touched:get32(h,68)!=0,last_use:get64(h,72)});
     }
     for _ in 0..na{let index=get64(d.take(8)?,0);let payload=d.take(96)?.to_vec();if index>=next{return ck("anchor position");}metadata.push(Original{index,kind:38,payload});}
     if d.at!=d.b.len(){return ck("trailing section bytes");}
@@ -492,9 +578,23 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
             if e.raw.as_ref()!=Some(&x){return ck("coverage identity");}e.value.coverage=Some(Located{index:x.index,value:row});
         }else{s.clocks.push(x);}
     }
-    if s.finals!=finals || cardinality(&finals)?!=get64(b,120) || s.reader.result.frames_parsed!=get64(b,120)
-        || s.reader.result.clocks_parsed!=get64(b,128) || s.reader.last_anchor!=get32(b,84) || s.reader.last_lost!=get64(b,96)
-        || s.last_coverage!=get64(b,208) || s.invalid!=(flags&16!=0){return ck("support census");}
+    let projection=s.projection.unwrap_or_default();
+    if s.finals!=finals || add(cardinality(&finals)?,projection.retired[0])?!=get64(b,120)
+        || add(s.reader.result.frames_parsed,projection.retired[0])?!=get64(b,120)
+        || add(s.reader.result.clocks_parsed,projection.retired[1])?!=get64(b,128)
+        || s.reader.last_anchor!=get32(b,84) || s.reader.last_lost!=get64(b,96)
+        || s.last_coverage!=get64(b,208) || (s.invalid&&flags&16==0)
+        || (!s.invalid&&flags&16!=0&&projection.retired[0]==0){return ck("support census");}
+    if projected{
+        let mut last=[None,None];for r in &finals{last[usize::from(r.owner!=0)]=Some(r.last);}
+        if last!=projection.final_frame{return ck("projection final cursor pins");}
+        let prior=s.clocks.iter().take_while(|x|x.index<projection.floor).count();
+        if prior>CLOCK_PREDECESSORS || (projection.retired[1]!=0&&prior!=CLOCK_PREDECESSORS){return ck("projection predecessor halo");}
+        let bracket=s.reader.result.config.as_ref().and_then(Config::attached).is_some_and(super::Attached::clock_bracket);
+        let bad=s.reader.result.clocks.iter().any(|a|a.flags==super::CK_REGRESSION||(!bracket&&a.flags!=super::CK_VALID));
+        if (bad&&!projection.sticky_clock)||(!bad&&projection.sticky_clock&&projection.retired[1]==0){return ck("projection sticky clock refusal");}
+    }
+    s.invalid=flags&16!=0;
     let expected_last=if flags&4!=0{Some((get32(b,80),get64(b,88)))}else{None};
     if s.reader.last_frame!=expected_last || (expected_last.is_none() && (get32(b,80)!=0 || get64(b,88)!=0)){return ck("coverage cursor");}
     let ops=get64(b,104);let op_chunks=get64(b,112);let last_op=get64(b,64);let max_snapshot=get64(b,72);
@@ -504,11 +604,17 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
     for (&k,e) in &imported{
         let n=e.value.records.iter().map(|x|u128::from(*x)).sum::<u128>();populations+=n;abandoned+=u128::from(e.value.abandoned);call_sum+=u128::from(e.value.call_excluded);
         if e.value.abandoned as u128>n || (Some(k.0)!=owner && !(k.0==0 && e.raw.is_some() && n==0 && e.value.abandoned==0 && e.value.call_excluded==0))
-            || (e.raw.is_none() && n==0 && e.value.call_excluded==0){return ck("build population/key");}
+            || (e.raw.is_none() && n==0 && e.value.call_excluded==0 && !(projected&&e.touched)){return ck("build population/key");}
     }
     if populations>u128::from(ops) || abandoned>populations || call_sum>u128::from(ops)*u128::from(u32::MAX){return ck("aggregate populations");}
     let membership=cardinality(&touched)?;s.unassociated=flags&32!=0;
     if touched.iter().any(|r|Some(r.owner)!=owner) || membership>ops || (s.unassociated && membership>=ops){return ck("execution membership census");}
+    if projected{
+        let mut expected=Vec::new();
+        for (&k,e) in &imported{if e.touched{insert(&mut expected,k,l.membership_runs,m)?;}}
+        if let Some((frame,_))=projection.marker{insert(&mut expected,(owner.ok_or(Error::Checkpoint("marker without owner"))?,frame),l.membership_runs,m)?;}
+        if expected!=touched{return ck("projected execution membership");}
+    }
     s.touched=touched;s.builds=imported;
     let current=[ops,get64(b,120),get64(b,128),last_op,max_snapshot];let mut snapshot=[0;5];for (j,v) in snapshot.iter_mut().enumerate(){*v=get64(b,168+j*8);}
     if snapshot.iter().zip(current).any(|(p,c)|*p>c) || (snapshot[0]==ops && (snapshot[3]!=last_op || snapshot[4]!=max_snapshot)) && status_len!=0{return ck("STATUS snapshot bounds");}
@@ -550,14 +656,15 @@ fn import_mode(refs:Refs<'_>,b:&[u8],target:u64,l:Limits,m:&mut Meter<'_>,combin
         if statuses>index.checked_sub(config_index).ok_or(Error::Checkpoint("STATUS before CONFIG"))?{return ck("STATUS position capacity");}
         let frames_at=s.builds.values().filter(|e|e.raw.as_ref().is_some_and(|x|x.index<index)).count() as u64;
         let clocks_at=s.clocks.iter().filter(|x|x.index<index).count() as u64;
-        if frames_at!=snapshot[1] || clocks_at!=snapshot[2] || snapshot[3]<snapshot[0] || (snapshot[0]==0 && (snapshot[3]!=0 || snapshot[4]!=0)){return ck("STATUS snapshot chronology");}
+        if add(frames_at,projection.before_status[0])?!=snapshot[1] || add(clocks_at,projection.before_status[1])?!=snapshot[2]
+            || snapshot[3]<snapshot[0] || (snapshot[0]==0 && (snapshot[3]!=0 || snapshot[4]!=0)){return ck("STATUS snapshot chronology");}
         s.reader.result.ops_parsed=snapshot[0];s.reader.result.frames_parsed=snapshot[1];s.reader.result.clocks_parsed=snapshot[2];
         s.reader.last_op=snapshot[3];s.reader.result.max_snapshot=snapshot[4];
         if !s.reader.install_ring_restart(ring_snapshot){return ck("ring STATUS cursor context");}
         s.reader.chunk(37,status_payload,refs.capture,refs.rsx_domains,refs.declared).map_err(|_|Error::Checkpoint("STATUS payload/snapshot"))?;
         if s.reader.result.final_seen && (snapshot!=current || ring_snapshot!=ring || prev.is_some_and(|p|p>index)){return ck("FINAL before newer state");}
         s.status=Some(Original{index,kind:37,payload:status_payload.to_vec()});
-    }else if get64(b,160)!=0 || snapshot!=[0;5]{return ck("absent STATUS snapshot");}
+    }else if get64(b,160)!=0 || snapshot!=[0;5] || projection.before_status!=[0;2]{return ck("absent STATUS snapshot");}
     if s.reader.result.final_seen!=(flags&8!=0){return ck("FINAL fence");}
     s.reader.result.ops_parsed=ops;s.reader.result.frames_parsed=current[1];s.reader.result.clocks_parsed=current[2];s.reader.result.statuses=statuses;
     s.reader.last_op=last_op;s.reader.result.max_snapshot=max_snapshot;s.snapshot=snapshot;s.op_chunks=op_chunks;s.next=next;
@@ -597,11 +704,12 @@ fn project(s:State,b:Boundary,m:&mut Meter<'_>)->Result<Retained,Error>{
     let retained=Counts{ops:cumulative.ops-prefix.ops,op_chunks:cumulative.op_chunks-prefix.op_chunks,frames:cumulative.frames-prefix.frames,clocks:cumulative.clocks-prefix.clocks,statuses:cumulative.statuses-prefix.statuses};
     m.charge(s.builds.len() as u128+s.clocks.len() as u128+s.ops.len() as u128+s.frames.len() as u128)?;
     let ring_cumulative=s.ringed().then_some(s.reader.result.ring_seen);
+    let support_floor=s.projection.map(|p|p.floor);let sticky_clock_refusal=s.projection.is_some_and(|p|p.sticky_clock);
     let last_frame=s.reader.last_frame;let r=s.reader.result;
     Ok(Retained{original_header:s.header,bootstrap:s.bootstrap,first_chunk,next_chunk,prefix,retained,cumulative,config:r.config,status:r.last_status,
         ring_prefix,ring_cumulative,max_ring_published:r.max_ring_published,
         final_seen:r.final_seen,ops:s.ops,frames:s.frames,clocks:s.clocks.into_iter().zip(r.clocks).map(|(x,value)|Located{index:x.index,value}).collect(),
-        builds:s.builds.into_values().map(|x|x.value).collect(),boundary_frames,prefix_unassociated,invalid_exclusion_seen:s.invalid,last_frame})
+        builds:s.builds.into_values().map(|x|x.value).collect(),boundary_frames,prefix_unassociated,invalid_exclusion_seen:s.invalid,support_floor,sticky_clock_refusal,last_frame})
 }
 
 /// Private continuous combined-file state. Public standalone admission and the
@@ -610,6 +718,7 @@ pub(crate) struct CombinedAdapter {state:State,boundary:Option<Boundary>,status_
 pub(crate) struct CombinedSummary {
     pub counts:Counts,pub config:Option<u64>,pub status:Option<u64>,
     pub status_chunks:u64,pub status_ops:u64,pub final_seen:bool,pub row_width:u32,pub status_width:u32,pub domain:Option<u32>,
+    pub projection:Option<(u64,[u64;2],[u64;2])>,pub coverage_width:u32,
 }
 impl CombinedAdapter {
     pub(crate) fn new(refs:Refs<'_>,l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
@@ -651,6 +760,21 @@ impl CombinedAdapter {
     pub(crate) fn encode(&self,l:Limits,work:&mut WorkBudget)->Result<Vec<u8>,Error>{
         self.packet_sides()?;encode(&self.state,l,&mut Meter{outer:work,left:l.work_items})
     }
+    pub(crate) fn project_support(&mut self,floor:u64,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        if self.boundary.as_ref().is_some_and(|b|floor>b.first_chunk){return ck("projection discards retained evidence");}
+        self.state.project_support(floor,l,&mut Meter{outer:work,left:l.work_items})
+    }
+    /// Fresh chunk-zero opt-in only; an imported or advanced state never
+    /// changes schema.
+    pub(crate) fn enable_projection(&mut self)->Result<(),Error>{
+        let s=&self.state;
+        if s.next!=0 || s.projection.is_some() || s.chunks!=0 || self.boundary.is_some(){return ck("schema3 AUTO opt-in after chunk zero");}
+        self.state.projection=Some(Projection::default());Ok(())
+    }
+    /// (builds, clocks, touched runs, final runs) actually held.
+    pub(crate) fn populations(&self)->(u64,u64,u64,u64){
+        let s=&self.state;(s.builds.len() as u64,s.clocks.len() as u64,s.touched.len() as u64,s.finals.len() as u64)
+    }
     pub(crate) fn mark_retained(&mut self,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
         if self.boundary.is_some(){return ck("second AUTO retention boundary");}
         let mut m=Meter{outer:work,left:l.work_items};m.charge(self.state.touched.len() as u128+1)?;
@@ -666,7 +790,9 @@ impl CombinedAdapter {
         let s=&self.state;let config=s.reader.result.config.as_ref().and_then(Config::attached);
         CombinedSummary{counts:s.counts(),config:s.config.as_ref().map(|x|x.index),
             status:s.status.as_ref().map(|x|x.index),status_chunks:self.status_chunks,status_ops:s.snapshot[0],
-            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),status_width:if s.ringed(){208}else{128},domain:config.map(|c|c.domain)}
+            final_seen:s.reader.result.final_seen,row_width:config.map_or(0,|c|c.op_width()),status_width:if s.ringed(){208}else{128},domain:config.map(|c|c.domain),
+            projection:s.projection.map(|p|(p.floor,p.retired,p.before_status)),
+            coverage_width:config.map_or(0,|a|if a.ringed(){528}else if a.tagged(){480}else if a.label_polls(){416}else if a.presentation_scopes(){384}else{352})}
     }
     pub(crate) fn support(&self)->impl Iterator<Item=&Original>{
         self.state.config.iter().chain(self.state.status.iter()).chain(self.state.builds.values().filter_map(|b|b.raw.as_ref())).chain(self.state.clocks.iter())
@@ -721,7 +847,8 @@ pub fn analyze(r:&Retained,f:Option<&fifo::rolling::Retained>,l:Limits,work:&mut
     let n=inv.clocks.iter().filter(|a|a.flags==super::CK_VALID).count() as u64;
     let map_work=crate::clockmap::solve_budget(n).checked_add(crate::rsx_measured::split_budget(n).checked_mul(2).ok_or(Error::Limit("map budget overflow"))?).ok_or(Error::Limit("map budget overflow"))?;
     meter.charge(u128::from(map_work))?;let mut map_meter=crate::clockmap::Meter::new(map_work,crate::clockmap::Limit::Capture);
-    let map=super::qualify_with_meter(&inv,&mut map_meter);
+    let map=if r.support_floor.is_some(){super::qualify_retained_support_with_meter(&inv,r.sticky_clock_refusal,&mut map_meter)}
+        else{super::qualify_with_meter(&inv,&mut map_meter)};
     let built=r.builds.iter().map(|b|((b.owner,b.frame),b.records)).collect();
     let abandoned=r.builds.iter().map(|b|((b.owner,b.frame),b.abandoned)).collect();
     let call_built=r.builds.iter().map(|b|((b.owner,b.frame),b.call_excluded)).collect();
@@ -759,7 +886,7 @@ pub fn analyze(r:&Retained,f:Option<&fifo::rolling::Retained>,l:Limits,work:&mut
         if view.verdict==super::Verdict::Unknown && unavailable.is_empty(){unavailable.push(Unavailable::Evidence);}
         FrameResult{view,unavailable}
     }).collect();
-    Ok(Report{map,intervals,frames})
+    Ok(Report{map,retained_support:r.support_floor.is_some(),intervals,frames})
 }
 
 #[cfg(test)]

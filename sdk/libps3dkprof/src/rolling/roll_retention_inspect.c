@@ -209,19 +209,33 @@ static int checkpoint(identity *id, const pfi_limits *limits, const pfr_segment 
         version = r16(p + 8);
         if (version == 1) { fixed = 80; section_count = 4; }
         else if (version == 2) { fixed = 96; section_count = 6; }
+        else if (version == 3) { fixed = 128; section_count = 6; }
         else return PFI_UNSUPPORTED;
         if (n < fixed + 4) return PFI_CORRUPT;
         flags = r32(p + 28);
         families = 3u | ((flags & 128) ? 4u : 0u) | ((flags & 64) ? 8u : 0u);
-        if ((version == 2) != ((flags & 192) != 0)
+        if ((version == 1 && (flags & 192)) || (version == 2 && !(flags & 192))
+            || (version == 3 && !(flags & 128))
             || r16(p + 10) != fixed || r32(p + 12) != section_count
             || r64(p + 48) != (uint64_t)(n - fixed - 4)
             || r32(p + 56) != families || r32(p + 60)
-            || !zeroes(p + 64 + 2 * section_count, fixed - 64 - 2 * section_count))
+            || !zeroes(p + 64 + 2 * section_count, (version == 3 ? 80 : fixed) - 64 - 2 * section_count))
             return PFI_CORRUPT;
         for (i = 0; i < section_count; ++i)
             if (r16(p + 64 + 2 * i) != 1) return PFI_UNSUPPORTED;
         next = r64(p + 32); bytes = r64(p + 40); original = p + 16;
+        if (version == 3) {
+            /* Retired-window census framing only: these bounds never make the
+             * census, or the capture, semantically valid. */
+            uint64_t floor = r64(p + 80), count = r64(p + 88), max_id = r64(p + 96);
+            uint64_t last_frame = r64(p + 104), end = r64(p + 112);
+            if (floor > next || max_id > UINT32_MAX || last_frame >= UINT64_C(1) << 63
+                || r64(p + 120)) return PFI_CORRUPT;
+            if (!count) {
+                if (max_id || last_frame || end) return PFI_CORRUPT;
+            } else if (end >= floor || count > max_id || 2 * count + 1 > end
+                       || !(flags & 512)) return PFI_CORRUPT;
+        }
     } else return PFI_UNSUPPORTED;
     if (next == UINT64_MAX || next != seg->first_chunk || bytes != prefix_bytes
         || bytes > UINT64_MAX - 16) return PFI_CORRUPT;

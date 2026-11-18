@@ -1268,7 +1268,11 @@ int ps3dk_prof_drain(void)
         rc = p_drain_once(p) == 0 ? PS3DK_PROF_OK : PS3DK_PROF_ESINKFAIL;
 #ifdef P_ROLLING_RUNTIME
         if (p->rolling) {
-            int rr = p_roll_flush(p);
+            /* Accept owns the chunk in bounded RAM and commits when the next
+             * whole chunk no longer fits. A drain pass is not a disk boundary:
+             * flushing here writes/syncs an entire slot even for one record.
+             * Still observe every refusal at this consumer boundary. */
+            int rr = p->rolling->result;
             if (rr) {
                 prepare_stop(p, 2u);
                 if (t->slot1 && !t->acked && !t->retired) p_observe_stop(p);
@@ -1380,7 +1384,10 @@ void *p_drain_main(void *arg)
         if (CAS_ACQREL(&p->drain_busy, &z, 1u)) {
             (void)p_drain_once(p);
 #ifdef P_ROLLING_RUNTIME
-            if (p->rolling && p_roll_flush(p)) {
+            /* Full-payload commits happen inside accept; finish and quick_exit
+             * explicitly flush the tail. Never turn every worker wake into a
+             * full-slot write, but preserve the resource/error stop hand-off. */
+            if (p->rolling && p->rolling->result) {
                 prepare_stop(p, 2u);
                 ST_REL(&p->wake, 1u);
             }

@@ -208,6 +208,24 @@ fn failed_prefix_clock_is_preserved_and_regression_disqualifies_map() {
 }
 
 #[test]
+fn projected_clock_support_qualifies_only_explicit_subset_and_keeps_sticky_refusal() {
+    let x=fixture();let mut r=read_at(&x.file,x.cut);let f=fifo_at(&x.file,x.cut);
+    r.clocks.remove(0);
+    let ordinary=rolling::analyze(&r,Some(&f),Limits::default(),&mut work()).unwrap();
+    assert!(matches!(ordinary.map,auto_rsx::MapState::Unqualified(_)));
+    assert!(!ordinary.retained_support);
+    r.support_floor=Some(r.first_chunk);
+    let retained=rolling::analyze(&r,Some(&f),Limits::default(),&mut work()).unwrap();
+    assert!(matches!(retained.map,auto_rsx::MapState::Qualified(_)),"explicit retained support uses the unchanged qualification rules");
+    assert!(retained.retained_support);
+    assert!(retained.intervals.iter().find(|x|x.op_id==2).unwrap().ppu.is_some());
+    r.sticky_clock_refusal=true;
+    let bad=rolling::analyze(&r,Some(&f),Limits::default(),&mut work()).unwrap();
+    assert!(matches!(bad.map,auto_rsx::MapState::Unqualified(ref why) if why.contains("retired")));
+    assert!(bad.intervals.iter().all(|i|i.ppu.is_none()));
+}
+
+#[test]
 fn prefix_timeout_is_not_regression_for_bracketed_configuration() {
     let mut x=fixture();let p=&mut x.file.chunks[10].payload;u16_at(p,2,2);u64_at(p,48,0);u64_at(p,56,0);
     let a=report_at(&x.file,x.cut);assert!(matches!(a.map,auto_rsx::MapState::Qualified(_)));

@@ -518,3 +518,30 @@ int pfp_core_view(const void *opaque,const void *arena,pfp_view *v)
     }
     return PFR_OK;
 }
+int pfp_core_project_metadata(const void *opaque,void *arena,pfp_keep_metadata keep,void *arg,
+                             uint64_t *removed_chunks,uint64_t *removed_bytes)
+{
+    const context *c=opaque;state *s=arena;pfp_view v;uint8_t *m;
+    uint32_t at=0,to=0,count=0,kept=0;uint64_t dropped=0,bytes=0;
+    if(!keep||!removed_chunks||!removed_bytes||pfp_core_view(c,s,&v)!=PFR_OK
+       ||s->metadata_used>c->cfg.metadata_bytes)return PFR_INVALID;
+    m=(uint8_t *)s+c->layout.metadata_offset;
+    while(at<s->metadata_used){
+        uint32_t n,ty;uint64_t index;int retain;
+        if(s->metadata_used-at<4)return PFR_INVALID;
+        n=r32(m+at);if(n<20||n>s->metadata_used-at-4)return PFR_INVALID;
+        ty=r32(m+at+4);index=r64(m+at+12);
+        retain=keep(arg,ty,index,m+at+20,n-20);
+        if(retain!=0&&retain!=1)return PFR_INVALID;
+        /* Even a faulty family selector cannot prune producer declarations,
+         * bootstrap or STATUS. The source-cursor state is never reconstructed
+         * from the remaining metadata and is not modified here. */
+        if(!retain&&ty!=36&&ty!=38&&ty!=41&&ty!=42)return PFR_INVALID;
+        if(retain){memmove(m+to,m+at,(size_t)n+4);to+=n+4;++kept;}
+        else{++dropped;bytes+=n;}
+        at+=n+4;++count;
+    }
+    if(count!=s->metadata_count)return PFR_INVALID;
+    s->metadata_used=to;s->metadata_count=kept;
+    *removed_chunks=dropped;*removed_bytes=bytes;return PFR_OK;
+}

@@ -123,7 +123,9 @@ static int observe(prof *p, int rc)
     if (rc == PFO_RESOURCE) {
         r->result = P_ROLL_RESOURCE;
     } else if (rc != PFR_OK) {
-        r->record.io_result = rc;
+        /* A later flush of the poisoned output reports PFR_FAILED. Preserve
+         * the original refusal, just as the sink's first_error does. */
+        if (!r->record.io_result) r->record.io_result = rc;
         r->result = PS3DK_PROF_ESINKFAIL;
         p->snk.failed = 1;
         if (!p->snk.first_error) p->snk.first_error = rc;
@@ -169,10 +171,20 @@ int p_roll_start(prof *p, const uint8_t head[16])
                  head, r->buffers.arenas[0], r->encoder.arena_bytes,
                  r->initial, r->options.store.checkpoint_bytes, &initial);
     if (rc) return PS3DK_PROF_EINVAL;
+#ifdef P_ROLLING_SCHEMA2
+    if (r->selection.kind == P_ROLL_SCHEMA2 &&
+        pfm2_retention(r->buffers.encoder_ctx,r->buffers.arenas[0],r->options.store.retained_slots,
+                      r->initial,r->options.store.checkpoint_bytes,&initial))
+        return PS3DK_PROF_EINVAL;
+#endif
     if (pfr_file_bind(&r->file, &r->io, p->snk.fd, r->disk.file_bytes) ||
         pfr_format_v2(r->store, &r->io, &r->options.store, r->scratch, r->disk.scratch_bytes) ||
         pfo_bind(r->output, r->store, &r->buffers, r->initial, initial))
         return PS3DK_PROF_ESINKFAIL;
+#ifdef P_ROLLING_SCHEMA2
+    if (r->selection.kind == P_ROLL_SCHEMA2 && pfo_support(r->output,pfm2_pressure,pfm2_project))
+        return PS3DK_PROF_EINVAL;
+#endif
     return observe(p, 0);
 }
 

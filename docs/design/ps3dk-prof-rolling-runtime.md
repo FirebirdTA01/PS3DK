@@ -117,9 +117,60 @@ candidate, even if earlier chunks were accepted.
 Resource exhaustion records `PS3DK_PROF_ERESOURCE` (-33). It does not become a
 generic sink error or manufacture a terminal TRAILER. Stopping is serviced only
 after emission has returned to a consumer boundary with family locks released.
-The public APP drain and the THREAD consumer flush at their boundaries. The
-rolling SPU lane-end inline path uses the existing public APP drain boundary;
-it must not leave automatic stopping pending after an inline refusal.
+The public APP drain and the THREAD consumer observe failures at their
+boundaries, without flushing a partial payload merely because a drain pass
+ended. The output coordinator commits when the next complete chunk will not
+fit, and finalization flushes the remaining tail. Bootstrap and best-effort
+quick exit also explicitly flush. Until a commit, accepted bytes live in the
+fixed RAM payload buffer; an abrupt exit can lose that tail. Thus a physical
+slot represents a payload batch, not one drainer wake. The rolling SPU lane-end
+inline path uses the existing public APP drain boundary; it must not leave
+automatic stopping pending after an inline refusal.
+
+### Retained support in AUTO/FIFO rolling files
+
+The managed AUTO/FIFO output uses combined checkpoint schema 3. Build rows,
+clock anchors, closed windows and FIFO accounting groups are retained by their
+original chunk positions and live dependencies, rather than for the entire
+process lifetime. Producer totals and protocol cursors remain cumulative.
+After each accepted source chunk, the prepared checkpoint compacts support at
+its own next-chunk frontier. Original records remain in the pending payload
+and immutable physical slots. Latest finalized rows, incomplete builds,
+protocol cursors, the open/latest closed window and eight clock predecessors
+remain as dependencies; finalized history alone cannot force a slot commit.
+Byte capacity determines normal commit cadence. Capacity still limits how
+much live support can coexist, and separately
+bounded descriptor, lane and other identity pools can still refuse work.
+
+The clock map is explicitly **retained-support** in the CLI and viewer. It uses
+the ordinary qualification rules on retained anchors plus exactly eight
+predecessor anchors when enough earlier anchors exist. Retiring a regression
+does not clear its sticky refusal. Lifetime anchor counts are never relabelled
+as retained counts. A qualified map supplies no extrapolation: spans outside
+its retained interpolation support remain UNKNOWN.
+
+Closed-window declarations retire as a prefix, while the latest closed window
+and any open window remain. A late FIFO row can therefore outlive its window's
+declaration. Its original bytes, counts and sequence remain; the reader labels
+its window bounds unavailable and gives it no window-specific evidential
+meaning. Missing zero or future IDs still refuse, and a late row cannot name
+a frame beyond the retired prefix's last frame. An ID within the retired
+region is only a claim with unavailable bounds, not proof that a skipped ID
+was declared. The 16-row producer queue bounds occupancy, not delay in frames:
+it drops newest rows while an older row awaits acceptance.
+
+The schema-3 shared header is 128 bytes. Besides the existing cumulative
+frontiers it carries the support floor at 80, retired window count at 88,
+greatest retired window ID at 96, that window's last frame at 104 and original
+END position at 112; 120 remains reserved zero. Raw BEGIN/END pairs retire
+together, with exact chunk/byte conservation. The AUTO checkpoint records
+retired row/anchor counts and STATUS splits. The FIFO wrapper records retired
+accounting groups, membership runs and their original last-use positions.
+Readers replay the same per-chunk compaction and check each retained physical
+successor against that state. Each slot's checkpoint remains an independent
+predecessor for its original payload; advancing another slot never rewrites it.
+Cold file inspection checks framing only;
+it cannot establish these semantic assertions.
 
 Automatic stopping owns a separate claim from public shutdown. It freezes the
 accepted frontier, closes the file and records the result. The first subsequent

@@ -65,6 +65,8 @@ pub struct Retained {
     pub boundary_frames: Vec<FrameRun>,
     /// Prefix events without tokens cannot be silently assigned zero wait.
     pub prefix_unassociated: bool,
+    pub unavailable_window_rows:u64,
+    pub unavailable_window_sequences:Vec<u64>,
 }
 #[derive(Debug)]
 pub enum Error {
@@ -117,6 +119,8 @@ struct State {
     frequency: Option<u64>,
     windows: bool,
     runs: Vec<FrameRun>,
+    run_indices:Vec<u64>,
+    retired_frame:Option<u64>,
     unassociated: bool,
     status_enter: u64,
     status_exit: u64,
@@ -136,14 +140,15 @@ fn context(refs: Refs<'_>) -> Result<Option<u64>, Error> {
 impl State {
     fn new(refs: Refs<'_>) -> Result<Self, Error> {
         Ok(Self {reader:decoder(),next:0,historical_work:0,frequency:context(refs)?,
-            windows:refs.capture.windows_flag,runs:Vec::new(),unassociated:false,status_enter:0,status_exit:0})
+            windows:refs.capture.windows_flag,runs:Vec::new(),run_indices:Vec::new(),retired_frame:None,unassociated:false,status_enter:0,status_exit:0})
     }
     fn counts(&self) -> Counts {
         let r=&self.reader.result;
         Counts {events:r.parsed_events,enter:r.visible_enter,exit:r.visible_exit,statuses:r.statuses,accounting_rows:r.accounting.parsed}
     }
-    fn touch(&mut self, token: Option<(u32,u64)>, limits: Limits, meter: &mut Meter<'_>) -> Result<(), Error> {
+    fn touch(&mut self, token: Option<(u32,u64)>, index:u64, limits: Limits, meter: &mut Meter<'_>) -> Result<(), Error> {
         let Some((owner,frame))=token else {self.unassociated=true;return Ok(())};
+        if self.retired_frame.is_some_and(|f|frame<=f){return Err(Error::Checkpoint("event reaches retired FIFO membership"));}
         // Charge the bounded linear search/shift, not the size of a frame run.
         meter.charge(self.runs.len() as u64+1)?;
         let mut start=0;
@@ -162,9 +167,12 @@ impl State {
         if count>limits.membership_runs {return Err(Error::Limit("frame membership runs"));}
         if end==start {
             self.runs.try_reserve(1).map_err(|_|Error::Limit("frame membership allocation"))?;
+            self.run_indices.try_reserve(1).map_err(|_|Error::Limit("frame membership allocation"))?;
             self.runs.insert(start,merged);
+            self.run_indices.insert(start,index);
         } else {
             self.runs[start]=merged;self.runs.drain(start+1..end);
+            self.run_indices[start]=index;self.run_indices.drain(start+1..end);
         }
         Ok(())
     }
@@ -208,9 +216,9 @@ impl State {
                     self.historical_work=history;
                     if *kind==33 {self.status_enter=self.reader.result.visible_enter;self.status_exit=self.reader.result.visible_exit;}
                     for i in old_events..self.reader.result.events.len() {
-                        self.touch(self.reader.result.events[i].token(),limits,meter)?;
+                        self.touch(self.reader.result.events[i].token(),index,limits,meter)?;
                     }
-                    if !retain {self.reader.result.events.clear();self.reader.result.accounting.rows.clear();}
+                    if !retain {self.reader.result.events.clear();self.reader.result.accounting.rows.clear();self.reader.result.accounting.unavailable_window_sequences.clear();}
                     self.reader.result.admission_ops_used=0;
                 }
             }
@@ -363,6 +371,7 @@ fn import(refs:Refs<'_>,b:&[u8],limits:Limits,meter:&mut Meter<'_>)->Result<Stat
         return Err(Error::Checkpoint("absent status"));
     }
     state.runs.try_reserve_exact(runs).map_err(|_|Error::Limit("membership allocation"))?;
+    state.run_indices.try_reserve_exact(runs).map_err(|_|Error::Limit("membership allocation"))?;
     let mut cardinality=0u64;
     for _ in 0..runs {
         let run=FrameRun{owner:u32_at(b,at),first:u64_at(b,at+8),last:u64_at(b,at+16)};
@@ -373,7 +382,7 @@ fn import(refs:Refs<'_>,b:&[u8],limits:Limits,meter:&mut Meter<'_>)->Result<Stat
         }
         let count=(run.last-run.first).checked_add(1).ok_or(Error::Checkpoint("membership count overflow"))?;
         cardinality=cardinality.checked_add(count).ok_or(Error::Checkpoint("membership count overflow"))?;
-        state.runs.push(run);at+=24;
+        state.runs.push(run);state.run_indices.push(0);at+=24;
     }
     if cardinality>r.result.parsed_events || (state.unassociated && cardinality>=r.result.parsed_events) {return Err(Error::Checkpoint("membership/event census"));}
     if let Some(e)=&r.last {
@@ -419,15 +428,20 @@ fn project(state:State,b:Boundary,meter:&mut Meter<'_>)->Result<Retained,Error>{
     let report=super::analyze_inventory(&state.reader.result);
     Ok(Retained{first_chunk,next_chunk,prefix,retained,cumulative,config:state.reader.result.config,status:state.reader.result.last_status,
         final_seen:state.reader.result.final_seen,wraps:report.wraps,accounting:state.reader.result.accounting.rows,
-        prefix_known_missing,known_missing:state.reader.result.accounting.known_missing,boundary_frames,prefix_unassociated})
+        prefix_known_missing,known_missing:state.reader.result.accounting.known_missing,boundary_frames,prefix_unassociated,
+        unavailable_window_rows:state.reader.result.accounting.unavailable_window_rows,
+        unavailable_window_sequences:state.reader.result.accounting.unavailable_window_sequences})
 }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub(crate) struct AccountingGroup {pub window:u64,pub rows:u64,pub first:u64,pub last:u64}
+pub(crate) struct AccountingGroup {pub window:u64,pub rows:u64,pub first:u64,pub last:u64,pub index:u64}
+#[derive(Clone,Copy,Debug,Default)]
+pub(crate) struct Projection {pub floor:u64,pub rows:u64,pub groups:u64,pub runs:u64,pub frame:u64,pub unknown:u64}
 #[derive(Default)]
 pub(crate) struct CombinedPosition {
     pub config:u64,pub status:u64,pub event_chunks:u64,pub status_chunks:u64,
     pub chunks:u64,pub bytes:u64,pub groups:Vec<AccountingGroup>,
+    pub projection:Option<Projection>,pub run_indices:Vec<u64>,
 }
 pub(crate) struct CombinedAdapter {state:State,boundary:Option<Boundary>,position:CombinedPosition}
 impl CombinedAdapter {
@@ -438,7 +452,17 @@ impl CombinedAdapter {
         l:Limits,work:&mut WorkBudget)->Result<Self,Error>{
         if position.groups.len()>l.membership_runs{return Err(Error::Limit("accounting window groups"));}
         let mut m=Meter{outer:work,left:l.work_records};m.charge(position.groups.len() as u64+1)?;
-        let state=import(refs,bytes,l,&mut m)?;
+        let mut state=import(refs,bytes,l,&mut m)?;
+        if let Some(p)=position.projection{
+            if p.floor!=next || p.unknown>state.reader.result.accounting.parsed || p.rows>state.reader.result.accounting.parsed
+                || p.groups>p.rows || p.runs>state.reader.result.parsed_events || (p.runs==0&&p.frame!=0)
+                || position.run_indices.len()!=state.runs.len()
+                || position.run_indices.iter().any(|&i|i<=position.config||i>=next)
+                || position.groups.iter().any(|g|g.index<=position.config||g.index>=next)
+                || (p.rows!=0&&p.floor<=position.config){return Err(Error::Checkpoint("FIFO projected census/positions"));}
+            state.run_indices=position.run_indices.clone();state.retired_frame=(p.runs!=0).then_some(p.frame);
+            state.reader.result.accounting.unavailable_window_rows=p.unknown;
+        }else if !position.run_indices.is_empty(){return Err(Error::Checkpoint("unprojected FIFO run positions"));}
         if state.next!=next{return Err(Error::Checkpoint("combined FIFO frontier"));}
         if encode(&state,l,&mut m)?.as_slice()!=bytes{return Err(Error::Checkpoint("noncanonical FIFO checkpoint"));}
         let s=Self{state,boundary:None,position};s.validate(closed_windows)?;Ok(s)
@@ -465,7 +489,7 @@ impl CombinedAdapter {
             || chunks+u128::from(r.parsed_events)+u128::from(closed_windows)!=u128::from(self.state.historical_work){
             return Err(Error::Checkpoint("FIFO exact chunk/byte/work census"));
         }
-        let mut previous:Option<AccountingGroup>=None;let mut total=0u128;
+        let mut previous:Option<AccountingGroup>=None;let mut total=u128::from(p.projection.map_or(0,|p|p.rows));
         for &g in &p.groups {
             if g.rows==0 || g.first>g.last || g.last>=SEQ_CEIL || u128::from(g.rows)>u128::from(g.last-g.first)+1
                 || (g.rows==1)!=(g.first==g.last) || self.state.windows!=(g.window!=0)
@@ -499,15 +523,47 @@ impl CombinedAdapter {
                     let a=&self.state.reader.result.accounting;let frame=a.last_frame.ok_or(Error::Checkpoint("missing accounting cursor"))?;
                     m.charge(1)?;
                     if let Some(g)=self.position.groups.last_mut().filter(|g|g.window==a.last_window){
-                        g.rows=g.rows.checked_add(1).ok_or(Error::Limit("accounting group rows"))?;g.last=frame;
+                        g.rows=g.rows.checked_add(1).ok_or(Error::Limit("accounting group rows"))?;g.last=frame;g.index=index;
                     }else{
                         if self.position.groups.len()>=l.membership_runs{return Err(Error::Limit("accounting window groups"));}
                         self.position.groups.try_reserve(1).map_err(|_|Error::Limit("accounting group allocation"))?;
-                        self.position.groups.push(AccountingGroup{window:a.last_window,rows:1,first:frame,last:frame});
+                        self.position.groups.push(AccountingGroup{window:a.last_window,rows:1,first:frame,last:frame,index});
                     }
                 },_=>unreachable!(),
             }
-        }Ok(())
+        }
+        if let Some(p)=&mut self.position.projection{
+            p.unknown=self.state.reader.result.accounting.unavailable_window_rows;
+            self.position.run_indices=self.state.run_indices.clone();
+        }
+        Ok(())
+    }
+    /// Fresh-state schema3 opt-in only.
+    pub(crate) fn enable_projection(&mut self)->Result<(),Error>{
+        if self.state.next!=0 || self.position.projection.is_some() || self.position.chunks!=0 || self.boundary.is_some(){
+            return Err(Error::Checkpoint("schema3 FIFO opt-in after chunk zero"));
+        }
+        self.position.projection=Some(Projection::default());Ok(())
+    }
+    pub(crate) fn window_prefix(&mut self,id:u64,last:u64){
+        self.state.reader.result.accounting.retired_window_bounds=(id!=0).then_some((id,last));
+    }
+    pub(crate) fn project_support(&mut self,floor:u64,l:Limits,work:&mut WorkBudget)->Result<(),Error>{
+        let p=self.position.projection.as_mut().ok_or(Error::Checkpoint("FIFO projection absent"))?;
+        if floor<p.floor || floor>self.state.next{return Err(Error::Checkpoint("FIFO projection order"));}
+        let mut m=Meter{outer:work,left:l.work_records};m.charge((self.position.groups.len()+self.state.runs.len()) as u64+1)?;
+        let latest=self.position.groups.last().map(|g|g.window);
+        self.position.groups.retain(|g|{
+            if Some(g.window)!=latest && g.index<floor{p.rows+=g.rows;p.groups+=1;false}else{true}
+        });
+        let token=self.state.reader.last.as_ref().and_then(|e|e.token());
+        let mut kept=Vec::new();let mut indices=Vec::new();
+        for (&r,&index) in self.state.runs.iter().zip(&self.state.run_indices){
+            let pin=token.is_some_and(|(owner,frame)|r.owner==owner&&r.first<=frame&&frame<=r.last);
+            if index<floor&&!pin{p.runs+=1;p.frame=p.frame.max(r.last);}else{kept.push(r);indices.push(index);}
+        }
+        self.state.runs=kept;self.state.run_indices=indices;self.position.run_indices=self.state.run_indices.clone();
+        self.state.retired_frame=(p.runs!=0).then_some(p.frame);p.floor=floor;Ok(())
     }
     pub(crate) fn encode(&self,closed_windows:u64,l:Limits,work:&mut WorkBudget)->Result<Vec<u8>,Error>{
         let mut m=Meter{outer:work,left:l.work_records};m.charge(self.position.groups.len() as u64+1)?;

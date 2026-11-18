@@ -37,9 +37,17 @@ fn report(bytes: &[u8], cap: u64, analysis_cap: usize, analysis_work: u64) -> Re
     let retained_bytes = physical.segments.iter().map(|s|s.payload.len() as u64).sum::<u64>();
     let state = match v.state { 1=>"OPEN", 2=>"SEALED", 3=>"STOPPED_RESOURCE", _=>"UNSPECIFIED" };
     let mut out = json!({"schema":1,"status":"VALID_RETAINED","note":NOTE,
-        "physical":{"version":v.format_version,"state":state,"reason":v.reason,"recovered":v.recovered,"generation":v.generation},
+        "physical":{"version":v.format_version,"state":state,"reason":v.reason,"recovered":v.recovered,"generation":v.generation,
+            "segment_payload_capacity":physical.config.payload_bytes},
         "retained":{"first_chunk":v.first_chunk,"next_chunk":v.next_chunk,"segments":v.retained_segments,
-            "payload_bytes":retained_bytes,"first_payload_byte":v.evicted_payload_bytes},
+            "payload_bytes":retained_bytes,"first_payload_byte":v.evicted_payload_bytes,
+            "segment_layout":physical.segments.iter().map(|s|json!({
+                "segment":s.segment,"first_chunk":s.first_chunk,"next_chunk":s.next_chunk,
+                "payload_bytes":s.payload.len(),
+                // Physical validation already checked every complete chunk.
+                "first_original_chunk_bytes":u32::from_le_bytes(s.payload[4..8].try_into().expect("validated chunk header")) as u64+20,
+                "commit_trigger":{"value":null,"reason":"not recorded in the physical format"}
+            })).collect::<Vec<_>>()},
         "evicted":{"chunks":v.evicted_chunks,"payload_bytes":v.evicted_payload_bytes,"segments":v.evicted_segments},
         "capture_totals":{"value":null,"reason":"This command reports retained measurements; it does not reconstruct capture totals from checkpoint claims."}});
     if magic == b"PFRCKP01" {
@@ -77,12 +85,17 @@ fn report(bytes: &[u8], cap: u64, analysis_cap: usize, analysis_work: u64) -> Re
                 "owner":f.view.owner,"frame":f.view.frame,"verdict":format!("{:?}",f.view.verdict),
                 "reason":f.view.reason,"rsx_busy_raw":f.view.rsx_busy_raw,"rsx_busy_ppu":f.view.rsx_busy_ppu,
                 "unavailable":f.unavailable.iter().map(|u|format!("{u:?}")).collect::<Vec<_>>() })).collect::<Vec<_>>()});
+            if a.retained_support{out["auto"]["clock_map_scope"]=json!("retained-support");}
         }
         if let Some(f) = r.fifo {
             out["fifo"] = json!({"final":f.final_seen,"retained_events":f.retained.events,
                 "retained_accounting_rows":f.retained.accounting_rows,"known_missing":f.known_missing,
                 "prefix_unassociated":f.prefix_unassociated,"boundary_frames":f.boundary_frames.iter()
                     .map(|b|json!({"owner":b.owner,"first":b.first,"last":b.last})).collect::<Vec<_>>()});
+            if f.unavailable_window_rows!=0{
+                out["fifo"]["window_bounds_unavailable"]=json!({"reason":"window declaration evicted; no window-specific evidence",
+                    "cumulative_rows":f.unavailable_window_rows,"retained_record_sequences":f.unavailable_window_sequences});
+            }
         }
     } else { return Err(failure(1,"unsupported rolling checkpoint schema")); }
     Ok(out)

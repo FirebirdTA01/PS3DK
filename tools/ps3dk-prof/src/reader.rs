@@ -187,6 +187,17 @@ impl PpuState {
             (w.windows.iter().map(|x| x.id).collect(), w.open.as_ref().map(|x| x.id)))
     }
     pub(crate) fn windows(&self)->Option<&crate::windows::Reader>{self.reader.windows.as_ref()}
+    /// Rolling-only removal of actual closed declarations. Cursor bounds stay
+    /// known, but no evicted window is synthesized for later associations.
+    pub(crate) fn project_windows(&mut self,id:u32,last:Option<u64>)->Result<(),Malformed>{
+        let Some(w)=self.reader.windows.as_mut() else {
+            return if id==0 {Ok(())} else {malformed(Rule::Windows,"retired window without capability")};
+        };
+        if w.open.as_ref().is_some_and(|v|v.id<=id){return malformed(Rule::Windows,"retired open window");}
+        w.windows.retain(|v|v.id>id);
+        if id>w.last_id{w.last_id=id;w.prev_last_frame=last;}
+        Ok(())
+    }
     pub(crate) fn max_span(&self, inc: u32) -> u64 {
         self.reader.rolling_span_max.as_ref().and_then(|m| m.get(&inc)).copied().unwrap_or(0)
     }

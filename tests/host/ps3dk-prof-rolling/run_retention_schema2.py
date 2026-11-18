@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent schema2 cold-framing controls; parent owns compiler scheduling.
+"""Independent schema2/schema3 cold-framing controls; parent owns compiler scheduling.
 
 The legacy 33 fixtures stay byte-identical. New Python family bodies are opaque
 framing sentinels, deliberately not semantic captures. A separate ignored Rust
@@ -48,6 +48,48 @@ def mix2(head, chunks, cut):
     out += struct.pack('<I', base.crc(out)); return bytes(out)
 
 
+CENSUS = 'count max_id last_frame end reserved'.split()
+
+
+def mix3(head, chunks, cut, floor=None, census=None):
+    # Schema 3 = schema-2 sections behind a 128-byte header: u64 floor at 80,
+    # then the retired-window census u64 count/max_id/last_frame/end/reserved.
+    v2 = mix2(head, chunks, cut); out = bytearray(v2[:96]) + bytearray(32)
+    w16(out, 8, 3); w16(out, 10, 128)
+    base.w64(out, 80, cut if floor is None else floor)
+    struct.pack_into('<5Q', out, 88, *[(census or {}).get(k, 0) for k in CENSUS])
+    out += v2[96:-4]; out += struct.pack('<I', base.crc(out)); return bytes(out)
+
+
+def schema3_violations(cp):
+    """Independent restatement of the schema-3 framing rules for one checkpoint."""
+    flags, next_ = u32(cp, 28), struct.unpack_from('<Q', cp, 32)[0]
+    floor = struct.unpack_from('<Q', cp, 80)[0]
+    w = dict(zip(CENSUS, struct.unpack_from('<5Q', cp, 88)))
+    bad = set()
+    if not flags & 128: bad.add('missing_auto128')
+    if floor > next_: bad.add('floor_above_next')
+    if w['max_id'] > 0xffffffff: bad.add('max_id_over_u32')
+    if w['last_frame'] >= 1 << 63: bad.add('last_frame_sign')
+    if w['reserved']: bad.add('census_reserved')
+    if w['count'] == 0:
+        if w['max_id'] or w['last_frame'] or w['end']: bad.add('partial_zero_census')
+    else:
+        if w['end'] >= floor: bad.add('end_not_below_floor')
+        if w['count'] > w['max_id']: bad.add('count_above_max_id')
+        if 2 * w['count'] > w['end'] - 1: bad.add('census_end_extent')
+        if not flags & 512: bad.add('census_without_windows_flag')
+    return bad
+
+
+def fixture3(flags=711, floor=None, census=None):
+    """Every checkpoint is schema 3; only the last carries the edited floor/census."""
+    head, chunks, parts = fixture(flags)
+    q = [(a, z, mix3(head, chunks, a, *((floor, census) if i == len(parts) - 1 else ())), pay)
+         for i, (a, z, _, pay) in enumerate(parts)]
+    return chunks, q
+
+
 def fixture(flags=193, zero=False, metadata_types=None, payload_types=None):
     head, originals = base.original(2); head = bytearray(head); base.w32(head, 12, flags); head = bytes(head)
     pairs = [(u32(raw, 0), raw[16:-4]) for raw in originals[:-1]]
@@ -86,7 +128,8 @@ def controls():
     cases = list(base.controls())
     def add(name, parts, expected=0, flags=193, **options):
         first = parts[max(0, len(parts) - 2)][0] if parts else 0
-        cases.append(dict(name='schema2_' + name, blob=base.container(parts), expected=expected,
+        if 'schema3' in options: options['checkpoints'] = [cp for _, _, cp, _ in parts[-2:]]
+        cases.append(dict(name=('' if name.startswith('schema3_') else 'schema2_') + name, blob=base.container(parts), expected=expected,
                           kind=2, flags=flags, first=first, next=parts[-1][1] if parts else 0,
                           generation=len(parts) + 2, framing_only=True, **options))
     for flags in [65, 129, 193, 711]:
@@ -102,7 +145,7 @@ def controls():
         ('fixed_header', 10, 2, 80), ('section_count', 12, 4, 4),
         ('section_extent', 48, 8, 1), ('family_mask', 56, 4, 3),
         ('reserved_word', 60, 4, 1), ('reserved_tail', 95, 1, 1),
-        ('unknown_schema', 8, 2, 3), ('unknown_family_schema', 72, 2, 2),
+        ('unknown_schema', 8, 2, 4), ('unknown_family_schema', 72, 2, 2),
         ('missing_family_flags', 28, 4, 1), ('mixed_original_flags', 28, 4, 705), ('unknown_original_flag', 28, 4, 1217),
     ]:
         def edit(cp, at=at, width=width, value=value): cp[at:at + width] = value.to_bytes(width, 'little')
@@ -147,6 +190,34 @@ def controls():
     head = q[0][2][16:32]
     q = [(a, z, mix2(head, profile_chunks, a), b''.join(profile_chunks[a:z])) for a, z, _, _ in q]
     add('profile_placement', q, -3, flags=711)
+    # Schema 3: retired-window census framing. Each negative breaks exactly
+    # one rule of a valid envelope (asserted by schema3_violations below).
+    retired = dict(count=3, max_id=5, last_frame=1000, end=7)
+    for name, flags, floor, census in [
+        ('schema3_no_retired_windows', 193, None, None), ('schema3_no_retired_windows_flags711', 711, None, None),
+        ('schema3_retired_windows', 711, None, retired),
+        ('schema3_retired_windows_tight', 711, 8, dict(count=3, max_id=3, last_frame=(1 << 63) - 1, end=7)),
+    ]:
+        _, q = fixture3(flags, floor, census); add(name, q, flags=flags, schema3=set())
+    for name, flags, floor, census in [
+        ('floor_above_next', 711, 13, retired),
+        ('max_id_over_u32', 711, None, retired | dict(max_id=1 << 32)),
+        ('last_frame_sign', 711, None, retired | dict(last_frame=1 << 63)),
+        ('end_not_below_floor', 711, 7, retired),
+        ('census_reserved', 711, None, retired | dict(reserved=1)),
+        ('partial_zero_census', 711, None, dict(max_id=5)),
+        ('partial_zero_census_last_frame', 711, None, dict(last_frame=7)),
+        ('partial_zero_census_end', 711, None, dict(end=7)),
+        ('count_above_max_id', 711, None, retired | dict(max_id=2)),
+        ('census_end_extent', 711, None, retired | dict(end=6)),
+        ('census_without_windows_flag', 193, None, retired),
+        ('missing_auto128', 65, None, None),
+    ]:
+        _, q = fixture3(flags, floor, census)
+        rule = 'partial_zero_census' if name.startswith('partial_zero_census') else name
+        add('schema3_' + name, q, -3, flags=flags, schema3={rule})
+    _, q = fixture3(); cp = bytearray(q[-1][2]); w16(cp, 8, 4)
+    q[-1] = (*q[-1][:2], base.repair(cp), q[-1][3]); add('schema3_unknown_version4', q, -6, flags=711)
     # Checkpoint corruption cannot be hidden by valid outer slot/root CRCs.
     mutate('checkpoint_crc', lambda cp: bytes(cp[:-1]) + bytes([cp[-1] ^ 1]))
     for name, changes in [('checkpoint_cap', dict(max_cp=1)), ('metadata_cap', dict(max_meta=16)),
@@ -155,6 +226,11 @@ def controls():
     altered = bytearray(good); altered[base.PREFIX+96] ^= 1
     cases.append(dict(name='schema2_digest_old_slot', blob=bytes(altered), expected=0, kind=2, flags=193,
                       first=2, next=len(chunks), generation=5, framing_only=True))
+    for c in cases:
+        if 'schema3' in c:
+            got = set().union(*(schema3_violations(cp) for cp in c.pop('checkpoints')))
+            assert got == c['schema3'], (c['name'], got)
+        c.pop('checkpoints', None)
     assert len({c['name'] for c in cases}) == len(cases)
     assert all(len(c['blob']) == base.FILE for c in cases)
     return cases

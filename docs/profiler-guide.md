@@ -173,6 +173,22 @@ does not cap a running file's size. For managed AUTO/FIFO builds, the separate
 `-DPS3_PROF_AUTO_ROLLING=64` CMake option requests rolling output with a 64 MiB
 file ceiling (alongside `-DPS3_PROF_AUTO=ON`). It generates constant pre-init
 options; no application calls are required. Empty keeps append output.
+Turn rolling output **ON** for long sessions that could fill the HDD with an
+append capture, soak tests or playtests where only the recent past matters,
+or when one capture must stay within a fixed disk budget. Leave it **OFF**
+(the default) for short captures, whole-run totals, analysis of every frame,
+SPU recording together with AUTO, or when the extra pre-allocated writer
+memory and repeated file writes are undesirable. The managed rolling profile
+refuses active SPU recording; it does not silently omit those lanes.
+
+**Retained-only** means the reader and viewer analyze the original records
+still present in the saved segments. Evicted history is not reconstructed;
+whole-capture totals are unavailable, and missing build or clock evidence can
+make a retained frame UNKNOWN. A fixed byte budget does not promise a fixed
+number of seconds: frame density determines how much recent history fits.
+Choose a file ceiling that admits the preset, then measure the retained frame
+span on a representative run. Use custom constant options to change segment
+or support capacities; raising only the ceiling does not enlarge the file.
 The finite preset retains six segments plus a spare and uses about 21 MiB of
 file space. Increasing the ceiling alone does not enlarge the preset's pools.
 Core/extension/rolling writer state has a separate 64 MiB ceiling; AUTO report

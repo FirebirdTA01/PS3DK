@@ -155,6 +155,8 @@ pub struct Fifo {
     pub final_seen: bool,
     pub retained_events: u64,
     pub retained_accounting_rows: u64,
+    pub unavailable_window_rows:u64,
+    pub retained_unavailable_window_rows:usize,
     pub known_missing: u64,
     pub prefix_unassociated: bool,
     pub boundary_frames: Vec<(u32, u64, u64)>,
@@ -357,10 +359,11 @@ pub fn analyse(bytes: &[u8], limits: OpenLimits) -> Result<Summary, String> {
                 .collect(),
         });
         if let Some(a) = r.auto_report {
-            let map_line = match &a.map {
+            let mut map_line = match &a.map {
                 ps3dk_prof::auto_rsx::MapState::Qualified(_) => "qualified".to_string(),
                 ps3dk_prof::auto_rsx::MapState::Unqualified(why) => format!("unqualified: {why}"),
             };
+            if a.retained_support{map_line=format!("retained-support: {map_line}");}
             out.auto = Some(Auto {
                 map: format!("{:?}", a.map),
                 map_line,
@@ -385,6 +388,8 @@ pub fn analyse(bytes: &[u8], limits: OpenLimits) -> Result<Summary, String> {
                 final_seen: fi.final_seen,
                 retained_events: fi.retained.events,
                 retained_accounting_rows: fi.retained.accounting_rows,
+                unavailable_window_rows:fi.unavailable_window_rows,
+                retained_unavailable_window_rows:fi.unavailable_window_sequences.len(),
                 known_missing: fi.known_missing,
                 prefix_unassociated: fi.prefix_unassociated,
                 boundary_frames: fi.boundary_frames.iter().map(|b| (b.owner, b.first, b.last)).collect(),

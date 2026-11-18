@@ -2,7 +2,8 @@
  * No historical OPS replay, heap allocation, producer MAIN pool or pointers in
  * accepted state. Exact negotiated legacy/ring formats share one typed state. */
 typedef struct {
-    uint32_t owner,width;uint64_t frame,records[3],abandoned,call_excluded,index;
+    uint32_t owner,width;uint64_t frame,records[3],abandoned,call_excluded,index,last_use;
+    uint32_t touched,reserved;
     uint8_t raw[528];
 } au_build;
 typedef struct {uint64_t index;uint8_t raw[96];} au_clock;
@@ -12,6 +13,10 @@ typedef struct {
     uint64_t config_index,status_index,last_op,max_snapshot,last_frame,last_lost,last_coverage;
     uint64_t ops,op_chunks,frames,clocks,statuses,bytes,chunks,history,status_chunks,snapshot[5];
     uint8_t config[216],status[208],ring[96],ring_snapshot[96];
+    uint64_t floor,retired_frames,retired_clocks,retired_status_frames,retired_status_clocks;
+    uint64_t final_frame[2];
+    uint64_t marker_frame,marker_index;
+    uint32_t projected,sticky_clock,final_present,new_builds,new_clocks,marker_present;
 } au_state;
 typedef struct {fi_run *finals,*touched;au_build *builds;au_clock *clocks;} au_pools;
 enum {AU_CONFIG=1,AU_STATUS=2,AU_FRAME=4,AU_FINAL=8,AU_INVALID=16,AU_UNASSOCIATED=32};
@@ -34,7 +39,7 @@ static int au_run(fi_run *runs,uint32_t *count,uint32_t cap,uint32_t owner,uint6
     }
     n=*count-(end-start)+1;if(n>cap)return PFR_IDENTITIES;
     memmove(runs+start+1,runs+end,(size_t)(*count-end)*sizeof *runs);
-    runs[start].owner=owner;runs[start].reserved=0;runs[start].first=first;runs[start].last=last;*count=n;return PFR_OK;
+    runs[start].owner=owner;runs[start].reserved=0;runs[start].first=first;runs[start].last=last;runs[start].index=0;*count=n;return PFR_OK;
 }
 static int au_entry(au_state *s,au_build *rows,uint32_t cap,uint32_t owner,uint64_t frame,au_build **out)
 {
@@ -43,7 +48,7 @@ static int au_entry(au_state *s,au_build *rows,uint32_t cap,uint32_t owner,uint6
     if(i==s->build_count||rows[i].owner!=owner||rows[i].frame!=frame){
         if(s->build_count>=cap)return PFR_IDENTITIES;
         memmove(rows+i+1,rows+i,(size_t)(s->build_count-i)*sizeof *rows);memset(rows+i,0,sizeof *rows);
-        rows[i].owner=owner;rows[i].frame=frame;++s->build_count;
+        rows[i].owner=owner;rows[i].frame=frame;++s->build_count;++s->new_builds;
     }
     *out=rows+i;return PFR_OK;
 }
@@ -109,7 +114,7 @@ static int au_ring_record(au_state *s,const uint8_t *p)
     if(r64(p+120)>r64(r))w64(r,r64(p+120));
     return PFR_OK;
 }
-static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t *p)
+static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t *p,uint64_t index)
 {
     const uint8_t *c=s->config;uint16_t kind=r16(p+12),flags=r16(p+14);uint64_t id=r64(p),frame=r64(p+16),published=r64(p+120);
     uint32_t owner=r32(p+8),first=r32(c+32)+16,end=r32(c+32)+r32(c+36),build_owner=0,build_flags=0,depth=0,j,mask=au_mask(s);
@@ -145,17 +150,24 @@ static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t
     if(!r32(p+104)||r32(p+104)==UINT32_MAX||r32(p+108)!=r32(p+104)+1)return PFR_INVALID;
     if(valid){if(r64(p+40)>r64(p+48)||published<r32(p+108))return PFR_INVALID;}
     else if(r64(p+40)||r64(p+48))return PFR_INVALID;
-    if(flags&1){rc=au_run(pools.touched,&s->touched_count,cfg->auto_touched_runs,owner,frame,0);if(rc)return rc;}
+    if(flags&1){rc=au_run(pools.touched,&s->touched_count,cfg->auto_touched_runs,owner,frame,0);if(rc)return rc;
+        /* FRAME begin can precede any build/coverage for the next frame. Keep
+         * that one open marker separately; it must not consume a build slot. */
+        if(s->projected&&kind!=4){rc=au_entry(s,pools.builds,cfg->auto_build_entries,owner,frame,&entry);if(rc)return rc;
+            entry->last_use=index;entry->touched=1;}
+        if(kind==4){s->marker_present=1;s->marker_frame=frame;s->marker_index=index;}}
     else s->flags|=AU_UNASSOCIATED;
     if(kind<=3){
         if(segment){owner=build_owner;frame=build_frame;}
         if((segment&&build_flags)||(!segment&&(flags&1))){
             rc=au_entry(s,pools.builds,cfg->auto_build_entries,owner,frame,&entry);if(rc)return rc;
+            entry->last_use=index;
             if(au_inc(&entry->records[kind-1],1)||(segment&&!r32(p+116)&&au_inc(&entry->abandoned,1)))return PFR_COUNTER_RANGE;
         }
     }
     if(kind==5&&valid&&!(flags&8)&&build_flags){
         rc=au_entry(s,pools.builds,cfg->auto_build_entries,build_owner,build_frame,&entry);if(rc)return rc;
+        entry->last_use=index;
         if(!plus64(&entry->call_excluded,r32(p+80)))entry->call_excluded=UINT64_MAX;
     }
     if(au_inc(&s->ops,1))return PFR_COUNTER_RANGE;
@@ -166,11 +178,13 @@ static int au_coverage(au_state *s,au_pools pools,const pfm2_config *cfg,const u
     int ring=au_ringed(s),rc;uint16_t flags=r16(p+2);uint32_t owner=r32(p+8),scopes=r32(p+12),k,j,mask=au_mask(s);
     uint64_t frame=r64(p+16),begin=r64(p+24),end=r64(p+32),lost=r64(p+48),sum;au_build *entry;
     uint32_t width=ring?528:(mask&512)?480:(mask&256)?416:(mask&16)?384:352;
+    unsigned owner_slot=owner!=0;
     if(n!=width||r16(p)!=1||r32(p+4)!=r32(s->config+4)||(flags&~(mask!=7?127u:31u))||!(flags&2)
        ||((flags&1)?owner!=r32(s->config+16):owner!=0)||(!(flags&64)&&(scopes||r64(p+56)))
        ||((s->flags&AU_FRAME)&&s->last_owner==owner&&frame<=s->last_frame)
        ||lost<s->last_lost||((lost!=0)!=((flags&8)!=0))||(!(flags&16)&&end<begin)
        ||((flags&64)&&!scopes&&r64(p+56)))return PFR_INVALID;
+    if(s->projected&&(s->final_present&(1u<<owner_slot))&&frame<=s->final_frame[owner_slot])return PFR_INVALID;
     if(mask&16){
         if((!(mask&32)&&r32(p+380))||(!(flags&64)&&!au_zero(p+352,28))
            ||(!r32(p+352)&&r64(p+368))||r32(p+376)>scopes)return PFR_INVALID;
@@ -203,9 +217,12 @@ static int au_coverage(au_state *s,au_pools pools,const pfm2_config *cfg,const u
     }
     rc=au_run(pools.finals,&s->final_count,cfg->auto_final_runs,owner,frame,1);if(rc)return rc;
     rc=au_entry(s,pools.builds,cfg->auto_build_entries,owner,frame,&entry);if(rc)return rc;
-    entry->width=(uint32_t)n;entry->index=index;memcpy(entry->raw,p,n);
+    entry->width=(uint32_t)n;entry->index=index;entry->last_use=index;memcpy(entry->raw,p,n);
+    for(j=0;j<s->touched_count;++j)if(pools.touched[j].owner==owner&&pools.touched[j].first<=frame&&frame<=pools.touched[j].last)
+        entry->touched=1;
     if(au_inc(&s->frames,1))return PFR_COUNTER_RANGE;
-    s->last_owner=owner;s->last_frame=frame;s->last_lost=lost;s->last_coverage=index;s->flags|=AU_FRAME;return PFR_OK;
+    s->last_owner=owner;s->last_frame=frame;s->last_lost=lost;s->last_coverage=index;s->flags|=AU_FRAME;
+    s->final_frame[owner_slot]=frame;s->final_present|=1u<<owner_slot;return PFR_OK;
 }
 static int au_clock_accept(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t *p,size_t n,uint64_t index)
 {
@@ -220,7 +237,10 @@ static int au_clock_accept(au_state *s,au_pools pools,const pfm2_config *cfg,con
         ||r64(p+88)!=r64(p+40)-r64(p+32)||!r32(p+28))return PFR_INVALID;}
     else if(r64(p+48)||r64(p+56))return PFR_INVALID;
     if(s->clock_count>=cfg->auto_clock_anchors)return PFR_IDENTITIES;
-    pools.clocks[s->clock_count].index=index;memcpy(pools.clocks[s->clock_count].raw,p,96);++s->clock_count;
+    pools.clocks[s->clock_count].index=index;memcpy(pools.clocks[s->clock_count].raw,p,96);++s->clock_count;++s->new_clocks;
+    /* Retiring the original bad anchor must never clear its refusal. Bracketed
+     * writers permit failed observations, but never a timebase regression. */
+    if(flags==4||(!(au_mask(s)&64)&&flags!=1))s->sticky_clock=1;
     if(au_inc(&s->clocks,1))return PFR_COUNTER_RANGE;
     s->last_anchor=id;return PFR_OK;
 }
@@ -262,6 +282,7 @@ static int au_status(au_state *s,const uint8_t *p,size_t n)
     memcpy(s->status,p,n);s->status_bytes=(uint32_t)n;s->flags|=AU_STATUS;
     s->snapshot[0]=s->ops;s->snapshot[1]=s->frames;s->snapshot[2]=s->clocks;
     s->snapshot[3]=s->last_op;s->snapshot[4]=s->max_snapshot;
+    s->retired_status_frames=s->retired_frames;s->retired_status_clocks=s->retired_clocks;
     memcpy(s->ring_snapshot,s->ring,96);s->status_chunks=s->op_chunks;return PFR_OK;
 }
 static int au_accept(au_state *s,au_pools pools,const pfm2_config *cfg,uint32_t type,const uint8_t *p,size_t n,
@@ -275,7 +296,7 @@ static int au_accept(au_state *s,au_pools pools,const pfm2_config *cfg,uint32_t 
     case 35:
         if(n<16||r16(p)!=1||r16(p+2)||r32(p+4)!=r32(s->config+4)||!r32(p+8)||r32(p+12)!=au_width(s))return PFR_INVALID;
         rows=r32(p+8);width=au_width(s);if((uint64_t)rows*width+16!=n)return PFR_INVALID;
-        for(i=0;i<rows;++i){rc=au_op(s,pools,cfg,p+16+(size_t)i*width);if(rc)return rc;}
+        for(i=0;i<rows;++i){rc=au_op(s,pools,cfg,p+16+(size_t)i*width,index);if(rc)return rc;}
         rc=au_inc(&s->op_chunks,1);break;
     case 36:if(n<64)return PFR_INVALID;rc=au_coverage(s,pools,cfg,p,n,index);rows=1;break;
     case 37:rc=au_status(s,p,n);if(!rc)s->status_index=index;break;
@@ -285,6 +306,39 @@ static int au_accept(au_state *s,au_pools pools,const pfm2_config *cfg,uint32_t 
     if(rc)return rc;
     if(au_inc(&s->history,1+(uint64_t)rows)||au_inc(&s->bytes,(uint64_t)n+20)||au_inc(&s->chunks,1))return PFR_COUNTER_RANGE;
     return PFR_OK;
+}
+static int au_cursor_needs(const uint8_t *cursor,const au_build *e)
+{
+    return r32(cursor+48)&&r32(cursor+56)&&r32(cursor+60)==e->owner&&r64(cursor+64)==e->frame;
+}
+static int au_project_state(au_state *s,au_pools pools,const pfm2_config *cfg,uint64_t floor)
+{
+    uint32_t i,to=0,before=0,drop;int rc;
+    if(!s->projected||floor<s->floor)return PFR_INVALID;
+    for(i=0;i<s->build_count;++i){au_build *e=pools.builds+i;unsigned which=e->owner!=0;
+        int last_final=(s->final_present&(1u<<which))&&e->frame==s->final_frame[which];
+        int incomplete=!e->width&&(!(s->final_present&(1u<<which))||e->frame>s->final_frame[which]);
+        int pin=last_final||incomplete||au_cursor_needs(s->ring,e)||au_cursor_needs(s->ring_snapshot,e);
+        if(e->last_use>=floor||pin){pools.builds[to++]=*e;continue;}
+        if(e->width){
+            if(au_inc(&s->retired_frames,1))return PFR_COUNTER_RANGE;
+            if((s->flags&AU_STATUS)&&e->index<s->status_index&&au_inc(&s->retired_status_frames,1))return PFR_COUNTER_RANGE;
+        }
+    }
+    s->build_count=to;s->final_count=s->touched_count=0;
+    for(i=0;i<to;++i){const au_build *e=pools.builds+i;
+        if(e->width){rc=au_run(pools.finals,&s->final_count,cfg->auto_final_runs,e->owner,e->frame,1);if(rc)return rc;}
+        if(e->touched){rc=au_run(pools.touched,&s->touched_count,cfg->auto_touched_runs,e->owner,e->frame,0);if(rc)return rc;}
+    }
+    if(s->marker_present){rc=au_run(pools.touched,&s->touched_count,cfg->auto_touched_runs,r32(s->config+16),s->marker_frame,0);if(rc)return rc;}
+    while(before<s->clock_count&&pools.clocks[before].index<floor)++before;
+    drop=before>8?before-8:0;
+    for(i=0;i<drop;++i){
+        if(au_inc(&s->retired_clocks,1))return PFR_COUNTER_RANGE;
+        if((s->flags&AU_STATUS)&&pools.clocks[i].index<s->status_index&&au_inc(&s->retired_status_clocks,1))return PFR_COUNTER_RANGE;
+    }
+    memmove(pools.clocks,pools.clocks+drop,(size_t)(s->clock_count-drop)*sizeof *pools.clocks);
+    s->clock_count-=drop;s->floor=floor;s->new_builds=s->new_clocks=0;return PFR_OK;
 }
 /* Accepted shared bootstrap only: original raw HEADER/CLOCKS/PROFILE payloads
  * become the inner typed bootstrap without copying historical events. */
@@ -306,7 +360,7 @@ static int au_size(const au_state *s,au_pools pools,const pfm2_config *cfg,const
     uint32_t count,boot,i;uint64_t n;int rc=au_boot(v,cfg->auto_bootstrap_bytes,&count,&boot);if(rc)return rc;
     if(s->final_count>cfg->auto_final_runs||s->touched_count>cfg->auto_touched_runs||s->build_count>cfg->auto_build_entries
        ||s->clock_count>cfg->auto_clock_anchors)return PFR_INVALID;
-    n=(au_ringed(s)?532u:340u)+(uint64_t)boot+s->config_bytes+s->status_bytes
+    n=(s->projected?628u:au_ringed(s)?532u:340u)+(uint64_t)boot+s->config_bytes+s->status_bytes
         +24*((uint64_t)s->final_count+s->touched_count)+80*(uint64_t)s->build_count+104*(uint64_t)s->clock_count;
     for(i=0;i<s->build_count;++i)n+=pools.builds[i].width;
     if(n>UINT32_MAX||n-340>cfg->auto_support_bytes)return PFR_SUPPORT;
@@ -314,9 +368,9 @@ static int au_size(const au_state *s,au_pools pools,const pfm2_config *cfg,const
 }
 static int au_encode(const au_state *s,au_pools pools,const pfm2_config *cfg,const pfp_view *v,uint8_t *b,size_t expected)
 {
-    uint32_t boot_count,boot_bytes,i,j;size_t fixed=au_ringed(s)?512:320,at,source=0;int rc;
+    uint32_t boot_count,boot_bytes,i,j;size_t fixed=s->projected?608:au_ringed(s)?512:320,at,source=0;int rc;
     rc=au_boot(v,cfg->auto_bootstrap_bytes,&boot_count,&boot_bytes);if(rc)return rc;
-    memset(b,0,fixed);memcpy(b,"PFRAUTO1",8);w32(b+8,au_ringed(s)?2:1);w32(b+12,(uint32_t)fixed);
+    memset(b,0,fixed);memcpy(b,"PFRAUTO1",8);w32(b+8,s->projected?3:au_ringed(s)?2:1);w32(b+12,(uint32_t)fixed);
     w64(b+16,expected);w64(b+24,v->next);w64(b+32,s->history);w32(b+40,s->flags|(boot_count>=2?64:0));
     w32(b+44,r32(v->header+12));w64(b+48,boot_count>=2?v->clock_frequency:0);w64(b+56,s->config_index);
     w64(b+64,s->last_op);w64(b+72,s->max_snapshot);w32(b+80,s->last_owner);w32(b+84,s->last_anchor);
@@ -326,6 +380,13 @@ static int au_encode(const au_state *s,au_pools pools,const pfm2_config *cfg,con
     w64(b+208,s->last_coverage);w32(b+216,s->config_bytes);w32(b+220,s->status_bytes);w32(b+224,s->final_count);
     w32(b+228,s->touched_count);w32(b+232,s->build_count);w32(b+236,s->clock_count);w32(b+240,boot_count);w32(b+244,boot_bytes);
     if(au_ringed(s)){memcpy(b+320,s->ring,96);memcpy(b+416,s->ring_snapshot,96);}
+    if(s->projected){
+        w64(b+512,s->floor);w64(b+520,s->retired_frames);w64(b+528,s->retired_clocks);
+        w64(b+536,s->retired_status_frames);w64(b+544,s->retired_status_clocks);
+        w32(b+552,s->sticky_clock);w32(b+556,8); /* fixed predecessor halo */
+        w64(b+560,s->final_frame[0]);w64(b+568,s->final_frame[1]);w32(b+576,s->final_present);
+        w32(b+580,s->marker_present);w64(b+584,s->marker_frame);w64(b+592,s->marker_index);
+    }
     at=fixed;memcpy(b+at,v->header,16);at+=16;
     for(i=0;i<boot_count;++i){uint32_t n=r32(v->metadata+source);const uint8_t *raw=v->metadata+source+4;
         w64(b+at,r64(raw+8));w32(b+at+8,r32(raw));w32(b+at+12,n-20);memcpy(b+at+16,raw+16,n-20);at+=16+n-20;source+=4+n;
@@ -336,7 +397,8 @@ static int au_encode(const au_state *s,au_pools pools,const pfm2_config *cfg,con
     for(i=0;i<s->build_count;++i){const au_build *e=pools.builds+i;
         memset(b+at,0,80);w32(b+at,e->owner);w32(b+at+4,e->width!=0);w64(b+at+8,e->frame);
         for(j=0;j<3;++j)w64(b+at+16+8*j,e->records[j]);
-        w64(b+at+40,e->abandoned);w64(b+at+48,e->call_excluded);w64(b+at+56,e->index);w32(b+at+64,e->width);at+=80;
+        w64(b+at+40,e->abandoned);w64(b+at+48,e->call_excluded);w64(b+at+56,e->index);w32(b+at+64,e->width);
+        if(s->projected){w32(b+at+68,e->touched);w64(b+at+72,e->last_use);}at+=80;
         memcpy(b+at,e->raw,e->width);at+=e->width;
     }
     for(i=0;i<s->clock_count;++i){w64(b+at,pools.clocks[i].index);memcpy(b+at+8,pools.clocks[i].raw,96);at+=104;}

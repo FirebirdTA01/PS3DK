@@ -48,9 +48,10 @@ def main():
     if args.sanitize:
         flags += [f'-fsanitize={args.sanitize}', '-fno-omit-frame-pointer', '-fno-sanitize-recover=all']
     binaries = {}
-    for name in ('test', 'fixture'):
-        inputs = [HERE / f'combined2_encoder_{name}.c', src / 'roll_combined2.c',
-                  src / 'roll_combined.c', src / 'roll_ppu.c']
+    for name in ('test', 'fixture', 'projection'):
+        inputs = ([HERE / 'combined2_projection_test.c'] if name == 'projection' else
+                  [HERE / f'combined2_encoder_{name}.c', src / 'roll_combined2.c'])
+        inputs += [src / 'roll_combined.c', src / 'roll_ppu.c']
         exe = out / ('combined2-encoder-' + name + ('.exe' if sys.platform == 'win32' else ''))
         command = flags + list(map(str, inputs)) + ['-o', str(exe)]
         before = dependencies(flags, inputs)
@@ -69,9 +70,10 @@ def main():
         binaries[name] = exe
     print(f'PS3DK_PROF_ROLLING_COMBINED2_ENCODER={binaries["fixture"]}', flush=True)
     results = []
-    for case in ('planner', 'overflow', 'undersized'):
+    for case in ('planner', 'overflow', 'undersized', 'projection'):
         with (out / (case + '.stdout')).open('wb') as stdout, (out / (case + '.stderr')).open('wb') as stderr:
-            r = subprocess.run([str(binaries['test']), case], stdout=stdout, stderr=stderr, timeout=60)
+            command = [str(binaries['projection'])] if case == 'projection' else [str(binaries['test']), case]
+            r = subprocess.run(command, stdout=stdout, stderr=stderr, timeout=60)
         results.append(dict(case=case, rc=r.returncode))
         print(f'{case}: rc={r.returncode}', flush=True)
     (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')

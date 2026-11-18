@@ -36,9 +36,13 @@ static int partition(size_t *n,size_t count,size_t size,uint32_t *at)
 }
 #include "roll_combined2_fifo.h"
 #include "roll_combined2_auto.h"
-typedef struct {uint32_t magic,windows;fi_state fifo;au_state automatic;} side;
 typedef struct {
-    uint32_t magic,core_offset,side_offset,runs_offset,groups_offset,reserved;
+    uint32_t magic,windows,new_windows,latest_closed;
+    uint64_t retired_windows,retired_window_id,retired_window_frame,retired_window_end;
+    fi_state fifo;au_state automatic;
+} side;
+typedef struct {
+    uint32_t magic,core_offset,side_offset,runs_offset,groups_offset,retained_slots;
     uint32_t auto_finals_offset,auto_touched_offset,auto_builds_offset,auto_clocks_offset;
     pfm2_config cfg;pfm2_layout layout;pfm_layout core_layout;pfm_core_config core_cfg;
 } context;
@@ -66,9 +70,9 @@ static int plan(const pfm2_config *cfg,context *c)
     c->core_cfg.family_flags=cfg->family_flags;c->core_cfg.rsx_domains=cfg->rsx_domains;
     if(pfm_core_plan(&c->core_cfg,&c->core_layout)!=PFR_OK)return PFR_INVALID;
     bound=c->core_layout.checkpoint_bound;
-    if(!plus64(&bound,48))return PFR_INVALID;
-    if((cfg->family_flags&64)&&(!plus64(&bound,64+404)||!times64(&bound,cfg->fifo_membership_runs,24)
-       ||!times64(&bound,cfg->accounting_groups,32)))return PFR_INVALID;
+    if(!plus64(&bound,48+128))return PFR_INVALID;
+    if((cfg->family_flags&64)&&(!plus64(&bound,128+404)||!times64(&bound,cfg->fifo_membership_runs,32)
+       ||!times64(&bound,cfg->accounting_groups,40)))return PFR_INVALID;
     if((cfg->family_flags&128)&&(!plus64(&bound,32+532+216+208)||!plus64(&bound,cfg->auto_bootstrap_bytes)
        ||!times64(&bound,(uint64_t)cfg->auto_final_runs+cfg->auto_touched_runs,24)
        ||!times64(&bound,cfg->auto_build_entries,608)||!times64(&bound,cfg->auto_clock_anchors,104)))return PFR_INVALID;
@@ -103,12 +107,14 @@ static int encode(const context *c,const void *a,void *output,size_t capacity,si
     uint8_t *b=output;uint64_t length,expected_chunks,expected_bytes,old_status;
     const au_state *au=&s->automatic;size_t at,common=0,inner,auto_inner=0;uint32_t i;int rc;
     int has_fifo=(c->cfg.family_flags&64)!=0,has_auto=(c->cfg.family_flags&128)!=0;
+    size_t fixed=c->retained_slots?128:96;
     if(s->magic!=F2_SIDE||f->run_count>c->cfg.fifo_membership_runs||f->group_count>c->cfg.accounting_groups
        ||s->windows>c->cfg.windows||pfm_core_snapshot(core(c),a,&v)!=PFR_OK)return PFR_INVALID;
     inner=has_fifo?fi_wire_size(f):0;
     if(has_auto){rc=au_size(au,auto_pools(c,a),&c->cfg,&v.ppu,&auto_inner);if(rc)return rc;}
-    length=96+16+(uint64_t)v.ppu.metadata_bytes+v.sections_bytes+16+16+4;
-    if(has_fifo)length+=64+(uint64_t)inner+(uint64_t)f->group_count*32;
+    length=fixed+16+(uint64_t)v.ppu.metadata_bytes+v.sections_bytes+16+16+4;
+    if(has_fifo)length+=(c->retained_slots?128:64)+(uint64_t)inner+(uint64_t)f->group_count*(c->retained_slots?40:32)
+        +(c->retained_slots?(uint64_t)f->run_count*8:0);
     if(has_auto)length+=32+(uint64_t)auto_inner;
     if(length>capacity||length>c->cfg.shared.checkpoint_bytes)return PFR_CHECKPOINT_BYTES;
     old_status=f->statuses?f->statuses-1:0;
@@ -116,7 +122,9 @@ static int encode(const context *c,const void *a,void *output,size_t capacity,si
     if(!plus64(&expected_chunks,v.ppu_record_chunks)||!plus64(&expected_chunks,v.spu_event_chunks)
        ||!plus64(&expected_chunks,f->event_chunks)||!plus64(&expected_chunks,old_status)
        ||!plus64(&expected_chunks,f->parsed)||!plus64(&expected_chunks,au->op_chunks)
-       ||!plus64(&expected_chunks,au->statuses?au->statuses-1:0))return PFR_COUNTER_RANGE;
+       ||!plus64(&expected_chunks,au->statuses?au->statuses-1:0)
+       ||!plus64(&expected_chunks,au->retired_frames)||!plus64(&expected_chunks,au->retired_clocks)
+       ||!times64(&expected_chunks,s->retired_windows,2))return PFR_COUNTER_RANGE;
     if(v.ppu.metadata_bytes<(uint64_t)v.ppu.metadata_count*4)return PFR_INVALID;
     expected_bytes=v.ppu.metadata_bytes-(uint64_t)v.ppu.metadata_count*4;
     if(!times64(&expected_bytes,v.ppu_record_chunks,28)||!times64(&expected_bytes,v.ppu.physical_rows,32)
@@ -124,25 +132,38 @@ static int encode(const context *c,const void *a,void *output,size_t capacity,si
        ||!times64(&expected_bytes,f->event_chunks,36)||!times64(&expected_bytes,f->events,96)
        ||!times64(&expected_bytes,old_status,100)||!times64(&expected_bytes,f->parsed,100)
        ||!times64(&expected_bytes,au->op_chunks,36)||!times64(&expected_bytes,au->ops,au_width(au))
-       ||!times64(&expected_bytes,au->statuses?au->statuses-1:0,au_ringed(au)?228:148))return PFR_COUNTER_RANGE;
+       ||!times64(&expected_bytes,au->statuses?au->statuses-1:0,au_ringed(au)?228:148)
+       ||!times64(&expected_bytes,au->retired_clocks,116)
+       ||!times64(&expected_bytes,au->retired_frames,20+(au_ringed(au)?528:(au_mask(au)&512)?480:(au_mask(au)&256)?416:(au_mask(au)&16)?384:352))
+       ||!times64(&expected_bytes,s->retired_windows,104))return PFR_COUNTER_RANGE;
     if(expected_chunks!=v.ppu.next||expected_bytes!=v.ppu.bytes)return PFR_INVALID;
-    memset(b,0,96);memcpy(b,"PFRMIX01",8);w16(b+8,2);w16(b+10,96);w32(b+12,6);memcpy(b+16,v.ppu.header,16);
-    w64(b+32,v.ppu.next);w64(b+40,v.ppu.bytes);w64(b+48,length-100);w32(b+56,3|(has_auto?4:0)|(has_fifo?8:0));
+    memset(b,0,fixed);memcpy(b,"PFRMIX01",8);w16(b+8,c->retained_slots?3:2);w16(b+10,(uint16_t)fixed);w32(b+12,6);memcpy(b+16,v.ppu.header,16);
+    w64(b+32,v.ppu.next);w64(b+40,v.ppu.bytes);w64(b+48,length-fixed-4);w32(b+56,3|(has_auto?4:0)|(has_fifo?8:0));
     for(i=0;i<6;++i)w16(b+64+2*i,1);
-    section(b+96,1,v.ppu.metadata_count,v.ppu.metadata_bytes);memcpy(b+112,v.ppu.metadata,v.ppu.metadata_bytes);at=112+v.ppu.metadata_bytes;
+    if(c->retained_slots){w64(b+80,au->floor);w64(b+88,s->retired_windows);w64(b+96,s->retired_window_id);
+        w64(b+104,s->retired_window_frame);w64(b+112,s->retired_window_end);}
+    section(b+fixed,1,v.ppu.metadata_count,v.ppu.metadata_bytes);memcpy(b+fixed+16,v.ppu.metadata,v.ppu.metadata_bytes);at=fixed+16+v.ppu.metadata_bytes;
     rc=pfm_core_sections(core(c),a,b+at,capacity-at,&common);if(rc!=PFR_OK)return rc;
     if(common!=v.sections_bytes)return PFR_INVALID;
     at+=common;
     section(b+at,5,(uint32_t)has_auto,has_auto?(uint32_t)(32+auto_inner):0);at+=16;
     if(has_auto){memset(b+at,0,32);w32(b+at,(uint32_t)auto_inner);w64(b+at+8,au->status_chunks);at+=32;
         rc=au_encode(au,auto_pools(c,a),&c->cfg,&v.ppu,b+at,auto_inner);if(rc)return rc;at+=auto_inner;}
-    section(b+at,6,(uint32_t)has_fifo,has_fifo?(uint32_t)(64+inner+(size_t)f->group_count*32):0);at+=16;
+    section(b+at,6,(uint32_t)has_fifo,has_fifo?(uint32_t)((c->retained_slots?128:64)+inner
+        +(size_t)f->group_count*(c->retained_slots?40:32)+(c->retained_slots?(size_t)f->run_count*8:0)):0);at+=16;
     if(has_fifo){
     memset(b+at,0,64);w32(b+at,(uint32_t)inner);w32(b+at+4,f->group_count);
     w64(b+at+8,f->config_index);w64(b+at+16,f->status_index);w64(b+at+24,f->event_chunks);
-    w64(b+at+32,f->status_chunks);w64(b+at+40,f->chunks);w64(b+at+48,f->bytes);at+=64;
+    w64(b+at+32,f->status_chunks);w64(b+at+40,f->chunks);w64(b+at+48,f->bytes);
+    if(c->retained_slots){w32(b+at+56,1);w32(b+at+60,f->run_count);memset(b+at+64,0,64);
+        w64(b+at+64,f->floor);w64(b+at+72,f->retired_rows);w64(b+at+80,f->retired_groups);
+        w64(b+at+88,f->retired_runs);w64(b+at+96,f->retired_frame);w64(b+at+104,f->unknown_windows);}
+    at+=c->retained_slots?128:64;
     at+=fi_encode(f,runs(c,a),v.ppu.next,v.ppu.clock_frequency,(r32(v.ppu.header+12)&512)!=0,b+at);
-    for(i=0;i<f->group_count;++i){w64(b+at,g[i].window);w64(b+at+8,g[i].rows);w64(b+at+16,g[i].first);w64(b+at+24,g[i].last);at+=32;}
+    if(c->retained_slots)for(i=0;i<f->run_count;++i){w64(b+at,runs(c,a)[i].index);at+=8;}
+    for(i=0;i<f->group_count;++i){w64(b+at,g[i].window);w64(b+at+8,g[i].rows);w64(b+at+16,g[i].first);w64(b+at+24,g[i].last);
+        if(c->retained_slots)w64(b+at+32,g[i].index);
+        at+=c->retained_slots?40:32;}
     }
     if(at!=length-4)return PFR_INVALID;
     w32(b+at,crc(b,at));*written=at+4;return PFR_OK;
@@ -178,8 +199,20 @@ int pfm2_work(const void *opaque,const void *chunk,size_t n,uint64_t *core_work,
        ||!times64(&extra,c->cfg.accounting_groups,32)||!times64(&extra,c->cfg.windows,32)
        ||!times64(&extra,auto_rows,1024*((uint64_t)c->cfg.auto_final_runs+c->cfg.auto_touched_runs+c->cfg.auto_build_entries+1))
        ||base>UINT64_MAX-extra)return PFO_RESOURCE;
+    /* Schema3 compacts the prepared state after EVERY chunk. Reserve the
+     * bounded metadata filter and pool reconstruction before mutating scratch;
+     * the accepted arena is never used as compaction scratch. */
+    if(c->retained_slots&&
+       (!times64(&extra,(uint64_t)c->cfg.shared.metadata_bytes/24+1,
+                    (uint64_t)c->cfg.auto_build_entries+c->cfg.auto_clock_anchors+16)
+        ||!times64(&extra,c->cfg.auto_build_entries,
+                    32*((uint64_t)c->cfg.auto_final_runs+c->cfg.auto_touched_runs+1))
+        ||!times64(&extra,c->cfg.auto_clock_anchors,sizeof(au_clock))
+        ||!times64(&extra,c->cfg.fifo_membership_runs,sizeof(fi_run))
+        ||base>UINT64_MAX-extra))return PFO_RESOURCE;
     *core_work=base;*family_work=extra;return PFR_OK;
 }
+static int project_prepared(const context *,void *,uint64_t);
 int pfm2_prepare(void *opaque,const void *a,void *b,const void *chunk,size_t n,
                  void *cp,size_t capacity,pfo_prepared *result)
 {
@@ -212,6 +245,10 @@ int pfm2_prepare(void *opaque,const void *a,void *b,const void *chunk,size_t n,
         if(ty==43&&len==80&&(r32(view.ppu.header+12)&512)){
             if(pfm_core_window(core(c),a,r64(raw+48),&window)==PFR_OK){
                 known_window=1;first=window.first_frame;last=window.closed?window.last_frame:UINT64_MAX;
+            }else if(c->retained_slots&&r64(raw+48)&&r64(raw+48)<=s->retired_window_id){
+                /* An old claimed identity has no retained bounds. Keep the row
+                 * and mark that evidence unavailable; never invent a window. */
+                known_window=2;first=0;last=s->retired_window_frame;
             }
         }
         rc=fi_accept(&s->fifo,runs(c,b),c->cfg.fifo_membership_runs,groups(c,b),c->cfg.accounting_groups,
@@ -232,12 +269,84 @@ int pfm2_prepare(void *opaque,const void *a,void *b,const void *chunk,size_t n,
     }
     rc=pfm_core_accept(core(c),a,b,raw,n,policy,c->cfg.shared.prepare_work-family_work,result);if(rc!=PFR_OK)return rc;
     if(ty==31||(ty==34&&r16(raw+18)==0)){rc=pfm_core_bind_rsx(core(c),b,r32(raw+24));if(rc!=PFR_OK)return rc;}
-    if(ty==41){if(s->windows==c->cfg.windows){result->reason=PFR_IDENTITIES;return PFO_RESOURCE;}++s->windows;}
+    if(ty==41){if(s->windows==c->cfg.windows){result->reason=PFR_IDENTITIES;return PFO_RESOURCE;}++s->windows;++s->new_windows;}
     if(ty==42){rc=fi_close(&s->fifo,r32(raw+20),r64(raw+28));
-        if(rc>0){result->reason=(uint32_t)rc;return PFO_RESOURCE;}if(rc!=PFR_OK)return rc;
+        if(rc>0){result->reason=(uint32_t)rc;return PFO_RESOURCE;}if(rc!=PFR_OK)return rc;s->latest_closed=r32(raw+20);
     }
-    if(!result->terminal){rc=encode(c,b,cp,capacity,&written);
+    if(!result->terminal){
+        if(c->retained_slots){rc=project_prepared(c,b,view.ppu.next+1);
+            if(rc>0){result->reason=(uint32_t)rc;return PFO_RESOURCE;}if(rc!=PFR_OK)return rc;}
+        rc=encode(c,b,cp,capacity,&written);
         if(rc>0){result->reason=(uint32_t)rc;return PFO_RESOURCE;}if(rc!=PFR_OK)return rc;
     }
     result->checkpoint_bytes=written;return PFR_OK;
+}
+int pfm2_retention(void *opaque,void *a,uint32_t slots,void *cp,size_t capacity,size_t *written)
+{
+    context *c=opaque;pfm_core_view v;
+    if(!c||c->magic!=F2_MAGIC||c->retained_slots||slots<2||slots>64||!(c->cfg.family_flags&128)
+       ||!cp||!written||capacity<c->cfg.shared.checkpoint_bytes
+       ||pfm_core_snapshot(core(c),a,&v)!=PFR_OK||v.ppu.next||v.ppu.bytes)return PFR_INVALID;
+    c->retained_slots=slots;state(c,a)->automatic.projected=1;state(c,a)->fifo.projected=1;
+    return encode(c,a,cp,capacity,written);
+}
+int pfm2_pressure(void *opaque,const void *a)
+{
+    const context *c=opaque;
+    if(!c||c->magic!=F2_MAGIC||!c->retained_slots||!a)return PFR_INVALID;
+    /* Finalized history retires at prepare, independently of physical slots.
+     * Real live-support exhaustion still refuses before ACK; it never forces
+     * a full-slot rewrite merely to advance the history frontier. */
+    return 0;
+}
+typedef struct {const context *c;const void *arena;} projection_filter;
+static int keep_auto_support(void *opaque,uint32_t ty,uint64_t index,const uint8_t *p,size_t n)
+{
+    const projection_filter *f=opaque;const au_state *s=&state(f->c,f->arena)->automatic;
+    au_pools pools=auto_pools(f->c,f->arena);uint32_t i;(void)p;(void)n;
+    if(ty==36){for(i=0;i<s->build_count;++i)if(pools.builds[i].width&&pools.builds[i].index==index)return 1;return 0;}
+    if(ty==38){for(i=0;i<s->clock_count;++i)if(pools.clocks[i].index==index)return 1;return 0;}
+    if(ty==41||ty==42)return r32(p+4)>state(f->c,f->arena)->retired_window_id;
+    return 1;
+}
+static int project_prepared(const context *c,void *b,uint64_t floor)
+{
+    pfm_core_view v;projection_filter filter;au_state *s;
+    uint64_t chunks,bytes,expected_chunks,expected_bytes,old_windows;int rc;size_t at;side *side_state;
+    if(pfm_core_snapshot(core(c),b,&v)!=PFR_OK||v.ppu.terminal||floor!=v.ppu.next)return PFR_INVALID;
+    side_state=state(c,b);s=&side_state->automatic;
+    old_windows=side_state->retired_windows;
+    for(at=0;at<v.ppu.metadata_bytes;){const uint8_t *raw=v.ppu.metadata+at+4;uint32_t n=r32(v.ppu.metadata+at);at+=4+n;
+        if(r32(raw)==42&&r64(raw+8)<floor&&r32(raw+20)!=side_state->latest_closed){
+            if(n!=52||!side_state->windows||fi_inc(&side_state->retired_windows,1))return PFR_INVALID;
+            --side_state->windows;side_state->retired_window_id=r32(raw+20);
+            side_state->retired_window_frame=r64(raw+28);side_state->retired_window_end=r64(raw+8);
+        }
+    }
+    side_state->new_windows=0;
+    rc=fi_project(&side_state->fifo,runs(c,b),groups(c,b),floor);if(rc)return rc;
+    expected_chunks=s->retired_frames;expected_bytes=s->retired_clocks;
+    rc=au_project_state(s,auto_pools(c,b),&c->cfg,floor);if(rc)return rc;
+    expected_chunks=s->retired_frames-expected_chunks;expected_bytes=s->retired_clocks-expected_bytes;
+    chunks=expected_chunks+expected_bytes;
+    bytes=expected_chunks*(20+(au_ringed(s)?528:(au_mask(s)&512)?480:(au_mask(s)&256)?416:(au_mask(s)&16)?384:352))
+        +expected_bytes*116;
+    chunks+=(side_state->retired_windows-old_windows)*2;bytes+=(side_state->retired_windows-old_windows)*104;
+    filter.c=c;filter.arena=b;
+    rc=pfm_core_project_metadata(core(c),b,keep_auto_support,&filter,&expected_chunks,&expected_bytes);
+    if(rc||chunks!=expected_chunks||bytes!=expected_bytes)return PFR_INVALID;
+    return PFR_OK;
+}
+int pfm2_project(void *opaque,const void *a,void *b,uint64_t floor,void *cp,size_t capacity,size_t *written)
+{
+    const context *c=opaque;pfm_core_view v;
+    if(!c||c->magic!=F2_MAGIC||!c->retained_slots||!a||!b||a==b||!cp||!written
+       ||capacity<c->cfg.shared.checkpoint_bytes||pfm_core_snapshot(core(c),a,&v)!=PFR_OK
+       ||v.ppu.terminal||floor>v.ppu.next||state(c,a)->automatic.floor!=v.ppu.next
+       ||state(c,a)->fifo.floor!=v.ppu.next)return PFR_INVALID;
+    /* The original slot is already committed. Its old retained floor must not
+     * resurrect history or change the accepted checkpoint. Prepare did all
+     * pruning at its own next_chunk; this callback only relocates that state. */
+    memcpy(b,a,c->layout.arena_bytes);
+    return encode(c,b,cp,capacity,written);
 }

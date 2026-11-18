@@ -3,22 +3,25 @@
 #define FI_CEIL (UINT64_C(1)<<63)
 enum { FI_CONFIG=1,FI_EVENT=2,FI_VALID_TB=4,FI_STATUS=8,FI_SAT=16,
        FI_FINAL=32,FI_ACCOUNT=64,FI_UNASSOCIATED=128,FI_CLOCK=256 };
-typedef struct {uint32_t owner,reserved;uint64_t first,last;} fi_run;
-typedef struct {uint64_t window,rows,first,last;} fi_group;
+typedef struct {uint32_t owner,reserved;uint64_t first,last,index;} fi_run;
+typedef struct {uint64_t window,rows,first,last,index;} fi_group;
 typedef struct {
     uint32_t flags,run_count,group_count,reserved;
     uint64_t history,events,enter,exit,statuses,valid_tb;
     uint64_t parsed,missing,seq,frame,window,status_enter,status_exit;
     uint64_t config_index,status_index,event_chunks,status_chunks,chunks,bytes;
+    uint64_t floor,retired_rows,retired_groups,retired_runs,retired_frame,unknown_windows;
+    uint32_t projected,new_groups,new_runs,reserved2;
     uint8_t config[64],event[96],status[80];
 } fi_state;
 static int fi_inc(uint64_t *n,uint64_t by)
 {if(by>UINT64_MAX-*n)return PFR_COUNTER_RANGE;*n+=by;return PFR_OK;}
 static uint64_t fi_succ(uint64_t n){return n==UINT64_MAX?n:n+1;}
-static int fi_touch(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *e)
+static int fi_touch(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *e,uint64_t index)
 {
     uint32_t owner=r32(e+40),start=0,end,count;uint64_t first=r64(e+48),last=first;
     if(!(r16(e+38)&1)){s->flags|=FI_UNASSOCIATED;return PFR_OK;}
+    if(s->retired_runs&&first<=s->retired_frame)return PFR_INVALID;
     while(start<s->run_count&&(runs[start].owner<owner
           ||(runs[start].owner==owner&&fi_succ(runs[start].last)<first)))++start;
     end=start;
@@ -29,7 +32,8 @@ static int fi_touch(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *e)
     }
     count=s->run_count-(end-start)+1;if(count>cap)return PFR_IDENTITIES;
     memmove(runs+start+1,runs+end,(size_t)(s->run_count-end)*sizeof *runs);
-    runs[start].owner=owner;runs[start].reserved=0;runs[start].first=first;runs[start].last=last;
+    runs[start].owner=owner;runs[start].reserved=0;runs[start].first=first;runs[start].last=last;runs[start].index=index;
+    if(end==start)++s->new_runs;
     s->run_count=count;return PFR_OK;
 }
 static int fi_config(fi_state *s,const uint8_t *p,size_t n,uint64_t hz,int owner,int domain)
@@ -42,7 +46,7 @@ static int fi_config(fi_state *s,const uint8_t *p,size_t n,uint64_t hz,int owner
        ||(begin&3)||(end&3)||begin>=end||end>=UINT32_C(0x20000000))return PFR_INVALID;
     memcpy(s->config,p,64);s->flags|=FI_CONFIG;return PFR_OK;
 }
-static int fi_event(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *p)
+static int fi_event(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *p,uint64_t index)
 {
     const uint8_t *c=s->config,*old=s->event;uint64_t seq=r64(p),wrap=r64(p+8);
     uint32_t owner=r32(c+12),begin=r32(c+40),end=r32(c+44),tail=r32(p+60),target;
@@ -66,7 +70,7 @@ static int fi_event(fi_state *s,fi_run *runs,uint32_t cap,const uint8_t *p)
            ||(flags&1)!=(r16(old+38)&1)||r32(p+40)!=r32(old+40)||r64(p+48)!=r64(old+48)))return PFR_INVALID;
         if(!(flags&2)&&(s->flags&FI_VALID_TB)&&r64(p+16)<s->valid_tb)return PFR_INVALID;
     }
-    rc=fi_touch(s,runs,cap,p);if(rc!=PFR_OK)return rc;
+    rc=fi_touch(s,runs,cap,p,index);if(rc!=PFR_OK)return rc;
     if(fi_inc(&s->events,1)!=PFR_OK||(kind==1&&fi_inc(&s->enter,1)!=PFR_OK)
        ||(kind==6&&fi_inc(&s->exit,1)!=PFR_OK))return PFR_COUNTER_RANGE;
     if(!(flags&2)){s->valid_tb=r64(p+24);s->flags|=FI_VALID_TB;}
@@ -97,7 +101,7 @@ static int fi_status(fi_state *s,const uint8_t *p,size_t n)
     s->status_enter=s->enter;s->status_exit=s->exit;return PFR_OK;
 }
 static int fi_account(fi_state *s,fi_group *groups,uint32_t cap,const uint8_t *p,size_t n,
-                      int windowed,int declared,uint64_t first,uint64_t last)
+                      int windowed,int declared,uint64_t first,uint64_t last,uint64_t index)
 {
     uint32_t reasons;uint64_t seq,frame,window,prepared,published,wraps;fi_group *g;
     if(n!=80||r16(p)!=1||r64(p+72)||r32(p+4)!=r32(s->config+4)||r32(p+8)!=r32(s->config+48)
@@ -110,12 +114,14 @@ static int fi_account(fi_state *s,fi_group *groups,uint32_t cap,const uint8_t *p
        ||wraps>prepared/4||wraps>published/4)return PFR_INVALID;
     if(windowed){if(!declared||window<s->window||frame<first||frame>last)return PFR_INVALID;}
     else if(window)return PFR_INVALID;
+    if(declared==2&&fi_inc(&s->unknown_windows,1)!=PFR_OK)return PFR_COUNTER_RANGE;
     if(s->group_count&&groups[s->group_count-1].window==window){
         g=&groups[s->group_count-1];if(fi_inc(&g->rows,1)!=PFR_OK)return PFR_COUNTER_RANGE;g->last=frame;
     }else{
         if(s->group_count>=cap)return PFR_IDENTITIES;
-        g=&groups[s->group_count++];g->window=window;g->rows=1;g->first=g->last=frame;
+        g=&groups[s->group_count++];g->window=window;g->rows=1;g->first=g->last=frame;++s->new_groups;
     }
+    g->index=index;
     if(fi_inc(&s->parsed,1)!=PFR_OK||fi_inc(&s->missing,seq-s->seq-1)!=PFR_OK)return PFR_COUNTER_RANGE;
     s->seq=seq;s->frame=frame;s->window=window;s->flags|=FI_ACCOUNT;return PFR_OK;
 }
@@ -131,14 +137,14 @@ static int fi_accept(fi_state *s,fi_run *runs,uint32_t run_cap,fi_group *groups,
     case 32:
         if(n<16||r16(p)!=1||r16(p+2)||r32(p+4)!=r32(s->config+4)||r32(p+12))return PFR_INVALID;
         count=r32(p+8);if(!count||(uint64_t)count*96+16!=n)return PFR_INVALID;
-        for(i=0;i<count;++i){rc=fi_event(s,runs,run_cap,p+16+(size_t)i*96);if(rc!=PFR_OK)return rc;}
+        for(i=0;i<count;++i){rc=fi_event(s,runs,run_cap,p+16+(size_t)i*96,index);if(rc!=PFR_OK)return rc;}
         if(fi_inc(&s->event_chunks,1)!=PFR_OK)return PFR_COUNTER_RANGE;
         charge+=(uint64_t)count;break;
     case 33:
         rc=fi_status(s,p,n);if(rc!=PFR_OK)return rc;
         s->status_index=index;s->status_chunks=s->event_chunks;break;
     case 43:
-        rc=fi_account(s,groups,group_cap,p,n,windowed,declared_window,first,last);if(rc!=PFR_OK)return rc;break;
+        rc=fi_account(s,groups,group_cap,p,n,windowed,declared_window,first,last,index);if(rc!=PFR_OK)return rc;break;
     default:return PFR_INVALID;
     }
     if(fi_inc(&s->history,charge)!=PFR_OK||fi_inc(&s->chunks,1)!=PFR_OK
@@ -149,6 +155,25 @@ static int fi_close(fi_state *s,uint64_t window,uint64_t last)
 {
     if((s->flags&FI_ACCOUNT)&&s->window==window&&s->frame>last)return PFR_INVALID;
     return fi_inc(&s->history,1);
+}
+static int fi_project(fi_state *s,fi_run *runs,fi_group *groups,uint64_t floor)
+{
+    uint32_t i,out=0;uint64_t frame=r64(s->event+48);uint32_t owner=r32(s->event+40);
+    if(!s->projected||floor<s->floor)return PFR_INVALID;
+    for(i=0;i<s->group_count;++i){
+        if(i+1<s->group_count&&groups[i].index<floor){
+            if(fi_inc(&s->retired_rows,groups[i].rows)||fi_inc(&s->retired_groups,1))return PFR_COUNTER_RANGE;
+        }else groups[out++]=groups[i];
+    }
+    s->group_count=out;out=0;
+    for(i=0;i<s->run_count;++i){
+        int pin=(s->flags&FI_EVENT)&&(r16(s->event+38)&1)&&runs[i].owner==owner&&runs[i].first<=frame&&frame<=runs[i].last;
+        if(runs[i].index<floor&&!pin){
+            if(fi_inc(&s->retired_runs,1))return PFR_COUNTER_RANGE;
+            if(runs[i].last>s->retired_frame)s->retired_frame=runs[i].last;
+        }else runs[out++]=runs[i];
+    }
+    s->run_count=out;s->floor=floor;s->new_groups=0;s->new_runs=0;return PFR_OK;
 }
 static size_t fi_wire_size(const fi_state *s)
 {return 164u+((s->flags&FI_CONFIG)?64u:0u)+((s->flags&FI_EVENT)?96u:0u)

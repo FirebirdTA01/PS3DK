@@ -340,3 +340,152 @@ fn unrelated_ppu_rows_still_pay_for_live_auto_build_storage_scans(){
     assert!(matches!(combined::checkpoint_combined(&bytes,Limits{work_items:base+u64::from(BUILDS)-1,..Limits::default()}),
         Err(Error::Limit(_))),"joint temporary-size walks must charge the AUTO build population even on a PPU chunk");
 }
+
+// ---- Schema3 own-next replay -------------------------------------------------
+// Each nonterminal chunk is followed by compaction at floor = its own next
+// chunk. These are Rust replays of that writer transition from the original
+// bytes; the writer's own emitted checkpoints are compared by the runtime tests.
+fn projected(f:&File,cut:usize)->Vec<u8>{
+    combined::checkpoint_combined_projected(&f.bytes()[..offset(f,cut)],Limits::default()).expect("valid projected original prefix")
+}
+fn sections3(cp:&[u8])->Vec<(u32,Vec<u8>)>{
+    assert_eq!(&cp[..12],b"PFRMIX01\x03\x00\x80\x00");assert_eq!(get32(cp,12),6);
+    assert_eq!(get64(cp,48) as usize,cp.len()-132);assert_eq!(crc32(&cp[..cp.len()-4]),get32(cp,cp.len()-4));
+    let mut at=128;let mut out=Vec::new();for kind in 1..=6u16{
+        assert_eq!(&cp[at..at+2],&kind.to_le_bytes());let end=at+16+get32(cp,at+8) as usize;
+        out.push((get32(cp,at+4),cp[at+16..end].to_vec()));at=end;
+    }assert_eq!(at,cp.len()-4);out
+}
+fn rebuild3(cp:&[u8],sections:&[(u32,Vec<u8>)])->Vec<u8>{
+    let mut out=cp[..128].to_vec();
+    for (i,(count,bytes)) in sections.iter().enumerate(){
+        out.extend_from_slice(&(i as u16+1).to_le_bytes());out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());out.extend_from_slice(bytes);
+    }
+    let n=out.len()-128;put64(&mut out,48,n as u64);out.extend_from_slice(&[0;4]);repair(&mut out);out
+}
+fn metadata_entries(section:&[u8])->Vec<Vec<u8>>{
+    let mut at=0;let mut out=Vec::new();
+    while at<section.len(){let n=get32(section,at) as usize;out.push(section[at+4..at+4+n].to_vec());at+=4+n;}out
+}
+fn metadata_section(entries:&[Vec<u8>])->(u32,Vec<u8>){
+    let mut b=Vec::new();for e in entries{b.extend_from_slice(&(e.len() as u32).to_le_bytes());b.extend_from_slice(e);}(entries.len() as u32,b)
+}
+/// Moves one anchor between the AUTO support list (and shared metadata) and its
+/// retired census, keeping every count, length and CRC self-consistent.
+fn forge_anchor(cp:&[u8],raw:&[u8],restore:bool)->Vec<u8>{
+    let mut s=sections3(cp);let auto=s[4].1.clone();let mut inner=auto[32..].to_vec();
+    let na=get32(&inner,236) as usize;let end=inner.len()-4;let first=end-104*na;
+    let index=get64(raw,8);let status=get64(&inner,160);let before=status!=0&&index<status;
+    let mut entry=index.to_le_bytes().to_vec();entry.extend_from_slice(&raw[16..raw.len()-4]);assert_eq!(entry.len(),104);
+    if restore{inner.splice(first..first,entry);}else{assert_eq!(&inner[first..first+104],entry.as_slice());inner.drain(first..first+104);}
+    let delta:i64=if restore{1}else{-1};
+    put32(&mut inner,236,(na as i64+delta) as u32);let size=inner.len() as u64;put64(&mut inner,16,size);
+    let r=(get64(&inner,528) as i64-delta) as u64;put64(&mut inner,528,r);
+    if before{let r=(get64(&inner,544) as i64-delta) as u64;put64(&mut inner,544,r);}
+    repair(&mut inner);let mut wrapper=auto[..32].to_vec();put32(&mut wrapper,0,inner.len() as u32);wrapper.extend_from_slice(&inner);
+    s[4].1=wrapper;
+    let mut entries=metadata_entries(&s[0].1);
+    if restore{let at=entries.iter().position(|e|get64(e,8)>index).unwrap_or(entries.len());entries.insert(at,raw.to_vec());}
+    else{let at=entries.iter().position(|e|e.as_slice()==raw).expect("anchor in shared metadata");entries.remove(at);}
+    s[0]=metadata_section(&entries);rebuild3(cp,&s)
+}
+fn raw_chunk(f:&File,i:usize)->Vec<u8>{f.bytes()[offset(f,i)..offset(f,i+1)].to_vec()}
+fn auto_inner(cp:&[u8])->Vec<u8>{sections3(cp)[4].1[32..].to_vec()}
+
+#[test]
+fn schema3_own_next_replay_is_canonical_and_associative_at_every_cut(){
+    for x in [fixture(),window_fixture()]{
+        let f=&x.file;full(f);let bytes=f.bytes();let end=f.chunks.len()-1;
+        let all:Vec<_>=(0..=end).map(|cut|projected(f,cut)).collect();
+        for cut in 0..=end{
+            let cp=&all[cut];sections3(cp);
+            assert_eq!(get64(cp,32),cut as u64);assert_eq!(get64(cp,80),cut as u64,"schema3 floor is the checkpoint's own next chunk");
+            assert_eq!(get64(&auto_inner(cp),512),cut as u64,"AUTO floor matches the shared frontier");
+            assert_eq!(&combined::advance_combined(cp,&[],Limits::default()).unwrap(),cp,"own-next transition is idempotent");
+            for target in [cut,(cut+1).min(end),(cut+5).min(end),end]{
+                assert_eq!(&combined::advance_combined(cp,&bytes[offset(f,cut)..offset(f,target)],Limits::default()).unwrap(),&all[target],
+                    "bulk advance {cut}->{target} equals the per-chunk replay");
+            }
+        }
+        // Finalized history leaves the checkpoint: the ninth anchor retires the
+        // first, and an eight-anchor predecessor halo stays.
+        let inner=auto_inner(&all[x.cut]);assert_eq!((get32(&inner,236),get64(&inner,528)),(8,1));
+        assert!(matches!(combined::checkpoint_combined_projected(&bytes,Limits::default()),Err(Error::Checkpoint("TRAILER has no successor checkpoint"))));
+    }
+}
+
+#[test]
+fn schema3_ordinary_schema2_bytes_and_opt_in_are_unchanged(){
+    let x=fixture();let f=&x.file;
+    for cut in [0,3,x.cut]{assert_eq!(&direct(f,cut)[8..12],&[2,0,96,0],"schema2 replay never compacts");}
+    // Only an AUTO-capable capture can opt in to own-next retention.
+    let mut plain=fixture().file;plain.flags&=!128;
+    assert!(combined::checkpoint_combined_projected(&plain.bytes()[..offset(&plain,2)],Limits::default()).is_err());
+}
+
+#[test]
+fn schema3_reader_keeps_decoded_retained_support_after_writer_compaction(){
+    let x=fixture();let f=&x.file;let bytes=f.bytes();let end=f.chunks.len()-1;
+    for cut in [3,x.cut-2,x.cut]{
+        let old=retained(&direct(f,cut),&bytes[offset(f,cut)..],Limits::default()).unwrap();
+        let new=retained(&projected(f,cut),&bytes[offset(f,cut)..],Limits::default()).unwrap();
+        let (a,b)=(old.auto.as_ref().unwrap(),new.auto.as_ref().unwrap());
+        assert_eq!(b.support_floor,Some(cut as u64));
+        assert_eq!((a.prefix,a.retained,a.cumulative),(b.prefix,b.retained,b.cumulative));
+        assert_eq!(a.ops,b.ops);assert_eq!(a.frames,b.frames);
+        // Anchors after the imported floor are decoded retained support even
+        // though the validator retires all but eight of them per chunk.
+        let after=|r:&ps3dk_prof::auto_rsx::rolling::Retained|r.clocks.iter().filter(|c|c.index>=cut as u64).count();
+        assert_eq!(after(a),after(b));
+        if f.chunks[..cut].iter().all(|c|c.ty!=36){assert_eq!(a.builds,b.builds,"retained build support");}
+        let (ra,rb)=(old.auto_report.as_ref().unwrap(),new.auto_report.as_ref().unwrap());
+        assert_eq!(ra.intervals,rb.intervals);
+        assert_eq!(ra.frames.iter().map(|f|&f.unavailable).collect::<Vec<_>>(),rb.frames.iter().map(|f|&f.unavailable).collect::<Vec<_>>());
+        assert_eq!(old.fifo.as_ref().unwrap().retained.events,new.fifo.as_ref().unwrap().retained.events);
+    }
+    // The validator's own final checkpoint no longer holds what the reader kept.
+    let last=auto_inner(&projected(f,end));assert_eq!(get32(&last,236),8);assert!(get64(&last,528)>=1);
+}
+
+#[test]
+fn schema3_physical_chain_validates_each_own_next_transition(){
+    let x=fixture();full(&x.file);let f=&x.file;let cuts=[0,x.cut,x.fifo_middle,f.chunks.len()];
+    let p3=|cuts:&[usize]|->Vec<Part>{let bytes=f.bytes();cuts.windows(2).map(|p|Part{checkpoint:projected(f,p[0]),
+        payload:bytes[offset(f,p[0])..offset(f,p[1])].to_vec(),first:p[0] as u64,next:p[1] as u64}).collect()};
+    let layout=Layout::new(2,2,32768,8192);
+    let ok=physical(&container(&p3(&cuts),layout,1,0),layout,Limits::default()).expect("schema3 physical own-next chain");
+    let base=physical(&container(&parts(f,&cuts),layout,1,0),layout,Limits::default()).unwrap();
+    assert_eq!(ok.retained.first_chunk,x.cut as u64);
+    assert_eq!(ok.retained.auto.as_ref().unwrap().ops,base.retained.auto.as_ref().unwrap().ops);
+    assert_eq!(ok.retained.auto_report.as_ref().unwrap().intervals,base.retained.auto_report.as_ref().unwrap().intervals);
+    // A schema2 successor of a schema3 predecessor, and the reverse, are not
+    // the deterministic transition and never fall back to an older root.
+    for a in [true,false]{
+        let mut all=if a{p3(&cuts)}else{parts(f,&cuts)};let other=if a{parts(f,&cuts)}else{p3(&cuts)};
+        all[2].checkpoint=other[2].checkpoint.clone();
+        assert!(physical(&container(&all,layout,1,0),layout,Limits::default()).is_err(),"mixed schema successor {a}");
+    }
+}
+
+#[test]
+fn schema3_forged_frontier_retained_history_or_dropped_dependency_refuses(){
+    let x=fixture();let f=&x.file;let bytes=f.bytes();let cp=projected(f,x.cut);
+    let suffix=&bytes[offset(f,x.cut)..];retained(&cp,suffix,Limits::default()).expect("canonical control");
+    // Old oldest-retained policy: floor below the own next chunk.
+    for floor in [0,x.cut as u64-1,x.cut as u64+1]{
+        let mut bad=cp.clone();put64(&mut bad,80,floor);repair(&mut bad);
+        cp_error(retained(&bad,suffix,Limits::default()));cp_error(combined::advance_combined(&bad,&[],Limits::default()));
+    }
+    let clocks:Vec<usize>=f.chunks.iter().enumerate().filter(|(i,c)|c.ty==38&&*i<x.cut).map(|(i,_)|i).collect();assert_eq!(clocks.len(),9);
+    // Self-consistent control: forging and restoring the same anchor is exact.
+    let first=raw_chunk(f,clocks[0]);let second=raw_chunk(f,clocks[1]);
+    assert_eq!(forge_anchor(&forge_anchor(&cp,&second,false),&second,true),cp,"forge helper control");
+    // Keeps finalized history: the retired first anchor is still present.
+    let kept=forge_anchor(&cp,&first,true);
+    cp_error(retained(&kept,suffix,Limits::default()));cp_error(combined::advance_combined(&kept,&[],Limits::default()));
+    // Drops a still-needed dependency: one of the eight predecessor anchors.
+    let dropped=forge_anchor(&cp,&second,false);
+    cp_error(retained(&dropped,suffix,Limits::default()));cp_error(combined::advance_combined(&dropped,&[],Limits::default()));
+}

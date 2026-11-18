@@ -14,6 +14,7 @@
 #define pfm_core_bind_rsx ps3dk_prof__roll_combined_core_bind_rsx
 #define pfm_core_declared ps3dk_prof__roll_combined_core_declared
 #define pfm_core_window ps3dk_prof__roll_combined_core_window
+#define pfm_core_project_metadata ps3dk_prof__roll_combined_core_project_metadata
 typedef struct {
     pfm_config base;
     uint32_t family_flags, rsx_domains;
@@ -54,4 +55,5 @@ int pfm_core_bind_rsx(const void *,void *,uint32_t);
  * Open windows have closed=0,last_frame=0. Closed lookup permits late rows;
  * the family owner applies its actual row/window membership constraints. */
 int pfm_core_window(const void *,const void *,uint64_t,pfm_window *);
+int pfm_core_project_metadata(const void *,void *,pfp_keep_metadata,void *,uint64_t *,uint64_t *);
 #endif

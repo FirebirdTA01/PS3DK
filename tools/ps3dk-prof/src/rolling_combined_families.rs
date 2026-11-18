@@ -30,6 +30,7 @@ struct Window {begin:u64,closed:Option<u64>,first:u64,last:Option<u64>}
 pub(super) struct Families {
     auto:Option<auto::CombinedAdapter>,fifo:Option<fifo::CombinedAdapter>,bootstrap:Vec<auto::Original>,
     rsx:BTreeSet<u32>,windows:BTreeMap<u64,Window>,closed:u64,pub restoring:bool,
+    retired_windows:super::RetiredWindows,
 }
 pub(super) struct Saved {pub auto:Option<(Vec<u8>,u64)>,pub fifo:Option<(Vec<u8>,fifo::CombinedPosition)>}
 pub(super) struct Proof {
@@ -41,8 +42,10 @@ impl Families {
         let rsx=BTreeSet::new();let boot=[];
         let auto=if flags(header)&128!=0{Some(arun(b,|l,w|auto::CombinedAdapter::new(arefs(header,&boot,p,&rsx),l,w))?)}else{None};
         let fifo=if flags(header)&64!=0{Some(fifo::CombinedAdapter::new(frefs(p,&rsx)).map_err(ferr)?)}else{None};
-        Ok(Self{auto,fifo,bootstrap:Vec::new(),rsx,windows:BTreeMap::new(),closed:0,restoring:false})
+        Ok(Self{auto,fifo,bootstrap:Vec::new(),rsx,windows:BTreeMap::new(),closed:0,restoring:false,retired_windows:super::RetiredWindows::default()})
     }
+    pub(super) fn restore_windows(&mut self,w:super::RetiredWindows){self.retired_windows=w;self.closed=w.count;}
+    pub(super) fn retired_windows(&self)->super::RetiredWindows{self.retired_windows}
     pub(super) fn accept(&mut self,c:&crate::rolling::Chunk<'_>,header:&[u8;16],p:&PpuState,s:&mut spu::Adapter,b:&mut Budget)->Result<(),Error>{
         if matches!(c.ty,1|2|17){
             if self.bootstrap.len()>=3{return ck("combined bootstrap count");}
@@ -87,7 +90,10 @@ impl Families {
             self.auto=Some(a);
         }
         if let Some((bytes,position))=saved.fifo{
-            let f=frun(b,|l,w|fifo::CombinedAdapter::import(frefs(p,&self.rsx),&bytes,next,position,self.closed,l,w))?;
+            let mut f=frun(b,|l,w|fifo::CombinedAdapter::import(frefs(p,&self.rsx),&bytes,next,position,self.closed,l,w))?;
+            if f.position().projection.map(|p|p.floor)!=self.projection(){return ck("FIFO projection identity");}
+            f.window_prefix(self.retired_windows.id,self.retired_windows.last);
+            if f.position().projection.is_some_and(|q|q.unknown!=0)&&self.retired_windows.count==0{return ck("unavailable FIFO windows without retirement");}
             let support=frun(b,|l,w|f.support(l,w))?;
             for (i,t,payload) in &support{check_support(metadata,*i,*t,payload,b)?;}
             if support.len()!=metadata.iter().filter(|raw|matches!(u32_at(raw,0),31|33)).count(){return ck("FIFO shared support census");}
@@ -99,14 +105,57 @@ impl Families {
         if let Some(f)=&self.fifo{for g in &f.position().groups{
             b.charge(u128::from(usize::BITS-self.windows.len().leading_zeros())+1)?;
             if g.window!=0 {
-                let w=self.windows.get(&g.window).ok_or(Error::Checkpoint("accounting undeclared window"))?;
-                if g.first<w.first || w.last.is_some_and(|last|g.last>last){return ck("accounting window frame bounds");}
+                if let Some(w)=self.windows.get(&g.window){
+                    if g.first<w.first || w.last.is_some_and(|last|g.last>last){return ck("accounting window frame bounds");}
+                }else if g.window>self.retired_windows.id||g.last>self.retired_windows.last{return ck("accounting undeclared window");}
             }
         }}Ok(())
     }
     pub(super) fn mark(&mut self,b:&mut Budget)->Result<(),Error>{
         if let Some(a)=&mut self.auto{arun(b,|l,w|a.mark_retained(l,w))?;}
         if let Some(f)=&mut self.fifo{frun(b,|l,w|f.mark_retained(l,w))?;}Ok(())
+    }
+    pub(super) fn projection(&self)->Option<u64>{self.auto.as_ref().and_then(|a|a.summary().projection.map(|p|p.0))}
+    /// Schema3 opt-in on a fresh chunk-zero state, matching the writer's arena.
+    pub(super) fn enable_projection(&mut self,b:&mut Budget)->Result<(),Error>{
+        let a=self.auto.as_mut().ok_or(Error::Checkpoint("schema3 retention requires AUTO"))?;
+        arun(b,|_,_|a.enable_projection())?;
+        if let Some(f)=&mut self.fifo{f.enable_projection().map_err(ferr)?;}Ok(())
+    }
+    /// Every retirement counter and retained support population. Reapplying
+    /// the own-next transition to an accepted schema3 state must keep these.
+    pub(super) fn census(&self,b:&mut Budget)->Result<Vec<u64>,Error>{
+        b.charge(16)?;let w=self.retired_windows;
+        let mut n=vec![w.count,w.id,w.last,w.end,self.windows.len() as u64,self.closed];
+        if let Some(a)=&self.auto{let (builds,clocks,touched,finals)=a.populations();
+            let (floor,retired,before)=a.summary().projection.unwrap_or_default();
+            n.extend([floor,retired[0],retired[1],before[0],before[1],builds,clocks,touched,finals]);}
+        if let Some(f)=&self.fifo{let p=f.position();let q=p.projection.unwrap_or_default();
+            n.extend([q.floor,q.rows,q.groups,q.runs,q.frame,q.unknown,p.groups.len() as u64,p.run_indices.len() as u64]);}
+        Ok(n)
+    }
+    pub(super) fn project_support(&mut self,floor:u64,metadata:&mut Vec<Vec<u8>>,ppu:&mut PpuState,b:&mut Budget)->Result<(),Error>{
+        b.charge(self.windows.len() as u128+1)?;
+        let latest=self.windows.iter().rev().find(|(_,w)|w.closed.is_some()).map(|(&id,_)|id);
+        let w=&mut self.retired_windows;
+        self.windows.retain(|&id,v|{
+            if Some(id)!=latest&&v.closed.is_some_and(|at|at<floor){
+                w.count+=1;w.id=id;w.last=v.last.unwrap();w.end=v.closed.unwrap();false
+            }else{true}
+        });
+        ppu.project_windows(w.id as u32,Some(w.last))?;
+        if let Some(f)=&mut self.fifo{frun(b,|l,m|f.project_support(floor,l,m))?;f.window_prefix(w.id,w.last);}
+        let a=self.auto.as_mut().ok_or(Error::Checkpoint("projection without AUTO"))?;
+        arun(b,|l,w|a.project_support(floor,l,w))?;
+        b.charge(a.storage_work()+metadata.len() as u128*32+1)?;
+        let keep:BTreeSet<_>=a.support().filter(|s|matches!(s.kind,36|38)).map(|s|s.index).collect();
+        let mut removed=0usize;
+        metadata.retain(|raw|{
+            let remove=match u32_at(raw,0){36|38=>!keep.contains(&u64_at(raw,8)),41|42=>u64::from(u32_at(raw,20))<=w.id,_=>false};
+            if remove{removed+=raw.len()+4;false}else{true}
+        });
+        b.metadata_used=b.metadata_used.checked_sub(removed).ok_or(Error::Checkpoint("projection metadata budget"))?;
+        Ok(())
     }
     pub(super) fn finish(self,b:&mut Budget)->Result<(Option<auto::Retained>,Option<fifo::Retained>,Option<auto::Report>),Error>{
         let a=self.auto.map(|a|arun(b,|l,w|a.finish(l,w))).transpose()?;
@@ -120,11 +169,18 @@ impl Families {
             put64(&mut a,8,state.summary().status_chunks);a.extend_from_slice(&inner);
         }
         let mut f=Vec::new();if let Some(state)=&self.fifo{
-            let inner=frun(b,|l,w|state.encode(self.closed,l,w))?;let p=state.position();f=vec![0;64];
+            let inner=frun(b,|l,w|state.encode(self.closed,l,w))?;let p=state.position();f=vec![0;if p.projection.is_some(){128}else{64}];
             put32(&mut f,0,u32::try_from(inner.len()).map_err(|_|Error::Limit("FIFO inner bytes"))?);
             put32(&mut f,4,u32::try_from(p.groups.len()).map_err(|_|Error::Limit("FIFO groups"))?);
             for (at,n) in [(8,p.config),(16,p.status),(24,p.event_chunks),(32,p.status_chunks),(40,p.chunks),(48,p.bytes)]{put64(&mut f,at,n);}
-            f.extend_from_slice(&inner);for g in &p.groups{for n in [g.window,g.rows,g.first,g.last]{f.extend_from_slice(&n.to_le_bytes());}}
+            if let Some(q)=p.projection{
+                put32(&mut f,56,1);put32(&mut f,60,p.run_indices.len() as u32);
+                for (at,n) in [(64,q.floor),(72,q.rows),(80,q.groups),(88,q.runs),(96,q.frame),(104,q.unknown)]{put64(&mut f,at,n);}
+            }
+            f.extend_from_slice(&inner);
+            if p.projection.is_some(){for n in &p.run_indices{f.extend_from_slice(&n.to_le_bytes());}}
+            for g in &p.groups{for n in [g.window,g.rows,g.first,g.last]{f.extend_from_slice(&n.to_le_bytes());}
+                if p.projection.is_some(){f.extend_from_slice(&g.index.to_le_bytes());}}
         }
         if a.len().checked_add(f.len()).is_none_or(|n|n>b.limits.checkpoint_bytes){return Err(Error::Limit("checkpoint bytes"));}
         b.bytes(a.len())?;b.bytes(f.len())?;Ok((a,f))
@@ -145,15 +201,35 @@ impl Families {
     }
     pub(super) fn proof(&self,next:u64,b:&mut Budget)->Result<Proof,Error>{
         self.validate_groups(b)?;let mut out=Proof{chunks:0,bytes:0,demands:Vec::new(),groups:Vec::new(),fifo_config:None,fifo_final:None};
+        if self.retired_windows.count!=0{
+            out.chunks+=2*u128::from(self.retired_windows.count);out.bytes+=104*u128::from(self.retired_windows.count);
+            out.demands.push(positions::IntervalDemand{start:2,end:self.retired_windows.end+1,chunks:self.retired_windows.count*2});
+        }
         let groups=self.fifo.as_ref().map_or(0,|f|f.position().groups.len());
-        if groups.checked_add(7).is_none_or(|n|n>b.limits.position_temporary_items){return Err(Error::Limit("family position temporary entries"));}
-        out.demands.try_reserve_exact(7).map_err(|_|Error::Limit("family demand allocation"))?;
+        if groups.checked_add(14).is_none_or(|n|n>b.limits.position_temporary_items){return Err(Error::Limit("family position temporary entries"));}
+        out.demands.try_reserve_exact(14).map_err(|_|Error::Limit("family demand allocation"))?;
         out.groups.try_reserve_exact(groups).map_err(|_|Error::Limit("family group allocation"))?;
         if let Some(a)=&self.auto{
             let s=a.summary();b.charge(16)?;
             if let Some(config)=s.config{lists(&mut out.demands,config,s.status,s.counts.op_chunks,s.status_chunks,next)?;statuses(&mut out.demands,config,s.status,s.counts.statuses)?;}
             let old=s.counts.statuses.saturating_sub(1);out.chunks+=u128::from(s.counts.op_chunks)+u128::from(old);
             out.bytes+=36*u128::from(s.counts.op_chunks)+u128::from(s.row_width)*u128::from(s.counts.ops)+(20+u128::from(s.status_width))*u128::from(old);
+            if let Some((floor,retired,before))=s.projection{
+                for i in 0..2{
+                    if retired[i]==0{continue;}
+                    let start=s.config.ok_or(Error::Checkpoint("retired support without CONFIG"))?.checked_add(1).ok_or(Error::Checkpoint("retired support position"))?;
+                    if let Some(status)=s.status{
+                        let after=retired[i].checked_sub(before[i]).ok_or(Error::Checkpoint("retired support STATUS split"))?;
+                        if before[i]!=0{out.demands.push(positions::IntervalDemand{start,end:floor.min(status),chunks:before[i]});}
+                        if after!=0{out.demands.push(positions::IntervalDemand{start:start.max(status.checked_add(1).ok_or(Error::Checkpoint("STATUS position"))?),end:floor,chunks:after});}
+                    }else{
+                        if before[i]!=0{return ck("retired support absent STATUS");}
+                        out.demands.push(positions::IntervalDemand{start,end:floor,chunks:retired[i]});
+                    }
+                    out.chunks+=u128::from(retired[i]);
+                    out.bytes+=u128::from(retired[i])*u128::from(if i==0{20+s.coverage_width}else{116});
+                }
+            }
             if s.final_seen && (s.status_ops!=s.counts.ops || s.status_chunks!=s.counts.op_chunks){return ck("AUTO post-final demand");}
         }
         if let Some(f)=&self.fifo{
@@ -163,10 +239,13 @@ impl Families {
                 lists(&mut out.demands,config,status,p.event_chunks,p.status_chunks,next)?;statuses(&mut out.demands,config,status,n.statuses)?;
                 let final_index=f.status().filter(|s|s.is_final()).map(|_|p.status);
                 if final_index.is_some() && p.status_chunks!=p.event_chunks{return ck("FIFO post-final demand");}
+                if let Some(q)=p.projection{if q.rows!=0{out.demands.push(positions::IntervalDemand{start:config+1,end:q.floor.min(final_index.unwrap_or(next)),chunks:q.rows});}}
                 for g in &p.groups {
                     if g.window==0{out.demands.push(positions::IntervalDemand{start:config.checked_add(1).ok_or(Error::Checkpoint("FIFO release overflow"))?,end:final_index.unwrap_or(next),chunks:g.rows});}
-                    else{let w=self.windows.get(&g.window).ok_or(Error::Checkpoint("FIFO window position"))?;
-                        out.groups.push(positions::FifoWindowGroup{window:g.window,begin:w.begin,closed:w.closed,rows:g.rows});}
+                    else if let Some(w)=self.windows.get(&g.window){out.groups.push(positions::FifoWindowGroup{window:g.window,begin:w.begin,closed:w.closed,rows:g.rows});}
+                    else if g.window<=self.retired_windows.id{
+                        out.demands.push(positions::IntervalDemand{start:config+1,end:final_index.unwrap_or(next),chunks:g.rows});
+                    }else{return ck("FIFO window position");}
                 }
                 if !out.groups.is_empty(){out.fifo_config=Some(config);out.fifo_final=final_index;}
             }
@@ -210,13 +289,20 @@ pub(super) fn decode(auto_section:(usize,&[u8]),fifo_section:(usize,&[u8]),heade
             b.bytes(inner)?;out.auto=Some((bytes[32..].to_vec(),u64_at(bytes,8)));
         }else{
             let count=u32_at(bytes,4) as usize;if count>b.limits.frame_runs{return Err(Error::Limit("accounting window groups"));}
-            if u64_at(bytes,56)!=0 || 64u128+inner as u128+32*count as u128!=bytes.len() as u128{return ck("FIFO wrapper fields");}
+            let projected=u32_at(bytes,56)==1;let fixed=if projected{128}else{64};let width=if projected{40}else{32};
+            let runs=u32_at(bytes,60) as usize;
+            if (!projected&&u64_at(bytes,56)!=0)||runs>b.limits.frame_runs
+                ||fixed as u128+inner as u128+8*runs as u128+width as u128*count as u128!=bytes.len() as u128{return ck("FIFO wrapper fields");}
+            if projected&&bytes[112..128].iter().any(|&x|x!=0){return ck("FIFO projection reserved");}
             b.charge(bytes.len() as u128+count as u128)?;
             let mut position=fifo::CombinedPosition{config:u64_at(bytes,8),status:u64_at(bytes,16),event_chunks:u64_at(bytes,24),
-                status_chunks:u64_at(bytes,32),chunks:u64_at(bytes,40),bytes:u64_at(bytes,48),groups:Vec::new()};
+                status_chunks:u64_at(bytes,32),chunks:u64_at(bytes,40),bytes:u64_at(bytes,48),groups:Vec::new(),
+                projection:projected.then(||fifo::Projection{floor:u64_at(bytes,64),rows:u64_at(bytes,72),groups:u64_at(bytes,80),runs:u64_at(bytes,88),frame:u64_at(bytes,96),unknown:u64_at(bytes,104)}),run_indices:Vec::new()};
             position.groups.try_reserve_exact(count).map_err(|_|Error::Limit("accounting group allocation"))?;
-            for raw in bytes[64+inner..].chunks_exact(32){position.groups.push(fifo::AccountingGroup{window:u64_at(raw,0),rows:u64_at(raw,8),first:u64_at(raw,16),last:u64_at(raw,24)});}
-            out.fifo=Some((bytes[64..64+inner].to_vec(),position));
+            position.run_indices.try_reserve_exact(runs).map_err(|_|Error::Limit("FIFO run position allocation"))?;
+            for raw in bytes[fixed+inner..fixed+inner+8*runs].chunks_exact(8){position.run_indices.push(u64_at(raw,0));}
+            for raw in bytes[fixed+inner+8*runs..].chunks_exact(width){position.groups.push(fifo::AccountingGroup{window:u64_at(raw,0),rows:u64_at(raw,8),first:u64_at(raw,16),last:u64_at(raw,24),index:if projected{u64_at(raw,32)}else{0}});}
+            out.fifo=Some((bytes[fixed..fixed+inner].to_vec(),position));
         }
     }Ok(out)
 }

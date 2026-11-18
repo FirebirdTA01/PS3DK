@@ -6,8 +6,8 @@
 #include <string.h>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL output:%d: %s\n",__LINE__,#x);exit(1); } } while(0)
 #define CAP 24576u
-typedef struct { uint64_t next,sum; } model;
-typedef struct { unsigned calls,mode; } encoder;
+typedef struct { uint64_t next,sum,since_boundary,floor; } model;
+typedef struct { unsigned calls,mode,policy,projects,fail_projection; } encoder;
 typedef struct { uint8_t bytes[CAP]; uint64_t length; unsigned writes,syncs,fail_write,fail_sync,short_io; } memory;
 typedef struct {
     memory *m; pfr_store *store; void *scratch; pfo_output *out;
@@ -27,6 +27,7 @@ static int sync_io(void *ctx){memory *m=ctx;return ++m->syncs==m->fail_sync?-1:0
 static int prepare(void *ctx,const void *accepted,void *candidate,const void *raw,size_t n,void *cp,size_t cap,pfo_prepared *result){
     encoder *e=ctx;const model *a=accepted;model *b=candidate;const uint8_t *p=raw;uint8_t *q=cp;
     ++e->calls;CHECK(n==24&&cap==32);CHECK(r64(p+8)==a->next);*b=*a;++b->next;b->sum+=a->next+1;
+    if(e->policy)++b->since_boundary;
     if(e->mode==1){result->reason=PFR_SUPPORT;return PFO_RESOURCE;}
     if(e->mode==2){result->checkpoint_bytes=33;return PFR_OK;}
     if(e->mode==3){result->terminal=1;return PFR_OK;}
@@ -82,14 +83,55 @@ static void short_and_partial(void){fixture f;pfo_view v;unsigned i;uint8_t stat
     /* Wire type7 is not TRAILER. Only the original type6 ends this stream. */
     chunk(status,1,0);w32(status,7);w32(status+20,crc(status,20));CHECK(pfo_accept(f.out,status,24)==PFR_OK);CHECK(!view(&f).terminal);
     accept(&f,2,1);CHECK(pfo_accept(f.out,"",0)==PFR_END);CHECK(pfo_finish(f.out)==PFR_OK);destroy(&f);}
+static int support_pressure(void *ctx,const void *candidate){
+    encoder *e=ctx;const model *m=candidate;CHECK(e->policy);return m->since_boundary>=2;
+}
+static int support_project(void *ctx,const void *accepted,void *projected,uint64_t floor,
+                           void *checkpoint,size_t cap,size_t *written){
+    encoder *e=ctx;const model *a=accepted;model *b=projected;uint8_t *p=checkpoint;
+    CHECK(e->policy&&cap==32&&floor>=a->floor&&floor<=a->next);++e->projects;
+    if(e->fail_projection)return PFR_INVALID;
+    *b=*a;b->since_boundary=0;b->floor=floor;
+    w64(p,b->next);w64(p+8,b->sum);w64(p+16,0);w64(p+24,floor);*written=32;return PFR_OK;
+}
+static void projected_support(void){
+    fixture f;unsigned i;init(&f);f.enc.policy=1;
+    CHECK(pfo_support(f.out,support_pressure,support_project)==PFR_OK);
+    CHECK(pfo_support(f.out,support_pressure,support_project)==PFR_INVALID);
+    for(i=0;i<20;++i){pfo_view v;pfr_view store;const model *m;
+        accept(&f,i,0);v=view(&f);m=v.accepted_arena;
+        CHECK(pfr_get_view(f.store,&store)==PFR_OK);
+        CHECK(v.accepted_next_chunk==i+1&&m->next==i+1&&m->sum==(uint64_t)(i+1)*(i+2)/2);
+        CHECK(m->since_boundary==1&&m->floor==store.first_chunk);
+        CHECK(v.pending_bytes==24&&f.enc.projects==i);
+        if(i>2)CHECK(store.first_chunk==i-2);
+    }
+    CHECK(f.enc.calls==39); /* original preflight plus revalidation after each projection */
+    accept(&f,20,1);CHECK(pfo_finish(f.out)==PFR_OK&&view(&f).committed_next_chunk==21);
+    CHECK(f.enc.projects==19); /* no successor projection after the actual trailer */
+    destroy(&f);
+    for(i=0;i<3;++i){uint8_t p[24];pfo_view before;unsigned io;init(&f);f.enc.policy=1;
+        CHECK(pfo_support(f.out,support_pressure,support_project)==PFR_OK);accept(&f,0,0);
+        before=view(&f);io=f.m->writes+f.m->syncs;chunk(p,1,0);
+        if(i==0)f.enc.mode=4;else if(i==1)f.m->fail_sync=1;else f.enc.fail_projection=1;
+        CHECK(pfo_accept(f.out,p,sizeof p)!=PFR_OK);
+        CHECK(view(&f).accepted_next_chunk==before.accepted_next_chunk);
+        CHECK(((const model *)view(&f).accepted_arena)->next==1);
+        if(i==0)CHECK(f.m->writes+f.m->syncs==io&&!f.enc.projects);
+        if(i==1)CHECK(!f.enc.projects);
+        if(i==2)CHECK(f.enc.projects==1&&view(&f).committed_next_chunk==1);
+        destroy(&f);
+    }
+}
 int main(int argc,char **argv){
-    if(argc==1){rotations();refused();faults();inputs();short_and_partial();}
+    if(argc==1){rotations();refused();faults();inputs();short_and_partial();projected_support();}
     else if(argc!=2)return 2;
     else if(!strcmp(argv[1],"rotations"))rotations();
     else if(!strcmp(argv[1],"refused"))refused();
     else if(!strcmp(argv[1],"faults"))faults();
     else if(!strcmp(argv[1],"inputs"))inputs();
     else if(!strcmp(argv[1],"short"))short_and_partial();
+    else if(!strcmp(argv[1],"projection"))projected_support();
     else return 2;
     puts("PASS output ownership, rotations, refusals and fault boundaries");return 0;
 }

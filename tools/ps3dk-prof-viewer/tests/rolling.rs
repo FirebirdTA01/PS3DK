@@ -84,6 +84,10 @@ fn as_cli(s: &Summary) -> Value {
 fn cli_subset(c: &Value) -> Value {
     let mut v = json!({"physical": c["physical"], "retained": c["retained"], "evicted": c["evicted"],
         "source_final": c["source"]["final"], "ppu": c["ppu"]});
+    // CLI storage diagnostics are not displayed by this summary page. Keep
+    // comparing every field the viewer actually presents (including counts).
+    v["physical"].as_object_mut().unwrap().remove("segment_payload_capacity");
+    v["retained"].as_object_mut().unwrap().remove("segment_layout");
     if c["source"]["complete"].is_boolean() {
         v["source_complete"] = c["source"]["complete"].clone();
     }
@@ -298,4 +302,29 @@ fn the_saved_rpcs3_rolling_file_opens_and_matches_the_cli() {
         Some(cli) => assert_matches_cli(s, &cli),
         None => eprintln!("CLI comparison skipped: ps3dk-prof binary not built in this run"),
     }
+}
+
+#[test]
+#[ignore="requires saved real delayed-FIFO runtime capture and the public CLI"]
+fn projected_clock_and_evicted_window_provenance_match_the_cli() {
+    let path=PathBuf::from(std::env::var_os("PS3DK_ROLLING_DELAYED_SAMPLE")
+        .expect("set the real delayed-FIFO capture; no implicit skip"));
+    let app=opened(&path);
+    let d=app.rolling.as_ref().unwrap_or_else(||panic!("projected open: {:?}",app.error));
+    assert!(app.doc.is_none(),"retained data must not become a whole-capture document");
+    let s=&d.summary;
+    let mut cli=run_cli(&path).expect("the public CLI is required");
+    assert_eq!(cli["auto"]["clock_map_scope"],"retained-support");
+    assert!(s.auto.as_ref().unwrap().map_line.starts_with("retained-support: "));
+    let fi=s.fifo.as_ref().unwrap();
+    let unavailable=&cli["fifo"]["window_bounds_unavailable"];
+    assert!(fi.unavailable_window_rows>0&&fi.retained_unavailable_window_rows>0);
+    assert_eq!(unavailable["cumulative_rows"].as_u64(),Some(fi.unavailable_window_rows));
+    assert_eq!(unavailable["retained_record_sequences"].as_array().unwrap().len(),fi.retained_unavailable_window_rows);
+    assert!(unavailable["reason"].as_str().unwrap().contains("no window-specific evidence"));
+    // The shared summary comparison checks every remaining measurement. The
+    // two extra provenance fields are asserted explicitly above.
+    cli["auto"].as_object_mut().unwrap().remove("clock_map_scope");
+    cli["fifo"].as_object_mut().unwrap().remove("window_bounds_unavailable");
+    assert_matches_cli(s,&cli);
 }

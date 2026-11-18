@@ -298,3 +298,10 @@ int pfm_core_window(const void *opaque,const void *a,uint64_t id,pfm_window *out
     if(!found)return PFR_INVALID;
     *out=window;return PFR_OK;
 }
+int pfm_core_project_metadata(const void *opaque,void *a,pfp_keep_metadata keep,void *arg,
+                              uint64_t *chunks,uint64_t *bytes)
+{
+    const context *c=opaque;
+    if(!c||c->magic!=MAGIC)return PFR_INVALID;
+    return pfp_core_project_metadata(core(c),a,keep,arg,chunks,bytes);
+}

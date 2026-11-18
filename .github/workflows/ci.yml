@@ -190,6 +190,8 @@ jobs:
           RETENTION_EXE="$(python3 -c 'import json,sys; rows=[json.loads(x) for x in open(sys.argv[1])]; paths=[r["executable"] for r in rows if r.get("reason")=="compiler-artifact" and r.get("target",{}).get("name")=="rolling_runtime_retention_budget" and r.get("executable")]; assert len(paths)==1; print(paths[0])' "$RUNNER_TEMP/rolling-retention-build.jsonl")"
           python3 tests/host/ps3dk-prof-rolling/run_runtime_retention_live_mutants.py --build-dir "$RUNNER_TEMP/rolling-retention-live-mutants" --rust-test-bin "$RETENTION_EXE"
           python3 tests/host/ps3dk-prof-rolling/run_runtime_schema2.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-schema2"
+          python3 tests/host/ps3dk-prof-rolling/run_runtime_schema2.py --delayed-fifo --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-runtime-delayed-fifo"
+          export PS3DK_PROF_RUNTIME_DELAYED_FIFO="$RUNNER_TEMP/rolling-runtime-delayed-fifo/runtime-schema2"
           export PS3DK_PROF_RUNTIME_SCHEMA2="$RUNNER_TEMP/rolling-runtime-schema2/runtime-schema2"
           cargo test --manifest-path tools/Cargo.toml -p ps3dk-prof --test rolling_runtime_schema2 -- --ignored --test-threads=1
           python3 tests/host/ps3dk-prof-rolling/run_runtime_schema2_preflight.py --cc 'cc -fno-pie -no-pie' --sanitize address --build-dir "$RUNNER_TEMP/rolling-schema2-preflight"

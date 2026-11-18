@@ -36,12 +36,14 @@ static uint64_t s2_bytes,s2_chunks,s2_allocs,s2_alloc_bytes,s2_init_allocs,s2_in
 static uint64_t s2_attach_allocs,s2_attach_bytes,s2_steady_allocs,s2_steady_bytes;
 static uint64_t s2_refused_next,s2_refused_bytes,s2_ack_count,s2_ring_acks;
 static uint64_t s2_refused_read;
+static uint64_t s2_covered,s2_timed,s2_room,s2_other_excluded;
 static uint32_t s2_refused_retired;
 static uint32_t s2_refused_type,s2_refusals,s2_rw,s2_append,s2_main_allocs,s2_maps,s2_mapped_bytes;
 static pthread_mutex_t s2_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s2_cond=PTHREAD_COND_INITIALIZER;
 static int s2_hold=1,s2_parked;
 static uint64_t s2_cycles;
+static int s2_long,s2_windows,s2_batching;
 static uint32_t s2_r32(const uint8_t *b){return (uint32_t)b[0]|(uint32_t)b[1]<<8|(uint32_t)b[2]<<16|(uint32_t)b[3]<<24;}
 static uint64_t s2_r64(const uint8_t *b){return s2_r32(b)|(uint64_t)s2_r32(b+4)<<32;}
 static void s2_path(char *b,size_t cap,const char *name)
@@ -65,6 +67,12 @@ static void s2_app_flush(int behind)
     else if(!synced)gpu_run_to(lag_put);
     synced=0;lag_put=off;
 }
+/* The inherited ring-only fixture deliberately has a no-op clock flush. Here
+ * anchors must really publish and complete so the long run tests their bounded
+ * retirement rather than quarantining the first sixteen report slots. */
+static void s2_device_flush(gpp_ctx *c)
+{S2(c==&context,"clock-flush-owner");s2_app_flush(0);}
+static const gpp_dev s2_device={report,label,s2_device_flush,ld64,st64,ld32,st32};
 static void s2_pace(void)
 {
     S2(!pthread_mutex_lock(&s2_lock),"worker-lock");++s2_cycles;
@@ -107,7 +115,7 @@ static void s2_settle(const auto_capture *a)
     while(LD_ACQ(&a->operations.read_idx)!=LD_ACQ(&a->operations.write_idx)){
         S2(s2_now()<end,"accepted-queue-deadline");sched_yield();
     }
-    /* The next snapshot is after the previous consumer pass and physical flush.
+    /* The next snapshot is after the previous consumer pass and RAM acceptance.
      * This is a handshake with the actual worker, not a sleep-based ordering. */
     s2_pause();
     S2(RETIRED(a)==LD_ACQ(&a->ring.issued),"accepted-blocks-retire");
@@ -154,12 +162,19 @@ int __wrap_ps3dk_prof__roll_combined2_init(void *ctx,size_t cb,const pfm2_config
     return rc;
 }
 int __real_ps3dk_prof__roll_output_accept(pfo_output *,const void *,size_t);
+#ifdef TEST_DELAYED_FIFO
+static void s2_late_accept(int,const uint8_t *);
+#endif
 int __wrap_ps3dk_prof__roll_output_accept(pfo_output *o,const void *raw,size_t n)
 {
     int rc=__real_ps3dk_prof__roll_output_accept(o,raw,n);
-    if(!rc){S2(s2_audit&&s2_bytes+n<=4u*1024u*1024u,"accepted-original-bound");
+#ifdef TEST_DELAYED_FIFO
+    s2_late_accept(rc,raw);
+#endif
+    if(!rc){S2(s2_audit&&s2_bytes+n<=16u*1024u*1024u,"accepted-original-bound");
         S2(fwrite(raw,1,n,s2_audit)==n&&!fflush(s2_audit),"accepted-original-audit");s2_bytes+=n;++s2_chunks;}
     else if(rc==PFO_RESOURCE){const auto_capture *capture_at_refusal=ps3dk_prof__auto_test_capture();
+        S2(!s2_long,"long-run-must-not-exhaust-prefix-support");
         ++s2_refusals;s2_refused_type=s2_r32(raw);s2_refused_next=s2_chunks;s2_refused_bytes=s2_bytes;
         S2(capture_at_refusal,"live-producer-at-refusal");
         s2_refused_read=LD_ACQ(&capture_at_refusal->operations.read_idx);s2_refused_retired=RETIRED(capture_at_refusal);}
@@ -169,10 +184,28 @@ int __wrap_ps3dk_prof__roll_output_accept(pfo_output *o,const void *raw,size_t n
  * Wraps delegate the original queue/ring algorithms; no ack is manufactured. */
 static struct {uint64_t id;uint32_t generation,ordinal;} s2_ledger[6000];
 static uint32_t s2_ledger_count,s2_ledger_at,s2_pending_generation,s2_pending_ordinal;
+#ifdef TEST_DELAYED_FIFO
+static int s2_late_emit_before(uint32_t,uint8_t *,size_t,int *);
+static void s2_late_emit_after(uint32_t,const uint8_t *,int);
+#endif
 int __real_ps3dk_prof__fifo_emit_chunk(prof *,uint32_t,const uint8_t *,size_t);
 int __wrap_ps3dk_prof__fifo_emit_chunk(prof *p,uint32_t ty,const uint8_t *b,size_t bytes)
 {
+#ifdef TEST_DELAYED_FIFO
+    {int held;if(s2_late_emit_before(ty,(uint8_t *)(uintptr_t)b,bytes,&held))return held;}
+#endif
     int rc=__real_ps3dk_prof__fifo_emit_chunk(p,ty,b,bytes);
+#ifdef TEST_DELAYED_FIFO
+    s2_late_emit_after(ty,b,rc);
+#endif
+    if(!rc&&ty==36){
+        S2(bytes==528,"actual-ring-coverage-width");
+        for(unsigned k=0;k<3;++k){const uint8_t *row=b+64+96*k;
+            s2_covered+=s2_r64(row);s2_timed+=s2_r64(row+8);s2_room+=s2_r64(row+16);
+            for(unsigned column=3;column<12;++column)s2_other_excluded+=s2_r64(row+8*column);
+            s2_other_excluded+=s2_r64(b+416+8*k)+s2_r64(b+480+8*k)+s2_r64(b+504+8*k);
+        }
+    }
     if(!rc&&ty==35){uint32_t n=s2_r32(b+8),width=s2_r32(b+12);
         S2(s2_ledger_at==s2_ledger_count&&!s2_pending_generation,"prior-OPS-ack-complete");
         S2(width==176&&n<=6000&&bytes==16+(size_t)n*width,"real-ring-OPS-layout");
@@ -208,10 +241,19 @@ static void s2_setup(int enabled,int resource)
     s2_config.rsx_domains=1;s2_config.windows=8;s2_config.fifo_membership_runs=64;s2_config.accounting_groups=8;s2_config.family_flags=192;
     s2_config.auto_final_runs=64;s2_config.auto_touched_runs=64;s2_config.auto_build_entries=resource?1:64;
     s2_config.auto_clock_anchors=64;s2_config.auto_bootstrap_bytes=32768;s2_config.auto_support_bytes=65536;
+    /* Sparse-drain batching is measured below normal support pressure. The
+     * long/window schedules keep the smaller limits to force retirement. */
+    if(s2_batching){s2_config.auto_build_entries=256;s2_config.windows=256;s2_config.accounting_groups=256;
+        /* The planner reserves their worst-case checkpoint, independently of
+         * this schedule's small number of occupied rows. */
+        s2_config.shared.checkpoint_bytes=s2_options.store.checkpoint_bytes=524288;}
+    if(s2_windows){s2_config.windows=32;s2_config.accounting_groups=32;s2_config.auto_clock_anchors=16;}
 #ifdef TEST_PUBLIC_OPTIONS
     ps3dk_prof_rolling_options public_options=PS3DK_PROF_ROLLING_AUTO_FIFO_INIT(UINT64_C(67108864),UINT64_C(67108864));
     p_roll_selection selected;
     if(resource)public_options.auto_build_entries=1;
+    if(s2_windows){public_options.windows=32;public_options.accounting_groups=32;
+        public_options.auto_build_entries=64;public_options.auto_clock_anchors=16;}
     S2(ps3dk_prof__roll_options_decode(&public_options,&s2_options,&selected)==0,"public-preset-plan");
     s2_config=selected.limits.schema2;
 #endif
@@ -256,7 +298,7 @@ static const auto_capture *s2_attach(void)
     for(uint32_t i=0;i<VRAM;++i)vram_a[i]=(uint8_t)(i*31u+7u);
     memset(labels,0x5a,sizeof labels);
     context=(gpp_ctx){fifo,fifo+PHYS,fifo,(int32_t (*)(gpp_ctx *,uint32_t))(void (*)(void))ps3tc_fifo_wrap_callback};ctrl.put=ctrl.get=IO;
-    ps3dk_prof_test_hooks.gpu_gpp_dev=&device;ps3dk_prof_test_hooks.auto_ring_memory=&s2_memory;
+    ps3dk_prof_test_hooks.gpu_gpp_dev=&s2_device;ps3dk_prof_test_hooks.auto_ring_memory=&s2_memory;
     ps3dk_prof__auto_gcm_init_result(&context,4u*WORDS,4u*WORDS,fifo,0);
     o.ring_blocks=2;o.ring_bytes=1u<<20;o.frame_records=256;o.ring_records=65536;
     S2(ps3dk_prof_auto_attach((void *)&context,&o,&instance,&domain)==0,"actual-native-ring-attach");
@@ -282,13 +324,23 @@ static void s2_plain_after_stop(void)
     S2(ctrl.get==ctrl.put&&ctrl.put==IO+24&&context.current==fifo+6,"ordinary-commands-execute-after-resource-stop");
     S2(s2_ack_count==ack&&s2_ring_acks==ring_ack,"continuation-does-not-ack-or-reuse-profiler-pool");
 }
+#ifdef TEST_DELAYED_FIFO
+#include "runtime_schema2_delayed_fifo.inc"
+#endif
 int main(int argc,char **argv)
 {
-    int enabled,resource,rc;const char *recipe;const auto_capture *a;uint32_t retired_before=0,issued=0;
+    int enabled,resource,rc,batching;const char *recipe;const auto_capture *a;uint32_t retired_before=0,issued=0;
+    uint64_t initial_revision=0;
     uint64_t read_before=0,draws=0;ps3dk_prof_test_rolling_record result={0};char p[1200];FILE *f;
     if(argc!=3){fputs("usage: runtime-schema2 CASE OUTPUT_DIRECTORY\n",stderr);return 2;}
-    setvbuf(stdout,NULL,_IONBF,0);s2_out=argv[2];enabled=strncmp(argv[1],"append-",7)!=0;recipe=enabled?argv[1]:argv[1]+7;
-    resource=!strcmp(recipe,"resource");S2(resource||!strcmp(recipe,"rotation"),"known-case");s2_setup(enabled,resource);a=s2_attach();
+    setvbuf(stdout,NULL,_IONBF,0);s2_out=argv[2];
+#ifdef TEST_DELAYED_FIFO
+    if(!strncmp(argv[1],"late-",5))return s2_late_main(argv[1]);
+#endif
+    enabled=strncmp(argv[1],"append-",7)!=0;recipe=enabled?argv[1]:argv[1]+7;
+    resource=!strcmp(recipe,"resource");s2_windows=!strcmp(recipe,"windows");s2_long=!strcmp(recipe,"long")||s2_windows;batching=s2_batching=!strcmp(recipe,"batching");
+    S2(resource||s2_long||batching||!strcmp(recipe,"rotation"),"known-case");s2_setup(enabled,resource);a=s2_attach();
+    if(enabled&&batching){pfr_view v;S2(pfr_get_view(g_prof->rolling->store,&v)==0,"initial-store-view");initial_revision=v.generation;}
     if(enabled){uint32_t rejected=UINT32_MAX;
         S2(ps3dk_prof_gpu_attach((void *)&context,0,2,100,&rejected)==PS3DK_PROF_ENOTSUP&&rejected==UINT32_MAX,
            "manual-GPU-not-admitted-by-AUTO-profile");}
@@ -314,8 +366,29 @@ int main(int argc,char **argv)
             s2_plain_after_stop();
         }else{ps3dk_prof_frame();s2_app_flush(0);s2_app_flush(0);s2_settle(a);}
     }else{
-        for(unsigned i=0;i<12;++i){uint32_t n=i?40:520;frame(n);draws+=n;s2_app_flush(0);ps3dk_prof_frame();s2_app_flush(0);s2_app_flush(0);s2_settle(a);}
-        issued=LD_ACQ(&a->ring.issued);S2(s2_ring_acks==draws&&issued>4,"more-than-504-real-ring-draws");
+        /* Rotation must fill actual payload slots, not depend on a flush at
+         * every drainer wake. Batching is the complementary sparse schedule. */
+        for(unsigned i=0;i<(s2_long?2000u:batching?12u:32u);++i){uint32_t n=i?(s2_long?1u:batching?40u:1500u):520u;
+            if(s2_windows&&i){
+                S2(ps3dk_prof_capture_end()==0,"short-window-END");
+                ps3dk_prof_frame();s2_app_flush(0);s2_app_flush(0);s2_settle(a);
+                S2(PS3DK_PROF_CAPTURE_WHOLE_RUN()==0,"next-short-window-BEGIN");
+            }
+            frame(n);draws+=n;s2_app_flush(0);ps3dk_prof_frame();s2_app_flush(0);s2_app_flush(0);s2_settle(a);
+            if(enabled&&batching){pfr_view v;pfo_view accepted;
+                S2(pfr_get_view(g_prof->rolling->store,&v)==0&&pfo_get_view(g_prof->rolling->output,&accepted)==0,"batched-store-view");
+                S2(accepted.pending_bytes&&accepted.pending_bytes<g_prof->rolling->buffers.payload_capacity,"partial-payload-owned-in-RAM");
+                S2(v.generation==initial_revision,"partial-drain-does-not-commit-a-slot");}}
+        issued=LD_ACQ(&a->ring.issued);
+        if(s2_long){
+            /* The genuine reserve path can leave a sparse draw without its
+             * timestamp room at a wrap. Append control has the same behavior;
+             * reconcile that explicit column, never forgive capacity loss. */
+            S2(s2_covered==draws&&s2_timed==s2_ring_acks&&s2_timed+s2_room==draws
+                &&!s2_other_excluded&&issued>4,"long-run-no-capacity-loss");
+            printf("long-run draws=%" PRIu64 " timed=%" PRIu64 " room=%" PRIu64 " other=%" PRIu64 "\n",
+                draws,s2_timed,s2_room,s2_other_excluded);
+        }else S2(s2_ring_acks==draws&&issued>4,"more-than-504-real-ring-draws");
     }
     if(!enabled||!resource){
         S2(ps3dk_prof_capture_end()==0,"real-window-END");ps3dk_prof_frame();s2_app_flush(0);s2_app_flush(0);s2_settle(a);
@@ -330,6 +403,7 @@ int main(int argc,char **argv)
         S2(result.accepted_next_chunk==s2_chunks&&result.committed_next_chunk==s2_chunks&&result.accepted_payload_bytes==s2_bytes&&result.committed_payload_bytes==s2_bytes,"original-accepted-committed-frontiers");
         S2(result.state_bytes<=s2_options.max_state_bytes&&result.file_bytes==s2_layout.file_bytes,"explicit-core-state-and-physical-caps");
         S2(!result.io_result&&!result.close_result&&!result.join_result,"no-hidden-terminal-error");s2_copy("capture.profr");
+        if(batching)S2(result.revision==initial_revision+2,"one-payload-commit-plus-terminal-root");
         ps3dk_prof_test_rolling_record repeat;S2(ps3dk_prof_shutdown()==PS3DK_PROF_EALREADY&&ps3dk_prof_test_rolling_result(&repeat)==0&&!memcmp(&result,&repeat,sizeof result),"public-result-immutable");
 #ifdef TEST_PUBLIC_OPTIONS
         ps3dk_prof_rolling_result public_result={0},again;public_result.size=sizeof public_result;public_result.version=1;

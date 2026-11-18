@@ -180,6 +180,11 @@ pub fn page(p: &mut egui::Ui, d: &RollingDoc) {
                     ),
                 ];
                 kv(p, "rolling-fifo", &rows);
+                if f.unavailable_window_rows!=0{
+                    ui::field_message(p,ui::Tone::Neutral,&format!(
+                        "Window bounds unavailable: {} retained row(s), {} cumulatively. The declarations were evicted; these rows provide no window-specific evidence.",
+                        f.retained_unavailable_window_rows,f.unavailable_window_rows));
+                }
             }
         }
     });

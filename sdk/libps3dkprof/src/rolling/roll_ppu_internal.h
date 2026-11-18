@@ -9,6 +9,7 @@
 #define pfp_core_view ps3dk_prof__roll_ppu_core_view
 #define pfp_core_sections ps3dk_prof__roll_ppu_core_sections
 #define pfp_core_accept_external ps3dk_prof__roll_ppu_core_accept_external
+#define pfp_core_project_metadata ps3dk_prof__roll_ppu_core_project_metadata
 typedef struct {
     const uint8_t *header, *metadata;
     uint64_t next, bytes, clock_frequency, physical_rows;
@@ -30,6 +31,13 @@ enum { PFP_EXTERNAL_EVENT=1, PFP_EXTERNAL_APPEND=2, PFP_EXTERNAL_LATEST=3 };
 int pfp_core_accept_external(void *,const void *,void *,const void *,size_t,
                              uint32_t type,uint32_t storage,pfo_prepared *);
 int pfp_core_view(const void *, const void *, pfp_view *);
+/* Prepared arena only. Retire selected COVERAGE/CLOCK/window support; all
+ * declarations, original bootstrap, producer cursors and cumulative frontiers
+ * remain intact. The caller owns the explicit projected-checkpoint census.
+ * keep reads separate family tables, not the metadata being compacted. */
+typedef int (*pfp_keep_metadata)(void *,uint32_t,uint64_t,const uint8_t *,size_t);
+int pfp_core_project_metadata(const void *,void *,pfp_keep_metadata,void *,
+                             uint64_t *removed_chunks,uint64_t *removed_bytes);
 /* Writes sections 2+3 using actual PPU rows. A non-NULL count array selects
  * combined 128-byte rows; NULL preserves standalone 120-byte rows. Counts
  * are keyed by incarnation, bounded by count, never a fabricated prefix. */

@@ -10,6 +10,9 @@ extern "C" {
 #define pfm2_init ps3dk_prof__roll_combined2_init
 #define pfm2_prepare ps3dk_prof__roll_combined2_prepare
 #define pfm2_work ps3dk_prof__roll_combined2_work
+#define pfm2_retention ps3dk_prof__roll_combined2_retention
+#define pfm2_pressure ps3dk_prof__roll_combined2_pressure
+#define pfm2_project ps3dk_prof__roll_combined2_project
 typedef struct {
     pfm_config shared;
     uint32_t rsx_domains, windows, fifo_membership_runs, accounting_groups;
@@ -31,6 +34,11 @@ int pfm2_prepare(void *, const void *, void *, const void *, size_t,
 /* Same checked reservation consumed by prepare, independent of accepted history.
  * On failure both outputs remain unchanged; sum is checked before admission. */
 int pfm2_work(const void *, const void *, size_t, uint64_t *core_work, uint64_t *family_work);
+/* Explicit projected schema; only a fresh initialized chunk0 arena may opt in.
+ * Old standalone schema2 encoder users retain their byte-exact contract. */
+int pfm2_retention(void *,void *,uint32_t,void *,size_t,size_t *);
+int pfm2_pressure(void *,const void *);
+int pfm2_project(void *,const void *,void *,uint64_t,void *,size_t,size_t *);
 #ifdef __cplusplus
 }
 #endif

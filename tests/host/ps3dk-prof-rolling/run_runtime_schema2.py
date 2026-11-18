@@ -26,9 +26,12 @@ def main():
     p.add_argument('--public-options', action='store_true', help='exercise the public preset/setter/result')
     p.add_argument('--automatic-startup', action='store_true', help='link the real AUTO constructor with the public preset')
     p.add_argument('--omit-automatic-startup', action='store_true', help='sensitivity control: omit only that constructor')
+    p.add_argument('--delayed-fifo', action='store_true', help='late FIFO accounting rows against retired windows')
     a = p.parse_args()
     if a.automatic_startup and not a.public_options or a.omit_automatic_startup and not a.automatic_startup:
         p.error('automatic startup requires public options; omission requires automatic startup')
+    if a.delayed_fifo and (a.public_options or a.automatic_startup):
+        p.error('delayed FIFO cases use the private schema2 selector only')
     if os.name != 'posix':
         raise RuntimeError('Linux/WSL host fixture only')
     out = a.build_dir.resolve()
@@ -122,11 +125,15 @@ int32_t gcmAddressToOffset(void *,u32 *);
         flags += ['-DTEST_AUTOMATIC_STARTUP']
         if not a.omit_automatic_startup:
             sources += [lib/'auto_rsx/auto_startup.c']
+    if a.delayed_fifo:
+        flags += ['-DTEST_DELAYED_FIFO']
     # No fake observer bridge. The automatic arm lets product constructor100
     # install options and initialize; the other arms explicitly call real init.
     wraps = ['ps3dk_prof__pal_alloc', 'ps3dk_prof__pal_open_excl', 'ps3dk_prof__pal_open_rw_excl',
              'ps3dk_prof__roll_combined2_init', 'ps3dk_prof__roll_output_accept',
              'ps3dk_prof__fifo_emit_chunk', 'ps3dk_prof__auto_queue_ack', 'ps3dk_prof__auto_ring_ack']
+    if a.delayed_fifo:
+        wraps += ['ps3dk_prof__roll_combined2_prepare']  # retired-frontier oracle (test link wrap)
     obj = out / 'native-provider.o'
     exe = out / 'runtime-schema2'
     commands = [cc + provider_flags + ['-c', str(provider), '-o', str(obj)],

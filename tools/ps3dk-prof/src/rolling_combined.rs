@@ -250,12 +250,20 @@ impl Budget {
 
 struct Lifetime { start: u64, end: Option<u64> }
 struct ReportBoundary { closed: BTreeSet<u32>, open: Option<u32>, first_chunk: u64, prefix_bytes: u64 }
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+struct RetiredWindows { count:u64,id:u64,last:u64,end:u64 }
 struct Live {
     header: [u8; 16], next: u64, bytes: u64,
     metadata: Vec<Vec<u8>>, record_chunks: BTreeMap<u32, u64>,
     ppu: PpuState, spu: spu::Adapter, prior: Option<ppu::State>,
     lifetimes: BTreeMap<u32, Lifetime>, terminal: bool,
     families:Option<families::Families>,
+    projection:Option<u64>,
+    /// Schema3 own-next transition: after each nonterminal chunk the
+    /// validator state retires finalized support at its own next chunk. An
+    /// analysis-only state clears this so retained source records keep the
+    /// support that analyzes them; it never encodes a successor checkpoint.
+    compact:bool,
 }
 impl Live {
     fn new(header: [u8; 16], budget:&mut Budget) -> Result<Self, Error> {
@@ -266,7 +274,7 @@ impl Live {
         let families=if flags(&header)&192!=0{Some(families::Families::new(&header,&ppu,budget)?)}else{None};
         Ok(Self { header, next: 0, bytes: 0, metadata: Vec::new(), record_chunks: BTreeMap::new(),
             ppu, spu: spu::Adapter::new_combined(flags(&header), spu_limits(limits))?, prior: None,
-            lifetimes: BTreeMap::new(), terminal: false, families })
+            lifetimes: BTreeMap::new(), terminal: false, families, projection:None, compact:true })
     }
     fn temporary(&self,budget:&mut Budget)->Result<u128,Error>{
         let Some(f)=&self.families else{return Ok(0);};let cap=self.ppu.capture();
@@ -357,6 +365,7 @@ impl Live {
             self.next = self.next.checked_add(1).filter(|&n| n != u64::MAX).ok_or(Error::Checkpoint("chunk frontier overflow"))?;
             self.bytes = self.bytes.checked_add(c.raw.len() as u64).filter(|&n| n.checked_add(16).is_some()).ok_or(Error::Checkpoint("byte frontier overflow"))?;
             self.terminal = c.ty == CHUNK_TRAILER; at += c.raw.len();
+            if !self.terminal { self.own_next(budget)?; }
         }
         Ok(false)
     }
@@ -371,7 +380,8 @@ impl Live {
     }
     fn restore(mut saved: checkpoint::Saved, budget: &mut Budget) -> Result<Self, Error> {
         let mut live = Self::new(saved.ppu.header, budget)?; let mut at = 0;
-        if let Some(f)=&mut live.families{f.restoring=true;}
+        if let Some(f)=&mut live.families{f.restoring=true;f.restore_windows(saved.windows);}
+        if saved.windows.count!=0{live.ppu.project_windows(saved.windows.id as u32,Some(saved.windows.last))?;}
         for entry in std::mem::take(&mut saved.journal) {
             match entry {
                 checkpoint::Entry::Support { index, ordinal } => live.replay_to(&saved.metadata, &mut at, index, Some(ordinal), budget)?,
@@ -392,11 +402,20 @@ impl Live {
         ppu::install_cursors(&mut live.ppu, &saved.ppu)?;
         if let Some(f)=&mut live.families{
             f.restore(saved.families.take().ok_or(Error::Checkpoint("missing family sections"))?,&live.header,&live.ppu,saved.ppu.next_chunk,&saved.metadata,budget)?;
+            if f.projection()!=saved.projection{return ck("combined projection identity");}
         }else if saved.families.is_some(){return ck("unexpected family sections");}
+        live.projection=saved.projection;
         live.metadata = saved.metadata; live.record_chunks = saved.record_chunks;
         live.next = saved.ppu.next_chunk; live.bytes = saved.ppu.prefix_bytes;
         live.prove(&saved.ppu, budget)?;
         live.spu.seal_import()?; live.prior = Some(saved.ppu); live.state_limits(budget)?;
+        if live.projection.is_some(){
+            // A schema3 checkpoint is the writer state already compacted at
+            // its own next chunk. Reapplying that transition is idempotent and
+            // must retire nothing; any finalized history it still holds refuses.
+            let before=live.census(budget)?;live.own_next(budget)?;
+            if live.census(budget)?!=before{return ck("schema3 checkpoint keeps finalized history");}
+        }
         Ok(live)
     }
     fn prove(&self, cursors: &ppu::State, budget: &mut Budget) -> Result<(), Error> {
@@ -480,6 +499,29 @@ impl Live {
         let cursors = self.snapshot(budget)?; self.prove(&cursors, budget)?;
         checkpoint::encode(self, &cursors, budget)
     }
+    fn project_support(&mut self,floor:u64,budget:&mut Budget)->Result<(),Error>{
+        if self.terminal || self.projection.is_none_or(|old|floor<old) || floor>self.next{return ck("combined projection order");}
+        let f=self.families.as_mut().ok_or(Error::Checkpoint("projection family absent"))?;
+        f.project_support(floor,&mut self.metadata,&mut self.ppu,budget)?;
+        self.projection=Some(floor);self.state_limits(budget)
+    }
+    /// The writer's deterministic per-chunk transition: bind every family to
+    /// the shared frontier, then compact at floor = own next chunk.
+    fn own_next(&mut self,budget:&mut Budget)->Result<(),Error>{
+        if !self.compact || self.projection.is_none() || self.terminal{return Ok(());}
+        let f=self.families.as_mut().ok_or(Error::Checkpoint("projection family absent"))?;
+        f.sync(&self.header,&self.ppu,self.next,budget)?;
+        self.project_support(self.next,budget)
+    }
+    fn census(&self,budget:&mut Budget)->Result<Vec<u64>,Error>{
+        let f=self.families.as_ref().ok_or(Error::Checkpoint("projection family absent"))?;
+        let mut n=f.census(budget)?;n.push(self.metadata.len() as u64);Ok(n)
+    }
+    fn enable_projection(&mut self,budget:&mut Budget)->Result<(),Error>{
+        if self.next!=0 || self.projection.is_some(){return ck("schema3 retention opts in only at chunk zero");}
+        let f=self.families.as_mut().ok_or(Error::Unsupported{flags:flags(&self.header),chunk:None})?;
+        f.enable_projection(budget)?;self.projection=Some(0);Ok(())
+    }
     fn checkpoint(mut self, budget: &mut Budget) -> Result<Vec<u8>, Error> {
         let bytes = self.canonical_boundary(budget)?;
         // These are the actual source validators, including present retired
@@ -534,6 +576,16 @@ pub fn checkpoint_combined(prefix: &[u8], limits: Limits) -> Result<Vec<u8>, Err
     if live.consume(&prefix[16..], false, &mut budget)? { return ck("prefix ends inside a chunk"); }
     live.checkpoint(&mut budget)
 }
+/// Schema3 replay from an original prefix: the state opts into retention at
+/// chunk zero (as the writer's fresh arena does), then every nonterminal chunk
+/// applies the own-next compaction transition. Decoded history is not kept.
+pub fn checkpoint_combined_projected(prefix: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
+    let header: [u8; 16] = prefix.get(..16).ok_or(Error::Checkpoint("short original header"))?.try_into().unwrap();
+    let mut budget = Budget::new(limits); let mut live = Live::new(header, &mut budget)?;
+    live.enable_projection(&mut budget)?;
+    if live.consume(&prefix[16..], false, &mut budget)? { return ck("prefix ends inside a chunk"); }
+    live.checkpoint(&mut budget)
+}
 pub fn advance_combined(checkpoint: &[u8], payload: &[u8], limits: Limits) -> Result<Vec<u8>, Error> {
     let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
     let mut live = Live::restore(saved, &mut budget)?;
@@ -544,9 +596,27 @@ pub fn read_combined_suffix(checkpoint: &[u8], suffix: &[u8], limits: Limits,
     options: ReportOptions<'_>) -> Result<RetainedCombined, Error> {
     let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
     let mut live = Live::restore(saved, &mut budget)?;
+    let mut validator = Validator::new(&live, checkpoint, limits)?;
+    live.compact = false;
     let boundary = live.report_boundary(&mut budget)?;
     let torn = live.consume(suffix, true, &mut budget)?;
+    if let Some(v) = &mut validator { if v.consume(suffix)? != torn || v.live.next != live.next { return ck("schema3 validator frontier"); } }
     live.finish_retained(boundary, torn, &mut budget, options)
+}
+
+/// Independent schema3 transition replay beside the analysis state. It owns a
+/// separate budget equal to the caller's limits, so the strict successor proof
+/// cannot starve, or be starved by, retained analysis of the same input.
+struct Validator { live: Live, budget: Budget }
+impl Validator {
+    fn new(analysis: &Live, checkpoint: &[u8], limits: Limits) -> Result<Option<Self>, Error> {
+        if analysis.projection.is_none() { return Ok(None); }
+        let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
+        let live = Live::restore(saved, &mut budget)?;
+        Ok(Some(Self { live, budget }))
+    }
+    fn consume(&mut self, bytes: &[u8]) -> Result<bool, Error> { self.live.consume(bytes, true, &mut self.budget) }
+    fn canonical(&mut self) -> Result<Vec<u8>, Error> { self.live.canonical_boundary(&mut self.budget) }
 }
 
 /// One imported state and one budget for the entire selected physical window.
@@ -567,6 +637,11 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
     let mut budget = Budget::new(limits);
     let saved = checkpoint::decode(first.checkpoint, &mut budget)?;
     let mut live = Live::restore(saved, &mut budget)?;
+    // Schema3 checkpoints are compared against the validator's own-next
+    // transitions; the analysis state retains decoded support for the whole
+    // retained interval and is never compacted beyond its imported floor.
+    let mut validator = Validator::new(&live, first.checkpoint, limits)?;
+    live.compact = false;
     if live.next != bounds.first_chunk || live.next != first.first_chunk {
         return Err(ChainError::Boundary { segment: Some(first.segment), field: "first chunk" });
     }
@@ -583,12 +658,22 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
         if live.consume(segment.payload, true, &mut budget)? {
             return Err(Error::Checkpoint("physical segment ends inside a chunk").into());
         }
+        if let Some(v) = &mut validator {
+            if v.consume(segment.payload)? || v.live.next != live.next {
+                return Err(Error::Checkpoint("schema3 validator frontier").into());
+            }
+        }
         if live.next != segment.next_chunk {
             return Err(ChainError::Boundary { segment: Some(segment.segment), field: "segment next chunk" });
         }
         if let Some(next) = segments.get(i + 1) {
             // This also rejects a terminal segment followed by an empty slot.
-            let canonical = live.canonical_boundary(&mut budget)?;
+            // Schema3 successors must equal the identical per-chunk own-next
+            // transition; nothing is projected at the oldest retained floor.
+            let canonical = match &mut validator {
+                Some(v) => v.canonical()?,
+                None => live.canonical_boundary(&mut budget)?,
+            };
             budget.bytes(next.checkpoint.len())?;
             if canonical.as_slice() != next.checkpoint {
                 return Err(ChainError::Transition { segment: next.segment });

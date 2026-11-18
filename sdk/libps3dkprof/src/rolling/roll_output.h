@@ -13,6 +13,7 @@ extern "C" {
 #define pfo_flush ps3dk_prof__roll_output_flush
 #define pfo_finish ps3dk_prof__roll_output_finish
 #define pfo_get_view ps3dk_prof__roll_output_get_view
+#define pfo_support ps3dk_prof__roll_output_support
 
 typedef struct pfo_output pfo_output;
 enum { PFO_RESOURCE = -7 };
@@ -31,6 +32,14 @@ typedef struct {
 typedef int (*pfo_prepare)(void *ctx, const void *accepted, void *prepared,
     const void *chunk, size_t chunk_bytes, void *checkpoint, size_t capacity,
     pfo_prepared *result);
+/* Optional bounded-support policy, installed before the first accept. Pressure
+ * examines a validated candidate. Projection runs only after a successful
+ * segment commit, on a copy of accepted state, with the store's actual oldest
+ * retained chunk. It must preserve original frontiers and open source state.
+ * No allocation, IO or ACKs. A zero/overlarge checkpoint is an error. */
+typedef int (*pfo_pressure)(void *ctx,const void *candidate);
+typedef int (*pfo_project)(void *ctx,const void *accepted,void *projected,
+    uint64_t first_retained,void *checkpoint,size_t capacity,size_t *written);
 typedef struct {
     void *arenas[2];
     size_t arena_bytes;
@@ -58,6 +67,7 @@ size_t pfo_state_bytes(void);
  * No IO on bind. No live reopen/resume or concurrent direct store operations. */
 int pfo_bind(pfo_output *, pfr_store *, const pfo_buffers *,
     const void *initial_checkpoint, size_t initial_bytes);
+int pfo_support(pfo_output *,pfo_pressure,pfo_project);
 /* Whole original framed chunk. OK means owned in preallocated RAM, not durable.
  * Preflight precedes rotation. Every refusal preserves the accepted frontier. */
 int pfo_accept(pfo_output *, const void *chunk, size_t chunk_bytes);

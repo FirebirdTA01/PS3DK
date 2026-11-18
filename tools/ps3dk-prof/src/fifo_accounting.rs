@@ -29,6 +29,10 @@ pub struct Inventory {
     pub(super) last_seq: u64,
     pub(super) last_frame: Option<u64>,
     pub(super) last_window: u64,
+    /// Only the projected rolling reader sets this; ordinary captures stay strict.
+    pub(crate) retired_window_bounds:Option<(u64,u64)>,
+    pub(crate) unavailable_window_rows:u64,
+    pub(crate) unavailable_window_sequences:Vec<u64>,
 }
 fn bad<T>(s: &str) -> Result<T, Malformed> { malformed(Rule::FifoEvents, format!("FIFO_ACCOUNTING: {s}")) }
 
@@ -73,7 +77,16 @@ impl Inventory {
                 w.windows.iter().any(|v| u64::from(v.id) == row.window && v.contains_frame(row.frame)) ||
                 w.open.as_ref().is_some_and(|v| u64::from(v.id) == row.window && row.frame >= v.first_frame)
             });
-            if !valid { return bad("window/frame association is not declared"); }
+            if !valid {
+                let known=windows.is_some_and(|w|w.windows.iter().any(|v|u64::from(v.id)==row.window)
+                    ||w.open.as_ref().is_some_and(|v|u64::from(v.id)==row.window));
+                if known || !self.retired_window_bounds.is_some_and(|(id,last)|row.window!=0&&row.window<=id&&row.frame<=last){
+                    return bad("window/frame association is not declared");
+                }
+                self.unavailable_window_rows=self.unavailable_window_rows.checked_add(1)
+                    .ok_or_else(||Malformed{rule:Rule::FifoEvents,detail:"unavailable window row count overflow".into()})?;
+                self.unavailable_window_sequences.push(row.seq);
+            }
         } else if row.window != 0 { return bad("nonzero window without capture windows"); }
         self.known_missing = self.known_missing.checked_add(row.seq - self.last_seq - 1)
             .ok_or_else(|| Malformed { rule: Rule::FifoEvents, detail: "FIFO accounting gap overflow".into() })?;

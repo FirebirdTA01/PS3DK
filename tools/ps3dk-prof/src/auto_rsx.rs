@@ -1656,11 +1656,21 @@ pub fn qualify(inv: &Inventory) -> MapState {
 }
 
 pub(crate) fn qualify_with_meter(inv: &Inventory, m: &mut Meter) -> MapState {
+    qualify_clock_support(inv,m,false,false)
+}
+/// A projected rolling checkpoint explicitly owns this subset and its fixed
+/// predecessor halo. Lifetime counters remain lifetime counters. All map
+/// qualification and interpolation rules below are otherwise unchanged.
+pub(crate) fn qualify_retained_support_with_meter(inv:&Inventory,sticky:bool,m:&mut Meter)->MapState{
+    qualify_clock_support(inv,m,true,sticky)
+}
+fn qualify_clock_support(inv:&Inventory,m:&mut Meter,retained:bool,sticky:bool)->MapState{
     let un = |s: String| MapState::Unqualified(s);
     if inv.config.as_ref().and_then(Config::attached).is_none() {
         return un("no attached AUTO configuration".into());
     }
-    if inv.refusal.is_some() || inv.clocks_parsed != inv.clocks.len() as u64 {
+    if sticky{return un("retired clock support carries a sticky refusal".into());}
+    if inv.refusal.is_some() || (!retained&&inv.clocks_parsed != inv.clocks.len() as u64) {
         return un("clock anchors not all retained".into());
     }
     // Bracketed writers (127/11) qualify from their VALID anchors: a failed or lost anchor carries no timestamp, so it
