@@ -1098,7 +1098,8 @@ impl eframe::App for App {
                     Page::Frames => match &d.frames {
                         Some(ix) => {
                             let ix_show = self.frames_window.as_ref().unwrap_or(ix);
-                            frames_ui::draw(p, a, ix_show, frames, timeline.as_mut(), Some(&d.foreign));
+                            let auto = self.auto_window.as_ref().or(d.auto.as_ref());
+                            frames_ui::draw(p, a, ix_show, frames, timeline.as_mut(), Some(&d.foreign), auto);
                         }
                         None => ui::field_message(p, ui::Tone::Neutral, "No frame index for this document."),
                     },

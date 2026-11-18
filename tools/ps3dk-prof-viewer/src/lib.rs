@@ -8,6 +8,7 @@
 
 pub mod app;
 pub mod auto;
+pub mod auto_lane;
 pub mod auto_ui;
 pub mod capture;
 pub mod capture_ctl;
