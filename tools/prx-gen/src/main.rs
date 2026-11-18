@@ -64,7 +64,7 @@ enum Cmd {
         attributes: Option<u16>,
 
         /// Build even when the module info block's pointer fields are not all
-        /// relocated. Almost always the wrong answer; see §1.3.
+        /// relocated. Almost always the wrong answer.
         #[arg(long)]
         allow_unrelocated_module_info: bool,
 

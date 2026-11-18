@@ -17,7 +17,7 @@
  *         PRX_EXPORT_FUNC(mylib_hello, 0x9876fedc)
  *     PRX_LIBRARY_END(mylib)
  *
- * The NID of each export is its FNID (nidgen fnid <name>), and the same
+ * The NID of each export is its FNID (nidgen nid <name>), and the same
  * name/NID pairs go into the library's YAML so `nidgen archive' can build
  * the lib<name>_stub.a an importer links against.
  *

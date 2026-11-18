@@ -65,7 +65,9 @@ a 64-bit link-register save.
 
 **Workaround (affected releases).** Build code that needs C++ exceptions
 for LP64: `-mlp64`, link against `$PS3DK/ppu/lib/lp64`, and run
-`sprxlinker --lp64` on the ELF before `make_self`.
+`sprxlinker` on the ELF before `make_self`.  (Passing `--lp64` too is harmless
+but a no-op: sprxlinker finds LP64 call sites from the stub shape, so the flag
+is accepted for legacy scripts yet changes nothing — see the ABI spec §5.1.)
 
 **Remaining limits.** Objects built with an affected toolchain still
 save the link register in 4 bytes and cannot be unwound through; rebuild

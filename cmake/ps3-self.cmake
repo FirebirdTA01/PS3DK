@@ -372,10 +372,12 @@ function(ps3_add_self target)
     set(_self      "${_self_out_dir}/${target}.self")
     set(_fake_self "${_self_out_dir}/${target}.fake.self")
 
-    # An LP64 executable needs `sprxlinker --lp64` so import call sites get
-    # their TOC restore. The LP64 toolchain file sets that globally; a target
-    # that opts into LP64 itself (-mlp64 in its link options, under the ILP32
-    # toolchain file) gets it here.
+    # LP64 call sites get their TOC restore from the sprxlinker post-link pass,
+    # which finds them by stub shape, so the `--lp64` flag it is passed is a
+    # no-op kept for compatibility with legacy build rules. Still, every LP64
+    # executable is post-linked with it: the LP64 toolchain file sets that
+    # globally, and a target that opts into LP64 itself (-mlp64 in its link
+    # options, under the ILP32 toolchain file) gets it here.
     set(_sprx_lp64 "")
     if(NOT "--lp64" IN_LIST PS3_SPRXLINKER_FLAGS)
         set(_sprx_lp64 "$<$<IN_LIST:-mlp64,$<TARGET_PROPERTY:${target},LINK_OPTIONS>>:--lp64>")
