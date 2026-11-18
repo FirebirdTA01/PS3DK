@@ -29,383 +29,26 @@ The repo is growing from a refreshed ps3dev/PSL1GHT baseline into a fuller SDK u
 | GDB | **14.2** | PPU | Debugger for RPCS3's gdbstub and (eventually) real-hardware targets |
 | PSL1GHT (v3) | pinned `f649a08` | PPU + SPU runtime | Homebrew runtime rebased for the platform ABI-style naming; source-compat shim keeps PSL1GHT-targeted homebrew building |
 | portlibs | pinned per recipe | PPU | zlib 1.3.1, libpng 1.6.58, pixman 0.42.2, FreeType 2.13.2, cairo 1.16.0, libzip 1.11.4, tiny3d + libfont3d; ps3soundlib opt-in (`scripts/portlibs/`) |
-| Tooling | in-tree | host | `rsx-cg-compiler` (Cg vertex/fragment shader compiler); Rust tools for NID/FNID and stub archives, ABI checks, PRX/SPRX and SFO generation, coverage reports; `sprxlinker` |
+| Tooling | in-tree | host | `rsx-cg-compiler` (Cg vertex/fragment shader compiler); Rust tools for NID/FNID and stub archives, ABI checks, PRX/SPRX and SFO generation, SPU image embedding, SDATA, overlays, coverage reports; `sprxlinker`; `pkg` ([tool guides](docs/tools/README.md)) |
 
 Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-design.md). Current upgrade work is tracked in [docs/roadmap.md](docs/roadmap.md). The detailed PPU ABI contract, including the ELF64+ILP32 default and LP64 multilib, is in [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md). POSIX threads (v0.12.0+) come from a pthread shim inside `librt.a` — where its semantics match hosted POSIX and where they deliberately differ is in [docs/sdk/pthreads.md](docs/sdk/pthreads.md).
 
-## Build host
+## Documentation
 
-**Native Linux** is the primary build host. Any reasonably current distribution (`glibc` >= 2.31, GCC >= 11 on the host, Python 3, Rust 1.88+) works. Linux gives the cleanest GCC cross-build experience and matches CI. **Windows users should build inside WSL2** (Ubuntu 24.04 recommended; see [Windows (via WSL2)](#windows-via-wsl2) below); native MSYS2 is not a supported bootstrap path. macOS is untested.
-
-The toolchain itself is targeted at running on **both Linux and Windows** for end users. Windows-hosted binaries (`powerpc64-ps3-elf-gcc.exe` etc.) are cross-built from Linux with `--host=x86_64-w64-mingw32` and a Mingw-w64 toolchain, and every release ships them in the Windows SDK zip.
-
-## Using a prebuilt Windows release
-
-End users who don't need to build the toolchain from source can use `ps3-sdk-vX.Y.Z-windows-x86_64.zip` from the GitHub Releases page; every release attaches it. See [`docs/VERSIONING.md`](docs/VERSIONING.md) for release packaging. The archive is self-contained: it ships the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files + helper modules under `cmake\`, portlibs, and the `samples/` source tree.
-
-### Install
-
-1. **Extract the archive** somewhere stable.  The path you pick is the value of `%PS3DK%`.
-   `tar -xf` (Windows 10+) or 7-Zip are the tested extractors.  Note for the
-   v0.11.15 archive only: PowerShell `Expand-Archive` and Explorer read its
-   timestamps as local time, so within 12 hours of publication files could
-   land "in the future" and make CMake/Ninja loop; archives from later
-   releases carry normalised timestamps and extract correctly with any tool.
-
-2. **Set `PS3DK` permanently** for your user account.  In a regular `cmd` window:
-   ```cmd
-   setx PS3DK "C:\path\to\extracted\PS3DK"
-   ```
-   `setx` writes to the registry but does not update the shell that runs it — open a new terminal afterwards.  The PPU GCC driver reads `%PS3DK%` via `getenv()` in its link spec, so `-L` resolves directly against `%PS3DK%\ppu\lib` at link time.
-
-3. **Activate the environment** in each new shell:
-   ```cmd
-   cd "%PS3DK%"
-   setup.cmd
-   ```
-   `setup.cmd` prepends `bin\`, `ppu\bin\`, and `spu\bin\` to `%PATH%` for the current session and exports `PS3DEV` / `PSL1GHT` as in-session aliases for `%PS3DK%` (some legacy code paths still read those names).
-
-4. **Check the toolchain binaries:**
-   ```cmd
-   powerpc64-ps3-elf-gcc.exe --version
-   spu-elf-gcc.exe --version
-   ```
-   You should see `(GCC) 16.1.0` from both.
-
-### Building samples from the prebuilt release
-
-The bundled `%PS3DK%\samples\` tree contains the same tracked samples as `samples/` in this repo: toolchain checks, SPU examples, GCM rendering, SPURS taskset demos, sysutil callbacks, savedata, network-module validation, and more.
-
-Samples build with **CMake**.  You need `cmake` (3.20+) and a generator on `PATH` — Ninja is recommended, but Unix Makefiles or "MinGW Makefiles" also work.  None of these ship in the toolchain zip; install via `choco install cmake ninja`, the Visual Studio installer's optional CMake/Ninja components, or any equivalent.
-
-Each sample is its own standalone CMake project — `cd` into a sample, point CMake at the PPU toolchain file, and build:
-
-```cmd
-:: From a cmd shell after running %PS3DK%\setup.cmd
-cd "%PS3DK%\samples\toolchain\hello-ppu-c++17"
-cmake -S . -B cmake-build -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\cmake\ps3-ppu-toolchain.cmake" -G Ninja
-cmake --build cmake-build
-```
-
-The toolchain file (`cmake\ps3-ppu-toolchain.cmake` for PPU, `cmake\ps3-spu-toolchain.cmake` for standalone SPU work) reads `%PS3DK%` from the environment, sets the cross-compiler, and adds the SDK include / library search paths.  Each sample's `CMakeLists.txt` then `include(ps3-self)` to pull in the helper module that drives the strip → `sprxlinker` → `make_self` / `fself` post-build chain (and `bin2s` / SPU embedding / Cg shader compilation when needed).
-
-Final artefacts land at the sample directory next to `CMakeLists.txt`; `cmake-build/` holds intermediates only:
-
-| Artefact            | Target              | How to run                                     |
-|---|---|---|
-| `<name>.elf`        | stripped PPU ELF    | `ps3load` or GDB against RPCS3's gdbstub       |
-| `<name>.self`       | CEX-signed SELF     | `rpcs3 --no-gui <name>.self` (RPCS3 / signed HW) |
-| `<name>.fake.self`  | fake-signed SELF    | `ps3load` / XMB install on CFW hardware        |
-
-`samples\README.md` has the full sample index plus per-sample notes on what each one validates.
-
-### Building a PRX / SPRX module
-
-The toolchain can produce loadable Lv-2 modules (`.prx`, and signed `.sprx`)
-and let other binaries link against them. A module is an ordinary CMake
-target plus a four-line export table; the importer is an ordinary executable.
-Reference pair: `samples/lv2/hello-sprx-export` (the module) and
-`samples/lv2/hello-sprx-import` (loads it, calls it, prints `PRX_OK`).
-
-**1. The module** — `CMakeLists.txt`:
-
-```cmake
-include(ps3-self)
-add_executable(mymod source/mymod.c source/exports.S)
-ps3_add_prx(mymod NAME mymod VERSION 1.0 SIGN)       # SIGN emits mymod.sprx (make_sprx) + mymod.fake.sprx (fself)
-```
-
-`source/exports.S` names what the module exports (NIDs from `nidgen nid <symbol>`):
-
-```asm
-#include <sys/prx_module.h>
-PRX_LIBRARY_BEGIN(mymod, "mymod")
-    PRX_EXPORT_FUNC(mymod_add, 0xe1f4c294)
-PRX_LIBRARY_END(mymod)
-```
-
-`module_start(size_t args, void *argp)` / `module_stop` are optional — the
-crt provides defaults that return `SYS_PRX_RESIDENT`; define them in C to run
-code at start/stop (return 0, or Lv-2 unloads the module). The build links
-with `-Wl,-q` against `lv2-prx.ld`, then `prx-gen build` turns the ELF into
-`mymod.prx` next to the CMakeLists and `prx-gen check` validates it.
-
-Outside CMake the same two steps are:
-
-```
-prx-gen build mymod.elf -o mymod.prx --name mymod [--version 1.0] [--attributes 0x0000]
-prx-gen check mymod.prx
-```
-
-Three things `prx-gen` will tell you about, so you don't have to discover
-them in the emulator: it must run on the **unstripped** link output (the
-`-Wl,-q` relocations reference `.symtab`); `--name` is at most 27 characters
-(module-info field width); and keep `check` in the build — the failures it
-catches (an export record with wrong attributes, an unrelocated module-info
-pointer) produce a module that loads cleanly and exports nothing, with no
-diagnostic anywhere in the RPCS3 log.
-
-**2. The importer** — link a stub archive generated from the same export list
-(`exports.yml`, nidgen's schema: `library`, `module`, `exports: [{name, nid}]`):
-
-```cmake
-include(ps3-self)
-ps3_prx_stub_library(mymod_stub EXPORTS ../mymod/exports.yml ARCHIVE_NAME mymod)
-add_executable(app source/main.c)
-target_link_libraries(app PRIVATE mymod_stub rt lv2)
-ps3_add_self(app)
-```
-
-In `main.c`: `sysPrxLoadModule("/app_home/mymod.prx", 0, NULL)`, then
-`sysPrxStartModule(id, args, argp, &modres, 0, NULL)` (the `modres` pointer
-must be non-NULL); after start, calls to `mymod_add()` resolve through the
-stub, and `argp` is a handy way for `module_start` to hand back pointers.
-Copy the `.prx` next to the booted executable so `/app_home/` finds it.
-
-**3. Running on RPCS3:** boot the importer's raw `.elf` and the unsigned
-`.prx` loads as-is. Booting the `.fake.self` requires the module's
-`.fake.sprx`; booting the real `.self` requires the `.sprx` — the module's
-container follows the executable's, which is why `SIGN` emits both.
-
-**4. Keeping export lists honest** — `prx-gen exports mymod.prx` reads a
-built module's export table back out as nidgen-schema YAML, and
-`ps3_prx_export_roundtrip(<target>)` wires that into the build: it compares
-the YAML extracted from the binary against the one the stubs are generated
-from and fails the build with both tables printed when they disagree — so a
-renamed export can't silently strand its importers.
-
-Format and design notes: `docs/design/sprx-generation.md`; the module layout
-is specified in `docs/abi/cellos-lv2-abi-spec.md` §8.
-
-### Embedding SPU programs (spu-elf-to-ppu-obj)
-
-PPU code that spawns SPU threads or SPURS jobs needs the SPU program's image
-inside the PPU executable.  `spu-elf-to-ppu-obj` does that wrapping as a
-standalone tool: it takes a linked SPU ELF and emits a PPU relocatable
-object exposing the image through `_binary_<name>_*` symbols, in one of
-three formats (`--format jobbin2` for SPURS job binaries — the default —
-plus raw `binary` and whole-`elf`).  `inspect` prints a JSON summary of an
-artifact set when you need to see what a wrap produced.
-
-```cmd
-spu-elf-to-ppu-obj.exe wrap --spu-elf worker.spu.elf --output worker_img.o --symbol-base worker
-spu-elf-to-ppu-obj.exe inspect worker_img.o
-```
-
-From CMake you rarely call it directly: `ps3_add_spu_image(<target>
-NAME <name> SOURCES <spu sources...> [LIBS ...] [JOBBIN|JOBBIN_WRAP]
-[NOSTARTFILES|FREESTANDING] [LDSCRIPT ...])` compiles the SPU sources with
-the SPU cross-compiler, links them, wraps the result, and links the wrapped
-object into the PPU target.  The `spu/` and `spurs/` samples are the worked
-examples.
-
-### Data files for cellFsSdataOpen (make_sdata)
-
-`make_sdata` wraps a file into a developer SDATA file, the container
-`cellFsSdataOpen` reads (plain data, no license).  Its options match the SDK
-tool of the same name: `-b <KB>` block size (1, 2, 4, 8, 16 or 32; default
-16), `--format2` / `--format3` for the older layouts, `-z` for the compressed
-layout, `-i` to print a file's header, `-x` to extract the data.  The
-compressed layout is written with every block stored uncompressed, so `-z`
-files are valid but not smaller; `-x` cannot read a block that was really
-compressed.
-
-```cmd
-make_sdata.exe -b 8 level1.dat level1.sdat
-make_sdata.exe -i level1.sdat
-```
-
-From CMake: `ps3_make_sdata(<output> <input> [BLOCK_KB <n>] [COMPRESS]
-[FORMAT 2|3])` adds the build rule; `samples/lv2/hello-sdata` embeds the
-results and reads them back.
-
-### Building installable packages (ps3_add_pkg)
-
-Any sample (or your own app) becomes an installable `.pkg` with one CMake
-call after `ps3_add_self`:
-
-```cmake
-ps3_add_self(myapp)
-ps3_add_pkg(myapp
-    CONTENTID "UP0001-MYAPP0001_00-PS3DKSAMPLES0000")
-```
-
-`CONTENTID` is the required 36-char identity; the 9 characters at positions
-8–16 are the **title id**, which is what the console and RPCS3 key the
-install on.  `APPID` defaults to that embedded title id (declaring both is
-allowed but they must agree — a mismatch fails at configure time, because a
-transposed digit otherwise ships a package that installs under one identity
-and announces another).  `TITLE` defaults to the target name; `ICON`,
-`SFOXML` and a `pkg_files/` overlay directory are overridable.  The build
-emits both `<target>.pkg` (debug-installable on CFW / RPCS3) and
-`<target>.gnpdrm.pkg` (npdrm-finalised).
-
-Under the hood this drives four host tools — `make_self_npdrm` (signs the
-ELF as `EBOOT.BIN` under the content id), `sfo` (generates `PARAM.SFO`; see
-the PARAM.SFO tools section), `pkg` (builds the archive), and
-`package_finalize` (npdrm-finalises a copy).  The equivalent manual command
-sequence is step 6 of the toolchain walkthrough below.  All `samples/gcm`,
-`samples/sysutil` and the PSL1GHT graphical/input ports carry this call, so
-any of them is a working reference.
-
-### Manual / direct toolchain invocation (no CMake)
-
-If you don't want to use CMake, the toolchain can be driven directly from `cmd` or PowerShell.  This is also the right path for IDE integration, custom build systems, or one-off compiles outside the CMake-driven sample tree.
-
-The end-to-end pipeline for a typical PS3 homebrew app is **compile → link → strip → sprxlinker → sign**.  Below shows the command sequence for a PPU C/C++ sample; replace `powerpc64-ps3-elf-` with `spu-elf-` for SPU code.  Flag set matches what `cmake/ps3-ppu-toolchain.cmake` exports via `CMAKE_C_FLAGS_INIT` so the docs translate one-to-one.
-
-**1. Compile each source file** (loop over .c / .cpp).  These are the same flags the PPU toolchain file emits:
-
-```cmd
-powerpc64-ps3-elf-gcc.exe ^
-    -O2 -Wall -mcpu=cell ^
-    -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections ^
-    -I"%PS3DK%\ppu\include" ^
-    -I"%PS3DK%\ppu\include\simdmath" ^
-    -c source\main.c -o build\main.o
-```
-
-For C++ swap `-gcc` → `-g++` and append `-std=c++17` (or whichever standard the sample's `Makefile` sets in `CXXFLAGS`).
-
-**2. Compile shaders** (only for samples with `.vcg` / `.fcg` files under `shaders\`).  Vertex profile is `sce_vp_rsx`, fragment profile is `sce_fp_rsx`:
-
-```cmd
-rsx-cg-compiler.exe -p sce_vp_rsx --emit-container build\vpshader.vpo shaders\vpshader.vcg
-rsx-cg-compiler.exe -p sce_fp_rsx --emit-container build\fpshader.fpo shaders\fpshader.fcg
-```
-
-**3. Embed binary data** (shaders, images, fonts — anything the CMake helper `ps3_bin2s()` would handle).  Each `.vpo` / `.fpo` / `.png` / `.jpg` / `.bin` becomes an object file the linker pulls in:
-
-```cmd
-bin2s.exe -a 64 build\vpshader.vpo > build\vpshader_vpo.s
-powerpc64-ps3-elf-as.exe -o build\vpshader_vpo.o build\vpshader_vpo.s
-```
-
-The CMake helper additionally writes a header (three `extern const u8`/`u32` declarations per blob, derived from the input filename) so C/C++ code can `#include "<name>_<ext>.h"` and reference the symbols.  When driving the toolchain by hand, generate or hand-write that header to match.
-
-**4. Link everything into a PPU ELF.**  The linker spec inside `powerpc64-ps3-elf-gcc` reads `%PS3DK%` via `getenv()` and auto-includes `-L%PS3DK%\ppu\lib --start-group -lsysbase -lc -lrt -llv2 --end-group` plus the LV2 CRT objects (`lv2-crt0.o`, `lv2-crti.o`, `lv2-crtn.o`, `lv2-sprx.o`) and the linker script `lv2.ld`.  You only need to specify the *additional* libs the sample uses:
-
-```cmd
-powerpc64-ps3-elf-gcc.exe ^
-    build\main.o build\vpshader_vpo.o build\fpshader_fpo.o ^
-    -mhard-float -fmodulo-sched -ffunction-sections -fdata-sections ^
-    -Wl,-Map,sample.elf.map ^
-    -L"%PS3DK%\ppu\lib" ^
-    -lgcm_cmd -lgcm_sys -lio -lsysutil -lsysmodule -lrt -llv2 -lm ^
-    -o sample.elf
-```
-
-**5. Strip + sprxlinker + SELF signing.**  Three host tools (shipped in `%PS3DK%\bin\`):
-
-```cmd
-powerpc64-ps3-elf-strip.exe sample.elf -o build\sample.elf
-sprxlinker.exe              build\sample.elf
-make_self.exe               build\sample.elf sample.self
-fself.exe                   build\sample.elf sample.fake.self
-```
-
-`sample.self` boots on RPCS3 / signed HW; `sample.fake.self` boots on CFW hardware via XMB install or `ps3load`.
-
-**6. (Optional) Build a `.pkg`** for installing the app on CFW hardware.  Requires `make_self_npdrm`, `sfo`, `pkg`, and `package_finalize`:
-
-```cmd
-mkdir build\pkg\USRDIR
-copy "%PS3DK%\bin\ICON0.PNG" build\pkg\ICON0.PNG
-make_self_npdrm.exe build\sample.elf build\pkg\USRDIR\EBOOT.BIN UP0001-HELPPU017_00-0000000000000000
-sfo.exe --title "Hello PPU" --appid HELPPU017 -f "%PS3DK%\bin\sfo.xml" build\pkg\PARAM.SFO
-pkg.exe --contentid UP0001-HELPPU017_00-0000000000000000 build\pkg\ sample.pkg
-copy sample.pkg sample.gnpdrm.pkg
-package_finalize.exe sample.gnpdrm.pkg
-```
-
-`sample.pkg` is unsigned (debug-installable on CFW); `sample.gnpdrm.pkg` after `package_finalize` is the npdrm-finalised version.
-
-The exact flag set each sample needs (extra `-l` libs, additional `-I` include paths, C++ standard overrides, etc.) is in that sample's `CMakeLists.txt`.  `cmake --build cmake-build --verbose` prints every command verbatim, so you can copy the lines you need and skip CMake entirely.
-
-## PARAM.SFO tools
-
-Every installable PS3 app carries a `PARAM.SFO` — title, title id,
-category, the `ATTRIBUTE` capability bits (remote play, Move support, …),
-resolution/sound masks, and so on.  The SDK ships one SFO engine with two
-front-ends:
-
-| Tool | Use it for |
+| Topic | Guide |
 |---|---|
-| `sfo.exe` | Everything from the shell or a script: inspect, validate, edit, add/remove params, flip flag bits, create from a template |
-| `sfo-gui.exe` | The same operations visually: every registry-known key and flag bit as a labelled widget |
-
-Both are generated from one key/flag registry
-(`tools/sfo/registry/param-sfo.yml`), which also generates the system
-document [docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) — so the CLI, the
-GUI and the docs cannot drift apart.
-
-They are **preservation-first**: keys and flag bits the registry doesn't
-know are kept byte-exact, edits never reflow the file layout unless you
-ask (`--grow`), and the CLI never writes in place — output always goes to
-`--out`.
-
-A history note: releases up to v0.12.0 shipped `sfo.exe` as a small C
-generator adopted from upstream PSL1GHT (with the editors alongside as
-`sfo-editor.exe` / `sfo-editor-gui.exe`).  The Rust CLI accepts that
-tool's exact command line (`--title` / `--appid` / `-f sfo.xml`, `-l`,
-`-t`) with byte-identical file output, so it now owns the `sfo.exe` name
-outright and the C tool is no longer built.  Its source stays in
-`tools/sfo-pkg/` for one purpose: the editors' correctness is anchored to
-checked-in golden fixtures generated from the frozen C tool — if those
-ever need regenerating, build `sfo.c` from the repo; never regenerate
-them from an installed `sfo.exe`, which would test the tool against
-itself.
-
-### CLI
-
-```cmd
-:: Show every key (add --json for machine-readable output)
-sfo.exe inspect PARAM.SFO
-
-:: Check types, sizes and flag bits against the registry
-sfo.exe validate PARAM.SFO
-
-:: Edit one value (rejects a value that will not fit; add --grow to resize)
-sfo.exe set PARAM.SFO "TITLE=My Game" --out PARAM.SFO.new
-
-:: Add a param a file does not carry (retail SFOs often omit ATTRIBUTE)
-sfo.exe add PARAM.SFO ATTRIBUTE --value 0 --out PARAM.SFO.new
-
-:: ...then flip capability bits on it by registry name
-sfo.exe flags PARAM.SFO ATTRIBUTE --enable psvita_remote_play --out PARAM.SFO.new
-sfo.exe flags PARAM.SFO ATTRIBUTE --disable psp_remote_play_v1 --out PARAM.SFO.new
-
-:: Same for the video-mode mask (ntsc / pal / hd_720 / hd_1080 ...)
-sfo.exe flags PARAM.SFO RESOLUTION --enable hd_720 --out PARAM.SFO.new
-
-:: Remove a param outright
-sfo.exe remove PARAM.SFO ATTRIBUTE --out PARAM.SFO.new
-
-:: Start a new SFO from a registry template
-sfo.exe create --template game --title "My Game" --appid MYGAME001 --out PARAM.SFO
-
-:: Key and flag reference, generated from the registry
-sfo.exe docs
-
-:: The legacy one-shot generator invocation still works (what ps3_add_pkg uses)
-sfo.exe --title "My Game" --appid MYGAME001 -f "%PS3DK%\bin\sfo.xml" PARAM.SFO
-```
-
-The flag names (`psvita_remote_play`, `hd_720`, …) come from the registry;
-`sfo.exe docs` or [docs/sdk/param-sfo.md](docs/sdk/param-sfo.md) lists
-every key, every known bit, and what it does.
-
-### GUI
-
-`sfo-gui.exe` opens a file through the native file dialog and edits with
-separate **Save** (in place) and **Save As**.  Every registry-known key
-renders as a typed widget; bitmask keys (`ATTRIBUTE`, `RESOLUTION`,
-`SOUND_FORMAT`, `REGION_DENY`) render as grouped, labelled checkboxes —
-remote-play bits under their own group, reserved bits hidden — with
-badges and tooltips from the registry.  Keys the file doesn't carry show
-as **"absent — Add"** rows, so giving a retail SFO an `ATTRIBUTE` (to
-enable Vita remote play, say) is: open, Add, tick the box, Save.  Unknown
-keys are shown and preserved, never dropped.
+| Compilers, binutils, GDB, flags, environment, CMake toolchain files and helpers, building without CMake | [docs/tools/toolchain.md](docs/tools/toolchain.md) |
+| Every host tool, one guide each | [docs/tools/README.md](docs/tools/README.md) |
+| Shader compiler | [docs/tools/rsx-cg-compiler.md](docs/tools/rsx-cg-compiler.md) |
+| PARAM.SFO (`sfo`, `sfo-gui`) | [docs/tools/sfo.md](docs/tools/sfo.md) |
+| Installable packages (`ps3_add_pkg`) | [docs/tools/pkg.md](docs/tools/pkg.md) |
+| PRX / SPRX modules (`prx-gen`, `ps3_add_prx`) | [docs/tools/prx-gen.md](docs/tools/prx-gen.md) |
+| Embedding SPU programs | [docs/tools/spu-elf-to-ppu-obj.md](docs/tools/spu-elf-to-ppu-obj.md) |
+| Profiler | [docs/profiler-guide.md](docs/profiler-guide.md) |
+| Building from source | [docs/building.md](docs/building.md) |
+| Samples | [samples/README.md](samples/README.md) |
+| ABI | [docs/abi/cellos-lv2-abi-spec.md](docs/abi/cellos-lv2-abi-spec.md) |
+| Debugging in RPCS3 | [docs/debugging-rpcs3.md](docs/debugging-rpcs3.md) |
 
 ## Profiler
 
@@ -414,143 +57,53 @@ zones (experimental); `ps3dk-prof` checks and reports a capture, and `ps3dk-prof
 over the network while the app runs.  How to enable and link it, use it on the PS3 and on the PC, and capture a frame:
 [docs/profiler-guide.md](docs/profiler-guide.md).
 
-## Getting started
+## Install (Windows release)
 
-### Host dependencies
+The Windows SDK zip `ps3-sdk-vX.Y.Z-windows-x86_64.zip` is attached to every release on the GitHub Releases page. It is self-contained: the `.exe` cross-compilers, the runtime libraries (PSL1GHT + our SDK), the CMake toolchain files and helper modules under `cmake\`, portlibs, and the `samples\` source tree. Linux users can take the `ps3dev-ppu` / `ps3dev-spu` toolchain tarballs from the same page, or [build from source](#building-from-source).
 
-Pick the command that matches your distribution.  Any recent version of the listed distros works; older LTS releases may need a PPA / module / COPR for a modern Rust toolchain.
+1. **Extract the archive** somewhere stable. The path you pick is the value of `%PS3DK%`. `tar -xf` (Windows 10+) and 7-Zip are the tested extractors. (The v0.11.15 archive only: PowerShell `Expand-Archive` and Explorer read its timestamps as local time, so within 12 hours of publication files could land "in the future" and make CMake/Ninja loop; later archives carry normalised timestamps and extract correctly with any tool.)
+2. **Set `PS3DK` permanently** for your user account, in a regular `cmd` window, then open a new terminal (`setx` does not update the shell that runs it):
+   ```cmd
+   setx PS3DK "C:\path\to\extracted\PS3DK"
+   ```
+3. **Activate the environment** in each new shell. `setup.cmd` puts the toolchain on `PATH` and sets `PS3DEV` / `PSL1GHT` as aliases ([details](docs/tools/toolchain.md#windows-setupcmd)):
+   ```cmd
+   cd "%PS3DK%"
+   setup.cmd
+   ```
+4. **Check the compilers.** Both print `(GCC) 16.1.0`:
+   ```cmd
+   powerpc64-ps3-elf-gcc.exe --version
+   spu-elf-gcc.exe --version
+   ```
 
-Debian / Ubuntu (`apt`):
-```bash
-sudo apt install -y build-essential gcc-12 g++-12 cmake ninja-build texinfo \
-    bison flex libgmp-dev libmpfr-dev libmpc-dev libisl-dev zlib1g-dev \
-    libreadline-dev libncurses-dev libexpat1-dev libssl-dev libelf-dev \
-    python3 python3-dev git wget patch autoconf automake libtool \
-    zip unzip
+## Quick start
+
+Samples build with CMake 3.20+ and a generator (Ninja recommended; neither ships in the zip: `winget install --id Kitware.CMake -e` and `winget install --id Ninja-build.Ninja -e`, or `choco install cmake ninja`). Each sample is its own CMake project:
+
+```cmd
+:: Windows, after %PS3DK%\setup.cmd
+cd "%PS3DK%\samples\toolchain\hello-ppu-c++17"
+cmake -S . -B cmake-build -G Ninja -DCMAKE_TOOLCHAIN_FILE="%PS3DK%\cmake\ps3-ppu-toolchain.cmake"
+cmake --build cmake-build
 ```
 
-Ubuntu 24.04 ships `rustc` 1.75 in apt, which can't build the Rust workspace under `tools/` (its locked dependencies need Rust 1.88+).  Install Rust via `rustup` instead:
-
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-. "$HOME/.cargo/env"
-rustc --version    # should report 1.88+
+# Linux, after source scripts/env.sh
+cd samples/toolchain/hello-ppu-c++17
+cmake -S . -B cmake-build -G Ninja -DCMAKE_TOOLCHAIN_FILE=$PS3DK/../cmake/ps3-ppu-toolchain.cmake
+cmake --build cmake-build
 ```
 
-(CI uses `dtolnay/rust-toolchain@stable` and CachyOS / Fedora / Arch already ship a recent enough `rustc` — this only matters when bootstrapping on a stale Debian/Ubuntu host.)
+The build writes `hello-ppu-c++17.elf` (stripped), `.self` (signed: RPCS3, `rpcs3 --no-gui hello-ppu-c++17.self`) and `.fake.self` (CFW hardware via `ps3load` or XMB install) to `cmake-build/`. A sample's `CMakeLists.txt` calls `include(ps3-self)` and `ps3_add_self(<target>)`; shaders, embedded SPU programs, PRX modules and `.pkg` packages are one more helper call each. See [docs/tools/toolchain.md](docs/tools/toolchain.md) for the helpers, the output-directory options and the equivalent commands without CMake, and [samples/README.md](samples/README.md) for what each sample validates.
 
-Fedora / RHEL / Rocky / Alma (`dnf`):
-```bash
-sudo dnf install -y @development-tools gcc gcc-c++ gmp-devel mpfr-devel \
-    libmpc-devel isl-devel zlib-devel readline-devel ncurses-devel \
-    expat-devel openssl-devel elfutils-libelf-devel python3 python3-devel \
-    rust cargo git wget bison flex texinfo cmake ninja-build patch zip unzip
-```
+## Building from source
 
-Arch / Manjaro / EndeavourOS (`pacman`):
-```bash
-sudo pacman -S --needed base-devel gcc gmp mpfr libmpc isl zlib readline \
-    ncurses expat openssl libelf python rust git wget bison flex texinfo \
-    cmake ninja patch zip unzip
-```
-
-On any other distribution, install equivalents of: a C/C++ host toolchain, GMP / MPFR / MPC / ISL / zlib / readline / ncurses / expat development headers, Python 3, Rust + Cargo, Git, Wget, Bison, Flex, Texinfo, CMake, Ninja, and Patch.
-
-#### Optional: cross-build the Windows-hosted toolchain release
-
-These extras are **only required** if you plan to run `./scripts/build-ppu-toolchain.sh --host=x86_64-w64-mingw32` (and the SPU equivalent) followed by `./scripts/package-windows-release.sh` to produce `ps3-sdk-vX.Y.Z-windows-x86_64.zip`.  A normal native Linux build does not need them.
-
-`zip` is also listed below — it is already part of the main host-deps line above, repeated here so this section is self-contained for someone wiring up Windows-release builds on a host that hasn't run the full host-deps install.
-
-Debian / Ubuntu (`apt`):
-```bash
-sudo apt install -y mingw-w64 g++-mingw-w64-x86-64 zip
-```
-
-Fedora / RHEL / Rocky / Alma (`dnf`):
-```bash
-sudo dnf install -y mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
-    mingw64-headers mingw64-crt mingw64-winpthreads zip
-```
-
-Arch / Manjaro / EndeavourOS (`pacman`):
-```bash
-sudo pacman -S --needed mingw-w64-gcc zip
-```
-
-After installing, confirm the cross compiler resolves:
-```bash
-which x86_64-w64-mingw32-gcc       # /usr/bin/x86_64-w64-mingw32-gcc
-x86_64-w64-mingw32-gcc --version
-```
-
-The end-to-end Windows-release flow then runs as:
+Build on native Linux, or inside WSL2 on Windows:
 
 ```bash
 source ./scripts/env.sh
-./scripts/build-ppu-toolchain.sh --host=x86_64-w64-mingw32   # ~15-30 min
-./scripts/build-spu-toolchain.sh --host=x86_64-w64-mingw32   # ~10-20 min
-./scripts/build-host-tools-windows.sh                        # ~10-15 min
-./scripts/package-windows-release.sh                         # ~5 min
-# stage/release/ps3-sdk-vX.Y.Z-windows-x86_64.zip ready to ship
-```
-
-`build-host-tools-windows.sh` cross-compiles `make_self.exe`, `make_self_npdrm.exe`, `package_finalize.exe`, `fself.exe`, `bin2s.exe`, `cgcomp.exe`, `sprxlinker.exe` and `rsx-cg-compiler.exe` plus their static `zlib`/`gmp`/`openssl` deps from upstream tarballs — those land under `stage/host-tools-windows/bin/` and `package-windows-release.sh` picks them up automatically.  The Rust workspace (every tool in `tools/Cargo.toml`, e.g. `nidgen.exe`, `abi-verify.exe`, `prx-gen.exe`) requires a `rustup`-managed Rust because Arch's `rust` package and Ubuntu apt's `rustc` ship only the host's std lib; install rustup (`pacman -S rustup` on Arch, `curl https://sh.rustup.rs | sh` elsewhere) then `rustup default stable && rustup target add x86_64-pc-windows-gnu` before re-running.  Without rustup, `build-host-tools-windows.sh` skips the Rust step gracefully — pull those `.exe`s from the CI `host-tools-windows-x86_64` artifact instead and pass it via `package-windows-release.sh --tools-zip=PATH`.
-
-### Windows (via WSL2)
-
-Native Windows builds aren't supported for the toolchain bootstrap — autotools and GCC's combined-tree build are reliable on Linux and brittle under MSYS2.  The recommended path for Windows users is **WSL2** with one of the supported Linux distributions.
-
-End users who just want to *use* a prebuilt toolchain on Windows do not need WSL when a tagged Windows release artifact is available. WSL2 is required only when *building from source*.
-
-1. **Install WSL2 and a distro** from an elevated PowerShell or `cmd`:
-   ```powershell
-   wsl --install -d Ubuntu-24.04
-   # other supported picks: archlinux, Debian, Fedora-43
-   ```
-   The first run prompts for a Linux username and password.
-
-2. **Open the WSL shell** (`wsl -d Ubuntu-24.04`) and install the distro's host dependencies using the matching command from [Host dependencies](#host-dependencies) above.  Everything from `bootstrap.sh` onward runs identically to a native Linux host.
-
-3. **Clone inside the WSL filesystem**, not on `/mnt/c/`.  GCC bootstrap performs millions of small-file operations and ext4 finishes in minutes where the 9P-bridged Windows volume can take hours:
-   ```bash
-   git clone https://github.com/FirebirdTA01/PS3_Custom_Toolchain.git ~/PS3_Custom_Toolchain
-   cd ~/PS3_Custom_Toolchain
-   ```
-   If you also keep the repo checked out on the Windows side for editing, add it as a remote so you can pull edits in without round-tripping through GitHub:
-   ```bash
-   git remote add windows /mnt/c/path/to/PS3_Custom_Toolchain
-   git fetch windows && git pull windows main   # after committing on the Windows side
-   ```
-
-4. **Continue with the normal build**: `source scripts/env.sh`, then `./scripts/bootstrap.sh`, then `./scripts/build-ppu-toolchain.sh` etc. as in [Building the toolchain + SDK](#building-the-toolchain--sdk).
-
-A few WSL2-specific notes:
-
-- The default `PS3_BUILD_ROOT` (`$HOME/ps3tc/build`) already lives in ext4 — no override needed.
-- If you want to use the Linux-hosted toolchain from Windows-native tools, copy or expose `stage/ps3dev/` back to the Windows side: `cp -r stage/ps3dev /mnt/c/ps3dev`, then set `PS3DEV=C:\ps3dev` in your Windows shell.
-- Cross-building the Windows toolchain release (the `.exe` binaries) requires the additional `mingw-w64 g++-mingw-w64-x86-64` packages on top of the standard Ubuntu install line (Debian/Fedora analogues exist).
-
-### Building the toolchain + SDK
-
-```bash
-# Activate the toolchain environment (exports PS3DEV, PPU_PREFIX, ...)
-source ./scripts/env.sh
-
-# First-time setup (clones upstream + ps3dev repos under src/).
 ./scripts/bootstrap.sh
-
-# Quick validation: binutils only, both targets (~1 minute total).
-./scripts/build-ppu-toolchain.sh --only binutils
-./scripts/build-spu-toolchain.sh --only binutils
-
-# Full toolchain + PSL1GHT + SDK headers + stub archives + portlibs + SDK.
-#
-# ** Heads-up: this takes a while. **  Bootstrapping GCC+newlib twice
-# (once for PPU, once for SPU) is CPU-bound and is the bulk of the
-# wait.  Kick it off and go do something else.  The steps must run in
-# this order, and each one exits non-zero on failure, so chaining them
-# with && stops at the first failure.
 ./scripts/build-spu-toolchain.sh &&
 ./scripts/build-ppu-toolchain.sh &&
 ./scripts/build-psl1ght.sh &&
@@ -560,115 +113,18 @@ source ./scripts/env.sh
 ./scripts/build-sdk.sh
 ```
 
-The final `build-sdk.sh` also builds and installs the host tools (`rsx-cg-compiler`, `sprxlinker`, `pkg`, the Rust
-tools) before the SDK libraries, because the SDK build compiles shaders with `rsx-cg-compiler`; it needs CMake, a host
-C/C++ compiler and Rust. `--no-host-tools` skips them for an SDK-only rebuild once they are installed.
-
-Both toolchain build scripts accept `--only <step>` and `--clean` to wipe intermediates before rebuilding. The PPU steps are binutils, gcc-newlib, gdb and symlinks; the SPU steps are binutils, gcc-newlib, symlinks and linker-script.
-
-`build-ppu-toolchain.sh` builds GCC 16.1.0 only and refuses a `$PS3DEV` that already holds a GCC 12.4 PPU compiler: install into a fresh prefix, then rebuild PSL1GHT, the portlibs, the SDK and your own objects against it. Re-run `bootstrap.sh` first in an existing checkout so it fetches `releases/gcc-16.1.0`.
-
-After a successful build, toolchain binaries live under `$PS3DEV/bin/` (aliased as `ppu-gcc`, `spu-gcc`, etc.).  The PSL1GHT runtime and our own SDK headers and archives (e.g. `libgcm_cmd.a`, `libdbgfont.a`) both install into `$PS3DK` (`$PS3DEV/ps3dk/ppu/`).
-
-### Verify the install
-
-```bash
-# Toolchain binaries respond with their version banner.
-$PS3DEV/ppu/bin/powerpc64-ps3-elf-gcc --version   # -> 16.1.0
-$PS3DEV/spu/bin/spu-elf-gcc         --version     # -> 16.1.0
-
-# SDK headers + libraries are in place.
-ls $PS3DEV/ps3dk/ppu/lib/libgcm_cmd.a
-ls $PS3DEV/ps3dk/ppu/include/cell/gcm.h
-```
-
-All four checks should succeed silently (or print the expected version).  If any fails, the corresponding build step didn't finish cleanly — rerun it with `--clean` to wipe stale intermediates.
-
-### Building and running samples
-
-Samples under `samples/` each build with **CMake** from inside their own directory:
-
-```bash
-cd samples/toolchain/hello-ppu-c++17
-cmake -S . -B cmake-build \
-      -DCMAKE_TOOLCHAIN_FILE=$PS3DK/../cmake/ps3-ppu-toolchain.cmake \
-      -G Ninja
-cmake --build cmake-build
-# Produces: hello-ppu-c++17.elf / .self / .fake.self next to CMakeLists.txt
-```
-
-The toolchain file under `cmake/ps3-ppu-toolchain.cmake` reads `$PS3DEV` / `$PS3DK` from the environment (set by `source scripts/env.sh` at repo root or `setup.cmd` on Windows), points CMake at the cross-compiler, and adds the SDK include / library search paths.  Each sample's `CMakeLists.txt` calls `include(ps3-self)` and `ps3_add_self(<target>)` to wire up the strip → `sprxlinker` → `make_self` / `fself` post-build chain — and adds `ps3_add_cg_shader(...)`, `ps3_add_spu_image(...)`, or `ps3_bin2s(...)` for samples that need shader compilation, embedded SPU code, or data embedding.
-
-Each sample produces three artefacts at the sample root (`cmake-build/` holds intermediates only):
-
-| Artefact | Target | How to run |
-|---|---|---|
-| `<name>.elf` | stripped PPU ELF | `ps3load` or GDB against RPCS3's gdbstub |
-| `<name>.self` | CEX-signed SELF | `rpcs3 --no-gui <name>.self` (boots on RPCS3 or signed hardware) |
-| `<name>.fake.self` | fake-signed SELF | `ps3load` / XMB install on CFW hardware |
-
-Quickest end-to-end check under RPCS3:
-
-```bash
-cd samples/toolchain/hello-ppu-abi-check
-cmake -S . -B cmake-build \
-      -DCMAKE_TOOLCHAIN_FILE=../../../cmake/ps3-ppu-toolchain.cmake \
-      -G Ninja
-cmake --build cmake-build
-rpcs3 --no-gui hello-ppu-abi-check.self
-# Stdout lands in ~/.cache/rpcs3/TTY.log — a clean run ends with
-#   result: PASS
-```
-
-`samples/README.md` has the full sample index plus per-sample notes on what each one validates.
-
-### Host tools
-
-The repo ships host tools under `tools/`; the Rust ones drive the stub-archive pipeline and the coverage report, among others:
-
-- `nidgen` — NID extraction from reference stub archives, stub-archive emission, FNID verification.
-- `coverage-report` — the platform ABI export set vs. our install tree coverage matrix → `docs/coverage.md`.
-
-`scripts/build-sdk.sh` builds and installs all of them (the whole Rust workspace and rsx-cg-compiler) through `scripts/install-host-tools.sh` unless you pass `--no-host-tools`. To build the Rust tools on their own:
-
-```bash
-cd tools
-cargo build --release
-# Binaries land in tools/target/release/
-```
-
-Once `nidgen` is built, `scripts/build-cell-stub-archives.sh` produces the stub archives the declaration-only cell headers (libsysutil_screenshot, libsysutil_ap, libsysutil_music*, libl10n, …) need at link time:
-
-```bash
-./scripts/build-cell-stub-archives.sh
-```
-
-### rsx-cg-compiler (recommended shader compiler)
-
-`tools/rsx-cg-compiler/` is our independent Cg → RSX (NV40) shader compiler, and it is now the **recommended** compiler for vertex and fragment programs. It compiles more of the shader corpus we test against than the bundled PSL1GHT `cgcomp`, including run-time-bound fragment loops (hardware `LOOP`/`BRK`), and every sample in `samples/` builds its shaders with it (`ps3_add_cg_shader_rsxcgc`).
-
-PSL1GHT's NVIDIA-based `cgcomp` is still bundled **for now**, so older PSL1GHT project Makefiles that call it keep building unchanged (`ps3_add_cg_shader` in CMake still uses it too). In a future release it will no longer be installed by default: keeping it will take an explicit build flag, and without that flag it is left out.
-
-Known gaps are refused by name rather than compiled wrongly: `while`/`do`-`while` loops, `break` inside a run-time loop other than a body ending in `if (c) break;`, run-time loops nested in run-time loops, constant-bound loops longer than 64 iterations, and a handful of very large community shaders that run out of fragment registers.
-
-To build it:
-
-```bash
-cmake -B tools/rsx-cg-compiler/build -S tools/rsx-cg-compiler
-cmake --build tools/rsx-cg-compiler/build
-# Binary: tools/rsx-cg-compiler/build/rsx-cg-compiler
-```
+Host packages for each distribution, WSL2 setup, per-step options, install checks and the Windows `.exe` cross-build are in [docs/building.md](docs/building.md).
 
 ## Layout
 
 - `scripts/` — build orchestrators and environment setup
 - `src/` — vendored upstream and ps3dev sources (reproducible via `bootstrap.sh`; `.gitignored`)
 - `patches/` — rebased and new patches against upstream sources
-- `tools/` — the Rust workspace (`nidgen`, `coverage-report`, `abi-verify`, `prx-gen`, `sfo`, `make-sdata`, `ovis`, `spu-elf-to-ppu-obj`), the C++ `rsx-cg-compiler` and the C `sprx-linker`
+- `tools/` — the Rust workspace (`nidgen`, `coverage-report`, `abi-verify`, `prx-gen`, `sfo`, `make-sdata`, `ovis`, `spu-elf-to-ppu-obj`, the profiler tools), the C++ `rsx-cg-compiler`, the C `sprx-linker` and `pkg`; user guides in [docs/tools/](docs/tools/README.md)
 - `stage/ps3dev/` — the `$PS3DEV` install prefix (bin, ppu, spu, ps3dk, portlibs)
 - `samples/` — tracked CMake sample projects across toolchain, GCM, audio, codec, sysutil, firmware helper, LV2, SPU, SPURS, and network categories
 - `.github/workflows/` — CI (`ci.yml`) + tag-driven release (`release.yml`)
-- `docs/` — coverage matrix, ABI reference, toolchain design notes, roadmap, `VERSIONING.md`
+- `docs/` — tool guides, build guide, coverage matrix, ABI reference, toolchain design notes, roadmap, `VERSIONING.md`
 - `CHANGELOG.md` — release-by-release history (Keep a Changelog format)
 
 ## Versioning and releases
