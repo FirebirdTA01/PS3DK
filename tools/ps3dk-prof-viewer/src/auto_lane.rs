@@ -35,11 +35,11 @@ impl AutoLane {
             let Some((i, _)) = owner.slot_of(fr.frame) else {
                 continue;
             };
+            // Any AUTO frame of this owner makes a lane, even when every one is unavailable (for example an
+            // unqualified clock map): those frames are shown with the reader's reason, never dropped.
+            any = true;
             let arm = match fr.rsx_busy_ppu {
-                Some((l, _)) => {
-                    any = true;
-                    AutoFrame::Busy(l)
-                }
+                Some((l, _)) => AutoFrame::Busy(l),
                 None => AutoFrame::Unavailable(fr.reason.clone()),
             };
             lane.slots[i] = Some(arm);
