@@ -200,6 +200,10 @@ occurred every 9–10 frames: about 1.05 MB written per commit, or 6.53 MB/s and
 at the end of that schedule. These are adapter byte counts, not PS3 HDD timings;
 CRC still scans the full slot using a byte table. Measure drainer CPU time, lag
 and dropped records on the target before choosing rolling for a heavy workload.
+Commits are driven by segment size, not elapsed time. A hard hang can lose the
+pending segment (up to about 1 MiB with this preset), even after its chunks were
+accepted into RAM. For sparse activity that can represent minutes of recent
+history; successful acceptance alone does not mean a disk commit or durability.
 Core/extension/rolling writer state has a separate 64 MiB ceiling; AUTO report
 ring and other attach allocations are bounded separately, so this is not a
 total-memory cap. Active SPU lanes and legacy live transport are not supported
