@@ -107,11 +107,11 @@ RING_OPTION={'ringopt':0,'ringopt2':1,'ringoptset':2,'ringoptsetring':3,'ringopt
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
+ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','stopvisitseal','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
                                   'ringsegment',*RING_OPTION],default='noinit')
 ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
 ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
-ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
+ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','ignore-global-stop','foreign-config-claim','sealed-config-claim','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
@@ -126,7 +126,7 @@ if a.reader:
     a.reader=a.reader.resolve(strict=True)
 operations=a.case in ('ops','conflict','reset','frames')
 if a.mutant in RING_MUTANTS:assert a.case==RING_MUTANTS[a.mutant][0] and not a.sanitize
-elif a.mutant:assert a.case=={'fifo-frame-acquire':'fifoaccount','reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
+elif a.mutant:assert a.case=={'fifo-frame-acquire':'fifoaccount','reject-late-end':'stop','ignore-global-stop':'stopvisit','foreign-config-claim':'stopvisit','sealed-config-claim':'stopvisitseal','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
@@ -166,7 +166,7 @@ def run(name,cmd,cwd=out):
         assert r.returncode==-6 and b'FIFO frame metadata requires attached publication' in r.stderr,(r.returncode,r.stderr.decode())
         print('fifo-frame-acquire rejected by pre-publication metadata assertion')
         raise SystemExit(0)
-    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks','preinit-foreign-silent',
+    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','foreign-config-claim','sealed-config-claim','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks','preinit-foreign-silent',
                                                      *CAPTURE_MUTANTS):
         expected=RING_MUTANTS[a.mutant][4] if a.mutant in RING_MUTANTS else {'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
@@ -222,12 +222,13 @@ flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-Wno-prio-ctor-dtor','
        '-I'+str(inc.parent),'-I'+str(root/'sdk/libgcm_cmd/src')]
 for directory in ('core','pal','spu','rsx','fifo','auto_rsx'):flags+=['-I'+str(src/directory)]
 if a.case!='noinit':flags+=['-DPS3DK_PROF_TEST_HOOKS']
-if operations or a.case in ('stop','stopvisit'):
-    flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'frames':0}[a.case])]
+if operations or a.case in ('stop','stopvisit','stopvisitseal'):
+    flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'stopvisitseal':0,'frames':0}[a.case])]
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
 if a.case=='fifoaccount':flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
-if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
+if a.case in ('stopvisit','stopvisitseal'):flags+=['-DTEST_STOP_VISIT=1']
+if a.case=='stopvisitseal':flags+=['-DTEST_STOP_SEAL=1']
 if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
@@ -459,6 +460,16 @@ for rel in sources:
     elif a.mutant=='clock-put' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='!auto_clock_after(&a->clocks,a->clock_put_frontier)';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'0').encode())
+    elif a.mutant=='sealed-config-claim' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text()
+        old='        claim=auto_config_begin(&configuration);\n        if(claim) {'
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'        claim=auto_config_begin(&configuration);\n        if(!claim) return NULL;\n        if(claim) {').encode())
+    elif a.mutant=='foreign-config-claim' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text()
+        old='        if(LD_ACQ(&candidate_owner_incarnation)!=g_tls.incarnation) return NULL;\n'
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'').encode())
     elif a.mutant in ('reject-late-end','ignore-global-stop') and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text()
         old='if(!ticket) return;' if a.mutant=='reject-late-end' else 'if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration))'
@@ -538,7 +549,7 @@ if a.case=='race':application=Path(__file__).with_name('auto-attach-race-test.c'
 if a.case in ('fifofail','fifopre','fifopost'):application=Path(__file__).with_name('auto-fifo-test.c').read_text()
 if operations:application=Path(__file__).with_name('auto-operations-test.c').read_text()
 if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-clock-runtime-test.c').read_text()
-if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
+if a.case in ('stop','stopvisit','stopvisitseal'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 if a.case=='extsegments':application=Path(__file__).with_name('auto-external-segment-test.c').read_text()
 if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
@@ -590,7 +601,8 @@ if a.case in RING_WRAP:
 # every case but the window API ones records through a whole-run window opened right after init (the shared helper)
 whole_run=[] if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate') else [
     root/'tests/host/ps3dk-prof-common/prof_whole_run.c','-Wl,--wrap=ps3dk_prof_init','-Wl,--wrap=ps3dk_prof_init_ex']
-run('link',[cc,*flags,out/'main.c',out/'bridge.c',*extra,*whole_run,'-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
+stop_wrap=['-Wl,--wrap=ps3dk_prof__auto_config_begin'] if a.case in ('stopvisit','stopvisitseal') else []
+run('link',[cc,*flags,out/'main.c',out/'bridge.c',*extra,*whole_run,*stop_wrap,'-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
 cmd=[out/'app']
 if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
@@ -694,7 +706,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO native FIFO accounting PASS\n' if a.case=='fifoaccount'
                        else b'AUTO actual marker producer and cumulative completion PASS\n' if operations
                        else b'AUTO in-flight owner seal retains claim and lower bound PASS\n' if a.case=='stop'
-                       else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
+                       else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case in ('stopvisit','stopvisitseal')
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO external segment timing PASS\n' if a.case=='extsegments'
@@ -1179,10 +1191,14 @@ if a.case in ('clocks','clockcap'):
     assert chunks[-1][0]==6
     print('real capture: '+str(len(rows))+' CLOCK facts, '+str(frames)+' closed frames, '+str(len(schedule)-len(rows))+' lost anchors and FINAL accounting PASS')
     raise SystemExit(0)
-if a.case in ('stop','stopvisit'):
+if a.case in ('stop','stopvisit','stopvisitseal'):
     assert [k for k,b in auto]==[34,37]
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     active=int(a.case=='stop')
+    if a.mutant in ('foreign-config-claim','sealed-config-claim'):
+        assert fields[:3]==(1,11,1) and fields[3:]==(0,)*15,fields
+        print(a.mutant+' KILLED: core owner ack left AUTO_OWNER_UNACK')
+        raise SystemExit(0)
     assert fields[:3]==(1,11 if active else 1,1),fields
     # capture windows: the stopped visit comes after shutdown closed the whole-run window, so it is not counted (no
     # unassociated visit); the in-flight draw of 'stop' was admitted inside the window
