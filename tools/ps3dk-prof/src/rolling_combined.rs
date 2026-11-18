@@ -205,9 +205,11 @@ fn framed<'a>(b: &'a [u8], expected: u64, header: &[u8; 16]) -> Result<Option<cr
     Ok(Some(crate::rolling::Chunk { index, ty, payload, raw: &b[..total] }))
 }
 
-struct Budget { limits: Limits, work: u64, events: u64, metadata_used: usize, input_used: usize, position_left: u64 }
+/// `held` is live temporary storage of a companion state (the schema3
+/// validator beside its analysis state), so both share one memory ceiling.
+struct Budget { limits: Limits, work: u64, events: u64, metadata_used: usize, input_used: usize, position_left: u64, held: u128 }
 impl Budget {
-    fn new(limits: Limits) -> Self { Self { limits, work: 0, events: 0, metadata_used: 16, input_used: 0, position_left: limits.position_total_work } }
+    fn new(limits: Limits) -> Self { Self { limits, work: 0, events: 0, metadata_used: 16, input_used: 0, position_left: limits.position_total_work, held: 0 } }
     fn input(&mut self, n: usize) -> Result<(), Error> {
         self.input_used = self.input_used.checked_add(n).ok_or(Error::Limit("input bytes"))?;
         if self.input_used > self.limits.input_bytes { return Err(Error::Limit("input bytes")); } Ok(())
@@ -277,6 +279,9 @@ impl Live {
             lifetimes: BTreeMap::new(), terminal: false, families, projection:None, compact:true })
     }
     fn temporary(&self,budget:&mut Budget)->Result<u128,Error>{
+        self.own_temporary(budget)?.checked_add(budget.held).ok_or(Error::Limit("combined temporary bytes"))
+    }
+    fn own_temporary(&self,budget:&mut Budget)->Result<u128,Error>{
         let Some(f)=&self.families else{return Ok(0);};let cap=self.ppu.capture();
         budget.charge(cap.lanes.len() as u128+self.spu.combined_lifecycle_work()+f.storage_work()+1)?;
         Ok(f.storage()+self.spu.combined_storage()+8*budget.metadata_used as u128
@@ -596,27 +601,52 @@ pub fn read_combined_suffix(checkpoint: &[u8], suffix: &[u8], limits: Limits,
     options: ReportOptions<'_>) -> Result<RetainedCombined, Error> {
     let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
     let mut live = Live::restore(saved, &mut budget)?;
-    let mut validator = Validator::new(&live, checkpoint, limits)?;
+    let mut validator = Validator::new(&live, checkpoint, &mut budget)?;
     live.compact = false;
     let boundary = live.report_boundary(&mut budget)?;
-    let torn = live.consume(suffix, true, &mut budget)?;
-    if let Some(v) = &mut validator { if v.consume(suffix)? != torn || v.live.next != live.next { return ck("schema3 validator frontier"); } }
+    let torn = analysis_consume(&mut live, validator.as_mut(), suffix, &mut budget)?;
+    if let Some(v) = &mut validator { if v.consume(&live, suffix, &mut budget)? != torn || v.live.next != live.next { return ck("schema3 validator frontier"); } }
+    drop(validator);
     live.finish_retained(boundary, torn, &mut budget, options)
 }
 
-/// Independent schema3 transition replay beside the analysis state. It owns a
-/// separate budget equal to the caller's limits, so the strict successor proof
-/// cannot starve, or be starved by, retained analysis of the same input.
-struct Validator { live: Live, budget: Budget }
+/// Independent schema3 transition replay beside the analysis state. It charges
+/// the caller's one aggregate budget: work, events and position work are
+/// shared, and each state's temporary storage counts against the other's
+/// ceiling. Only the per-state checkpoint metadata census is kept separately,
+/// and the identical input bytes are not admitted twice.
+struct Validator { live: Live, metadata_used: usize }
 impl Validator {
-    fn new(analysis: &Live, checkpoint: &[u8], limits: Limits) -> Result<Option<Self>, Error> {
+    fn new(analysis: &Live, checkpoint: &[u8], budget: &mut Budget) -> Result<Option<Self>, Error> {
         if analysis.projection.is_none() { return Ok(None); }
-        let mut budget = Budget::new(limits); let saved = checkpoint::decode(checkpoint, &mut budget)?;
-        let live = Live::restore(saved, &mut budget)?;
-        Ok(Some(Self { live, budget }))
+        let held = analysis.own_temporary(budget)?;
+        let mut v = Self { live: Live::new(analysis.header, budget)?, metadata_used: 16 };
+        v.with(budget, held, |live, budget| {
+            let saved = checkpoint::decode(checkpoint, budget)?; *live = Live::restore(saved, budget)?; Ok(())
+        })?;
+        Ok(Some(v))
     }
-    fn consume(&mut self, bytes: &[u8]) -> Result<bool, Error> { self.live.consume(bytes, true, &mut self.budget) }
-    fn canonical(&mut self) -> Result<Vec<u8>, Error> { self.live.canonical_boundary(&mut self.budget) }
+    fn with<T>(&mut self, budget: &mut Budget, held: u128, f: impl FnOnce(&mut Live, &mut Budget) -> Result<T, Error>) -> Result<T, Error> {
+        let analysis_metadata = std::mem::replace(&mut budget.metadata_used, self.metadata_used);
+        let input = budget.input_used; budget.held = held;
+        let result = f(&mut self.live, budget);
+        self.metadata_used = std::mem::replace(&mut budget.metadata_used, analysis_metadata);
+        budget.input_used = input; budget.held = 0; result
+    }
+    fn own_temporary(&mut self, budget: &mut Budget) -> Result<u128, Error> { self.with(budget, 0, |live, budget| live.own_temporary(budget)) }
+    fn consume(&mut self, analysis: &Live, bytes: &[u8], budget: &mut Budget) -> Result<bool, Error> {
+        let held = analysis.own_temporary(budget)?;
+        self.with(budget, held, |live, budget| live.consume(bytes, true, budget))
+    }
+    fn canonical(&mut self, analysis: &Live, budget: &mut Budget) -> Result<Vec<u8>, Error> {
+        let held = analysis.own_temporary(budget)?;
+        self.with(budget, held, |live, budget| live.canonical_boundary(budget))
+    }
+}
+/// Analysis consumption while a validator still holds its own storage.
+fn analysis_consume(live: &mut Live, validator: Option<&mut Validator>, bytes: &[u8], budget: &mut Budget) -> Result<bool, Error> {
+    budget.held = match validator { Some(v) => v.own_temporary(budget)?, None => 0 };
+    let result = live.consume(bytes, true, budget); budget.held = 0; result
 }
 
 /// One imported state and one budget for the entire selected physical window.
@@ -640,7 +670,7 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
     // Schema3 checkpoints are compared against the validator's own-next
     // transitions; the analysis state retains decoded support for the whole
     // retained interval and is never compacted beyond its imported floor.
-    let mut validator = Validator::new(&live, first.checkpoint, limits)?;
+    let mut validator = Validator::new(&live, first.checkpoint, &mut budget)?;
     live.compact = false;
     if live.next != bounds.first_chunk || live.next != first.first_chunk {
         return Err(ChainError::Boundary { segment: Some(first.segment), field: "first chunk" });
@@ -655,11 +685,11 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
         if live.next != segment.first_chunk {
             return Err(ChainError::Boundary { segment: Some(segment.segment), field: "segment first chunk" });
         }
-        if live.consume(segment.payload, true, &mut budget)? {
+        if analysis_consume(&mut live, validator.as_mut(), segment.payload, &mut budget)? {
             return Err(Error::Checkpoint("physical segment ends inside a chunk").into());
         }
         if let Some(v) = &mut validator {
-            if v.consume(segment.payload)? || v.live.next != live.next {
+            if v.consume(&live, segment.payload, &mut budget)? || v.live.next != live.next {
                 return Err(Error::Checkpoint("schema3 validator frontier").into());
             }
         }
@@ -671,7 +701,7 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
             // Schema3 successors must equal the identical per-chunk own-next
             // transition; nothing is projected at the oldest retained floor.
             let canonical = match &mut validator {
-                Some(v) => v.canonical()?,
+                Some(v) => v.canonical(&live, &mut budget)?,
                 None => live.canonical_boundary(&mut budget)?,
             };
             budget.bytes(next.checkpoint.len())?;
@@ -688,5 +718,7 @@ pub(crate) fn read_segmented(segments: &[SegmentInput<'_>], bounds: ChainBounds,
     }
     // Only this final consuming validation produces a report. Canonical
     // intermediate equality alone is not a verdict on original source finals.
+    // The validator's storage is released before analysis scratch is reserved.
+    drop(validator);
     Ok(live.finish_retained(boundary, false, &mut budget, options)?)
 }

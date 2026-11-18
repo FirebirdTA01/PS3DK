@@ -178,7 +178,7 @@ append capture, soak tests or playtests where only the recent past matters,
 or when one capture must stay within a fixed disk budget. Leave it **OFF**
 (the default) for short captures, whole-run totals, analysis of every frame,
 SPU recording together with AUTO, or when the extra pre-allocated writer
-memory and repeated file writes are undesirable. The managed rolling profile
+memory (about 16 MB with the preset) and repeated file writes are undesirable. The managed rolling profile
 refuses active SPU recording; it does not silently omit those lanes.
 
 **Retained-only** means the reader and viewer analyze the original records

@@ -23,7 +23,7 @@
 #define S2_LATE_WINDOWS_MAX 64u      /* extra windows allowed for the frontier to pass */
 #endif
 #ifndef S2_LATE_DRAWS
-#define S2_LATE_DRAWS 100u           /* per frame: enough OPS volume to rotate 6 slots */
+#define S2_LATE_DRAWS 100u           /* per frame; eviction is driven by bytes below */
 #endif
 #define S2_LATE_TARGET 3u            /* whole-run = 1, first FRAMES = 2, held = second FRAMES */
 #define S2_LATE_QUEUE 16u            /* FIFO_ACCOUNT_ROWS */
@@ -193,6 +193,14 @@ static int s2_late_main(const char *name)
         if (!s2l.released && s2l.held && w + 1u >= S2_LATE_WINDOWS &&
             s2l.retired_max >= S2_LATE_TARGET + S2_LATE_QUEUE / 2u) break;
     }
+    /* Own-next projection retires declarations without committing slots.
+     * Keep one window open while >6 MiB of actual OPS evicts the preceding
+     * declarations from the physical file too. The old 40-window schedule
+     * wrote only ~1.6 MiB and depended on history-pressure commits. */
+    S2(PS3DK_PROF_CAPTURE_WHOLE_RUN() == 0, "eviction-window-BEGIN");
+    for (w = 0; w < 400; ++w) s2_late_tick(a);
+    S2(ps3dk_prof_capture_state(&info) == 0 && info.state != 0,
+       "eviction-window-still-open");
     /* Preconditions of the scenario, not of the product verdict. */
     S2(s2l.held && s2l.deferrals > 0 && !s2l.released, "row-held-by-real-queue");
     S2(s2l.schema >= 3, "schema3-retired-frontier-present");
@@ -216,11 +224,16 @@ static int s2_late_main(const char *name)
         S2(s2l.mode != S2L_RETIRED || s2l.queued_delivered == S2_LATE_QUEUE, "all-16-queued-rows-kept");
         S2(s2l.mode != S2L_BOUNDARY || (s2l.queued_delivered == 1 && s2l.swallowed == S2_LATE_QUEUE - 1u),
            "boundary-row-alone");
+        /* Admit more real draws until the pending row reaches its first
+         * byte-full commit. Never force a partial flush just for the test. */
+        for (w = 0; !s2l.saved && w < 128; ++w) s2_late_tick(a);
+        S2(s2l.saved, "released-row-observed-at-its-commit");
+        S2(ps3dk_prof_capture_end() == 0, "eviction-window-END");
+        s2_late_tick(a); s2_late_tick(a);
         for (w = 0; w < 4; ++w) {                                 /* capture continues */
             S2(PS3DK_PROF_CAPTURE_FRAMES("delayed-fifo", 2) == 0, "post-release-window-BEGIN");
             s2_late_tick(a); s2_late_tick(a); s2_late_tick(a);
         }
-        S2(s2l.saved, "released-row-observed-at-its-commit");
         S2(s2l.first_after_seq > s2l.held_seq + S2_LATE_QUEUE, "newest-rows-dropped-as-seq-gap");
         s2_resume(); ps3dk_prof_thread_end();
         rc = ps3dk_prof_shutdown();

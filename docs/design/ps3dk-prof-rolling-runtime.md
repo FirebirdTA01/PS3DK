@@ -215,10 +215,18 @@ Dense retained AUTO rows can exceed the library's 64 MiB default analysis
 allowance even in a 21 MiB physical file. The CLI and viewer can use
 `rolling_file::desktop_limits()`; explicit library limits remain unchanged.
 That policy also admits 2^38 conservative analysis work units, configurable
-with `--max-analysis-work N`. AUTO precharges the product of retained frames,
-operations and supporting evidence, including a conservative constant factor;
-these units are not CPU instructions or a time limit. Both work and storage
-checks remain enforced before analysis.
+with `--max-analysis-work N`. With F retained frames, O operations, A anchors,
+B build-support rows, W FIFO wraps plus FIFO boundary runs and R AUTO boundary
+runs, AUTO precharges 256 x (8(F+1)(O+B+W+R+1) + 4(O+1)(A+1)
++ 64(O+F+B+A+W+R+1)) work units: every frame rescans the operations, and
+every operation endpoint scans the anchors. The clock-map solver and H-SPLIT
+pay their own n log n budget on top. Analysis storage is linear:
+4096 x (O+F+B+A+W+1) bytes for AUTO analysis, reserved together with the
+live combined state. Neither bound grows with the square of the anchor count.
+These units are not CPU instructions or a time limit. Both work and storage
+checks remain enforced before analysis. A schema3 read also runs a validator
+replay. The replay charges the same aggregate work budget, and its live
+storage counts against the same storage ceiling.
 These caps do not promise a bound on total process RSS or authenticate evicted
 history. Budget exhaustion refuses the listing; it does not discard rows or
 relax wire validation. The analysis allowance applies to combined PPU/SPU/AUTO/

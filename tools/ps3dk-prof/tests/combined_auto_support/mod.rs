@@ -143,3 +143,72 @@ pub fn container(all: &[Part], layout: Layout, state: u32, reason: u32) -> Vec<u
     }
     rolling_store::read(&b, layout.limits()).expect("independent physical fixture must validate"); b
 }
+
+// ---- Schema3 checkpoint sections (test-side parser) ----
+pub fn sections3(cp:&[u8])->Vec<(u32,Vec<u8>)>{
+    assert_eq!(&cp[..12],b"PFRMIX01\x03\x00\x80\x00");assert_eq!(get32(cp,12),6);
+    assert_eq!(get64(cp,48) as usize,cp.len()-132);assert_eq!(crc32(&cp[..cp.len()-4]),get32(cp,cp.len()-4));
+    let mut at=128;let mut out=Vec::new();for kind in 1..=6u16{
+        assert_eq!(&cp[at..at+2],&kind.to_le_bytes());let end=at+16+get32(cp,at+8) as usize;
+        out.push((get32(cp,at+4),cp[at+16..end].to_vec()));at=end;
+    }assert_eq!(at,cp.len()-4);out
+}
+pub fn rebuild3(cp:&[u8],sections:&[(u32,Vec<u8>)])->Vec<u8>{
+    let mut out=cp[..128].to_vec();
+    for (i,(count,bytes)) in sections.iter().enumerate(){
+        out.extend_from_slice(&(i as u16+1).to_le_bytes());out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());out.extend_from_slice(bytes);
+    }
+    let n=out.len()-128;put64(&mut out,48,n as u64);out.extend_from_slice(&[0;4]);repair(&mut out);out
+}
+pub fn metadata_entries(section:&[u8])->Vec<Vec<u8>>{
+    let mut at=0;let mut out=Vec::new();
+    while at<section.len(){let n=get32(section,at) as usize;out.push(section[at+4..at+4+n].to_vec());at+=4+n;}out
+}
+pub fn metadata_section(entries:&[Vec<u8>])->(u32,Vec<u8>){
+    let mut b=Vec::new();for e in entries{b.extend_from_slice(&(e.len() as u32).to_le_bytes());b.extend_from_slice(e);}(entries.len() as u32,b)
+}
+pub fn auto_inner(cp:&[u8])->Vec<u8>{sections3(cp)[4].1[32..].to_vec()}
+
+// ---- Schema3 test-side wire surgery (independent of the production codec) ----
+/// Canonical (owner, frame) runs from an explicit key set.
+pub fn runs_of(keys:&std::collections::BTreeSet<(u32,u64)>)->Vec<u8>{
+    let mut out:Vec<(u32,u64,u64)>=Vec::new();
+    for &(o,f) in keys{match out.last_mut(){Some(r) if r.0==o&&r.2+1==f=>r.2=f,_=>out.push((o,f,f))}}
+    let mut b=Vec::new();for (o,f,l) in out{b.extend_from_slice(&o.to_le_bytes());b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&f.to_le_bytes());b.extend_from_slice(&l.to_le_bytes());}b
+}
+pub fn keys_of(b:&[u8])->std::collections::BTreeSet<(u32,u64)>{
+    b.chunks_exact(24).flat_map(|r|{let o=get32(r,0);(get64(r,8)..=get64(r,16)).map(move|f|(o,f))}).collect()
+}
+/// AUTO inner build entries: (owner, frame, raw coverage index, width, touched).
+pub fn auto_builds(inner:&[u8])->Vec<(u32,u64,u64,u32,u32)>{
+    let mut at=608+16+get32(inner,244) as usize+get32(inner,216) as usize+get32(inner,220) as usize
+        +24*(get32(inner,224)+get32(inner,228)) as usize;
+    let mut out=Vec::new();for _ in 0..get32(inner,232){let h=&inner[at..at+80];let w=get32(h,64);
+        out.push((get32(h,0),get64(h,8),get64(h,56),w,get32(h,68)));at+=80+w as usize;}out
+}
+/// Removes one AUTO build entry and its finals/touched membership and raw
+/// coverage, then claims it as a retired row with every census adjusted, so
+/// only a dependency check (not arithmetic) can refuse the result.
+pub fn forge_drop_build(cp:&[u8],key:(u32,u64))->Vec<u8>{
+    let mut s=sections3(cp);let auto=s[4].1.clone();let inner=auto[32..].to_vec();
+    let base=608+16+get32(&inner,244) as usize+get32(&inner,216) as usize+get32(&inner,220) as usize;
+    let nr=get32(&inner,224) as usize;let nt=get32(&inner,228) as usize;
+    let mut finals=keys_of(&inner[base..base+24*nr]);let mut touched=keys_of(&inner[base+24*nr..base+24*(nr+nt)]);
+    let mut at=base+24*(nr+nt);let mut builds=Vec::new();let mut dropped=None;
+    for _ in 0..get32(&inner,232){let w=get32(&inner,at+64) as usize;let e=inner[at..at+80+w].to_vec();
+        if (get32(&e,0),get64(&e,8))==key{dropped=Some(e);}else{builds.extend_from_slice(&e);}at+=80+w;}
+    let e=dropped.expect("build to drop");let width=get32(&e,64);let raw=get64(&e,56);
+    if width!=0{finals.remove(&key);}if get32(&e,68)!=0{touched.remove(&key);}
+    let mut out=inner[..base].to_vec();let f=runs_of(&finals);let t=runs_of(&touched);
+    put32(&mut out,224,(f.len()/24) as u32);put32(&mut out,228,(t.len()/24) as u32);put32(&mut out,232,get32(&inner,232)-1);
+    out.extend_from_slice(&f);out.extend_from_slice(&t);out.extend_from_slice(&builds);out.extend_from_slice(&inner[at..]);
+    if width!=0{let n=get64(&out,520)+1;put64(&mut out,520,n);
+        let status=get64(&out,160);if status!=0&&raw<status{let n=get64(&out,536)+1;put64(&mut out,536,n);}}
+    let n=out.len() as u64;put64(&mut out,16,n);repair(&mut out);
+    let mut wrapper=auto[..32].to_vec();put32(&mut wrapper,0,out.len() as u32);wrapper.extend_from_slice(&out);s[4].1=wrapper;
+    if width!=0{let mut m=metadata_entries(&s[0].1);m.retain(|x|!(get32(x,0)==36&&get64(x,8)==raw));s[0]=metadata_section(&m);}
+    rebuild3(cp,&s)
+}

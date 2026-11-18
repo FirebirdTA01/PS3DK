@@ -6,7 +6,7 @@ mod fifo_support;
 mod spu_support;
 mod combined_auto_support;
 use common::*;
-use combined_auto_support::{config,op,coverage,clock,status,put16,put32,put64,get32};
+use combined_auto_support::{config,op,coverage,clock,status,put16,put32,put64,get32,auto_builds,auto_inner,forge_drop_build};
 use ps3dk_prof::{auto_rsx,rolling_combined as combined};
 use std::{path::{Path,PathBuf},process::{Command,Stdio},time::{Duration,Instant},io::Read};
 
@@ -176,3 +176,37 @@ fn c_auto_legacy7_ppu_spu_fifo_matches_every_original_cut(){parity(modeled(false
 fn c_auto_ring2047_ppu_spu_fifo_matches_every_original_cut(){parity(modeled(true).bytes());}
 #[test] #[ignore="requires fresh real runtime source and prebuilt C AUTO encoder fixture"]
 fn c_auto_real_runtime_ring_matches_every_original_cut(){parity(runtime());}
+
+// ---- Schema3 ring-cursor pin -------------------------------------------------
+/// The ring model without its middle STATUS: the saved STATUS ring cursor then
+/// still names frame 7 after frame 8 finalizes, so only that cursor pins it.
+fn cursor_pinned()->(File,usize){
+    let mut f=modeled(true);
+    let statuses:Vec<usize>=f.chunks.iter().enumerate().filter(|(_,c)|c.ty==37).map(|(i,_)|i).collect();
+    assert_eq!(statuses.len(),3);f.chunks.remove(statuses[1]);
+    let rows:Vec<usize>=f.chunks.iter().enumerate().filter(|(_,c)|c.ty==36).map(|(i,_)|i).collect();
+    assert_eq!(rows.len(),2);(f,rows[1]+1)
+}
+fn projected_at(f:&File,cut:usize)->Vec<u8>{
+    let b=f.bytes();let o=checked_bytes(&b);combined::checkpoint_combined_projected(&b[..o[cut]],limits()).expect("projected ring prefix")
+}
+#[test]
+fn schema3_ring_cursor_pin_survives_compaction_and_its_removal_refuses(){
+    let owner=fifo_support::OWNER;
+    // Control: with the newer STATUS the finalized frame-7 row retires.
+    let plain=modeled(true);let rows:Vec<usize>=plain.chunks.iter().enumerate().filter(|(_,c)|c.ty==36).map(|(i,_)|i).collect();
+    let cp=projected_at(&plain,rows[1]+1);
+    assert!(!auto_builds(&auto_inner(&cp)).iter().any(|b|(b.0,b.1)==(owner,7)),"unpinned finalized row retires");
+    let (f,cut)=cursor_pinned();let b=f.bytes();let o=checked_bytes(&b);
+    let cp=projected_at(&f,cut);
+    assert!(auto_builds(&auto_inner(&cp)).iter().any(|b|(b.0,b.1,b.3!=0)==(owner,7,true)),"STATUS ring cursor pins finalized frame 7");
+    let suffix=&b[o[cut]..];
+    combined::read_combined_suffix(&cp,suffix,limits(),combined::ReportOptions{spu_profile_table:&[],causal_limits:Default::default()})
+        .expect("canonical pinned control");
+    let bad=forge_drop_build(&cp,(owner,7));
+    let read=combined::read_combined_suffix(&bad,suffix,limits(),combined::ReportOptions{spu_profile_table:&[],causal_limits:Default::default()});
+    assert!(matches!(read,Err(combined::Error::Checkpoint(_))),"dropped ring-cursor dependency refuses: {:?}",read.err());
+    assert!(matches!(combined::advance_combined(&bad,&[],limits()),Err(combined::Error::Checkpoint(_))));
+    // The dropped row's retirement is also not the successor transition.
+    let next=combined::advance_combined(&cp,&b[o[cut]..o[cut+1]],limits()).unwrap();assert_ne!(forge_drop_build(&cp,(owner,7)),next);
+}

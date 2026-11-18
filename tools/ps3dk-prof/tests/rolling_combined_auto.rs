@@ -293,10 +293,12 @@ fn analysis_scratch_cannot_reuse_memory_already_held_by_combined_families(){
     let x=fixture();full(&x.file);let cp=direct(&x.file,x.cut);let bytes=x.file.bytes();let suffix=&bytes[offset(&x.file,x.cut)..];
     let generous=retained(&cp,suffix,Limits{temporary_bytes:1<<20,..Limits::default()}).unwrap();useful(&generous);
     // Nine exact anchors, retained operations/coverage/build support and paired
-    // FIFO phases coexist with PPU/SPU state. An independent full-cap grant to
-    // AUTO analysis fits this cap; the joint live-plus-scratch reservation cannot.
-    assert!(matches!(retained(&cp,suffix,Limits{temporary_bytes:250_000,..Limits::default()}),
-        Err(Error::Limit("combined analysis temporary bytes"))),"AUTO scratch must share the held combined-state cap");
+    // FIFO phases coexist with PPU/SPU state. Analysis scratch is linear in its
+    // population (anchors included), so the binding cap just below the minimum
+    // admitted size is the joint live-plus-scratch reservation, not either part.
+    let need=(1..=1usize<<20).collect::<Vec<_>>().partition_point(|&n|retained(&cp,suffix,Limits{temporary_bytes:n,..Limits::default()}).is_err())+1;
+    assert!(matches!(retained(&cp,suffix,Limits{temporary_bytes:need-1,..Limits::default()}),
+        Err(Error::Limit("combined analysis temporary bytes"))),"AUTO scratch must share the held combined-state cap ({need})");
 }
 
 fn configured_prefix()->File{
@@ -348,30 +350,6 @@ fn unrelated_ppu_rows_still_pay_for_live_auto_build_storage_scans(){
 fn projected(f:&File,cut:usize)->Vec<u8>{
     combined::checkpoint_combined_projected(&f.bytes()[..offset(f,cut)],Limits::default()).expect("valid projected original prefix")
 }
-fn sections3(cp:&[u8])->Vec<(u32,Vec<u8>)>{
-    assert_eq!(&cp[..12],b"PFRMIX01\x03\x00\x80\x00");assert_eq!(get32(cp,12),6);
-    assert_eq!(get64(cp,48) as usize,cp.len()-132);assert_eq!(crc32(&cp[..cp.len()-4]),get32(cp,cp.len()-4));
-    let mut at=128;let mut out=Vec::new();for kind in 1..=6u16{
-        assert_eq!(&cp[at..at+2],&kind.to_le_bytes());let end=at+16+get32(cp,at+8) as usize;
-        out.push((get32(cp,at+4),cp[at+16..end].to_vec()));at=end;
-    }assert_eq!(at,cp.len()-4);out
-}
-fn rebuild3(cp:&[u8],sections:&[(u32,Vec<u8>)])->Vec<u8>{
-    let mut out=cp[..128].to_vec();
-    for (i,(count,bytes)) in sections.iter().enumerate(){
-        out.extend_from_slice(&(i as u16+1).to_le_bytes());out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&count.to_le_bytes());out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes());out.extend_from_slice(bytes);
-    }
-    let n=out.len()-128;put64(&mut out,48,n as u64);out.extend_from_slice(&[0;4]);repair(&mut out);out
-}
-fn metadata_entries(section:&[u8])->Vec<Vec<u8>>{
-    let mut at=0;let mut out=Vec::new();
-    while at<section.len(){let n=get32(section,at) as usize;out.push(section[at+4..at+4+n].to_vec());at+=4+n;}out
-}
-fn metadata_section(entries:&[Vec<u8>])->(u32,Vec<u8>){
-    let mut b=Vec::new();for e in entries{b.extend_from_slice(&(e.len() as u32).to_le_bytes());b.extend_from_slice(e);}(entries.len() as u32,b)
-}
 /// Moves one anchor between the AUTO support list (and shared metadata) and its
 /// retired census, keeping every count, length and CRC self-consistent.
 fn forge_anchor(cp:&[u8],raw:&[u8],restore:bool)->Vec<u8>{
@@ -392,7 +370,6 @@ fn forge_anchor(cp:&[u8],raw:&[u8],restore:bool)->Vec<u8>{
     s[0]=metadata_section(&entries);rebuild3(cp,&s)
 }
 fn raw_chunk(f:&File,i:usize)->Vec<u8>{f.bytes()[offset(f,i)..offset(f,i+1)].to_vec()}
-fn auto_inner(cp:&[u8])->Vec<u8>{sections3(cp)[4].1[32..].to_vec()}
 
 #[test]
 fn schema3_own_next_replay_is_canonical_and_associative_at_every_cut(){
@@ -488,4 +465,95 @@ fn schema3_forged_frontier_retained_history_or_dropped_dependency_refuses(){
     // Drops a still-needed dependency: one of the eight predecessor anchors.
     let dropped=forge_anchor(&cp,&second,false);
     cp_error(retained(&dropped,suffix,Limits::default()));cp_error(combined::advance_combined(&dropped,&[],Limits::default()));
+}
+
+#[test]
+fn schema3_missing_initial_build_claim_cannot_qualify_its_later_import() {
+    let x=fixture();let f=&x.file;full(f);let bytes=f.bytes();
+    let cut=f.chunks.iter().position(|c|c.ty==35).unwrap()+1;
+    let cp=projected(f,cut);let key=(fifo_support::OWNER,7);
+    assert!(auto_builds(&auto_inner(&cp)).iter().any(|b|(b.0,b.1,b.3)==(key.0,key.1,0)));
+    let suffix=&bytes[offset(f,cut)..];
+    let good=retained(&cp,suffix,Limits::default()).expect("canonical incomplete build claim");
+    assert_eq!(good.auto_report.as_ref().unwrap().frames.iter().find(|r|r.view.frame==8).unwrap().view.verdict,
+        auto_rsx::Verdict::RsxBound,"positive imported build population");
+    // The initial checkpoint cannot authenticate evicted history. Removing an
+    // incomplete build and its membership can be internally consistent, but
+    // the later retained coverage/record population must no longer qualify.
+    let dropped=forge_drop_build(&cp,key);
+    let bad=retained(&dropped,suffix,Limits::default()).expect("self-consistent initial prefix claim");
+    assert_eq!(bad.auto_report.as_ref().unwrap().frames.iter().find(|r|r.view.frame==8).unwrap().view.verdict,
+        auto_rsx::Verdict::Unknown,"missing prefix build evidence cannot promote a verdict");
+    // The identical omission in a retained successor is different: the
+    // preceding original bytes determine its state, so the chain must refuse.
+    let mut chain=vec![Part{checkpoint:projected(f,0),payload:bytes[16..offset(f,cut)].to_vec(),first:0,next:cut as u64},
+        Part{checkpoint:cp,payload:suffix.to_vec(),first:cut as u64,next:f.chunks.len() as u64}];
+    let layout=Layout::new(2,2,32768,8192);
+    physical(&container(&chain,layout,1,0),layout,Limits::default()).expect("canonical retained successor");
+    chain[1].checkpoint=dropped;
+    assert!(physical(&container(&chain,layout,1,0),layout,Limits::default()).is_err(),
+        "retained successor omission is not an unauthenticated prefix claim");
+}
+
+// ---- Schema3 shared aggregate budget and anchor-cost sensitivity ------------
+fn minimum<F:Fn(Limits)->bool>(ok:F,set:fn(u64)->Limits,mut high:u64)->u64{
+    assert!(ok(set(high)),"generous control admits");let mut low=0;
+    while high-low>1{let mid=low+(high-low)/2;if ok(set(mid)){high=mid}else{low=mid}}high
+}
+fn work(n:u64)->Limits{Limits{work_items:n,..Limits::default()}}
+fn memory(n:u64)->Limits{Limits{temporary_bytes:n as usize,..Limits::default()}}
+fn limited<T>(r:Result<T,Error>)->bool{match r{Ok(_)=>true,Err(Error::Limit(_))=>false,Err(e)=>panic!("budget control changed semantics: {e:?}")}}
+
+#[test]
+fn schema3_validator_and_analysis_share_one_aggregate_budget(){
+    let x=fixture();let f=&x.file;let bytes=f.bytes();let cut=3;let suffix=&bytes[offset(f,cut)..];
+    let (v2,v3)=(direct(f,cut),projected(f,cut));
+    let end=offset(f,f.chunks.len()-1);let validator_input=&bytes[offset(f,cut)..end];
+    for set in [work as fn(u64)->Limits,memory]{
+        let high=if set(1).work_items==1{Limits::default().work_items}else{Limits::default().temporary_bytes as u64};
+        let analysis=minimum(|l|limited(retained(&v2,suffix,l)),set,high);
+        let replay=minimum(|l|limited(combined::advance_combined(&v3,validator_input,l)),set,high);
+        let one=analysis.max(replay);let joint=minimum(|l|limited(retained(&v3,suffix,l)),set,high);
+        assert!(!limited(retained(&v3,suffix,set(one))),"a schema3 read cannot get a second budget for its validator ({analysis}/{replay}/{joint})");
+        assert!(limited(retained(&v3,suffix,set(2*one))),"the same read fits the sum of both states ({analysis}/{replay}/{joint})");
+    }
+}
+
+fn anchor_suffix(n:u32)->(File,usize){
+    let mut f=configured_prefix();let cut=f.chunks.len();f.chunks.extend((1..=n).map(clock));(f,cut)
+}
+#[test]
+fn schema3_anchor_analysis_is_linear_memory_and_sound_bounded_work(){
+    const N:u32=2048;let (f,cut)=anchor_suffix(N);let bytes=f.bytes();reader::read(&bytes).expect("independent many-anchor source");
+    let cp=projected(&f,cut);let suffix=&bytes[offset(&f,cut)..];
+    let got=retained(&cp,suffix,work(1<<30)).expect("many retained anchors fit the default memory cap");
+    assert_eq!(got.auto.as_ref().unwrap().clocks.iter().filter(|c|c.index>=cut as u64).count(),N as usize,"every retained anchor is analysis support");
+    // A quadratic live-storage quote would need 2048*N^2 = 8 GiB; the read
+    // above used the 64 MiB default cap.
+    assert!(2048*u128::from(N)*u128::from(N)>Limits::default().temporary_bytes as u128);
+    // Operation endpoints scan every anchor: that product is still charged,
+    // so an undersized work cap trips before analysis runs.
+    const OPS:u64=256;const A:u32=256;
+    let mut g=configured_prefix();let cut=g.chunks.len();g.chunks.extend((1..=A).map(clock));
+    let execution=7;let mut ops=op(1,execution,None,(10000,20000));put32(&mut ops.payload,8,OPS as u32);
+    for id in 2..=OPS{ops.payload.extend_from_slice(&op(id,execution,None,(10000+id,20000+id)).payload[16..]);}
+    g.chunks.push(ops);let bytes=g.bytes();reader::read(&bytes).expect("independent anchors-and-operations source");
+    let cp=projected(&g,cut);let suffix=&bytes[offset(&g,cut)..];
+    let need=minimum(|l|limited(retained(&cp,suffix,l)),work,1<<36);
+    assert!(u128::from(need)>=1024*u128::from(OPS)*u128::from(A),"operation-by-anchor work is charged ({need})");
+    assert!(matches!(retained(&cp,suffix,work(need-1)),Err(Error::Limit(_))),"an undersized work cap trips");
+}
+
+#[test]
+#[ignore="requires PS3DK_PROF_OWN_FRONTIER_FIXTURES: directories holding real own-next capture.profr files"]
+fn schema3_real_own_next_runtime_files_open_under_desktop_limits(){
+    let dirs=std::env::var("PS3DK_PROF_OWN_FRONTIER_FIXTURES").expect("set PS3DK_PROF_OWN_FRONTIER_FIXTURES");
+    let mut n=0;for dir in std::env::split_paths(&dirs){
+        let bytes=std::fs::read(dir.join("capture.profr")).unwrap();assert!(bytes.len()<=32<<20);
+        let got=rolling_file::read_combined(&bytes,ps3dk_prof::rolling_store::Limits{max_file_bytes:32<<20,max_slot_bytes:4<<20},
+            rolling_file::desktop_limits(),ReportOptions{spu_profile_table:&[],causal_limits:CausalLimits::default()})
+            .unwrap_or_else(|e|panic!("{}: real own-next join: {e:?}",dir.display()));
+        let auto=got.retained.auto.as_ref().unwrap();assert_eq!(auto.support_floor,Some(got.retained.first_chunk));
+        eprintln!("{}: retained chunks {}..{}, anchors {}, frames {}",dir.display(),got.retained.first_chunk,got.retained.next_chunk,auto.clocks.len(),auto.frames.len());n+=1;
+    }assert!(n>0);
 }

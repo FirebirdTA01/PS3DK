@@ -55,6 +55,34 @@ static int own_frontier(void)
     CHECK(pfm2_pressure(ctx,a)==0); /* History alone cannot force full-slot IO. */
     free(cp);free(saved);free(b);free(a);free(ctx);return 0;
 }
+static int dependency_pins(void)
+{
+    au_state s={0};au_build builds[8]={{0}};au_clock clocks[9]={{0}};
+    fi_run finals[8]={{0}},touched[8]={{0}};pfm2_config cfg={0};
+    au_pools pools={finals,touched,builds,clocks};unsigned i;int marker=0;
+    const uint64_t frames[]={5,2,3,4,7,8};
+    s.projected=1;s.build_count=6;s.clock_count=9;s.final_present=3;
+    s.final_frame[0]=5;s.final_frame[1]=7;s.marker_present=1;s.marker_frame=6;
+    s.flags=AU_STATUS|AU_INVALID;s.status_index=1000;s.sticky_clock=1;
+    w32(s.config+16,2);
+    cfg.auto_build_entries=8;cfg.auto_final_runs=8;cfg.auto_touched_runs=8;cfg.auto_clock_anchors=9;
+    for(i=0;i<6;++i){builds[i].owner=i?2:0;builds[i].frame=frames[i];
+        builds[i].width=i==5?0:528;builds[i].touched=1;builds[i].index=i+10;}
+    for(i=0;i<9;++i)clocks[i].index=i+20;
+    w32(s.ring+48,1);w32(s.ring+56,1);w32(s.ring+60,2);w64(s.ring+64,4);
+    w32(s.ring_snapshot+48,1);w32(s.ring_snapshot+56,1);w32(s.ring_snapshot+60,2);w64(s.ring_snapshot+64,3);
+    CHECK(au_project_state(&s,pools,&cfg,100)==PFR_OK);
+    CHECK(s.build_count==5&&builds[0].owner==0&&builds[0].frame==5);
+    CHECK(builds[1].frame==3&&builds[2].frame==4&&builds[3].frame==7&&builds[4].frame==8);
+    CHECK(builds[4].width==0); /* unfinished build survives without a coverage row */
+    CHECK(s.retired_frames==1&&s.retired_status_frames==1);
+    CHECK(s.clock_count==8&&clocks[0].index==21&&s.retired_clocks==1&&s.retired_status_clocks==1);
+    CHECK(s.sticky_clock==1&&(s.flags&AU_INVALID));
+    for(i=0;i<s.touched_count;++i)if(touched[i].owner==2&&touched[i].first<=6&&touched[i].last>=6)marker=1;
+    CHECK(marker); /* FRAME membership survives even without a build entry */
+    CHECK(au_project_state(&s,pools,&cfg,100)==PFR_OK&&s.retired_frames==1&&s.retired_clocks==1);
+    return 0;
+}
 int main(void)
 {
     static const uint16_t flags[] = {2,4,8}; /* TIMEOUT, REGRESSION, READ_REFUSED */
@@ -72,5 +100,6 @@ int main(void)
         CHECK(s.sticky_clock==(!bracket||flags[j]==4));
     }
     CHECK(own_frontier()==0);
+    CHECK(dependency_pins()==0);
     puts("projection clock flags and own frontier: PASS");return 0;
 }

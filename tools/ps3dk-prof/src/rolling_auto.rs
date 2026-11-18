@@ -803,8 +803,10 @@ impl CombinedAdapter {
     pub(crate) fn analysis_scratch(&self,fifo_items:u128)->Result<u128,Error>{
         let s=&self.state;let anchors=s.clocks.len() as u128;
         let population=s.ops.len() as u128+s.frames.len() as u128+s.builds.len() as u128+anchors+1;
+        // Live analysis storage is linear in anchors: the map solver, H-SPLIT
+        // hold-outs and bound queries keep O(1) records per anchor. Their
+        // search cost is charged separately as work in analyze().
         population.checked_add(fifo_items).and_then(|n|n.checked_mul(4096))
-            .and_then(|n|anchors.checked_mul(anchors).and_then(|a|a.checked_mul(2048)).and_then(|a|n.checked_add(a)))
             .ok_or(Error::Limit("analysis temporary overflow"))
     }
     pub(crate) fn retained_rows(&self)->usize{self.state.ops.len()+self.state.frames.len()}
@@ -835,10 +837,18 @@ pub fn analyze(r:&Retained,f:Option<&fifo::rolling::Retained>,l:Limits,work:&mut
     let ops=r.ops.len() as u128;let frames=r.frames.len() as u128;let anchors=r.clocks.len() as u128;let builds=r.builds.len() as u128;
     let fifo=f.map_or(0,|f|(f.wraps.len()+f.boundary_frames.len()) as u128);
     if r.ops.len()+r.frames.len()>l.retained_records || r.clocks.len()>l.anchors || r.builds.len()>l.build_entries{return Err(Error::Limit("analysis population"));}
-    if 4096*(ops+frames+builds+fifo+anchors+1)+2048*anchors*anchors>l.temporary_bytes as u128{return Err(Error::Limit("analysis temporary bytes"));}
-    // Pay a conservative upper bound before any clone, repeated scan, sort,
-    // exact arithmetic or output allocation in the shared analysis helper.
-    meter.charge(256*(frames+1)*(ops+1)*(anchors+builds+fifo+1)+256*(ops+frames+builds+anchors+fifo+1))?;
+    if 4096*(ops+frames+builds+fifo+anchors+1)>l.temporary_bytes as u128{return Err(Error::Limit("analysis temporary bytes"));}
+    // Pay a sound upper bound before any clone, repeated scan, sort, exact
+    // arithmetic or output allocation in the shared analysis helper, in units
+    // of 256 per element visit: every frame rescans the retained operations
+    // (at most eight passes: records, CALLs, two FRAME marks, represented),
+    // its FIFO wraps/boundary runs, build support and boundary membership;
+    // every operation endpoint scans the anchors (busy merge and intervals);
+    // sorts and map lookups are charged 64 visits per element. The map solver
+    // and H-SPLIT pay their own n log n budget below. No anchor-pair work
+    // exists, and per-frame work does not multiply by the anchor count.
+    let boundary=r.boundary_frames.len() as u128;
+    meter.charge(256*(8*(frames+1)*(ops+builds+fifo+boundary+1)+4*(ops+1)*(anchors+1)+64*(ops+frames+builds+anchors+fifo+boundary+1)))?;
     let inv=super::Inventory{config:r.config.clone(),ops:r.ops.iter().map(|o|o.value.clone()).collect(),ops_parsed:r.cumulative.ops,
         frames:r.frames.iter().map(|x|x.value.clone()).collect(),frames_parsed:r.cumulative.frames,
         clocks:r.clocks.iter().map(|x|x.value.clone()).collect(),clocks_parsed:r.cumulative.clocks,statuses:r.cumulative.statuses,
