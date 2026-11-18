@@ -200,6 +200,22 @@ occurred every 9–10 frames: about 1.05 MB written per commit, or 6.53 MB/s and
 at the end of that schedule. These are adapter byte counts, not PS3 HDD timings;
 CRC still scans the full slot using a byte table. Measure drainer CPU time, lag
 and dropped records on the target before choosing rolling for a heavy workload.
+On the measured PS3 HDD (2000 frames, 600 clears per frame), 206 commits took
+about 205 ms median / 472 ms p95 elapsed time, with two syncs per commit.
+Subtracting positioned-write and sync elapsed time left about 46 ms per commit
+as a non-I/O upper bound, not a CPU-time measurement. The observed mean and
+median commit times imply a rough service-rate estimate of 4–5 commits/s,
+about 4–5 MB/s of these capture records. This is not a measured sustained
+throughput limit: that GPU-bound run produced only 0.38 commits/s (0.40 MB/s).
+It had no ring-full, metadata-full, lost-frame or dropped-operation counts;
+112 draws were untimed for command-buffer room. If production outruns drain
+service long enough to fill the bounded buffers, later draws/records can be
+excluded or lost. Their capacity-exclusion, lost-record and GAP evidence is
+counted and reported; the reader does not silently treat it as full coverage.
+An output failure instead leaves a failed or incomplete capture. In this run,
+frame-mark-to-RAM-acceptance lag was 23 ms median / 189 ms p95 / 643 ms maximum;
+RAM acceptance is not a disk commit. The full-slot clear and CRC scan remain
+an optimization follow-up; the measured 46 ms includes other non-I/O work too.
 Commits are driven by segment size, not elapsed time. A hard hang can lose the
 pending segment (up to about 1 MiB with this preset), even after its chunks were
 accepted into RAM. For sparse activity that can represent minutes of recent
