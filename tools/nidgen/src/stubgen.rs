@@ -210,9 +210,12 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         //     slot, and bctr into the resolved entry.  There is no
         //     trampoline LR save because LP64 caller-frame header slots
         //     are ABI reserved (sp+16 LR, sp+24 compiler, sp+32 link
-        //     editor, sp+40 TOC).  `sprxlinker --lp64` rewrites
-        //     call-site post-bl nops to `ld r2,40(r1)`, matching the
-        //     system caller-side TOC restore contract.
+        //     editor, sp+40 TOC).  sprxlinker post-links these call sites:
+        //     it finds them from the stub shape (a stub that saves r2 to
+        //     sp+40 and tail-calls) and rewrites the post-bl nop to
+        //     `ld r2,40(r1)`, matching the system caller-side TOC restore
+        //     contract.  Its `--lp64` flag is a no-op kept for legacy
+        //     build rules.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();

@@ -291,7 +291,11 @@ but the field widths stay 32 bits.
 ## 5. Relocation class contract
 
 Only a small set of PPC64 relocation types appear in conformant
-CellOS Lv-2 objects. `abi-verify` flags any relocation outside this set.
+CellOS Lv-2 objects. `abi-verify` does not check every relocation
+against this set; it checks relocations only in `.opd` (head =
+`R_PPC64_ADDR32`, tail = `R_PPC64_TLSGD`) and `.toc` (data-model
+consistency: `R_PPC64_ADDR32` only under ILP32, `R_PPC64_ADDR64` only
+under LP64).
 
 | Type                   | Use                                          |
 |------------------------|----------------------------------------------|

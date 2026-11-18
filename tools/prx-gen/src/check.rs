@@ -40,15 +40,15 @@ pub fn check(input: &Path) -> Result<bool> {
 
     // --- ELF header (§4.1) --------------------------------------------------
     if elf.e_type != ET_SCE_PPURELEXEC {
-        r.err(format!("e_type is 0x{:x}, want 0xFFA4 (§4.1)", elf.e_type));
+        r.err(format!("e_type is 0x{:x}, want 0xFFA4", elf.e_type));
     }
     if elf.data[7] != ELFOSABI_LV2 {
-        r.err(format!("EI_OSABI is 0x{:02x}, want 0x66 (§4.1)", elf.data[7]));
+        r.err(format!("EI_OSABI is 0x{:02x}, want 0x66", elf.data[7]));
     }
     let e_entry = rd_u64(&elf.data, 24);
     if e_entry != 0 {
         r.warn(format!(
-            "e_entry is 0x{e_entry:x}; the PRX loader never reads it, zero is the convention (§4.2)"
+            "e_entry is 0x{e_entry:x}; the PRX loader never reads it, zero is the convention"
         ));
     }
 
@@ -58,7 +58,7 @@ pub fn check(input: &Path) -> Result<bool> {
         bail!("no PT_LOAD segments");
     }
     if elf.phdrs[0].p_type != PT_LOAD {
-        r.err("program header 0 is not PT_LOAD; the module info lookup indexes it (§1.1)".into());
+        r.err("program header 0 is not PT_LOAD; the module info lookup indexes it".into());
     }
     println!("  segments       {} PT_LOAD", loads.len());
     for (i, p) in loads.iter().enumerate() {
@@ -80,7 +80,7 @@ pub fn check(input: &Path) -> Result<bool> {
     if seg0.p_paddr == 0 {
         r.err(
             "PHDR[0].p_paddr is 0: the loader logs 'PRX library info not found' and the module \
-             exports nothing (§1.1)"
+             exports nothing"
                 .into(),
         );
     }
@@ -90,7 +90,7 @@ pub fn check(input: &Path) -> Result<bool> {
         None => {
             r.err(format!(
                 "the module info address 0x{mi_vaddr:x} implied by p_paddr is not inside any \
-                 segment (§1.1)"
+                 segment"
             ));
             return finish(r);
         }
@@ -137,14 +137,14 @@ pub fn check(input: &Path) -> Result<bool> {
     match rela_segs.len() {
         0 => r.err(
             "no PT_SCE_PPURELA (0x700000A4) segment: nothing would be relocated, and the module \
-             info's own pointers would be read as link-time addresses (§1.3)"
+             info's own pointers would be read as link-time addresses"
                 .into(),
         ),
         1 => {
             let seg = rela_segs[0];
             if seg.p_filesz as usize % PRX_RELOC_SIZE != 0 {
                 r.err(format!(
-                    "relocation segment is {} bytes, not a multiple of {} (§2.2)",
+                    "relocation segment is {} bytes, not a multiple of {}",
                     seg.p_filesz, PRX_RELOC_SIZE
                 ));
             }
@@ -171,7 +171,7 @@ pub fn check(input: &Path) -> Result<bool> {
                 }
                 match loads.get(index_addr as usize) {
                     None => r.err(format!(
-                        "relocation {i} names segment {index_addr}, but the module has {} (§2.3)",
+                        "relocation {i} names segment {index_addr}, but the module has {}",
                         loads.len()
                     )),
                     Some(p) => {
@@ -180,7 +180,7 @@ pub fn check(input: &Path) -> Result<bool> {
                         if offset >= limit {
                             r.err(format!(
                                 "relocation {i} offset 0x{offset:x} is past segment {index_addr} \
-                                 (size 0x{:x}); the loader throws rather than skipping (§2.4)",
+                                 (size 0x{:x}); the loader throws rather than skipping",
                                 p.p_memsz
                             ));
                         }
@@ -193,20 +193,20 @@ pub fn check(input: &Path) -> Result<bool> {
                 if index_value != 0xFF && loads.get(index_value as usize).is_none() {
                     r.err(format!(
                         "relocation {i} takes its base from segment {index_value}, which does not \
-                         exist (§2.3)"
+                         exist"
                     ));
                 }
             }
             for t in bad_type {
                 r.err(format!(
                     "relocation type {t} is not in the loader's accepted set \
-                     1/4/5/6/10/11/38/44/57 (§2.5)"
+                     1/4/5/6/10/11/38/44/57"
                 ));
             }
             if mi_hits < 5 {
                 r.err(format!(
                     "only {mi_hits} of the module info block's 5 pointer fields are relocated; \
-                     the loader reads them after relocation (§1.3)"
+                     the loader reads them after relocation"
                 ));
             } else {
                 println!("  module info    {mi_hits} relocated pointer fields");
@@ -237,14 +237,14 @@ pub fn check(input: &Path) -> Result<bool> {
                 r.err(format!(
                     "export record at 0x{:x} has attributes 0x{:04x}: neither 0x0001 (named \
                      library) nor 0x8000 (management), so the loader skips it in silence and the \
-                     module exports nothing (§1.5)",
+                     module exports nothing",
                     rec.vaddr, rec.attributes
                 ));
             }
             if rec.num_tlsvar != 0 {
                 r.warn(format!(
                     "export record at 0x{:x} declares {} TLS vars; the loader logs an error and \
-                     ignores them (§1.6)",
+                     ignores them",
                     rec.vaddr, rec.num_tlsvar
                 ));
             }
@@ -279,7 +279,7 @@ pub fn check(input: &Path) -> Result<bool> {
                             "export record at 0x{:x}: function NID 0x{nid:08x} points at \
                              0x{target:x}, which is not inside the image. The loader dereferences \
                              every special/exported address while logging and throws on a bad one \
-                             — the module will fail to load (§3)",
+                             — the module will fail to load",
                             rec.vaddr
                         ));
                     }
@@ -289,7 +289,7 @@ pub fn check(input: &Path) -> Result<bool> {
         if !have_start {
             r.warn(
                 "no management record exports module_start (NID 0xBC9A0086); the module will load \
-                 but nothing runs at start (§3)"
+                 but nothing runs at start"
                     .into(),
             );
         }
@@ -312,7 +312,7 @@ pub fn check(input: &Path) -> Result<bool> {
             if rec.num_func == 0 && rec.num_var == 0 {
                 r.warn(format!(
                     "import record at 0x{:x} declares no functions; num_func is filled in at \
-                     build time from the .rodata.sceFNID run lengths (§5.2)",
+                     build time from the .rodata.sceFNID run lengths",
                     rec.vaddr
                 ));
             }

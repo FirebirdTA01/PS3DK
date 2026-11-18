@@ -401,8 +401,8 @@ pub fn convert(elf: &Elf) -> Result<Conversion> {
             msg.push_str(&format!("  type {:<4} ({:<24}) x{}\n", t, type_name(*t), n));
         }
         msg.push_str(
-            "Accepted types are 1/4/5/6/10/11/38/44/57 (see sprx-format-facts.md §2.5).\n\
-             This usually means the module was built without -fPIC-style addressing or \
+            "Accepted types are 1/4/5/6/10/11/38/44/57.\n\
+             This usually means the module was built without -fPIC-style addressing or\
              uses a code model the module ABI cannot express.",
         );
         bail!(msg);
