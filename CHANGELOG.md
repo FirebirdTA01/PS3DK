@@ -64,6 +64,14 @@ The version stamped into builds is generated from the most recent
   built on that image: its Windows host tools are compiled by mingw-w64 GCC 15
   (GCC 13 in v0.26.153) and its info pages by makeinfo 7.2.
 
+- **Shader archive packer renamed to `rsxcg2elf`.** The host tool that packs
+  `.vpo`/`.fpo` files into an ELF shader archive is now `rsxcg2elf` (CMake
+  target, binary, `--help` and `--version`). `cgnv2elf` is still installed
+  beside it as a compatibility name for existing Makefiles: a symlink on
+  Linux, a copy of the `.exe` on Windows. Options, exit statuses and output
+  bytes are the same under both names, and the archive's ELF note is
+  unchanged.
+
 ### Fixed
 
 - **PSGL draw and enable errors.** `glDrawArrays` and `glDrawElements`

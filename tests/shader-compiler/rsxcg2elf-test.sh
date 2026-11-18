@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cgnv2elf: pack .vpo/.fpo containers into an ELF shader archive.
+# rsxcg2elf: pack .vpo/.fpo containers into an ELF shader archive.
 #
 # Compiles a few small shaders with rsx-cg-compiler, converts them singly
 # and as a folder, and checks the archive structure: ELF32 big-endian
@@ -8,8 +8,15 @@
 # ucode, the program count, folder ordering, -s and -e, the default output
 # path, and the refusals (missing input, -u, a missing output directory).
 #
-# usage: cgnv2elf-test.sh [rsx-cg-compiler] [cgnv2elf]
-# cgnv2elf defaults to the binary beside rsx-cg-compiler.
+#
+# Every conversion runs twice, under rsxcg2elf and under its compatibility
+# name cgnv2elf, from the same starting state: exit status, diagnostics and
+# archive bytes must be identical.  --help and --version must name
+# rsxcg2elf under both names, the alias adding one line.
+#
+# usage: rsxcg2elf-test.sh [rsx-cg-compiler] [rsxcg2elf] [cgnv2elf]
+# rsxcg2elf defaults to the binary beside rsx-cg-compiler, cgnv2elf to the
+# binary beside rsxcg2elf.
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -18,13 +25,15 @@ if [[ -z "$compiler" ]]; then
     compiler="$repo_root/tools/rsx-cg-compiler/build/rsx-cg-compiler"
 fi
 exe=""; [[ "$compiler" == *.exe ]] && exe=".exe"
-tool="${2:-$(dirname "$compiler")/cgnv2elf$exe}"
+tool="${2:-$(dirname "$compiler")/rsxcg2elf$exe}"
+alias_tool="${3:-$(dirname "$tool")/cgnv2elf$exe}"
 python="$(command -v python3 || command -v python)"
 fail=0
 bad() { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
 ok() { printf 'ok   %s\n' "$*"; }
 [[ -x "$compiler" ]] || { bad "rsx-cg-compiler not executable: $compiler"; exit 1; }
-[[ -x "$tool" ]] || { bad "cgnv2elf not executable: $tool"; exit 1; }
+[[ -x "$tool" ]] || { bad "rsxcg2elf not executable: $tool"; exit 1; }
+[[ -x "$alias_tool" ]] || { bad "cgnv2elf (compatibility name) not executable: $alias_tool"; exit 1; }
 [[ -n "$python" ]] || { bad "python3 not found"; exit 1; }
 
 work="$(mktemp -d)"
@@ -130,10 +139,46 @@ print("programs=%d" % n)
 EOF
 check() { "$python" "$work/check.py" "$@" >"$work/check.log" 2>&1; }
 
-# convert <expected-exit> <args...>: runs cgnv2elf, 0 = status matched.
+# twin <runner> <args...>: runs <runner> <program> <args...> under the
+# cgnv2elf name first, puts the file named by the last argument back as it
+# was, then runs it under rsxcg2elf.  Returns the rsxcg2elf status with its
+# log in tool.log; any difference in status, log (up to the random suffix
+# of a temporary file name) or written bytes between the two names is
+# appended to twin.diffs.
+run_tool() { "$1" -q "${@:2}" >"$work/tool.log" 2>&1; }
+run_bounded() {
+    local program="$1"; shift
+    ( ulimit -c 0; ulimit -v 1048576
+      exec timeout 20 "$program" -q "$@" ) >"$work/tool.log" 2>&1
+}
+twin_runs=0
+twin() {
+    local runner="$1"; shift
+    local last="${*: -1}" had=0 awrote=0 pwrote=0 arc prc
+    rm -f "$work/twin.before" "$work/twin.alias"
+    if [[ -f "$last" ]]; then cp -p "$last" "$work/twin.before"; had=1; fi
+    "$runner" "$alias_tool" "$@"; arc=$?
+    cp "$work/tool.log" "$work/alias.log"
+    if [[ -f "$last" ]]; then cp -p "$last" "$work/twin.alias"; awrote=1; fi
+    if [[ $had -eq 1 ]]; then cp -p "$work/twin.before" "$last"
+    elif [[ -f "$last" ]]; then rm -f "$last"; fi
+    "$runner" "$tool" "$@"; prc=$?
+    [[ -f "$last" ]] && pwrote=1
+    twin_runs=$((twin_runs + 1))
+    # Temporary output names carry a random suffix; compare the rest.
+    sed -E 's/\.tmp-[0-9a-f]{16}/.tmp-RANDOM/g' "$work/tool.log" >"$work/tool.norm"
+    sed -E 's/\.tmp-[0-9a-f]{16}/.tmp-RANDOM/g' "$work/alias.log" >"$work/alias.norm"
+    if [[ $arc -ne $prc || $awrote -ne $pwrote ]] || ! cmp -s "$work/tool.norm" "$work/alias.norm" \
+            || { [[ $pwrote -eq 1 ]] && ! cmp -s "$last" "$work/twin.alias"; }; then
+        echo "exit $arc vs $prc, output $awrote vs $pwrote: $*" >>"$work/twin.diffs"
+    fi
+    return $prc
+}
+
+# convert <expected-exit> <args...>: runs both names, 0 = status matched.
 convert() {
     local want="$1"; shift
-    "$tool" -q "$@" >"$work/tool.log" 2>&1
+    twin run_tool "$@"
     local rc=$?
     [[ $rc -eq $want ]] && return 0
     printf 'exit %d, want %d: %s\n' "$rc" "$want" "$(head -1 "$work/tool.log")" >"$work/check.log"
@@ -380,10 +425,7 @@ struct.pack_into(">I", b, 8, len(b))
 open(out, "wb").write(b)
 EOF
 }
-bounded() {
-    ( ulimit -c 0; ulimit -v 1048576
-      exec timeout 20 "$tool" -q "$@" ) >"$work/tool.log" 2>&1
-}
+bounded() { twin run_bounded "$@"; }
 synth "$work/deep.fpo" "$("$python" -c 'print(".".join(["a"] * 10000))')"
 synth "$work/depth.fpo" "$("$python" -c 'print(".".join(["a"] * 500))')"
 synth "$work/offset.fpo" "a" 0x7ffffff0
@@ -497,8 +539,29 @@ leftovers="$(find "$work" -name '*.tmp-*' | head -3)"
 if [[ -z "$leftovers" ]]; then ok "no temporary files left behind"
 else bad "temporary files left behind: $leftovers"; fi
 
+# The compatibility name: every run above matched, and both names report
+# rsxcg2elf in --version and --help.
+if [[ $twin_runs -gt 0 && ! -e "$work/twin.diffs" ]]; then
+    ok "cgnv2elf name: $twin_runs runs with identical exit status, diagnostics and archive bytes"
+else bad "cgnv2elf name differs ($twin_runs runs): $(head -3 "$work/twin.diffs" 2>/dev/null)"; fi
+"$tool" --version >"$work/ver.p" 2>&1; vp=$?
+"$alias_tool" --version >"$work/ver.a" 2>&1; va=$?
+"$tool" --help >"$work/help.p" 2>&1; hp=$?
+"$alias_tool" --help >"$work/help.a" 2>&1; ha=$?
+if [[ $vp -eq 0 && $va -eq 0 && $(wc -l <"$work/ver.p") -eq 1 && "$(cat "$work/ver.p")" == "rsxcg2elf "* \
+      && $(wc -l <"$work/ver.a") -eq 2 && "$(head -1 "$work/ver.a")" == "$(cat "$work/ver.p")" \
+      && "$(tail -1 "$work/ver.a")" == *"compatibility alias for rsxcg2elf"* ]]; then
+    ok "--version: '$(cat "$work/ver.p")' under both names, plus one alias line under cgnv2elf"
+else bad "--version: rsxcg2elf '$(cat "$work/ver.p")' exit $vp, cgnv2elf '$(cat "$work/ver.a")' exit $va"; fi
+n="$(wc -l <"$work/help.p")"
+if [[ $hp -eq 0 && $ha -eq 0 && "$(head -1 "$work/help.p")" == "usage: rsxcg2elf "* \
+      && $(wc -l <"$work/help.a") -eq $((n + 1)) && "$(head -n "$n" "$work/help.a")" == "$(cat "$work/help.p")" \
+      && "$(tail -1 "$work/help.a")" == *"compatibility alias for rsxcg2elf"* ]]; then
+    ok "--help names rsxcg2elf under both names, plus one alias line under cgnv2elf"
+else bad "--help: rsxcg2elf exit $hp '$(head -1 "$work/help.p")', cgnv2elf exit $ha '$(tail -1 "$work/help.a")'"; fi
+
 if [[ $fail -ne 0 ]]; then
-    echo "cgnv2elf-test: FAILED" >&2
+    echo "rsxcg2elf-test: FAILED" >&2
     exit 1
 fi
-echo "cgnv2elf-test: all checks passed"
+echo "rsxcg2elf-test: all checks passed"

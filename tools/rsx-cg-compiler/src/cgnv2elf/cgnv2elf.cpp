@@ -1,10 +1,10 @@
 /*
- * cgnv2elf -- pack compiled RSX shader containers (.vpo / .fpo, the
+ * rsxcg2elf -- pack compiled RSX shader containers (.vpo / .fpo, the
  * CgBinaryProgram layout rsx-cg-compiler writes with --emit-container)
  * into one big-endian ELF32 relocatable shader archive.
  *
  * Usage:
- *   cgnv2elf [-qsuehv][--quiet][--no-sem][--no-unref][--help] input [output]
+ *   rsxcg2elf [-qsuehv][--quiet][--no-sem][--no-unref][--help] input [output]
  *
  * `input` is one container or a folder; a folder converts every regular
  * file in it (case-insensitive name order), silently skipping files that
@@ -28,6 +28,10 @@
  * Section data follows the section header table in section order, each
  * section aligned to its sh_addralign; the file ends at the last byte of
  * the last non-empty section.
+ *
+ * Also installed as `cgnv2elf`, a compatibility alias for existing
+ * Makefiles: the same program, with the same options and output bytes;
+ * only --help and --version add a line naming the alias.
  *
  * The parameter table rebuilds the parameter tree from the container's
  * flat, composed parameter names (`light.color`, `k[1][2]`, `m[0]` for a
@@ -961,9 +965,25 @@ Bytes write_archive(std::vector<Program>& progs, const std::vector<std::string>&
 // Driver.
 // ---------------------------------------------------------------------------
 
+std::string lower_ascii(std::string s);
+
+// True when started under the compatibility name (cgnv2elf, any case,
+// with or without .exe).  Only --help and --version look at it.
+bool invoked_as_alias(const char* argv0) {
+    if (!argv0) return false;
+    std::string base = argv0;
+    size_t slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base.erase(0, slash + 1);
+    base = lower_ascii(base);
+    if (base.size() > 4 && base.compare(base.size() - 4, 4, ".exe") == 0) base.resize(base.size() - 4);
+    return base == "cgnv2elf";
+}
+
+const char kAliasNote[] = "(invoked as cgnv2elf, a compatibility alias for rsxcg2elf)\n";
+
 void usage(std::FILE* f) {
     std::fprintf(f,
-        "usage: cgnv2elf [-qsuh][--quiet][--no-sem][--no-unref][--help] input [output]\n"
+        "usage: rsxcg2elf [-qsuh][--quiet][--no-sem][--no-unref][--help] input [output]\n"
         "\n"
         "Packs RSX shader containers (.vpo/.fpo) into an ELF shader archive.\n"
         "input may be a single container or a folder of containers.\n"
@@ -1066,16 +1086,25 @@ int run(int argc, char** argv) {
         }
     }
 
-    if (help) { usage(stdout); return 0; }
-    if (version) { std::printf("cgnv2elf %s\n", RSX_CG_COMPILER_VERSION); return 0; }
+    const bool alias = invoked_as_alias(argc > 0 ? argv[0] : nullptr);
+    if (help) {
+        usage(stdout);
+        if (alias) std::fputs(kAliasNote, stdout);
+        return 0;
+    }
+    if (version) {
+        std::printf("rsxcg2elf %s\n", RSX_CG_COMPILER_VERSION);
+        if (alias) std::fputs(kAliasNote, stdout);
+        return 0;
+    }
     if (noUnref) {
-        std::fprintf(stderr, "cgnv2elf: -u/--no-unref is not supported\n");
+        std::fprintf(stderr, "rsxcg2elf: -u/--no-unref is not supported\n");
         return 1;
     }
     if (pos.empty() || pos.size() > 2) { usage(stderr); return 1; }
     if (!quiet)
         for (const std::string& o : ignored)
-            std::fprintf(stderr, "cgnv2elf: warning: ignoring unknown option %s\n", o.c_str());
+            std::fprintf(stderr, "rsxcg2elf: warning: ignoring unknown option %s\n", o.c_str());
 
     std::string inArg = pos[0];
     while (inArg.size() > 1 && (inArg.back() == '/' || inArg.back() == '\\')) inArg.pop_back();
@@ -1084,7 +1113,7 @@ int run(int argc, char** argv) {
     std::error_code ec;
     fs::file_status st = fs::status(input, ec);
     if (ec || !fs::exists(st)) {
-        std::fprintf(stderr, "cgnv2elf: couldn't open %s\n", pos[0].c_str());
+        std::fprintf(stderr, "rsxcg2elf: couldn't open %s\n", pos[0].c_str());
         return 1;
     }
     const bool folder = fs::is_directory(st);
@@ -1103,7 +1132,7 @@ int run(int argc, char** argv) {
             if (it->is_regular_file(fe)) files.push_back(it->path());
         }
         if (ec) {
-            std::fprintf(stderr, "cgnv2elf: couldn't read folder %s: %s\n",
+            std::fprintf(stderr, "rsxcg2elf: couldn't read folder %s: %s\n",
                          pos[0].c_str(), ec.message().c_str());
             return 1;
         }
@@ -1124,7 +1153,7 @@ int run(int argc, char** argv) {
         std::error_code se;
         uint64_t size = fs::file_size(f, se);
         if (se) {
-            std::fprintf(stderr, "cgnv2elf: couldn't open %s\n", shown.c_str());
+            std::fprintf(stderr, "rsxcg2elf: couldn't open %s\n", shown.c_str());
             return 1;
         }
         if (size > kMaxInputBytes) {
@@ -1133,7 +1162,7 @@ int run(int argc, char** argv) {
             std::ifstream in(f, std::ios::binary);
             in.read(&head[0], 8);
             if (in.gcount() == 8 && Reader(head).u32(4) == kContainerRevision) {
-                std::fprintf(stderr, "cgnv2elf: %s: %s\n", shown.c_str(),
+                std::fprintf(stderr, "rsxcg2elf: %s: %s\n", shown.c_str(),
                              budget_message("file-size", "container is larger than " +
                                             std::to_string(kMaxInputBytes) + " bytes",
                                             kMaxInputBytes).c_str());
@@ -1144,7 +1173,7 @@ int run(int argc, char** argv) {
         }
         totalBytes += size;
         if (totalBytes > kMaxArchiveBytes) {
-            std::fprintf(stderr, "cgnv2elf: %s\n",
+            std::fprintf(stderr, "rsxcg2elf: %s\n",
                          budget_message("archive-size", "inputs exceed " +
                                         std::to_string(kMaxArchiveBytes) + " bytes in total",
                                         kMaxArchiveBytes).c_str());
@@ -1152,14 +1181,14 @@ int run(int argc, char** argv) {
         }
         Bytes data;
         if (!read_file(f, data)) {
-            std::fprintf(stderr, "cgnv2elf: couldn't open %s\n", shown.c_str());
+            std::fprintf(stderr, "rsxcg2elf: couldn't open %s\n", shown.c_str());
             return 1;
         }
         std::optional<Program> prog;
         try {
             prog = read_container(data);
         } catch (const FormatError& e) {
-            std::fprintf(stderr, "cgnv2elf: %s: %s\n", shown.c_str(), e.what());
+            std::fprintf(stderr, "rsxcg2elf: %s: %s\n", shown.c_str(), e.what());
             return 1;
         }
         if (!prog) {
@@ -1167,7 +1196,7 @@ int run(int argc, char** argv) {
             continue;
         }
         if (progs.size() == kMaxPrograms) {
-            std::fprintf(stderr, "cgnv2elf: %s\n",
+            std::fprintf(stderr, "rsxcg2elf: %s\n",
                          budget_message("program-count", "more than " + std::to_string(kMaxPrograms) +
                                         " programs in one archive", kMaxPrograms).c_str());
             return 1;
@@ -1184,18 +1213,18 @@ int run(int argc, char** argv) {
     try {
         archive = write_archive(progs, names, noSem);
     } catch (const FormatError& e) {
-        std::fprintf(stderr, "cgnv2elf: %s\n", e.what());
+        std::fprintf(stderr, "rsxcg2elf: %s\n", e.what());
         return 1;
     }
 
     std::string err;
     if (!write_atomically(output, archive, err)) {
-        std::fprintf(stderr, "cgnv2elf: %s\n", err.c_str());
+        std::fprintf(stderr, "rsxcg2elf: %s\n", err.c_str());
         return 1;
     }
     if (progs.empty()) {
         // An archive with no programs is still written, but the run fails.
-        std::fprintf(stderr, "cgnv2elf: no shader programs in %s; wrote an empty archive %s\n",
+        std::fprintf(stderr, "rsxcg2elf: no shader programs in %s; wrote an empty archive %s\n",
                      pos[0].c_str(), output.u8string().c_str());
         return 1;
     }
@@ -1211,7 +1240,7 @@ int main(int argc, char** argv) {
     try {
         return run(argc, argv);
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "cgnv2elf: %s\n", e.what());
+        std::fprintf(stderr, "rsxcg2elf: %s\n", e.what());
         return 1;
     }
 }

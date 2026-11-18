@@ -61,6 +61,7 @@ host_bin  bin/pkg.exe
 host_bin  bin/prx-gen.exe
 host_bin  bin/psgl-shader-builder.exe
 host_bin  bin/rsx-cg-compiler.exe
+host_bin  bin/rsxcg2elf.exe
 host_bin  bin/sfo.exe
 host_bin  bin/sfo-gui.exe
 host_bin  bin/sprxlinker.exe

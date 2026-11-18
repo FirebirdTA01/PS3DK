@@ -479,11 +479,12 @@ jobs:
         run: |
           cmake -S tools/rsx-cg-compiler -B tools/rsx-cg-compiler/build \
               -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler cgnv2elf
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
       - name: Validate rsx-cg-compiler --version
         run: |
           tools/rsx-cg-compiler/build/rsx-cg-compiler --version
+          tools/rsx-cg-compiler/build/rsxcg2elf --version
           tools/rsx-cg-compiler/build/cgnv2elf --version
 
       - name: Build psgl-shader-builder
@@ -1552,8 +1553,8 @@ jobs:
         run: bash tests/shader-compiler/discard-guard-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
       - name: Test rsx-cg-compiler texobj types and unknown type names
         run: bash tests/shader-compiler/texobj-and-unknown-type-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
-      - name: Test cgnv2elf shader archives
-        run: bash tests/shader-compiler/cgnv2elf-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: Test rsxcg2elf shader archives
+        run: bash tests/shader-compiler/rsxcg2elf-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
       - name: Test rsx-cg-compiler lane inserts
         run: bash tests/shader-compiler/lane-insert-literal-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
@@ -2088,12 +2089,13 @@ jobs:
               -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
-          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler cgnv2elf
+          cmake --build tools/rsx-cg-compiler/build --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
       - name: Validate --version
         run: |
           set -e
           tools/rsx-cg-compiler/build/rsx-cg-compiler.exe --version
+          tools/rsx-cg-compiler/build/rsxcg2elf.exe --version
           tools/rsx-cg-compiler/build/cgnv2elf.exe --version
           file tools/sprx-linker/sprxlinker.exe
 

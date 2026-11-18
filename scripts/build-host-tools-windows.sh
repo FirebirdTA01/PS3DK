@@ -558,10 +558,13 @@ EOF
     cmake -S "$src" -B "$obj" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$tc" \
         -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$obj" --target rsx-cg-compiler cgnv2elf
+    cmake --build "$obj" --target rsx-cg-compiler rsxcg2elf cgnv2elf
 
+    # cgnv2elf.exe is the compatibility name for existing Makefiles: a real
+    # copy of rsxcg2elf.exe that the build writes beside it (symlinks
+    # do not survive zips).
     local exe
-    for exe in rsx-cg-compiler cgnv2elf; do
+    for exe in rsx-cg-compiler rsxcg2elf cgnv2elf; do
         if [[ -f "$obj/$exe.exe" ]]; then
             install -m 0755 "$obj/$exe.exe" "$STAGE_BIN/"
             say "  staged $exe.exe"

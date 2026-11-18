@@ -170,17 +170,37 @@ target_include_directories(rsx-cg-compiler PRIVATE
 )
 
 # ----------------------------------------------------------------------------
-# cgnv2elf — standalone converter that packs .vpo / .fpo containers into an
-# ELF shader archive.  Plain C++17; shares only the generated version.h.
+# rsxcg2elf — standalone converter that packs .vpo / .fpo containers
+# into an ELF shader archive.  Plain C++17; shares only the generated
+# version.h.
+#
+# cgnv2elf is its compatibility name for existing Makefiles: a byte-for-byte
+# copy of the executable beside it (a copy, not a link, so it also survives
+# Windows zips).  The copy is written after every link of rsxcg2elf and
+# again, if it differs or is missing, by the cgnv2elf target, which is part
+# of `all`.  It is deliberately not a declared OUTPUT: on hosts without an
+# executable suffix the file and the target would share the name.  The
+# program only looks at the name it was started under for one extra
+# --help/--version line.
 # ----------------------------------------------------------------------------
 
-add_executable(cgnv2elf
+add_executable(rsxcg2elf
     ${SRC_DIR}/cgnv2elf/cgnv2elf.cpp
+)
+set(RSXCG2ELF_ALIAS $<TARGET_FILE_DIR:rsxcg2elf>/cgnv2elf${CMAKE_EXECUTABLE_SUFFIX})
+add_custom_command(TARGET rsxcg2elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:rsxcg2elf> ${RSXCG2ELF_ALIAS}
+    VERBATIM
+)
+add_custom_target(cgnv2elf ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:rsxcg2elf> ${RSXCG2ELF_ALIAS}
+    DEPENDS rsxcg2elf
+    VERBATIM
 )
 
 add_executable(fp-register-remap-test EXCLUDE_FROM_ALL tests/fp_register_remap_test.cpp)
 target_include_directories(fp-register-remap-test PRIVATE ${SRC_DIR})
 
-target_include_directories(cgnv2elf PRIVATE
+target_include_directories(rsxcg2elf PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}    # generated version.h
 )
