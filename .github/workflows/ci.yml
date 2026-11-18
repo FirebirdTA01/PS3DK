@@ -313,13 +313,14 @@ jobs:
           python3 tests/host/ps3dk-prof-rolling/run_auto_mutants.py --build-dir "$RUNNER_TEMP/rolling-auto-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_ring_mutants.py --build-dir "$RUNNER_TEMP/rolling-ring-mutants"
           python3 tests/host/ps3dk-prof-rolling/run_combined_resource_mutants.py --build-dir "$RUNNER_TEMP/rolling-combined-resource-mutants"
-      - name: Live END close, deadlines and OS/API controls
+      - name: Live END close, deadlines, OS/API controls and capture triggers
         if: matrix.suite == 'live-e2e'
         run: |
           python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent"
           python3 tests/host/ps3dk-prof-runtime/live-agent-test.py "$RUNNER_TEMP/live-e2e/agent-address" --sanitize
           python3 tests/host/ps3dk-prof-runtime/live-os-test.py "$RUNNER_TEMP/live-e2e/os"
           python3 tests/host/ps3dk-prof-runtime/live-api-test.py "$RUNNER_TEMP/live-e2e/api"
+          python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"
@@ -500,6 +501,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringlabel --mutant seal-ignores-held --out "$RUNNER_TEMP/auto-ring-mutant-seal-ignores-held"
           # the flip's CALL into the reserved prefix needs the init's io_address record
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringflip --mutant flip-unrecorded --out "$RUNNER_TEMP/auto-ring-mutant-flip-unrecorded"
+          # the build-option ring constant (PS3_PROF_AUTO_RING): sizes, setter precedence, start-up refusal, OFF unchanged
+          for case in ringopt ringopt2 ringoptset ringoptsetring ringoptbad ringoptoff; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
+          done
 
       - name: Automatic RSX initialization, wire and queue controls
         run: |
@@ -559,6 +565,7 @@ jobs:
           python3 tests/sdk/auto-queue-test.py --out "$RUNNER_TEMP/auto-queue-relaxed" --sanitize thread --mutant relaxed-publication
           python3 tests/host/ps3dk-prof-runtime/auto-link-check-test.py
           python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
+          python3 tests/host/ps3dk-prof-runtime/auto-ring-option-cmake-test.py --out "$RUNNER_TEMP/auto-ring-option-cmake"
           python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
           for mutant in compile-as-driver internal-definitions positional-inputs; do
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"

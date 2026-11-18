@@ -7,6 +7,7 @@
 #include "live_agent.h"
 #include "live_os.h"
 #include "prof_test_hooks.h"
+#include <ps3dk/prof.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -104,6 +105,10 @@ typedef struct client {
     char name[LIVE_MAX_NAME + 1];
     uint8_t rx[LIVE_HDR_BYTES + LIVE_MAX_PAYLOAD];
     uint32_t rx_len;
+    uint32_t asked;  /* the version CLIENT_HELLO asked for (0: LIVE_VERSION) */
+    uint32_t caps;   /* HELLO's capability field */
+    int acks;        /* CAPTURE_ACKs received; the last one in ack */
+    uint8_t ack[LIVE_ACK_BYTES];
 } client;
 
 /* A small receive buffer makes "the viewer stopped reading" bite quickly. */
@@ -134,23 +139,28 @@ static void cl_send(int fd, uint32_t type, uint32_t flags, const void *p, uint32
         CHECK(send(fd, p, len, MSG_NOSIGNAL) == (ssize_t)len);
 }
 
-static void cl_hello(int fd, uint32_t magic)
+static void cl_hello_v(int fd, uint32_t magic, uint32_t version)
 {
     uint8_t p[8];
     live_put32(p, magic);
-    live_put16(p + 4, LIVE_VERSION);
+    live_put16(p + 4, version);
     live_put16(p + 6, 0);
     cl_send(fd, LIVE_T_CLIENT_HELLO, 0, p, 8);
 }
 
-static client *cl_open(uint16_t port)
+static void cl_hello(int fd, uint32_t magic) { cl_hello_v(fd, magic, LIVE_VERSION); }
+
+static client *cl_open_v(uint16_t port, uint32_t version)
 {
     client *c = calloc(1, sizeof *c);
     CHECK(c);
     c->fd = cl_connect(port);
-    cl_hello(c->fd, LIVE_MAGIC);
+    c->asked = version;
+    cl_hello_v(c->fd, LIVE_MAGIC, version);
     return c;
 }
+
+static client *cl_open(uint16_t port) { return cl_open_v(port, LIVE_VERSION); }
 
 static void cl_frame(client *c, uint32_t type, const uint8_t *p, uint32_t len)
 {
@@ -163,7 +173,9 @@ static void cl_frame(client *c, uint32_t type, const uint8_t *p, uint32_t len)
     }
     if (!c->hello) {
         CHECK(type == LIVE_T_HELLO); /* HELLO is first */
-        CHECK(len >= 16 + 6 && live_get16(p) == LIVE_VERSION);
+        CHECK(len >= 16 + 6 && live_get16(p) == (c->asked ? c->asked : LIVE_VERSION)); /* the version asked for */
+        c->caps = live_get32(p + 4);
+        CHECK(live_get16(p) >= 2 || c->caps == 0); /* v1: the reserved 0 */
         c->session = live_get64(p + 8);
         uint32_t o = 16, al = live_get16(p + o);
         CHECK(al >= 1 && al <= LIVE_MAX_APP);
@@ -196,6 +208,11 @@ static void cl_frame(client *c, uint32_t type, const uint8_t *p, uint32_t len)
     } else if (type == LIVE_T_PONG) {
         CHECK(len == 0);
         c->pongs++;
+    } else if (type == LIVE_T_CAPTURE_ACK) {
+        CHECK(c->asked != 1); /* never on a v1 session */
+        CHECK(len == LIVE_ACK_BYTES && live_get16(p + 14) == 0);
+        memcpy(c->ack, p, LIVE_ACK_BYTES);
+        c->acks++;
     } else {
         CHECK(!"unexpected frame type");
     }
@@ -904,6 +921,397 @@ static void case_delivered_counts_sent_frames(void)
     CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
 }
 
+/* ---- capture commands (protocol v2) ---------------------------------------------------------------------- */
+
+/* A scripted command source, standing in for the runtime's mailbox: the test decides each result. */
+static struct {
+    atomic_int submits, polls, cancels;
+    atomic_int submit_rc;    /* returned by submit (0: queued) */
+    atomic_int done;         /* poll reports the result once this is set */
+    atomic_int cancel_rc;    /* returned by cancel */
+    int32_t result;
+    uint32_t window;
+    uint32_t type, frames, name_len;
+    char name[LIVE_MAX_WINDOW_NAME + 1];
+} g_cmd;
+
+static int fake_submit(void *ctx, uint32_t type, const char *name, uint32_t name_len, uint32_t frames)
+{
+    (void)ctx;
+    g_cmd.type = type;
+    g_cmd.frames = frames;
+    g_cmd.name_len = name_len;
+    CHECK(name_len <= LIVE_MAX_WINDOW_NAME && (name_len == 0) == (type == LIVE_T_CAPTURE_END));
+    memcpy(g_cmd.name, name ? name : "", name_len);
+    g_cmd.name[name_len] = 0;
+    atomic_fetch_add(&g_cmd.submits, 1);
+    return atomic_load(&g_cmd.submit_rc);
+}
+
+static int fake_poll(void *ctx, int32_t *result, uint32_t *window_id)
+{
+    (void)ctx;
+    atomic_fetch_add(&g_cmd.polls, 1);
+    if (!atomic_exchange(&g_cmd.done, 0))
+        return 0;
+    *result = g_cmd.result;
+    *window_id = g_cmd.window;
+    return 1;
+}
+
+static int fake_cancel(void *ctx)
+{
+    (void)ctx;
+    atomic_fetch_add(&g_cmd.cancels, 1);
+    return atomic_load(&g_cmd.cancel_rc);
+}
+
+static const live_cmd_ops g_fake_ops = {.submit = fake_submit, .poll = fake_poll, .cancel = fake_cancel};
+
+static uint16_t start_cmd_agent(live_config cfg, const live_cmd_ops *ops)
+{
+    live_source src = {.path = g_path, .session_id = 0x1122334455667788ull, .app = "liveapp",
+                       .app_len = 7, .build_id = "bid", .build_id_len = 3, .finalization = fin_get, .cmd = ops};
+    CHECK(live_agent_start(&g_agent, &cfg, &src) == LIVE_OK);
+    return live_agent_port(&g_agent);
+}
+
+static void send_begin(int fd, uint32_t req, const char *name)
+{
+    uint8_t p[8 + LIVE_MAX_WINDOW_NAME];
+    uint32_t n = (uint32_t)strlen(name);
+    live_put32(p, req);
+    live_put16(p + 4, n);
+    live_put16(p + 6, 0);
+    memcpy(p + 8, name, n);
+    cl_send(fd, LIVE_T_CAPTURE_BEGIN, 0, p, 8 + n);
+}
+
+static void send_frames(int fd, uint32_t req, uint32_t frames, const char *name)
+{
+    uint8_t p[12 + LIVE_MAX_WINDOW_NAME];
+    uint32_t n = (uint32_t)strlen(name);
+    live_put32(p, req);
+    live_put32(p + 4, frames);
+    live_put16(p + 8, n);
+    live_put16(p + 10, 0);
+    memcpy(p + 12, name, n);
+    cl_send(fd, LIVE_T_CAPTURE_FRAMES, 0, p, 12 + n);
+}
+
+static void send_end(int fd, uint32_t req)
+{
+    uint8_t p[4];
+    live_put32(p, req);
+    cl_send(fd, LIVE_T_CAPTURE_END, 0, p, 4);
+}
+
+static int has_ack(client *c) { return c->acks > 0; }
+
+static void check_ack(const client *c, uint32_t req, int32_t result, uint32_t window, uint32_t type)
+{
+    CHECK(live_get32(c->ack) == req);
+    CHECK((int32_t)live_get32(c->ack + 4) == result);
+    CHECK(live_get32(c->ack + 8) == window);
+    CHECK(live_get16(c->ack + 12) == type);
+}
+
+/* A v2 hello is answered in v2 with the TRIGGERS capability; BEGIN, FRAMES and END each reach the source with
+ * their exact fields and come back as one ACK carrying the request id, the result, the window id and the type. */
+static void case_cmd_round_trip(void)
+{
+    w_open();
+    w_append(100);
+    client *c = cl_open(start_cmd_agent(test_cfg(), &g_fake_ops));
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->hello && c->caps == LIVE_CAP_TRIGGERS);
+
+    send_begin(c->fd, 7, "pc-window");
+    uint64_t until = now_us() + 2000000;
+    while (atomic_load(&g_cmd.submits) < 1 && now_us() < until)
+        pal_sleep_us(1000);
+    CHECK(g_cmd.type == LIVE_T_CAPTURE_BEGIN && strcmp(g_cmd.name, "pc-window") == 0 && g_cmd.frames == 0);
+    cl_pump(c, 100, has_ack);
+    CHECK(c->acks == 0); /* pending until the source finishes it */
+    g_cmd.result = 0;
+    g_cmd.window = 5;
+    atomic_store(&g_cmd.done, 1);
+    cl_pump(c, 2000, has_ack);
+    CHECK(c->acks == 1);
+    check_ack(c, 7, 0, 5, LIVE_T_CAPTURE_BEGIN);
+
+    c->acks = 0;
+    send_end(c->fd, 8);
+    g_cmd.result = PS3DK_PROF_EPERM;
+    g_cmd.window = 9; /* a refusal never names a window */
+    atomic_store(&g_cmd.done, 1);
+    cl_pump(c, 2000, has_ack);
+    CHECK(c->acks == 1 && g_cmd.type == LIVE_T_CAPTURE_END && g_cmd.name_len == 0);
+    check_ack(c, 8, PS3DK_PROF_EPERM, 0, LIVE_T_CAPTURE_END);
+
+    c->acks = 0;
+    char longest[LIVE_MAX_WINDOW_NAME + 1];
+    memset(longest, 'n', LIVE_MAX_WINDOW_NAME);
+    longest[LIVE_MAX_WINDOW_NAME] = 0;
+    send_frames(c->fd, 9, LIVE_MAX_WINDOW_FRAMES, longest);
+    g_cmd.result = 0;
+    g_cmd.window = 6;
+    atomic_store(&g_cmd.done, 1);
+    cl_pump(c, 2000, has_ack);
+    CHECK(c->acks == 1 && g_cmd.type == LIVE_T_CAPTURE_FRAMES && g_cmd.frames == LIVE_MAX_WINDOW_FRAMES);
+    CHECK(strcmp(g_cmd.name, longest) == 0);
+    check_ack(c, 9, 0, 6, LIVE_T_CAPTURE_FRAMES);
+
+    /* the stream goes on, and ends normally */
+    w_close();
+    publish(100, 1, 0);
+    cl_pump(c, 3000, NULL);
+    CHECK(c->end && !c->closed);
+    check_bytes(c, 100);
+    CHECK(atomic_load(&g_agent.acks) == 3 && atomic_load(&g_agent.ack_refusals) == 1);
+    CHECK(atomic_load(&g_cmd.cancels) == 0);
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* A refusal at submit is acked at once; nothing is queued. */
+static void case_cmd_refused_at_submit(void)
+{
+    w_open();
+    w_append(100);
+    client *c = cl_open(start_cmd_agent(test_cfg(), &g_fake_ops));
+    cl_pump(c, 2000, has_hello);
+    atomic_store(&g_cmd.submit_rc, PS3DK_PROF_EFULL);
+    send_frames(c->fd, 3, 10, "x");
+    cl_pump(c, 2000, has_ack);
+    check_ack(c, 3, PS3DK_PROF_EFULL, 0, LIVE_T_CAPTURE_FRAMES);
+    CHECK(atomic_load(&g_cmd.cancels) == 0);
+    /* the next command is accepted (one at a time, and the last was answered) */
+    c->acks = 0;
+    atomic_store(&g_cmd.submit_rc, PS3DK_PROF_ESTOPPED);
+    send_begin(c->fd, 4, "y");
+    cl_pump(c, 2000, has_ack);
+    check_ack(c, 4, PS3DK_PROF_ESTOPPED, 0, LIVE_T_CAPTURE_BEGIN);
+    CHECK(!c->closed);
+    w_close();
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* No frame mark took it before the deadline: withdrawn (cancel) and refused ETIMEDOUT, never silent.  A cancel
+ * that loses to the frame thread (0) waits for the source's result instead. */
+static void case_cmd_timeout(void)
+{
+    w_open();
+    w_append(100);
+    live_config cfg = test_cfg();
+    cfg.cmd_timeout_us = 50000;
+    client *c = cl_open(start_cmd_agent(cfg, &g_fake_ops));
+    cl_pump(c, 2000, has_hello);
+    atomic_store(&g_cmd.cancel_rc, 1);
+    uint64_t t0 = now_us();
+    send_begin(c->fd, 11, "slow");
+    cl_pump(c, 2000, has_ack);
+    CHECK(c->acks == 1 && now_us() - t0 >= 50000);
+    check_ack(c, 11, PS3DK_PROF_ETIMEDOUT, 0, LIVE_T_CAPTURE_BEGIN);
+    CHECK(atomic_load(&g_cmd.cancels) == 1);
+
+    c->acks = 0;
+    atomic_store(&g_cmd.cancel_rc, 0); /* being applied: the agent keeps polling */
+    send_end(c->fd, 12);
+    cl_pump(c, 300, has_ack);
+    CHECK(c->acks == 0 && atomic_load(&g_cmd.cancels) >= 2);
+    g_cmd.result = 0;
+    g_cmd.window = 2;
+    atomic_store(&g_cmd.done, 1);
+    cl_pump(c, 2000, has_ack);
+    check_ack(c, 12, 0, 2, LIVE_T_CAPTURE_END);
+    w_close();
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* A v2 agent without a command source: HELLO has no TRIGGERS bit; a command is refused ENOTSUP. */
+static void case_cmd_no_source(void)
+{
+    w_open();
+    w_append(100);
+    client *c = cl_open(start_agent(test_cfg()));
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->caps == 0);
+    send_end(c->fd, 1);
+    cl_pump(c, 2000, has_ack);
+    check_ack(c, 1, PS3DK_PROF_ENOTSUP, 0, LIVE_T_CAPTURE_END);
+    CHECK(!c->closed);
+    w_close();
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* A v2 agent serves a v1 viewer exactly as v1: HELLO version 1 with the reserved 0 (even with a command source),
+ * and a command frame on that session is a protocol drop. */
+static void case_cmd_v1_session(void)
+{
+    w_open();
+    w_append(5000);
+    uint16_t port = start_cmd_agent(test_cfg(), &g_fake_ops);
+    client *c = cl_open_v(port, 1);
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->hello && c->caps == 0);
+    for (int i = 0; i < 3; ++i)
+        cl_send(c->fd, LIVE_T_PING, 0, NULL, 0);
+    cl_pump(c, 300, NULL);
+    CHECK(c->pongs == 3 && !c->closed);
+    send_begin(c->fd, 1, "v1");
+    CHECK(cl_wait_closed(c, 2000) && !c->end && c->acks == 0);
+    CHECK(drops(LIVE_DROP_PROTOCOL) == 1 && atomic_load(&g_cmd.submits) == 0);
+    cl_free(c);
+    /* and a v1 viewer still streams to the end */
+    w_close();
+    publish(5000, 1, 0);
+    client *d = cl_open_v(port, 1);
+    cl_pump(d, 3000, NULL);
+    CHECK(d->end && d->caps == 0);
+    check_bytes(d, 5000);
+    cl_free(d);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* Versions outside 1..LIVE_VERSION are bad hellos. */
+static void case_cmd_bad_versions(void)
+{
+    w_open();
+    w_close();
+    uint16_t port = start_cmd_agent(test_cfg(), &g_fake_ops);
+    const uint32_t bad[] = {0, LIVE_VERSION + 1, 0xffff};
+    for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; ++i) {
+        client *c = calloc(1, sizeof *c);
+        c->fd = cl_connect(port);
+        cl_hello_v(c->fd, LIVE_MAGIC, bad[i]);
+        CHECK(cl_wait_closed(c, 2000) && !c->hello);
+        cl_free(c);
+    }
+    CHECK(drops(LIVE_DROP_BAD_HELLO) == 3);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* Every malformed command closes the link (a protocol drop), and nothing reaches the source. */
+static void malformed_one(uint16_t port, uint32_t type, const uint8_t *p, uint32_t len, int header_only)
+{
+    unsigned long long before = drops(LIVE_DROP_PROTOCOL);
+    client *c = cl_open(port);
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->hello);
+    if (header_only) {
+        uint8_t h[LIVE_HDR_BYTES];
+        live_put16(h, type);
+        live_put16(h + 2, 0);
+        live_put32(h + 4, len);
+        CHECK(send(c->fd, h, sizeof h, MSG_NOSIGNAL) == (ssize_t)sizeof h);
+    } else {
+        cl_send(c->fd, type, 0, p, len);
+    }
+    CHECK(cl_wait_closed(c, 2000) && !c->end && c->acks == 0);
+    CHECK(drops(LIVE_DROP_PROTOCOL) == before + 1);
+    cl_free(c);
+}
+
+static void case_cmd_malformed(void)
+{
+    w_open();
+    w_append(100);
+    uint16_t port = start_cmd_agent(test_cfg(), &g_fake_ops);
+    uint8_t p[16 + LIVE_MAX_WINDOW_NAME];
+    memset(p, 'a', sizeof p);
+    int n = 0;
+    /* BEGIN: request 0; reserved field; a name length that is not the payload's; lengths past the bounds */
+    live_put32(p, 0); live_put16(p + 4, 1); live_put16(p + 6, 0);
+    malformed_one(port, LIVE_T_CAPTURE_BEGIN, p, 9, 0); n++;
+    live_put32(p, 1); live_put16(p + 4, 1); live_put16(p + 6, 1);
+    malformed_one(port, LIVE_T_CAPTURE_BEGIN, p, 9, 0); n++;
+    live_put32(p, 1); live_put16(p + 4, 2); live_put16(p + 6, 0);
+    malformed_one(port, LIVE_T_CAPTURE_BEGIN, p, 9, 0); n++;
+    malformed_one(port, LIVE_T_CAPTURE_BEGIN, NULL, 8, 1); n++;                        /* empty name */
+    malformed_one(port, LIVE_T_CAPTURE_BEGIN, NULL, 8 + LIVE_MAX_WINDOW_NAME + 1, 1); n++; /* name too long */
+    /* END: any length but 4; request 0 */
+    malformed_one(port, LIVE_T_CAPTURE_END, NULL, 5, 1); n++;
+    malformed_one(port, LIVE_T_CAPTURE_END, NULL, 0, 1); n++;
+    live_put32(p, 0);
+    malformed_one(port, LIVE_T_CAPTURE_END, p, 4, 0); n++;
+    /* FRAMES: 0 frames, too many frames, reserved, name length mismatch, bounds */
+    live_put32(p, 1); live_put32(p + 4, 0); live_put16(p + 8, 1); live_put16(p + 10, 0);
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, p, 13, 0); n++;
+    live_put32(p + 4, LIVE_MAX_WINDOW_FRAMES + 1);
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, p, 13, 0); n++;
+    live_put32(p + 4, 1); live_put16(p + 10, 1);
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, p, 13, 0); n++;
+    live_put16(p + 10, 0); live_put16(p + 8, 3);
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, p, 13, 0); n++;
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, NULL, 12, 1); n++;
+    malformed_one(port, LIVE_T_CAPTURE_FRAMES, NULL, 12 + LIVE_MAX_WINDOW_NAME + 1, 1); n++;
+    /* the agent's own frame types, and the ACK, from a viewer */
+    malformed_one(port, LIVE_T_CAPTURE_ACK, NULL, LIVE_ACK_BYTES, 1); n++;
+    malformed_one(port, 12, NULL, 0, 1); n++;
+    CHECK(atomic_load(&g_cmd.submits) == 0);
+    CHECK(drops(LIVE_DROP_PROTOCOL) == (unsigned long long)n);
+    printf("MEASURE malformed commands refused: %d\n", n);
+    w_close();
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* A second command before the first's ACK closes the link, and the queued one is withdrawn. */
+static void case_cmd_overlap(void)
+{
+    w_open();
+    w_append(100);
+    client *c = cl_open(start_cmd_agent(test_cfg(), &g_fake_ops));
+    cl_pump(c, 2000, has_hello);
+    atomic_store(&g_cmd.cancel_rc, 1);
+    send_begin(c->fd, 1, "first");
+    send_end(c->fd, 2);
+    CHECK(cl_wait_closed(c, 2000) && c->acks == 0);
+    CHECK(drops(LIVE_DROP_PROTOCOL) == 1 && atomic_load(&g_cmd.submits) == 1 && atomic_load(&g_cmd.cancels) == 1);
+    cl_free(c);
+    w_close();
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* The viewer leaves with a command queued: the agent withdraws it. */
+static void case_cmd_peer_close_cancels(void)
+{
+    w_open();
+    w_append(100);
+    client *c = cl_open(start_cmd_agent(test_cfg(), &g_fake_ops));
+    cl_pump(c, 2000, has_hello);
+    atomic_store(&g_cmd.cancel_rc, 1);
+    send_begin(c->fd, 1, "orphan");
+    uint64_t until = now_us() + 2000000;
+    while (atomic_load(&g_cmd.submits) < 1 && now_us() < until)
+        pal_sleep_us(1000);
+    cl_free(c);
+    until = now_us() + 2000000;
+    while (atomic_load(&g_cmd.cancels) < 1 && now_us() < until)
+        pal_sleep_us(1000);
+    CHECK(atomic_load(&g_cmd.cancels) == 1 && drops(LIVE_DROP_PEER_CLOSED) == 1);
+    w_close();
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* A command source with a missing function is a bad source. */
+static void case_cmd_bad_source(void)
+{
+    live_config cfg = test_cfg();
+    live_cmd_ops ops = g_fake_ops;
+    ops.cancel = NULL;
+    live_source src = {.path = g_path, .app = "a", .app_len = 1, .finalization = fin_get, .cmd = &ops};
+    CHECK(live_agent_start(&g_agent, &cfg, &src) == LIVE_EINVAL);
+    cfg.cmd_timeout_us = 999;
+    src.cmd = &g_fake_ops;
+    CHECK(live_agent_start(&g_agent, &cfg, &src) == LIVE_EINVAL);
+    cfg.cmd_timeout_us = 60000001;
+    CHECK(live_agent_start(&g_agent, &cfg, &src) == LIVE_EINVAL);
+}
+
 struct named { const char *name; void (*fn)(void); };
 static const struct named cases[] = {
     {"end-with-unread-ping", case_end_with_unread_ping},
@@ -938,6 +1346,16 @@ static const struct named cases[] = {
     {"delivered-counts-sent-frames", case_delivered_counts_sent_frames},
     {"held-pread-data", case_held_pread_data},
     {"held-pread-eof", case_held_pread_eof},
+    {"cmd-round-trip", case_cmd_round_trip},
+    {"cmd-refused-at-submit", case_cmd_refused_at_submit},
+    {"cmd-timeout", case_cmd_timeout},
+    {"cmd-no-source", case_cmd_no_source},
+    {"cmd-v1-session", case_cmd_v1_session},
+    {"cmd-bad-versions", case_cmd_bad_versions},
+    {"cmd-malformed", case_cmd_malformed},
+    {"cmd-overlap", case_cmd_overlap},
+    {"cmd-peer-close-cancels", case_cmd_peer_close_cancels},
+    {"cmd-bad-source", case_cmd_bad_source},
 };
 
 int main(int argc, char **argv)

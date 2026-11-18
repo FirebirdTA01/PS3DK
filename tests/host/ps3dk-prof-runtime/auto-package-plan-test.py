@@ -99,6 +99,8 @@ for member in required:
 assert all('-DPS3DK_PROF_WITH_AUTO=1' in line and '-DPS3DK_PROF_WITH_FIFO=1' in line
            and '-DPS3DK_PROF_ROLLING=1' in line and '-DPS3DK_PROF_ROLLING_PUBLIC=1' in line
            and '-fno-instrument-functions' in line for line in compile_lines)
+# the shipped AUTO archives carry the report ring (dormant unless PS3_PROF_AUTO_RING or ring options select it)
+assert all('-DPS3DK_PROF_AUTO_RING=1' in line for line in compile_lines if '/auto-rsx/' in line)
 assert prof.count('archive_digest.py verify')==2
 assert 'libps3dkprof_auto.a' in prof and '--id "AUTO-RSX"' in prof
 gcm_install=plan(current,trees[0],'install-auto')

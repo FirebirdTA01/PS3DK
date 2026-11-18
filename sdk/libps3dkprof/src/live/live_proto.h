@@ -1,7 +1,15 @@
-/* Live link, protocol version 1: the wire schema shared by the agent and its
- * tests. Design: docs/design/ps3dk-prof-viewer.md, "Phase 2". All integers
- * are little-endian. Nothing here changes the capture format: DATA carries
- * the capture file's bytes unchanged. */
+/* Live link, protocol versions 1 and 2: the wire schema shared by the agent,
+ * its tests and the viewer. Design: docs/design/ps3dk-prof-viewer.md,
+ * "Phase 2". All integers are little-endian. Nothing here changes the
+ * capture format: DATA carries the capture file's bytes unchanged.
+ *
+ * Version 2 adds capture triggers (CAPTURE_BEGIN, CAPTURE_END,
+ * CAPTURE_FRAMES and their CAPTURE_ACK). The viewer names the version in
+ * CLIENT_HELLO; an agent serves every version from LIVE_VERSION_MIN to
+ * LIVE_VERSION and answers in the version the viewer asked for, so a v1
+ * viewer sees exactly the v1 protocol. A v1 agent closes a v2 hello (BAD
+ * HELLO) without a reply: a v2 viewer then reconnects once asking for v1 and
+ * keeps its triggers off. No v2 frame is ever sent on a v1 session. */
 #ifndef PS3DK_PROF_LIVE_PROTO_H
 #define PS3DK_PROF_LIVE_PROTO_H
 #include <stdint.h>
@@ -10,20 +18,25 @@
 #define LIVE_HDR_BYTES 8u
 #define LIVE_MAX_PAYLOAD 65536u
 
-/* Viewer -> agent. Payload exactly 8 bytes: u32 magic, u16 version, u16 0. */
+/* Viewer -> agent. Payload exactly 8 bytes: u32 magic, u16 version
+ * (LIVE_VERSION_MIN..LIVE_VERSION), u16 0. */
 #define LIVE_T_CLIENT_HELLO 1u
 #define LIVE_MAGIC 0x564c3350u /* "P3LV" */
-#define LIVE_VERSION 1u
+#define LIVE_VERSION_MIN 1u
+#define LIVE_VERSION 2u      /* the newest version */
 
 /* Agent -> viewer, once, first frame after a valid CLIENT_HELLO:
- *   u16 protocol version, u16 agent version, u32 0,
+ *   u16 protocol version (the one CLIENT_HELLO asked for), u16 agent version,
+ *   u32 capabilities (version 1: 0; version 2: LIVE_CAP_* bits, unknown bits
+ *   ignored by the viewer),
  *   u64 session id (the capture's init timebase value),
  *   then three strings, each u16 length + bytes:
  *     app (1..LIVE_MAX_APP), build id (0..LIVE_MAX_BUILD_ID),
  *     file name (1..LIVE_MAX_NAME, the capture's base name, no '/').
  * The identity is for display; version 1 has no resume. */
 #define LIVE_T_HELLO 2u
-#define LIVE_AGENT_VERSION 1u
+#define LIVE_AGENT_VERSION 2u
+#define LIVE_CAP_TRIGGERS 1u /* the agent applies CAPTURE_* commands (it serves a runtime) */
 #define LIVE_MAX_APP 32u
 #define LIVE_MAX_BUILD_ID 512u
 #define LIVE_MAX_NAME 255u
@@ -56,6 +69,39 @@
  * a refused viewer may see only the close. */
 #define LIVE_T_BUSY 7u
 #define LIVE_BUSY_STREAMING 1u
+
+/* Version 2 only, viewer -> agent, while streaming (after HELLO, before END).
+ * At most ONE command is outstanding: the viewer sends the next only after
+ * the CAPTURE_ACK of the last. A command on a v1 session, a second one while
+ * one is outstanding, a request id of 0, a nonzero reserved field, a name
+ * length outside 1..LIVE_MAX_WINDOW_NAME, a frame count outside
+ * 1..LIVE_MAX_WINDOW_FRAMES, or a payload length that is not exactly the
+ * layout's closes the link (a protocol drop, as in v1).
+ *   CAPTURE_BEGIN:  u32 request id, u16 name length, u16 0, name bytes.
+ *                   A MANUAL window named <name>, from the next frame mark.
+ *   CAPTURE_END:    u32 request id. Closes the window this link opened.
+ *   CAPTURE_FRAMES: u32 request id, u32 frames, u16 name length, u16 0,
+ *                   name bytes. A FRAMES window of that many frames; it
+ *                   closes itself (reason COUNT).
+ * The name is the window's name in the capture, recorded as for a window the
+ * app opens; it must be UTF-8 without NUL (else the ACK refuses EINVAL). */
+#define LIVE_T_CAPTURE_BEGIN 8u
+#define LIVE_T_CAPTURE_END 9u
+#define LIVE_T_CAPTURE_FRAMES 10u
+#define LIVE_MAX_WINDOW_NAME 63u
+#define LIVE_MAX_WINDOW_FRAMES 1000000u
+#define LIVE_CMD_MAX_BYTES (12u + LIVE_MAX_WINDOW_NAME)
+
+/* Version 2 only, agent -> viewer, exactly one per command, 16 bytes:
+ *   u32 request id, i32 result (0, or the PS3DK_PROF_* refusal),
+ *   u32 window id (the window opened or closed; 0 when refused),
+ *   u16 command type, u16 0.
+ * A refusal changes nothing in the capture. The agent answers within its
+ * command deadline (a request no frame mark took in time is withdrawn and
+ * refused PS3DK_PROF_ETIMEDOUT) unless the link ends first; END is never
+ * followed by an ACK. */
+#define LIVE_T_CAPTURE_ACK 11u
+#define LIVE_ACK_BYTES 16u
 
 /* 64..79 are reserved for TTY and 80..95 for debugger traffic. Reserving
  * them defines no security or scheduling design for those channels. */

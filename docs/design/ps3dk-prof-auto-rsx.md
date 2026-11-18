@@ -432,10 +432,21 @@ an unacknowledged owner requires a lower bound. FINAL occurs once and forbids
 later records. A live conflict/reset stops admission and quarantines outstanding
 resources, without replacing CONFIG or rewriting earlier retained facts.
 
-## Report ring (CONFIG 2047/11, private: PS3DK_PROF_AUTO_RING)
+## Report ring (CONFIG 2047/11, opt-in: PS3_PROF_AUTO_RING)
 
-Not in any archive yet: a nonzero ring option is refused (EINVAL) unless the
-library is built with the private `PS3DK_PROF_AUTO_RING`. The ring removes the
+The shipped AUTO archives are built with `PS3DK_PROF_AUTO_RING` (a library
+built without it still refuses a nonzero ring option with EINVAL). The ring is
+dormant and allocates nothing unless the options select it: ring fields set
+through `ps3dk_prof_auto_attach` or `PS3DK_PROF_AUTO_OPTIONS_SET`, or the CMake
+option `PS3_PROF_AUTO_RING=ON`, which compiles a generated constant
+`ps3dk_prof_automatic_ring_options` (2 blocks, `PS3_PROF_AUTO_RING_MB` MiB,
+`PS3_PROF_AUTO_RING_RECORDS` records) into each executable and links it with
+`--require-defined`. The AUTO start-up constructor reads it through a weak
+reference before profiler initialization and validates it as the attach
+validates ring fields; a refused constant prints a diagnostic and leaves the
+automatic capture uninitialized. An accepted one replaces the ring fields of
+the defaults for every attach without options (the automatic attach unless
+same-thread pre-init options apply, and an override with NULL). The ring removes the
 local report-pair ceiling for **owner-buffer draws only** (phase 1): ARRAY,
 INDEX and CLEAR written into the attached context. Segment-built draws, FRAME
 marks, whole-CALL brackets and AUTO ranges keep the disjoint legacy pool and

@@ -95,7 +95,13 @@ def stand_in_install(sdk):
 
 class CxxLink(unittest.TestCase):
     def test_cxx_only_rolling_compiles_and_defines_the_constant(self):
-        base = OUT/'cxx-rolling'
+        self.rolling_constant(False)
+
+    def test_cxx_only_ring_and_rolling_keep_both_constants(self):
+        self.rolling_constant(True)
+
+    def rolling_constant(self, ring):
+        base = OUT/('cxx-ring-rolling' if ring else 'cxx-rolling')
         base.mkdir(parents=True)
         sdk = base/'sdk'
         lib = stand_in_install(sdk)
@@ -104,6 +110,9 @@ class CxxLink(unittest.TestCase):
         # and C linkage as constructor100, even though C is not enabled.
         for name in ('prof.h', 'prof_rolling.h'):
             (inc/'ps3dk'/name).write_bytes((ROOT/'sdk/include/ps3dk'/name).read_bytes())
+        if ring:
+            (inc/'ps3dk/prof_auto.h').write_bytes((ROOT/'sdk/include/ps3dk/prof_auto.h').read_bytes())
+            (inc/'ps3dk/prof_gpu.h').write_bytes((ROOT/'sdk/libps3dkprof/src/rsx/prof_gpu.h').read_bytes())
         manifest = json.loads((lib/GUARD.MANIFEST).read_text())
         manifest['headers'] = {n: GUARD.sha(inc/n) for n in GUARD.HEADERS}
         (lib/GUARD.MANIFEST).write_text(json.dumps(manifest))
@@ -117,10 +126,15 @@ int main() {
         p->max_capture_bytes == 67108864 ? 0 : 7;
 }
 ''')
+        if ring:
+            main = src/'main.cpp'
+            main.write_text('#include <ps3dk/prof_auto.h>\nextern "C" const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options __attribute__((weak));\n'+
+                main.read_text().replace('return p &&', 'return &ps3dk_prof_automatic_ring_options && ps3dk_prof_automatic_ring_options.size == 16 && ps3dk_prof_automatic_ring_options.ring_bytes == 16777216 && p &&'))
         forced = ','.join('-u,'+s for s in GUARD.REQUIRED)
         (src/'CMakeLists.txt').write_text(f'''cmake_minimum_required(VERSION 3.21)
 set(PS3_PROF_AUTO ON)
 set(PS3_PROF_AUTO_ROLLING 64)
+{'set(PS3_PROF_AUTO_RING ON)' if ring else ''}
 set(PS3DK "{sdk.as_posix()}")
 set(CMAKE_PROJECT_INCLUDE "{(ROOT/'cmake/ps3-prof-auto.cmake').as_posix()}")
 project(cxx_only_rolling CXX)
@@ -137,6 +151,11 @@ target_link_options(app PRIVATE "-Wl,{forced}")
             self.assertEqual(r.returncode,0,r.stdout[-3000:]+r.stderr[-3000:])
         r = subprocess.run([str(build/'app')],capture_output=True,text=True,timeout=30)
         self.assertEqual(r.returncode,0,'CXX-only rolling constant absent: silent append fallback')
+        if ring:
+            self.assertTrue((build/'app-auto-ring.cpp').exists())
+            link = (build/'CMakeFiles/app.dir/link.txt').read_text()
+            for name in ('ring', 'rolling'):
+                self.assertIn('--require-defined,ps3dk_prof_automatic_'+name+'_options', link)
         # Force a missing-definition link after the positive run. A weak app
         # reference alone links successfully and silently picks append mode.
         source = build/'app-auto-rolling.cpp'

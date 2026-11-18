@@ -235,6 +235,10 @@ int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out);
  * one PC viewer over TCP while it grows, reading the file only (the writer never waits for a viewer).  Manual
  * lifecycle only (libps3dkprof); the network must be initialized first (netInitialize).  Calls are caller-serialized:
  * init, live_start, shutdown and live_stop are never concurrent.
+ * The viewer can also open and close capture windows (live protocol 2, the viewer's Begin / End / Capture N
+ * frames): the thread that marks frames applies each request inside ps3dk_prof_frame, exactly like a
+ * capture_begin or capture_end at the end of the previous frame, so a window opens or closes at a frame boundary
+ * and is recorded like one the app opens.  The app adds no code for it; one window at a time still holds.
  * live_start, after a successful init: OK; ENOTINIT before one; ESTOPPED once shutdown has begun; ENOTSUP with a
  * callback sink or a capture outside /dev_hdd0/ (the only device measured); EALREADY after a start (once per run);
  * EINVAL for a bad config; ENET if the listener cannot be created; ETHREAD if the thread cannot be.

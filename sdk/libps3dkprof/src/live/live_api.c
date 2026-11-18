@@ -5,9 +5,18 @@
  *
  * Calls are caller-serialized: init, live_start, shutdown and live_stop are
  * never concurrent. The agent object is never freed; after ETIMEDOUT or
- * ECLOCK its thread may still use it. */
+ * ECLOCK its thread may still use it.
+ *
+ * Capture triggers (protocol v2): the agent thread queues a viewer's command
+ * in a one-entry mailbox; the thread that marks frames takes it in its frame
+ * mark (prof_frame_hook.h), calls the public capture-window API there, and
+ * posts the result, which the agent sends as the ACK. The capture-window API
+ * is the frame thread's (a MANUAL or FRAMES window belongs to the thread that
+ * marks frames, and its descriptor is registered on the caller's ring), so
+ * the agent thread never calls it. */
 #include "live_api.h"
 #include "live_os.h"
+#include "prof_frame_hook.h"
 #include <string.h>
 
 #ifdef PS3DK_PROF_TEST_HOOKS
@@ -18,6 +27,190 @@ enum { API_NEVER, API_RUNNING, API_STOPPED, API_JOIN_FAILED };
 
 static live_agent g_agent; /* zero-initialized static storage, as live_agent.h requires */
 static int g_api_state;
+
+/* ---- capture triggers ------------------------------------------------------------------------------------------- */
+
+/* The window names a viewer sent, each a descriptor the runtime keeps a pointer to for the rest of the process: a
+ * fixed table, filled once per distinct name and never rewritten or freed.  The same name reuses its entry (and so
+ * its descriptor); a new name once the table is full is refused EFULL.  Written by the agent thread only, before the
+ * mailbox publication (release) that the frame thread acquires. */
+#define LIVE_NAME_SLOTS 32u
+typedef struct live_name {
+    ps3dk_prof_desc desc;
+    char text[LIVE_MAX_WINDOW_NAME + 1];
+} live_name;
+static live_name g_names[LIVE_NAME_SLOTS];
+static uint32_t g_names_used;
+
+/* The mailbox.  IDLE -> PENDING (agent: submit) -> TAKEN (frame thread) -> DONE (frame thread) -> IDLE (agent: poll).
+ * The agent withdraws a request with PENDING -> IDLE (cancel; poll at shutdown); whoever wins the CAS on PENDING owns
+ * the request.  A DONE whose link already ended is discarded by the next submit. */
+enum { MB_IDLE, MB_PENDING, MB_TAKEN, MB_DONE };
+static struct {
+    atomic_uint state;
+    uint32_t type, frames;
+    live_name *name;
+    int32_t result;
+    uint32_t window_id;
+} g_mb;
+/* The window the live link opened last (0: none); read and written only by the request owner (TAKEN). */
+static uint32_t g_live_window;
+
+/* Strict UTF-8 (no overlong forms, no surrogates, at most U+10FFFF) without NUL: what a descriptor name may hold. */
+static int name_ok(const uint8_t *s, uint32_t n)
+{
+    uint32_t i = 0;
+    while (i < n) {
+        uint32_t c = s[i], k, cp, min;
+        if (c == 0)
+            return 0;
+        if (c < 0x80) {
+            i++;
+            continue;
+        }
+        if ((c & 0xe0) == 0xc0) {
+            k = 1;
+            cp = c & 0x1f;
+            min = 0x80;
+        } else if ((c & 0xf0) == 0xe0) {
+            k = 2;
+            cp = c & 0x0f;
+            min = 0x800;
+        } else if ((c & 0xf8) == 0xf0) {
+            k = 3;
+            cp = c & 0x07;
+            min = 0x10000;
+        } else {
+            return 0;
+        }
+        if (n - i - 1 < k)
+            return 0;
+        for (uint32_t j = 1; j <= k; ++j) {
+            if ((s[i + j] & 0xc0) != 0x80)
+                return 0;
+            cp = cp << 6 | (s[i + j] & 0x3fu);
+        }
+        if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+            return 0;
+        i += k + 1;
+    }
+    return 1;
+}
+
+/* The table entry for this name: an existing one, a new one, or NULL when the table is full. */
+static live_name *name_entry(const char *name, uint32_t n)
+{
+    for (uint32_t i = 0; i < g_names_used; ++i)
+        if (strlen(g_names[i].text) == n && memcmp(g_names[i].text, name, n) == 0)
+            return &g_names[i];
+    if (g_names_used == LIVE_NAME_SLOTS)
+        return NULL;
+    live_name *e = &g_names[g_names_used++];
+    memcpy(e->text, name, n);
+    e->text[n] = 0;
+    /* one call site for every live window: the name alone tells them apart */
+    e->desc = (ps3dk_prof_desc){.name = e->text, .logical_tag = "", .file = "ps3dk-prof live viewer", .line = 1u,
+                                .scope = 1u};
+    return e;
+}
+
+static int cmd_submit(void *ctx, uint32_t type, const char *name, uint32_t name_len, uint32_t frames)
+{
+    (void)ctx;
+    if (ps3dk_prof__shutdown_claimed())
+        return PS3DK_PROF_ESTOPPED;
+    unsigned st = atomic_load_explicit(&g_mb.state, memory_order_acquire);
+    if (st == MB_DONE) {
+        /* the result of a request whose link ended while the frame thread applied it */
+        atomic_store_explicit(&g_mb.state, MB_IDLE, memory_order_relaxed);
+        st = MB_IDLE;
+    }
+    if (st != MB_IDLE)
+        return PS3DK_PROF_EBUSY; /* a request of an ended link is being applied right now */
+    live_name *e = NULL;
+    if (type != LIVE_T_CAPTURE_END) {
+        if (!name_ok((const uint8_t *)name, name_len))
+            return PS3DK_PROF_EINVAL;
+        e = name_entry(name, name_len);
+        if (!e)
+            return PS3DK_PROF_EFULL; /* LIVE_NAME_SLOTS distinct names this run */
+    }
+    g_mb.type = type;
+    g_mb.frames = frames;
+    g_mb.name = e;
+    atomic_store_explicit(&g_mb.state, MB_PENDING, memory_order_release);
+    return 0;
+}
+
+static int cmd_poll(void *ctx, int32_t *result, uint32_t *window_id)
+{
+    (void)ctx;
+    unsigned st = atomic_load_explicit(&g_mb.state, memory_order_acquire);
+    if (st == MB_DONE) {
+        *result = g_mb.result;
+        *window_id = g_mb.window_id;
+        atomic_store_explicit(&g_mb.state, MB_IDLE, memory_order_relaxed);
+        return 1;
+    }
+    /* A shutdown has begun: no frame mark will take the request any more. */
+    if (st == MB_PENDING && ps3dk_prof__shutdown_claimed() &&
+        atomic_compare_exchange_strong_explicit(&g_mb.state, &st, MB_IDLE, memory_order_acq_rel,
+                                                memory_order_acquire)) {
+        *result = PS3DK_PROF_ESTOPPED;
+        *window_id = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_cancel(void *ctx)
+{
+    (void)ctx;
+    unsigned st = MB_PENDING;
+    return atomic_compare_exchange_strong_explicit(&g_mb.state, &st, MB_IDLE, memory_order_acq_rel,
+                                                   memory_order_acquire);
+}
+
+/* Applies the request on the frame thread, inside its frame mark. */
+static void apply(void)
+{
+    ps3dk_prof_capture_info info;
+    int rc;
+    uint32_t id = 0;
+    if (g_mb.type == LIVE_T_CAPTURE_END) {
+        (void)ps3dk_prof_capture_state(&info);
+        if (info.state == 0 || info.state == 3)
+            rc = PS3DK_PROF_EINVAL; /* no window to end (or it already ends at this boundary) */
+        else if (!g_live_window || info.id != g_live_window)
+            rc = PS3DK_PROF_EPERM; /* a window the app opened: the viewer ends only its own */
+        else
+            rc = ps3dk_prof_capture_end();
+        id = info.id;
+    } else {
+        uint32_t kind = g_mb.type == LIVE_T_CAPTURE_FRAMES ? PS3DK_PROF_WINDOW_FRAMES : PS3DK_PROF_WINDOW_MANUAL;
+        rc = ps3dk_prof_capture_begin(&g_mb.name->desc, kind, kind == PS3DK_PROF_WINDOW_FRAMES ? g_mb.frames : 0u);
+        if (rc == PS3DK_PROF_OK) {
+            /* only this thread (the window's owner and opener) can change the slot before the next frame mark */
+            (void)ps3dk_prof_capture_state(&info);
+            id = g_live_window = info.id;
+        }
+    }
+    g_mb.result = rc;
+    g_mb.window_id = rc == PS3DK_PROF_OK ? id : 0u;
+}
+
+static void live_frame_hook(void)
+{
+    unsigned st = MB_PENDING;
+    if (atomic_load_explicit(&g_mb.state, memory_order_relaxed) != MB_PENDING ||
+        !atomic_compare_exchange_strong_explicit(&g_mb.state, &st, MB_TAKEN, memory_order_acq_rel,
+                                                 memory_order_relaxed))
+        return;
+    apply();
+    atomic_store_explicit(&g_mb.state, MB_DONE, memory_order_release);
+}
+
+static const live_cmd_ops g_cmd_ops = {.submit = cmd_submit, .poll = cmd_poll, .cancel = cmd_cancel};
 
 static const struct ps3dk_prof_finalization *runtime_finalization(void *ctx)
 {
@@ -82,8 +275,12 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
 #endif
     live_source src = {.path = rec.path, .session_id = rec.session_id, .app = rec.app, .app_len = rec.app_len,
                        .build_id = (const char *)rec.build_id, .build_id_len = rec.build_id_len,
-                       .finalization = runtime_finalization};
-    switch (live_agent_start(&g_agent, &c, &src)) {
+                       .finalization = runtime_finalization, .cmd = &g_cmd_ops};
+    ps3dk_prof__set_frame_hook(live_frame_hook); /* before a viewer can send a command */
+    rc = live_agent_start(&g_agent, &c, &src);
+    if (rc != LIVE_OK)
+        ps3dk_prof__set_frame_hook(NULL);
+    switch (rc) {
     case LIVE_OK:
         g_api_state = API_RUNNING;
         return PS3DK_PROF_OK;
@@ -113,6 +310,7 @@ int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)
     switch (live_agent_stop(&g_agent, graceful_us, join_us)) {
     case LIVE_OK:
         g_api_state = API_STOPPED;
+        ps3dk_prof__set_frame_hook(NULL); /* no viewer is left to answer */
         return PS3DK_PROF_OK;
     case LIVE_ETIMEDOUT:
         return PS3DK_PROF_ETIMEDOUT;

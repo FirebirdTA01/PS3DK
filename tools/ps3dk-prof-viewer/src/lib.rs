@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod auto;
+pub mod auto_lane;
 pub mod auto_ui;
 pub mod capture;
 pub mod capture_ctl;
@@ -24,6 +25,8 @@ pub mod hotpaths;
 pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
+pub mod live_triggers;
+pub mod live_triggers_ui;
 pub mod model;
 pub mod passes_ui;
 pub mod rolling_doc;

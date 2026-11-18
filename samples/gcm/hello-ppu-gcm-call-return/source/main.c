@@ -16,7 +16,9 @@
  *   -ring    600 owner-buffer clears per frame for the AUTO report ring
  *            (GCM_SEG_VARIANT_RING); GCM_SEG_RING_FRAME_COUNT defaults to 30
  *            (1..300) and permits longer rolling-retention probes without
- *            changing GCM setup; built with -DGCM_SEG_RING_PROBE, the first
+ *            changing GCM setup. Its own attach selects the ring unless
+ *            PS3_PROF_AUTO_RING=ON already selected it automatically;
+ *            built with -DGCM_SEG_RING_PROBE, the first
  *            3 flips print the flip words and IO offset 0 (GCM_SEG_PROBE)
  * Progress goes to GCM_SEG_STEP lines and /dev_hdd0/tmp/gcmseg-crumb.txt. */
 #include <cell/gcm.h>
@@ -341,11 +343,22 @@ static int large_check(CellGcmContextData *ring, uint32_t *mem)
 #error GCM_SEG_RING_FRAME_COUNT must be between 1 and 300
 #endif
 enum { RING_FRAMES = GCM_SEG_RING_FRAME_COUNT, RING_DRAWS = 600 };
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+#include <ps3dk/prof_auto.h>
+/* Defined by the generated unit of a PS3_PROF_AUTO_RING=ON build: the automatic attach already selected the ring. */
+extern const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options __attribute__((weak));
+#endif
 static void ring_attach(void)
 {
 #if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
     ps3dk_prof_auto_options o = PS3DK_PROF_AUTO_OPTIONS_INIT;
     uint32_t instance = 0, domain = 0;
+    if (&ps3dk_prof_automatic_ring_options) {
+        const ps3dk_prof_auto_ring_options *r = &ps3dk_prof_automatic_ring_options;
+        printf("GCM_SEG_RING attach from the build option: blocks=%u bytes=%u records=%u\n", (unsigned)r->ring_blocks,
+               (unsigned)r->ring_bytes, (unsigned)r->ring_records);
+        return;
+    }
     o.ring_blocks = 2;   /* 16 MiB of MAIN extents, 16,384 records, label 245: the defaults */
     int rc = ps3dk_prof_auto_attach((ps3dk_prof_gcm_ctx *)(void *)CELL_GCM_CURRENT, &o, &instance, &domain);
     printf("GCM_SEG_RING attach rc=%d instance=%u domain=%u\n", rc, (unsigned)instance, (unsigned)domain);
