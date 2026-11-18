@@ -23,6 +23,9 @@ usage: r2-test.py OUT --reader READER"""
 import argparse
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 import re
 import shutil
 import struct
@@ -488,10 +491,10 @@ for name, f, old, new, case, kill, *n in mutants:
         src = src.replace(o, nw)
     d = out / f'mut-{name}'
     d.mkdir()
-    shutil.copytree(lib, d / 'src')
-    (d / 'src' / f).write_text(src, encoding='utf-8')
+    mut_src = copy_runtime(lib, d / 'runtime')
+    (mut_src / f).write_text(src, encoding='utf-8')
     tsan = kill == 'TSAN'
-    if not build(d, d / 'src', ['-Wno-error', '-Wno-unused-variable', '-Wno-unused-function'] +
+    if not build(d, mut_src, ['-Wno-error', '-Wno-unused-variable', '-Wno-unused-function'] +
                  (['-fsanitize=thread'] if tsan else [])):
         row(f'mutant {name}: INVALID (build failed)', False)
         continue

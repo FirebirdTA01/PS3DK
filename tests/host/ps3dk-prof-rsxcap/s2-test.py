@@ -26,6 +26,9 @@ import argparse
 import hashlib
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 import re
 import shutil
 import struct
@@ -475,8 +478,8 @@ MUT = [
 if want('mut'):
     for name, f, edits, rall, kind, case, judge in MUT:
         md = out / f'mut-{name}'
-        shutil.copytree(lib, md / 'src')
-        p = md / 'src' / f
+        mut_src = copy_runtime(lib, md / 'runtime')
+        p = mut_src / f
         s = p.read_text()
         okedit = True
         for old, new in edits:
@@ -489,7 +492,7 @@ if want('mut'):
         if not okedit:
             continue
         p.write_text(s)
-        e = build(md / 'b', kind, 'plain', src=md / 'src')
+        e = build(md / 'b', kind, 'plain', src=mut_src)
         if not e:
             row('mut', name, False, 'build failed', status='INVALID')
             continue

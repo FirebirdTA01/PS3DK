@@ -28,9 +28,9 @@ SOURCE = "tools/ps3dk-prof/src/rolling_combined.rs"
 WRAPPER = "tools/ps3dk-prof/src/rolling_file.rs"
 TEST = "tools/ps3dk-prof/tests/rolling_combined_file.rs"
 PINS = {
-    SOURCE: "51e85d602705e65c249b815c70fecf6c34ccacab208e119b3e825718df9ce8fd",
-    WRAPPER: "8e9511b2c42ffc7fc822adce7f904dd4128a3594558f290e4628654f1daf067f",
-    TEST: "7ac8e6ce08d77ad8780fcd2eefe3459acaf514faea4a602fc2c0b2d95eb656fe",
+    SOURCE: '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
+    WRAPPER: '0fd1a44cfeb74a9b6316efae7b7adc990a6d4dea63978a30a98a91859485a38e',
+    TEST: '7ac8e6ce08d77ad8780fcd2eefe3459acaf514faea4a602fc2c0b2d95eb656fe',
 }
 
 
@@ -46,9 +46,9 @@ def replace_one(text, before, after):
 
 
 def cases(source, tests):
-    canonical = "            let canonical = live.canonical_boundary(&mut budget)?;"
+    canonical = "            let canonical = match &mut validator {"
     compare = "            if canonical.as_slice() != next.checkpoint {"
-    boundary = "    let boundary = live.report_boundary();\n    for (i, segment)"
+    boundary = "    let boundary = live.report_boundary(&mut budget)?;\n    for (i, segment)"
     specifications = [
         ("canonical_transition", "repaired_crc_intermediate_forgery_rejects_without_semantic_root_fallback",
          "forged transition accepted", "forged transition accepted", [
@@ -56,11 +56,11 @@ def cases(source, tests):
          ]),
         ("retained_baseline_reset", "all_retained_slots_keep_counts_crossing_spans_and_original_causal_bounds",
          "assert_eq!((got.first_chunk, got.next_chunk, got.prefix_bytes)", "assertion `left == right` failed", [
-             (boundary, "    let mut boundary = live.report_boundary();\n    for (i, segment)"),
+             (boundary, "    let mut boundary = live.report_boundary(&mut budget)?;\n    for (i, segment)"),
              ("                return Err(ChainError::Transition { segment: next.segment });\n            }",
               "                return Err(ChainError::Transition { segment: next.segment });\n            }\n"
               "            live = Live::restore(checkpoint::decode(next.checkpoint, &mut budget)?, &mut budget)?;\n"
-              "            boundary = live.report_boundary(); // MUTANT: forget earlier retained slots"),
+              "            boundary = live.report_boundary(&mut budget)?; // MUTANT: forget earlier retained slots"),
          ]),
         ("input_budget_reset", "input_bytes_are_admitted_for_the_entire_borrowed_payload_chain",
          'panic!("expected limit {expected}, accepted")', "expected limit input bytes, accepted", [
@@ -71,9 +71,9 @@ def cases(source, tests):
          ]),
         ("event_budget_reset", "event_work_is_cumulative_across_all_retained_slots",
          'panic!("expected limit {expected}, accepted")', "expected limit event work, accepted", [
-             ('        if live.consume(segment.payload, true, &mut budget)? {',
+             ('        if analysis_consume(&mut live, validator.as_mut(), segment.payload, &mut budget)? {',
               '        budget.events = 0; // MUTANT: per-slot instead of cumulative\n'
-              '        if live.consume(segment.payload, true, &mut budget)? {'),
+              '        if analysis_consume(&mut live, validator.as_mut(), segment.payload, &mut budget)? {'),
          ]),
         ("proof_budget_reset", "canonical_boundary_proof_reservations_share_one_operation_budget",
          'panic!("expected limit {expected}, accepted")', "expected limit position work reservation, accepted", [

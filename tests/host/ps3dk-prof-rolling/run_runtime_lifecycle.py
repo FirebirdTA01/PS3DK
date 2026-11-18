@@ -93,7 +93,7 @@ def main():
     wrapped = ['ps3dk_prof__pal_' + name for name in ('open_excl', 'open_rw_excl', 'close', 'alloc', 'thread_create',
                'mutex_lock', 'mutex_unlock', 'mutex_trylock', 'retain_complete_kind', 'sleep_us', 'thread_join')]
     wrapped += ['ps3dk_prof__roll_ppu_init', 'ps3dk_prof__roll_output_accept', 'ps3dk_prof__roll_runtime_flush',
-                'ps3dk_prof__roll_publish_state', 'pwrite', 'pwrite64', 'fsync']
+                'ps3dk_prof__roll_runtime_accept', 'ps3dk_prof__roll_publish_state', 'pwrite', 'pwrite64', 'fsync']
     exe = out / 'runtime-lifecycle'
     command = cc + flags + [str(p) for p in files] + ['-Wl,--wrap=' + name for name in wrapped] + ['-o', str(exe)]
     inventory = candidates(lib); initial = {str(p): sha(p) for p in inventory}

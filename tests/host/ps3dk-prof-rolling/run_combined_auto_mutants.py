@@ -22,19 +22,19 @@ SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
 # Reviewed LF hashes: C110 set plus the integration PREINIT_FOREIGN mask and
 # sticky-bit change (ordinary-source/old-C RED in gate137).
 PINS = {
-    "roll_combined2.c": "3af713b702820d4bef5cd285472a64e7e9946d47e86b47649e8490c549864624",
-    "roll_combined2.h": "8c2d218877bf5280d98e181378ecc5e82a20338bdc8ebeaca7c9401f22c97e7d",
-    "roll_combined2_auto.h": "3817f1a8bcd56fe64c617f914842918fcf97c48718e701eeff60b63c1d3ed5f7",
-    "roll_combined2_fifo.h": "cd757ae2cea21fa75269d8c3104ec0f3f8def0aab8f36cbc057ac8fe5c507b05",
-    "roll_combined.c": "8645d9614afffa6a0d251688d6b4bceafa4ad1c7586de78c008e695ad5f607cb",
-    "roll_combined.h": "0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431",
-    "roll_combined_internal.h": "e455d68426dc4bed3e1e5ab7f052a975265715c18a1b06ae0de39d3bec644b05",
-    "roll_combined_spu.h": "c9bb915cf8eb08b059ef8e92532284375b7f33eb4b83a7c16b28f9748670212a",
-    "roll_ppu.c": "7e5f300519d9fbcc373883763fb9fdd601b1893f789887e4f111a8f7ce0ae3ff",
-    "roll_ppu.h": "6a8d69aacd73486293bdbd906d78cc2d81b00a8e1880a165aa80762c174c7e6e",
-    "roll_ppu_internal.h": "f609cc26cbc7513bc9b537e6fa5816f251ae1d0628d1dc7051022822a71495d4",
-    "roll_output.h": "89b20af13c86a366c87ccfe8fb1cc230e0a4af8f9fd528488540654ba27ab57c",
-    "roll_store.h": "7c3ec5a246d633cc7b3e2248e34b0192a772de9cb7d585c55bf7faa16cf7bf34"
+    "roll_combined2.c": 'c6b9deb18059bb459d0cc99bae551c9dec05e730872ab0a517ee56174615d454',
+    "roll_combined2.h": '5cc46860e697320289fd9b864b0dbb33b609711a588db9c8b1a0841a8f05ca8e',
+    "roll_combined2_auto.h": 'e6c09a88a87f994d7afba4ba8d2424085e1f283c0667b0cbbd63aacdbe7a9ec1',
+    "roll_combined2_fifo.h": '49e2976f7a04f6eb4224825014eeb823da43fc764473c67fc799fecc685a4bb8',
+    "roll_combined.c": 'b4f5f050acc187615c32a73fc07aa403a4dbd490d033346b598af9bdd5c4f5d1',
+    "roll_combined.h": '0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431',
+    "roll_combined_internal.h": '9eecdd1c65d0eafb599e9625dc755d3a5f7037c206f0918bb0630f79d02b5fb7',
+    "roll_combined_spu.h": 'c9bb915cf8eb08b059ef8e92532284375b7f33eb4b83a7c16b28f9748670212a',
+    "roll_ppu.c": '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
+    "roll_ppu.h": '6a8d69aacd73486293bdbd906d78cc2d81b00a8e1880a165aa80762c174c7e6e',
+    "roll_ppu_internal.h": '2f0515bb61c2fc71630e49e83efee3f36cb58ac396f3b53195d2880280d24fa0',
+    "roll_output.h": 'ee1cf162972b36873bfdab66700bb11ea0876d4f741c5703bf60d6c8df1b1283',
+    "roll_store.h": '7c3ec5a246d633cc7b3e2248e34b0192a772de9cb7d585c55bf7faa16cf7bf34'
 }
 B1 = 'c_auto_ring2047_ppu_spu_fifo_matches_every_original_cut'
 B2 = 'c_auto_mask63_build_execution_and_abandoned_population'

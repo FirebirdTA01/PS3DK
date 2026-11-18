@@ -103,12 +103,23 @@ fn actual_c_combined_event_and_witness_caps_preserve_predecessor() {
 }
 #[test]
 #[ignore = "requires real SPU source and configurable C encoder"]
-fn actual_c_combined_cumulative_metadata_cap_includes_terminal() {
+fn actual_c_combined_metadata_pool_excludes_nonstored_terminal() {
     let b = source(); let offsets = cuts(&b); let final_cut=offsets.len()-2; assert_eq!(u32_at(&b,offsets[final_cut]),6);
-    let mut bytes=16usize;
-    for pair in offsets.windows(2) { if !matches!(u32_at(&b,pair[0]),5|13) {bytes+=4+pair[1]-pair[0];} }
-    refusal(&b,"metadata_bytes",(bytes-1) as u32,final_cut,4);
+    // The C writer reserves retained storage, not the reader's cumulative
+    // analysis budget. TRAILER has no successor checkpoint (runtime contract,
+    // b8704674e), so exact-capacity output must still be able to seal.
+    let mut bytes=16usize; let mut last_stored=0;
+    for (cut,pair) in offsets.windows(2).enumerate() {
+        if !matches!(u32_at(&b,pair[0]),5|6|13) { bytes+=4+pair[1]-pair[0]; last_stored=cut; }
+    }
+    assert!(last_stored<final_cut);
+    let (_tmp,out,result)=invoke(&b,Some(("metadata_bytes",bytes as u32)));
+    assert!(result.status.success(),"exact writer pool must accept terminal: {}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(bounded(&out.join(format!("cut-{final_cut:06}.ckp"))),
+               combined::checkpoint_combined(&b[..offsets[final_cut]],limits()).unwrap());
+    refusal(&b,"metadata_bytes",(bytes-1) as u32,last_stored,4);
 }
+
 #[test]
 #[ignore = "requires real SPU source and configurable C encoder"]
 fn actual_c_combined_work_refuses_before_crc_scan() {

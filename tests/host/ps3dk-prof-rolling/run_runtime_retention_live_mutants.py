@@ -31,11 +31,11 @@ PINS=(DRAIN,CORE,LIVE,PPU,INSPECT)
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
 APPROVED_PINS={
-    'sdk/libps3dkprof/src/core/prof_drain.c': 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
-    'sdk/libps3dkprof/src/core/prof_core.c': '9d9410a1e3666016bad03bd78c8291e228fbab9863ba940c809264c03369fc79',
-    'sdk/libps3dkprof/src/live/live_api.c': 'afed59fbdebb943a757d470863b2aababce7e0cdcb5eca4a3a36adb109235786',
-    'sdk/libps3dkprof/src/rolling/roll_ppu.c': '7e5f300519d9fbcc373883763fb9fdd601b1893f789887e4f111a8f7ce0ae3ff',
-    'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': 'cb33cb59ad96ff5a4caff334c89f57516efa9f39eee4df5a6f6ec425d65a8dca',
+    'sdk/libps3dkprof/src/core/prof_drain.c': 'c61973c33502e99257d2150b48d0aa1a2fadc2a176cd1cdd1cb9ea33eee8abb4',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'd3ef8a105899e764fd15401a4b55127b9fb838f83dd4ebd2f8acdba765307cab',
+    'sdk/libps3dkprof/src/live/live_api.c': '03afdc3e424240b9a9c15333c79047ad443be2b9c044816d9b30be64960914ec',
+    'sdk/libps3dkprof/src/rolling/roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
+    'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': '959224ba03ebc3b9965e64f4d3b0f2d5a453fc7dc52720ee307ea46f596391f0',
 }
 # Exact reviewed post-budget-fix anchors; no test input is mutated.
 COMBINED_BUDGET_EDIT=('case P_ROLL_COMBINED: metadata = r->selection.limits.combined.metadata_bytes; break;',

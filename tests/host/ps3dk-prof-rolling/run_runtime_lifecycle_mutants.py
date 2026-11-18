@@ -30,8 +30,8 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
 PINS = {
-    DRAIN: 'fd8b303c8e5521868dcebc57639cdf34c71758aac1dcfd06a768fd7c020ddda2',
-    BRIDGE: 'd935adf4125e0a3003480bc1eb48eea3197c0e3564285a9eecff4b4d5589f42a',
+    DRAIN: 'c61973c33502e99257d2150b48d0aa1a2fadc2a176cd1cdd1cb9ea33eee8abb4',
+    BRIDGE: 'bb7b76245a7134a77281e057138606ea532b3ca59caaaeda04834d9e1cb681ea',
 }
 RUST_TESTS = {
     'actual_thread_automatic_resource_stop_preserves_first_public_join_and_result',

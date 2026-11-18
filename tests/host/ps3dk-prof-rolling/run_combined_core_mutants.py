@@ -21,9 +21,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
 PINS = dict(SHARED_PINS, **{
-    'roll_combined2.c': 'a0e7399cc86d0ca9f97aef9a8840ca4d417f426711235d5e9e1cb336977dee6f',
-    'roll_combined2.h': 'af9c5c3c18e725c07726cb66e2e172766078db15f3db04d7b562e72e797b6ba2',
-    'roll_combined2_fifo.h': 'cd757ae2cea21fa75269d8c3104ec0f3f8def0aab8f36cbc057ac8fe5c507b05',
+    'roll_combined2.c': 'c6b9deb18059bb459d0cc99bae551c9dec05e730872ab0a517ee56174615d454',
+    'roll_combined2.h': '5cc46860e697320289fd9b864b0dbb33b609711a588db9c8b1a0841a8f05ca8e',
+    'roll_combined2_auto.h': 'e6c09a88a87f994d7afba4ba8d2424085e1f283c0667b0cbbd63aacdbe7a9ec1',
+    'roll_combined2_fifo.h': '49e2976f7a04f6eb4224825014eeb823da43fc764473c67fc799fecc685a4bb8',
 })
 ORDINAL = 'c_fifo_schema2_interleaved_spu_status_replacement_preserves_original_support_ordinals'
 CAPACITY = 'c_fifo_schema2_latest_status_uses_net_metadata_capacity'

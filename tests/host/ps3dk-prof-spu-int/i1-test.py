@@ -58,6 +58,11 @@ def build(label, r, extra, spu, test_src, links):
     flags = ['-std=c11', '-O1', '-g', '-pthread', '-DPS3DK_PROF=1', '-DPS3DK_PROF_PAL_HOST', '-DPS3DK_PROF_TEST_HOOKS',
              *inc, *warn, *extra]
     srcs = [lib / 'core/prof_core.c', lib / 'core/prof_drain.c', lib / 'pal/pal_host.c', lib / 'rolling/roll_file.c', lib / 'rolling/roll_retention_inspect.c', lib / 'rolling/roll_store.c', test_src]
+    # The frozen v1 ancestor has no rolling directory. Preserve the explicit
+    # current dependency list (audited by retention/dependency_test.py), but
+    # compile the ancestor's own dependency set for its byte-for-byte oracle.
+    if not (lib / 'rolling').exists():
+        srcs = [source for source in srcs if source.parent != lib / 'rolling']
     if (lib / 'core/prof_version.c').exists():  # absent from a base tree that predates the member
         srcs.append(lib / 'core/prof_version.c')
     if '-DPS3DK_PROF_WITH_ARCS' in extra:

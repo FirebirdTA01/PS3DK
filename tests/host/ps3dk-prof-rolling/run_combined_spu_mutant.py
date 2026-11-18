@@ -23,13 +23,15 @@ ANCHOR = 'rc=sp_accept(spu(c,b),&c->spu_layout,&c->cfg,&v,ty,raw+16,len,flags);'
 PINS = {
     # Reviewed shared-core extraction: same typed caller anchor now lives in
     # core_accept; schema1 passes no external policy and zero family flags.
-    # Gate97 ASan schema1/SPU/resource/physical and mixed39 parity all passed.
-    'roll_combined.c': '63824d372ae119055b55f00e84524b312c04ab7baebf2e6f8fef4882f0b7c5ff',
+    # Refreshed after schema3 support compaction and terminal-budget parity.
+    # The typed sp_accept/INVALID propagation below is unchanged; both the
+    # original named witness and its semantic mutation must still execute.
+    'roll_combined.c': 'b4f5f050acc187615c32a73fc07aa403a4dbd490d033346b598af9bdd5c4f5d1',
     'roll_combined.h': '0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431',
-    'roll_combined_internal.h': 'e455d68426dc4bed3e1e5ab7f052a975265715c18a1b06ae0de39d3bec644b05',
+    'roll_combined_internal.h': '9eecdd1c65d0eafb599e9625dc755d3a5f7037c206f0918bb0630f79d02b5fb7',
     'roll_combined_spu.h': 'c9bb915cf8eb08b059ef8e92532284375b7f33eb4b83a7c16b28f9748670212a',
-    'roll_ppu.c': '0e300f2a7b09ea2c25abca085f5c0f06b52abafda78a0df8546d814c5d2478da',
-    'roll_ppu_internal.h': '4faa531a02488930fb7647df6b829c3e1403a9e50a21468821a8cf0aa7c2d929',
+    'roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
+    'roll_ppu_internal.h': '2f0515bb61c2fc71630e49e83efee3f36cb58ac396f3b53195d2880280d24fa0',
 }
 
 

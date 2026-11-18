@@ -21,19 +21,22 @@ import tomllib
 
 sys.dont_write_bytecode = True
 PINS = {
-    "tools/ps3dk-prof/src/rolling_combined.rs": "8b9488ec9dd1e89db1641e76a6e5d4c5e3b2cb42352c82dae78e191f3b598c0c",
-    "tools/ps3dk-prof/src/rolling_combined_families.rs": "9fd7c4b35b8bb6546df6ed2fcbaa35132377cd0d30d682967f19f4ec540fdc55",
-    "tools/ps3dk-prof/src/rolling_combined_checkpoint.rs": "d22bc33196b93419ae9b5645b782d7221a52186a98d021341efd78fd0b84c7f6",
-    "tools/ps3dk-prof/src/rolling_auto.rs": "455a505cd594721492678e16bf49e7bd0ba0bc93a4800951ebbc214f23b65b7b",
-    "tools/ps3dk-prof/src/rolling_fifo.rs": "7d68d5b8421d6d6ecd7e896370200d56f71f5c043ada2b9b6ba8d8f96ea2ccce",
-    "tools/ps3dk-prof/src/rolling_family_positions.rs": "f38ebf0df519a130e2d30cf6f1489ae55a3507a943f6b22e963e353c69a7b666",
-    "tools/ps3dk-prof/tests/rolling_combined_auto.rs": "9e97df1089a66f869a05541c81058a4c35c90ccc0947063025bb7a9646fe21f8",
-    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": "0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece",
+    "tools/ps3dk-prof/src/rolling_combined.rs": '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
+    "tools/ps3dk-prof/src/rolling_combined_families.rs": 'c12ee3549813d5d970b45a921bf01aa370754b634c47a8d5761e492793ce10de',
+    "tools/ps3dk-prof/src/rolling_combined_checkpoint.rs": '12e6a9c8e2ea81f61754409d5b22513a974bdf598ce5a61317589143ad56c71b',
+    "tools/ps3dk-prof/src/rolling_auto.rs": 'cde2c1bb4dd8ec9fe90925c6f5b911ec42f2bd6664dfc0d344acd22694bec1d0',
+    "tools/ps3dk-prof/src/rolling_fifo.rs": '375c0ce06679b87b19e172f7d8208a0d5976b2bddb5cad13933e91bb519a2be1',
+    "tools/ps3dk-prof/src/rolling_family_positions.rs": '4a35d04cc6c5e8bd2491a107ecea0691820273dbc04b5e6d22717b9eba8d76af',
+    "tools/ps3dk-prof/tests/rolling_combined_auto.rs": '2f546661875ba3ccaf5c2eea3c0880a32bd769c89ec3b8448cfa27e41e221c99',
+    "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": '0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece',
 }
 SOURCE = "tools/ps3dk-prof/src/rolling_combined.rs"
 TEST = "tools/ps3dk-prof/tests/rolling_combined_auto.rs"
 SUPERVISOR = "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py"
-TEST_COUNT = 19
+TEST_COUNT = 28
+# This existing integration test requires caller-supplied real capture files;
+# the isolated semantic baseline has no such inputs. Require its exact ignore.
+FIXTURE_TEST = "schema3_real_own_next_runtime_files_open_under_desktop_limits"
 MAX_INPUT_FILES = 512
 MAX_INPUT_BYTES = 32 << 20
 MAX_OUTPUT_BYTES = 2 << 30
@@ -53,13 +56,13 @@ def sha(data):
 
 def controls(inputs):
     specs = [
-        ("m01_status_metadata_scan", "status_replacement_charges_the_shared_metadata_scan_before_work", 327,
+        ("m01_status_metadata_scan", "status_replacement_charges_the_shared_metadata_scan_before_work", 329,
          "STATUS replacement cannot receive a free metadata scan",
          "budget.charge(2*self.metadata.len() as u128+1)?;", "// MUTANT: omit shared metadata lookup/shift charge"),
-        ("m02_auto_storage_walk", "unrelated_ppu_rows_still_pay_for_live_auto_build_storage_scans", 340,
+        ("m02_auto_storage_walk", "unrelated_ppu_rows_still_pay_for_live_auto_build_storage_scans", 342,
          "joint temporary-size walks must charge the AUTO build population even on a PPU chunk",
          "+f.storage_work()", ""),
-        ("m03_joint_analysis_scratch", "analysis_scratch_cannot_reuse_memory_already_held_by_combined_families", 298,
+        ("m03_joint_analysis_scratch", "analysis_scratch_cannot_reuse_memory_already_held_by_combined_families", 300,
          "AUTO scratch must share the held combined-state cap",
          "if held.checked_add(scratch).is_none_or(|n|n>budget.limits.temporary_bytes as u128){", "if false {"),
     ]
@@ -140,7 +143,9 @@ def verdict(result, text, case, supervisor):
     if not supervisor.healthy(result):
         return False
     if case["test"] is None:
-        return result["returncode"] == 0 and f"test result: ok. {TEST_COUNT} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;" in text
+        return (result["returncode"] == 0
+                and f"test {FIXTURE_TEST} ... ignored, requires PS3DK_PROF_OWN_FRONTIER_FIXTURES:" in text
+                and f"test result: ok. {TEST_COUNT-1} passed; 0 failed; 1 ignored; 0 measured; 0 filtered out;" in text)
     locations = re.findall(r"panicked at ([^\r\n]+)", text)
     location = r"rolling_combined_auto\.rs:" + str(case["line"]) + r":\d+:"
     witness = (case["message"] in text if case["message"] else

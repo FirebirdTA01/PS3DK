@@ -20,6 +20,9 @@ drain discards the emission error must fail.  --lock-only runs just these cases 
 """
 import argparse, json, os, shutil, struct, subprocess, sys
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
 WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
@@ -192,8 +195,7 @@ def lock_cases(out, cc, src, tag):
 def lock_suite(out, cc):
     """The fixed runtime passes every lock case; a mutant whose drain discards the emission error must fail."""
     ok = not lock_cases(out, cc, SRC, "runtime")
-    mut = out / "mutant-src"
-    shutil.copytree(SRC, mut)
+    mut = copy_runtime(SRC, out / "mutant")
     drain = mut / "core/prof_drain.c"
     text = drain.read_text()
     edited = text.replace("if (p_counter_emit(p, 0) != 0)", "if ((void)p_counter_emit(p, 0), 0)")

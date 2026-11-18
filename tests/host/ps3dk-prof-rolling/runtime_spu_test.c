@@ -84,7 +84,13 @@ static void d6_setup(int enabled,int resource)
 }
 static void d6_lane(unsigned i,uint32_t image)
 {prod *p=&d6_producers[i];D6(ps3dk_prof_spu_lane_create(i?"interior":"crossing",image,1,&p->lane)==0,"real-lane-create");D6(prod_init(p,0)==PSP_OK,"real-producer-init-observe-only");}
-static void d6_drain(void){D6(ps3dk_prof_drain()==0,"actual-app-drain");}
+static void d6_drain(void)
+{
+    D6(ps3dk_prof_drain()==0,"actual-app-drain");
+    /* Fixture cuts deliberately rotate/censor spans. Real APP drain batches
+     * until byte capacity; explicitly commit these private test boundaries. */
+    if(d6_enabled)D6(p_roll_flush(g_prof)==0,"explicit-spu-fixture-cut");
+}
 static void d6_flush(prod *p){D6(psp_spu_flush(&p->s)==PSP_OK,"actual-producer-flush");}
 static void d6_end(prod *p)
 {ps3dk_prof_spu_lane_stats st;D6(psp_spu_fini(&p->s)==PSP_OK,"writer-fini");

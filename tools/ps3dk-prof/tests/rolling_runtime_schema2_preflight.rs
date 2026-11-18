@@ -64,9 +64,11 @@ fn rolling(case:&str)->Run{
     assert_eq!(r.meta["accepted_bytes"],b.len()-16);
     for s in &p.segments{
         assert_eq!(s.payload,&b[o[s.first_chunk as usize]..o[s.next_chunk as usize]]);
-        let expected=combined::checkpoint_combined(&b[..o[s.first_chunk as usize]],combined::Limits::default()).unwrap();
+        // The runtime enables own-next support projection at attach. Replay
+        // that schema3 policy independently, preserving exact checkpoint parity.
+        let expected=combined::checkpoint_combined_projected(&b[..o[s.first_chunk as usize]],combined::Limits::default()).unwrap();
         assert_eq!(s.checkpoint,expected.as_slice());
-        assert_eq!(&s.checkpoint[..12],b"PFRMIX01\x02\x00\x60\x00");
+        assert_eq!(&s.checkpoint[..12],b"PFRMIX01\x03\x00\x80\x00");
     }
     let j=rolling_file::read_combined(&physical,limits,combined::Limits::default(),combined::ReportOptions{
         spu_profile_table:&[],causal_limits:Default::default()}).unwrap();
