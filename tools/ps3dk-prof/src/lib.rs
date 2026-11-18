@@ -42,6 +42,7 @@ pub mod rolling_file;
 pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;
+pub mod rsx_frame;
 pub mod spu_ticks;
 pub mod waits;
 pub mod windows;

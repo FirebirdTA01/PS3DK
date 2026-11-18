@@ -124,6 +124,8 @@ struct Reader {
     auto: Option<crate::auto_rsx::Reader>,
     /// file_flags bit 9: capture windows (chunk types 41-42).
     windows: Option<crate::windows::Reader>,
+    /// file_flags bit 10: RSX frame captures (chunk types 44-48).
+    rsxf: Option<crate::rsx_frame::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -162,7 +164,7 @@ impl PpuState {
         cap.incomplete.clear();
         let windows = cap.windows_flag.then(crate::windows::Reader::new);
         Ok(Self { minor: u16::from_le_bytes([header[10], header[11]]), reader: Reader {
-            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows,
+            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows, rsxf: None,
             declared: BTreeSet::new(), live_slots: BTreeMap::new(), descriptor_ids: BTreeMap::new(),
             trailer_seen: false, ext: None, checkpoints: None, source_checkpoints: None,
             rolling_prefix: BTreeMap::new(), rolling_span_max: Some(BTreeMap::new()),
@@ -351,6 +353,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         fifo: None,
         auto: None,
         windows: None,
+        rsxf: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -382,7 +385,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let known = (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
             && (v & 64 == 0 || v & 1 != 0) && (v & 128 == 0 || v & 1 != 0);
         // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte) or bit 9 (WINDOWS, value 2 in that byte); bytes 14..15 must be 0
-        let high_ok = !(n > 13 && bytes[13] & !3 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
+        // byte 13 bit 2 (bit 10, RSX frame captures) needs bit 7 (byte 12 value 128)
+        let high_ok = !(n > 13 && bytes[13] & !7 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0))
+            && !(n > 13 && bytes[13] & 4 != 0 && v & 128 == 0);
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
             let allowed = if bytes[12] & 128 != 0 {
@@ -415,6 +420,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         if n > 12 && u32::from(bytes[12]) & crate::auto_rsx::FLAG_AUTO != 0 {
             r.cap.auto = Some(crate::auto_rsx::Inventory::default());
         }
+        if n > 13 && bytes[13] & 4 != 0 {
+            r.cap.rsx_frame = Some(crate::rsx_frame::Inventory::default());
+        }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
         return Ok(r.cap);
@@ -437,14 +445,18 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let fifo_flag = crate::fifo::FLAG_FIFO;
     let auto_flag = crate::auto_rsx::FLAG_AUTO;
     let windows_flag = crate::model::FLAG_WINDOWS;
+    let rsxf_flag = crate::rsx_frame::FLAG_RSX_FRAME;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag | fifo_flag | auto_flag | windows_flag) != 0
+        | counters_flag | fifo_flag | auto_flag | windows_flag | rsxf_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
     }
     if file_flags & auto_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 7 without bit 0"));
+    }
+    if file_flags & rsxf_flag != 0 && file_flags & auto_flag == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 10 without bit 7"));
     }
     if file_flags & fifo_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 6 without bit 0"));
@@ -476,6 +488,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & windows_flag != 0 {
         r.windows = Some(crate::windows::Reader::new());
+    }
+    if file_flags & rsxf_flag != 0 {
+        r.rsxf = Some(crate::rsx_frame::Reader::new());
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -549,8 +564,10 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let export_ty = ty == crate::model::CHUNK_EXPORT;
         let windows_ty = r.windows.is_some()
             && (ty == crate::model::CHUNK_WINDOW_BEGIN || ty == crate::model::CHUNK_WINDOW_END);
+        let rsxf_ty = r.rsxf.is_some()
+            && (crate::rsx_frame::CHUNK_CONFIG..=crate::rsx_frame::CHUNK_END).contains(&ty);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty && !rsxf_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -579,6 +596,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if wait_ty {
             r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if rsxf_ty {
+            r.rsxf.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
             pos += total;
             index += 1;
             continue;
@@ -675,6 +698,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
+    if let Some(x) = r.rsxf.take() {
+        r.cap.rsx_frame = Some(x.finish(r.trailer_seen)?);
+    }
     // an exported report-ring capture: the RING records parsed are exactly the ones its EXPORT accounting kept
     if let Some(exp) = r.cap.export.as_ref().and_then(|e| e.ring) {
         let seen = r.cap.auto.as_ref().filter(|a| a.config.as_ref().and_then(|c| c.attached())

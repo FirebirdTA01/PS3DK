@@ -877,3 +877,185 @@ Verified by:
   - It fails the counter-mutex lock once at each drainer site, ordinary and final, and checks the failed capture,
     the absence of a FINAL after a failed freeze, and that nothing is emitted twice; a mutant whose drain discards
     the emission error must fail.
+
+## 12. RSX frame captures (file flag bit 10, chunk types 44..48)
+
+An opt-in family written by the RSX frame capture runtime (`PS3_PROF_RSX_FRAME`, an AUTO product). It sets
+file_flags bit 10 (value 1024, byte 13 bit 2). Bit 10 requires bit 7 (automatic RSX observation): every timed draw
+names the AUTO_OPS record that times it. Without bit 10, types 44..48 are unknown chunks (MALFORMED); a reader that
+does not know bit 10 refuses the flag. Builds that do not select the feature never set the bit.
+
+A capture is ONE frame of the AUTO owner, requested from the live link or from app code. The runtime streams it as
+it is recorded: one RSXF_BEGIN, then RSXF_DRAWS chunks (one per sealed staging block), then one RSXF_END. Timing is
+not in these chunks: a draw record carries the id of its AUTO operation, and the reader joins the two.
+
+All integers are little-endian. Every reserved field and every padding byte is zero. Every rule in this section is
+MALFORMED (reader rule `RsxFrame`) when broken.
+
+### 12.1 RSXF_CONFIG (44), exactly once
+
+Written at attach, before any other type 44..48 chunk; a file with a TRAILER must hold it.
+
+| off | type | field |
+|---|---|---|
+| 0 | u16 | schema = 1 |
+| 2 | u16 | flags = 0 |
+| 4 | u32 | decoder version = 1 |
+| 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
+| 12 | u32 | staging block bytes: 4096..1048576, a multiple of 8 |
+| 16 | u32 | staging blocks: 1..16 |
+| 20 | u32 | program table capacity per capture: 1..65535 |
+| 24 | u32 | label table capacity per capture: 1..65535 |
+| 28 | u32 | label byte limit: 1..255 |
+| 32 | 32 bytes | reserved = 0 |
+
+A capture (BEGIN) in a file whose CONFIG availability is nonzero is MALFORMED.
+
+### 12.2 RSXF_BEGIN (45)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: 1.., strictly greater than every earlier capture id of the file |
+| 4 | u16 | source: 1 live request, 2 app call |
+| 6 | u16 | flags: bit 0 ISOLATED timing, bit 1 PROGRAM_BYTES; other bits 0 |
+| 8 | u32 | request id (live: the viewer's id, nonzero; app: 0) |
+| 12 | u32 | owner (the AUTO owner incarnation) |
+| 16 | u64 | frame (the owner frame being captured) |
+| 24 | u32 | window id (the capture window recording it; 0 none) |
+| 28 | u32 | reserved = 0 |
+| 32 | u64 | PPU timebase at arming |
+| 40 | u32 | baseline VP start slot |
+| 44 | u32 | baseline FP_ADDRESS register value |
+| 48 | u32 | baseline known: bit 0 VP start, bit 1 FP_ADDRESS; other bits 0 |
+| 52 | u16 | name length n: 0..63, UTF-8 without NUL |
+| 54 | u16 | reserved = 0 |
+| 56 | n bytes | name, then zero padding to a multiple of 8 |
+
+At most one capture is open (BEGIN without its END) at a time.
+
+### 12.3 RSXF_DRAWS (46)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: the open capture |
+| 4 | u32 | block sequence: strictly increasing within the capture, from 0; a gap is a dropped block |
+| 8 | u32 | record count |
+| 12 | u32 | record bytes: exactly the bytes that follow |
+| 16 | records | each {u16 type, u16 length, body}; length is the whole record, a multiple of 8 |
+
+Record types (any other is MALFORMED; a record never spans chunks):
+
+DRAW (type 1, length 96):
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | ordinal: strictly increasing within the capture (gaps are draws not recorded) |
+| 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
+| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); at least one of bits 0..1; other bits 0 |
+| 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
+| 16 | u64 | AUTO operation id: nonzero iff the reason is 0 |
+| 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
+| 28 | u32 | first vertex / first index |
+| 32 | u32 | count (vertices or indices) |
+| 36 | u32 | index offset (INDEX; else 0) |
+| 40 | u8 | index type: 0 u32, 1 u16 (INDEX, INLINE_INDEX; else 0) |
+| 41 | u8 | index location: 0 local, 1 main (INDEX; else 0) |
+| 42 | u16 | reserved = 0 |
+| 44 | u32 | clear mask (CLEAR; else 0) |
+| 48 | u32 | tag (`PS3DK_PROF_AUTO_TAG`) |
+| 52 | u32 | label index: 0 none, else a LABEL defined earlier in the capture |
+| 56 | u32 | VP program index: 0 unknown, else a VP PROGRAM defined earlier in the capture |
+| 60 | u32 | FP program index: 0 unknown, else an FP PROGRAM defined earlier in the capture |
+| 64 | u32 | FP_ADDRESS register value |
+| 68 | u32 | VP start slot |
+| 72 | u64 | caller PC (HOOKED; else 0) |
+| 80 | u32 | command words of the draw |
+| 84 | u32 | reserved = 0 |
+| 88 | u64 | PPU timebase at the hook (HOOKED) or at decode |
+
+PROGRAM (type 2, length 48), the first time a program identity is seen in the capture:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | index: 1.., dense, in definition order (VP and FP share the numbering) |
+| 8 | u8 | profile: 1 VP, 2 FP |
+| 9 | u8 | source: 1 command stream, 2 program container at bind, 3 RSX memory read, 4 app registration |
+| 10 | u16 | flags: bit 0 UNTERMINATED (no end bit within the bound), bit 1 UNREADABLE (no hash); other bits 0 |
+| 12 | u32 | instruction count |
+| 16 | u64 | canonical hash (12.6); 0 iff UNREADABLE |
+| 24 | u32 | ucode bytes walked (instructions and constant blocks) |
+| 28 | u32 | constant blocks (FP; 0 for VP) |
+| 32 | u32 | address where first seen (FP_ADDRESS or VP start) |
+| 36 | u32 | ordinal of the first draw using it |
+| 40 | u64 | reserved = 0 |
+
+Two PROGRAM records of one capture with the same (profile, nonzero hash) are MALFORMED.
+
+LABEL (type 3) and NAME (type 4), length 16 + n rounded up to 8:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | LABEL: label index 1.., dense; NAME: the PROGRAM index it names (at most one NAME per program) |
+| 8 | u16 | n: 1..CONFIG label byte limit, UTF-8 without NUL |
+| 10 | u16 | reserved = 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n bytes | text, then zero padding |
+
+A label is the full scope path joined with `/` (scopes outermost first, then the label).
+
+### 12.4 RSXF_PROGRAMS (47)
+
+Allocated for parameter tables and program bytes (later phases). Schema 1 writers never write it; a schema 1
+reader refuses it.
+
+### 12.5 RSXF_END (48)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: the open capture |
+| 4 | u16 | outcome: 1 DONE, 2 TRUNCATED, 3 ABANDONED |
+| 6 | u16 | reason: 0 none; 1 staging full (drainer behind); 2 program table full; 3 label table full; 4 shutdown; 5 context reset; 6 decoder invalid; 7 cancelled |
+| 8 | u32 | DRAWS chunks emitted (must equal the chunks seen) |
+| 12 | u32 | blocks dropped (every block sequence seen is below emitted + dropped) |
+| 16 | u32 | draws seen |
+| 20 | u32 | draws recorded (must equal the DRAW records seen; at most draws seen) |
+| 24 | u32 | hooked draws |
+| 28 | u32 | decoded-only draws |
+| 32 | u32 | mismatches |
+| 36 | u32 | truncated at: the first ordinal not recorded, 0xffffffff none; not none iff the outcome is TRUNCATED |
+| 40 | u32 | programs defined (must equal the PROGRAM records) |
+| 44 | u32 | labels defined (must equal the LABEL records) |
+| 48 | u32 | labels refused |
+| 52 | u32 | programs refused |
+| 56 | u64 | record bytes streamed |
+| 64 | u64 | record bytes dropped |
+| 72 | u64 | PPU timebase at close |
+| 80 | u64 | decoder words in the frame |
+| 88 | u32 | decoder first rejected header (0 none) |
+| 92 | u32 | decoder rejection reason (`RING_REJECT_REASONS` numbering; 0 none) |
+| 96 | u32 | FP memory reads |
+| 100 | u32 | reserved = 0 |
+| 104 | u64 | FP memory read PPU ticks |
+| 112 | u32 | draws not timed |
+| 116 | u32 | reserved = 0 |
+| 120 | u64 | reserved = 0 |
+
+A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.
+
+### 12.6 Canonical program hash
+
+FNV-1a 64 (offset basis 0xcbf29ce484222325, prime 0x100000001b3) over a domain string, then the instruction words,
+each 32-bit word fed as its 4 bytes in big-endian order (the byte order of the program container and of RSX memory):
+
+- VP: domain `ps3dk.rsxf.vp1`; 4-word instructions from the start slot through the first one whose word 3 has bit 0
+  (last instruction) set, at most 512.
+- FP: domain `ps3dk.rsxf.fp1`; 4-word instructions in memory order. Each word is stored with its 16-bit halves
+  swapped. On the swapped-back value, bits 0..1 of words 1..3 are the source register type; type 2 (constant) in any
+  of them means the next 4 words are a constant block, which is skipped (not hashed). Bit 0 of the swapped-back word
+  0 ends the program after that instruction and its constant block. At most 65536 instructions.
+
+The hash ignores the load slot, the address and the constant values, so a program keeps its identity across boots,
+allocations and uniform updates. `ps3dk-prof shader-hash <files>` computes it for program containers.
+
+Verified by: `tools/ps3dk-prof/tests/rsx_frame.rs` (every rule above refused once; the hash against hand-built
+containers).
