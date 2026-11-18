@@ -787,7 +787,18 @@ pub fn export_capture_no_clobber<P: AsRef<Path>, Q: AsRef<Path>>(
     range: RangeInclusive<u64>,
 ) -> Result<(), ExportError> {
     let bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
-    let exported = export_bytes(&bytes, range)?;
+    export_bytes_no_clobber(&bytes, out_path, range)
+}
+
+/// Export an immutable capture snapshot without replacing an existing destination.
+/// Live consumers pass exactly the reader-accepted prefix, not later received bytes.
+/// Validation finishes before any output file is created.
+pub fn export_bytes_no_clobber<Q: AsRef<Path>>(
+    bytes: &[u8],
+    out_path: Q,
+    range: RangeInclusive<u64>,
+) -> Result<(), ExportError> {
+    let exported = export_bytes(bytes, range)?;
     publish_no_clobber(&exported, out_path.as_ref(), || {})
 }
 

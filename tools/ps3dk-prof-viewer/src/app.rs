@@ -65,6 +65,8 @@ pub struct ConnectForm {
 pub struct Live {
     pub client: LiveClient,
     pub target: String,
+    /// The user's absolute save directory; the document path is only a display label.
+    out_dir: PathBuf,
     generation: u64,
     /// The session's outcome was handled (bookmarks written, or the reason they were not shown).
     bookmarks_done: bool,
@@ -413,6 +415,7 @@ impl App {
             .map_err(|e| format!("Cannot use {} for captures: {e}", cfg.out_dir.display()))?;
         let target = format!("{}:{}", cfg.host.trim(), cfg.port);
         let host = cfg.host.trim().to_string();
+        let out_dir = cfg.out_dir.clone();
         let client = LiveClient::start(cfg)?;
         // Only now does the new session replace what was shown.
         self.end_captures();
@@ -421,6 +424,7 @@ impl App {
         self.live = Some(Live {
             client,
             target,
+            out_dir,
             generation: 0,
             bookmarks_done: false,
         });
@@ -591,8 +595,41 @@ impl App {
         }
     }
 
-    /// Writes a single frame or a frame range of an open capture as a standalone
-    /// `.prof` next to the capture itself, using the reader's no-clobber export.
+    fn export_path(&self, doc: &Document, suffix: String) -> Result<PathBuf, ps3dk_prof::ExportError> {
+        let Some(live) = self.live.as_ref() else { return Ok(sibling_path(&doc.path, suffix)) };
+        let view = live.client.view();
+        let base = match view.outcome {
+            Some(Outcome::Published(p)) | Some(Outcome::PublishedEarly { published: p, .. }) => p.path,
+            Some(Outcome::Incomplete { .. }) => return Err(ps3dk_prof::ExportError::Refused(
+                "the live session failed validation; its data cannot be exported as an accepted capture",
+            )),
+            None => {
+                let hello = view.hello.ok_or(ps3dk_prof::ExportError::Refused("no live capture received yet"))?;
+                live.out_dir.join(format!("{}.prof", crate::live::local_stem(&hello)))
+            }
+        };
+        Ok(sibling_path(&base, suffix))
+    }
+
+    fn export_document(&self, doc: &Document, out: &std::path::Path, range: std::ops::RangeInclusive<u64>)
+        -> Result<(), ps3dk_prof::ExportError>
+    {
+        if let Some(live) = self.live.as_ref() {
+            let a = doc.analysis().ok_or(ps3dk_prof::ExportError::Refused("the live document is malformed"))?;
+            // A parser snapshot can include a torn final chunk. Export only what the reader accepted, and never
+            // extend it to newer network bytes. received_prefix drops the receiver lock before copying the bytes;
+            // neither analysis nor filesystem I/O happens under that lock.
+            let len = a.prefix.as_ref().map_or(doc.size, |p| p.cut);
+            let bytes = live.client.received_prefix(len as u64)
+                .ok_or(ps3dk_prof::ExportError::Refused("the displayed live prefix is no longer available"))?;
+            ps3dk_prof::export_bytes_no_clobber(&bytes, out, range)
+        } else {
+            ps3dk_prof::export_capture_no_clobber(&doc.path, out, range)
+        }
+    }
+
+    /// Writes a single frame or a frame range as a standalone `.prof` next to the file capture, or in the live
+    /// session's chosen directory, using the reader's no-clobber export of the displayed accepted prefix.
     /// Never overwrites an existing file: the `exists()` check is only an early
     /// message; the export itself publishes without replacing (a target that
     /// appears later is still refused) and never truncates a stray temporary.
@@ -602,12 +639,15 @@ impl App {
             self.save_result = Some((true, "the frame range must start at or before its end".into()));
             return;
         }
-        let out = sibling_path(&doc.path, format!("{}..{}.prof", lo, hi));
+        let out = match self.export_path(&doc, format!("{}..{}.prof", lo, hi)) {
+            Ok(p) => p,
+            Err(e) => { self.save_result = Some((true, format!("Save failed: {e}"))); return; }
+        };
         if out.exists() {
             self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
             return;
         }
-        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, lo..=hi) {
+        self.save_result = Some(match self.export_document(&doc, &out, lo..=hi) {
             Ok(()) => (false, format!("Saved {}", out.display())),
             Err(e) => save_failed(&out, e),
         });
@@ -629,12 +669,15 @@ impl App {
             self.save_result = Some((true, format!("window {id} has no frames to save")));
             return;
         };
-        let out = sibling_path(&doc.path, format!("window_{}.prof", id));
+        let out = match self.export_path(&doc, format!("window_{}.prof", id)) {
+            Ok(p) => p,
+            Err(e) => { self.save_result = Some((true, format!("Save failed: {e}"))); return; }
+        };
         if out.exists() {
             self.save_result = Some((true, format!("{} already exists; nothing was written", out.display())));
             return;
         }
-        self.save_result = Some(match ps3dk_prof::export_capture_no_clobber(&doc.path, &out, w.first_frame..=last) {
+        self.save_result = Some(match self.export_document(&doc, &out, w.first_frame..=last) {
             Ok(()) => (false, format!("Saved window {} as {}", id, out.display())),
             Err(e) => save_failed(&out, e),
         });
