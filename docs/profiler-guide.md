@@ -564,6 +564,10 @@ The same window controls are available in the GUI. With a capture open, the app 
   dialog is prefilled with the selected window's frames, or the whole capture when no window is selected). Neither ever
   replaces an existing file: the status line names the file a save wrote, or the existing file that made it refuse. To
   save again under the same name, rename or remove the earlier file first.
+  For a live session, saves go into the folder chosen in Connect and use the received bytes that produced the
+  displayed document, even if its saved file was moved or changed. Only the reader-accepted prefix is exported;
+  a torn trailing chunk and bytes received after that snapshot are excluded. Saving also works after Disconnect
+  when the client accepted an early prefix. A session that failed validation refuses export with a reason.
 
 - **Overview.** The **WINDOWS** section lists each window — id, name, kind, frames, and its end reason, flagged when it
   is still open or the reader marks it incomplete.
