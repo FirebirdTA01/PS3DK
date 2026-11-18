@@ -468,6 +468,14 @@ The **Capture full frame** button on the app bar:
 6. Bookmarks are written next to the saved capture as `<name>.frames.txt` (a live session: when the session's file is saved; an opened file: at once). Reopening a bookmark re-reads the whole saved file; a refused or changed file is reported, never used silently.
 7. Limits: 64 snapshots held at a time per session, and an accounted memory budget of 1 GiB shared by all sessions (an accounting limit, not a guarantee about the viewer's process memory).
 
+AUTO builds also have an `rsx.auto` row containing retained draw, CALL and range records, placed through the reader's
+qualified AUTO clock map within its interpolation support. Their execution-frame tokens select the frame, including
+CALL-segment draws built in an earlier frame. A ranges-only capture shows recorded ranges, not individual draw bars.
+Untimed draws and records with unavailable timing remain counts, with reasons; replay or invalid clock evidence is
+never drawn. The AUTO-declared domain with no EXT events says **timed by AUTO records**, pointing to `rsx.auto` for
+clock validity. A PPU lane containing only frame marks says **no zones in this build**. These labels do not claim
+complete coverage or per-draw state.
+
 ---
 
 ## 5. Capture windows
