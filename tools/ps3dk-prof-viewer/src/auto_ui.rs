@@ -147,6 +147,10 @@ pub struct Drawn {
     pub ring_config: Option<RingConfigDrawn>,
     pub ring_status: Option<RingStatusDrawn>,
     pub ring_reject: Option<RingRejectDrawn>,
+    /// The capture's refused AUTO ranges as drawn (tagged captures only): the total and reasons from the last STATUS,
+    /// None when drawn UNAVAILABLE; `ranges_refused_text` is the row's text.
+    pub ranges_refused: Option<crate::auto::RangesRefused>,
+    pub ranges_refused_text: Option<String>,
 }
 
 /// The report-ring partition negotiated in CONFIG (2047/11); `ps3dk-prof auto` "report ring: ...".
@@ -487,6 +491,33 @@ fn draw_capture_facts(p: &mut egui::Ui, v: &AutoView, drawn: &mut Drawn, _pal: &
                     auto_badge(h, "NOT RECORDED", ui::Tone::Warning);
                     h.add_space(ui::SPACE_XS);
                     h.add(egui::Label::new(u.tail.as_str()).wrap()).on_hover_text(u.tail.as_str());
+                });
+            });
+        }
+
+        // AUTO ranges refused (tagged captures): the capture total by reason, recorded in STATUS from 3071/11 on.
+        if v.records_ranges() {
+            let refused = v.ranges_refused();
+            drawn.ranges_refused = refused;
+            let text = match &refused {
+                Some(r) => ps3dk_prof::auto_rsx::reasons_text(&r.by_reason),
+                None => unsealed.and_then(|u| u.total("ranges_refused")).map_or_else(
+                    || ps3dk_prof::auto_rsx::RANGES_REFUSED_UNRECORDED.to_string(), |t| t.note.clone()),
+            };
+            drawn.ranges_refused_text = Some(text.clone());
+            fact_row(c, "AUTO ranges refused", |v_ui| {
+                v_ui.horizontal_top(|h| {
+                    match &refused {
+                        Some(r) => {
+                            let badge = format!("{}{} REFUSED", if r.at_least { ">= " } else { "" }, r.total);
+                            auto_badge(h, &badge, if r.total == 0 { ui::Tone::Neutral } else { ui::Tone::Warning });
+                        }
+                        None => {
+                            auto_badge(h, "UNAVAILABLE", ui::Tone::Warning);
+                        }
+                    }
+                    h.add_space(ui::SPACE_XS);
+                    h.add(egui::Label::new(text.as_str()).wrap()).on_hover_text(text.as_str());
                 });
             });
         }
