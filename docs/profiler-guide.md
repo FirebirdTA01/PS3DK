@@ -198,9 +198,13 @@ reuse. In the default-cap host schedule with 600 draws per frame, byte rotation
 occurred every 9–10 frames: about 1.05 MB written per commit, or 6.53 MB/s and
 12.4 syncs/s when normalized to 60 fps. The six retained segments held 52 frames
 at the end of that schedule. These are adapter byte counts, not PS3 HDD timings;
-CRC still scans the full slot using a byte table. Measure drainer CPU time, lag
-and dropped records on the target before choosing rolling for a heavy workload.
-On the measured PS3 HDD (2000 frames, 600 clears per frame), 206 commits took
+the writer now clears only the overwritten prefix and extends the used-data
+CRC mathematically over known-zero padding. The stored bytes and two-sync
+publication order are unchanged; readers still check the actual padding.
+Measure drainer time, lag and dropped records on the target before choosing
+rolling for a heavy workload.
+Before this clear/CRC optimization, on the measured PS3 HDD (2000 frames,
+600 clears per frame), 206 commits took
 about 205 ms median / 472 ms p95 elapsed time, with two syncs per commit.
 Subtracting positioned-write and sync elapsed time left about 46 ms per commit
 as a non-I/O upper bound, not a CPU-time measurement. The observed mean and
@@ -214,8 +218,9 @@ excluded or lost. Their capacity-exclusion, lost-record and GAP evidence is
 counted and reported; the reader does not silently treat it as full coverage.
 An output failure instead leaves a failed or incomplete capture. In this run,
 frame-mark-to-RAM-acceptance lag was 23 ms median / 189 ms p95 / 643 ms maximum;
-RAM acceptance is not a disk commit. The full-slot clear and CRC scan remain
-an optimization follow-up; the measured 46 ms includes other non-I/O work too.
+RAM acceptance is not a disk commit. Target timings after the clear/CRC
+optimization are pending; the measured 46 ms includes other non-I/O work too
+and is not an estimate of the time this optimization saves.
 Commits are driven by segment size, not elapsed time. A hard hang can lose the
 pending segment (up to about 1 MiB with this preset), even after its chunks were
 accepted into RAM. For sparse activity that can represent minutes of recent
