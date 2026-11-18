@@ -38,6 +38,7 @@ typedef struct {
 size_t pfr_state_bytes(void);
 int pfr_plan(const pfr_config *, pfr_layout *);
 int pfr_format(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
+int pfr_format_v2(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
 int pfr_open(pfr_store *, const pfr_io *, const pfr_config *, void *, size_t);
 int pfr_commit(pfr_store *, const void *, size_t, const void *, size_t);
 int pfr_get_view(const pfr_store *, pfr_view *);

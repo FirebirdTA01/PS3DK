@@ -6,6 +6,8 @@ int pfr_plan(const pfr_config *c, pfr_layout *l)
 { (void)c; (void)l; return PFR_FAILED; }
 int pfr_format(pfr_store *s, const pfr_io *i, const pfr_config *c, void *b, size_t n)
 { (void)s; (void)i; (void)c; (void)b; (void)n; return PFR_FAILED; }
+int pfr_format_v2(pfr_store *s, const pfr_io *i, const pfr_config *c, void *b, size_t n)
+{ (void)s; (void)i; (void)c; (void)b; (void)n; return PFR_FAILED; }
 int pfr_open(pfr_store *s, const pfr_io *i, const pfr_config *c, void *b, size_t n)
 { (void)s; (void)i; (void)c; (void)b; (void)n; return PFR_FAILED; }
 int pfr_commit(pfr_store *s, const void *c, size_t n, const void *p, size_t k)
