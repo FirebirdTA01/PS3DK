@@ -142,8 +142,9 @@ check() { "$python" "$work/check.py" "$@" >"$work/check.log" 2>&1; }
 # twin <runner> <args...>: runs <runner> <program> <args...> under the
 # cgnv2elf name first, puts the file named by the last argument back as it
 # was, then runs it under rsxcg2elf.  Returns the rsxcg2elf status with its
-# log in tool.log; any difference in status, log or written bytes between
-# the two names is appended to twin.diffs.
+# log in tool.log; any difference in status, log (up to the random suffix
+# of a temporary file name) or written bytes between the two names is
+# appended to twin.diffs.
 run_tool() { "$1" -q "${@:2}" >"$work/tool.log" 2>&1; }
 run_bounded() {
     local program="$1"; shift
@@ -164,7 +165,10 @@ twin() {
     "$runner" "$tool" "$@"; prc=$?
     [[ -f "$last" ]] && pwrote=1
     twin_runs=$((twin_runs + 1))
-    if [[ $arc -ne $prc || $awrote -ne $pwrote ]] || ! cmp -s "$work/tool.log" "$work/alias.log" \
+    # Temporary output names carry a random suffix; compare the rest.
+    sed -E 's/\.tmp-[0-9a-f]{16}/.tmp-RANDOM/g' "$work/tool.log" >"$work/tool.norm"
+    sed -E 's/\.tmp-[0-9a-f]{16}/.tmp-RANDOM/g' "$work/alias.log" >"$work/alias.norm"
+    if [[ $arc -ne $prc || $awrote -ne $pwrote ]] || ! cmp -s "$work/tool.norm" "$work/alias.norm" \
             || { [[ $pwrote -eq 1 ]] && ! cmp -s "$last" "$work/twin.alias"; }; then
         echo "exit $arc vs $prc, output $awrote vs $pwrote: $*" >>"$work/twin.diffs"
     fi
