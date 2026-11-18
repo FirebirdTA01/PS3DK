@@ -176,7 +176,7 @@ recorded, but no pass in this compiler is gated on them yet, so every level
 and both fast-math settings produce the same output today. The cleanup the
 compiler always does (algebraic simplification, common-subexpression
 elimination, dead-code elimination, constant folding and constant sharing,
-if-conversion, unrolling of loops with constant bounds) runs at every level.
+if-conversion, expansion of `for` loops with constant bounds) runs at every level.
 Pass the flags your project wants; they will start to matter as passes gate
 on them, and the default (`-O1`, fast-math on) matches the established
 compiler's no-flag default so default builds stay comparable.
@@ -271,8 +271,9 @@ two RSX profiles:
   `const` globals, `uniform` parameters and globals.
 - Functions with `in`, `out` and `inout` parameters, overloading, default
   arguments on entry parameters; helper functions are inlined.
-- Control flow: `if`/`else`, `for`, `while`, `do`, `break`, `continue`,
-  `return`, `discard` (fragment), ternary and comma operators.
+- Control flow: `if`/`else`, `for` (see [Loops](#loops)), `break`,
+  `continue`, `return`, `discard` (fragment), ternary and comma operators.
+  `while` and `do`/`while` parse but are refused by the back end.
 - The Cg standard library through the embedded header: arithmetic,
   trigonometric and exponential functions, `lerp`, `saturate`, `clamp`,
   `dot`, `cross`, `normalize`, `reflect`, `refract`, `faceforward`, `mul`,
@@ -292,6 +293,32 @@ clip-distance outputs; for fragment programs, `COLOR0/1`, `TEXCOORD0..7`,
 (fragment) or `ATTR` (vertex) bindings in the order the established compiler
 uses, counting only the inputs the program still reads. Explicit uniform
 register bindings (`: C<n>`, `: TEXUNIT<n>`) are honoured.
+
+### Loops
+
+Only `for` loops compile, in one of two ways:
+
+- **Static expansion.** A `for` whose trip count can be proven from literal
+  bounds (including negative literals) is fully unrolled, up to 64
+  iterations. Past 64 the compile fails with `static loop expansion exceeds
+  64 iterations; hardware-loop lowering required`.
+- **Run-time loop.** A `for` whose bound is a run-time value (for example a
+  uniform) becomes a real loop: in a fragment program a hardware `LOOP` with
+  the condition tested at each iteration and a `BRK` where it fails (at most
+  255 iterations, the hardware loop counter's limit); in a vertex program a
+  test and branch pair. The admitted shape is narrow: one `if (c) break;`
+  may close the body; a `break` anywhere else, a nested loop that is not
+  statically expanded, reading a variable in the body before it has a value,
+  reading an iteration-local variable after the loop, an `if` arm with
+  `discard`/`return`, and writes to `out` parameters or file-scope variables
+  inside the loop are refused by name.
+
+A `for` inside a helper function must be statically expandable; otherwise the
+inliner refuses it (`unproven for-loop; hardware-loop lowering required`).
+
+`while` and `do`/`while` loops are always refused, whatever their bounds,
+with `control flow has a back-edge (loop); refusing`. Rewrite them as `for`
+loops.
 
 A vertex program must write `POSITION`/`HPOS` on some path; otherwise it is
 refused with `error C6014: Required output 'HPOS' not written`.
@@ -807,6 +834,8 @@ from the front end; one that does not comes from the back end.
 - **Optimisation flags have no effect yet** (see [Optimisation](#optimisation)).
   The fast/nofast pairs in the differential rig exist to catch the day they
   do.
+- **Loops:** `while` and `do`/`while` are refused; `for` is expanded (up to 64
+  iterations) or lowered to a restricted run-time loop (see [Loops](#loops)).
 - **No `-D`**, and `-I` takes its directory as a separate argument.
 - **`#pragma texformat` is not implemented**; it is accepted and ignored like
   other unknown pragmas.
@@ -844,6 +873,7 @@ from the front end; one that does not comes from the back end.
 | `rsxLoadFragmentProgramLocation` renders garbage | The blob came from `rsx-cg-compiler`; that API needs `cgcomp`, or switch to `cellGcmCg*`. |
 | `RSXCG_GENERAL=0 selected the legacy NV40 shape matcher, which has been removed` | Unset `RSXCG_GENERAL`. |
 | `--legacy-lowering selected the NV40 shape matcher` | Drop the flag. |
+| `control flow has a back-edge (loop); refusing` | A `while`/`do` loop, or a `for` outside the admitted shapes; see [Loops](#loops). |
 | `... temp registers ... refusing (fragment-output-liveness)` | Too many values live at once; see [Known limits](#known-limits). |
 | `ps3_add_cg_shader_rsxcgc: rsx-cg-compiler not found` | Install the SDK host tools (`scripts/install-host-tools.sh`) or build `tools/rsx-cg-compiler/build`. |
 | `__DATE__` differs between builds | Set `SOURCE_DATE_EPOCH`. |
