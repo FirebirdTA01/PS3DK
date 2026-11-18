@@ -114,7 +114,13 @@ target_link_options(app PRIVATE "-Wl,{forced}")
         self.assertEqual(self.generated(build), [])
         self.assertEqual(self.build_and_run(base, build), 'no ring constant\n')
         self.assertNotIn('--require-defined', (build/'CMakeFiles/app.dir/link.txt').read_text())
-        self.assertNotIn('auto-ring', (build/'app-auto.map').read_text())   # the app's weak reference stays unresolved
+        # The app's weak reference stays unresolved: no generated object is linked and nothing defines the constant.
+        # (Match the object and symbol names, not 'auto-ring': the test's own output directory contains that text.)
+        amap = (build/'app-auto.map').read_text()
+        self.assertNotIn('app-auto-ring', amap)
+        # ld's cross-reference table lists the symbol with the app's own object as its only (weak) referrer.
+        xref = [line.split() for line in amap.splitlines() if line.startswith(SYMBOL)]
+        self.assertTrue(all(len(f) == 2 and f[1].endswith('main.c.o') for f in xref), xref)
         print('OFF: nothing generated, no required symbol, no ring constant')
 
     def check_on(self, name, lang, options, expect):
