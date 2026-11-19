@@ -904,7 +904,7 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 |---|---|---|
 | 0 | u16 | schema = 1 |
 | 2 | u16 | flags = 0 |
-| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); other values MALFORMED |
+| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); other values MALFORMED |
 | 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
 | 12 | u32 | staging block bytes: 4096..1048576, a multiple of 8 |
 | 16 | u32 | staging blocks: 1..16 |
@@ -1034,6 +1034,45 @@ batch triggers and CLEAR_BUFFERS. A register is known from its first write after
 - The register file at a draw is the BASELINE, then every STATE record up to and including that draw's, in order (a
   RESET makes every register unknown first). A truncated capture's draws not recorded carry no state.
 
+VPCONST (type 7), decoder 3, length 16 + 24 x n, n 0..128: the VP constant file (468 slots of 4 words) as written by
+VP_UPLOAD_CONST_ID and the constant data port (slot = id + the vec4 the method address selects).
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | BASELINE: 0; else the ordinal of the draw it belongs to |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 RESET (every slot unknown before these), bit 1 BASELINE (exactly 2 on a baseline record); other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 24 | {u16 slot 0..467, u8 known mask 1..15 (bit k: word k known), u8 reserved = 0, u32 reserved = 0, 4 x u32 words} |
+
+Rules as BASELINE and STATE (12.3): baseline records before the first draw's records, slots increasing across them,
+n >= 1; per-draw records right before their DRAW in the same chunk, slots increasing across the draw's records, RESET
+only on the first, n = 0 only with RESET.
+
+FPCONST (type 8), decoder 3, length 16 + 24 x n, n 0..32: the embedded constants of the FP a draw runs with, written
+when they differ from the last FPCONST (a draw without one runs with the latest list).
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | the ordinal of the draw it belongs to |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 TRUNCATED (the program has more constant blocks than were captured); other bits 0 |
+| 12 | u32 | the FP PROGRAM index, defined earlier (0: FP unknown, then n = 0) |
+| 16 | n x 24 | {u32 ucode byte offset of the constant block (increasing), u8 provenance: 1 FIFO (an inline transfer in the owner's command stream wrote it), 2 CONTAINER (the container's value at bind: no write seen since attach, a CPU write would not be seen, so it may differ at GPU time), 3 UNKNOWN (the decoder reset or its inline-write map was full since attach; the container's value is given); u8, u16 reserved = 0; 4 x u32 words as in memory (16-bit halves swapped)} |
+
+At most one FPCONST per draw, right before its DRAW in the same chunk.
+
+UNIFORM (type 9), decoder 3, length 16 + 40 x n, n 1..32: a program's named uniforms from its container's parameter
+table at bind, once per program, after its PROGRAM record.
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | PROGRAM index |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 TRUNCATED (the table had more named uniforms); other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 40 | {u32 resource, u16 count >= 1, u8 kind, u8 name length 1..32, 32 bytes name then zeros}; kind 1 VP constant (VP programs; resource the first slot, resource + count <= 468) or 2 FP embedded constant (FP programs; resource the first ucode offset, count the offsets it is patched at) |
+
 ### 12.4 RSXF_PROGRAMS (47)
 
 Allocated for parameter tables and program bytes (later phases). Schema 1 writers never write it; a schema 1
@@ -1066,10 +1105,12 @@ reader refuses it.
 | 92 | u32 | decoder rejection reason (`RING_REJECT_REASONS` numbering; 0 none) |
 | 96 | u32 | decoder draw events lost (0 in this release: each event is recorded as it completes) |
 | 100 | u32 | register pairs in BASELINE records (must equal the pairs seen; 0 for decoder 1) |
-| 104 | u64 | reserved = 0 |
+| 104 | u32 | VPCONST records (must equal the records seen; 0 before decoder 3) |
+| 108 | u32 | FPCONST records (likewise) |
 | 112 | u32 | draws not timed |
 | 116 | u32 | STATE records (must equal the records seen; 0 for decoder 1) |
-| 120 | u64 | reserved = 0 |
+| 120 | u32 | UNIFORM records (likewise) |
+| 124 | u32 | reserved = 0 |
 
 A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.
 

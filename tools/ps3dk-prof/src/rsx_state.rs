@@ -46,6 +46,58 @@ impl Registers {
     }
 }
 
+/// VP constant slots (the VP constant file).
+pub const VP_CONSTS: usize = 468;
+
+/// The VP constant file at one draw: four 32-bit words per slot and a known-component mask (bit k: word k).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VpConstants {
+    value: Vec<[u32; 4]>,
+    known: Vec<u8>,
+}
+impl Default for VpConstants {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl VpConstants {
+    pub fn new() -> Self {
+        VpConstants { value: vec![[0; 4]; VP_CONSTS], known: vec![0; VP_CONSTS] }
+    }
+    /// The words of `slot` with their known mask (None: no component known).
+    pub fn get(&self, slot: usize) -> Option<([u32; 4], u8)> {
+        (slot < VP_CONSTS && self.known[slot] != 0).then(|| (self.value[slot], self.known[slot]))
+    }
+    /// The slot as floats, a component None when unknown.
+    pub fn floats(&self, slot: usize) -> [Option<f32>; 4] {
+        let mut out = [None; 4];
+        if let Some((v, m)) = self.get(slot) {
+            for k in 0..4 {
+                if m >> k & 1 != 0 {
+                    out[k] = Some(f32::from_bits(v[k]));
+                }
+            }
+        }
+        out
+    }
+    pub fn set(&mut self, slot: u16, mask: u8, value: [u32; 4]) {
+        let i = slot as usize;
+        self.value[i] = value;
+        self.known[i] = mask;
+    }
+    pub fn clear(&mut self) {
+        self.known.iter_mut().for_each(|m| *m = 0);
+    }
+    pub fn known_count(&self) -> usize {
+        self.known.iter().filter(|&&m| m != 0).count()
+    }
+}
+
+/// An FP embedded-constant word as it lies in memory (16-bit halves swapped) as a float.
+pub fn fp_word_float(w: u32) -> f32 {
+    f32::from_bits(w.rotate_left(16))
+}
+
 /// One interpreted field value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {

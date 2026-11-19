@@ -493,15 +493,16 @@ One requested frame of the AUTO owner: every draw and clear of its command buffe
 time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
 used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
 tag, an app label (5.7), the AUTO range it ran in, and the render state, texture slots, vertex attributes, index
-stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader). The captured
-frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This release does not record
-constant values or buffer contents.
+stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader), its VP
+constants and FP embedded constants by uniform name, and the instance runs (consecutive draws identical except their
+constants). The captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This
+release does not record buffer contents.
 
 ```cmake
 -DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_AUTO_RING_MB=1 -DPS3_PROF_AUTO_RING_RECORDS=4096 -DPS3_PROF_RSX_FRAME=ON
 ```
 
-- Cost: the ring (2 MiB at the sizes above); about 70 KiB of decoder, register and program state from AUTO attach
+- Cost: the ring (2 MiB at the sizes above); about 150 KiB of decoder, register, constant and program state from AUTO attach
   (none without the ring); while a capture is being written, the two staging blocks (512 KiB at the default), freed when it
   is written; one pass of the profiler over the owner's command words, at each covered draw and at wraps and flushes;
   at each fragment-program bind on the owner, a hash of the program the first time it is bound and a table lookup
@@ -1036,7 +1037,11 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
 - The live link needs app code, a FILE sink on `/dev_hdd0/`, and no rolling output; one viewer at a time.
 - Rolling output is AUTO-only and refuses active SPU lanes.
 - AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
-- RSX frame capture (beta): one capture at a time; no constant values or buffer contents yet; register state is
+- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are exact only when the app
+  patches them through the command stream (cell gcm `cellGcmSetFragmentProgramParameter` does); a value written by the
+  CPU into the program's memory shows the container's value marked "may differ at GPU time"; uniform names come from
+  cell gcm program containers (the PSL1GHT `rsx*` program objects are not read yet), at most 32 per program and 16
+  programs remembered; register state is
   what the owner's command buffer wrote: a CALL into another buffer resets the decoder (registers unknown until
   written again) and writes from other contexts are not seen; the baseline needs room in the staging blocks (16 KiB
   at most); draws inside

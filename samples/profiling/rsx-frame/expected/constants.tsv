@@ -1,0 +1,19 @@
+# rsx-frame sample: the uniform values each captured draw must show (`ps3dk-prof rsx-frame --json`, draw
+# "constants"), tab-separated: ordinal, <profile>.<uniform name>, the expected vec4 as a JSON array (compared within
+# 1e-5). The values are the constants bind_vp() in source/main.c sets; the fragment programs have no uniforms.
+#ordinal	uniform	value
+1	vp.offset	[-0.6, 0.4, 0.0, 0.0]
+2	vp.offset	[0.0, 0.4, 0.0, 0.0]
+3	vp.offset	[0.6, 0.4, 0.0, 0.0]
+4	vp.xform	[-0.6, -0.1, 1.0, 1.0]
+5	vp.xform	[0.0, -0.1, 1.0, 1.0]
+6	vp.xform	[0.6, -0.1, 1.0, 1.0]
+7	vp.xform	[0.0, -0.55, 1.0, 0.5]
+8	vp.offset	[-0.84, -0.82, 0.0, 0.0]
+9	vp.offset	[-0.6, -0.82, 0.0, 0.0]
+10	vp.offset	[-0.36, -0.82, 0.0, 0.0]
+11	vp.offset	[-0.12, -0.82, 0.0, 0.0]
+12	vp.offset	[0.12, -0.82, 0.0, 0.0]
+13	vp.offset	[0.36, -0.82, 0.0, 0.0]
+14	vp.offset	[0.6, -0.82, 0.0, 0.0]
+15	vp.offset	[0.84, -0.82, 0.0, 0.0]

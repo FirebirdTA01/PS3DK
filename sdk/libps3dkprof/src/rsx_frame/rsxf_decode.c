@@ -46,6 +46,11 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
     d->known = 0;
     memset(d->reg_known, 0, sizeof d->reg_known);
     d->regs_cleared++;
+    memset(d->vpc_known, 0, sizeof d->vpc_known);
+    /* unseen words may have held inline transfers: no remembered word can be trusted */
+    memset(d->imap_addr, 0, sizeof d->imap_addr);
+    d->imap_used = 0;
+    d->imap_cleared++;
     memset(d->vp_known, 0, sizeof d->vp_known);
     d->vp_generation++;
     d->in_group = 0;
@@ -92,7 +97,18 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
         }
         return;
     }
+    if (m >= 0x1f00u && m <= 0x1f7cu) {
+        /* VP constant data port: slot = the uploaded id + the vec4 the method address selects */
+        uint32_t slot = d->vpc_id + ((m - 0x1f00u) >> 4), comp = (m >> 2) & 3u;
+        if (slot < RSXF_VP_CONSTS) {
+            d->vpc[slot][comp] = v;
+            d->vpc_known[slot] |= (uint8_t)(1u << comp);
+            d->vpc_dirty[slot >> 5] |= 1u << (slot & 31u);
+        }
+        return;
+    }
     switch (m) {
+    case 0x1efc: d->vpc_id = v; return; /* VP_UPLOAD_CONST_ID */
     case M_VP_UPLOAD_FROM: d->vp_upload = v; d->vp_word = 0; return;
     case M_VP_START_FROM: d->vp_start = v; d->known |= 1u; return;
     case M_FP_ADDRESS: d->fp_address = v; d->known |= 2u; return;
@@ -156,6 +172,59 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
     }
 }
 
+static uint32_t imap_slot(uint32_t addr) { return ((addr >> 2) * 2654435761u) >> (32 - 12); }
+
+static void imap_store(rsxf_decoder *d, uint32_t addr, uint32_t v)
+{
+    uint32_t i = imap_slot(addr);
+    for (uint32_t k = 0; k < 16; k++, i = (i + 1u) & (RSXF_INLINE_MAP - 1u)) {
+        if (d->imap_addr[i] == addr + 1u || !d->imap_addr[i]) {
+            if (!d->imap_addr[i])
+                d->imap_used++;
+            d->imap_addr[i] = addr + 1u;
+            d->imap_val[i] = v;
+            return;
+        }
+    }
+    d->imap_overflow++; /* not remembered: a later lookup of it reports UNKNOWN, never an older value */
+}
+
+int ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v)
+{
+    uint32_t i = imap_slot(addr);
+    for (uint32_t k = 0; k < 16; k++, i = (i + 1u) & (RSXF_INLINE_MAP - 1u)) {
+        if (d->imap_addr[i] == addr + 1u) {
+            *v = d->imap_val[i];
+            return 1;
+        }
+        if (!d->imap_addr[i])
+            return 0;
+    }
+    return 0;
+}
+
+/* Subchannels 3 (surfaces 2D) and 5 (image from CPU), as this SDK's inline transfer binds and writes them: the
+ * destination DMA and offset, the start pixel and width, then 32-bit pixels landing at offset + 4 x (x + i). */
+static void method_2d(rsxf_decoder *d, uint32_t sub, uint32_t m, uint32_t v)
+{
+    if (sub == 3) {
+        if (m == 0x188u)
+            d->s3_dma = v;
+        else if (m == 0x30cu)
+            d->s3_offset = v;
+        return;
+    }
+    if (m == 0x304u)
+        d->s5_x = v & 0xffffu;
+    else if (m == 0x308u)
+        d->s5_w = v & 0xffffu;
+    else if (m >= 0x400u && m < 0x480u) {
+        uint32_t i = (m - 0x400u) >> 2;
+        if (i < d->s5_w && d->s3_dma == 0xfeed0000u)
+            imap_store(d, d->s3_offset + 4u * (d->s5_x + i), v);
+    }
+}
+
 int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
 {
     const uint32_t allowed = 0x40000000u | (2047u << 18) | (7u << 13) | 0x1ffcu;
@@ -185,6 +254,9 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
         if (sub == 0)
             for (uint32_t i = 0; i < count; i++)
                 method(d, (h & 0x40000000u) ? m : m + 4u * i, p[at + i]);
+        else if (sub == 3 || sub == 5)
+            for (uint32_t i = 0; i < count; i++)
+                method_2d(d, sub, (h & 0x40000000u) ? m : m + 4u * i, p[at + i]);
         at += count;
     }
     return ok;

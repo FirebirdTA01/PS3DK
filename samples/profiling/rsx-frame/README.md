@@ -17,7 +17,9 @@ sample drains the RSX, seals the capture and returns 0 (2 if the request was ref
 
 Textures and fixed-function state vary across the matrix: `expected/state.tsv` lists, per draw, the render state,
 texture slot 0, the three vertex attributes, the index stream and the surfaces the capture must show (decoder 2);
-fields that depend on the display or on memory placement are left out.
+fields that depend on the display or on memory placement are left out. `expected/constants.tsv` lists each draw's
+VP uniform values (`offset`, `xform`), and the draw table's `@ instance_runs` the one instance run (draws 8..15,
+differing in `offset`) (decoder 3).
 
 ## Build
 

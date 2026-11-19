@@ -160,6 +160,32 @@ static void register_shadow(void)
     ps3dk_prof__rsxf_decode_init(&d);
 }
 
+/* VP constants through VP_UPLOAD_CONST_ID + the data port (the id then x, y, z, w per slot, one packet), and inline
+ * transfers into local memory (subchannel 3 destination, subchannel 5 pixels from the start pixel, padding not
+ * stored); a rejection forgets both. */
+static void constants_and_inline_writes(void)
+{
+    const uint32_t w[] = {M(0, 0x1efc, 5), 7, 1, 2, 3, 4,
+                          M(0, 0x1efc, 9), 20, 11, 12, 13, 14, 21, 22, 23, 24,
+                          M(3, 0x188, 1), 0xfeed0000u, M(3, 0x30c, 1), 0x1000,
+                          M(5, 0x304, 3), 2, (1u << 16) | 3u, (1u << 16) | 3u, M(5, 0x400, 4), 0xa, 0xb, 0xc, 0,
+                          M(3, 0x188, 1), 0xfeed0001u, M(5, 0x400, 2), 0x77, 0x78}; /* main memory: not mapped */
+    uint32_t v = 0;
+    ps3dk_prof__rsxf_decode_init(&d);
+    decode(w, sizeof w / 4, 1);
+    assert(d.vpc[7][0] == 1 && d.vpc[7][3] == 4 && d.vpc_known[7] == 15);
+    assert(d.vpc[20][2] == 13 && d.vpc[21][0] == 21 && d.vpc_known[21] == 15 && !d.vpc_known[8]);
+    assert((d.vpc_dirty[0] >> 7 & 1u) && (d.vpc_dirty[0] >> 20 & 1u) && (d.vpc_dirty[0] >> 21 & 1u));
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) && v == 0xa);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1010, &v) && v == 0xc);
+    assert(!ps3dk_prof__rsxf_inline_word(&d, 0x1014, &v)); /* the padding word */
+    assert(!ps3dk_prof__rsxf_inline_word(&d, 0x1004, &v));
+    assert(d.imap_used == 3 && !d.imap_overflow);
+    ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
+    assert(!d.vpc_known[7] && !ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) && d.imap_cleared == 1);
+    ps3dk_prof__rsxf_decode_init(&d);
+}
+
 static void register_records(void)
 {
     uint8_t o[64];
@@ -307,6 +333,7 @@ int main(int argc, char **argv)
     rejections_forget_and_recover();
     hashes();
     register_shadow();
+    constants_and_inline_writes();
     register_records();
     utf8();
     encoders(out, owner);

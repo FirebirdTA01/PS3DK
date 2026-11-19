@@ -34,9 +34,20 @@ enum { RSXF_CHUNK_CONFIG = 44, RSXF_CHUNK_BEGIN = 45, RSXF_CHUNK_DRAWS = 46, RSX
 enum { RSXF_CONFIG_BYTES = 64, RSXF_BEGIN_FIXED = 56, RSXF_DRAWS_HEADER = 16, RSXF_END_BYTES = 128,
        RSXF_DRAW_BYTES = 96, RSXF_PROGRAM_BYTES = 48, RSXF_NAME_MAX = 63, RSXF_TEXT_MAX = 63 };
 enum { RSXF_REC_DRAW = 1, RSXF_REC_PROGRAM = 2, RSXF_REC_LABEL = 3, RSXF_REC_NAME = 4, RSXF_REC_BASELINE = 5,
-       RSXF_REC_STATE = 6 };
-/* CONFIG decoder version: 1 draws and programs; 2 also the 3D register shadow (BASELINE and STATE records). */
-enum { RSXF_DECODER = 2 };
+       RSXF_REC_STATE = 6, RSXF_REC_VPCONST = 7, RSXF_REC_FPCONST = 8, RSXF_REC_UNIFORM = 9 };
+/* CONFIG decoder version: 1 draws and programs; 2 also the 3D register shadow (BASELINE and STATE records); 3 also VP
+ * constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM). */
+enum { RSXF_DECODER = 3 };
+/* VP constant slots; VPCONST entries per record; FP constants per draw and uniforms per program, at most. */
+enum { RSXF_VP_CONSTS = 468, RSXF_VPC_PER_REC = 128, RSXF_FPC_MAX = 32, RSXF_UNI_MAX = 32, RSXF_UNI_NAME = 32,
+       RSXF_VPC_ENTRY = 24, RSXF_FPC_ENTRY = 24, RSXF_UNI_ENTRY = 40 };
+enum { RSXF_VPC_RESET = 1, RSXF_VPC_BASELINE = 2, RSXF_FPC_TRUNCATED = 1, RSXF_UNI_TRUNCATED = 1 };
+/* FP constant provenance: written by an inline transfer in the command stream, the container's value (no write
+ * seen since attach: the memory may have been patched by the CPU, so it may differ at GPU time), or unknown (the
+ * decoder reset or the inline-write map was full since). */
+enum { RSXF_FPC_FIFO = 1, RSXF_FPC_CONTAINER = 2, RSXF_FPC_UNKNOWN = 3 };
+enum { RSXF_UNI_VP = 1, RSXF_UNI_FP = 2 };
+enum { RSXF_INLINE_MAP = 4096 };
 /* Register records: at most this many (register, value) pairs each (16 + 8 x 255 bytes). */
 enum { RSXF_REG_PAIRS_MAX = 255, RSXF_REG_HEADER = 16, RSXF_STATE_RESET = 1 };
 enum { RSXF_AVAILABLE = 0, RSXF_NO_AUTO = 1, RSXF_NO_RING = 2, RSXF_NO_DECODER = 3 };
@@ -81,7 +92,7 @@ typedef struct rsxf_wire_program {
 typedef struct rsxf_wire_end {
     uint32_t id, blocks, blocks_dropped, draws_seen, draws_recorded, hooked, decoded_only, mismatches, truncated_at,
              programs, labels, labels_refused, programs_refused, reject_header, reject_reason, lost_events, untimed,
-             baseline_registers, state_records;
+             baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records;
     uint16_t outcome, reason;
     uint64_t bytes_streamed, bytes_dropped, tb_end, decoder_words;
 } rsxf_wire_end;
@@ -136,6 +147,16 @@ typedef struct rsxf_decoder {
     uint32_t reg[RSXF_REGS];
     uint32_t reg_known[RSXF_REG_WORDS], reg_dirty[RSXF_REG_WORDS];
     uint32_t regs_cleared;
+    /* VP constants (VP_UPLOAD_CONST_ID + data port): values, a KNOWN component mask per slot, DIRTY bits */
+    uint32_t vpc[RSXF_VP_CONSTS][4];
+    uint8_t vpc_known[RSXF_VP_CONSTS];
+    uint32_t vpc_dirty[(RSXF_VP_CONSTS + 31) / 32];
+    uint32_t vpc_id;
+    /* inline transfers into local memory (subchannel 3 surfaces-2D destination, subchannel 5 image-from-CPU data):
+     * the last word written at each address, open addressing; a full map counts imap_overflow, a reset clears it */
+    uint32_t s3_dma, s3_offset, s5_x, s5_w;
+    uint32_t imap_addr[RSXF_INLINE_MAP], imap_val[RSXF_INLINE_MAP]; /* addr + 1; 0 empty */
+    uint32_t imap_used, imap_overflow, imap_cleared;
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
     uint32_t bad_header, bad_reason, resets; /* the first rejection (AUTO_RING_REJECT_* numbering) */
@@ -155,6 +176,8 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
 /* Decodes n complete owner words; completed draws and clears are appended to events. Returns 0 after a rejection
  * (the registers are then unknown; decoding resumes at the next word given). */
 int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n);
+/* 1 with *v when an inline transfer wrote the local-memory word at addr since the map was last cleared. */
+int ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v);
 
 /* ---- runtime hooks (rsxf_runtime.c), called from auto_runtime.c -------------------------------------------------- */
 struct _gcmCtxData;
@@ -186,6 +209,9 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal);
 
 /* Program bind hooks (SDK headers in a PS3TC_PROF_AUTO unit; symbols in auto_runtime.c, forwarded when selected). */
 void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
+/* A program container (CgBinaryProgram) bound on the owner: kind 1 VP, 2 FP (after its fp_bind). Its uniform names
+ * and resources, and an FP's constant blocks with their container values, are read here (bounded), never later. */
+void ps3dk_prof__rsxf_container_bind(struct _gcmCtxData *ctx, const void *container, uint32_t kind);
 
 /* ---- live link (protocol v3), read by live_api.c through a weak symbol ------------------------------------------- */
 typedef struct rsxf_status {
