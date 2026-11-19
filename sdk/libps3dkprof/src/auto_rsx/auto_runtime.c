@@ -12,6 +12,7 @@ extern void *ps3dk_prof__rsxf_active;
 #define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)
 /* The owner's AUTO capture (NULL on any other thread, in the drainer or before CONFIG froze). */
 static auto_capture *owner_capture(gpp_ctx *ctx, int observe);
+static void isolate(gpp_ctx *ctx);
 #define RSXF_OWNER() (RSXF_ON() && owner_capture(NULL,0)!=NULL)
 /* The exclusion column of the last covered visit AUTO counted on the owner, for the capture's untimed reason. */
 static int counted(auto_frames *f,uint32_t kind,uint32_t column)

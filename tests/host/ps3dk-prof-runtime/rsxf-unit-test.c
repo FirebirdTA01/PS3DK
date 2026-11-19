@@ -262,7 +262,7 @@ static void encoders(FILE *out, uint32_t owner)
 {
     uint8_t buf[4096], rec[1024];
     size_t n, r = 0;
-    rsxf_wire_config c = {RSXF_AVAILABLE, 262144u, 2u, 512u, 256u, 63u};
+    rsxf_wire_config c = {RSXF_AVAILABLE, 262144u, 2u, 512u, 256u, 63u, 0u};
     rsxf_wire_begin b;
     rsxf_wire_program p;
     rsxf_wire_draw w;
