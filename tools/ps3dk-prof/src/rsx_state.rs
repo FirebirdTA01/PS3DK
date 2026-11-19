@@ -267,7 +267,9 @@ fn render(r: &Registers) -> Vec<Field> {
         .field("color_mask.r", 0x324, 16, 0xff, Kind::Bool)
         .field("color_mask.a", 0x324, 24, 0xff, Kind::Bool)
         .whole("color_mask.mrt", 0x370, Kind::Hex);
-    for (side, base) in [("front", 0x348u32), ("back", 0x328)] {
+    // 0x328.. is the stencil test SetStencilTestEnable/Func/Mask/Op write (the front face, or both when one-sided);
+    // 0x348.. is SetTwoSidedStencilTestEnable and the back face's SetBackStencil* (the reverse of nouveau's names)
+    for (side, base) in [("front", 0x328u32), ("back", 0x348)] {
         t.whole(&format!("stencil.{side}.enable"), base, Kind::Bool)
             .whole(&format!("stencil.{side}.write_mask"), base + 4, Kind::Hex)
             .whole(&format!("stencil.{side}.func"), base + 8, Kind::Named(FUNC))
@@ -447,7 +449,7 @@ pub fn register_name(method: u32) -> String {
         (0x288, "COLOR2_OFFSET"), (0x28c, "COLOR3_OFFSET"), (0x2b8, "WINDOW_OFFSET"), (0x300, "DITHER_ENABLE"),
         (0x304, "ALPHA_TEST_ENABLE"), (0x308, "ALPHA_TEST_FUNC"), (0x30c, "ALPHA_TEST_REF"), (0x310, "BLEND_ENABLE"),
         (0x314, "BLEND_FUNC_SRC"), (0x318, "BLEND_FUNC_DST"), (0x31c, "BLEND_COLOR"), (0x320, "BLEND_EQUATION"),
-        (0x324, "COLOR_MASK"), (0x328, "STENCIL_BACK_ENABLE"), (0x348, "STENCIL_FRONT_ENABLE"),
+        (0x324, "COLOR_MASK"), (0x328, "STENCIL_TEST_ENABLE"), (0x348, "TWO_SIDED_STENCIL_TEST_ENABLE"),
         (0x368, "SHADE_MODEL"), (0x36c, "BLEND_ENABLE_MRT"), (0x370, "MRT_COLOR_MASK"),
         (0x374, "COLOR_LOGIC_OP_ENABLE"), (0x378, "COLOR_LOGIC_OP"), (0x37c, "BLEND_COLOR2"),
         (0x380, "DEPTH_BOUNDS_TEST_ENABLE"), (0x394, "DEPTH_RANGE_NEAR"), (0x398, "DEPTH_RANGE_FAR"),

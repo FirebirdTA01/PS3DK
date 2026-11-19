@@ -1030,7 +1030,9 @@ BASELINE (type 5) and STATE (type 6), decoder 2 only, length 16 + 8 x n:
 The register file is the 3D object's methods 0x0000..0x1ffc on subchannel 0 as the decoder last saw them written. Data
 ports are interpreted, never stored: the object bind and the channel words below 0x100, VP instruction upload
 (0x0b80..0x0bfc), VP constant upload (0x1f00..0x1f7c), BEGIN_END, inline vertex and index data, the vertex and index
-batch triggers and CLEAR_BUFFERS. A register is known from its first write after attach or after a decoder reset
+batch triggers and CLEAR_BUFFERS. One-shot actions are not stored either: NOP, NOTIFY, WAIT_FOR_IDLE, the vertex cache
+invalidates (0x1710, 0x1714), texture cache control (0x1fd8), report writes (0x1800) and the semaphore releases
+(0x1d70, 0x1d74). A register is known from its first write after attach or after a decoder reset
 (any rejected or unfollowed word); its value is then the last one written.
 
 - BASELINE: the known registers at arming, before the first DRAW or STATE of the capture; n >= 1; register indices

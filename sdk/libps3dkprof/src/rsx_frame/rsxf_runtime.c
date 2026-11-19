@@ -1089,9 +1089,10 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
         w.count = s->hook.kind == RSXF_K_CLEAR ? 0 : s->hook.count;
         if (s->hook.kind == RSXF_K_INDEX) {
             w.index_offset = s->hook.offset;
-            w.index_type = (uint8_t)(s->hook.index_type & 1u);
             w.index_location = (uint8_t)(s->hook.location & 1u);
         }
+        if (s->hook.kind == RSXF_K_INDEX || s->hook.kind == RSXF_K_INLINE_INDEX)
+            w.index_type = (uint8_t)(s->hook.index_type & 1u);
         w.clear_mask = s->hook.kind == RSXF_K_CLEAR ? s->hook.clear_mask : 0;
         w.flags = RSXF_DF_HOOKED | (e ? RSXF_DF_DECODED : 0);
         if (e && (e->kind != s->hook.kind ||

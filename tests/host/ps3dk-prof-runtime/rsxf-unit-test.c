@@ -151,6 +151,11 @@ static void register_shadow(void)
     assert(!KNOWN(0x1d94) && !KNOWN(0x0b80) && !KNOWN(0x0b8c) && !KNOWN(0x1f00) && !KNOWN(0x320));
     assert(!ps3dk_prof__rsxf_shadowed(0x1808) && !ps3dk_prof__rsxf_shadowed(0x1814) &&
            !ps3dk_prof__rsxf_shadowed(0x0000) && ps3dk_prof__rsxf_shadowed(0x181c) && ps3dk_prof__rsxf_shadowed(0x1fc0));
+    /* one-shot actions are not state: NOP, NOTIFY, cache invalidates, report writes, semaphore releases */
+    assert(!ps3dk_prof__rsxf_shadowed(0x0100) && !ps3dk_prof__rsxf_shadowed(0x0104) &&
+           !ps3dk_prof__rsxf_shadowed(0x1710) && !ps3dk_prof__rsxf_shadowed(0x1714) &&
+           !ps3dk_prof__rsxf_shadowed(0x1fd8) && !ps3dk_prof__rsxf_shadowed(0x1800) &&
+           !ps3dk_prof__rsxf_shadowed(0x1d70) && !ps3dk_prof__rsxf_shadowed(0x1d74) && ps3dk_prof__rsxf_shadowed(0x1d6c));
     cleared = d.regs_cleared;
     ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
     assert(!KNOWN(0x310) && !KNOWN(0x1a00) && d.regs_cleared == cleared + 1);

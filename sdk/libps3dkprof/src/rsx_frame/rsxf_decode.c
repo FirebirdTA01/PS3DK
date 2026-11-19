@@ -32,6 +32,11 @@ int ps3dk_prof__rsxf_shadowed(uint32_t m)
     case M_BEGIN_END: case M_ELEMENT_U16: case M_ELEMENT_U32: case M_VERTEX_BATCH: case M_VERTEX_DATA:
     case M_INDEX_DRAW: case M_CLEAR: case 0x0110u: /* WAIT_FOR_IDLE */
         return 0; /* draw triggers, inline data and pipeline waits */
+    case 0x0100u: case 0x0104u: /* NOP, NOTIFY */
+    case 0x1710u: case 0x1714u: case 0x1fd8u: /* vertex cache invalidates, texture cache control */
+    case 0x1800u: /* report write (GET_REPORT: every AUTO marker) */
+    case 0x1d70u: case 0x1d74u: /* back-end write and texture-read semaphore releases */
+        return 0; /* one-shot actions: their last value is not state (it would differ between identical draws) */
     default:
         return 1;
     }
