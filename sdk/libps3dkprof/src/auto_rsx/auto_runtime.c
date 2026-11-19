@@ -2,8 +2,36 @@
 #include "auto_commands.h"
 #include "../fifo/fifo_internal.h"
 #include "../rsx/gpu_internal.h"
+#include "../rsx_frame/rsxf.h"
 #include <string.h>
 #include <stddef.h>
+
+/* RSX frame capture (rsxf.h): NULL unless the executable selected it and AUTO attached; every hook below tests it
+ * with one load before calling the capture code, so an unselected build does nothing more. */
+extern void *ps3dk_prof__rsxf_active;
+#define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)
+/* The exclusion column of the last covered visit AUTO counted, for the capture's untimed reason. */
+static int counted(auto_frames *f,uint32_t kind,uint32_t column)
+{
+    if(RSXF_ON()) rsxf_note_column(column);
+    return ps3dk_prof__auto_frames_count(f,kind,column);
+}
+__attribute__((unused)) static int counted_outside(auto_frames *f,uint32_t kind)
+{
+    if(RSXF_ON()) rsxf_note_column(RSXF_UNTIMED_OUTSIDE_RANGE);
+    return ps3dk_prof__auto_frames_outside(f,kind);
+}
+__attribute__((unused)) static int counted_ring(auto_frames *f,uint32_t kind,uint32_t which)
+{
+    if(RSXF_ON()) rsxf_note_column(which ? RSXF_UNTIMED_RING_STATE:RSXF_UNTIMED_RING_FULL);
+    return ps3dk_prof__auto_frames_ring(f,kind,which);
+}
+#undef auto_frames_count
+#undef auto_frames_outside
+#undef auto_frames_ring
+#define auto_frames_count counted
+#define auto_frames_outside counted_outside
+#define auto_frames_ring counted_ring
 
 /* The core admits one capture per process. CONFIG remains mutable only through
  * the owner-side initialization/override window; its encoder cannot freeze it.
@@ -417,6 +445,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
         return PS3DK_PROF_ESTOPPED;
     }
     ps3dk_prof__fifo_account_native_start(gc);
+    rsxf_attach(gc,capture && capture->ring_plan.blocks!=0);
     *instance=1;*domain=id;
     return PS3DK_PROF_OK;
 fail:
@@ -1442,7 +1471,21 @@ static void late_row(auto_capture *a)
     }
 }
 
+static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller);
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
+{
+    uint32_t ticket;
+    auto_capture *a;
+    if(!RSXF_ON()) return auto_begin(context,call,caller);
+    a=capture;
+    if(call && context && a && (void *)context==(void *)a->context)
+        rsxf_hook_begin(context,call->kind,call->mode,call->start,call->count,call->offset,call->index_type,
+                        call->location,call->clear_mask,caller,a->tag);
+    ticket=auto_begin(context,call,caller);
+    rsxf_hook_admitted(ticket && a && a->active ? a->active->op.id:0);
+    return ticket;
+}
+static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     if(!ctx || !p_ready()) return 0;
@@ -1475,7 +1518,9 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
         (void)auto_frames_count(&a->coverage,call->kind,11);
         return 0;
     }
-    if(a->timing && !a->timed_open) { (void)auto_frames_outside(&a->coverage,call->kind);return 0; }
+    if(a->timing && !a->timed_open && !(RSXF_ON() && rsxf_forced())) {
+        (void)auto_frames_outside(&a->coverage,call->kind);return 0;
+    }
 #ifdef PS3DK_PROF_AUTO_RING
     if(a->ring_plan.blocks) {
         if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
@@ -1536,7 +1581,13 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     return e->op.serial_end;
 }
 
+static void auto_end(struct _gcmCtxData *context,uint32_t ticket);
 void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
+{
+    auto_end(context,ticket);
+    if(RSXF_ON()) rsxf_hook_end(context);
+}
+static void auto_end(struct _gcmCtxData *context,uint32_t ticket)
 {
     auto_capture *a;
     auto_queue_entry *e;
@@ -1598,6 +1649,7 @@ void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontie
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 {
     if(!context || !p_ready()) return;
+    if(RSXF_ON()) rsxf_reset(context);
     ps3dk_prof__fifo_account_unknown(context);
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,1);
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
@@ -1620,6 +1672,8 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 /* Report ring hooks (ps3tc_prof_auto.h). Owner context only; the drainer and foreign threads never emit. */
 void ps3dk_prof__auto_prewrap(struct _gcmCtxData *context)
 {
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain && owner_capture((gpp_ctx *)(void *)context,0))
+        rsxf_wrap(context);
 #ifdef PS3DK_PROF_AUTO_RING
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     auto_capture *a;
@@ -1633,6 +1687,8 @@ void ps3dk_prof__auto_prewrap(struct _gcmCtxData *context)
 }
 void ps3dk_prof__auto_preflush(struct _gcmCtxData *context)
 {
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain && owner_capture((gpp_ctx *)(void *)context,0))
+        rsxf_scan(context);
 #ifdef PS3DK_PROF_AUTO_RING
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     auto_capture *a;
@@ -1663,7 +1719,15 @@ void p_auto_owner_retire(void)
 }
 
 static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame);
+static void auto_frame(uint64_t frame,uint64_t tb);
 void p_auto_frame(uint64_t frame,uint64_t tb)
+{
+    auto_capture *a;
+    auto_frame(frame,tb);
+    if(RSXF_ON() && (a=owner_capture(NULL,0)) && !a->active && !g_tls.in_gpu)
+        rsxf_frame(frame,tb,a->owner_incarnation,p_window_gate(g_prof),p_window_id(g_prof));
+}
+static void auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
     if(a && !p_window_gate(g_prof)) {
@@ -2111,7 +2175,17 @@ void p_auto_seal_claim(void)
     auto_config_stop(&configuration);
 }
 
+static void auto_drain(prof *p, int seal);
 void p_auto_drain(prof *p, int seal)
+{
+    const auto_wire_config *c;
+    auto_drain(p,seal);
+    if(p->snk.failed || !rsxf_selected()) return;
+    c=auto_config_read(&configuration);
+    if(!c) return; /* CONFIG not frozen yet: the capture's CONFIG follows AUTO's */
+    rsxf_drain(chunk,p,!c->reason && capture!=NULL,seal);
+}
+static void auto_drain(prof *p, int seal)
 {
     const auto_wire_config *c;
     uint8_t b[64]={0};
@@ -2240,6 +2314,19 @@ void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context,uint32_t offs
     s=segment_find(a,context);
     if(!s || s->external) s=segment_at(a,(gpp_ctx *)(void *)context);
     if(s && s->open) s->fp=offset;
+}
+/* Program bind hooks (gcm_cg_bridge.h, rsx_legacy): the container's ucode bound at an FP offset of the owner
+ * context. Inert unless the RSX frame capture is selected. */
+void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
+void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context,const void *ucode,uint32_t bytes,uint32_t offset)
+{
+    if(!RSXF_ON() || !context || !p_ready() || !owner_capture((gpp_ctx *)(void *)context,0)) return;
+    ps3dk_prof__rsxf_bind(context,ucode,bytes,offset);
+}
+/* 1 on the registered AUTO owner thread (labels are owner-only). */
+int ps3dk_prof__auto_owner_self(void)
+{
+    return p_ready() && owner_capture(NULL,0)!=NULL;
 }
 static void range_refuse(auto_capture *a)
 {
