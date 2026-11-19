@@ -46,7 +46,7 @@ pub enum RsxFrameEvent {
 
 pub fn refusal(code: i32) -> String {
     match code {
-        -2=>"EBUSY: an RSX frame capture is already outstanding".into(),
+        -2=>"EBUSY: the console still follows an earlier RSX frame capture (its final state has not arrived); request again once it has".into(),
         -5=>"EINVAL: the capture flags or name were refused".into(),
         -6=>"ENOMEM: capture staging memory could not be allocated".into(),
         -14=>"ENOTINIT: the profiler is not initialized".into(),
@@ -100,8 +100,9 @@ impl RequestTracker {
     }
     pub fn blocked(&self) -> Option<String> {
         self.unavailable.clone().or_else(|| {
+            // One followed capture per link: the agent answers EBUSY until it has sent the
+            // final STATE (ENCODED or ABANDONED), even when the capture data already arrived.
             if self.request.is_some()
-                && !self.resolved
                 && self.error.is_none()
                 && !self.progress.is_some_and(|s| matches!(s.state, 3 | 4))
             {

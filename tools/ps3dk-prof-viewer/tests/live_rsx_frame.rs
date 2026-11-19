@@ -324,3 +324,27 @@ fn socket_negotiates_each_version_once_and_v3_can_send_an_rsx_request() {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[test]
+fn data_before_the_final_state_keeps_following_and_ebusy_allows_a_later_request() {
+    use ps3dk_prof_viewer::live_rsx_frame::RequestTracker;
+    let mut t = RequestTracker::default();
+    let s = session(3, CAP_RSX_FRAME);
+    t.on_link(&s.state, s.hello.as_ref());
+    let (r, _) = t.start("one".into()).unwrap();
+    let bytes = include_bytes!("../../ps3dk-prof/tests/fixtures/rsx_frame/sample.prof");
+    let mut frames = ps3dk_prof::rsx_frame::frames(&ps3dk_prof::reader::read(bytes).unwrap());
+    frames[0].request_id = r;
+    t.event(RsxFrameEvent::Ack(RsxFrameAck { request: r, capture: frames[0].id, result: 0 }));
+    t.observe(&frames);
+    assert!(t.resolved, "complete data is Ready");
+    assert!(t.blocked().is_some(), "the link still follows it until ENCODED or ABANDONED");
+    // An agent that still refuses: the reason is shown and a later request is allowed.
+    let mut t = RequestTracker::default();
+    t.on_link(&s.state, s.hello.as_ref());
+    let (r, _) = t.start("two".into()).unwrap();
+    t.event(RsxFrameEvent::Ack(RsxFrameAck { request: r, capture: 0, result: -2 }));
+    assert!(t.status_line().unwrap().starts_with("EBUSY: the console still follows"));
+    assert!(t.blocked().is_none());
+    assert!(t.start("three".into()).is_ok());
+}

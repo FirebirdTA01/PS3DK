@@ -197,3 +197,19 @@ fn long_decoded_capture_renders_a_bounded_number_of_rows() {
         std::fs::write(std::path::Path::new(&dir).join("long.prof"), bytes).unwrap();
     }
 }
+
+#[test]
+fn header_notes_explain_mismatched_lost_and_replaced_text() {
+    use ps3dk_prof_viewer::rsx_frame_ui::header_notes;
+    let d = doc();
+    let v = d.rsx_frames.get(d.analysis().unwrap());
+    let mut f = v.frames[0].clone();
+    assert!(header_notes(&f).is_empty());
+    f.totals.mismatched = 2;
+    f.text_replaced = 1;
+    if let Some(e) = f.end.as_mut() { e.lost_events = 3; }
+    let notes: Vec<String> = header_notes(&f).into_iter().map(|(_, s)| s).collect();
+    assert!(notes[0].starts_with("2 mismatched draws: their AUTO operation belongs to another draw kind or frame"));
+    assert!(notes.iter().any(|s| s.starts_with("3 draw events lost")));
+    assert!(notes.last().unwrap().starts_with("Text replaced: 1 "));
+}

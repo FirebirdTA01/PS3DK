@@ -20,6 +20,25 @@ pub struct Rows {
     pub ids: Vec<usize>,
     pub groups: Vec<rf::Group>,
 }
+/// Header warnings with their reasons: mismatched draws, lost decoder events, replaced text.
+pub fn header_notes(f: &FrameView) -> Vec<(ui::Tone, String)> {
+    let mut out = Vec::new();
+    if f.totals.mismatched > 0 {
+        out.push((ui::Tone::Warning, format!(
+            "{} mismatched draws: their AUTO operation belongs to another draw kind or frame, so they are in no timed count or sum",
+            f.totals.mismatched)));
+    }
+    if let Some(n) = f.end.as_ref().map(|e| e.lost_events).filter(|&n| n > 0) {
+        out.push((ui::Tone::Warning, format!(
+            "{n} draw events lost: the stream decoder could not hand them to the capture, so those draws are absent")));
+    }
+    if f.text_replaced > 0 {
+        out.push((ui::Tone::Warning, format!(
+            "Text replaced: {} name, label or program-name fields were not valid UTF-8 and show U+FFFD; the capture is otherwise intact",
+            f.text_replaced)));
+    }
+    out
+}
 pub fn badge(status: &FrameStatus) -> &'static str {
     match status {
         FrameStatus::Complete => "Ready",
@@ -228,12 +247,13 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
    if let Some(why)=st.link_ended_reason() {ui::field_message(p,ui::Tone::Warning,why);}
    p.label(if f.isolated{"ISOLATED timing"}else{"PIPELINED: reached-marker intervals can overlap. Their sum is not isolated execution cost."});
    p.horizontal_wrapped(|p|{
-     p.label(format!("{} draws · {} timed · {} untimed · {} missing · {} primitives",f.totals.draws,f.totals.timed,f.totals.untimed,f.totals.missing,f.totals.primitives));
+     p.label(format!("{} draws · {} timed · {} untimed · {} missing · {} mismatched · {} primitives",f.totals.draws,f.totals.timed,f.totals.untimed,f.totals.missing,f.totals.mismatched,f.totals.primitives));
      p.label("Sum");duration(p,v,Some(f.totals.sum));p.label("Span");duration(p,v,f.totals.span.map(|(b,e)|e-b));p.label("Gaps");duration(p,v,Some(f.totals.gaps));
    });
    if f.draws_not_retained>0 {ui::field_message(p,ui::Tone::Warning,&format!("{} draw records were not retained by the reader",f.draws_not_retained));}
+   for (tone,why) in header_notes(f) {ui::field_message(p,tone,&why);}
    if let Some(e)=&f.end {p.collapsing("Capture evidence",|p|{
-     p.label(format!("{} seen / {} recorded; {} hooked / {} decoded only / {} mismatches",e.draws_seen,e.draws_recorded,e.hooked,e.decoded_only,e.mismatches));
+     p.label(format!("{} seen / {} recorded; {} hooked / {} decoded only / {} mismatches; {} lost events",e.draws_seen,e.draws_recorded,e.hooked,e.decoded_only,e.mismatches,e.lost_events));
      p.label(format!("{} blocks / {} dropped; {} bytes streamed / {} dropped; labels refused {} / programs refused {}",e.blocks,e.blocks_dropped,e.bytes_streamed,e.bytes_dropped,e.labels_refused,e.programs_refused));
      if let Some((h,r))=e.decoder_reject{p.label(format!("Decoder rejected header {h:#010x}, reason {r}"));}
    });}
