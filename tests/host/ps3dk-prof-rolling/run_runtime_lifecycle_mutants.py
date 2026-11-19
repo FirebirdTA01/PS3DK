@@ -29,8 +29,9 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_lifecycle.rs')
 # Lifecycle mutation anchors and all exact behavioral witnesses are unchanged.
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
+# DRAIN repinned for RSX frame capture (file_flags bit 10 when selected): no mutation anchor moved.
 PINS = {
-    DRAIN: 'c61973c33502e99257d2150b48d0aa1a2fadc2a176cd1cdd1cb9ea33eee8abb4',
+    DRAIN: '697e7253a01878030d084b6377189ac2af0675bfabbb1297251d7b289f505012',
     BRIDGE: 'bb7b76245a7134a77281e057138606ea532b3ca59caaaeda04834d9e1cb681ea',
 }
 RUST_TESTS = {

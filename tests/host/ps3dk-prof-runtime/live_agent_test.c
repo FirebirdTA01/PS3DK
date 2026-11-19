@@ -109,6 +109,8 @@ typedef struct client {
     uint32_t caps;   /* HELLO's capability field */
     int acks;        /* CAPTURE_ACKs received; the last one in ack */
     uint8_t ack[LIVE_ACK_BYTES];
+    int rsxf_acks, rsxf_states; /* v3 RSX_FRAME_ACK / RSX_FRAME_STATE frames; the last of each */
+    uint8_t rsxf_ack[LIVE_RSXF_ACK_BYTES], rsxf_state[LIVE_RSXF_STATE_BYTES];
 } client;
 
 /* A small receive buffer makes "the viewer stopped reading" bite quickly. */
@@ -213,6 +215,17 @@ static void cl_frame(client *c, uint32_t type, const uint8_t *p, uint32_t len)
         CHECK(len == LIVE_ACK_BYTES && live_get16(p + 14) == 0);
         memcpy(c->ack, p, LIVE_ACK_BYTES);
         c->acks++;
+    } else if (type == LIVE_T_RSX_FRAME_ACK) {
+        CHECK(c->asked == 0 || c->asked >= 3); /* v3 only */
+        CHECK(len == LIVE_RSXF_ACK_BYTES && live_get32(p + 12) == 0);
+        memcpy(c->rsxf_ack, p, len);
+        c->rsxf_acks++;
+    } else if (type == LIVE_T_RSX_FRAME_STATE) {
+        CHECK(c->asked == 0 || c->asked >= 3);
+        CHECK(len == LIVE_RSXF_STATE_BYTES && live_get16(p + 6) == 0);
+        CHECK(c->rsxf_acks > 0); /* the ACK first */
+        memcpy(c->rsxf_state, p, len);
+        c->rsxf_states++;
     } else {
         CHECK(!"unexpected frame type");
     }
@@ -1195,6 +1208,175 @@ static void case_cmd_bad_versions(void)
     CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
 }
 
+/* ---- RSX frame capture (protocol v3) ------------------------------------------------------------------ */
+
+/* A scripted capture source: the test decides availability, the request result and the status it reports. */
+static struct {
+    atomic_int available, requests, rc;
+    uint32_t req, flags, name_len, id;
+    char name[LIVE_MAX_WINDOW_NAME + 1];
+    live_rsxf_status st;
+    atomic_int st_seq;
+} g_rf;
+
+static int rf_request(uint32_t req, uint32_t flags, const char *name, uint32_t n, uint32_t *id)
+{
+    g_rf.req = req;
+    g_rf.flags = flags;
+    g_rf.name_len = n;
+    memcpy(g_rf.name, name, n);
+    g_rf.name[n] = 0;
+    atomic_fetch_add(&g_rf.requests, 1);
+    *id = g_rf.id;
+    return atomic_load(&g_rf.rc);
+}
+static void rf_status(live_rsxf_status *out)
+{
+    (void)atomic_load(&g_rf.st_seq);
+    *out = g_rf.st;
+}
+static int rf_available(void) { return atomic_load(&g_rf.available); }
+static const live_rsxf_ops g_rf_ops = {.request = rf_request, .status = rf_status, .available = rf_available};
+
+static uint16_t start_rsxf_agent(live_config cfg, const live_rsxf_ops *ops)
+{
+    live_source src = {.path = g_path, .session_id = 0x1122334455667788ull, .app = "liveapp", .app_len = 7,
+                       .build_id = "bid", .build_id_len = 3, .finalization = fin_get, .cmd = &g_fake_ops,
+                       .rsxf = ops};
+    CHECK(live_agent_start(&g_agent, &cfg, &src) == LIVE_OK);
+    return live_agent_port(&g_agent);
+}
+
+static void send_rsxf(int fd, uint32_t req, uint32_t flags, uint32_t frames, const char *name, uint32_t reserved)
+{
+    uint8_t p[12 + LIVE_MAX_WINDOW_NAME];
+    uint32_t n = (uint32_t)strlen(name);
+    live_put32(p, req);
+    live_put16(p + 4, flags);
+    live_put16(p + 6, frames);
+    live_put16(p + 8, n);
+    live_put16(p + 10, reserved);
+    memcpy(p + 12, name, n);
+    cl_send(fd, LIVE_T_RSX_FRAME_REQ, 0, p, 12 + n);
+}
+static int has_rsxf_ack(client *c) { return c->rsxf_acks > 0; }
+static int rf_want_states;
+static int has_rsxf_states(client *c) { return c->rsxf_states >= rf_want_states; }
+static void rf_set(uint32_t state, uint32_t draws, uint64_t frame)
+{
+    g_rf.st.state = state;
+    g_rf.st.draws = draws;
+    g_rf.st.frame = frame;
+    atomic_fetch_add(&g_rf.st_seq, 1);
+}
+
+/* v3 with a capture source: HELLO carries LIVE_CAP_RSX_FRAME; a request is answered at once (16-byte ACK), then
+ * one STATE per change (32 bytes: id, state, reason, draws, request, frame, bytes), none once it is final. */
+static void case_rsxf_round_trip(void)
+{
+    w_open();
+    w_append(100);
+    atomic_store(&g_rf.available, 1);
+    g_rf.id = 4;
+    client *c = cl_open(start_rsxf_agent(test_cfg(), &g_rf_ops));
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->hello && c->caps == (LIVE_CAP_TRIGGERS | LIVE_CAP_RSX_FRAME));
+    send_rsxf(c->fd, 11, 0, 1, "frame-a", 0);
+    cl_pump(c, 2000, has_rsxf_ack);
+    CHECK(c->rsxf_acks == 1 && atomic_load(&g_rf.requests) == 1 && g_rf.req == 11 && g_rf.flags == 0);
+    CHECK(strcmp(g_rf.name, "frame-a") == 0);
+    CHECK(live_get32(c->rsxf_ack) == 11 && live_get32(c->rsxf_ack + 4) == 0 && live_get32(c->rsxf_ack + 8) == 4);
+    g_rf.st.id = 4;
+    g_rf.st.request = 11;
+    g_rf.st.bytes = 777;
+    rf_set(1, 0, 42);
+    rf_want_states = 1;
+    cl_pump(c, 2000, has_rsxf_states);
+    CHECK(c->rsxf_states == 1 && live_get32(c->rsxf_state) == 4 && c->rsxf_state[4] == 1);
+    CHECK(live_get32(c->rsxf_state + 12) == 11 && live_get64(c->rsxf_state + 16) == 42);
+    rf_set(2, 22, 42);
+    rf_want_states = 2;
+    cl_pump(c, 2000, has_rsxf_states);
+    CHECK(c->rsxf_states == 2 && c->rsxf_state[4] == 2 && live_get32(c->rsxf_state + 8) == 22);
+    CHECK(live_get64(c->rsxf_state + 24) == 777);
+    rf_set(3, 22, 42);
+    rf_want_states = 3;
+    cl_pump(c, 2000, has_rsxf_states);
+    CHECK(c->rsxf_states == 3 && c->rsxf_state[4] == 3);
+    rf_set(4, 22, 42); /* after a final state nothing more is sent for this capture */
+    cl_pump(c, 300, NULL);
+    CHECK(c->rsxf_states == 3 && !c->closed);
+    /* a refusal: one ACK with the code and capture id 0, no STATE */
+    c->rsxf_acks = 0;
+    atomic_store(&g_rf.rc, PS3DK_PROF_EBUSY);
+    send_rsxf(c->fd, 12, 0, 1, "", 0);
+    cl_pump(c, 2000, has_rsxf_ack);
+    CHECK((int32_t)live_get32(c->rsxf_ack + 4) == PS3DK_PROF_EBUSY && live_get32(c->rsxf_ack + 8) == 0);
+    cl_pump(c, 300, NULL);
+    CHECK(c->rsxf_states == 3);
+    w_close();
+    cl_free(c);
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* Not available (not built with the option, no ring): no capability bit, a request is refused ENOTSUP without
+ * reaching the source; without a source at all the same. A v2 session never sees the bit and a request on it drops. */
+static void case_rsxf_unavailable_and_v2(void)
+{
+    w_open();
+    w_append(100);
+    atomic_store(&g_rf.available, 0);
+    uint16_t port = start_rsxf_agent(test_cfg(), &g_rf_ops);
+    client *c = cl_open(port);
+    cl_pump(c, 2000, has_hello);
+    CHECK(c->caps == LIVE_CAP_TRIGGERS);
+    send_rsxf(c->fd, 1, 0, 1, "x", 0);
+    cl_pump(c, 2000, has_rsxf_ack);
+    CHECK((int32_t)live_get32(c->rsxf_ack + 4) == PS3DK_PROF_ENOTSUP && atomic_load(&g_rf.requests) == 0);
+    cl_free(c);
+    atomic_store(&g_rf.available, 1);
+    client *d = cl_open_v(port, 2);
+    cl_pump(d, 2000, has_hello);
+    CHECK(d->hello && d->caps == LIVE_CAP_TRIGGERS); /* v2: no RSX frame bit even when available */
+    send_rsxf(d->fd, 2, 0, 1, "x", 0);
+    CHECK(cl_wait_closed(d, 2000) && d->rsxf_acks == 0 && atomic_load(&g_rf.requests) == 0);
+    CHECK(drops(LIVE_DROP_PROTOCOL) == 1);
+    cl_free(d);
+    w_close();
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
+/* Every malformed request closes the link and reaches no source: request id 0, frames != 1, a reserved field, a
+ * length that is not 12 + n. */
+static void case_rsxf_malformed(void)
+{
+    w_open();
+    w_append(100);
+    atomic_store(&g_rf.available, 1);
+    uint16_t port = start_rsxf_agent(test_cfg(), &g_rf_ops);
+    unsigned long long expected = 0;
+    for (int k = 0; k < 4; ++k) {
+        client *c = cl_open(port);
+        cl_pump(c, 2000, has_hello);
+        if (k == 0) send_rsxf(c->fd, 0, 0, 1, "a", 0);
+        if (k == 1) send_rsxf(c->fd, 1, 0, 2, "a", 0);
+        if (k == 2) send_rsxf(c->fd, 1, 0, 1, "a", 1);
+        if (k == 3) {
+            uint8_t p[16] = {0};
+            live_put32(p, 1);
+            live_put16(p + 6, 1);
+            live_put16(p + 8, 1); /* says 1 name byte, sends 4 */
+            cl_send(c->fd, LIVE_T_RSX_FRAME_REQ, 0, p, 16);
+        }
+        CHECK(cl_wait_closed(c, 2000) && c->rsxf_acks == 0);
+        CHECK(drops(LIVE_DROP_PROTOCOL) == ++expected);
+        cl_free(c);
+    }
+    CHECK(atomic_load(&g_rf.requests) == 0);
+    w_close();
+    CHECK(live_agent_stop(&g_agent, 0, 1000000) == LIVE_OK);
+}
+
 /* Every malformed command closes the link (a protocol drop), and nothing reaches the source. */
 static void malformed_one(uint16_t port, uint32_t type, const uint8_t *p, uint32_t len, int header_only)
 {
@@ -1356,6 +1538,9 @@ static const struct named cases[] = {
     {"cmd-overlap", case_cmd_overlap},
     {"cmd-peer-close-cancels", case_cmd_peer_close_cancels},
     {"cmd-bad-source", case_cmd_bad_source},
+    {"rsxf-round-trip", case_rsxf_round_trip},
+    {"rsxf-unavailable-and-v2", case_rsxf_unavailable_and_v2},
+    {"rsxf-malformed", case_rsxf_malformed},
 };
 
 int main(int argc, char **argv)

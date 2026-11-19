@@ -99,7 +99,7 @@ RING_MUTANTS.update({
 # checked on the capture after a clean run, not by an assertion of the application
 CAPTURE_MUTANTS=('seal-ignores-held',)
 RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5,'ringflip':6,
-              'ringsegment':7}
+              'ringsegment':7,'ringrsxf':8,'ringfixturetoday':3}
 RING_WRAP=('ringwrap',*RING_RUNTIME)
 # The build-option ring constant (PS3_PROF_AUTO_RING): auto-ring-option-test.c modes. ringofftoday is ringoptoff
 # built without the ring compiled in (the archive before the ring shipped), whose CONFIG ringoptoff must match.
@@ -108,7 +108,7 @@ ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
 ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','stopvisitseal','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
-                                  'ringsegment',*RING_OPTION],default='noinit')
+                                  'ringsegment','ringrsxf','ringfixturetoday',*RING_OPTION],default='noinit')
 ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
 ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
 ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','ignore-global-stop','foreign-config-claim','sealed-config-claim','no-frame-boundary','clock-put',
@@ -220,7 +220,7 @@ flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-Wno-prio-ctor-dtor','
        '-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-DPS3DK_PROF_WITH_SPU',
        '-DPS3DK_PROF_WITH_PROFILE','-DPS3DK_PROF_WITH_FIFO','-DPS3DK_PROF_WITH_AUTO',
        '-I'+str(inc.parent),'-I'+str(root/'sdk/libgcm_cmd/src')]
-for directory in ('core','pal','spu','rsx','fifo','auto_rsx'):flags+=['-I'+str(src/directory)]
+for directory in ('core','pal','spu','rsx','fifo','auto_rsx','rsx_frame'):flags+=['-I'+str(src/directory)]
 if a.case!='noinit':flags+=['-DPS3DK_PROF_TEST_HOOKS']
 if operations or a.case in ('stop','stopvisit','stopvisitseal'):
     flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'stopvisitseal':0,'frames':0}[a.case])]
@@ -286,7 +286,8 @@ sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_h
          'auto_rsx/auto_runtime.c','auto_rsx/auto_startup.c','auto_rsx/auto_config.c',
          'auto_rsx/auto_wire.c','auto_rsx/auto_writer.c','auto_rsx/auto_queue.c',
          'auto_rsx/auto_commands.c','auto_rsx/auto_completion.c','auto_rsx/auto_frames.c','auto_rsx/auto_clock.c',
-         'auto_rsx/auto_ring.c','auto_rsx/auto_ring_commands.c','auto_rsx/auto_ring_layout.c']
+         'auto_rsx/auto_ring.c','auto_rsx/auto_ring_commands.c','auto_rsx/auto_ring_layout.c',
+         'rsx_frame/rsxf_runtime.c','rsx_frame/rsxf_wire.c','rsx_frame/rsxf_decode.c']
 objects=[]
 for rel in sources:
     source=src/rel;obj=out/(source.stem+'.o')
@@ -314,6 +315,17 @@ for rel in sources:
                 !pal_owner_is_self(&a->owner))'''
         assert code.count(old)==1
         source=out/'gpu_runtime.c';source.write_bytes(code.replace(old,'else if(0)').encode())
+    elif a.case=='ringfixturetoday' and rel in ('auto_rsx/auto_runtime.c','core/prof_drain.c'):
+        # the runtime before RSX frame capture: no capture hook runs, no file flag (the dormant build must match it)
+        code=source.read_text()
+        if rel=='core/prof_drain.c':
+            old='        if (ps3dk_prof__rsxf_selected())\n            head[13] |= 4;'
+            new='        (void)0;'
+        else:
+            old='#define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)'
+            new='#define RSXF_ON() 0'
+        assert code.count(old)==1,rel
+        source=out/source.name;source.write_bytes(code.replace(old,new).encode())
     elif a.mutant=='retired-owner' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='if(!capture->owner_declared) {';assert code.count(old)==1
         source=out/'auto_runtime.c'
@@ -619,10 +631,11 @@ if a.case in RING_RUNTIME:
             'ringstop':b'AUTO ring producer-only stop drains the sealed blocks PASS',
             'ringlabel':b'AUTO ring stopped with held extents PASS',
             'ringflip':b'AUTO ring flip CALL into the reserved prefix PASS',
-            'ringsegment':b'AUTO ring CALL into an application segment refused PASS'}[a.case]
+            'ringsegment':b'AUTO ring CALL into an application segment refused PASS',
+            'ringrsxf':b'RSX frame capture runtime PASS','ringfixturetoday':b'AUTO ring fixture PASS'}[a.case]
     assert result.stdout.endswith(passed+bytes([10])),result.stdout
     print(result.stdout.decode(),end='')
-    if a.case in ('ringrun','ringfixture','ringstop','ringlabel','ringflip'):
+    if a.case in ('ringrun','ringfixture','ringfixturetoday','ringstop','ringlabel','ringflip'):
         import importlib.util
         spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
         check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
@@ -662,6 +675,63 @@ if a.case in RING_RUNTIME:
                 assert 'ring decoder rejected header 0x00042000 at +%#x: ' % at in text,text
             print('reader exit 0: '+next(l for l in text.splitlines() if 'FINAL' in l))
         if a.case in ('ringfixture','ringstop') and a.fixture:shutil.copyfile(files[0],a.fixture)
+        if a.case in ('ringfixture','ringfixturetoday'):
+            # not selected: no file flag bit 10 and no chunk 44..48 (the capture code is dormant)
+            assert not (int.from_bytes(data[12:16],'little')&1024),'bit 10 set without PS3_PROF_RSX_FRAME'
+            assert not [k for k,_ in check.chunks(data) if 44<=k<=48],'RSXF chunks without PS3_PROF_RSX_FRAME'
+            (out/'capture.prof').write_bytes(data)
+        if a.case=='ringfixture' and not a.mutant:
+            # Byte-level: the same program built with the capture hooks compiled out (the runtime before them), run
+            # twice. Its two runs must match outside the masked run-dependent fields (auto_capture_bytes.py lists
+            # them; the mask is honest when the two runs of ONE build differ only there), and this dormant capture
+            # must match it the same way.
+            spec=importlib.util.spec_from_file_location('capture_bytes',Path(__file__).with_name('auto_capture_bytes.py'))
+            cmp=importlib.util.module_from_spec(spec);spec.loader.exec_module(cmp)
+            runs=[]
+            for k in (1,2):
+                today=out/('today%d'%k)
+                argv=['python3',__file__,'--case','ringfixturetoday','--out',today]+(['--sanitize',a.sanitize] if a.sanitize else [])
+                run('ringfixturetoday%d'%k,argv)
+                runs.append((today/'capture.prof').read_bytes())
+            problems,masked=cmp.compare(runs[0],runs[1])
+            assert not problems and masked>0,('two runs of the build without the hooks',problems,masked)
+            print('two runs of the build without the capture hooks: equal outside the mask (%d masked bytes differ)' % masked)
+            problems,masked=cmp.compare(runs[0],data)
+            assert not problems,('dormant capture against the build without the hooks',problems)
+            print('dormant capture equals the build without the capture hooks outside the mask (%d masked bytes differ)' % masked)
+    if a.case=='ringrsxf':
+        files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
+        data=files[0].read_bytes()
+        assert int.from_bytes(data[12:16],'little')&1024,'bit 10 not set'
+        assert a.reader,'ringrsxf needs --reader'
+        r=run('reader-rsxf',[a.reader,'rsx-frame','--json',files[0]],capture_dir)
+        v=json.loads(r.stdout)
+        caps=v['captures'];assert v['availability']=='available' and len(caps)==2,v
+        def fnv(b):
+            h=0xcbf29ce484222325
+            for x in b:h=((h^x)*0x100000001b3)&0xffffffffffffffff
+            return h
+        vp=b'ps3dk.rsxf.vp1'+b''.join((0x10000000+(i<<8)|(1 if i==11 else 0)).to_bytes(4,'big') for i in range(12))
+        fp=b'ps3dk.rsxf.fp1'+bytes([0x3e,0x80,0,0,0xc8,2,0,0,0xc8,0,0,0,0xc8,0,0,0,0x3e,0x81,0,0,0xc8,0,0,0,0xc8,0,0,0,0xc8,0,0,0])
+        c=caps[0]
+        assert (c['name'],c['source'],c['status'])==('first','app','COMPLETE'),c['status']
+        progs={p['profile']:p for p in c['programs']}
+        assert progs['vp']['hash']=='%016x'%fnv(vp) and progs['vp']['instructions']==3,progs
+        assert progs['fp']['hash']=='%016x'%fnv(fp) and progs['fp']['const_blocks']==1 and progs['fp']['source']=='program container at bind',progs
+        d=c['draws'];assert len(d)==22,len(d)
+        for k in range(10):
+            x=d[k]
+            assert (x['kind'],x['primitive'],x['count'],x['label'],x['hooked'],x['decoded'],x['mismatch'])==('ARRAY','TRIANGLES',36,'terrain/rock',True,True,False),x
+            assert x['timing']['state']=='timed' and x['vp']==progs['vp']['index'] and x['fp']==progs['fp']['index'] and x['caller']==0x1234,x
+        for k in range(10,20):
+            x=d[k];assert (x['kind'],x['label'],x['hooked'],x['decoded'],x['timing']['state'])==('CLEAR','terrain/water',True,True,'timed'),x
+        for k in (20,21):
+            x=d[k];assert (x['kind'],x['primitive'],x['count'],x['first'],x['hooked'],x['decoded'])==('ARRAY','LINE_STRIP',6,7,False,True),x
+            assert x['timing']['state']=='untimed' and x['timing']['reason'].startswith('not hooked'),x
+        c=caps[1]
+        assert c['status'].startswith('TRUNCATED') and c['end']['draws_seen']==200 and 0<c['end']['draws_recorded']<200,c['end']
+        assert all(x['timing']['state']=='timed' for x in c['draws']),'every recorded draw of the truncated capture is timed'
+        print('reader: capture 1 %d draws COMPLETE; capture 2 %s, %d of 200 recorded' % (len(d),c['status'],c['end']['draws_recorded']))
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else
