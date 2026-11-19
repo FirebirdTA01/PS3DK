@@ -493,7 +493,7 @@ values.
 -DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_AUTO_RING_MB=1 -DPS3_PROF_AUTO_RING_RECORDS=4096 -DPS3_PROF_RSX_FRAME=ON
 ```
 
-- Cost: the ring (2 MiB at the sizes above); about 48 KiB of decoder and program state from AUTO attach (none
+- Cost: the ring (2 MiB at the sizes above); about 52 KiB of decoder and program state from AUTO attach (none
   without the ring); while a capture is being written, the two staging blocks (512 KiB at the default), freed when it
   is written; one pass of the profiler over the owner's command words, at each covered draw and at wraps and flushes;
   at each fragment-program bind on the owner, a hash of the program the first time it is bound and a table lookup
@@ -1030,9 +1030,12 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
 - AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
 - RSX frame capture (beta): one capture at a time; no render state, textures, buffers or constants yet; draws inside
   CALL segments are timed by AUTO but not listed; a fragment program bound without a program container is recorded by
-  address only. A program is hashed when it is bound; a container rewritten in place with the same address, size and
-  sampled bytes (its first, middle and last 16) keeps the hash of its earlier bind. A draw whose AUTO operation is of
-  another kind or frame is listed as a timing mismatch and left out of every total. Times are reached-marker
+  address only. A program is hashed when it is bound: every bind while a capture is armed hashes all its
+  instruction bytes. A program bound before the capture keeps the identity of that bind and is shown as "bound before
+  capture, not revalidated" (an in-place rewrite since then would not be seen); one whose sampled bytes (first, middle
+  and last 16) changed between two binds outside a capture has no identity. A draw whose AUTO operation is of
+  another kind or frame, or whose hooked call and decoded words disagree, is listed as a timing mismatch and left out
+  of every total. Times are reached-marker
   intervals (they include queued work and overlap neighbours).
 - `quick_exit` makes one best-effort drain of PPU zones and frames only (no trailer, no extension data).
 - SPU durations are decrementer ticks, not wall time; SPU zones in SPURS jobs are untested.

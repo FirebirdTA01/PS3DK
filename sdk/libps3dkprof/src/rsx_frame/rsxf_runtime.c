@@ -34,11 +34,12 @@ enum { B_FREE = 0, B_FILLING = 1, B_SEALED = 2 };
 #define F_DRAINER_OUT 0x800ull /* the sealing drainer is done with the blocks */
 #define WORD(st, flags, e) RSXCAP_WORD((st), (flags), (e), 0, 0)
 
-/* The FP program bound at an offset: hashed in the bind call, never read again. */
-typedef struct bind { uint32_t offset, valid; rsxf_hash h; } bind;
-/* Containers hashed before, by (ucode, offset, size) and sampled bytes: a rebind costs a lookup, not a hash. */
+/* The FP program bound at an offset: hashed in the bind call, never read again. flags: RSXF_PF_NOT_REVALIDATED (bound
+ * before the capture was armed) and RSXF_PF_UNREADABLE (identity unavailable). */
+typedef struct bind { uint32_t offset, valid, flags, armed_seq; rsxf_hash h; } bind;
+/* Containers hashed before, by (ucode, offset, size) and sampled bytes: a rebind outside a capture costs a lookup. */
 typedef struct fp_cached { const void *ucode; uint32_t offset, bytes; uint8_t sample[FP_SAMPLE]; rsxf_hash h; } fp_cached;
-typedef struct program { uint64_t hash, key; uint32_t index, profile; } program;
+typedef struct program { uint64_t hash, key; uint32_t index, profile, flags; } program;
 typedef struct label { uint64_t hash; uint32_t index, n; char text[RSXF_TEXT_MAX]; } label;
 typedef struct block {
     uint8_t *base;
@@ -69,7 +70,7 @@ typedef struct rsxf_state {
     char name[RSXF_NAME_MAX];
     block blocks[BLOCKS_MAX];
     /* owner while ARMED */
-    uint32_t armed, window_waits, window_asked, cur, next_seq;
+    uint32_t armed, arm_seq, window_waits, window_asked, cur, next_seq;
     uint64_t frame, words_at_arm;
     uint32_t draws_seen, hooked, decoded_only, mismatches, untimed, truncated_at, labels_refused, programs_refused;
     uint32_t nprograms, nlabels, lost_at_arm;
@@ -294,11 +295,11 @@ static int owner_stopped(rsxf_state *s)
 
 /* ---- identities (owner, armed) ---------------------------------------------------------------------------------- */
 
-static program *find_program(rsxf_state *s, uint32_t profile, uint64_t hash, uint64_t key)
+static program *find_program(rsxf_state *s, uint32_t profile, uint64_t hash, uint64_t key, uint32_t flags)
 {
     for (uint32_t i = 0; i < s->nprograms; i++) {
         program *p = &s->programs[i];
-        if (p->profile == profile && (hash ? p->hash == hash : (!p->hash && p->key == key)))
+        if (p->profile == profile && p->flags == flags && (hash ? p->hash == hash : (!p->hash && p->key == key)))
             return p;
     }
     return NULL;
@@ -310,7 +311,7 @@ static uint32_t program_index(rsxf_state *s, uint8_t *unit, uint32_t *len, uint3
                               uint32_t ordinal)
 {
     uint64_t hash = (flags & RSXF_PF_UNREADABLE) ? 0 : h->hash;
-    program *p = find_program(s, profile, hash, key);
+    program *p = find_program(s, profile, hash, key, flags);
     rsxf_wire_program w;
     if (p)
         return p->index;
@@ -338,6 +339,7 @@ static uint32_t program_index(rsxf_state *s, uint8_t *unit, uint32_t *len, uint3
     p->key = key;
     p->index = w.index;
     p->profile = profile;
+    p->flags = flags;
     return w.index;
 }
 
@@ -392,7 +394,9 @@ static uint32_t fp_identity(rsxf_state *s, uint8_t *unit, uint32_t *len, uint32_
     off = fp_offset(d->fp_address);
     b = &s->binds[(off >> 6) % BIND_SLOTS];
     if (b->valid && fp_offset(b->offset) == off) {
-        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, 0,
+        /* a bind before this capture was armed: its identity is not revalidated against the bytes bound now */
+        uint32_t f = b->flags | (b->armed_seq != s->arm_seq ? RSXF_PF_NOT_REVALIDATED : 0u);
+        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, f,
                                     d->fp_address, off, ordinal);
     } else {
         memset(&h, 0, sizeof h);
@@ -673,8 +677,11 @@ static void fp_sample(const uint8_t *u, uint32_t bytes, uint8_t out[FP_SAMPLE])
 }
 
 /* The program container's ucode bound at `offset` (owner, inside the application's bind call): hashed here, so the
- * capture never reads application memory later (a container freed or reused after its bind cannot be misread). A
- * container bound before with the same address, offset and size whose sampled bytes still match reuses its hash. */
+ * capture never reads application memory later (a container freed or reused after its bind cannot be misread).
+ * While a capture is armed every bind hashes every instruction byte (exact identity). Outside a capture a container
+ * bound before with the same address, offset and size whose sampled bytes still match reuses its hash; one whose
+ * sampled bytes differ is identity unavailable (no hash outside a capture for a rewritten container). Either way a
+ * draw of the captured frame that uses a bind from before arming carries RSXF_PF_NOT_REVALIDATED. */
 void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
 void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset)
 {
@@ -682,12 +689,19 @@ void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_
     uint8_t sample[FP_SAMPLE];
     fp_cached *c;
     bind *b;
+    uint32_t flags = 0;
+    int same;
     if (!s || !ucode || !bytes)
         return;
+    rsxf_scan(ctx); /* the draws before this bind keep the program bound before it */
     fp_sample(ucode, bytes, sample);
     c = &s->fpc[((uintptr_t)ucode >> 4 ^ (uintptr_t)(offset >> 6) ^ bytes) % FP_CACHE];
-    if (c->ucode == ucode && c->offset == offset && c->bytes == bytes && !memcmp(c->sample, sample, FP_SAMPLE)) {
+    same = c->ucode == ucode && c->offset == offset && c->bytes == bytes;
+    if (!s->armed && same && !memcmp(c->sample, sample, FP_SAMPLE)) {
         s->fp_reused++;
+    } else if (!s->armed && same) {
+        flags = RSXF_PF_UNREADABLE; /* rewritten in place outside a capture: never the old identity */
+        c->ucode = NULL;
     } else {
         ps3dk_prof__rsxf_fp_hash(ucode, bytes, &c->h);
         c->ucode = ucode;
@@ -699,6 +713,8 @@ void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_
     b = &s->binds[(fp_offset(offset) >> 6) % BIND_SLOTS];
     b->offset = offset;
     b->h = c->h;
+    b->flags = flags;
+    b->armed_seq = s->armed ? s->arm_seq : 0u;
     b->valid = 1;
     if (s->fp_cached && fp_offset(s->fp_addr) == fp_offset(offset))
         s->fp_cached = 0; /* the same address may now hold another program */
@@ -859,6 +875,8 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
         owner_leave(s); /* shutdown added STOP while arming */
         return;
     }
+    if (!++s->arm_seq)
+        s->arm_seq = 1; /* 0 marks a bind made outside every capture */
     s->armed = 1;
 }
 

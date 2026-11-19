@@ -259,6 +259,9 @@ pub struct Program {
     pub source: ProgramSource,
     pub unterminated: bool,
     pub unreadable: bool,
+    /// The identity comes from a bind made before the capture was armed: the container may have been rewritten in
+    /// place since, so it is shown as "bound before capture, not revalidated" (a bind while armed is exact).
+    pub not_revalidated: bool,
     pub instructions: u32,
     /// Canonical hash (format 12.6); 0 when unreadable.
     pub hash: u64,
@@ -358,7 +361,7 @@ pub struct Reader {
     open: bool,
     retained: u64,
     last_ordinal: Option<u32>,
-    by_hash: BTreeMap<(Profile, u64), u32>,
+    by_hash: BTreeMap<(Profile, u64, bool), u32>,
     named: Vec<bool>,
 }
 
@@ -678,16 +681,17 @@ impl Reader {
                         v => return bad(format!("program {index}: source {v}")),
                     };
                     let unreadable = flags & 2 != 0;
-                    if flags & !3 != 0 || r != 0 || unreadable != (hash == 0)
+                    let not_revalidated = flags & 4 != 0;
+                    if flags & !7 != 0 || r != 0 || unreadable != (hash == 0)
                         || (profile == Profile::Vertex && const_blocks != 0)
                     {
                         return bad(format!("program {index}: flags {flags:#x} hash {hash:#x}"));
                     }
-                    if !unreadable && self.by_hash.insert((profile, hash), index).is_some() {
+                    if !unreadable && self.by_hash.insert((profile, hash, not_revalidated), index).is_some() {
                         return bad(format!("program {index}: {} defined twice", profile.short()));
                     }
                     rec.programs.push(Program {
-                        index, profile, source, unterminated: flags & 1 != 0, unreadable, instructions, hash,
+                        index, profile, source, unterminated: flags & 1 != 0, unreadable, not_revalidated, instructions, hash,
                         ucode_bytes, const_blocks, address, first_draw, name: None,
                     });
                     self.named.push(false);
@@ -1098,6 +1102,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
     let mut last_end: Option<u64> = None;
     for d in &c.draws {
         let mut op_mismatch = false;
+        let flagged = d.flags & DF_MISMATCH != 0;
         let timing = if d.op_id == 0 {
             Timing::Untimed(d.untimed)
         } else {
@@ -1108,6 +1113,9 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
                     if op_mismatch {
                         // the op is not this draw's (another kind or frame): its interval is not the draw's time
                         Timing::Invalid("AUTO operation of another kind or frame")
+                    } else if flagged {
+                        // the runtime saw the hooked call and the decoded words disagree: not this draw's time either
+                        Timing::Invalid("hooked call and decoded draw disagree")
                     } else {
                         match op_interval(o) {
                             Ok((rb, re)) => Timing::Timed { raw_begin: rb, raw_end: re },
@@ -1137,7 +1145,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
                     .map(|(i, _)| i);
             }
             Timing::Missing => totals.missing += 1,
-            _ if op_mismatch => totals.mismatched += 1,
+            _ if op_mismatch || flagged => totals.mismatched += 1,
             _ => totals.untimed += 1,
         }
         if let Some(i) = pass {
@@ -1298,10 +1306,11 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
                 p.raw_end - p.raw_begin, p.draws)?;
         }
         for p in &f.programs {
-            writeln!(out, "  program {} {}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}",
+            writeln!(out, "  program {} {}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}{}",
                 p.index, p.id_text(), p.name.as_ref().map_or_else(String::new, |n| format!(" \"{n}\"")), p.instructions,
                 p.ucode_bytes, p.const_blocks, p.source.name(), p.address, p.first_draw,
-                if p.unterminated { ", UNTERMINATED" } else { "" })?;
+                if p.unterminated { ", UNTERMINATED" } else { "" },
+                if p.not_revalidated { ", bound before capture, not revalidated" } else { "" })?;
         }
         if let Some(k) = draw {
             match f.draws.iter().find(|d| d.raw.ordinal == k) {
@@ -1357,7 +1366,7 @@ fn program_json(p: &Program) -> Value {
     json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
         "name": p.name, "source": p.source.name(), "instructions": p.instructions, "ucode_bytes": p.ucode_bytes,
         "const_blocks": p.const_blocks, "address": p.address, "first_draw": p.first_draw,
-        "unterminated": p.unterminated, "unreadable": p.unreadable})
+        "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated})
 }
 
 fn timing_json(t: &Timing) -> Value {

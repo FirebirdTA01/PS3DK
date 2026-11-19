@@ -39,9 +39,9 @@ MUTANTS = {
         ('static uint32_t fp_offset(uint32_t v) { return v & 0x1ffffffcu; }\n',
          'static uint32_t fp_offset(uint32_t v) { return v & 0x1ffffffcu; }\n'
          'static const void *mut_ucode;\nstatic uint32_t mut_bytes;\n'),
-        ('        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, 0,',
+        ('        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, f,',
          '        ps3dk_prof__rsxf_fp_hash(mut_ucode, mut_bytes, (rsxf_hash *)&b->h);\n'
-         '        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, 0,'),
+         '        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, f,'),
         ('    b->valid = 1;\n', '    b->valid = 1;\n    mut_ucode = ucode;\n    mut_bytes = bytes;\n')],
 }
 
@@ -132,6 +132,11 @@ def main():
                     break
         assert killed, f'mutant {m} survived {a.mutant_rounds} rounds under both sanitizers'
         print(f'mutant {m}: KILLED ({", ".join(killed)})')
+    for name in ('thread', 'address', 'bench'):
+        pre = ['setarch', 'x86_64', '-R'] if name == 'thread' else []
+        r = run([*pre, exes[name], 'identity'], out, f'identity-{name}', env)
+        assert b'FP identity across binds PASS' in r.stdout, r.stdout
+    print(r.stdout.decode().strip())
     r = run([exes['bench'], 'bench'], out, 'bench')
     print(r.stdout.decode().strip())
     print(f'RSX frame capture shutdown races PASS ({a.rounds} rounds x TSan and ASan+UBSan; '
