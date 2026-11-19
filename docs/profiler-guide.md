@@ -493,8 +493,10 @@ One requested frame of the AUTO owner: every draw and clear of its command buffe
 time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
 used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
 tag, an app label (5.7), the AUTO range it ran in (inline-array, inline-index and immediate draws through the SDK's
-safe writers are timed too while the capture is selected; draws written by `Unsafe` or raw writers are listed with
-the reason they are untimed), and the render state, texture slots, vertex attributes, index
+safe writers are timed too while the capture is selected, as AUTO operations of the ARRAY kind (inline array,
+immediate) or the INDEX kind (inline index): with the capture selected, AUTO's per-kind counts, coverage rows and
+`ps3dk-prof auto` totals include them; the capture shows their own kind; draws written by `Unsafe` or raw writers are
+listed with the reason they are untimed), and the render state, texture slots, vertex attributes, index
 stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader), its VP
 constants and FP embedded constants by uniform name, and the instance runs (consecutive draws identical except their
 constants). The captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This
