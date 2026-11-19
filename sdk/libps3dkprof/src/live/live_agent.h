@@ -78,6 +78,19 @@ typedef struct live_cmd_ops {
 /* Where the capture is and how to know it is finished. finalization returns
  * NULL until the winning shutdown has published its record (the runtime's
  * ps3dk_prof__finalization); the host tests inject one. */
+/* RSX frame capture (protocol v3), served by the runtime when it selected the capture: request returns 0 with *id
+ * or a PS3DK_PROF_* refusal at once; status fills the latest capture's progress (state 0: none); available is 1
+ * when requests can be served (advertised as LIVE_CAP_RSX_FRAME). Called on the agent thread only. */
+typedef struct live_rsxf_status {
+    uint32_t id, request, state, reason, draws;
+    uint64_t frame, bytes;
+} live_rsxf_status;
+typedef struct live_rsxf_ops {
+    int (*request)(uint32_t request_id, uint32_t flags, const char *name, uint32_t name_len, uint32_t *id);
+    void (*status)(live_rsxf_status *out);
+    int (*available)(void);
+} live_rsxf_ops;
+
 typedef struct live_source {
     const char *path;          /* 1..1023 bytes */
     uint64_t session_id;
@@ -88,6 +101,7 @@ typedef struct live_source {
     const struct ps3dk_prof_finalization *(*finalization)(void *ctx);
     void *ctx;
     const live_cmd_ops *cmd;   /* optional: capture commands (protocol v2); kept valid like ctx */
+    const live_rsxf_ops *rsxf; /* optional: RSX frame capture (protocol v3) */
 } live_source;
 
 /* Why a viewer connection ended. */
@@ -125,6 +139,10 @@ typedef struct live_conn {
     /* An ACK waiting for the output buffer. */
     int ack_ready;
     uint8_t ack[LIVE_ACK_BYTES];
+    /* RSX frame capture (v3): an ACK waiting, the accepted capture this link follows and the last state sent */
+    int rsxf_ack_ready;
+    uint8_t rsxf_ack[LIVE_RSXF_ACK_BYTES];
+    uint32_t rsxf_id, rsxf_sent_state;
     live_out out;
     uint32_t pongs_pending;
     uint64_t sent;            /* DATA bytes queued so far (== next offset) */
@@ -146,6 +164,7 @@ typedef struct live_agent {
     const struct ps3dk_prof_finalization *(*finalization)(void *ctx);
     void *ctx;
     const live_cmd_ops *cmd;
+    const live_rsxf_ops *rsxf;
     int listen_fd;
     uint16_t bound_port;
     live_conn conn;
