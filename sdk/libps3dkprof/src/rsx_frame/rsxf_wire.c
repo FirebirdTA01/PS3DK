@@ -12,11 +12,12 @@ size_t ps3dk_prof__rsxf_put_config(uint8_t *o, size_t cap, const rsxf_wire_confi
 {
     if (!o || !c || cap < RSXF_CONFIG_BYTES || c->availability > RSXF_NO_DECODER || c->block_bytes < 4096u ||
         c->block_bytes > 1048576u || (c->block_bytes & 7u) || !c->blocks || c->blocks > 16u || !c->programs ||
-        c->programs > 65535u || !c->labels || c->labels > 65535u || !c->label_bytes || c->label_bytes > 255u)
+        c->programs > 65535u || !c->labels || c->labels > 65535u || !c->label_bytes || c->label_bytes > 255u ||
+        c->fp_bytes_cap > (16u << 20))
         return 0;
     memset(o, 0, RSXF_CONFIG_BYTES);
     le16(o, 1); le32(o + 4, RSXF_DECODER); le32(o + 8, c->availability); le32(o + 12, c->block_bytes); le32(o + 16, c->blocks);
-    le32(o + 20, c->programs); le32(o + 24, c->labels); le32(o + 28, c->label_bytes);
+    le32(o + 20, c->programs); le32(o + 24, c->labels); le32(o + 28, c->label_bytes); le32(o + 32, c->fp_bytes_cap);
     return RSXF_CONFIG_BYTES;
 }
 
@@ -24,7 +25,9 @@ size_t ps3dk_prof__rsxf_put_begin(uint8_t *o, size_t cap, const rsxf_wire_begin 
 {
     size_t n;
     if (!o || !b || !b->id || b->name_len > RSXF_NAME_MAX || (b->name_len && !b->name) || b->source < 1 ||
-        b->source > 2 || (b->flags & ~3u) || (b->known & ~3u) || ((b->source == 1) != (b->request != 0)))
+        b->source > 2 || (b->flags & ~(uint32_t)RSXF_REQ_ALL) ||
+        ((b->flags & RSXF_REQ_ISOLATED) && (b->flags & RSXF_REQ_BOTH)) || (b->known & ~3u) ||
+        ((b->source == 1) != (b->request != 0)))
         return 0;
     n = RSXF_BEGIN_FIXED + pad8(b->name_len);
     if (cap < n)
@@ -181,7 +184,7 @@ size_t ps3dk_prof__rsxf_put_end(uint8_t *o, size_t cap, const rsxf_wire_end *e)
     le64(o + 72, e->tb_end); le64(o + 80, e->decoder_words); le32(o + 88, e->reject_header);
     le32(o + 92, e->reject_reason); le32(o + 96, e->lost_events); le32(o + 100, e->baseline_registers);
     le32(o + 104, e->vpconst_records); le32(o + 108, e->fpconst_records); le32(o + 112, e->untimed);
-    le32(o + 116, e->state_records); le32(o + 120, e->uniform_records);
+    le32(o + 116, e->state_records); le32(o + 120, e->uniform_records); le32(o + 124, e->ucode_records);
     return RSXF_END_BYTES;
 }
 

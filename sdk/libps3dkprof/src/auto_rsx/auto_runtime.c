@@ -797,6 +797,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.ring_ordinal=(uint16_t)t.pair;e->op.ring_local=(uint16_t)t.local;
     a->active=e;g_tls.in_gpu=1;
     e->op.tb_before=observation_tb();
+    if(a->iso_active) isolate(ctx);
     segment_report(ctx,e->op.report_begin);
     a->expected_end=(uintptr_t)(void *)ctx->current+words*4u;
     return e->op.serial_end;
@@ -808,10 +809,13 @@ static void ring_end(auto_capture *a, auto_queue_entry *e, uint32_t ticket)
     uintptr_t current=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
     const uint32_t slot=e->op.ring_slot;
     int complete;
-    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<8) {
+    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<8u+4u*a->iso_active) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
-    } else segment_report(ctx,e->op.report_end);
+    } else {
+        if(a->iso_active) isolate(ctx);
+        segment_report(ctx,e->op.report_end);
+    }
     e->op.tb_after=observation_tb();
     if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
     complete=!(e->op.flags&4);
@@ -1474,6 +1478,18 @@ static void late_row(auto_capture *a)
     }
 }
 
+/* ISOLATED RSX frame capture: a WAIT_FOR_IDLE (two words) before each marker of every covered draw of the captured
+ * frame, so the draw starts on an idle RSX and its end report waits for its own work. Room for both is checked with the
+ * draw's; nothing is written outside an isolated capture. */
+static uint32_t isolate_words(void) { return RSXF_ON() && rsxf_isolated() ? 4u : 0u; }
+static void isolate(gpp_ctx *ctx)
+{
+    uint32_t *w=(uint32_t *)(void *)ctx->current;
+    w[0]=(1u<<18)|0x110u;               /* WAIT_FOR_IDLE, one word */
+    w[1]=0;
+    ctx->current=(void *)(w+2);
+}
+
 static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller);
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
 {
@@ -1532,8 +1548,9 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
         if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
         words=auto_command_words(call);
         if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
+        a->iso_active=isolate_words();
         if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
-                             (uintptr_t)(void *)ctx->end,words)) {
+                             (uintptr_t)(void *)ctx->end,words+a->iso_active)) {
             (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
         }
         return ring_begin(a,ctx,call,caller,words);
@@ -1542,8 +1559,9 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
     if(a->pool_tail_column) { (void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0; }
     words=auto_command_words(call);
     if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
+    a->iso_active=isolate_words();
     if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
-                         (uintptr_t)(void *)ctx->end,words)) {
+                         (uintptr_t)(void *)ctx->end,words+a->iso_active)) {
         (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
     }
     c=auto_config_read(&configuration);
@@ -1574,6 +1592,7 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
     a->operations_device.sync(a->operations_device.ctx);
     a->active=e;g_tls.in_gpu=1;
     e->op.tb_before=observation_tb();
+    if(a->iso_active) isolate(ctx);
     a->expected_end=(uintptr_t)(void *)ctx->current+(words+6)*4;
     /* The complete app+markers room check above excludes callbacks. The end
      * verifies the actual application's advancement before issuing its marker. */
@@ -1615,7 +1634,8 @@ static void auto_end(struct _gcmCtxData *context,uint32_t ticket)
 #endif
     c=auto_config_read(&configuration);
     uintptr_t current=(uintptr_t)(void *)a->context->current,end=(uintptr_t)(void *)a->context->end;
-    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<24 ||
+    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<24u+4u*a->iso_active ||
+       (a->iso_active && (isolate(a->context),0)) ||
        a->operations_device.reserve_pair(a->operations_device.ctx,e->op.report_end,c->op_label,e->op.serial_end)!=0) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);

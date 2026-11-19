@@ -34,6 +34,23 @@
 #if TEST_RING_MODE==8
 #include "rsxf.h"
 PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(4u, 2u));
+/* The words one covered draw wrote, [from, to): every WAIT_FOR_IDLE packet (*wfi) and those directly followed by a
+ * timestamp report packet (the return value: a WAIT_FOR_IDLE before a marker). Packets are walked by their counts. */
+static uint32_t wfi_before_markers(const uint32_t *from, const uint32_t *to, uint32_t *wfi)
+{
+    uint32_t before = 0;
+    *wfi = 0;
+    for (const uint32_t *p = from; p < to;) {
+        uint32_t h = *p, count = (h >> 18) & 2047u;
+        if (h == ((1u << 18) | 0x110u)) {
+            (*wfi)++;
+            if (p + 2 < to && p[2] == ((1u << 18) | 0x1800u))
+                before++;
+        }
+        p += 1u + count; /* a zero (NOP padding) word is one word */
+    }
+    return before;
+}
 #endif
 
 #ifndef TEST_RING_MODE
@@ -524,7 +541,8 @@ int main(void)
         ps3dk_prof__rsxf_fp_bind((void *)&context,fp_ucode,sizeof fp_ucode,0x2000u);
         ps3dk_prof_frame();
         draw();
-        assert(ps3dk_prof_rsx_frame_capture("bad",1u)==PS3DK_PROF_EINVAL);
+        assert(ps3dk_prof_rsx_frame_capture("bad",8u)==PS3DK_PROF_EINVAL);   /* an unknown flag */
+        assert(ps3dk_prof_rsx_frame_capture("bad",5u)==PS3DK_PROF_EINVAL);   /* ISOLATED with BOTH */
         id=ps3dk_prof_rsx_frame_capture("first",0u);
         assert(id>0);
         assert(ps3dk_prof_rsx_frame_capture("again",0u)==PS3DK_PROF_EBUSY);
@@ -566,7 +584,15 @@ int main(void)
         ps3dk_prof_frame();
         ops->status(&st);
         assert(st.id==lid && st.state==1u && st.frame);
-        for(uint32_t i=0;i<200;i++) draw();
+        for(uint32_t i=0;i<200;i++) {
+            /* a pipelined capture: no WAIT_FOR_IDLE anywhere in a draw's words */
+            uint32_t wfi,*from;
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            (void)wfi_before_markers(from,context.current,&wfi);
+            assert(wfi==0);
+        }
         ps3dk_prof_frame();
         ops->status(&st);
         assert(st.id==lid && st.state==2u && st.reason==RSXF_R_STAGING && st.draws==200u);
@@ -576,9 +602,32 @@ int main(void)
         assert(st.state==3u);
         printf("capture %u: truncated, %u draws seen\n",lid,st.draws);
         /* an app request after it leaves the live link's final state in place (nothing written: never armed) */
-        assert(ps3dk_prof_rsx_frame_capture("third",0u)==(int)lid+1);
+        assert(ps3dk_prof_rsx_frame_capture("third",PS3DK_PROF_RSX_FRAME_ISOLATED)==(int)lid+1);
         ops->status(&st);
         assert(st.id==lid && st.state==3u);
+        /* the ISOLATED capture: armed at the next boundary, each draw's markers behind WAIT_FOR_IDLE (room for the
+         * four extra words kept in the extent like the draw's own) */
+        ps3dk_prof_frame();
+        for(uint32_t i=0;i<10;i++) {
+            uint32_t wfi,*from;
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            /* exactly two WAIT_FOR_IDLE packets, each right before one of the draw's two timestamp reports */
+            assert(wfi_before_markers(from,context.current,&wfi)==2u && wfi==2u);
+        }
+        {
+            /* after the isolated frame closed: a draw gets no WAIT_FOR_IDLE again */
+            uint32_t wfi,*from;
+            ps3dk_prof_frame();
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            (void)wfi_before_markers(from,context.current,&wfi);
+            assert(wfi==0);
+        }
+        ps3dk_prof_frame();
+        app_flush(0);app_flush(0);settle_drainer(a);
     }
     puts("RSX frame capture runtime PASS");
 #else

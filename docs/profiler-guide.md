@@ -672,6 +672,19 @@ draw_rocks();
 PS3DK_PROF_DRAW_SCOPE_END();
 ```
 
+Flags (the macro requests none; call `ps3dk_prof_rsx_frame_capture(name, flags)` or set them in the PC app):
+
+- `PS3DK_PROF_RSX_FRAME_ISOLATED`: every captured draw runs alone (a WAIT_FOR_IDLE before each of its two markers),
+  so its interval is its own cost. Turn it on to rank draws by cost; leave it off to see the frame as it really runs
+  (the isolated frame is slower and its overlap is gone). It costs 4 command words per draw in the captured frame.
+- `PS3DK_PROF_RSX_FRAME_BOTH`: two consecutive frames, the first pipelined, the second isolated, read as two frames
+  with their draws paired (kind, label, programs). Costs as ISOLATED for the second frame; the staging must hold two
+  frames of records.
+- `PS3DK_PROF_RSX_FRAME_FP_BYTES`: store each fragment program's bytes once (for the disassembly), up to
+  `PS3_PROF_RSX_FRAME_FP_BYTES_KB` (CMake, default 256 KiB) per capture, streamed through the staging blocks; only
+  programs bound while the capture is armed. Turn it on to read the shaders; leave it off to keep the capture small.
+  Vertex program bytes are always stored (at most 8 KiB each, from the command stream).
+
 A request is armed at the AUTO owner's next frame boundary when a capture window is open (an app's
 `PS3DK_PROF_CAPTURE_WHOLE_RUN()` counts); otherwise the capture opens a two-frame window named `rsx-frame` and arms at
 the boundary after. The frame from the arming boundary to the next one is captured. A request that finds no window

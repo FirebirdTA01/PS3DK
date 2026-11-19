@@ -379,7 +379,8 @@ fn every_rule_refused_once() {
     case("app with request id", vec![cfg.chunk(), XBegin { source: 2, ..begin() }.chunk()]);
     case("live without request id", vec![cfg.chunk(), XBegin { request: 0, ..begin() }.chunk()]);
     case("undeclared owner", vec![cfg.chunk(), XBegin { owner: 999, ..begin() }.chunk()]);
-    case("begin flags", vec![cfg.chunk(), XBegin { flags: 4, ..begin() }.chunk()]);
+    case("begin flags", vec![cfg.chunk(), XBegin { flags: 8, ..begin() }.chunk()]);
+    case("isolated with both", vec![cfg.chunk(), XBegin { flags: 5, ..begin() }.chunk()]);
     case("name too long", vec![cfg.chunk(), XBegin { name: "n".repeat(64), ..begin() }.chunk()]);
     case("begin padding", { let mut c = begin().chunk(); let l = c.payload.len(); c.payload[l - 1] = 1; vec![cfg.chunk(), c] });
     case("baseline without known", { let mut c = begin().chunk(); c.payload[40] = 1; vec![cfg.chunk(), c] });
