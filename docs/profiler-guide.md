@@ -902,10 +902,11 @@ programs), with unpaired draws marked.
 their total and mean time in that view's mode, and the constants that change across those draws. When the capture
 kept the program's bytes it shows the disassembly; encodings the disassembler does not know are shown as raw words.
 Vertex-program bytes are kept by phase 4 captures; fragment-program bytes only with **Keep fragment shader bytes**,
-for programs bound while the capture was armed and within the agent's byte cap. PIPELINED intervals may overlap: their sum is
-not isolated execution cost.
-Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
-raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
+for programs bound while the capture was armed and within the agent's byte cap.
+
+PIPELINED intervals may overlap: their sum is not isolated execution cost. Qualified AUTO clocks give millisecond
+bounds (three decimals), with raw ticks on hover; unqualified clocks retain raw ticks and their unavailable-conversion
+notice. Existing EXT-marker captures remain a separate source selector.
 
 **Shader folder…** scans that folder's `.vpo`/`.fpo` files in the background, matching the reader's canonical hash.
 Names supplied by the app take precedence over local filenames, then stable hashes. The folder is session-local;
