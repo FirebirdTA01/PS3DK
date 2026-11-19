@@ -29,7 +29,13 @@ pub const CHUNK_END: u32 = 48;
 pub const SCHEMA: u16 = 1;
 /// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records); 3
 /// also VP constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM).
-pub const DECODER: u32 = 3;
+pub const DECODER: u32 = 4;
+pub const REC_UCODE: u16 = 10;
+pub const REC_SECOND: u16 = 11;
+/// Request / BEGIN flags.
+pub const REQ_ISOLATED: u16 = 1;
+pub const REQ_FP_BYTES: u16 = 2;
+pub const REQ_BOTH: u16 = 4;
 pub const CONFIG_BYTES: usize = 64;
 pub const BEGIN_FIXED: usize = 56;
 pub const DRAWS_HEADER: usize = 16;
@@ -172,6 +178,8 @@ pub struct Config {
     pub program_capacity: u32,
     pub label_capacity: u32,
     pub label_bytes: u32,
+    /// FP ucode bytes a capture stores at most when they are requested (decoder 4; 0 before).
+    pub fp_bytes_cap: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +194,8 @@ pub struct Begin {
     pub source: Source,
     pub isolated: bool,
     pub program_bytes: bool,
+    /// Two consecutive frames: the first pipelined, the second isolated (a SECOND record marks the second).
+    pub both: bool,
     pub request_id: u32,
     pub owner: u32,
     pub frame: u64,
@@ -413,6 +423,8 @@ pub struct End {
     pub vpconst_records: u32,
     pub fpconst_records: u32,
     pub uniform_records: u32,
+    /// UCODE records (decoder 4).
+    pub ucode_records: u32,
 }
 
 /// END reason text.
@@ -451,6 +463,20 @@ pub struct CaptureRecord {
     pub vpconst_records: u32,
     pub fpconst_records: u32,
     pub uniform_records: u32,
+    /// BOTH: the first ordinal and the frame of the second (isolated) frame (SECOND record).
+    pub second: Option<(u32, u64)>,
+    /// Program bytes (UCODE records), by (profile, hash).
+    pub ucode: BTreeMap<(Profile, u64), UcodeParts>,
+    pub ucode_records: u32,
+}
+
+/// One program's UCODE records so far: its length, the bytes in order, whether the last part was read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UcodeParts {
+    pub total: u32,
+    pub data: Vec<u8>,
+    pub parts: u32,
+    pub complete: bool,
 }
 
 /// The decoded family of one file: present exactly when file_flags bit 10 is.
@@ -571,7 +597,8 @@ impl Reader {
         let program_capacity = c.u32()?;
         let label_capacity = c.u32()?;
         let label_bytes = c.u32()?;
-        zeros(&mut c, 32, "RSXF_CONFIG")?;
+        let fp_bytes_cap = c.u32()?;
+        zeros(&mut c, 28, "RSXF_CONFIG")?;
         if schema != SCHEMA {
             return bad(format!("RSXF_CONFIG schema {schema}"));
         }
@@ -590,6 +617,9 @@ impl Reader {
                  {label_capacity} x {label_bytes}"
             ));
         }
+        if fp_bytes_cap > 16 << 20 || (decoder < 4 && fp_bytes_cap != 0) {
+            return bad(format!("RSXF_CONFIG FP bytes cap {fp_bytes_cap} with decoder {decoder}"));
+        }
         self.result.config = Some(Config {
             decoder,
             availability,
@@ -598,6 +628,7 @@ impl Reader {
             program_capacity,
             label_capacity,
             label_bytes,
+            fp_bytes_cap,
         });
         Ok(())
     }
@@ -643,7 +674,7 @@ impl Reader {
             2 => Source::App,
             s => return bad(format!("RSXF_BEGIN source {s}")),
         };
-        if flags & !3 != 0 || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
+        if flags & !7 != 0 || (flags & REQ_ISOLATED != 0 && flags & REQ_BOTH != 0) || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
             return bad(format!("RSXF_BEGIN flags {flags:#x} known {known:#x} name length {n}"));
         }
         if (source == Source::Live) != (request_id != 0) {
@@ -661,6 +692,7 @@ impl Reader {
                 source,
                 isolated: flags & 1 != 0,
                 program_bytes: flags & 2 != 0,
+                both: flags & REQ_BOTH != 0,
                 request_id,
                 owner,
                 frame,
@@ -683,6 +715,9 @@ impl Reader {
             vpconst_records: 0,
             fpconst_records: 0,
             uniform_records: 0,
+            second: None,
+            ucode: BTreeMap::new(),
+            ucode_records: 0,
         });
         self.open = true;
         self.last_ordinal = None;
@@ -1074,6 +1109,48 @@ impl Reader {
                     rec.programs[i - 1].uniforms_truncated = flags & 1 != 0;
                     rec.uniform_records += 1;
                 }
+                REC_UCODE => {
+                    let profile = c.u8()?;
+                    let flags = c.u8()?;
+                    let part = u32::from(c.u16()?);
+                    let total = c.u32()?;
+                    let hash = c.u64()?;
+                    let offset = c.u32()?;
+                    let n = c.u32()? as usize;
+                    let r0 = c.u32()?;
+                    if decoder < 4 || len != 32 + pad8(n) || n == 0 || n > 2048 || flags & !1 != 0 || r0 != 0
+                        || total > 16 << 20 || offset as usize + n > total as usize
+                        || (flags & 1 != 0) != (offset as usize + n == total as usize)
+                    {
+                        return bad(format!("UCODE: part {part} of {n} bytes at {offset} of {total}, flags {flags:#x}"));
+                    }
+                    let profile = match profile {
+                        1 => Profile::Vertex,
+                        2 => Profile::Fragment,
+                        v => return bad(format!("UCODE profile {v}")),
+                    };
+                    let data = c.take(n)?.to_vec();
+                    zeros(&mut c, pad8(n) - n, "UCODE")?;
+                    let u = rec.ucode.entry((profile, hash)).or_default();
+                    if u.complete || part != u.parts || offset as usize != u.data.len() || (part > 0 && total != u.total) {
+                        return bad(format!("UCODE {}:{hash:016x}: part {part} at {offset} out of sequence", profile.short()));
+                    }
+                    u.total = total;
+                    u.parts += 1;
+                    u.data.extend_from_slice(&data);
+                    u.complete = flags & 1 != 0;
+                    rec.ucode_records += 1;
+                }
+                REC_SECOND => {
+                    let first = c.u32()?;
+                    let frame = c.u64()?;
+                    if decoder < 4 || len != 16 || !rec.begin.both || rec.second.is_some() || self.pending.is_some()
+                        || self.last_ordinal.is_some_and(|o| first <= o)
+                    {
+                        return bad(format!("SECOND at draw {first}"));
+                    }
+                    rec.second = Some((first, frame));
+                }
                 _ => return bad(format!("record type {ty}")),
             }
         }
@@ -1114,8 +1191,8 @@ impl Reader {
         let untimed = c.u32()?;
         let state_records = c.u32()?;
         let uniform_records = c.u32()?;
-        let r2 = c.u32()?;
-        let r3 = 0u32;
+        let ucode_records = c.u32()?;
+        let (r2, r3) = (0u32, 0u32);
         let rec = self.result.captures.last_mut().expect("open");
         if id != rec.begin.id {
             return bad(format!("RSXF_END for capture {id} while capture {} is open", rec.begin.id));
@@ -1142,7 +1219,7 @@ impl Reader {
             return bad(format!("RSXF_END draw counts: seen {draws_seen} recorded {draws_recorded} (records {recorded})"));
         }
         if vpconst_records != rec.vpconst_records || fpconst_records != rec.fpconst_records
-            || uniform_records != rec.uniform_records
+            || uniform_records != rec.uniform_records || ucode_records != rec.ucode_records
         {
             return bad(format!("RSXF_END: {vpconst_records} VPCONST, {fpconst_records} FPCONST and {uniform_records} \
                 UNIFORM records against {}, {} and {}", rec.vpconst_records, rec.fpconst_records, rec.uniform_records));
@@ -1166,7 +1243,7 @@ impl Reader {
             truncated_at: truncated.then_some(truncated_at), programs, labels, labels_refused, programs_refused,
             bytes_streamed, bytes_dropped, tb_end, decoder_words,
             decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), lost_events, untimed,
-            baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records,
+            baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records, ucode_records,
         });
         self.open = false;
         Ok(())
@@ -1466,6 +1543,89 @@ pub struct FrameView {
     /// The register file at arming (decoder 2 captures).
     pub baseline: Option<Arc<Registers>>,
     pub instance_runs: Vec<InstanceRun>,
+    /// Which frame of the capture this view is: the only one, or the pipelined first / isolated second of a BOTH
+    /// capture (each view has one timing mode, [`FrameView::isolated`]).
+    pub half: Half,
+    /// On the second view of a BOTH capture: its draws paired with the first view's ([`pair_draws`]).
+    pub pairs: Vec<DrawPair>,
+    /// Program ucode bytes stored in the capture (UCODE records), by (profile, hash); [`FrameView::bytes_of`].
+    pub program_bytes: BTreeMap<(Profile, u64), Arc<ProgramBytes>>,
+}
+
+/// Which frame of its capture a [`FrameView`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Half {
+    Only,
+    /// BOTH: the first frame, pipelined.
+    First,
+    /// BOTH: the second frame, isolated.
+    Second,
+}
+
+/// A draw of a BOTH capture's first frame and its counterpart in the second (indices into each view's draws; None:
+/// unpaired).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawPair {
+    pub first: Option<usize>,
+    pub second: Option<usize>,
+}
+
+/// One program's ucode bytes (a disassembler's input). VP: the instructions as the command stream uploaded them, 16
+/// bytes each, 32-bit words big-endian, from the start slot through the last instruction. FP: the bytes as they lay in
+/// memory at the bind (each 32-bit word big-endian with its 16-bit halves swapped, constant blocks inline after the
+/// instruction that reads them), through the end instruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramBytes {
+    pub profile: Profile,
+    pub hash: u64,
+    /// The program's length in bytes, and the bytes captured (all of them when `complete`).
+    pub total: u32,
+    pub bytes: Vec<u8>,
+    pub complete: bool,
+}
+
+impl FrameView {
+    /// The stored bytes of program `index` (into [`FrameView::programs`]), if any.
+    pub fn bytes_of(&self, index: usize) -> Option<&ProgramBytes> {
+        let p = self.programs.get(index)?;
+        (!p.unreadable).then(|| self.program_bytes.get(&(p.profile, p.hash)).map(|b| b.as_ref())).flatten()
+    }
+}
+
+/// The pairing key of a draw: kind, label, and the (profile, hash) of its programs.
+fn pair_key(f: &FrameView, d: &Draw) -> (DrawKind, Option<String>, Option<(Profile, u64)>, Option<(Profile, u64)>) {
+    let id = |i: Option<usize>| i.map(|i| (f.programs[i].profile, f.programs[i].hash));
+    (d.raw.kind, d.label.clone(), id(d.vp), id(d.fp))
+}
+
+/// Pairs the draws of a BOTH capture's two frames: in submission order, a draw pairs with the next draw of the other
+/// frame with the same kind, label and program pair (looking up to 16 draws ahead); the rest are unpaired.
+pub fn pair_draws(a: &FrameView, b: &FrameView) -> Vec<DrawPair> {
+    let (ka, kb): (Vec<_>, Vec<_>) = (a.draws.iter().map(|d| pair_key(a, d)).collect(),
+        b.draws.iter().map(|d| pair_key(b, d)).collect());
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while i < ka.len() || j < kb.len() {
+        if i < ka.len() && j < kb.len() && ka[i] == kb[j] {
+            out.push(DrawPair { first: Some(i), second: Some(j) });
+            i += 1;
+            j += 1;
+        } else {
+            let ahead = if i < ka.len() { (j..kb.len().min(j + 16)).find(|&k| kb[k] == ka[i]) } else { None };
+            if let Some(k) = ahead {
+                for s in j..k {
+                    out.push(DrawPair { first: None, second: Some(s) });
+                }
+                j = k;
+            } else if i < ka.len() {
+                out.push(DrawPair { first: Some(i), second: None });
+                i += 1;
+            } else {
+                out.push(DrawPair { first: None, second: Some(j) });
+                j += 1;
+            }
+        }
+    }
+    out
 }
 
 fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
@@ -1485,15 +1645,33 @@ fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
 pub fn frames(cap: &Capture) -> Vec<FrameView> {
     let Some(inv) = &cap.rsx_frame else { return Vec::new() };
     let ops: HashMap<u64, &Op> = cap.auto.as_ref().map_or_else(HashMap::new, |a| a.ops.iter().map(|o| (o.id, o)).collect());
-    inv.captures.iter().map(|c| view(cap, c, &ops)).collect()
+    inv.captures.iter().flat_map(|c| {
+        if !c.begin.both {
+            return vec![view(cap, c, &ops, Half::Only)];
+        }
+        let first = view(cap, c, &ops, Half::First);
+        if c.second.is_none() {
+            return vec![first];
+        }
+        let mut second = view(cap, c, &ops, Half::Second);
+        second.pairs = pair_draws(&first, &second);
+        vec![first, second]
+    }).collect()
 }
 
-fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView {
+fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -> FrameView {
     let b = &c.begin;
+    // the frame this view shows and its draw ordinals [lo, hi); a view never mixes timing modes
+    let (frame, lo, hi, isolated) = match (half, c.second) {
+        (Half::First, Some((o, _))) => (b.frame, 0u64, u64::from(o), false),
+        (Half::Second, Some((o, f))) => (f, u64::from(o), u64::MAX, true),
+        (Half::First, None) => (b.frame, 0, u64::MAX, false),
+        _ => (b.frame, 0, u64::MAX, b.isolated),
+    };
     // passes: the frame's AUTO ranges
     let mut passes: Vec<Pass> = cap.auto.as_ref().map_or_else(Vec::new, |a| {
         a.ops.iter()
-            .filter(|o| o.kind == auto_rsx::KIND_RANGE && o.token() == Some((b.owner, b.frame)))
+            .filter(|o| o.kind == auto_rsx::KIND_RANGE && o.token() == Some((b.owner, frame)))
             .filter_map(|o| op_interval(o).ok().map(|(rb, re)| (o, rb, re)))
             .map(|(o, rb, re)| Pass {
                 name: cap.descriptors.get(&o.args[0].wrapping_sub(1))
@@ -1530,6 +1708,38 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
     let mut totals = Totals::default();
     let mut last_end: Option<u64> = None;
     for d in &c.draws {
+        let mut changed = Vec::new();
+        if let Some(cur) = regs.as_mut() {
+            if d.state_reset || !d.state.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.state_reset {
+                    next.clear();
+                }
+                for &(i, v) in &d.state {
+                    next.set(i, v);
+                    changed.push(u32::from(i) * 4);
+                }
+            }
+        }
+        let mut vpc_changed = Vec::new();
+        if let Some(cur) = vpcs.as_mut() {
+            if d.vpc_reset || !d.vpc.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.vpc_reset {
+                    next.clear();
+                }
+                for &(s, m, w) in &d.vpc {
+                    next.set(s, m, w);
+                    vpc_changed.push(s);
+                }
+            }
+        }
+        if let Some(f) = &d.fpc {
+            fpcs = Some(Arc::new(f.clone()));
+        }
+        if !(lo..hi).contains(&u64::from(d.ordinal)) {
+            continue; // the other frame of a BOTH capture (its state is still replayed above)
+        }
         let mut op_mismatch = false;
         let flagged = d.flags & DF_MISMATCH != 0;
         let timing = if d.op_id == 0 {
@@ -1538,7 +1748,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
             match ops.get(&d.op_id) {
                 None => Timing::Missing,
                 Some(o) => {
-                    op_mismatch = d.kind.auto_kind() != Some(o.kind) || o.token() != Some((b.owner, b.frame));
+                    op_mismatch = d.kind.auto_kind() != Some(o.kind) || o.token() != Some((b.owner, frame));
                     if op_mismatch {
                         // the op is not this draw's (another kind or frame): its interval is not the draw's time
                         Timing::Invalid("AUTO operation of another kind or frame")
@@ -1584,35 +1794,6 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         let label = (d.label != 0).then(|| c.labels[d.label as usize - 1].clone());
         let vp = (d.vp != 0).then(|| d.vp as usize - 1);
         let fp = (d.fp != 0).then(|| d.fp as usize - 1);
-        let mut changed = Vec::new();
-        if let Some(cur) = regs.as_mut() {
-            if d.state_reset || !d.state.is_empty() {
-                let next = Arc::make_mut(cur);
-                if d.state_reset {
-                    next.clear();
-                }
-                for &(i, v) in &d.state {
-                    next.set(i, v);
-                    changed.push(u32::from(i) * 4);
-                }
-            }
-        }
-        let mut vpc_changed = Vec::new();
-        if let Some(cur) = vpcs.as_mut() {
-            if d.vpc_reset || !d.vpc.is_empty() {
-                let next = Arc::make_mut(cur);
-                if d.vpc_reset {
-                    next.clear();
-                }
-                for &(s, m, w) in &d.vpc {
-                    next.set(s, m, w);
-                    vpc_changed.push(s);
-                }
-            }
-        }
-        if let Some(f) = &d.fpc {
-            fpcs = Some(Arc::new(f.clone()));
-        }
         let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed,
             vp_constants: vpcs.clone(), vpc_changed, fp_constants: if constants { fpcs.clone() } else { None },
             run: None };
@@ -1634,9 +1815,9 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         source: b.source,
         request_id: b.request_id,
         owner: b.owner,
-        frame: b.frame,
+        frame,
         window: b.window,
-        isolated: b.isolated,
+        isolated,
         status,
         draws,
         programs: c.programs.clone(),
@@ -1647,6 +1828,12 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         text_replaced: c.text_replaced,
         baseline,
         instance_runs: Vec::new(),
+        half,
+        pairs: Vec::new(),
+        program_bytes: c.ucode.iter().filter(|(_, u)| !u.data.is_empty()).map(|(&(profile, hash), u)| {
+            ((profile, hash), Arc::new(ProgramBytes { profile, hash, total: u.total, bytes: u.data.clone(),
+                complete: u.complete }))
+        }).collect(),
     };
     let runs = instance_runs(&view);
     for (k, r) in runs.iter().enumerate() {
@@ -1823,7 +2010,16 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
     for f in frames {
         writeln!(out, "capture {} \"{}\": owner {} frame {} window {} source {} timing {}; {}", f.id, f.name, f.owner,
             f.frame, f.window, if f.source == Source::Live { format!("live request {}", f.request_id) } else { "app".into() },
-            if f.isolated { "ISOLATED" } else { "PIPELINED (reached-marker intervals)" }, f.status.text())?;
+            match (f.half, f.isolated) {
+                (Half::First, _) => "PIPELINED (reached-marker intervals), frame 1 of 2",
+                (Half::Second, _) => "ISOLATED, frame 2 of 2",
+                (_, true) => "ISOLATED",
+                _ => "PIPELINED (reached-marker intervals)",
+            }, f.status.text())?;
+        if f.half == Half::Second {
+            let unpaired = f.pairs.iter().filter(|p| p.first.is_none() || p.second.is_none()).count();
+            writeln!(out, "  paired with frame 1: {} pairs, {unpaired} unpaired", f.pairs.len() - unpaired)?;
+        }
         let t = &f.totals;
         writeln!(out, "  draws {} (timed {}, untimed {}, timing absent {}, op mismatch {}); primitives {}; interval sum {} raw; span {}; gaps {} raw{}{}",
             t.draws, t.timed, t.untimed, t.missing, t.mismatched, t.primitives, t.sum,
@@ -2013,6 +2209,7 @@ fn end_json(e: &End) -> Value {
     o.insert("vpconst_records".into(), json!(e.vpconst_records));
     o.insert("fpconst_records".into(), json!(e.fpconst_records));
     o.insert("uniform_records".into(), json!(e.uniform_records));
+    o.insert("ucode_records".into(), json!(e.ucode_records));
     o.insert("decoder_reject".into(),
         json!(e.decoder_reject.map(|(h, r)| json!({"header": h, "reason": auto_rsx::reject_reason(r)}))));
     v
@@ -2033,6 +2230,14 @@ fn frame_json(f: &FrameView) -> Value {
     o.insert("totals".into(), totals);
     o.insert("draws_not_retained".into(), json!(f.draws_not_retained));
     o.insert("text_replaced".into(), json!(f.text_replaced));
+    o.insert("half".into(), json!(match f.half { Half::Only => "only", Half::First => "first", Half::Second => "second" }));
+    o.insert("pairs".into(), Value::Array(f.pairs.iter().map(|p| json!({"first": p.first, "second": p.second}))
+        .collect()));
+    o.insert("program_bytes".into(), Value::Array(f.programs.iter().enumerate().map(|(i, p)| {
+        let b = f.bytes_of(i);
+        json!({"index": p.index, "bytes": b.map(|b| b.bytes.len()), "total": b.map(|b| b.total),
+            "complete": b.map(|b| b.complete)})
+    }).collect()));
     o.insert("instance_runs".into(), Value::Array(f.instance_runs.iter().map(|r| {
         let vp_names: Vec<String> = f.draws[r.first].vp.map_or_else(Vec::new, |i| f.programs[i].uniforms.iter()
             .filter(|u| r.vp_slots.iter().any(|&s| (u.resource..u.resource + u.count).contains(&u32::from(s))))

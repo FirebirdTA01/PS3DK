@@ -143,6 +143,31 @@ def compare_constants(rows, meta, doc):
     return list(dict.fromkeys(bad))
 
 
+def compare_both(meta, rows, doc, hashes):
+    '''The BOTH capture named by `@ both`: its pipelined and isolated views each match the draw table, every draw is
+    paired, and every program's bytes are stored and complete.'''
+    if 'both' not in meta:
+        return []
+    name = meta['both']
+    views = [c for c in doc.get('captures', []) if c.get('name') == name]
+    if [v.get('half') for v in views] != ['first', 'second']:
+        return [f'BOTH capture {name!r}: halves {[v.get("half") for v in views]!r}, expected first and second']
+    bad = []
+    for i, mode in enumerate(('pipelined', 'isolated')):
+        m = dict(meta, name=name, timing_mode=mode)
+        m.pop('instance_runs', None)
+        base = views[0].get('draws', [{}])[-1].get('ordinal', -1) + 1 if i else 0
+        bad += [f'{name} {mode}: {b}' for b in compare(m, rows, doc, hashes, view=i, base=base)]
+    pairs = views[1].get('pairs', [])
+    unpaired = [p for p in pairs if p.get('first') is None or p.get('second') is None]
+    if len(pairs) != len(rows) or unpaired:
+        bad.append(f'{name}: {len(pairs)} pairs, {len(unpaired)} unpaired; expected {len(rows)} all paired')
+    for pb in views[0].get('program_bytes', []):
+        if not pb.get('bytes') or pb.get('complete') is not True:
+            bad.append(f'{name}: program {pb.get("index")} bytes {pb.get("bytes")!r} complete {pb.get("complete")!r}')
+    return bad
+
+
 def run_json(cmd):
     r = subprocess.run([str(c) for c in cmd], capture_output=True, timeout=300)
     if r.returncode != 0:
@@ -159,10 +184,11 @@ def hashes_by_stem(doc):
     return out
 
 
-def compare(meta, rows, doc, hashes):
-    """Returns the list of differences (empty: the capture matches)."""
+def compare(meta, rows, doc, hashes, view=0, base=0):
+    """Returns the list of differences (empty: the capture matches): of the `view`-th view named meta['name'], whose
+    ordinals start at `base`."""
     bad = []
-    caps = [c for c in doc.get('captures', []) if c.get('name') == meta.get('name')]
+    caps = [c for c in doc.get('captures', []) if c.get('name') == meta.get('name')][view:]
     if doc.get('availability') != 'available':
         bad.append(f'availability: {doc.get("availability")!r}, expected available')
     if 'decoder' in meta and str(doc.get('decoder')) != meta['decoder']:
@@ -203,6 +229,8 @@ def compare(meta, rows, doc, hashes):
             if col in ('vp', 'fp'):
                 continue
             exp = want[col] if col != 'tag' else hex(int(want[col], 0))
+            if col == 'ordinal':
+                exp = str(int(exp) + base)
             if got[col] != exp:
                 bad.append(f'{where} {col}: {got[col]!r}, expected {exp!r}')
         for col in ('vp', 'fp'):
@@ -258,6 +286,7 @@ def main():
     else:
         ap.error('give --reader and --shaders, or --hashes-json')
     bad = compare(meta, rows, doc, hashes_by_stem(hdoc))
+    bad += compare_both(meta, rows, doc, hashes_by_stem(hdoc))
     if str(a.state) != '-':
         bad += compare_state(load_state(a.state), doc, meta.get('name'))
     if str(a.constants) != '-':

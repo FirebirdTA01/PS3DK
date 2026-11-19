@@ -30,8 +30,8 @@ int ps3dk_prof__rsxf_shadowed(uint32_t m)
         return 0; /* VP constant upload port */
     switch (m) {
     case M_BEGIN_END: case M_ELEMENT_U16: case M_ELEMENT_U32: case M_VERTEX_BATCH: case M_VERTEX_DATA:
-    case M_INDEX_DRAW: case M_CLEAR:
-        return 0; /* draw triggers and inline data */
+    case M_INDEX_DRAW: case M_CLEAR: case 0x0110u: /* WAIT_FOR_IDLE */
+        return 0; /* draw triggers, inline data and pipeline waits */
     default:
         return 1;
     }

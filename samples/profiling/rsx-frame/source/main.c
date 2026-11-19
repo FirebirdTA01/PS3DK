@@ -5,7 +5,8 @@
  * and depth / cull / blend variants inside the AUTO range "matrix", one indexed draw, and an instance run of 8
  * identical draws that differ only in a vertex-program constant inside the AUTO range "instances", with labels in
  * nested scopes and a tag per group. At frame CAPTURE_AT the app requests a capture itself
- * (PS3DK_PROF_RSX_FRAME_CAPTURE), so no PC app is needed; the PC app can still request more over the live link.
+ * (PS3DK_PROF_RSX_FRAME_CAPTURE), so no PC app is needed; the PC app can still request more over the live link. At
+ * frame BOTH_AT it requests a BOTH capture with FP bytes: the same draws pipelined, then isolated, paired.
  * After FRAMES frames the sample drains the RSX, seals the capture and returns. tools/check_capture.py compares the
  * reader's output for the capture with expected/draws.tsv field by field.
  *
@@ -53,6 +54,7 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define HOST_HEAP_SIZE (16 * 1024 * 1024)
 #define FRAMES         120u   /* then a clean exit */
 #define CAPTURE_AT     30u    /* the frame that requests the capture; the next frame boundary arms it */
+#define BOTH_AT        60u    /* the frame that requests a BOTH capture (pipelined then isolated) with FP bytes */
 #define LABEL_FENCE    200u
 #define WAIT_US        2000000ull   /* any single flip or fence wait */
 #define SESSION_US     60000000ull  /* the whole workload */
@@ -445,7 +447,7 @@ int main(void)
 {
     sys_addr_t host = 0;
     CellGcmConfig cfg;
-    int capture = 0;
+    int capture = 0, both = 0;
     uint32_t frames = 0;
 
     (void)PS3DK_PROF_CAPTURE_WHOLE_RUN(); /* a capture window for the whole run: the request arms at once */
@@ -491,6 +493,11 @@ int main(void)
             printf("RSXFRAME request frame=%u result=%d\n", frames, capture);
             fflush(stdout);
         }
+        if (frames == BOTH_AT) {
+            both = ps3dk_prof_rsx_frame_capture("matrix-both", PS3DK_PROF_RSX_FRAME_BOTH | PS3DK_PROF_RSX_FRAME_FP_BYTES);
+            printf("RSXFRAME request frame=%u both result=%d\n", frames, both);
+            fflush(stdout);
+        }
         render_frame();
         if (!submit_flip())
             break;
@@ -521,6 +528,6 @@ int main(void)
         printf("RSXFRAME EXIT failed at=%s frames=%u capture=%d\n", g_failed, frames, capture);
         return 1;
     }
-    printf("RSXFRAME EXIT %s frames=%u capture=%d\n", g_quit ? "quit" : "clean", frames, capture);
-    return capture > 0 ? 0 : 2;
+    printf("RSXFRAME EXIT %s frames=%u capture=%d both=%d\n", g_quit ? "quit" : "clean", frames, capture, both);
+    return capture > 0 && both > 0 ? 0 : 2;
 }

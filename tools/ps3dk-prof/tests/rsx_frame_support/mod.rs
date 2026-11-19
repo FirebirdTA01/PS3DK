@@ -196,12 +196,15 @@ pub struct XEnd {
     pub vpcs: u32,
     pub fpcs: u32,
     pub unis: u32,
+    /// UCODE records (offset 124).
+    pub ucodes: u32,
 }
 impl XEnd {
     pub fn done(id: u32) -> Self {
         XEnd { id, outcome: 1, reason: 0, n: [0, 0, 0, 0, 0, 0, 0, u32::MAX, 0, 0, 0, 0], bytes: (0, 0), tb_end: 9000,
             decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0,
-            baseline: 0, states: 0, vpcs: 0, fpcs: 0, unis: 0 }
+            baseline: 0, states: 0, vpcs: 0, fpcs: 0, unis: 0,
+            ucodes: 0 }
     }
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
@@ -211,7 +214,7 @@ impl XEnd {
         }
         b.u64(self.bytes.0).u64(self.bytes.1).u64(self.tb_end).u64(self.decoder_words).u32(self.reject.0)
             .u32(self.reject.1).u32(self.lost_events).u32(self.baseline).u32(self.vpcs).u32(self.fpcs).u32(self.untimed)
-            .u32(self.states).u32(self.unis).u32(0);
+            .u32(self.states).u32(self.unis).u32(self.ucodes);
         chunk(T_END, b.0)
     }
 }
@@ -429,4 +432,18 @@ pub fn uni_rec(b: &mut Buf, program: u32, flags: u16, e: &[(u32, u16, u8, &str)]
         n.resize(32, 0);
         b.0.extend_from_slice(&n);
     }
+}
+
+/// A UCODE record (type 10): one part of a program's bytes.
+pub fn ucode_rec(b: &mut Buf, profile: u8, last: bool, part: u16, total: u32, hash: u64, offset: u32, data: &[u8]) {
+    let pad = (data.len() + 7) & !7;
+    b.u16(10).u16((32 + pad) as u16).u8(profile).u8(u8::from(last)).u16(part).u32(total).u64(hash).u32(offset)
+        .u32(data.len() as u32).u32(0);
+    b.0.extend_from_slice(data);
+    b.0.resize(b.0.len() + pad - data.len(), 0);
+}
+
+/// A SECOND record (type 11): the first ordinal and the frame of a BOTH capture's isolated frame.
+pub fn second_rec(b: &mut Buf, first: u32, frame: u64) {
+    b.u16(11).u16(16).u32(first).u64(frame);
 }

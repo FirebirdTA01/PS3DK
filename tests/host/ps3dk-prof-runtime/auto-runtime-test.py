@@ -706,7 +706,10 @@ if a.case in RING_RUNTIME:
         assert a.reader,'ringrsxf needs --reader'
         r=run('reader-rsxf',[a.reader,'rsx-frame','--json',files[0]],capture_dir)
         v=json.loads(r.stdout)
-        caps=v['captures'];assert v['availability']=='available' and len(caps)==2,v
+        caps=v['captures'];assert v['availability']=='available' and len(caps)==3,v
+        c=caps[2]
+        assert (c['name'],c['source'],c['timing_mode'],c['status'])==('third','app','isolated','COMPLETE'),c['status']
+        assert len(c['draws'])==10 and all(x['timing']['state']=='timed' for x in c['draws']),c['draws'][:2]
         def fnv(b):
             h=0xcbf29ce484222325
             for x in b:h=((h^x)*0x100000001b3)&0xffffffffffffffff

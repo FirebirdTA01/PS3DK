@@ -62,7 +62,7 @@ typedef struct block {
     uint32_t state;              /* atomic: B_* */
     uint32_t used, records, seq; /* owner while FILLING, drainer while SEALED */
     uint32_t draws, programs, labels, states, baseline; /* baseline: BASELINE register pairs */
-    uint32_t vpcs, fpcs, unis;
+    uint32_t vpcs, fpcs, unis, ucodes;
 } block;
 
 typedef struct rsxf_state {
@@ -97,7 +97,13 @@ typedef struct rsxf_state {
     uint32_t end_reject_reason, end_reject_header, end_lost;
     /* the records of sealed blocks: what END counts (an open block at seal is not written) */
     uint32_t sealed_draws, sealed_programs, sealed_labels, sealed_states, sealed_baseline;
-    uint32_t sealed_vpcs, sealed_fpcs, sealed_unis;
+    uint32_t sealed_vpcs, sealed_fpcs, sealed_unis, sealed_ucodes;
+    /* request flags (requester, before REQUESTED); this capture's mode while armed (owner) */
+    uint32_t req_flags, iso, second_half;
+    /* program bytes stored in this capture: by (profile, hash), and the FP bytes against the cap */
+    uint32_t nsent, fp_bytes_used;
+    uint64_t sent_hash[RSXF_SENT_MAX];
+    uint8_t sent_profile[RSXF_SENT_MAX];
     uint64_t sealed_bytes;
     /* the register state the records describe so far (owner, armed): a STATE record carries what differs */
     uint32_t emit_val[RSXF_REGS];
@@ -112,6 +118,7 @@ typedef struct rsxf_state {
     /* programs the current draw's unit defines (for their UNIFORM records) */
     uint32_t unit_new, unit_new_idx[2], unit_new_prof[2];
     uint64_t unit_new_hash[2];
+    uint32_t unit_new_addr[2], unit_new_n[2];
     /* program containers seen at bind; the last FP bind's hash */
     prog_info pinfo[PINFO];
     uint32_t pinfo_stamp, last_fp_ok;
@@ -127,7 +134,7 @@ typedef struct rsxf_state {
     uint32_t end_ready;               /* atomic */
     /* drainer: the blocks it wrote for the open capture */
     uint32_t begin_emitted, drain_seq, blocks_emitted, d_draws, d_programs, d_labels, d_states, d_baseline;
-    uint32_t d_vpcs, d_fpcs, d_unis;
+    uint32_t d_vpcs, d_fpcs, d_unis, d_ucodes;
     uint64_t d_bytes;
     /* the latest LIVE request's status for the live link (single-word atomics; app requests leave it alone) */
     uint32_t st_id, st_request, st_state, st_reason, st_draws;
@@ -151,6 +158,12 @@ static uint32_t opt_kb(void)
     uint32_t kb = ps3dk_prof_automatic_rsx_frame_options.staging_kb;
     return kb ? kb : 256u;
 }
+/* FP ucode bytes stored per capture when requested (PS3_PROF_RSX_FRAME_FP_BYTES_KB; 256 KiB by default). */
+static uint32_t opt_fp_cap(void)
+{
+    uint32_t kb = ps3dk_prof_automatic_rsx_frame_options.fp_bytes_kb;
+    return (kb ? kb : 256u) * 1024u;
+}
 static uint32_t opt_blocks(void)
 {
     uint32_t b = ps3dk_prof_automatic_rsx_frame_options.blocks;
@@ -166,7 +179,7 @@ int rsxf_selected(void)
     if (&ps3dk_prof_automatic_rsx_frame_options) {
         const ps3dk_prof_rsx_frame_options *o = &ps3dk_prof_automatic_rsx_frame_options;
         uint32_t kb = opt_kb(), b = opt_blocks();
-        if (o->size == sizeof *o && !o->reserved && kb >= 4u && kb <= 1024u && b >= 2u && b <= BLOCKS_MAX)
+        if (o->size == sizeof *o && o->fp_bytes_kb <= 4096u && kb >= 4u && kb <= 1024u && b >= 2u && b <= BLOCKS_MAX)
             s = 2;
     }
     ST_RLX(&g_selected, s);
@@ -248,6 +261,7 @@ static void seal_current(rsxf_state *s)
     s->sealed_vpcs += b->vpcs;
     s->sealed_fpcs += b->fpcs;
     s->sealed_unis += b->unis;
+    s->sealed_ucodes += b->ucodes;
     s->sealed_bytes += b->used - RSXF_DRAWS_HEADER;
     ST_REL(&b->state, B_SEALED);
 }
@@ -260,7 +274,7 @@ static int take_block(rsxf_state *s)
             block *b = &s->blocks[i];
             b->used = RSXF_DRAWS_HEADER;
             b->records = b->draws = b->programs = b->labels = b->states = b->baseline = 0;
-            b->vpcs = b->fpcs = b->unis = 0;
+            b->vpcs = b->fpcs = b->unis = b->ucodes = 0;
             ST_RLX(&b->state, B_FILLING);
             s->cur = i;
             return 1;
@@ -285,7 +299,7 @@ static uint8_t *reserve(rsxf_state *s, uint32_t len)
     return b->base + b->used;
 }
 
-typedef struct counts { uint32_t records, draws, programs, labels, states, baseline, vpcs, fpcs, unis; } counts;
+typedef struct counts { uint32_t records, draws, programs, labels, states, baseline, vpcs, fpcs, unis, ucodes; } counts;
 
 static void commit(rsxf_state *s, uint32_t len, const counts *c)
 {
@@ -300,6 +314,7 @@ static void commit(rsxf_state *s, uint32_t len, const counts *c)
     b->vpcs += c->vpcs;
     b->fpcs += c->fpcs;
     b->unis += c->unis;
+    b->ucodes += c->ucodes;
     s->bytes_streamed += len;
 }
 
@@ -813,6 +828,65 @@ static uint32_t put_uniform_record(uint8_t *p, uint32_t program, const prog_info
     return len;
 }
 
+/* ---- program bytes (owner, armed) -------------------------------------------------------------------------------- */
+
+static int ucode_sent(rsxf_state *s, uint32_t profile, uint64_t hash)
+{
+    for (uint32_t i = 0; i < s->nsent; i++)
+        if (s->sent_hash[i] == hash && s->sent_profile[i] == profile)
+            return 1;
+    return 0;
+}
+
+/* One program's bytes as UCODE records of at most RSXF_UCODE_PART bytes each, each its own record (a block may end
+ * between them). `byte_at(ctx, i)` gives byte i. 0 when a part did not fit: the parts written stay (the reader shows
+ * the program's bytes incomplete). */
+static int put_ucode(rsxf_state *s, uint32_t profile, uint64_t hash, uint32_t total,
+                     uint8_t (*byte_at)(const void *, uint32_t), const void *ctx)
+{
+    if (s->nsent >= RSXF_SENT_MAX || !total || ucode_sent(s, profile, hash))
+        return 1;
+    s->sent_hash[s->nsent] = hash;
+    s->sent_profile[s->nsent++] = (uint8_t)profile;
+    for (uint32_t off = 0, part = 0; off < total; part++) {
+        uint32_t n = total - off < RSXF_UCODE_PART ? total - off : RSXF_UCODE_PART;
+        uint32_t len = RSXF_UCODE_HEADER + ((n + 7u) & ~7u);
+        uint8_t *p = reserve(s, len);
+        counts c;
+        if (!p)
+            return 0;
+        memset(p, 0, len);
+        put16(p, RSXF_REC_UCODE);
+        put16(p + 2, len);
+        p[4] = (uint8_t)profile;
+        p[5] = off + n == total ? RSXF_UCODE_LAST : 0u;
+        put16(p + 6, part);
+        put32(p + 8, total);
+        put32(p + 12, (uint32_t)hash);
+        put32(p + 16, (uint32_t)(hash >> 32));
+        put32(p + 20, off);
+        put32(p + 24, n);
+        for (uint32_t i = 0; i < n; i++)
+            p[RSXF_UCODE_HEADER + i] = byte_at(ctx, off + i);
+        memset(&c, 0, sizeof c);
+        c.records = 1;
+        c.ucodes = 1;
+        commit(s, len, &c);
+        off += n;
+    }
+    return 1;
+}
+
+/* VP bytes from the decoder's VP memory: instruction words big-endian, from the start slot. */
+typedef struct vp_bytes { const rsxf_decoder *d; uint32_t start; } vp_bytes;
+static uint8_t vp_byte(const void *ctx, uint32_t i)
+{
+    const vp_bytes *v = ctx;
+    uint32_t w = v->d->vp[v->start + i / 16u][(i / 4u) & 3u];
+    return (uint8_t)(w >> (24u - 8u * (i & 3u)));
+}
+static uint8_t mem_byte(const void *ctx, uint32_t i) { return ((const uint8_t *)ctx)[i]; }
+
 /* ---- identities (owner, armed) ---------------------------------------------------------------------------------- */
 
 static program *find_program(rsxf_state *s, uint32_t profile, uint64_t hash, uint64_t key, uint32_t flags)
@@ -864,6 +938,8 @@ static uint32_t program_index(rsxf_state *s, uint8_t *unit, uint32_t *len, uint3
         s->unit_new_idx[s->unit_new] = w.index;
         s->unit_new_prof[s->unit_new] = profile == RSXF_PROFILE_VP ? RSXF_UNI_VP : RSXF_UNI_FP;
         s->unit_new_hash[s->unit_new] = hash;
+        s->unit_new_addr[s->unit_new] = address;
+        s->unit_new_n[s->unit_new] = h ? h->instructions : 0u;
         s->unit_new++;
     }
     return w.index;
@@ -1080,6 +1156,12 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
                 nuni++;
             }
         }
+        /* a vertex program defined now: its instruction bytes once per capture (its own records) */
+        for (uint32_t k = 0; k < s->unit_new; k++)
+            if (s->unit_new_prof[k] == RSXF_UNI_VP && s->unit_new_addr[k] + s->unit_new_n[k] <= RSXF_VP_SLOTS) {
+                vp_bytes vb = {&s->dec, s->unit_new_addr[k]};
+                (void)put_ucode(s, RSXF_PROFILE_VP, s->unit_new_hash[k], 16u * s->unit_new_n[k], vp_byte, &vb);
+            }
         p = reserve(s, sbytes + vbytes + ubytes + fbytes + len);
         if (p) {
             counts c;
@@ -1239,6 +1321,12 @@ void rsxf_hook_end(void *ctx)
     s->hook.active = 0;
 }
 
+int rsxf_isolated(void)
+{
+    rsxf_state *s = LD_ACQ(&S);
+    return s && s->armed && s->iso;
+}
+
 int rsxf_forced(void)
 {
     rsxf_state *s = LD_ACQ(&S);
@@ -1298,6 +1386,13 @@ void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_
     b->valid = 1;
     s->last_fp_ok = !(flags & RSXF_PF_UNREADABLE);
     s->last_fp_hash = c->h.hash;
+    /* FP bytes requested: stored once per program bound while armed, within the capture's cap (from the bind call's
+     * memory, never later) */
+    if (s->armed && (s->req_flags & RSXF_REQ_FP_BYTES) && s->last_fp_ok && c->h.bytes &&
+        !ucode_sent(s, RSXF_PROFILE_FP, c->h.hash) && s->fp_bytes_used + c->h.bytes <= opt_fp_cap()) {
+        s->fp_bytes_used += c->h.bytes;
+        (void)put_ucode(s, RSXF_PROFILE_FP, c->h.hash, c->h.bytes, mem_byte, ucode);
+    }
     if (s->fp_cached && fp_offset(s->fp_addr) == fp_offset(offset))
         s->fp_cached = 0; /* the same address may now hold another program */
 }
@@ -1353,7 +1448,8 @@ static int request(uint32_t source, uint32_t request_id, uint32_t flags, const c
     uint32_t e;
     if (!rsxf_selected() || !s)
         return PS3DK_PROF_ENOTSUP;
-    if (flags || name_len > RSXF_NAME_MAX || (name_len && (!name || memchr(name, 0, name_len))))
+    if ((flags & ~(uint32_t)RSXF_REQ_ALL) || ((flags & RSXF_REQ_ISOLATED) && (flags & RSXF_REQ_BOTH)) ||
+        name_len > RSXF_NAME_MAX || (name_len && (!name || memchr(name, 0, name_len))))
         return PS3DK_PROF_EINVAL;
     if (!p_ready())
         return PS3DK_PROF_ENOTINIT;
@@ -1377,6 +1473,7 @@ static int request(uint32_t source, uint32_t request_id, uint32_t flags, const c
         ST_RLX(&s->blocks[i].state, B_FREE);
     }
     s->req_source = source;
+    s->req_flags = flags;
     s->req_id = request_id;
     /* the name as valid UTF-8 (an invalid byte becomes '?'), so the reader never has to refuse it */
     s->name_len = ps3dk_prof__rsxf_utf8_append(s->name, 0, RSXF_NAME_MAX, name, name_len);
@@ -1428,6 +1525,10 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     s->sealed_draws = s->sealed_programs = s->sealed_labels = s->sealed_states = s->sealed_baseline = 0;
     s->sealed_vpcs = s->sealed_fpcs = s->sealed_unis = 0;
     s->fpc_prog = s->fpc_n = 0;
+    s->sealed_ucodes = 0;
+    s->iso = (s->req_flags & RSXF_REQ_ISOLATED) != 0;
+    s->second_half = 0;
+    s->nsent = s->fp_bytes_used = 0;
     s->vp_cached = s->fp_cached = 0;
     s->next_seq = 0;
     s->cur = s->nblocks - 1u;
@@ -1440,6 +1541,7 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     memset(&b, 0, sizeof b);
     b.id = e;
     b.source = (uint16_t)s->req_source;
+    b.flags = (uint16_t)(s->req_flags & RSXF_REQ_ALL);
     b.request = s->req_id;
     b.owner = owner;
     b.frame = frame;
@@ -1489,6 +1591,7 @@ static void build_end(rsxf_state *s, uint8_t *out, uint32_t id, uint16_t outcome
     e.vpconst_records = s->sealed_vpcs;
     e.fpconst_records = s->sealed_fpcs;
     e.uniform_records = s->sealed_unis;
+    e.ucode_records = s->sealed_ucodes;
     e.labels_refused = s->labels_refused;
     e.programs_refused = s->programs_refused;
     e.bytes_streamed = s->sealed_bytes;
@@ -1521,6 +1624,7 @@ static void build_end_drained(rsxf_state *s, uint8_t *out, uint32_t id)
     e.vpconst_records = s->d_vpcs;
     e.fpconst_records = s->d_fpcs;
     e.uniform_records = s->d_unis;
+    e.ucode_records = s->d_ucodes;
     e.bytes_streamed = s->d_bytes;
     e.tb_end = p_tb();
     (void)ps3dk_prof__rsxf_put_end(out, RSXF_END_BYTES, &e);
@@ -1559,6 +1663,27 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
         return;
     }
     if (RSXCAP_STATE(w) == RSXCAP_ARMED) {
+        if ((s->req_flags & RSXF_REQ_BOTH) && !s->second_half) {
+            /* BOTH: this boundary starts the isolated frame; a SECOND record marks its first draw */
+            uint8_t *p = reserve(s, 16u);
+            s->second_half = 1;
+            s->iso = 1;
+            if (p) {
+                counts c;
+                memset(p, 0, 16);
+                put16(p, RSXF_REC_SECOND);
+                put16(p + 2, 16);
+                put32(p + 4, s->draws_seen);
+                put32(p + 8, (uint32_t)frame);
+                put32(p + 12, (uint32_t)(frame >> 32));
+                memset(&c, 0, sizeof c);
+                c.records = 1;
+                commit(s, 16, &c);
+            } else if (s->truncated_at == RSXF_NO_ORDINAL) {
+                s->truncated_at = s->draws_seen; /* no room for the marker: the isolated frame is not recorded */
+            }
+            return;
+        }
         close_capture(s, w);
         return;
     }
@@ -1571,7 +1696,8 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
     }
     if (!s->window_asked) {
         /* a capture window from the next frame mark; EBUSY (one is opening) is waited for the same way */
-        (void)ps3dk_prof_capture_begin(&g_window_desc, PS3DK_PROF_WINDOW_FRAMES, 2u);
+        (void)ps3dk_prof_capture_begin(&g_window_desc, PS3DK_PROF_WINDOW_FRAMES,
+                                       (s->req_flags & RSXF_REQ_BOTH) ? 3u : 2u);
         s->window_asked = 1;
         return;
     }
@@ -1614,6 +1740,7 @@ static int emit_blocks(rsxf_state *s, rsxf_emit_fn emit, void *user, uint32_t id
         s->d_vpcs += b->vpcs;
         s->d_fpcs += b->fpcs;
         s->d_unis += b->unis;
+        s->d_ucodes += b->ucodes;
         s->d_bytes += b->used - RSXF_DRAWS_HEADER;
         ST_REL(&b->state, B_FREE);
     }
@@ -1694,6 +1821,7 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
         c.programs = PROGRAMS;
         c.labels = LABELS;
         c.label_bytes = RSXF_TEXT_MAX;
+        c.fp_bytes_cap = opt_fp_cap();
         if (!ps3dk_prof__rsxf_put_config(b, sizeof b, &c) || emit(user, RSXF_CHUNK_CONFIG, b, sizeof b) != 0)
             return;
         ST_RLX(&g_config_emitted, 1u);
@@ -1714,7 +1842,7 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
         s->begin_emitted = 1;
         s->drain_seq = s->blocks_emitted = 0;
         s->d_draws = s->d_programs = s->d_labels = s->d_states = s->d_baseline = 0;
-        s->d_vpcs = s->d_fpcs = s->d_unis = 0;
+        s->d_vpcs = s->d_fpcs = s->d_unis = s->d_ucodes = 0;
         s->d_bytes = 0;
     }
     if (s->begin_emitted && !emit_blocks(s, emit, user, id))
