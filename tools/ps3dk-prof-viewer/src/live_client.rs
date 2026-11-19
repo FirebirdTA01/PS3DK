@@ -280,8 +280,12 @@ impl LiveClient {
 
     /// Queues one independent protocol-3 RSX request. The capture arrives in DATA.
     pub fn request_rsx_frame(&self,name:String)->Result<u32,String>{
+        self.request_rsx_frame_with(name,0)
+    }
+    /// The same with request flags (`live_rsx_frame::RequestOptions::flags`).
+    pub fn request_rsx_frame_with(&self,name:String,flags:u16)->Result<u32,String>{
         let mut g=self.shared.inner.lock().unwrap();
-        let (request,frame)=g.view.rsx_frame.start(name)?;
+        let (request,frame)=g.view.rsx_frame.start_with(name,flags)?;
         if let Err(e)=g.session.expect_rsx_frame(request){g.view.rsx_frame.send_failed(request,&e);return Err(e)}
         g.outbox.push_back((request,frame));Ok(request)
     }

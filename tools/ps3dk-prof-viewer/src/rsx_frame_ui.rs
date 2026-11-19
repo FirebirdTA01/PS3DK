@@ -1,14 +1,26 @@
 //! AUTO draw captures. All timing, grouping and identities come from the reader.
 use crate::rsx_frame_view::{program_label, provenance, sorted_draws, DrawColumn, Names, RsxFrameView};
 use eframe::egui::{self, RichText};
-use ps3dk_prof::rsx_frame::{self as rf, FrameStatus, FrameView, GroupBy};
+use ps3dk_prof::rsx_frame::{self as rf, FrameStatus, FrameView, GroupBy, Half};
 use ps3dk_ui as ui;
 use std::sync::Arc;
+
+/// What the RSX frames page shows for the selected view.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum View {
+    #[default]
+    Draws,
+    /// Every program with time, varying constants and disassembly.
+    Shaders,
+    /// A Both capture's per-draw pipelined vs isolated pairing.
+    Pairs,
+}
 
 #[derive(PartialEq, Eq)]
 struct RowKey {
     generation: u64,
     capture: Option<u32>,
+    half: Half,
     filter: String,
     column: DrawColumn,
     descending: bool,
@@ -64,6 +76,9 @@ pub enum Tab {
 }
 pub struct State {
     pub selected: Option<u32>,
+    /// Which view of the selected capture (a Both capture has a pipelined and an isolated one).
+    pub half: Half,
+    pub view: View,
     pub draw: Option<u32>,
     pub filter: String,
     pub column: DrawColumn,
@@ -81,11 +96,15 @@ pub struct State {
     rows: Option<(RowKey, Arc<Rows>)>,
     consumed: Option<(u32, u32)>,
     state_cache: crate::rsx_state_ui::Cache,
+    shaders: crate::rsx_shader_ui::Cache,
 }
 impl Default for State {
     fn default() -> Self {
         Self {
             selected: None,
+            half: Half::Only,
+            view: View::Draws,
+            shaders: Default::default(),
             draw: None,
             filter: String::new(),
             column: DrawColumn::Time,
@@ -104,23 +123,28 @@ impl Default for State {
     }
 }
 impl State {
+    /// The selected view: the capture `selected` and its `half`.
+    pub fn current<'a>(&self, v: &'a RsxFrameView) -> Option<&'a FrameView> {
+        let id = self.selected?;
+        v.frames.iter().find(|f| f.id == id && f.half == self.half).or_else(|| v.frames.iter().find(|f| f.id == id))
+    }
     /// Sorted and grouped draws, rebuilt only when the immutable view, the selection,
     /// filter, sort, grouping or shader-name scan (`scan`, its generation) changes.
     pub fn rows(&mut self, v: &RsxFrameView, names: &Names, scan: u64) -> Arc<Rows> {
         if let Some((k, rows)) = &self.rows {
-            if k.generation == v.generation && k.capture == self.selected && k.filter == self.filter
+            if k.generation == v.generation && k.capture == self.selected && k.half == self.half && k.filter == self.filter
                 && k.column == self.column && k.descending == self.descending && k.group == self.group && k.by_target == self.by_target && k.expanded == self.expanded && k.scan == scan {
                 return rows.clone();
             }
         }
-        let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| {
+        let rows = Arc::new(self.current(v).map_or_else(Rows::default, |f| {
             let ids = sorted_draws(f, &self.filter, self.column, self.descending, names);
             Rows {
             display: crate::rsx_constants_ui::display_rows(f, &ids, &self.expanded, (self.column==DrawColumn::Time).then_some(self.descending)),
             ids,
             groups: if self.by_target { crate::rsx_state_ui::target_groups(f) } else { self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)) },
         }}));
-        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, by_target:self.by_target, expanded:self.expanded.clone(), scan}, rows.clone()));
+        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, half:self.half, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, by_target:self.by_target, expanded:self.expanded.clone(), scan}, rows.clone()));
         rows
     }
     /// The link-ended reason, shown only while that capture is selected.
@@ -131,6 +155,10 @@ impl State {
         self.rows = None;
         self.expanded.clear();
         self.selected = Some(f.id);
+        self.half = f.half;
+        if self.view == View::Pairs && f.half == Half::Only {
+            self.view = View::Draws;
+        }
         self.column = DrawColumn::Time;
         self.descending = true;
         self.filter.clear();
@@ -220,19 +248,21 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
     p.horizontal_wrapped(|p| {
         egui::ComboBox::from_id_salt("rsxf-capture")
             .selected_text(
-                st.selected
-                    .map_or("Choose capture".into(), |id| format!("Capture {id}")),
+                st.selected.map_or("Choose capture".into(), |id| {
+                    format!("Capture {id}{}", crate::rsx_modes_ui::half_suffix(st.half))
+                }),
             )
             .show_ui(p, |p| {
                 for f in &v.frames {
                     if p.selectable_label(
-                        st.selected == Some(f.id),
+                        st.selected == Some(f.id) && st.half == f.half,
                         format!(
-                            "#{} {} · frame {} · {}",
+                            "#{} {} · frame {} · {}{}",
                             f.id,
                             f.name,
                             f.frame,
-                            f.status.text()
+                            f.status.text(),
+                            crate::rsx_modes_ui::half_suffix(f.half)
                         ),
                     )
                     .clicked()
@@ -256,10 +286,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
             out.shader_folder = true;
         }
     });
-    let Some(f) = st
-        .selected
-        .and_then(|id| v.frames.iter().find(|f| f.id == id))
-    else {
+    let Some(f) = st.current(v) else {
         p.label("Choose a capture to inspect its draws.");
         return;
     };
@@ -270,7 +297,11 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      p.label(format!("{} · owner {} · frame {} · window {}",f.name,f.owner,f.frame,f.window));p.label(&status);
    });
    if let Some(why)=st.link_ended_reason() {ui::field_message(p,ui::Tone::Warning,why);}
-   p.label(if f.isolated{"ISOLATED timing"}else{"PIPELINED: reached-marker intervals can overlap. Their sum is not isolated execution cost."});
+   p.horizontal_wrapped(|p|{
+     ui::badge(p,&crate::rsx_modes_ui::mode_label(f),ui::Tone::Accent);
+     p.label(if f.isolated{"ISOLATED: the RSX waited for idle around each draw, so each interval is that draw's own cost."}else{"PIPELINED: reached-marker intervals can overlap. Their sum is not isolated execution cost."});
+   });
+   if f.half!=Half::Only {ui::field_message(p,ui::Tone::Neutral,"A Both capture has two views, each with its own timing mode and totals; they are never added together. Pairs compares them per draw.");}
    p.horizontal_wrapped(|p|{
      p.label(format!("{} draws · {} timed · {} untimed · {} missing · {} mismatched · {} primitives",f.totals.draws,f.totals.timed,f.totals.untimed,f.totals.missing,f.totals.mismatched,f.totals.primitives));
      p.label("Sum");duration(p,v,Some(f.totals.sum));p.label("Span");duration(p,v,f.totals.span.map(|(b,e)|e-b));p.label("Gaps");duration(p,v,Some(f.totals.gaps));
@@ -284,6 +315,16 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
    });}
    if !f.passes.is_empty(){p.collapsing("Pass intervals",|p|{for pass in &f.passes{p.horizontal_wrapped(|p|{p.label(format!("{} · depth {} · {} draws",pass.name,pass.depth,pass.draws));duration(p,v,Some(pass.raw_end-pass.raw_begin));p.label(format!("{}..{} raw ticks",pass.raw_begin,pass.raw_end));});}});}
    p.separator();
+   p.horizontal_wrapped(|p|{
+     p.selectable_value(&mut st.view,View::Draws,"Draws");
+     p.selectable_value(&mut st.view,View::Shaders,"Shader view");
+     if f.half!=Half::Only {p.selectable_value(&mut st.view,View::Pairs,"Pairs (pipelined vs isolated)");}
+   });
+   match st.view {
+     View::Shaders=>{crate::rsx_shader_ui::shader_page(p,v,f,names,&mut st.shaders);return;},
+     View::Pairs=>{crate::rsx_modes_ui::pairs_page(p,v,f.id);return;},
+     View::Draws=>{},
+   }
    p.horizontal_wrapped(|p|{
      p.label("Filter");p.add(egui::TextEdit::singleline(&mut st.filter).hint_text("Label, shader, kind or ordinal").desired_width(250.0));
      egui::ComboBox::from_id_salt("rsxf-group").selected_text(if st.by_target{"Render target"}else{st.group.map_or("No grouping",group_name)}).show_ui(p,|p|{
@@ -365,7 +406,7 @@ fn draw_table(
                 }
             });
             let mut list = egui::ScrollArea::vertical()
-                .id_salt(("rsxf-draws", f.id))
+                .id_salt(("rsxf-draws", f.id, f.half == Half::Second))
                 .max_height(200.0);
             if st.focus {
                 if let Some(pos) = rows
