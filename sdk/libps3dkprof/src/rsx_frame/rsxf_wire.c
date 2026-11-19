@@ -66,6 +66,63 @@ size_t ps3dk_prof__rsxf_put_program(uint8_t *o, size_t cap, const rsxf_wire_prog
 
 size_t ps3dk_prof__rsxf_text_bytes(uint32_t n) { return 16u + pad8(n); }
 
+/* The length of the valid UTF-8 sequence at s[0..n) (1..4), or 0 when s[0] does not start one (RFC 3629: no
+ * overlong form, no surrogate, nothing past U+10FFFF). */
+static uint32_t utf8_seq(const uint8_t *s, size_t n)
+{
+    uint8_t c = s[0], lo = 0x80, hi = 0xbf;
+    uint32_t len;
+    if (c < 0x80)
+        return 1;
+    if (c >= 0xc2 && c <= 0xdf)
+        len = 2;
+    else if (c >= 0xe0 && c <= 0xef) {
+        len = 3;
+        if (c == 0xe0) lo = 0xa0;
+        if (c == 0xed) hi = 0x9f;
+    } else if (c >= 0xf0 && c <= 0xf4) {
+        len = 4;
+        if (c == 0xf0) lo = 0x90;
+        if (c == 0xf4) hi = 0x8f;
+    } else
+        return 0;
+    if (n < len)
+        return 0;
+    for (uint32_t i = 1; i < len; i++) {
+        if (s[i] < lo || s[i] > hi)
+            return 0;
+        lo = 0x80;
+        hi = 0xbf;
+    }
+    return len;
+}
+
+uint32_t ps3dk_prof__rsxf_utf8_append(char *dst, uint32_t at, uint32_t cap, const char *src, size_t n)
+{
+    const uint8_t *s = (const uint8_t *)src;
+    size_t i = 0;
+    if (!dst || !src)
+        return at;
+    while (i < n && s[i] && at < cap) {
+        size_t m = 0;
+        uint32_t len;
+        while (m < 4 && i + m < n && s[i + m])
+            m++;
+        len = utf8_seq(s + i, m);
+        if (!len) {
+            dst[at++] = '?';
+            i++;
+            continue;
+        }
+        if (at + len > cap)
+            break; /* cut on the character boundary */
+        memcpy(dst + at, s + i, len);
+        at += len;
+        i += len;
+    }
+    return at;
+}
+
 size_t ps3dk_prof__rsxf_put_text(uint8_t *o, size_t cap, uint16_t type, uint32_t index, const char *s, uint32_t n)
 {
     size_t len = ps3dk_prof__rsxf_text_bytes(n);
@@ -100,8 +157,7 @@ size_t ps3dk_prof__rsxf_put_end(uint8_t *o, size_t cap, const rsxf_wire_end *e)
     le32(o + 40, e->programs); le32(o + 44, e->labels); le32(o + 48, e->labels_refused);
     le32(o + 52, e->programs_refused); le64(o + 56, e->bytes_streamed); le64(o + 64, e->bytes_dropped);
     le64(o + 72, e->tb_end); le64(o + 80, e->decoder_words); le32(o + 88, e->reject_header);
-    le32(o + 92, e->reject_reason); le32(o + 96, e->fp_reads); le64(o + 104, e->fp_read_ticks);
-    le32(o + 112, e->untimed);
+    le32(o + 92, e->reject_reason); le32(o + 96, e->lost_events); le32(o + 112, e->untimed);
     return RSXF_END_BYTES;
 }
 

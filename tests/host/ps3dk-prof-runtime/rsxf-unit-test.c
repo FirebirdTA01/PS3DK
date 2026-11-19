@@ -12,6 +12,12 @@
 #define NI 0x40000000u
 
 static rsxf_decoder d;
+static int sunk;
+static void count_event(void *user, const rsxf_draw_event *e)
+{
+    assert(e->kind == RSXF_K_CLEAR && e->clear_mask == 0xf0);
+    (*(int *)user)++;
+}
 
 static void decode(const uint32_t *w, size_t n, int ok)
 {
@@ -114,7 +120,35 @@ static void rejections_forget_and_recover(void)
         d.n_events = d.lost_events = 0;
         decode(clears, 40, 1);
         assert(d.n_events == 16 && d.lost_events == 4);
+        /* with a sink (the runtime's) every event goes out at once: nothing is buffered or lost */
+        d.n_events = d.lost_events = 0;
+        d.sink = count_event;
+        d.sink_user = &sunk;
+        decode(clears, 40, 1);
+        assert(sunk == 20 && d.n_events == 0 && d.lost_events == 0);
+        d.sink = NULL;
     }
+}
+
+static void utf8(void)
+{
+    char o[16];
+    uint32_t n;
+    /* valid text is copied as is, a NUL ends it */
+    n = ps3dk_prof__rsxf_utf8_append(o, 0, sizeof o, "rock\0x", 6);
+    assert(n == 4 && !memcmp(o, "rock", 4));
+    /* invalid bytes (a lone continuation, an overlong form, a surrogate, past U+10FFFF, a cut sequence) become '?' */
+    n = ps3dk_prof__rsxf_utf8_append(o, 0, sizeof o, "\x80" "a\xc0\xaf" "b\xed\xa0\x80\xf4\x90\x80\x80\xe2\x82", 15);
+    assert(n == 14 && !memcmp(o, "?a??b?????????", 14));
+    /* a multi-byte character that does not fit whole is left out: the text ends on a character boundary */
+    memcpy(o, "abcdefghijklm", 13);
+    n = ps3dk_prof__rsxf_utf8_append(o, 13, 15, "\xe2\x82\xac", 3);
+    assert(n == 13);
+    n = ps3dk_prof__rsxf_utf8_append(o, 12, 15, "\xe2\x82\xac", 3);
+    assert(n == 15 && !memcmp(o + 12, "\xe2\x82\xac", 3));
+    /* a 2-byte and a 4-byte character */
+    n = ps3dk_prof__rsxf_utf8_append(o, 0, sizeof o, "\xc3\xa9\xf0\x9f\x8e\xae", 6);
+    assert(n == 6 && !memcmp(o, "\xc3\xa9\xf0\x9f\x8e\xae", 6));
 }
 
 static void hashes(void)
@@ -193,6 +227,7 @@ static void encoders(FILE *out, uint32_t owner)
     memset(&e, 0, sizeof e);
     e.id = 1; e.outcome = RSXF_OUT_DONE; e.blocks = 1; e.draws_seen = 1; e.draws_recorded = 1; e.decoded_only = 1;
     e.truncated_at = RSXF_NO_ORDINAL; e.programs = 1; e.labels = 1; e.untimed = 1; e.bytes_streamed = r;
+    e.lost_events = 2;
     e.outcome = RSXF_OUT_TRUNCATED;
     assert(!ps3dk_prof__rsxf_put_end(buf, sizeof buf, &e)); /* TRUNCATED needs an ordinal */
     e.outcome = RSXF_OUT_DONE;
@@ -210,6 +245,7 @@ int main(int argc, char **argv)
     draws_and_clears();
     rejections_forget_and_recover();
     hashes();
+    utf8();
     encoders(out, owner);
     assert(fclose(out) == 0);
     puts("rsxf units PASS");

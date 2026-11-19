@@ -1,13 +1,21 @@
-/* RSX frame capture runtime (rsxf.h). Dormant unless the executable defines ps3dk_prof_automatic_rsx_frame_options:
- * then every hook returns after one load of `S` (NULL) and nothing is allocated, decoded or written.
+/* RSX frame capture runtime (rsxf.h). Dormant unless the executable defines ps3dk_prof_automatic_rsx_frame_options
+ * and AUTO attached with the report ring: until then every hook returns after one load of `S` (NULL) and nothing is
+ * allocated, decoded or written.
  *
- * Slot word (rsxcap.h layout, whole-word CAS by every actor):
+ * Slot word (rsxcap.h layout, whole-word CAS by every actor; no store ever overwrites a word it did not observe):
  *   IDLE(e) -requester-> CLAIMING(e+1) -requester-> REQUESTED(e+1) -owner boundary-> ARMING -> ARMED
  *   ARMED -owner boundary-> CLOSING -drainer, after END-> IDLE(e+1)
- *   REQUESTED -owner, no capture window after 3 boundaries-> IDLE (abandoned, nothing written)
- *   any state -drainer at seal-> IDLE (END ABANDONED when a BEGIN was written)
+ *   REQUESTED -owner, no capture window after 3 boundaries-> ARMING -> IDLE (abandoned, nothing written)
+ * Shutdown (the sealing drainer) adds F_STOP to whatever word it observes. From then on:
+ *   - the requester refuses (ESTOPPED); one in CLAIMING fails its publish CAS, frees what it allocated and leaves IDLE;
+ *   - the owner never touches a block again once it has observed STOP (every record, arm and boundary checks it) and
+ *     says so with F_OWNER_OUT; the drainer says it is done with F_DRAINER_OUT; whichever of the two leaves second
+ *     frees the staging. Neither waits for the other: an owner that never runs again keeps the blocks allocated
+ *     until the process exits, it is never freed under it.
+ * END: the owner's own counters when it closed or left the capture; otherwise (shutdown with the owner still inside)
+ * the drainer's counts of the blocks it wrote, so every END count matches the records in the file.
  * Staging blocks: allocated by the requester before REQUESTED, owned block by block by the owner (FILLING) and the
- * drainer (SEALED), freed by the drainer after END (or by the owner when a request is abandoned before arming). */
+ * drainer (SEALED). The side that frees them does so before it releases the slot to IDLE. */
 #include "rsxf.h"
 #include "../core/prof_internal.h"
 #include "../rsx/rsxcap.h"
@@ -18,10 +26,18 @@
 
 extern const ps3dk_prof_rsx_frame_options ps3dk_prof_automatic_rsx_frame_options __attribute__((weak));
 
-enum { BIND_SLOTS = 64, PROGRAMS = 512, LABELS = 256, SCOPES = 8, BLOCKS_MAX = 16, UNIT_MAX = 512 };
+enum { BIND_SLOTS = 64, FP_CACHE = 32, FP_SAMPLE = 48, PROGRAMS = 512, LABELS = 256, SCOPES = 8, BLOCKS_MAX = 16,
+       UNIT_MAX = 512 };
 enum { B_FREE = 0, B_FILLING = 1, B_SEALED = 2 };
+#define F_STOP RSXCAP_F_STOP
+#define F_OWNER_OUT 0x400ull   /* the owner observed STOP and will not touch a block again */
+#define F_DRAINER_OUT 0x800ull /* the sealing drainer is done with the blocks */
+#define WORD(st, flags, e) RSXCAP_WORD((st), (flags), (e), 0, 0)
 
-typedef struct bind { uint32_t offset, bytes; const void *ucode; } bind;
+/* The FP program bound at an offset: hashed in the bind call, never read again. */
+typedef struct bind { uint32_t offset, valid; rsxf_hash h; } bind;
+/* Containers hashed before, by (ucode, offset, size) and sampled bytes: a rebind costs a lookup, not a hash. */
+typedef struct fp_cached { const void *ucode; uint32_t offset, bytes; uint8_t sample[FP_SAMPLE]; rsxf_hash h; } fp_cached;
 typedef struct program { uint64_t hash, key; uint32_t index, profile; } program;
 typedef struct label { uint64_t hash; uint32_t index, n; char text[RSXF_TEXT_MAX]; } label;
 typedef struct block {
@@ -35,13 +51,14 @@ typedef struct rsxf_state {
     rsxf_decoder dec;
     void *ctx;
     uintptr_t cursor;
-    int ringed;
     uint32_t block_bytes, nblocks;
     /* owner: labels */
     const char *label, *scope[SCOPES];
     uint32_t depth, depth_excess;
-    /* owner: bound programs by offset */
+    /* owner: bound programs by offset, and the hash cache */
     bind binds[BIND_SLOTS];
+    fp_cached fpc[FP_CACHE];
+    uint64_t fp_hashed, fp_reused; /* bind statistics (host tests) */
     /* owner: the covered draw between begin and end */
     struct { uint32_t active, claimed, kind, mode, first, count, offset, index_type, location, clear_mask, tag;
              uint64_t caller, op_id; uint32_t column; } hook;
@@ -55,8 +72,11 @@ typedef struct rsxf_state {
     uint32_t armed, window_waits, window_asked, cur, next_seq;
     uint64_t frame, words_at_arm;
     uint32_t draws_seen, hooked, decoded_only, mismatches, untimed, truncated_at, labels_refused, programs_refused;
-    uint32_t nprograms, nlabels;
+    uint32_t nprograms, nlabels, lost_at_arm;
     uint64_t bytes_streamed, bytes_dropped;
+    /* the decoder's part of END, fixed when the owner closes or leaves (it keeps decoding afterwards) */
+    uint64_t end_words;
+    uint32_t end_reject_reason, end_reject_header, end_lost;
     /* the records of sealed blocks: what END counts (an open block at seal is not written) */
     uint32_t sealed_draws, sealed_programs, sealed_labels;
     uint64_t sealed_bytes;
@@ -69,19 +89,24 @@ typedef struct rsxf_state {
     uint32_t begin_len, begin_ready;  /* begin_ready atomic */
     uint8_t end_buf[RSXF_END_BYTES];
     uint32_t end_ready;               /* atomic */
-    /* drainer */
-    uint32_t begin_emitted, drain_seq, blocks_emitted;
-    /* status for the live link (single-word atomics) */
+    /* drainer: the blocks it wrote for the open capture */
+    uint32_t begin_emitted, drain_seq, blocks_emitted, d_draws, d_programs, d_labels;
+    uint64_t d_bytes;
+    /* the latest LIVE request's status for the live link (single-word atomics; app requests leave it alone) */
     uint32_t st_id, st_request, st_state, st_reason, st_draws;
     uint64_t st_frame, st_bytes;
 } rsxf_state;
 
-/* Published once at attach (release); NULL: dormant or not attached. auto_runtime.c tests it with one load. */
+/* Published at attach (release) when the report ring is attached; NULL: dormant. auto_runtime.c tests it with one
+ * load. The state, once allocated, is kept (g_state) so a later attach without the ring can unpublish it safely. */
 void *ps3dk_prof__rsxf_active;
 #define S (*(rsxf_state **)(void *)&ps3dk_prof__rsxf_active)
+static rsxf_state *g_state;
+static uint32_t g_ringless;      /* the last attach had no report ring */
 static uint64_t g_slot;          /* RSXCAP_WORD layout */
 static uint32_t g_selected;      /* 0 unknown, 1 no, 2 yes */
 static uint32_t g_config_emitted;
+static uint32_t g_drain_sealed;  /* drainer: the seal ran; nothing is written after it */
 static ps3dk_prof_desc g_window_desc = {"rsx-frame", "", "<ps3dk-rsxf>", 1u, 1u, 0u, 0u};
 
 static uint32_t opt_kb(void)
@@ -111,40 +136,66 @@ int rsxf_selected(void)
     return s == 2;
 }
 
-static void status(uint32_t state, uint32_t reason)
+static uint64_t slot_load(void) { return LD_ACQ(&g_slot); }
+static int slot_cas(uint64_t *seen, uint64_t to)
 {
-    ST_RLX(&S->st_reason, reason);
-    ST_REL(&S->st_state, state);
+    return __atomic_compare_exchange_n(&g_slot, seen, to, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
+
+/* The live link's status, only for a live request (written before the slot word moves on, so a later request never
+ * sees an earlier capture's write land on its own id). */
+static void status(rsxf_state *s, uint32_t state, uint32_t reason)
+{
+    if (s->req_source != 1u)
+        return;
+    ST_RLX(&s->st_reason, reason);
+    ST_REL(&s->st_state, state);
+}
+
+static void on_event(void *user, const rsxf_draw_event *e);
 
 void rsxf_attach(void *ctx, int ringed)
 {
-    rsxf_state *s;
+    rsxf_state *s = LD_ACQ(&g_state);
     if (!rsxf_selected())
         return;
-    if ((s = LD_ACQ(&S)) != NULL) {
-        /* an override attach (ps3dk_prof_auto_attach after cellGcmInit) replaces the options, the ring with them;
-         * it runs on the owner before any covered operation, so nothing is armed yet */
-        s->ctx = ctx;
-        s->ringed = ringed;
-        s->cursor = ctx ? (uintptr_t)(void *)((gpp_ctx *)ctx)->current : 0;
+    if (!ringed) {
+        /* no report ring: dormant (an override attach without the ring unpublishes; nothing is armed yet) */
+        ST_RLX(&g_ringless, 1u);
+        ST_REL(&S, NULL);
         return;
     }
-    s = pal_alloc(sizeof *s);
-    if (!s)
-        return; /* CONFIG then records the decoder as unavailable */
-    memset(s, 0, sizeof *s);
-    ps3dk_prof__rsxf_decode_init(&s->dec);
+    ST_RLX(&g_ringless, 0u);
+    if (!s) {
+        s = pal_alloc(sizeof *s);
+        if (!s)
+            return; /* CONFIG then records the decoder as unavailable */
+        memset(s, 0, sizeof *s);
+        ps3dk_prof__rsxf_decode_init(&s->dec);
+        s->dec.sink = on_event;
+        s->dec.sink_user = s;
+        s->block_bytes = opt_kb() * 1024u;
+        s->nblocks = opt_blocks();
+        ST_REL(&g_state, s);
+    }
+    /* an override attach (ps3dk_prof_auto_attach after cellGcmInit) runs on the owner before any covered operation:
+     * nothing is armed yet. Decoding starts at the context's current word: everything written from here on is seen. */
     s->ctx = ctx;
-    s->ringed = ringed;
-    /* decoding starts at the context's current word: everything the owner writes from attach on is seen */
     s->cursor = ctx ? (uintptr_t)(void *)((gpp_ctx *)ctx)->current : 0;
-    s->block_bytes = opt_kb() * 1024u;
-    s->nblocks = opt_blocks();
     ST_REL(&S, s);
 }
 
 /* ---- staging (owner) ---------------------------------------------------------------------------------------------- */
+
+static void free_staging(rsxf_state *s)
+{
+    for (uint32_t i = 0; i < BLOCKS_MAX; i++) {
+        if (s->blocks[i].base)
+            pal_free(s->blocks[i].base);
+        s->blocks[i].base = NULL;
+        ST_RLX(&s->blocks[i].state, B_FREE);
+    }
+}
 
 static void seal_current(rsxf_state *s)
 {
@@ -195,6 +246,49 @@ static int append(rsxf_state *s, const uint8_t *unit, uint32_t len, uint32_t rec
     b->programs += programs;
     b->labels += labels;
     s->bytes_streamed += len;
+    return 1;
+}
+
+/* The decoder's END counters as of now (owner): what END reports, not what the owner decodes after it. */
+static void snap_decoder(rsxf_state *s)
+{
+    s->end_words = s->dec.words - s->words_at_arm;
+    s->end_reject_reason = s->dec.bad_reason;
+    s->end_reject_header = s->dec.bad_reason ? s->dec.bad_header : 0;
+    s->end_lost = s->dec.lost_events - s->lost_at_arm;
+}
+
+/* The owner leaves a stopped capture (F_STOP observed in ARMING or ARMED): it never touches a block again. When the
+ * drainer already left, the owner frees the staging and releases the slot; otherwise it marks F_OWNER_OUT and the
+ * drainer frees. */
+static void owner_leave(rsxf_state *s)
+{
+    uint64_t w = slot_load();
+    s->armed = 0;
+    s->hook.active = 0;
+    for (;;) {
+        uint32_t st = RSXCAP_STATE(w);
+        if (!(w & F_STOP) || (st != RSXCAP_ARMING && st != RSXCAP_ARMED) || (w & F_OWNER_OUT))
+            return;
+        status(s, 4u, RSXF_R_SHUTDOWN); /* over a CLOSED or ARMED this owner wrote before it saw STOP */
+        snap_decoder(s);                /* published by the CAS below for the drainer's END */
+        if (w & F_DRAINER_OUT) {
+            if (slot_cas(&w, WORD(RSXCAP_IDLE, F_STOP, RSXCAP_EPOCH(w)))) {
+                free_staging(s); /* STOP stays set: no request can claim the slot again */
+                return;
+            }
+        } else if (slot_cas(&w, w | F_OWNER_OUT)) {
+            return;
+        }
+    }
+}
+
+/* 1 when shutdown stopped the capture (the owner then left it). */
+static int owner_stopped(rsxf_state *s)
+{
+    if (!(slot_load() & F_STOP))
+        return 0;
+    owner_leave(s);
     return 1;
 }
 
@@ -297,10 +391,9 @@ static uint32_t fp_identity(rsxf_state *s, uint8_t *unit, uint32_t *len, uint32_
         return s->fp_index;
     off = fp_offset(d->fp_address);
     b = &s->binds[(off >> 6) % BIND_SLOTS];
-    if (b->ucode && fp_offset(b->offset) == off) {
-        ps3dk_prof__rsxf_fp_hash(b->ucode, b->bytes, &h);
-        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &h, RSXF_SRC_CONTAINER, 0, d->fp_address,
-                                    off, ordinal);
+    if (b->valid && fp_offset(b->offset) == off) {
+        s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &b->h, RSXF_SRC_CONTAINER, 0,
+                                    d->fp_address, off, ordinal);
     } else {
         memset(&h, 0, sizeof h);
         s->fp_index = program_index(s, unit, len, defs, RSXF_PROFILE_FP, &h, RSXF_SRC_MEMORY, RSXF_PF_UNREADABLE,
@@ -325,11 +418,14 @@ static uint32_t label_index(rsxf_state *s, uint8_t *unit, uint32_t *len, uint32_
         parts[np++] = s->label;
     if (!np)
         return 0;
-    for (uint32_t i = 0; i < np && n < RSXF_TEXT_MAX; i++) {
-        if (i && n < RSXF_TEXT_MAX)
+    /* "scope/scope/label", valid UTF-8, cut on a character boundary at RSXF_TEXT_MAX bytes */
+    for (uint32_t i = 0; i < np; i++) {
+        if (i) {
+            if (n + 1u >= RSXF_TEXT_MAX)
+                break;
             path[n++] = '/';
-        for (const char *c = parts[i]; *c && n < RSXF_TEXT_MAX; c++)
-            path[n++] = *c;
+        }
+        n = ps3dk_prof__rsxf_utf8_append(path, n, RSXF_TEXT_MAX, parts[i], RSXF_TEXT_MAX);
     }
     h = ps3dk_prof__rsxf_fnv(RSXF_FNV_OFFSET, path, n);
     for (uint32_t i = 0; i < s->nlabels; i++)
@@ -369,9 +465,14 @@ static uint32_t untimed_of(uint32_t column)
 static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
 {
     uint8_t unit[UNIT_MAX];
-    uint32_t len = 0, defs_p = 0, defs_l = 0, unknown = 0, programs_before = s->nprograms, labels_before = s->nlabels;
+    uint32_t len = 0, defs_p = 0, defs_l = 0, unknown = 0, programs_before, labels_before;
     rsxf_wire_draw w;
-    uint32_t ordinal = s->draws_seen++;
+    uint32_t ordinal;
+    if (owner_stopped(s))
+        return; /* shutdown: no block is touched again */
+    programs_before = s->nprograms;
+    labels_before = s->nlabels;
+    ordinal = s->draws_seen++;
     memset(&w, 0, sizeof w);
     w.ordinal = ordinal;
     if (hooked) {
@@ -436,25 +537,24 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
         s->nlabels = labels_before;
         s->vp_cached = s->fp_cached = 0;
     }
-    ST_RLX(&s->st_draws, s->draws_seen);
-    ST_RLX(&s->st_bytes, s->bytes_streamed);
+    if (s->req_source == 1u) {
+        ST_RLX(&s->st_draws, s->draws_seen);
+        ST_RLX(&s->st_bytes, s->bytes_streamed);
+    }
 }
 
-static void events(rsxf_state *s)
+/* The decoder's sink: each completed draw or clear at once, with the registers of that draw. */
+static void on_event(void *user, const rsxf_draw_event *e)
 {
-    rsxf_decoder *d = &s->dec;
-    for (uint32_t i = 0; i < d->n_events; i++) {
-        const rsxf_draw_event *e = &d->events[i];
-        if (!s->armed)
-            continue;
-        if (s->hook.active && !s->hook.claimed) {
-            s->hook.claimed = 1;
-            record(s, e, 1);
-        } else {
-            record(s, e, 0);
-        }
+    rsxf_state *s = user;
+    if (!s->armed)
+        return;
+    if (s->hook.active && !s->hook.claimed) {
+        s->hook.claimed = 1;
+        record(s, e, 1);
+    } else {
+        record(s, e, 0);
     }
-    d->n_events = 0;
 }
 
 /* ---- owner hooks ---------------------------------------------------------------------------------------------- */
@@ -482,7 +582,6 @@ void rsxf_scan(void *ctx)
     }
     (void)ps3dk_prof__rsxf_decode(&s->dec, (const uint32_t *)(void *)s->cursor, (cur - s->cursor) / 4u);
     s->cursor = cur;
-    events(s);
 }
 
 void rsxf_wrap(void *ctx)
@@ -536,9 +635,9 @@ void rsxf_note_column(uint32_t c)
         s->last_column = c;
 }
 
-void rsxf_hook_admitted(uint64_t op_id)
+void rsxf_hook_admitted(void *ctx, uint64_t op_id)
 {
-    rsxf_state *s = LD_ACQ(&S);
+    rsxf_state *s = owner_state(ctx);
     if (!s || !s->hook.active)
         return;
     s->hook.op_id = op_id;
@@ -562,17 +661,45 @@ int rsxf_forced(void)
     return s && s->armed;
 }
 
+/* Up to FP_SAMPLE bytes of the ucode (its first, middle and last 16) that a cached hash must still match. */
+static void fp_sample(const uint8_t *u, uint32_t bytes, uint8_t out[FP_SAMPLE])
+{
+    memset(out, 0, FP_SAMPLE);
+    memcpy(out, u, bytes < 16u ? bytes : 16u);
+    if (bytes >= 32u)
+        memcpy(out + 16, u + ((bytes / 2u) & ~15u), 16);
+    if (bytes >= 48u)
+        memcpy(out + 32, u + bytes - 16u, 16);
+}
+
+/* The program container's ucode bound at `offset` (owner, inside the application's bind call): hashed here, so the
+ * capture never reads application memory later (a container freed or reused after its bind cannot be misread). A
+ * container bound before with the same address, offset and size whose sampled bytes still match reuses its hash. */
 void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
 void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset)
 {
     rsxf_state *s = owner_state(ctx);
+    uint8_t sample[FP_SAMPLE];
+    fp_cached *c;
     bind *b;
     if (!s || !ucode || !bytes)
         return;
+    fp_sample(ucode, bytes, sample);
+    c = &s->fpc[((uintptr_t)ucode >> 4 ^ (uintptr_t)(offset >> 6) ^ bytes) % FP_CACHE];
+    if (c->ucode == ucode && c->offset == offset && c->bytes == bytes && !memcmp(c->sample, sample, FP_SAMPLE)) {
+        s->fp_reused++;
+    } else {
+        ps3dk_prof__rsxf_fp_hash(ucode, bytes, &c->h);
+        c->ucode = ucode;
+        c->offset = offset;
+        c->bytes = bytes;
+        memcpy(c->sample, sample, FP_SAMPLE);
+        s->fp_hashed++;
+    }
     b = &s->binds[(fp_offset(offset) >> 6) % BIND_SLOTS];
     b->offset = offset;
-    b->bytes = bytes;
-    b->ucode = ucode;
+    b->h = c->h;
+    b->valid = 1;
     if (s->fp_cached && fp_offset(s->fp_addr) == fp_offset(offset))
         s->fp_cached = 0; /* the same address may now hold another program */
 }
@@ -612,23 +739,21 @@ void ps3dk_prof_draw_scope_end(void)
 
 /* ---- requests (any thread) ---------------------------------------------------------------------------------------- */
 
-static void free_staging(rsxf_state *s)
+/* The requester gives its CLAIMING word back: IDLE, keeping STOP (the only flag another actor adds to it). */
+static void release_claim(void)
 {
-    for (uint32_t i = 0; i < BLOCKS_MAX; i++) {
-        if (s->blocks[i].base)
-            pal_free(s->blocks[i].base);
-        s->blocks[i].base = NULL;
-        ST_RLX(&s->blocks[i].state, B_FREE);
-    }
+    uint64_t w = slot_load();
+    while (!slot_cas(&w, WORD(RSXCAP_IDLE, w & F_STOP, RSXCAP_EPOCH(w))))
+        ;
 }
 
 static int request(uint32_t source, uint32_t request_id, uint32_t flags, const char *name, uint32_t name_len,
                    uint32_t *id_out)
 {
     rsxf_state *s = LD_ACQ(&S);
-    uint64_t w;
+    uint64_t w, want;
     uint32_t e;
-    if (!rsxf_selected() || !s || !s->ringed)
+    if (!rsxf_selected() || !s)
         return PS3DK_PROF_ENOTSUP;
     if (flags || name_len > RSXF_NAME_MAX || (name_len && (!name || memchr(name, 0, name_len))))
         return PS3DK_PROF_EINVAL;
@@ -636,34 +761,43 @@ static int request(uint32_t source, uint32_t request_id, uint32_t flags, const c
         return PS3DK_PROF_ENOTINIT;
     if (LD_ACQ(&g_prof->stop_latch))
         return PS3DK_PROF_ESTOPPED;
-    w = LD_ACQ(&g_slot);
-    if (RSXCAP_STATE(w) != RSXCAP_IDLE || (w & RSXCAP_F_STOP))
-        return (w & RSXCAP_F_STOP) ? PS3DK_PROF_ESTOPPED : PS3DK_PROF_EBUSY;
-    e = RSXCAP_EPOCH(w) + 1u;
-    if (!__atomic_compare_exchange_n(&g_slot, &w, RSXCAP_WORD(RSXCAP_CLAIMING, 0, e, 0, 0), 0, __ATOMIC_ACQ_REL,
-                                     __ATOMIC_ACQUIRE))
+    w = slot_load();
+    if (w & F_STOP)
+        return PS3DK_PROF_ESTOPPED;
+    if (RSXCAP_STATE(w) != RSXCAP_IDLE)
         return PS3DK_PROF_EBUSY;
+    e = RSXCAP_EPOCH(w) + 1u;
+    if (!slot_cas(&w, WORD(RSXCAP_CLAIMING, 0, e)))
+        return (w & F_STOP) ? PS3DK_PROF_ESTOPPED : PS3DK_PROF_EBUSY;
     for (uint32_t i = 0; i < s->nblocks; i++) {
         s->blocks[i].base = pal_alloc(s->block_bytes);
         if (!s->blocks[i].base) {
             free_staging(s);
-            ST_REL(&g_slot, RSXCAP_WORD(RSXCAP_IDLE, 0, e, 0, 0));
+            release_claim();
             return PS3DK_PROF_ENOMEM;
         }
         ST_RLX(&s->blocks[i].state, B_FREE);
     }
     s->req_source = source;
     s->req_id = request_id;
-    s->name_len = name_len;
-    if (name_len)
-        memcpy(s->name, name, name_len);
-    ST_RLX(&s->st_id, e);
-    ST_RLX(&s->st_request, request_id);
-    ST_RLX(&s->st_draws, 0u);
-    ST_RLX(&s->st_frame, 0ull);
-    ST_RLX(&s->st_bytes, 0ull);
-    status(5u, 0u);
-    ST_REL(&g_slot, RSXCAP_WORD(RSXCAP_REQUESTED, 0, e, 0, 0));
+    /* the name as valid UTF-8 (an invalid byte becomes '?'), so the reader never has to refuse it */
+    s->name_len = ps3dk_prof__rsxf_utf8_append(s->name, 0, RSXF_NAME_MAX, name, name_len);
+    if (source == 1u) {
+        ST_RLX(&s->st_id, e);
+        ST_RLX(&s->st_request, request_id);
+        ST_RLX(&s->st_draws, 0u);
+        ST_RLX(&s->st_frame, 0ull);
+        ST_RLX(&s->st_bytes, 0ull);
+    }
+    status(s, 5u, 0u);
+    want = WORD(RSXCAP_CLAIMING, 0, e);
+    if (!slot_cas(&want, WORD(RSXCAP_REQUESTED, 0, e))) {
+        /* shutdown added STOP while the blocks were allocated: nobody else touched them */
+        status(s, 4u, RSXF_R_SHUTDOWN);
+        free_staging(s);
+        release_claim();
+        return PS3DK_PROF_ESTOPPED;
+    }
     *id_out = e;
     return PS3DK_PROF_OK;
 }
@@ -686,8 +820,7 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     uint32_t e = RSXCAP_EPOCH(w);
     rsxf_wire_begin b;
     uint64_t want = w;
-    if (!__atomic_compare_exchange_n(&g_slot, &want, RSXCAP_WORD(RSXCAP_ARMING, 0, e, 0, 0), 0, __ATOMIC_ACQ_REL,
-                                     __ATOMIC_ACQUIRE))
+    if (!slot_cas(&want, WORD(RSXCAP_ARMING, 0, e)))
         return;
     s->frame = frame;
     s->draws_seen = s->hooked = s->decoded_only = s->mismatches = s->untimed = 0;
@@ -699,6 +832,7 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     s->next_seq = 0;
     s->cur = s->nblocks - 1u;
     s->words_at_arm = s->dec.words;
+    s->lost_at_arm = s->dec.lost_events;
     s->hook.active = 0;
     (void)take_block(s);
     memset(&b, 0, sizeof b);
@@ -716,16 +850,21 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     b.name_len = s->name_len;
     s->begin_len = (uint32_t)ps3dk_prof__rsxf_put_begin(s->begin_buf, sizeof s->begin_buf, &b);
     ST_RLX(&s->end_ready, 0u);
-    ST_RLX(&s->begin_emitted, 0u);
     ST_REL(&s->begin_ready, 1u);
-    ST_RLX(&s->st_frame, frame);
+    if (s->req_source == 1u)
+        ST_RLX(&s->st_frame, frame);
+    status(s, 1u, 0u);
+    want = WORD(RSXCAP_ARMING, 0, e);
+    if (!slot_cas(&want, WORD(RSXCAP_ARMED, 0, e))) {
+        owner_leave(s); /* shutdown added STOP while arming */
+        return;
+    }
     s->armed = 1;
-    status(1u, 0u);
-    ST_REL(&g_slot, RSXCAP_WORD(RSXCAP_ARMED, 0, e, 0, 0));
 }
 
-/* END from the sealed blocks only: every count matches the records the drainer writes. */
-static void build_end(rsxf_state *s, uint32_t id, uint16_t outcome, uint16_t reason)
+/* END from the sealed blocks only: every count matches the records the drainer writes. The owner's counters, read by
+ * the owner at close or by the drainer once the owner left (snap_decoder ran first in both cases). */
+static void build_end(rsxf_state *s, uint8_t *out, uint32_t id, uint16_t outcome, uint16_t reason)
 {
     rsxf_wire_end e;
     memset(&e, 0, sizeof e);
@@ -746,11 +885,31 @@ static void build_end(rsxf_state *s, uint32_t id, uint16_t outcome, uint16_t rea
     e.bytes_streamed = s->sealed_bytes;
     e.bytes_dropped = s->bytes_dropped + (s->bytes_streamed - s->sealed_bytes);
     e.tb_end = p_tb();
-    e.decoder_words = s->dec.words - s->words_at_arm;
-    e.reject_reason = s->dec.bad_reason;
-    e.reject_header = s->dec.bad_reason ? s->dec.bad_header : 0;
+    e.decoder_words = s->end_words;
+    e.reject_reason = s->end_reject_reason;
+    e.reject_header = s->end_reject_header;
+    e.lost_events = s->end_lost;
     e.untimed = s->untimed;
-    (void)ps3dk_prof__rsxf_put_end(s->end_buf, sizeof s->end_buf, &e);
+    (void)ps3dk_prof__rsxf_put_end(out, RSXF_END_BYTES, &e);
+}
+
+/* END at shutdown while the owner may still be inside the capture: only the drainer's own counts of the blocks it
+ * wrote (the owner's counters are not read). */
+static void build_end_drained(rsxf_state *s, uint8_t *out, uint32_t id)
+{
+    rsxf_wire_end e;
+    memset(&e, 0, sizeof e);
+    e.id = id;
+    e.outcome = RSXF_OUT_ABANDONED;
+    e.reason = RSXF_R_SHUTDOWN;
+    e.blocks = s->blocks_emitted;
+    e.draws_seen = e.draws_recorded = s->d_draws;
+    e.truncated_at = RSXF_NO_ORDINAL;
+    e.programs = s->d_programs;
+    e.labels = s->d_labels;
+    e.bytes_streamed = s->d_bytes;
+    e.tb_end = p_tb();
+    (void)ps3dk_prof__rsxf_put_end(out, RSXF_END_BYTES, &e);
 }
 
 static void close_capture(rsxf_state *s, uint64_t w)
@@ -761,13 +920,15 @@ static void close_capture(rsxf_state *s, uint64_t w)
     seal_current(s);
     if (LD_RLX(&s->blocks[s->cur].state) == B_FILLING)
         ST_REL(&s->blocks[s->cur].state, B_FREE); /* an empty open block */
-    build_end(s, e, truncated ? RSXF_OUT_TRUNCATED : RSXF_OUT_DONE, truncated ? RSXF_R_STAGING : RSXF_R_NONE);
+    snap_decoder(s);
+    build_end(s, s->end_buf, e, truncated ? RSXF_OUT_TRUNCATED : RSXF_OUT_DONE,
+              truncated ? RSXF_R_STAGING : RSXF_R_NONE);
     s->armed = 0;
     s->hook.active = 0;
     ST_REL(&s->end_ready, 1u);
-    status(2u, truncated ? RSXF_R_STAGING : 0u);
-    (void)__atomic_compare_exchange_n(&g_slot, &want, RSXCAP_WORD(RSXCAP_CLOSING, 0, e, 0, 0), 0, __ATOMIC_ACQ_REL,
-                                      __ATOMIC_ACQUIRE);
+    status(s, 2u, truncated ? RSXF_R_STAGING : 0u);
+    if (!slot_cas(&want, WORD(RSXCAP_CLOSING, 0, e)))
+        owner_leave(s); /* shutdown added STOP: the drainer ends it from the counters published here */
 }
 
 void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, uint32_t window_id)
@@ -778,7 +939,11 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
         return;
     s->label = NULL;
     s->depth = s->depth_excess = 0;
-    w = LD_ACQ(&g_slot);
+    w = slot_load();
+    if (w & F_STOP) {
+        owner_leave(s);
+        return;
+    }
     if (RSXCAP_STATE(w) == RSXCAP_ARMED) {
         close_capture(s, w);
         return;
@@ -799,10 +964,13 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
     if (++s->window_waits >= 3u) {
         uint64_t want = w;
         s->window_waits = s->window_asked = 0;
-        if (__atomic_compare_exchange_n(&g_slot, &want, RSXCAP_WORD(RSXCAP_IDLE, 0, RSXCAP_EPOCH(w), 0, 0), 0,
-                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        /* abandoned: ARMING holds the blocks for the owner while it frees them, then the slot goes back to IDLE */
+        if (slot_cas(&want, WORD(RSXCAP_ARMING, 0, RSXCAP_EPOCH(w)))) {
+            status(s, 4u, RSXF_R_CANCELLED);
             free_staging(s);
-            status(4u, RSXF_R_CANCELLED);
+            want = slot_load();
+            while (!slot_cas(&want, WORD(RSXCAP_IDLE, want & F_STOP, RSXCAP_EPOCH(want))))
+                ;
         }
     }
 }
@@ -824,13 +992,75 @@ static int emit_blocks(rsxf_state *s, rsxf_emit_fn emit, void *user, uint32_t id
             return 0;
         s->drain_seq++;
         s->blocks_emitted++;
+        s->d_draws += b->draws;
+        s->d_programs += b->programs;
+        s->d_labels += b->labels;
+        s->d_bytes += b->used - RSXF_DRAWS_HEADER;
         ST_REL(&b->state, B_FREE);
+    }
+}
+
+/* The sealing drainer's last step (STOP already set): end what was begun, then leave. It frees the staging only when
+ * no other actor can touch it (IDLE, REQUESTED, CLOSING, or the owner already out); otherwise it marks F_DRAINER_OUT
+ * and the requester or the owner frees on its way out. */
+static void seal_finish(rsxf_state *s, rsxf_emit_fn emit, void *user)
+{
+    for (;;) {
+        uint64_t w = slot_load();
+        uint32_t st = RSXCAP_STATE(w), id = RSXCAP_EPOCH(w);
+        uint8_t end[RSXF_END_BYTES];
+        switch (st) {
+        case RSXCAP_IDLE:
+            return;
+        case RSXCAP_CLAIMING: /* the requester allocates: its publish fails on STOP and it frees what it made */
+            if (slot_cas(&w, w | F_DRAINER_OUT))
+                return;
+            continue;
+        case RSXCAP_REQUESTED: /* no BEGIN was written; neither the owner nor the requester touches the blocks */
+        case RSXCAP_CLOSING:   /* the owner is out; END could not be written (the sink refused) */
+            status(s, 4u, RSXF_R_SHUTDOWN);
+            if (slot_cas(&w, WORD(RSXCAP_IDLE, F_STOP, id))) {
+                free_staging(s);
+                ST_RLX(&s->begin_ready, 0u);
+                s->begin_emitted = 0;
+                return;
+            }
+            continue;
+        case RSXCAP_ARMING:
+        case RSXCAP_ARMED:
+            if (s->begin_emitted) {
+                if (w & F_OWNER_OUT) {
+                    /* the owner's counters are final: write every block it sealed, then its END */
+                    if (!emit_blocks(s, emit, user, id))
+                        return;
+                    build_end(s, end, id, RSXF_OUT_ABANDONED, RSXF_R_SHUTDOWN);
+                } else {
+                    build_end_drained(s, end, id);
+                }
+                if (emit(user, RSXF_CHUNK_END, end, RSXF_END_BYTES) != 0)
+                    return;
+                s->begin_emitted = 0;
+            }
+            status(s, 4u, RSXF_R_SHUTDOWN);
+            if (w & F_OWNER_OUT) {
+                if (slot_cas(&w, WORD(RSXCAP_IDLE, F_STOP, id))) {
+                    free_staging(s);
+                    ST_RLX(&s->begin_ready, 0u);
+                    return;
+                }
+            } else if (slot_cas(&w, w | F_DRAINER_OUT)) {
+                return; /* the owner frees when it observes STOP */
+            }
+            continue;
+        default:
+            return;
+        }
     }
 }
 
 void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
 {
-    rsxf_state *s = LD_ACQ(&S);
+    rsxf_state *s = LD_ACQ(&g_state);
     uint64_t w;
     uint32_t st, id;
     if (!rsxf_selected())
@@ -838,8 +1068,8 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
     if (!LD_RLX(&g_config_emitted)) {
         uint8_t b[RSXF_CONFIG_BYTES];
         rsxf_wire_config c;
-        c.availability = !auto_available ? RSXF_NO_AUTO : !s ? RSXF_NO_DECODER : !s->ringed ? RSXF_NO_RING
-                         : RSXF_AVAILABLE;
+        c.availability = !auto_available ? RSXF_NO_AUTO : LD_RLX(&g_ringless) ? RSXF_NO_RING
+                         : !s ? RSXF_NO_DECODER : RSXF_AVAILABLE;
         c.block_bytes = opt_kb() * 1024u;
         c.blocks = opt_blocks();
         c.programs = PROGRAMS;
@@ -849,17 +1079,23 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
             return;
         ST_RLX(&g_config_emitted, 1u);
     }
-    if (!s)
+    if (!s || g_drain_sealed)
         return;
-    w = LD_ACQ(&g_slot);
+    w = slot_load();
+    if (seal)
+        while (!(w & F_STOP) && !slot_cas(&w, w | F_STOP))
+            ;
+    if ((w & F_DRAINER_OUT) || ((w & F_STOP) && !seal))
+        return; /* sealed already: nothing is written after the seal */
     st = RSXCAP_STATE(w);
     id = RSXCAP_EPOCH(w);
     if (LD_ACQ(&s->begin_ready) && !s->begin_emitted) {
         if (emit(user, RSXF_CHUNK_BEGIN, s->begin_buf, s->begin_len) != 0)
             return;
         s->begin_emitted = 1;
-        s->drain_seq = 0;
-        s->blocks_emitted = 0;
+        s->drain_seq = s->blocks_emitted = 0;
+        s->d_draws = s->d_programs = s->d_labels = 0;
+        s->d_bytes = 0;
     }
     if (s->begin_emitted && !emit_blocks(s, emit, user, id))
         return;
@@ -869,22 +1105,14 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
         free_staging(s);
         ST_RLX(&s->begin_ready, 0u);
         s->begin_emitted = 0;
-        status(3u, LD_RLX(&s->st_reason));
-        ST_REL(&g_slot, RSXCAP_WORD(RSXCAP_IDLE, 0, id, 0, 0));
-        return;
+        status(s, 3u, LD_RLX(&s->st_reason));
+        /* CLOSING belongs to the drainer; only this thread's seal adds STOP to it */
+        while (!slot_cas(&w, WORD(RSXCAP_IDLE, w & F_STOP, id)))
+            ;
     }
-    if (seal && st != RSXCAP_IDLE) {
-        /* the owner has quiesced: an armed capture ends here with the blocks already sealed (the open block's
-         * records are dropped, so every count matches the emitted records), a request not yet armed is withdrawn */
-        if (s->begin_emitted && (st == RSXCAP_ARMED || st == RSXCAP_ARMING)) {
-            build_end(s, id, RSXF_OUT_ABANDONED, RSXF_R_SHUTDOWN);
-            if (emit(user, RSXF_CHUNK_END, s->end_buf, RSXF_END_BYTES) != 0)
-                return;
-        }
-        s->armed = 0;
-        free_staging(s);
-        status(4u, RSXF_R_SHUTDOWN);
-        ST_REL(&g_slot, RSXCAP_WORD(RSXCAP_IDLE, RSXCAP_F_STOP, id, 0, 0));
+    if (seal) {
+        seal_finish(s, emit, user);
+        g_drain_sealed = 1;
     }
 }
 
@@ -898,7 +1126,7 @@ static int live_request(uint32_t request_id, uint32_t flags, const char *name, u
 }
 static void live_status(rsxf_status *o)
 {
-    rsxf_state *s = LD_ACQ(&S);
+    rsxf_state *s = LD_ACQ(&g_state);
     memset(o, 0, sizeof *o);
     if (!s)
         return;
@@ -912,8 +1140,24 @@ static void live_status(rsxf_status *o)
 }
 static int live_available(void)
 {
-    rsxf_state *s = LD_ACQ(&S);
-    return rsxf_selected() && s && s->ringed;
+    return rsxf_selected() && LD_ACQ(&S) != NULL;
 }
 static const rsxf_live_ops g_live_ops = {live_request, live_status, live_available};
 const rsxf_live_ops *ps3dk_prof__rsxf_live_ops(void) { return rsxf_selected() ? &g_live_ops : NULL; }
+
+#ifdef PS3DK_PROF_RSXF_TEST
+/* Host tests: how many bind calls hashed and how many reused a cached hash. */
+void ps3dk_prof__rsxf_test_bind_stats(uint64_t *hashed, uint64_t *reused);
+void ps3dk_prof__rsxf_test_bind_stats(uint64_t *hashed, uint64_t *reused)
+{
+    rsxf_state *s = LD_ACQ(&g_state);
+    *hashed = s ? s->fp_hashed : 0;
+    *reused = s ? s->fp_reused : 0;
+}
+/* Host tests: the standing state's size (allocated once at attach with the ring). */
+size_t ps3dk_prof__rsxf_test_state_bytes(void);
+size_t ps3dk_prof__rsxf_test_state_bytes(void) { return sizeof(rsxf_state); }
+/* Host tests: the slot word, to aim a seal at a state. */
+uint64_t ps3dk_prof__rsxf_test_slot(void);
+uint64_t ps3dk_prof__rsxf_test_slot(void) { return slot_load(); }
+#endif

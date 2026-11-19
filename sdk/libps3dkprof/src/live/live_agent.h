@@ -79,7 +79,8 @@ typedef struct live_cmd_ops {
  * NULL until the winning shutdown has published its record (the runtime's
  * ps3dk_prof__finalization); the host tests inject one. */
 /* RSX frame capture (protocol v3), served by the runtime when it selected the capture: request returns 0 with *id
- * or a PS3DK_PROF_* refusal at once; status fills the latest capture's progress (state 0: none); available is 1
+ * or a PS3DK_PROF_* refusal at once; status fills the latest live request's progress (state 0: none; a request from
+ * app code never replaces it); available is 1
  * when requests can be served (advertised as LIVE_CAP_RSX_FRAME). Called on the agent thread only. */
 typedef struct live_rsxf_status {
     uint32_t id, request, state, reason, draws;

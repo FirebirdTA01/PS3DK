@@ -220,6 +220,57 @@ fn open_and_pending_states() {
     assert_eq!(rf::frames(&cap)[0].status, FrameStatus::Truncated { at: 1, reason: 1 });
 }
 
+/// A text field that is not valid UTF-8 (or holds a NUL) degrades that field only: the file, its AUTO data and the
+/// capture still read, the text shows U+FFFD replacements, and the capture counts the replaced fields.
+#[test]
+fn bad_text_degrades_the_field_not_the_file() {
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let mut b = Buf::default();
+    // LABEL 1: "ro" + a lone continuation byte + "k" (4 bytes, padded to 8)
+    b.u16(3).u16(24).u32(1).u16(4).u16(0).u32(0);
+    b.0.extend_from_slice(&[b'r', b'o', 0x80, b'k', 0, 0, 0, 0]);
+    let mut d = XDraw::decoded(0, 1);
+    d.label = 1;
+    d.encode(&mut b);
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 0, 1, 0, u32::MAX, 0, 1, 0, 0];
+    end.untimed = 1;
+    let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, 0, "a\0b").chunk(),
+        draws_chunk(1, 0, 2, &b.0), end.chunk()]);
+    let cap = reader::read(&f.bytes()).expect("a bad text field never fails the file");
+    assert!(cap.auto.is_some());
+    let fr = &rf::frames(&cap)[0];
+    assert_eq!(fr.name, "a\u{fffd}b");
+    assert_eq!(fr.draws[0].label.as_deref(), Some("ro\u{fffd}k"));
+    assert_eq!(fr.text_replaced, 2);
+    assert_eq!(fr.status, FrameStatus::Complete);
+    let (rc, out) = cli(&["rsx-frame", &temp("badtext.prof", &f.bytes())]);
+    assert_eq!(rc, 0);
+    assert!(out.contains("2 text fields not UTF-8"), "{out}");
+}
+
+/// A draw whose AUTO op is of another kind (or frame) is not timed by it: it is in no timed count or sum.
+#[test]
+fn mismatched_op_is_not_timed() {
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let (op, op_kind) = bind.ops[0];
+    let kind = if op_kind == 1 { 2 } else { 1 };
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 1, 0, 0, u32::MAX, 0, 0, 0, 0];
+    let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, bind.frame, "m").chunk(),
+        one_draw(1, &XDraw::timed(0, kind, op)), end.chunk()]);
+    let cap = reader::read(&f.bytes()).unwrap();
+    let fr = &rf::frames(&cap)[0];
+    assert!(fr.draws[0].op_mismatch);
+    assert!(matches!(fr.draws[0].timing, Timing::Invalid(_)));
+    assert_eq!((fr.totals.timed, fr.totals.untimed, fr.totals.mismatched, fr.totals.sum), (0, 0, 1, 0));
+    assert_eq!(fr.totals.span, None);
+    let g = rf::group(fr, GroupBy::Kind, &Default::default());
+    assert_eq!((g[0].timed, g[0].sum), (0, 0));
+}
+
 #[test]
 fn flag_rules() {
     let base = tags_fixture();
@@ -272,7 +323,6 @@ fn every_rule_refused_once() {
     case("undeclared owner", vec![cfg.chunk(), XBegin { owner: 999, ..begin() }.chunk()]);
     case("begin flags", vec![cfg.chunk(), XBegin { flags: 4, ..begin() }.chunk()]);
     case("name too long", vec![cfg.chunk(), XBegin { name: "n".repeat(64), ..begin() }.chunk()]);
-    case("name NUL", vec![cfg.chunk(), XBegin { name: "a\0".into(), ..begin() }.chunk()]);
     case("begin padding", { let mut c = begin().chunk(); let l = c.payload.len(); c.payload[l - 1] = 1; vec![cfg.chunk(), c] });
     case("baseline without known", { let mut c = begin().chunk(); c.payload[40] = 1; vec![cfg.chunk(), c] });
     // DRAWS
@@ -353,6 +403,7 @@ fn every_rule_refused_once() {
         let mut b = Buf::default(); dec().encode(&mut b); draws_chunk(1, 3, 1, &b.0) }, end1().chunk()]);
     case("reject header without reason", { let mut e = end1(); e.reject = (5, 0); vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("end reserved", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
+    case("end reserved 104", { let mut e = end1().chunk(); e.payload[104] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("open at trailer", vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec())]);
 }
 

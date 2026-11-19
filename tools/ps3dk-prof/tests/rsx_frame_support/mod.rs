@@ -184,14 +184,13 @@ pub struct XEnd {
     pub tb_end: u64,
     pub decoder_words: u64,
     pub reject: (u32, u32),
-    pub fp_reads: u32,
-    pub fp_ticks: u64,
+    pub lost_events: u32,
     pub untimed: u32,
 }
 impl XEnd {
     pub fn done(id: u32) -> Self {
         XEnd { id, outcome: 1, reason: 0, n: [0, 0, 0, 0, 0, 0, 0, u32::MAX, 0, 0, 0, 0], bytes: (0, 0), tb_end: 9000,
-            decoder_words: 1234, reject: (0, 0), fp_reads: 0, fp_ticks: 0, untimed: 0 }
+            decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0 }
     }
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
@@ -200,7 +199,7 @@ impl XEnd {
             b.u32(v);
         }
         b.u64(self.bytes.0).u64(self.bytes.1).u64(self.tb_end).u64(self.decoder_words).u32(self.reject.0)
-            .u32(self.reject.1).u32(self.fp_reads).u32(0).u64(self.fp_ticks).u32(self.untimed).u32(0).u64(0);
+            .u32(self.reject.1).u32(self.lost_events).u32(0).u64(0).u32(self.untimed).u32(0).u64(0);
         chunk(T_END, b.0)
     }
 }

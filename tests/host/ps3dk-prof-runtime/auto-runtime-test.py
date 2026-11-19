@@ -729,6 +729,7 @@ if a.case in RING_RUNTIME:
             x=d[k];assert (x['kind'],x['primitive'],x['count'],x['first'],x['hooked'],x['decoded'])==('ARRAY','LINE_STRIP',6,7,False,True),x
             assert x['timing']['state']=='untimed' and x['timing']['reason'].startswith('not hooked'),x
         c=caps[1]
+        assert (c['name'],c['source'],c['request_id'])==('second','live',9),c
         assert c['status'].startswith('TRUNCATED') and c['end']['draws_seen']==200 and 0<c['end']['draws_recorded']<200,c['end']
         assert all(x['timing']['state']=='timed' for x in c['draws']),'every recorded draw of the truncated capture is timed'
         print('reader: capture 1 %d draws COMPLETE; capture 2 %s, %d of 200 recorded' % (len(d),c['status'],c['end']['draws_recorded']))

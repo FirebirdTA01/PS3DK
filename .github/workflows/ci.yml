@@ -421,6 +421,13 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/rsxf-test.py --out "$RUNNER_TEMP/rsxf-plain" --reader tools/target/debug/ps3dk-prof
           python3 tests/host/ps3dk-prof-runtime/rsxf-test.py --out "$RUNNER_TEMP/rsxf-address" --reader tools/target/debug/ps3dk-prof --sanitize
 
+      # RSX frame capture runtime racing shutdown: the owner, an app and a live requester against the drainer's seal,
+      # TSan and ASan+UBSan, one round per process; each reviewed defect (a seal freeing under the owner, an owner
+      # that never leaves, a plain REQUESTED store over STOP, a lazy FP hash) put back must fail; the bind-hook cost.
+      - name: RSX frame capture shutdown races
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/rsxf-race-test.py --out "$RUNNER_TEMP/rsxf-race"
+
       # Named counters: end-to-end values against the reader, unchanged zone records, and the counter-mutex lock
       # failures (each fails the capture closed, no FINAL after a failed freeze, nothing emitted twice), plain and
       # ASan+UBSan, with a mutant that discards the emission error.

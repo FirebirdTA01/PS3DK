@@ -92,6 +92,7 @@ def main():
     assert len(d) == 1 and d[0]['kind'] == 'ARRAY' and d[0]['primitive'] == 'TRIANGLES' and d[0]['count'] == 36
     assert d[0]['label'] == 'terrain/rock' and d[0]['fp'] == 1 and d[0]['timing']['state'] == 'untimed'
     assert d[0]['timing']['reason'].startswith('not hooked'), d[0]
+    assert c['end']['lost_events'] == 2 and 'fp_reads' not in c['end'], c['end']
     print('RSX frame capture units and reader round trip PASS')
 
 

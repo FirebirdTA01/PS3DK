@@ -620,8 +620,8 @@ void RSX_FUNC(LoadFragmentProgramLocation)(gcmContextData *context,const rsxFrag
 	RSX_CONTEXT_CURRENTP[1] = ((location + 1) | (offset&0x1fffffff));
 	RSX_CONTEXT_CURRENT_END(2);
 #if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
-	{
-		/* RSX frame capture: the program bound at this offset (identity only; inert unless selected) */
+	if(__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED)) {
+		/* RSX frame capture: the program bound at this offset (identity only; one load and a branch unless active) */
 		void *ucode = NULL;
 		u32 size = 0;
 		rsxFragmentProgramGetUCode(program,&ucode,&size);
