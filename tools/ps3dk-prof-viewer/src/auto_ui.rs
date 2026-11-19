@@ -660,6 +660,9 @@ fn draw_verdict_strip(
             resp.clone().on_hover_ui(|tip| {
                 tip.label(RichText::new(format!("Frame #{} (owner {})", f.frame, f.owner)).strong());
                 auto_badge(tip, f.verdict.key(), verdict_tone(f.verdict));
+                if f.isolated_ops != 0 {
+                    tip.label(ps3dk_prof::auto_rsx::ISOLATED_FRAME);
+                }
                 tip.label(f.verdict.explanation());
                 tip.label(RichText::new(&f.reason).italics());
                 tip.add_space(ui::SPACE_XS);
@@ -918,7 +921,8 @@ fn draw_frames_table(
                         // Rows
                         for f in &visible_frames {
                             let is_sel = st.selected_frame == Some(f.frame);
-                            let f_resp = g.selectable_label(is_sel, format!("#{}", f.frame));
+                            let f_resp = g.selectable_label(is_sel, format!("#{}{}", f.frame, if f.isolated_ops != 0 { " ISOLATED" } else { "" }));
+                            let f_resp = if f.isolated_ops != 0 { f_resp.on_hover_text(ps3dk_prof::auto_rsx::ISOLATED_FRAME) } else { f_resp };
                             if f_resp.clicked() {
                                 st.select_and_jump(Some(f.frame), v, timeline.as_deref_mut());
                                 drawn.selected_frame = Some(f.frame);
@@ -1032,6 +1036,9 @@ fn draw_frame_detail(
                 h.set_max_width(card_w);
                 h.label(RichText::new(format!("FRAME #{} DETAIL", f.frame)).strong());
                 auto_badge(h, f.verdict.key(), verdict_tone(f.verdict));
+                if f.isolated_ops != 0 {
+                    auto_badge(h, "ISOLATED", ui::Tone::Warning).on_hover_text(ps3dk_prof::auto_rsx::ISOLATED_FRAME);
+                }
                 h.add_space(ui::SPACE_LG);
 
                 if ui::primary_button(h, "View in Timeline").clicked() {

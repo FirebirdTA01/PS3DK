@@ -34,6 +34,7 @@ static const matrix_cell MATRIX[VP_COUNT * FP_COUNT] = {
 #define INDEX_TAG 0x200u
 #define INSTANCE_TAG 0x300u
 #define INSTANCES 8          /* identical draws, only the offset constant differs */
-#define DRAWS_PER_FRAME (1 + VP_COUNT * FP_COUNT + 1 + INSTANCES)
+#define SPECIAL_TAG 0x400u   /* the inline-array, inline-index and immediate draws */
+#define DRAWS_PER_FRAME (1 + VP_COUNT * FP_COUNT + 1 + INSTANCES + 3)
 
 #endif

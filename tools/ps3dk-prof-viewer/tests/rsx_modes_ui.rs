@@ -86,6 +86,7 @@ fn both_capture_is_two_labelled_views_paired_per_draw_and_ready_only_when_both_a
     assert_eq!((st.selected, st.half), (Some(b.id), Half::Second));
     assert!(std::ptr::eq(st.current(&v).unwrap(), b));
     let ctx = eframe::egui::Context::default();
+    ps3dk_ui::install(&ctx);
     for view in [View::Draws, View::Shaders, View::Pairs] {
         st.view = view;
         let mut drawn = Drawn::default();

@@ -486,13 +486,19 @@ process uses the directory).
 ### 4.12 `PS3_PROF_RSX_FRAME`, `PS3_PROF_RSX_FRAME_STAGING_KB` (CMake, beta)
 
 With `PS3_PROF_AUTO=ON` and `PS3_PROF_AUTO_RING=ON` (refused without the ring). Default OFF.
-`_STAGING_KB`: each of the two staging blocks, 4..1024, default 256. The selector compiles
+`_STAGING_KB`: each of the two staging blocks, 32..1024, default 256 (a block must hold the largest per-draw unit,
+about 31 KiB: every register changed, every VP constant changed and two programs defined at one draw; a value below 32
+set directly in the options macro is raised to 32). The selector compiles
 `<target>-auto-rsx-frame.c` into each executable and requires its symbol at link time.
 
 One requested frame of the AUTO owner: every draw and clear of its command buffer in submission order, with its RSX
 time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
 used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
-tag, an app label (5.7), the AUTO range it ran in, and the render state, texture slots, vertex attributes, index
+tag, an app label (5.7), the AUTO range it ran in (inline-array, inline-index and immediate draws through the SDK's
+safe writers are timed too while the capture is selected, as AUTO operations of the ARRAY kind (inline array,
+immediate) or the INDEX kind (inline index): with the capture selected, AUTO's per-kind counts, coverage rows and
+`ps3dk-prof auto` totals include them; the capture shows their own kind; draws written by `Unsafe` or raw writers are
+listed with the reason they are untimed), and the render state, texture slots, vertex attributes, index
 stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader), its VP
 constants and FP embedded constants by uniform name, and the instance runs (consecutive draws identical except their
 constants). The captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This
@@ -677,6 +683,8 @@ Flags (the macro requests none; call `ps3dk_prof_rsx_frame_capture(name, flags)`
 - `PS3DK_PROF_RSX_FRAME_ISOLATED`: every captured draw runs alone (a WAIT_FOR_IDLE before each of its two markers),
   so its interval is its own cost. Turn it on to rank draws by cost; leave it off to see the frame as it really runs
   (the isolated frame is slower and its overlap is gone). It costs 4 command words per draw in the captured frame.
+  AUTO marks the operations of an isolated frame ISOLATED: `ps3dk-prof auto` labels that frame row ISOLATED and keeps
+  it out of the `--by-tag` tag and range summaries (its numbers are not comparable with pipelined frames).
 - `PS3DK_PROF_RSX_FRAME_BOTH`: two consecutive frames, the first pipelined, the second isolated, read as two frames
   with their draws paired (kind, label, programs). Costs as ISOLATED for the second frame; the staging must hold two
   frames of records.
@@ -883,8 +891,10 @@ that no register state was recorded.
 **Constants** (decoder 3 captures) lists the draw's vertex-program uniforms, then its fragment-program uniforms, by
 name with their vec4 values; components not written since the last decoder reset show as `?`. Slots and blocks
 without a uniform name (the VP literal pool, unnamed FP constants) follow by slot or offset. Each FP constant has a
-provenance badge: **FIFO exact** (written in the command stream), **container: may differ at GPU time** (the
-program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset). Values
+provenance badge per component (one badge when all four agree): **last inline write seen** (the latest inline write
+the decoder saw in the command stream; not a claim about the value at GPU time), **container: may differ at GPU
+time** (the program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset or a
+full write map). Frames timed isolated are labelled **ISOLATED** on the Automatic page. Values
 changed since the previous draw are highlighted. Consecutive draws that differ only in their constants collapse in
 the draw list into one **xN** row with the run's total time and the slots that vary; click it to list its draws.
 Sorted by time, a run is placed by its total time; other sorts keep it where its first draw falls.
@@ -1083,15 +1093,18 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
 - The live link needs app code, a FILE sink on `/dev_hdd0/`, and no rolling output; one viewer at a time.
 - Rolling output is AUTO-only and refuses active SPU lanes.
 - AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
-- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are exact only when the app
-  patches them through the command stream (cell gcm `cellGcmSetFragmentProgramParameter` does); a value written by the
-  CPU into the program's memory shows the container's value marked "may differ at GPU time"; uniform names come from
+- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are never exact: each component
+  shows the last inline write the decoder saw to it in the command stream (cell gcm `cellGcmSetFragmentProgramParameter`
+  writes them so), else the container's value marked "may differ at GPU time" (a value the CPU wrote into the program's
+  memory is not seen), and UNKNOWN after a decoder reset, a full inline-write map, an M2MF copy over it or another
+  program bound at its address; uniform names come from
   cell gcm program containers (the PSL1GHT `rsx*` program objects are not read yet), at most 32 per program and 16
   programs remembered; register state is
   what the owner's command buffer wrote: a CALL into another buffer resets the decoder (registers unknown until
   written again) and writes from other contexts are not seen; the baseline needs room in the staging blocks (16 KiB
   at most); draws inside
-  CALL segments are timed by AUTO but not listed; a fragment program bound without a program container is recorded by
+  CALL segments are timed by AUTO but not listed; an immediate draw whose vertex data wraps or flushes the command
+  buffer is listed with its timing incomplete; a fragment program bound without a program container is recorded by
   address only. A program is hashed when it is bound: every bind while a capture is armed hashes all its
   instruction bytes. A program bound before the capture keeps the identity of that bind and is shown as "bound before
   capture, not revalidated" (an in-place rewrite since then would not be seen); one whose sampled bytes (first, middle

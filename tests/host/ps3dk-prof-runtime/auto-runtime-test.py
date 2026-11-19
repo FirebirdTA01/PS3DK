@@ -736,6 +736,15 @@ if a.case in RING_RUNTIME:
         assert c['status'].startswith('TRUNCATED') and c['end']['draws_seen']==200 and 0<c['end']['draws_recorded']<200,c['end']
         assert all(x['timing']['state']=='timed' for x in c['draws']),'every recorded draw of the truncated capture is timed'
         print('reader: capture 1 %d draws COMPLETE; capture 2 %s, %d of 200 recorded' % (len(d),c['status'],c['end']['draws_recorded']))
+        # AUTO: the isolated capture's ten draws are ISOLATED operations; their frame row is labelled, no other is
+        r=run('reader-auto',[a.reader,'auto','--json',files[0]],capture_dir)
+        av=json.loads(r.stdout)
+        reports=av['windows'] if 'windows' in av else [av]      # one report per capture window, or the whole file
+        iso=sorted({(f['frame'],f['isolated_ops']) for w in reports for f in w['frames'] if 'isolated_ops' in f})
+        assert len(iso)==1 and iso[0][1]==10,iso
+        r=run('reader-auto-text',[a.reader,'auto',files[0]],capture_dir)
+        assert r.stdout.count(b'ISOLATED: timed by the RSX frame capture')==1,r.stdout[-2000:]
+        print('AUTO: frame %d labelled ISOLATED (%d operations)' % iso[0])
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else

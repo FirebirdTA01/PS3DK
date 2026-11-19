@@ -426,6 +426,48 @@ static void render_frame(void)
     PS3DK_PROF_AUTO_RANGE_END();
     PS3DK_PROF_DRAW_SCOPE_END();
 
+    /* the draw modes AUTO times only for the capture: an inline array (the vertex data in the command buffer, the
+     * attribute layout of the arrays: position 2, colour 4, uv 2 words per vertex), an inline index array (16-bit
+     * indices in the command buffer into the vertex arrays) and an immediate draw (SetDrawBegin, per-vertex
+     * attribute writes, SetDrawEnd) with the arrays disabled; the next frame's first bind_vp enables them again */
+    PS3DK_PROF_DRAW_SCOPE_BEGIN("special");
+    PS3DK_PROF_AUTO_TAG(SPECIAL_TAG);
+    cellGcmSetFragmentProgram(g_ctx, g_fp[FP_COLOR].prog, g_fp[FP_COLOR].offset);
+    fixed_function(0, 0, 0);
+    {
+        static const float tri[3][8] = {
+            {-0.15f, -0.15f, 1.0f, 0.2f, 0.2f, 1.0f, 0.0f, 0.0f},
+            { 0.15f, -0.15f, 0.2f, 1.0f, 0.2f, 1.0f, 1.0f, 0.0f},
+            { 0.0f,   0.15f, 0.2f, 0.2f, 1.0f, 1.0f, 0.5f, 1.0f},
+        };
+        static const uint16_t idx[6] = {0, 1, 2, 0, 2, 3};
+        PS3DK_PROF_DRAW_LABEL("inline_array");
+        bind_vp(VP_OFFSET, 0.6f, -0.55f, 0.0f, 0.0f);
+        cellGcmSetInvalidateVertexCache(g_ctx);
+        cellGcmSetDrawInlineArray(g_ctx, CELL_GCM_PRIMITIVE_TRIANGLES, 24, tri);
+        PS3DK_PROF_DRAW_LABEL("inline_index");
+        bind_vp(VP_OFFSET, 0.85f, -0.55f, 0.0f, 0.0f);
+        cellGcmSetInvalidateVertexCache(g_ctx);
+        rsxDrawInlineIndexArray16(g_ctx, CELL_GCM_PRIMITIVE_TRIANGLES, 0, 6, idx);
+        PS3DK_PROF_DRAW_LABEL("immediate");
+        bind_vp(VP_OFFSET, -0.6f, -0.55f, 0.0f, 0.0f);
+        for (int a = 0; a < 3; a++) {
+            const int attr = a == 0 ? g_vp[VP_OFFSET].pos : a == 1 ? g_vp[VP_OFFSET].col : g_vp[VP_OFFSET].uv;
+            cellGcmSetVertexDataArray(g_ctx, (uint8_t)attr, 0, 0, 0, CELL_GCM_VERTEX_F, CELL_GCM_LOCATION_LOCAL, 0);
+        }
+        cellGcmSetDrawBegin(g_ctx, CELL_GCM_PRIMITIVE_TRIANGLES);
+        for (int v = 0; v < 3; v++) {
+            const float color[4] = {tri[v][2], tri[v][3], tri[v][4], tri[v][5]};
+            const float uv[4] = {tri[v][6], tri[v][7], 0.0f, 1.0f};
+            const float pos[4] = {tri[v][0], tri[v][1], 0.0f, 1.0f};
+            cellGcmSetVertexData4f(g_ctx, (uint8_t)g_vp[VP_OFFSET].col, color);
+            cellGcmSetVertexData4f(g_ctx, (uint8_t)g_vp[VP_OFFSET].uv, uv);
+            cellGcmSetVertexData4f(g_ctx, (uint8_t)g_vp[VP_OFFSET].pos, pos); /* position last: it emits the vertex */
+        }
+        cellGcmSetDrawEnd(g_ctx);
+    }
+    PS3DK_PROF_DRAW_SCOPE_END();
+
     PS3DK_PROF_DRAW_SCOPE_END();
     PS3DK_PROF_AUTO_TAG(0);
 }

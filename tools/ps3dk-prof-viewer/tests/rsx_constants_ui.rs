@@ -31,7 +31,7 @@ fn doc() -> Document {
     XProgram { index: 2, profile: 2, source: 2, flags: 0, instructions: 2, hash: 0x22, bytes: 48, consts: 1,
         address: 0x40, first_draw: 0 }.encode(&mut b);
     uni_rec(&mut b, 2, 0, &[(0x30, 1, 2, "tint")]);
-    fpc_rec(&mut b, 0, 2, 0, &[(0x30, 1, [h(0.5); 4])]);
+    fpc_rec(&mut b, 0, 2, 0, &[(0x30, [1; 4], [h(0.5); 4])]);
     let draw = |ordinal: u32, count: u32| {
         let mut d = XDraw::decoded(ordinal, 1);
         d.vp = 1;
@@ -68,14 +68,19 @@ fn constants_rows_name_uniforms_mark_changes_and_list_unnamed_slots() {
     assert_eq!((offset.profile, offset.resource, offset.values[0]), (Profile::Vertex, 5, [Some(3.0), Some(2.0), Some(0.0), Some(0.0)]));
     assert!(offset.changed, "slot 5 changed at draw 1");
     let tint = r1.iter().find(|r| r.name.as_deref() == Some("tint")).unwrap();
-    assert_eq!((tint.provenance, tint.changed), (Some(Provenance::Fifo), false));
+    assert_eq!((tint.provenance, tint.changed), (Some([Provenance::Inline; 4]), false));
     let unnamed = r1.iter().find(|r| r.name.is_none() && r.profile == Profile::Vertex).unwrap();
     assert_eq!(unnamed.resource, 467);
     assert!(r1.iter().position(|r| r.name.is_none()).unwrap() > r1.iter().position(|r| r.name.is_some()).unwrap());
     assert!(!rows(fr, 3).iter().any(|r| r.changed), "draw 3 changes no constant");
     assert_eq!(vec4(&[Some(1.0), None, Some(0.5), None]), "(1, ?, 0.5, ?)");
     assert!(provenance_badge(Provenance::Container).0.contains("may differ at GPU time"));
-    assert_eq!(provenance_badge(Provenance::Fifo).0, "FIFO exact");
+    assert_eq!(provenance_badge(Provenance::Inline).0, "last inline write seen");
+    use ps3dk_prof_viewer::rsx_constants_ui::provenance_badges;
+    assert_eq!(provenance_badges([Provenance::Inline; 4]).len(), 1);
+    let mixed: Vec<String> = provenance_badges([Provenance::Inline, Provenance::Inline, Provenance::Container, Provenance::Inline])
+        .into_iter().map(|(t, _)| t).collect();
+    assert_eq!(mixed, vec!["x y w: last inline write seen".to_string(), "z: container: may differ at GPU time".to_string()]);
     assert_eq!(provenance_badge(Provenance::Unknown).0, "unknown");
 }
 
@@ -96,6 +101,7 @@ fn instance_runs_collapse_into_one_expandable_row() {
     st.select(fr);
     st.tab = Tab::Constants;
     let ctx = eframe::egui::Context::default();
+    ps3dk_ui::install(&ctx);
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
         eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));

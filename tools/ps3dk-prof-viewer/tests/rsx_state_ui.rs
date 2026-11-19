@@ -125,6 +125,7 @@ fn state_textures_buffers_tabs_render_and_grouping_by_target_is_cached() {
     st.by_target = false;
     assert!(st.rows(&v, &Default::default(), 0).groups.is_empty());
     let ctx = eframe::egui::Context::default();
+    ps3dk_ui::install(&ctx);
     for tab in [Tab::State, Tab::Textures, Tab::Buffers, Tab::Constants] {
         st.tab = tab;
         let mut drawn = Drawn::default();

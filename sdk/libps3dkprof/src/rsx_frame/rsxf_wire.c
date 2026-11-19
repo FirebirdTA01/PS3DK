@@ -10,7 +10,7 @@ static size_t pad8(size_t n) { return (n + 7u) & ~(size_t)7u; }
 
 size_t ps3dk_prof__rsxf_put_config(uint8_t *o, size_t cap, const rsxf_wire_config *c)
 {
-    if (!o || !c || cap < RSXF_CONFIG_BYTES || c->availability > RSXF_NO_DECODER || c->block_bytes < 4096u ||
+    if (!o || !c || cap < RSXF_CONFIG_BYTES || c->availability > RSXF_NO_DECODER || c->block_bytes < RSXF_STAGING_KB_MIN * 1024u ||
         c->block_bytes > 1048576u || (c->block_bytes & 7u) || !c->blocks || c->blocks > 16u || !c->programs ||
         c->programs > 65535u || !c->labels || c->labels > 65535u || !c->label_bytes || c->label_bytes > 255u ||
         c->fp_bytes_cap > (16u << 20))

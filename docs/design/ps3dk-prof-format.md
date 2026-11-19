@@ -906,7 +906,7 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 | 2 | u16 | flags = 0 |
 | 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); 4 also program bytes and BOTH captures (UCODE, SECOND) and the FP bytes cap below; other values MALFORMED |
 | 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
-| 12 | u32 | staging block bytes: 4096..1048576, a multiple of 8 |
+| 12 | u32 | staging block bytes: 32768..1048576, a multiple of 8 (a block holds the largest per-draw unit: STATE for all 2048 registers, VPCONST for all 468 slots, two UNIFORM records of 32 entries, a full FPCONST, the definitions and DRAW, 31,712 bytes) |
 | 16 | u32 | staging blocks: 1..16 |
 | 20 | u32 | program table capacity per capture: 1..65535 |
 | 24 | u32 | label table capacity per capture: 1..65535 |
@@ -924,7 +924,7 @@ most 16 MiB; 0 for earlier decoders); offsets 36..63 stay reserved.
 |---|---|---|
 | 0 | u32 | capture id: 1.., strictly greater than every earlier capture id of the file |
 | 4 | u16 | source: 1 live request, 2 app call |
-| 6 | u16 | flags: bit 0 ISOLATED timing, bit 1 PROGRAM_BYTES; other bits 0 |
+| 6 | u16 | flags: bit 0 ISOLATED, bit 1 FP_BYTES, bit 2 BOTH; other bits 0 |
 | 8 | u32 | request id (live: the viewer's id, nonzero; app: 0) |
 | 12 | u32 | owner (the AUTO owner incarnation) |
 | 16 | u64 | frame (the owner frame being captured) |
@@ -950,7 +950,7 @@ At most one capture is open (BEGIN without its END) at a time.
 | off | type | field |
 |---|---|---|
 | 0 | u32 | capture id: the open capture |
-| 4 | u32 | block sequence: strictly increasing within the capture, from 0; a gap is a dropped block |
+| 4 | u32 | block sequence: 0 for the first block of the capture, then each the previous + 1 (blocks are written in order and never skipped) |
 | 8 | u32 | record count |
 | 12 | u32 | record bytes: exactly the bytes that follow |
 | 16 | records | each {u16 type, u16 length, body}; length is the whole record, a multiple of 8 |
@@ -965,7 +965,7 @@ DRAW (type 1, length 96):
 | 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
 | 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); at least one of bits 0..1; other bits 0 |
 | 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
-| 16 | u64 | AUTO operation id: nonzero iff the reason is 0 |
+| 16 | u64 | AUTO operation id: nonzero iff the reason is 0; INLINE_ARRAY and IMMEDIATE draws are timed by ARRAY operations and INLINE_INDEX draws by INDEX operations (the AUTO kinds stay 1..3), ARRAY, INDEX and CLEAR by their own kind |
 | 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
 | 28 | u32 | first vertex / first index |
 | 32 | u32 | count (vertices or indices) |
@@ -1030,7 +1030,10 @@ BASELINE (type 5) and STATE (type 6), decoder 2 only, length 16 + 8 x n:
 The register file is the 3D object's methods 0x0000..0x1ffc on subchannel 0 as the decoder last saw them written. Data
 ports are interpreted, never stored: the object bind and the channel words below 0x100, VP instruction upload
 (0x0b80..0x0bfc), VP constant upload (0x1f00..0x1f7c), BEGIN_END, inline vertex and index data, the vertex and index
-batch triggers and CLEAR_BUFFERS. A register is known from its first write after attach or after a decoder reset
+batch triggers and CLEAR_BUFFERS. One-shot actions are not stored either: NOP, NOTIFY, WAIT_FOR_IDLE, the vertex cache
+invalidates (0x1710, 0x1714), texture cache control (0x1fd8), report writes (0x1800) and the semaphore releases
+(0x1d70, 0x1d74); nor are the VP constant and instruction upload pointers (0x1efc, 0x1e9c: the decoder interprets them)
+or SEMAPHORE_OFFSET (0x1d6c, which AUTO's own markers rewrite). A register is known from its first write after attach or after a decoder reset
 (any rejected or unfollowed word); its value is then the last one written.
 
 - BASELINE: the known registers at arming, before the first DRAW or STATE of the capture; n >= 1; register indices
@@ -1066,7 +1069,16 @@ when they differ from the last FPCONST (a draw without one runs with the latest 
 | 8 | u16 | n |
 | 10 | u16 | flags: bit 0 TRUNCATED (the program has more constant blocks than were captured); other bits 0 |
 | 12 | u32 | the FP PROGRAM index, defined earlier (0: FP unknown, then n = 0) |
-| 16 | n x 24 | {u32 ucode byte offset of the constant block (increasing), u8 provenance: 1 FIFO (an inline transfer in the owner's command stream wrote it), 2 CONTAINER (the container's value at bind: no write seen since attach, a CPU write would not be seen, so it may differ at GPU time), 3 UNKNOWN (the decoder reset or its inline-write map was full since attach; the container's value is given); u8, u16 reserved = 0; 4 x u32 words as in memory (16-bit halves swapped)} |
+| 16 | n x 24 | {u32 ucode byte offset of the constant block (increasing); 4 x u8 provenance, one per component (x, y, z, w); 4 x u32 words as in memory (16-bit halves swapped)} |
+
+Provenance, per component, is never an exact claim (the capture reads the owner's command stream, not memory): 1
+INLINE, the last inline transfer the decoder saw write that word (subchannel 5 COLOR data into local memory, the whole
+packet); a CPU write after it, or a write the decoder could not see, is not reflected. 2 CONTAINER, the container's
+value at bind: no command-stream write to the word seen since attach (a CPU write would not be seen, so it may differ at
+GPU time). 3 UNKNOWN, the container's value is given: the decoder reset (any rejected or unfollowed word) or its
+inline-write map was full since attach, an M2MF copy (subchannel 1, launched by BUF_NOTIFY) wrote local memory over the
+word, or a different program was bound at the word's address after an inline write there. An FP in main memory gives
+CONTAINER only while no inline write or copy into main memory and no reset was seen, else UNKNOWN.
 
 At most one FPCONST per draw, right before its DRAW in the same chunk.
 
@@ -1118,7 +1130,7 @@ reader refuses it.
 | 4 | u16 | outcome: 1 DONE, 2 TRUNCATED, 3 ABANDONED |
 | 6 | u16 | reason: 0 none; 1 staging full (drainer behind); 2 program table full; 3 label table full; 4 shutdown; 5 context reset; 6 decoder invalid; 7 cancelled |
 | 8 | u32 | DRAWS chunks emitted (must equal the chunks seen) |
-| 12 | u32 | blocks dropped (every block sequence seen is below emitted + dropped) |
+| 12 | u32 | reserved = 0 (blocks dropped: the writer never drops a block; one it cannot write abandons the capture) |
 | 16 | u32 | draws seen |
 | 20 | u32 | draws recorded (must equal the DRAW records seen; at most draws seen) |
 | 24 | u32 | hooked draws |

@@ -92,13 +92,38 @@ pub fn vec4(v: &[Option<f32>; 4]) -> String {
     let c: Vec<String> = v.iter().map(|x| x.map_or_else(|| "?".to_string(), |x| format!("{x}"))).collect();
     format!("({})", c.join(", "))
 }
-/// Badge text and tone for an FP constant's provenance.
+/// Badge text and tone for one FP constant component's provenance. An inline write is the last one the decoder
+/// saw, not a claim about the value at GPU time.
 pub fn provenance_badge(p: Provenance) -> (&'static str, ui::Tone) {
     match p {
-        Provenance::Fifo => ("FIFO exact", ui::Tone::Success),
+        Provenance::Inline => ("last inline write seen", ui::Tone::Accent),
         Provenance::Container => ("container: may differ at GPU time", ui::Tone::Warning),
         Provenance::Unknown => ("unknown", ui::Tone::Neutral),
     }
+}
+/// The badges of a vec4's per-component provenance: one when all four agree, else one per differing component
+/// (`x y: last inline write seen`, `z w: container ...`).
+pub fn provenance_badges(p: [Provenance; 4]) -> Vec<(String, ui::Tone)> {
+    if p.iter().all(|&x| x == p[0]) {
+        let (t, tone) = provenance_badge(p[0]);
+        return vec![(t.to_string(), tone)];
+    }
+    let mut out: Vec<(Provenance, String)> = Vec::new();
+    for (k, c) in ['x', 'y', 'z', 'w'].into_iter().enumerate() {
+        match out.iter_mut().find(|(q, _)| *q == p[k]) {
+            Some((_, lanes)) => {
+                lanes.push(' ');
+                lanes.push(c);
+            }
+            None => out.push((p[k], c.to_string())),
+        }
+    }
+    out.into_iter()
+        .map(|(q, lanes)| {
+            let (t, tone) = provenance_badge(q);
+            (format!("{lanes}: {t}"), tone)
+        })
+        .collect()
 }
 
 /// One Constants row: a named uniform or an unnamed slot/offset.
@@ -110,7 +135,8 @@ pub struct ConstRow {
     /// VP first slot or FP ucode offset.
     pub resource: u32,
     pub values: Vec<[Option<f32>; 4]>,
-    pub provenance: Option<Provenance>,
+    /// FP: each component's provenance (None for VP: the stream is exact).
+    pub provenance: Option<[Provenance; 4]>,
     /// Changed since the previous draw (VP: a slot in `vpc_changed`; FP: different words or provenance).
     pub changed: bool,
 }
@@ -206,8 +232,11 @@ fn const_table(p: &mut egui::Ui, id: &str, rows: &[&ConstRow]) {
                 }
                 match r.provenance {
                     Some(pv) => {
-                        let (t, tone) = provenance_badge(pv);
-                        ui::badge(p, t, tone);
+                        p.horizontal_wrapped(|p| {
+                            for (t, tone) in provenance_badges(pv) {
+                                ui::badge(p, &t, tone);
+                            }
+                        });
                     }
                     None => {
                         p.label("");

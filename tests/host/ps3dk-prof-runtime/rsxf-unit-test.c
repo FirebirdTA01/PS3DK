@@ -151,6 +151,13 @@ static void register_shadow(void)
     assert(!KNOWN(0x1d94) && !KNOWN(0x0b80) && !KNOWN(0x0b8c) && !KNOWN(0x1f00) && !KNOWN(0x320));
     assert(!ps3dk_prof__rsxf_shadowed(0x1808) && !ps3dk_prof__rsxf_shadowed(0x1814) &&
            !ps3dk_prof__rsxf_shadowed(0x0000) && ps3dk_prof__rsxf_shadowed(0x181c) && ps3dk_prof__rsxf_shadowed(0x1fc0));
+    /* one-shot actions are not state: NOP, NOTIFY, cache invalidates, report writes, semaphore releases */
+    assert(!ps3dk_prof__rsxf_shadowed(0x0100) && !ps3dk_prof__rsxf_shadowed(0x0104) &&
+           !ps3dk_prof__rsxf_shadowed(0x1710) && !ps3dk_prof__rsxf_shadowed(0x1714) &&
+           !ps3dk_prof__rsxf_shadowed(0x1fd8) && !ps3dk_prof__rsxf_shadowed(0x1800) &&
+           !ps3dk_prof__rsxf_shadowed(0x1d70) && !ps3dk_prof__rsxf_shadowed(0x1d74));
+    /* interpreted, not render state: the VP constant and instruction upload pointers, AUTO's semaphore offset */
+    assert(!ps3dk_prof__rsxf_shadowed(0x1efc) && !ps3dk_prof__rsxf_shadowed(0x1e9c) && !ps3dk_prof__rsxf_shadowed(0x1d6c));
     cleared = d.regs_cleared;
     ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
     assert(!KNOWN(0x310) && !KNOWN(0x1a00) && d.regs_cleared == cleared + 1);
@@ -176,13 +183,54 @@ static void constants_and_inline_writes(void)
     assert(d.vpc[7][0] == 1 && d.vpc[7][3] == 4 && d.vpc_known[7] == 15);
     assert(d.vpc[20][2] == 13 && d.vpc[21][0] == 21 && d.vpc_known[21] == 15 && !d.vpc_known[8]);
     assert((d.vpc_dirty[0] >> 7 & 1u) && (d.vpc_dirty[0] >> 20 & 1u) && (d.vpc_dirty[0] >> 21 & 1u));
-    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) && v == 0xa);
-    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1010, &v) && v == 0xc);
-    assert(!ps3dk_prof__rsxf_inline_word(&d, 0x1014, &v)); /* the padding word */
-    assert(!ps3dk_prof__rsxf_inline_word(&d, 0x1004, &v));
-    assert(d.imap_used == 3 && !d.imap_overflow);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) == RSXF_FPC_INLINE && v == 0xa);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1010, &v) == RSXF_FPC_INLINE && v == 0xc);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1014, &v) == RSXF_FPC_CONTAINER); /* the padding word: not written */
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x1004, &v) == RSXF_FPC_CONTAINER);
+    assert(d.imap_used == 3 && !d.imap_overflow && d.main_written);
     ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
-    assert(!d.vpc_known[7] && !ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) && d.imap_cleared == 1);
+    assert(!d.vpc_known[7] && ps3dk_prof__rsxf_inline_word(&d, 0x1008, &v) == RSXF_FPC_UNKNOWN && d.imap_cleared == 1);
+    ps3dk_prof__rsxf_decode_init(&d);
+}
+
+/* The inline-write map's limits: a whole COLOR packet past 32 words is remembered; an M2MF copy into local memory makes
+ * its range UNKNOWN (an inline write after it is remembered again); a different program placed over remembered words
+ * makes them UNKNOWN; the VP constant id is masked to 9 bits. */
+static void inline_map_limits(void)
+{
+    uint32_t w[8 + 1 + 40], n = 0, v = 0;
+    ps3dk_prof__rsxf_decode_init(&d);
+    w[n++] = M(3, 0x188, 1); w[n++] = 0xfeed0000u; w[n++] = M(3, 0x30c, 1); w[n++] = 0x2000;
+    w[n++] = M(5, 0x304, 2); w[n++] = 0; w[n++] = (1u << 16) | 40u;
+    w[n++] = M(5, 0x400, 40);
+    for (uint32_t i = 0; i < 40; i++)
+        w[n++] = 0x100u + i;
+    decode(w, n, 1);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x2000 + 4u * 39u, &v) == RSXF_FPC_INLINE && v == 0x100u + 39u);
+    assert(d.imap_used == 40 && !d.imap_overflow);
+    {
+        /* M2MF: 16 bytes into local 0x2010 (words 4..7), then an inline write to word 5 */
+        const uint32_t c[] = {M(1, 0x188, 1), 0xfeed0000u, M(1, 0x310, 1), 0x2010, M(1, 0x318, 4), 0, 16, 1, 0x101,
+                              M(1, 0x328, 1), 0,
+                              M(3, 0x30c, 1), 0x2014, M(5, 0x304, 2), 0, (1u << 16) | 1u, M(5, 0x400, 1), 0x55};
+        decode(c, sizeof c / 4, 1);
+        assert(d.m2mf_copies == 1 && d.ntaint == 1);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x2010, &v) == RSXF_FPC_UNKNOWN);     /* remembered, then copied over */
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x2014, &v) == RSXF_FPC_INLINE && v == 0x55); /* written after the copy */
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x201c, &v) == RSXF_FPC_UNKNOWN);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x2020, &v) == RSXF_FPC_INLINE && v == 0x108);  /* past the copy */
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x3000, &v) == RSXF_FPC_CONTAINER);
+    }
+    /* a different program over words 8..9: their inline values are no longer trusted */
+    ps3dk_prof__rsxf_inline_forget(&d, 0x2020, 0x2028);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x2020, &v) == RSXF_FPC_UNKNOWN);
+    assert(ps3dk_prof__rsxf_inline_word(&d, 0x2028, &v) == RSXF_FPC_INLINE && v == 0x10a);
+    {
+        /* VP_UPLOAD_CONST_ID keeps 9 bits: 0x200 + 3 selects slot 3, never a slot past the table */
+        const uint32_t c[] = {M(0, 0x1efc, 5), 0x203u, 1, 2, 3, 4};
+        decode(c, sizeof c / 4, 1);
+        assert(d.vpc_id == 3 && d.vpc_known[3] == 15 && d.vpc[3][0] == 1);
+    }
     ps3dk_prof__rsxf_decode_init(&d);
 }
 
@@ -262,7 +310,7 @@ static void encoders(FILE *out, uint32_t owner)
 {
     uint8_t buf[4096], rec[1024];
     size_t n, r = 0;
-    rsxf_wire_config c = {RSXF_AVAILABLE, 262144u, 2u, 512u, 256u, 63u};
+    rsxf_wire_config c = {RSXF_AVAILABLE, 262144u, 2u, 512u, 256u, 63u, 0u};
     rsxf_wire_begin b;
     rsxf_wire_program p;
     rsxf_wire_draw w;
@@ -334,6 +382,7 @@ int main(int argc, char **argv)
     hashes();
     register_shadow();
     constants_and_inline_writes();
+    inline_map_limits();
     register_records();
     utf8();
     encoders(out, owner);

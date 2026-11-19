@@ -247,6 +247,31 @@ pub fn tags_fixture() -> Vec<u8> {
     std::fs::read(format!("{}/../ps3dk-prof/tests/fixtures/auto/tags.prof", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
+/// `tags_fixture()` with AUTO op `id` (a CLEAR) turned into an ARRAY op (kind 1, its CLEAR-only argument 6 cleared),
+/// for the class rules of inline and immediate draws: the fixture itself has only CLEAR draw operations.
+pub fn tags_with_array_op(id: u64) -> Vec<u8> {
+    let (flags, mut chunks) = parse_chunks(&tags_fixture());
+    let mut patched = 0;
+    for c in chunks.iter_mut().filter(|c| c.ty == 35) {
+        let count = u32::from_le_bytes(c.payload[8..12].try_into().unwrap()) as usize;
+        let width = u32::from_le_bytes(c.payload[12..16].try_into().unwrap()) as usize;
+        for i in 0..count {
+            let r = 16 + i * width;
+            let op = u64::from_le_bytes(c.payload[r..r + 8].try_into().unwrap());
+            let kind = u16::from_le_bytes(c.payload[r + 12..r + 14].try_into().unwrap());
+            if op == id && kind == 3 {
+                c.payload[r + 12..r + 14].copy_from_slice(&1u16.to_le_bytes());
+                c.payload[r + 64 + 24..r + 64 + 28].copy_from_slice(&0u32.to_le_bytes());
+                patched += 1;
+            }
+        }
+    }
+    assert_eq!(patched, 1, "CLEAR op {id} in tags.prof");
+    let mut f = File::new(chunks);
+    f.flags = flags;
+    f.bytes()
+}
+
 /// The AUTO operations of `base` a sample capture binds to: (owner, frame) and its (id, kind) list of covered draws
 /// in id order, for the first frame that has a non-segment ARRAY/INDEX/CLEAR operation and an AUTO range.
 pub struct Binding {
@@ -330,7 +355,7 @@ pub fn binding(base: &[u8]) -> Binding {
 /// The sample: capture 1 "sample", live request 7, on the binding frame of tags.prof. Its draws, in order:
 /// every bound AUTO op as a timed hooked draw (labels "terrain/rock" on even ordinals, "water" on odd; VP 1 on all,
 /// FP 2 on all but the first), then one decoded-only INDEX draw, then one hooked draw untimed for report capacity
-/// (reason 3). Two blocks (sequences 0 and 2; block 1 dropped). Programs: 1 VP (stream), 2 FP (container, named
+/// (reason 3). Two blocks (sequences 0 and 1). Programs: 1 VP (stream), 2 FP (container, named
 /// "water.fpo"). END DONE.
 pub fn sample() -> (Vec<u8>, Binding) {
     let base = tags_fixture();
@@ -379,7 +404,7 @@ pub fn sample() -> (Vec<u8>, Binding) {
     let draws = bind.ops.len() as u32 + 2;
     let mut end = XEnd::done(1);
     // blocks, dropped, seen, recorded, hooked, decoded-only, mismatches, truncated_at, programs, labels, refused x2
-    end.n = [2, 1, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
+    end.n = [2, 0, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
     end.bytes = ((recs1.0.len() + recs2.0.len()) as u64, 0);
     end.untimed = 2;
     let begin = XBegin::live(1, bind.owner, bind.frame, "sample");
@@ -387,7 +412,7 @@ pub fn sample() -> (Vec<u8>, Binding) {
         XConfig::default().chunk(),
         begin.chunk(),
         draws_chunk(1, 0, n1, &recs1.0),
-        draws_chunk(1, 2, n2, &recs2.0),
+        draws_chunk(1, 1, n2, &recs2.0),
         end.chunk(),
     ];
     (with_rsxf(&base, extra).bytes(), bind)
@@ -413,10 +438,10 @@ pub fn vpc_rec(b: &mut Buf, ordinal: u32, flags: u16, e: &[(u16, u8, [u32; 4])])
 }
 
 /// An FPCONST record (type 8): (ucode offset, provenance, words as in memory).
-pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, u8, [u32; 4])]) {
+pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, [u8; 4], [u32; 4])]) {
     b.u16(8).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(program);
     for &(off, prov, w) in e {
-        b.u32(off).u8(prov).u8(0).u16(0);
+        b.u32(off).u8(prov[0]).u8(prov[1]).u8(prov[2]).u8(prov[3]);
         for v in w {
             b.u32(v);
         }

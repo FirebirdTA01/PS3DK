@@ -55,7 +55,8 @@ fn four_draws() -> (Vec<u8>, u32) {
     let mut b = Buf::default();
     vpc_rec(&mut b, 0, 2, &[(5, 15, [f(1.0), f(2.0), 0, 0]), (467, 15, [0, f(1.0), 0, 0])]);
     programs(&mut b);
-    fpc_rec(&mut b, 0, 2, 0, &[(0x30, 1, [h(0.5); 4])]);
+    // a float2 patch: x and y written inline, z and w the container's
+    fpc_rec(&mut b, 0, 2, 0, &[(0x30, [1, 1, 2, 2], [h(0.5); 4])]);
     draw(0, 36).encode(&mut b);
     vpc_rec(&mut b, 1, 0, &[(5, 15, [f(3.0), f(2.0), 0, 0])]);
     draw(1, 36).encode(&mut b);
@@ -77,7 +78,8 @@ fn constants_uniforms_and_instance_runs() {
     assert_eq!(u0.len(), 2);
     assert_eq!((u0[0].name.as_str(), u0[0].values[0]), ("offset", [Some(1.0), Some(2.0), Some(0.0), Some(0.0)]));
     assert_eq!((u0[1].name.as_str(), u0[1].values[0], u0[1].provenance),
-        ("tint", [Some(0.5); 4], Some(Provenance::Fifo)));
+        ("tint", [Some(0.5); 4], Some([Provenance::Inline, Provenance::Inline, Provenance::Container,
+            Provenance::Container])));
     let u2 = rf::uniforms(fr, &fr.draws[2]);
     assert_eq!(u2[0].values[0][0], Some(4.0));
     // the FP list carries forward to the draws after its FPCONST
@@ -94,7 +96,9 @@ fn constants_uniforms_and_instance_runs() {
     assert_eq!(c["instance_runs"][0]["length"], 3);
     assert_eq!(c["instance_runs"][0]["vp_uniforms"], serde_json::json!(["offset"]));
     assert_eq!(c["draws"][1]["constants"]["vp"][0]["values"][0][0], 3.0);
-    assert_eq!(c["draws"][0]["constants"]["fp"][0]["provenance"], "fifo");
+    assert_eq!(c["draws"][0]["constants"]["fp"][0]["provenance"], serde_json::json!(["last inline write seen",
+        "last inline write seen", "container (may differ at GPU time)", "container (may differ at GPU time)"]));
+    assert_eq!(c["draws"][0]["constants"]["fp_list"][0]["provenance"][2], "container (may differ at GPU time)");
     assert_eq!(c["programs"][0]["uniforms"][0]["name"], "offset");
     assert_eq!(c["end"]["uniform_records"], 2);
 }
@@ -127,9 +131,9 @@ fn every_constant_rule_refused_once() {
         end(1, 0, 1, 2), 3);
     refused("two fpconst", rec(&|b| { programs(b); fpc_rec(b, 0, 2, 0, &[]); fpc_rec(b, 0, 2, 0, &[]);
         draw(0, 4).encode(b) }), 7, end(1, 0, 2, 2), 3);
-    refused("fpconst provenance", rec(&|b| { programs(b); fpc_rec(b, 0, 2, 0, &[(0x30, 4, [0; 4])]);
+    refused("fpconst provenance", rec(&|b| { programs(b); fpc_rec(b, 0, 2, 0, &[(0x30, [1, 1, 1, 4], [0; 4])]);
         draw(0, 4).encode(b) }), 6, end(1, 0, 1, 2), 3);
-    refused("fpconst order", rec(&|b| { programs(b); fpc_rec(b, 0, 2, 0, &[(0x40, 1, [0; 4]), (0x30, 1, [0; 4])]);
+    refused("fpconst order", rec(&|b| { programs(b); fpc_rec(b, 0, 2, 0, &[(0x40, [1; 4], [0; 4]), (0x30, [1; 4], [0; 4])]);
         draw(0, 4).encode(b) }), 6, end(1, 0, 1, 2), 3);
     refused("uniform for an undefined program", rec(&|b| { uni_rec(b, 3, 0, &[(1, 1, 1, "x")]); programs(b);
         draw(0, 4).encode(b) }), 6, end(1, 0, 0, 3), 3);

@@ -20,13 +20,13 @@
 # Every draw is also checked hooked and decoded, with no mismatch, no unknown state, and every program exact
 # (readable, terminated, not "bound before capture").
 @ name	matrix
-@ decoder	3
+@ decoder	4
 @ instance_runs	8:8:offset
 @ both	matrix-both
 @ source	app
 @ status	COMPLETE
 @ timing_mode	pipelined
-@ draws	16
+@ draws	19
 @ programs	5
 @ mismatched	0
 @ untimed	0
@@ -49,3 +49,6 @@
 13	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
 14	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
 15	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+16	INLINE_ARRAY	TRIANGLES	24	0	-	frame/special/inline_array	vp_offset	fp_color	0x400	-	timed
+17	INLINE_INDEX	TRIANGLES	6	0	u16/local	frame/special/inline_index	vp_offset	fp_color	0x400	-	timed
+18	IMMEDIATE	TRIANGLES	0	0	-	frame/special/immediate	vp_offset	fp_color	0x400	-	timed
