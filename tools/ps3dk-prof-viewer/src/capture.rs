@@ -653,6 +653,13 @@ pub struct FrameSnapshot {
     pub premise: Premise,
     pub freq_hz: Option<u64>,
     pub origin: Origin,
+    /// Diagnostic aggregates are values carried from the original source;
+    /// all timing still comes from the retained raw support.
+    pub saved_support: bool,
+    /// Bounded save recipe over snap.bytes; it never owns the source Analysis.
+    pub save: Option<ps3dk_prof::snapshot_export::Frozen>,
+    pub save_error: Option<Box<str>>,
+    pub(crate) save_seeds: Option<ps3dk_prof::snapshot_export::Keep>,
     pub lanes: Box<[CLane]>,
     pub bars: Box<[CBar]>,
     pub labels: Box<[Box<str>]>,
@@ -666,9 +673,16 @@ pub struct FrameSnapshot {
 }
 
 impl FrameSnapshot {
+    pub fn save_refusal(&self) -> Option<&str> {
+        if self.saved_support || self.save.is_some() { None } else {
+            Some(self.save_error.as_deref().unwrap_or("Save unavailable: bounded recipe workspace was unavailable when this snapshot was frozen"))
+        }
+    }
     /// What the extract holds, walked over its own allocations with the reservation's rule.
     pub fn retained_bytes(&self) -> u64 {
         let mut n = alloc_bytes(std::mem::size_of::<FrameSnapshot>() as u64 + 16);
+        n += self.save.as_ref().map_or(0, |p| p.retained_bytes());
+        n += alloc_bytes(self.save_error.as_ref().map_or(0, |s| s.len() as u64));
         n += alloc_bytes(self.owner_name.len() as u64);
         n += self.origin.charge();
         n += slice_bytes::<CLane>(self.lanes.len() as u64);
@@ -726,11 +740,22 @@ pub struct Work {
     pub m: Meter,
     pub transient: u64,
     cap: u64,
+    pub(crate) save: Option<ps3dk_prof::snapshot_export::Keep>,
 }
 
 impl Work {
     pub fn new(caps: Caps) -> Work {
-        Work { m: Meter::new(caps.ops, Limit::Capture), transient: 0, cap: caps.transient }
+        Work { m: Meter::new(caps.ops, Limit::Capture), transient: 0, cap: caps.transient, save: None }
+    }
+    fn save_seed(&mut self, span: Option<(u32,u64)>, op: Option<u64>) {
+        if let Some(k) = &mut self.save {
+            if (k.spans.len() + k.ops.len() + 1) * 128 > ps3dk_prof::snapshot_export::RECIPE_BYTES / 4 {
+                self.save = None; // only Save becomes unavailable
+            } else {
+                k.spans.extend(span);
+                k.ops.extend(op);
+            }
+        }
     }
     pub fn ops(&mut self, n: u64) -> Result<(), String> {
         self.m.charge(n).map_err(meter_err)
@@ -897,6 +922,8 @@ pub const fn pending_bytes() -> u64 {
 
 /// The classified frame, before admission.
 pub struct Plan {
+    pub(crate) save_keep: Option<ps3dk_prof::snapshot_export::Keep>,
+    saved_support: bool,
     owner: u32,
     owner_name: String,
     frame: u64,
@@ -986,7 +1013,7 @@ fn plan_auto(
     if lanes.len() >= u16::MAX as usize { return Err("too many lanes".into()); }
     let li = lanes.len() as u16;
     let mut ev = Evidence { open: inv.final_seen.then_some(0), loss: inv.final_seen.then_some(0),
-        auto_dropped: inv.ops_dropped, ..Evidence::default() };
+        auto_dropped: src.a.capture.snapshot.as_ref().and_then(|s|s.diagnostic(4,0)).unwrap_or(inv.ops_dropped), ..Evidence::default() };
     let report = src.auto;
     let map = report.and_then(|r| r.map.as_ref()).and_then(|m| match m {
         ar::MapState::Qualified(m) => Some(m.as_ref()), _ => None,
@@ -1013,6 +1040,7 @@ fn plan_auto(
         if o.kind == ar::KIND_FRAME { continue; } // frame marks delimit; they are not draw/range bars
         let mine = o.token() == Some(key);
         let unclaimed = o.token().is_none();
+        if mine || unclaimed { w.save_seed(None, Some(o.id)); }
         let valid = o.raw_valid() && o.flags & (ar::OP_CLOCK_INVALID | ar::OP_INCOMPLETE | ar::OP_READ_REFUSED | ar::OP_PUBLICATION_UNKNOWN) == 0
             && o.raw_end >= o.raw_begin && (o.flags & ar::OP_SEGMENT == 0 || o.call != 0);
         if ev.auto_reason.is_some() || !valid {
@@ -1026,6 +1054,7 @@ fn plan_auto(
             continue;
         };
         let overlaps = b.0 < next && e.1 > tb;
+        if overlaps { w.save_seed(None, Some(o.id)); }
         let class = if mine { Class::Claimed } else if unclaimed && overlaps { Class::Possible } else {
             if !unclaimed && overlaps { ev.other += 1; }
             continue;
@@ -1088,6 +1117,10 @@ pub fn plan(
                 && lane.gap_count == 0 && !lane.clock_anomaly,
             ..Evidence::default()
         };
+        if let Some(saved)=&cap.snapshot {
+            if let Some(value)=saved.diagnostic(1,inc){ev.frame_only=value!=0;}
+            if let Some(value)=saved.diagnostic(3,inc){ev.gaps=value;}
+        }
         let mut max_depth = 0u8;
         w.ops(1 + lane.spans.len() as u64)?;
         for &idx in &lane.spans {
@@ -1102,6 +1135,9 @@ pub fn plan(
             };
             let claim = a.spans.get(idx).and_then(|v| v.attribution.claim());
             let c = ppu_class(claim, s.begin_tb, end, key, tb, next_tb);
+            if matches!(c,Class::Claimed|Class::Possible) || c == Class::Other && ppu_class(None,s.begin_tb,end,key,tb,next_tb)==Class::Possible {
+                w.save_seed(Some((s.incarnation,s.span_id)),None);
+            }
             match c {
                 Class::Outside => continue,
                 Class::Other => {
@@ -1335,6 +1371,8 @@ pub fn plan(
     )?;
     w.ops((members.len() as u64).saturating_mul(log2(members.len())))?;
     let mut p = Plan {
+        save_keep: w.save.take(),
+        saved_support: src.a.capture.snapshot.is_some(),
         owner,
         owner_name: o.name.clone(),
         frame,
@@ -1439,6 +1477,10 @@ pub fn build(p: Plan, id: u32, snap: Arc<SnapshotBytes>, origin: Origin) -> Fram
         premise: p.premise,
         freq_hz: p.freq_hz,
         origin,
+        saved_support: p.saved_support,
+        save: None,
+        save_error: None,
+        save_seeds: p.save_keep,
         lanes: lanes.into_boxed_slice(),
         bars: bars.into_boxed_slice(),
         labels: labels.into_boxed_slice(),

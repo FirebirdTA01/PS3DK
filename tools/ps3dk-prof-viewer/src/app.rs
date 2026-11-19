@@ -52,6 +52,12 @@ pub struct RollingJob {
     rx: std::sync::mpsc::Receiver<Result<crate::rolling_doc::RollingDoc, String>>,
 }
 
+struct PendingSave {
+    session: String,
+    key: (u8,u32), // snapshot=0, live window=1
+    job: crate::capture_save::SaveJob,
+}
+
 /// The Connect dialog's fields.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectForm {
@@ -123,6 +129,8 @@ pub struct App {
     pub save_range_modal: bool,
     /// A save-window / save-range result line, shown in the status bar.
     pub save_result: Option<(bool, String)>,
+    save_job: Option<PendingSave>,
+    saved_paths: std::collections::BTreeMap<(u8,u32),PathBuf>,
     /// The open rolling capture (retained window only); exclusive with `doc`.
     pub rolling: Option<Arc<crate::rolling_doc::RollingDoc>>,
     /// A rolling open still running on its background thread.
@@ -226,6 +234,8 @@ impl App {
             save_range_to: 0,
             save_range_modal: false,
             save_result: None,
+            save_job: None,
+            saved_paths: Default::default(),
             rolling: None,
             rolling_job: None,
             rolling_limits: crate::rolling_doc::OpenLimits::desktop(),
@@ -263,7 +273,14 @@ impl App {
                     self.pool.clone(),
                 );
                 self.captures.bind_source(&bytes);
-                self.captures.load_marks(&path, &bytes);
+                if let Some(doc)=self.doc.as_ref().filter(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+                    match self.captures.restore_saved(doc,&bytes) {
+                        Ok(s)=>{self.shown=Some(s);self.page=Page::Snapshot;}
+                        Err(e)=>{self.error=Some(e);self.page=Page::Overview;}
+                    }
+                } else {
+                    self.captures.load_marks(&path, &bytes);
+                }
             }
             Err(e) => self.error = Some(format!("{}: {e}", path.display())),
         }
@@ -380,8 +397,7 @@ impl App {
             self.auto_window = None;
             self.frames_window = None;
         }
-        self.save_result = None;
-        self.save_range_modal = false;
+        if fresh {self.save_result = None;self.save_range_modal = false;}
         if let (Some(id), Some(a)) = (self.window, doc.analysis()) {
             if let Some(w) = a.capture.windows.iter().find(|w| w.id == id) {
                 let w = w.clone();
@@ -500,6 +516,7 @@ impl App {
     /// Ends the current session's snapshots (a new session or file).  A live session whose outcome is not known yet
     /// keeps its snapshots: it is disconnected and retired until its file is published, then bookmarked.
     fn end_captures(&mut self) {
+        self.saved_paths.clear();
         self.shown = None;
         if self.page == Page::Snapshot {
             self.page = Page::Overview;
@@ -518,12 +535,16 @@ impl App {
 
     /// Why "Capture full frame" is unavailable, or None.
     pub fn capture_blocked(&self) -> Option<String> {
+        if self.doc.as_ref().is_some_and(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+            return Some("This file contains one saved snapshot. Re-resolve that snapshot, or open the original capture to capture another frame.".into());
+        }
         self.captures.blocked(self.doc.as_deref())
     }
 
     /// The "Capture full frame" click: the Frames selection when a frame is selected, else the newest frame
     /// (`capture::choose_frame`), under the Timeline's current premise.
     pub fn capture_frame(&mut self) {
+        if let Some(why)=self.capture_blocked(){self.captures.message=Some((true,why));return;}
         let Some(doc) = self.doc.clone() else { return };
         let (owner, frame) = (self.frames.sel.owner, self.frames.sel.frame);
         let premise = self
@@ -570,6 +591,7 @@ impl App {
                 self.captures.delete(id);
                 self.captures.sweep();
             }
+            capture_ui::Action::Save(id,save_as) => self.save_snapshot(id,save_as),
             capture_ui::Action::Reresolve(premise) => {
                 if let Some(cur) = self.shown.clone() {
                     if let Ok(s) = self.captures.reresolve(&cur, premise) {
@@ -593,6 +615,115 @@ impl App {
         {
             self.open(p);
         }
+    }
+
+    fn save_available(&mut self)->bool {
+        if self.save_job.is_some(){self.save_result=Some((true,"A capture save is already running".into()));false}else{true}
+    }
+
+    fn start_save(&mut self,key:(u8,u32),result:Result<crate::capture_save::SaveJob,String>){
+        match result {
+            Ok(job)=>{self.save_job=Some(PendingSave{session:self.captures.session.clone(),key,job});
+                self.save_result=Some((false,"Saving capture in the background…".into()));}
+            Err(e)=>self.save_result=Some((true,format!("Save refused: {e}"))),
+        }
+    }
+
+    pub fn poll_save(&mut self)->bool {
+        let Some(pending)=self.save_job.as_mut() else{return false};
+        let Some(result)=pending.job.poll() else{return true};
+        self.finish_save(result);false
+    }
+    pub fn wait_save(&mut self){
+        let Some(pending)=self.save_job.as_mut() else{return};
+        let result=pending.job.wait();self.finish_save(result);
+    }
+    fn finish_save(&mut self,result:Result<PathBuf,String>){
+        let Some(pending)=self.save_job.take()else{return};
+        self.save_result=Some(match result{
+            Ok(path)=>{
+                if pending.session==self.captures.session {
+                    if self.saved_paths.len()==128 {self.saved_paths.pop_first();}
+                    self.saved_paths.insert(pending.key,path.clone());
+                }
+                (false,match pending.job.direct_child_bytes {
+                    Some(n)=>format!("Saved {} ({n} bytes of direct-child timing support)",path.display()),
+                    None=>format!("Saved {}",path.display()),
+                })
+            }
+            Err(e)=>(true,format!("Save failed: {e}")),
+        });
+    }
+
+    pub fn save_snapshot_to(&mut self,id:u32,path:PathBuf){
+        if !self.save_available(){return;}
+        if self.saved_paths.get(&(0,id)) == Some(&path) {
+            self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+        }
+        let Some(s)=self.captures.list.iter().find(|s|s.id==id).cloned()else{
+            self.save_result=Some((true,"This snapshot is no longer retained".into()));return;
+        };
+        let job=crate::capture_save::SaveJob::snapshot(s,path,self.pool.clone());self.start_save((0,id),job);
+    }
+
+    fn save_snapshot(&mut self,id:u32,save_as:bool){
+        if !self.save_available(){return;}
+        if !save_as {
+            if let Some(path)=self.saved_paths.get(&(0,id)) {
+                self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+            }
+        }
+        let Some(s)=self.captures.list.iter().find(|s|s.id==id)else{return};
+        let filename=format!("snapshot_{}_{}_{}.prof",s.owner,s.frame,id);
+        let suggested=self.saved_paths.get(&(0,id)).cloned().unwrap_or_else(||match &self.captures.home{
+            Home::File(p)=>sibling_path(p,filename.clone()),
+            _=>self.live.as_ref().map_or_else(||PathBuf::from(&filename),|l|l.out_dir.join(&filename)),
+        });
+        let path=if save_as||!suggested.is_absolute(){
+            let mut dialog=rfd::FileDialog::new().add_filter("PS3DK frame snapshot",&["prof"])
+                .set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(parent)=suggested.parent().filter(|p|p.is_absolute()){dialog=dialog.set_directory(parent);}
+            let Some(path)=dialog.save_file()else{return};path
+        }else{suggested};
+        self.save_snapshot_to(id,path);
+    }
+
+    pub fn save_live_window_to(&mut self,id:u32,path:PathBuf){
+        if !self.save_available(){return;}
+        let Some(doc)=self.doc.clone()else{return};
+        let result=(||{
+            let range=crate::capture_save::window_range(&doc,id)?;
+            let a=doc.analysis().ok_or("No readable capture")?;
+            let len=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
+            if let Some(live)=&self.live {
+                if matches!(live.client.view().outcome,Some(Outcome::Incomplete{..})) {
+                    return Err("The live session failed validation; it cannot be exported".into());
+                }
+                crate::capture_save::SaveJob::window(len,path,range,self.pool.clone(),||{
+                    live.client.received_prefix(len as u64).ok_or_else(||"Displayed live prefix is no longer available".into())
+                })
+            }else{
+                let (source_len,sha)=self.captures.source.ok_or("Source identity is unavailable")?;
+                crate::capture_save::SaveJob::window_file(doc.path.clone(),source_len as usize,sha,len,path,range,self.pool.clone())
+            }
+        })();
+        self.start_save((1,id),result);
+    }
+
+    fn save_live_window(&mut self,id:u32,save_as:bool){
+        if !self.save_available(){return;}
+        let Some(doc)=self.doc.clone()else{return};
+        let suggested=match self.saved_paths.get(&(1,id)).cloned().map(Ok)
+            .unwrap_or_else(||self.export_path(&doc,format!("window_{id}.prof"))){
+            Ok(p)=>p,Err(e)=>{self.save_result=Some((true,e.to_string()));return;}
+        };
+        let path=if save_as {
+            let mut dialog=rfd::FileDialog::new().add_filter("PS3DK capture",&["prof"])
+                .set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(p)=suggested.parent(){dialog=dialog.set_directory(p);}
+            let Some(p)=dialog.save_file()else{return};p
+        }else{suggested};
+        self.save_live_window_to(id,path);
     }
 
     fn export_path(&self, doc: &Document, suffix: String) -> Result<PathBuf, ps3dk_prof::ExportError> {
@@ -892,6 +1023,7 @@ impl eframe::App for App {
         if self.poll_rolling() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
+        if self.poll_save() {ctx.request_repaint_after(Duration::from_millis(100));}
         if let Some(path) = self.screenshot.clone() {
             // A screenshot shows the finished open, not its progress.
             if self.rolling_job.is_none() {
@@ -1074,6 +1206,9 @@ impl eframe::App for App {
         let snap_msg = self.captures.message.clone();
         let save_msg = self.save_result.clone();
         let mut want_trigger = None;
+        let mut want_window_save = None;
+        let save_busy=self.save_job.is_some();
+        let save_doc=self.doc.clone();
         if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() || save_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
             let form = &mut self.trigger_form;
@@ -1086,6 +1221,35 @@ impl eframe::App for App {
                 // Capture triggers while the live session runs (disabled, with the reason, on a v1 agent).
                 if let Some(v) = live_view.as_ref().filter(|v| v.outcome.is_none()) {
                     want_trigger = crate::live_triggers_ui::row(strip, &v.triggers, form);
+                }
+                if let Some(v)=live_view.as_ref().filter(|v|!v.triggers.windows.is_empty()) {
+                    egui::CollapsingHeader::new(format!("Viewer captures ({})",v.triggers.windows.len())).show(strip,|p|{
+                        egui::ScrollArea::vertical().max_height(180.0).show(p,|p|{
+                            for w in v.triggers.windows.iter().rev(){
+                                let ready=if save_busy{Err("A save is already running".to_string())}
+                                    else{save_doc.as_ref().ok_or_else(||"No received document yet".to_string())
+                                        .and_then(|d|crate::capture_save::window_range(d,w.id).map(|_|()))};
+                                p.push_id(w.id,|p|p.horizontal(|p|{
+                                    p.label(format!("{} · window {}",w.name,w.id));
+                                    for (label,as_new) in [("Save",false),("Save as…",true)] {
+                                        let r=p.add_enabled(ready.is_ok(),egui::Button::new(label).frame(false));
+                                        if r.clicked(){want_window_save=Some((w.id,as_new));}
+                                        if let Err(why)=&ready {r.on_disabled_hover_text(why);}
+                                    }
+                                    if let Err(why)=&ready {p.label(egui::RichText::new(why).small());}
+                                    if save_doc.as_ref().and_then(|d|d.analysis()).is_some_and(|a|a.capture.windows.iter().any(|x|x.id==w.id&&x.is_open)) {
+                                        p.label("OPEN: saves the frames observed so far");
+                                    }
+                                }));
+                            }
+                        });
+                    });
+                }
+                if save_doc.as_ref().is_some_and(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+                    ui::field_message(strip,ui::Tone::Warning,"Saved snapshot support only: this is not the complete session. Source-wide diagnostics are carried from the original capture; timing comes from retained records.");
+                    if let Some(n)=save_doc.as_ref().and_then(|d|d.analysis()).and_then(|a|a.capture.snapshot.as_ref()).and_then(|s|s.diagnostic(5,0)) {
+                        ui::field_message(strip,ui::Tone::Neutral,&format!("Source seal proofs not carried: {n} SOURCE_SEAL records in the original capture. This is provenance, not completion evidence for this snapshot."));
+                    }
                 }
                 if let Some((t, _, text)) = &verdict {
                     ui::field_message(strip, *t, text);
@@ -1104,6 +1268,7 @@ impl eframe::App for App {
             // A refusal to send is shown by the trigger row itself (the client records it).
             let _ = l.client.send(cmd);
         }
+        if let Some((id,save_as))=want_window_save {self.save_live_window(id,save_as);}
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
         let rolling_open = self.rolling.is_some() || self.rolling_job.is_some();
         let rsx_count = self.rsx_count();

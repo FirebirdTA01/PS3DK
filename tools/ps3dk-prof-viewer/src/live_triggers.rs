@@ -36,15 +36,25 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestedWindow {
+    pub id: u32,
+    pub name: String,
+    /// Acknowledgement only; the displayed WINDOW_END record decides save readiness.
+    pub end_acknowledged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Triggers {
     pub availability: Availability,
     pub status: Status,
+    /// Recent successfully requested windows, retained when the connection ends.
+    pub windows: Vec<RequestedWindow>,
     next_request: u32,
 }
 
 impl Default for Triggers {
     fn default() -> Self {
-        Triggers { availability: Availability::Connecting, status: Status::Idle, next_request: 1 }
+        Triggers { availability: Availability::Connecting, status: Status::Idle, windows: Vec::new(), next_request: 1 }
     }
 }
 
@@ -116,6 +126,19 @@ impl Triggers {
             return;
         }
         let command = command.clone();
+        if ack.result == 0 {
+            match &command {
+                Command::Begin { name } | Command::Frames { name, .. } => {
+                    if !self.windows.iter().any(|w| w.id == ack.window_id) {
+                        if self.windows.len() == 64 { self.windows.remove(0); }
+                        self.windows.push(RequestedWindow { id: ack.window_id, name: name.clone(), end_acknowledged: false });
+                    }
+                }
+                Command::End => {
+                    if let Some(w) = self.windows.iter_mut().find(|w| w.id == ack.window_id) { w.end_acknowledged = true; }
+                }
+            }
+        }
         self.status = if ack.result == 0 {
             Status::Acked { command, window_id: ack.window_id }
         } else {

@@ -43,7 +43,7 @@ struct RawChunk<'a> {
     payload: &'a [u8],
 }
 
-fn encode_record(r: &RawRecord) -> [u8; 32] {
+pub(crate) fn encode_record(r: &RawRecord) -> [u8; 32] {
     let mut buf = [0u8; 32];
     buf[0] = r.kind;
     buf[1] = r.depth;
@@ -55,7 +55,7 @@ fn encode_record(r: &RawRecord) -> [u8; 32] {
     buf
 }
 
-fn encode_gap(start_seq: u64, end_seq: u64, is_export: bool) -> [u8; 32] {
+pub(crate) fn encode_gap(start_seq: u64, end_seq: u64, is_export: bool) -> [u8; 32] {
     let mut buf = [0u8; 32];
     buf[0] = KIND_GAP;
     if is_export {
@@ -807,6 +807,13 @@ fn already_exists(out: &Path) -> ExportError {
         std::io::ErrorKind::AlreadyExists,
         format!("{} already exists; nothing was written", out.display()),
     ))
+}
+
+/// Publish a structurally valid prebuilt projection, without replacing a destination.
+/// Snapshot callers additionally check their semantic freeze/reopen identity before this call.
+pub fn publish_projection(bytes: &[u8], out: &Path) -> Result<(), ExportError> {
+    crate::reader::read(bytes).map_err(|e|ExportError::Malformed(e.to_string()))?;
+    publish_no_clobber(bytes,out,||{})
 }
 
 /// Writes `bytes` to `out` without ever replacing an existing file.  `before_publish` runs after the temporary is

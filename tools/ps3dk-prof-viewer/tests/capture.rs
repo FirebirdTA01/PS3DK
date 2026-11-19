@@ -892,8 +892,11 @@ fn two_writes(d: &Path, budget: u64) -> (Captures, Result<(), String>, Vec<u8>, 
 #[test]
 fn a_metadata_refusal_preserves_disk_marks_ids_and_ledger_exact_and_one_short() {
     let d = dir("meta-big");
-    let (big, r, _, _) = two_writes(&d, RETAIN_BUDGET);
+    // Isolate bookmark accounting from optional Save recipes: a small pool
+    // omits those recipes in all three schedules while retaining both views.
+    let (big, r, _, _) = two_writes(&d, 1 << 20);
     r.unwrap();
+    assert!(big.list.iter().all(|s| s.save.is_none()));
     let need = big.ledger.used;
     drop(big);
     let d = dir("meta-exact");
