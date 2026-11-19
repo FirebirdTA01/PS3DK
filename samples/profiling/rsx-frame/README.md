@@ -1,7 +1,7 @@
 # rsx-frame
 
 A known draw matrix for the RSX frame capture (`PS3_PROF_RSX_FRAME`, guide 4.12 and 5.7). Every frame submits the
-same 16 draws, so whichever frame is captured, `ps3dk-prof rsx-frame` must read back exactly the list in
+same 19 draws, so whichever frame is captured, `ps3dk-prof rsx-frame` must read back exactly the list in
 `expected/draws.tsv`:
 
 | Draws | What | Label | Tag | AUTO range |
@@ -10,9 +10,14 @@ same 16 draws, so whichever frame is captured, `ps3dk-prof rsx-frame` must read 
 | 1..6 | 2 vertex programs x 3 fragment programs, one quad each; textures A8R8G8B8, R5G6B5 and B8; depth test, back-face cull and alpha blend in varying combinations | `frame/matrix/vp<v>_fp<f>` | 0x100..0x105 | `matrix` |
 | 7 | an indexed quad (6 u16 indices in local memory) | `frame/indexed/quad` | 0x200 | - |
 | 8..15 | an instance run: 8 identical draws, only a vertex-program constant differs | `frame/instances/run` | 0x300 | `instances` |
+| 16 | an inline-array triangle (the vertex data in the command buffer) | `frame/special/inline_array` | 0x400 | - |
+| 17 | an inline-index draw (6 u16 indices in the command buffer) | `frame/special/inline_index` | 0x400 | - |
+| 18 | an immediate triangle (SetDrawBegin, per-vertex attribute writes, SetDrawEnd; the arrays disabled first) | `frame/special/immediate` | 0x400 | - |
 
-The app requests the capture itself at frame 30 (`PS3DK_PROF_RSX_FRAME_CAPTURE("matrix")`), so no PC app is needed;
-with the PC app connected (live auto-start is on), its Capture RSX frame button requests more. After 120 frames the
+The app requests the capture itself at frame 30 (`PS3DK_PROF_RSX_FRAME_CAPTURE("matrix")`), so no PC app is needed.
+At frame 60 it requests a second one, `matrix-both`, with `PS3DK_PROF_RSX_FRAME_BOTH | PS3DK_PROF_RSX_FRAME_FP_BYTES`:
+the same draws pipelined, then isolated, each view checked against the same table, the two paired, every program's
+bytes stored (decoder 4). With the PC app connected (live auto-start is on), its Capture RSX frame button requests more. After 120 frames the
 sample drains the RSX, seals the capture and returns 0 (2 if the request was refused, 1 after a failure).
 
 Textures and fixed-function state vary across the matrix: `expected/state.tsv` lists, per draw, the render state,
@@ -34,8 +39,8 @@ The configure step refuses without any of the four options.
 
 ## Run and check
 
-The TTY shows `RSXFRAME start ...`, `RSXFRAME request frame=30 result=<id>`, `RSXFRAME drain flip=ok fence=ok` and
-`RSXFRAME EXIT clean frames=120 capture=<id>`. Then, with the capture copied off the console:
+The TTY shows `RSXFRAME start ...`, `RSXFRAME request frame=30 result=<id>`, `RSXFRAME request frame=60 both result=<id>`,
+`RSXFRAME drain flip=ok fence=ok` and `RSXFRAME EXIT clean frames=120 capture=<id> both=<id>`. Then, with the capture copied off the console:
 
 ```sh
 python3 tools/check_capture.py --reader ps3dk-prof --capture <executable>-<timebase>.prof --shaders build/shaders

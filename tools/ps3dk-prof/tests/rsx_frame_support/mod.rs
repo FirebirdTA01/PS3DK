@@ -247,6 +247,31 @@ pub fn tags_fixture() -> Vec<u8> {
     std::fs::read(format!("{}/../ps3dk-prof/tests/fixtures/auto/tags.prof", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
+/// `tags_fixture()` with AUTO op `id` (a CLEAR) turned into an ARRAY op (kind 1, its CLEAR-only argument 6 cleared),
+/// for the class rules of inline and immediate draws: the fixture itself has only CLEAR draw operations.
+pub fn tags_with_array_op(id: u64) -> Vec<u8> {
+    let (flags, mut chunks) = parse_chunks(&tags_fixture());
+    let mut patched = 0;
+    for c in chunks.iter_mut().filter(|c| c.ty == 35) {
+        let count = u32::from_le_bytes(c.payload[8..12].try_into().unwrap()) as usize;
+        let width = u32::from_le_bytes(c.payload[12..16].try_into().unwrap()) as usize;
+        for i in 0..count {
+            let r = 16 + i * width;
+            let op = u64::from_le_bytes(c.payload[r..r + 8].try_into().unwrap());
+            let kind = u16::from_le_bytes(c.payload[r + 12..r + 14].try_into().unwrap());
+            if op == id && kind == 3 {
+                c.payload[r + 12..r + 14].copy_from_slice(&1u16.to_le_bytes());
+                c.payload[r + 64 + 24..r + 64 + 28].copy_from_slice(&0u32.to_le_bytes());
+                patched += 1;
+            }
+        }
+    }
+    assert_eq!(patched, 1, "CLEAR op {id} in tags.prof");
+    let mut f = File::new(chunks);
+    f.flags = flags;
+    f.bytes()
+}
+
 /// The AUTO operations of `base` a sample capture binds to: (owner, frame) and its (id, kind) list of covered draws
 /// in id order, for the first frame that has a non-segment ARRAY/INDEX/CLEAR operation and an AUTO range.
 pub struct Binding {

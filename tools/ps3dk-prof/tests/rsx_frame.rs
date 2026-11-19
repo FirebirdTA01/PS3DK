@@ -333,7 +333,7 @@ fn not_revalidated_program() {
 /// the draw keeps its own kind and primitive, and an inline index draw timed by an ARRAY op is a mismatch.
 #[test]
 fn inline_and_immediate_draws_timed_by_their_class() {
-    let base = tags_fixture();
+    let base = tags_with_array_op(2);
     let bind = binding(&base);
     let Some(&(op, _)) = bind.ops.iter().find(|o| o.1 == 1) else { panic!("an ARRAY op in the fixture") };
     let mut end = XEnd::done(1);
