@@ -69,8 +69,49 @@ fn terminal_selection_focuses_slowest_once_and_refresh_does_not_steal_navigation
     view.frames[0].status = FrameStatus::PendingTiming { missing: 1 };
     app.rsx_frame = State::default();
     assert!(!app.follow_rsx_frame(&t, &view));
+    t.ended = true;
+    assert!(app.follow_rsx_frame(&t, &view), "link end exposes the received partial capture");
+    assert!(app.rsx_frame.link_ended_reason.is_some());
+    app.page = Page::Overview;
+    assert!(!app.follow_rsx_frame(&t, &view));
+    assert_eq!(app.page, Page::Overview);
+    app.rsx_frame = State::default();
+    view.frames[0].status = FrameStatus::Open;
+    assert!(app.follow_rsx_frame(&t, &view));
+    t.ended = false;
+    app.rsx_frame = State::default();
     view.frames[0].status = FrameStatus::Abandoned { reason: 1 };
     assert!(app.follow_rsx_frame(&t, &view));
+}
+
+#[test]
+fn pending_and_open_badges_are_distinct_and_cached_rows_refresh_only_on_inputs() {
+    use ps3dk_prof_viewer::rsx_frame_ui::badge;
+    assert_eq!(badge(&FrameStatus::Open), "Open");
+    assert_eq!(badge(&FrameStatus::PendingTiming { missing: 1 }), "Pending timing");
+    let d = doc();
+    let v = d.rsx_frames.get(d.analysis().unwrap());
+    let mut st = State::default();
+    st.select(&v.frames[0]);
+    st.group = Some(ps3dk_prof::rsx_frame::GroupBy::Kind);
+    let names = Default::default();
+    let a = st.rows(&v, &names);
+    let b = st.rows(&v, &names);
+    assert!(Arc::ptr_eq(&a, &b), "idle repaint must reuse sort/group work");
+    st.filter = "missing-label".into();
+    let c = st.rows(&v, &names);
+    assert!(!Arc::ptr_eq(&b, &c));
+    assert!(c.ids.is_empty());
+    st.filter.clear();
+    st.descending = false;
+    let e = st.rows(&v, &names);
+    assert!(!Arc::ptr_eq(&c, &e));
+    let mut changed = names;
+    changed.insert((ps3dk_prof::rsx_frame::Profile::Vertex, 1), "new scan".into());
+    assert!(!Arc::ptr_eq(&e, &st.rows(&v, &changed)));
+    let next = doc();
+    let next = next.rsx_frames.get(next.analysis().unwrap());
+    assert!(!Arc::ptr_eq(&e, &st.rows(&next, &changed)));
 }
 #[test]
 fn empty_untimed_and_virtualized_draw_lists_are_explicit() {

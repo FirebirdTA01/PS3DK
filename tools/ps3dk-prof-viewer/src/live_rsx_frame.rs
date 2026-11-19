@@ -66,6 +66,7 @@ pub struct RequestTracker {
     pub unavailable: Option<String>,
     pub ended: bool,
     pub resolved: bool,
+    pub timing_counts: Option<(u32, u32)>,
     next: u32,
 }
 impl Default for RequestTracker {
@@ -78,6 +79,7 @@ impl Default for RequestTracker {
             unavailable: Some("waiting for the console's HELLO".into()),
             ended: false,
             resolved: false,
+            timing_counts: None,
             next: 1,
         }
     }
@@ -101,7 +103,7 @@ impl RequestTracker {
             if self.request.is_some()
                 && !self.resolved
                 && self.error.is_none()
-                && !self.progress.is_some_and(|s| s.state == 4)
+                && !self.progress.is_some_and(|s| matches!(s.state, 3 | 4))
             {
                 Some("waiting for the outstanding RSX frame capture".into())
             } else {
@@ -124,6 +126,7 @@ impl RequestTracker {
         self.progress = None;
         self.error = None;
         self.resolved = false;
+        self.timing_counts = None;
         Ok((id, bytes))
     }
     pub fn event(&mut self, e: RsxFrameEvent) {
@@ -157,6 +160,7 @@ impl RequestTracker {
             .find(|f| f.id == ack.capture && f.request_id == ack.request)
         {
             use ps3dk_prof::rsx_frame::FrameStatus;
+            self.timing_counts = Some((f.totals.timed, f.totals.draws));
             self.resolved = matches!(
                 f.status,
                 FrameStatus::Complete
@@ -185,7 +189,10 @@ impl RequestTracker {
                 "Abandoned: {}",
                 ps3dk_prof::rsx_frame::end_reason(s.reason as u16)
             ),
-            Some(_) => "Waiting for received RSX capture data and timing".into(),
+            Some(s) => {
+                let (timed, total) = self.timing_counts.unwrap_or((0, s.draws));
+                format!("Waiting for RSX ({timed}/{total})")
+            },
             None => "Requested: waiting for a frame".into(),
         })
     }

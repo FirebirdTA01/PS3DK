@@ -10,6 +10,7 @@ use std::{
 };
 pub type Names = BTreeMap<(Profile, u64), String>;
 pub struct RsxFrameView {
+    pub generation: u64,
     pub frames: Vec<FrameView>,
     pub map: Option<MapState>,
     pub hz: u64,
@@ -17,7 +18,9 @@ pub struct RsxFrameView {
 }
 impl RsxFrameView {
     pub fn build(a: &Analysis) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
+            generation: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             frames: rf::frames(&a.capture),
             map: a
                 .capture

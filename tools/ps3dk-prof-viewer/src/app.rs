@@ -1264,6 +1264,8 @@ impl eframe::App for App {
                 // Capture triggers while the live session runs (disabled, with the reason, on a v1 agent).
                 if let Some(v) = live_view.as_ref().filter(|v| v.outcome.is_none()) {
                     want_trigger = crate::live_triggers_ui::row(strip, &v.triggers, form);
+                }
+                if let Some(v) = live_view.as_ref() {
                     strip.horizontal_wrapped(|p|{
                         let blocked=v.rsx_frame.blocked();
                         let r=p.add_enabled(blocked.is_none(),egui::Button::new("Capture RSX frame"));

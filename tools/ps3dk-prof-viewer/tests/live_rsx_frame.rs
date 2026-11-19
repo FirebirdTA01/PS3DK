@@ -181,11 +181,33 @@ fn encoded_is_not_ready_and_a_fresh_tracker_does_not_inherit_requests() {
         bytes: 200,
     }));
     assert!(!t.resolved);
-    assert!(t.blocked().is_some());
+    assert!(t.blocked().is_none(), "ENCODED releases admission, not timing readiness");
     assert!(t.status_line().unwrap().contains("Waiting"));
     t.on_link(&LinkState::Failed(LinkError::Closed), s.hello.as_ref());
     assert!(t.status_line().unwrap().contains("ended"));
     assert!(RequestTracker::default().request.is_none());
+}
+
+#[test]
+fn encoded_pending_timing_has_counts_and_allows_the_next_request() {
+    use ps3dk_prof_viewer::live_rsx_frame::RequestTracker;
+    let mut t = RequestTracker::default();
+    let s = session(3, CAP_RSX_FRAME);
+    t.on_link(&s.state, s.hello.as_ref());
+    let (r, _) = t.start("one".into()).unwrap();
+    let bytes = include_bytes!("../../ps3dk-prof/tests/fixtures/rsx_frame/sample.prof");
+    let mut frames = ps3dk_prof::rsx_frame::frames(&ps3dk_prof::reader::read(bytes).unwrap());
+    let f = &mut frames[0];
+    f.request_id = r;
+    f.status = ps3dk_prof::rsx_frame::FrameStatus::PendingTiming { missing: 1 };
+    t.event(RsxFrameEvent::Ack(RsxFrameAck { request:r, capture:f.id, result:0 }));
+    t.event(RsxFrameEvent::State(RsxFrameState { request:r, capture:f.id, state:3, reason:0, draws:f.totals.draws, frame:f.frame, bytes:200 }));
+    t.observe(&frames);
+    assert_eq!(t.status_line().unwrap(), format!("Waiting for RSX ({}/{})", frames[0].totals.timed, frames[0].totals.draws));
+    assert!(!t.resolved);
+    assert!(t.start("two".into()).is_ok());
+    // No mutation of the reader's retained first capture.
+    assert!(matches!(frames[0].status, ps3dk_prof::rsx_frame::FrameStatus::PendingTiming { .. }));
 }
 
 #[test]

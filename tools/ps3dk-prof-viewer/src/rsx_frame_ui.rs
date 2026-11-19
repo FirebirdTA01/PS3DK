@@ -3,6 +3,31 @@ use crate::rsx_frame_view::{sorted_draws, DrawColumn, Names, RsxFrameView};
 use eframe::egui::{self, RichText};
 use ps3dk_prof::rsx_frame::{self as rf, FrameStatus, FrameView, GroupBy};
 use ps3dk_ui as ui;
+use std::sync::Arc;
+
+#[derive(PartialEq, Eq)]
+struct RowKey {
+    generation: u64,
+    capture: Option<u32>,
+    filter: String,
+    column: DrawColumn,
+    descending: bool,
+    group: Option<GroupBy>,
+    names: Names,
+}
+#[derive(Default)]
+pub struct Rows {
+    pub ids: Vec<usize>,
+    pub groups: Vec<rf::Group>,
+}
+pub fn badge(status: &FrameStatus) -> &'static str {
+    match status {
+        FrameStatus::Complete => "Ready",
+        FrameStatus::Open => "Open",
+        FrameStatus::PendingTiming { .. } => "Pending timing",
+        _ => "Partial",
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -24,6 +49,8 @@ pub struct State {
     pub group: Option<GroupBy>,
     pub legacy: bool,
     pub focus: bool,
+    pub link_ended_reason: Option<String>,
+    rows: Option<(RowKey, Arc<Rows>)>,
     consumed: Option<(u32, u32)>,
 }
 impl Default for State {
@@ -38,12 +65,30 @@ impl Default for State {
             group: None,
             legacy: false,
             focus: false,
+            link_ended_reason: None,
+            rows: None,
             consumed: None,
         }
     }
 }
 impl State {
+    pub fn rows(&mut self, v: &RsxFrameView, names: &Names) -> Arc<Rows> {
+        if let Some((k, rows)) = &self.rows {
+            if k.generation == v.generation && k.capture == self.selected && k.filter == self.filter
+                && k.column == self.column && k.descending == self.descending && k.group == self.group && &k.names == names {
+                return rows.clone();
+            }
+        }
+        let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| Rows {
+            ids: sorted_draws(f, &self.filter, self.column, self.descending, names),
+            groups: self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)),
+        }));
+        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, names:names.clone()}, rows.clone()));
+        rows
+    }
     pub fn select(&mut self, f: &FrameView) {
+        self.rows = None;
+        self.link_ended_reason = None;
         self.selected = Some(f.id);
         self.column = DrawColumn::Time;
         self.descending = true;
@@ -67,16 +112,19 @@ impl State {
         let Some(f) = v.frames.iter().find(|f| {
             f.id == ack.capture
                 && f.request_id == ack.request
-                && matches!(
+                && (t.ended || matches!(
                     f.status,
                     FrameStatus::Complete
                         | FrameStatus::Truncated { .. }
                         | FrameStatus::Abandoned { .. }
-                )
+                ))
         }) else {
             return false;
         };
         self.select(f);
+        if t.ended && matches!(f.status, FrameStatus::Open | FrameStatus::PendingTiming { .. }) {
+            self.link_ended_reason = Some("Live link ended; this received capture has incomplete timing".into());
+        }
         self.consumed = Some((ack.request, ack.capture));
         true
     }
@@ -168,9 +216,10 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, st: &mut State, o
     egui::ScrollArea::vertical().id_salt("rsxf-page").show(p,|p|{
    let status=f.status.text();out.status=Some(status.clone());
    p.horizontal_wrapped(|p|{
-     ui::badge(p,if matches!(f.status,FrameStatus::Complete){"Ready"}else{"Partial"},if matches!(f.status,FrameStatus::Complete){ui::Tone::Success}else{ui::Tone::Warning}).on_hover_text(&status);
+     ui::badge(p,badge(&f.status),if matches!(f.status,FrameStatus::Complete){ui::Tone::Success}else{ui::Tone::Warning}).on_hover_text(&status);
      p.label(format!("{} · owner {} · frame {} · window {}",f.name,f.owner,f.frame,f.window));p.label(&status);
    });
+   if let Some(why)=&st.link_ended_reason {ui::field_message(p,ui::Tone::Warning,why);}
    p.label(if f.isolated{"ISOLATED timing"}else{"PIPELINED: reached-marker intervals can overlap. Their sum is not isolated execution cost."});
    p.horizontal_wrapped(|p|{
      p.label(format!("{} draws · {} timed · {} untimed · {} missing · {} primitives",f.totals.draws,f.totals.timed,f.totals.untimed,f.totals.missing,f.totals.primitives));
@@ -190,9 +239,9 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, st: &mut State, o
        p.selectable_value(&mut st.group,None,"No grouping");for by in [GroupBy::Program,GroupBy::Vp,GroupBy::Fp,GroupBy::Label,GroupBy::Tag,GroupBy::Pass,GroupBy::Kind]{p.selectable_value(&mut st.group,Some(by),group_name(by));}
      });
    });
-   if let Some(by)=st.group {p.collapsing("Group totals (all draws)",|p|{let groups=rf::group(f,by,names);egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    p.horizontal_wrapped(|p|{p.label("Sort");for (column,name) in [(DrawColumn::Time,"Time"),(DrawColumn::Ordinal,"Ordinal"),(DrawColumn::Kind,"Kind"),(DrawColumn::Count,"Count"),(DrawColumn::Gap,"Gap")]{if p.selectable_label(st.column==column,name).clicked(){if st.column==column{st.descending=!st.descending}else{st.column=column;st.descending=column!=DrawColumn::Ordinal;}}}p.label(if st.descending{"Descending"}else{"Ascending"});});
-   let ids=sorted_draws(f,&st.filter,st.column,st.descending,names);
+   let cached=st.rows(v,names);let ids=&cached.ids;
+   if st.group.is_some() {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    if ids.is_empty(){p.label(if f.draws.is_empty(){"No draw records retained in this capture."}else{"No draws match the filter."});}
    draw_table(p,v,f,names,st,out,&ids);
    p.separator();
