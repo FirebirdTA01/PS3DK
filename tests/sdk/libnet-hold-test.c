@@ -77,6 +77,16 @@ static int load(void)
 }
 
 static int is_loaded(void) { return atomic_load(&modules) > 0; }
+/* The profiler's probe (a socket created and closed): up when a network is up, 0 when it is not initialized, or the
+ * error the test injects. */
+static atomic_int probe_error, probes;
+static int probe_up(void)
+{
+    atomic_fetch_add(&probes, 1);
+    if (atomic_load(&probe_error))
+        return atomic_load(&probe_error);
+    return atomic_load(&net_up) ? 1 : 0;
+}
 
 static int unload(void)
 {
@@ -128,7 +138,7 @@ static void prof_evict(void)
 static int prof_acquire(void)
 {
     pthread_mutex_lock(&prof_lock);
-    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, is_loaded, prof_evict);
+    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, is_loaded, probe_up, prof_evict);
     if (!rc)
         atomic_store(&agent_running, 1);
     pthread_mutex_unlock(&prof_lock);
@@ -383,12 +393,41 @@ static void foreign(int firmware_double_ok)
     atomic_store(&double_ok, firmware_double_ok);
     atomic_store(&net_up, 1); /* brought up outside libnet: no front end's record */
     atomic_store(&modules, 1);
-    CHECK(prof_acquire() == 0); /* joined: the NET module was already loaded */
+    CHECK(prof_acquire() == 0); /* joined: the NET module was loaded and the probe found a network up */
+    CHECK(atomic_load(&probes) == 1);
     COUNTS(0, 0, 0, 0);         /* no raw call at all: ownership is never read from an init's result */
     CHECK(prof_release() == 0 && atomic_load(&net_up) && atomic_load(&modules) == 1);
     COUNTS(0, 0, 0, 0);         /* never finalized, nothing unloaded */
 }
 static void case_foreign_network(void) { foreign(0); }
+
+/* NET loaded early by the app (or a library) but no network initialized yet: the probe says so, and the profiler
+ * brings the network up as its owner without loading the module, so it finalizes its own network and never unloads
+ * the module someone else loaded. */
+static void case_loaded_but_down(void)
+{
+    atomic_store(&double_ok, 1);
+    atomic_store(&modules, 1); /* the app's early cellSysmoduleLoadModule */
+    CHECK(prof_acquire() == 0);
+    CHECK(atomic_load(&probes) == 1 && atomic_load(&net_up));
+    COUNTS(1, 0, 0, 0); /* one raw init, no load */
+    CHECK(prof_release() == 0 && !atomic_load(&net_up));
+    COUNTS(1, 1, 0, 0); /* its own network finalized, nothing unloaded */
+    CHECK(atomic_load(&modules) == 1);
+}
+
+/* The probe fails some other way: no hold, no raw call; the profiler reports the error (auto-start off). */
+static void case_loaded_probe_error(void)
+{
+    atomic_store(&double_ok, 1);
+    atomic_store(&modules, 1);
+    atomic_store(&probe_error, -5);
+    CHECK(prof_acquire() == -5);
+    COUNTS(0, 0, 0, 0);
+    CHECK(prof_release() == 0);
+    COUNTS(0, 0, 0, 0);
+    CHECK(atomic_load(&modules) == 1);
+}
 /* The measured firmware: a double initialize answers 0, so only libnet's own records (and the loaded module) can
  * tell a foreign network; the profiler still never finalizes it. */
 static void case_foreign_network_double_ok(void) { foreign(1); }
@@ -474,6 +513,8 @@ static const struct {
     {"legacy_then_cell_no_prof", case_legacy_then_cell_no_prof},
     {"foreign_network", case_foreign_network},
     {"foreign_network_double_ok", case_foreign_network_double_ok},
+    {"loaded_but_down", case_loaded_but_down},
+    {"loaded_probe_error", case_loaded_probe_error},
     {"prof_owner_double_ok", case_prof_owner_double_ok},
     {"prof_finalize_fails", case_prof_finalize_fails},
     {"concurrent", case_concurrent},

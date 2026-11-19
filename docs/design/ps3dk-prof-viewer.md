@@ -532,9 +532,12 @@ auto-start (opt-in)".
   `tests/hardware/net-init-probe`).** A second
   `sys_net_initialize_network_ex` while the network is up returns 0: the
   firmware does not refuse it. So libnet never infers ownership from an
-  initialize's result. Ownership comes from its own records only, and a
-  network with the NET module already loaded but no libnet record is
-  assumed foreign: joined, never finalized, nothing unloaded.
+  initialize's result. Ownership comes from its own records only. With
+  the NET module already loaded but no libnet record, one socket created
+  and closed asks whether a network is up: up means foreign (joined, never
+  finalized, nothing unloaded); `ENETDOWN` means none (the profiler brings
+  one up without loading the module); any other error turns auto-start
+  off.
 
 ## Phase 3: PPU, SPU and RSX on one timeline (planned)
 

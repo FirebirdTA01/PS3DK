@@ -277,11 +277,15 @@ before. While the profiler holds the network, libnet applies these rules:
   so that call and the later `netDeinitialize` give the results the same sequence gives without the profiler.
 - The profiler never finalizes a network an app front end or the ps3dk-run hook brought up, and never unloads a module
   it did not load.
-- If the NET module is already loaded but no libnet front end brought the network up (a library or hook outside this
-  libnet), the profiler assumes the network is foreign: it joins without initializing, and never finalizes it or
-  unloads anything. The firmware answers a second initialize with 0 (measured on HEN and in RPCS3), so that answer is
-  never used to decide who owns the network. If that network is not actually up, the agent cannot listen and
-  auto-start stays off with its one line.
+- If the NET module is already loaded but no libnet front end brought the network up (an app that loads NET early, a
+  library or a hook outside this libnet), the profiler first asks whether a network is up without touching it: it
+  creates and closes one socket. If that works, the network is someone else's: the profiler joins without
+  initializing, and never finalizes it or unloads anything. If the system reports no network (`ENETDOWN`), the profiler
+  brings one up as its owner without loading the module again, so at shutdown it finalizes its own network and never
+  unloads the module someone else loaded. Any other error turns auto-start off with one line. The firmware answers a
+  second initialize with 0 (measured on HEN and in RPCS3), so that answer is never used to decide who owns the network.
+  Which error the console's socket call reports with no network up has not been measured yet; RPCS3 always answers
+  that a network is up.
 
 **Existing `ps3dk_prof_live_start` calls keep working.** While the auto-started agent runs, the call returns `OK` and
 does nothing when every non-zero field of its config matches, `EALREADY` otherwise. Before the auto-started agent is
