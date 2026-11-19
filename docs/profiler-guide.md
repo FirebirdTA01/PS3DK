@@ -277,8 +277,11 @@ before. While the profiler holds the network, libnet applies these rules:
   so that call and the later `netDeinitialize` give the results the same sequence gives without the profiler.
 - The profiler never finalizes a network an app front end or the ps3dk-run hook brought up, and never unloads a module
   it did not load.
-- If something outside libnet brought the network up, the profiler's bring-up fails and auto-start stays off with its
-  one line.
+- If the NET module is already loaded but no libnet front end brought the network up (a library or hook outside this
+  libnet), the profiler assumes the network is foreign: it joins without initializing, and never finalizes it or
+  unloads anything. The firmware answers a second initialize with 0 (measured on HEN and in RPCS3), so that answer is
+  never used to decide who owns the network. If that network is not actually up, the agent cannot listen and
+  auto-start stays off with its one line.
 
 **Existing `ps3dk_prof_live_start` calls keep working.** While the auto-started agent runs, the call returns `OK` and
 does nothing when every non-zero field of its config matches, `EALREADY` otherwise. Before the auto-started agent is

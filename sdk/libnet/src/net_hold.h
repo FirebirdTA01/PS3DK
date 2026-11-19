@@ -35,12 +35,16 @@ int __ps3dk_net_cell_finalize(void);
 
 /* The profiler's hold. acquire: 0 when the network is up for it (joined or
  * brought up with pool, loading the NET module with load), or the failing
- * call's result (-1 while an eviction runs). evict is called, without libnet's
+ * call's result (-1 while an eviction runs). Ownership is decided from this
+ * layer's own records only, never from a raw initialize's result (the
+ * firmware answers a second initialize while up with 0): with no front end
+ * holding and is_loaded reporting the NET module already loaded, the network
+ * is assumed foreign and joined, never finalized, and nothing is unloaded. evict is called, without libnet's
  * lock, when an app front end must take the network back; it must stop every
  * use of the network and then call release. release: 0 or the raw finalize's
  * result; during an eviction it only drops the hold. */
 int __ps3dk_net_prof_acquire(void *pool, uint32_t pool_bytes, int (*load)(void), int (*unload)(void),
-                             void (*evict)(void));
+                             int (*is_loaded)(void), void (*evict)(void));
 int __ps3dk_net_prof_release(void);
 
 /* The 128 KiB pool netInitialize has always used (net_pool.c): the profiler

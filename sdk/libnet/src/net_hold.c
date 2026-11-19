@@ -150,7 +150,8 @@ int __ps3dk_net_cell_finalize(void)
     pthread_mutex_unlock(&hold_lock); return rc;
 }
 
-int __ps3dk_net_prof_acquire(void *pool, uint32_t bytes, int (*load)(void), int (*unload)(void), void (*evict_fn)(void))
+int __ps3dk_net_prof_acquire(void *pool, uint32_t bytes, int (*load)(void), int (*unload)(void), int (*is_loaded)(void),
+                             void (*evict_fn)(void))
 {
     int rc = pthread_mutex_lock(&hold_lock);
     if (rc) return -1;
@@ -158,6 +159,13 @@ int __ps3dk_net_prof_acquire(void *pool, uint32_t bytes, int (*load)(void), int 
     else if (prof_held) rc = 0;
     else if (legacy_up || cell_up) {
         prof_held = 1; prof_owner = 0; prof_evict = evict_fn; /* the app's network, the app's pool */
+        rc = 0;
+    } else if (is_loaded && is_loaded()) {
+        /* No libnet front end brought the network up, but the NET module is already loaded: someone outside this
+         * layer (a library, or a hook built against another libnet) may own a live network.  The firmware answers a
+         * second initialize with 0 (measured on HEN and in RPCS3), so a raw init cannot tell; assume it is foreign:
+         * join without a raw call, and never finalize it or unload anything (prof_owner stays 0). */
+        prof_held = 1; prof_owner = 0; prof_evict = evict_fn;
         rc = 0;
     } else {
         rc = load ? load() : 0;

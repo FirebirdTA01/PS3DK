@@ -25,6 +25,8 @@ struct wire_init { uint32_t memory, size; int32_t flags; };
 #define DOUBLE_INIT (-0x7fffff01) /* the model's "already initialized" (the firmware's is measured on target) */
 #define NOT_INIT (-0x7fffff02)
 static atomic_int net_up, modules, inits, finals, loads, unloads, init_fail, final_fail, load_fail, protocol;
+/* The firmware as measured on HEN and in RPCS3: a second initialize while up answers 0 (no refusal). */
+static atomic_int double_ok;
 static atomic_uint last_size;
 static unsigned char *volatile active_pool; /* the pool the "firmware" uses while up */
 
@@ -43,7 +45,7 @@ int __ps3dk_raw_sys_net_initialize_network_ex(const struct wire_init *w)
     if (!atomic_load(&modules))
         atomic_store(&protocol, 1); /* sys_net called with the NET module unloaded */
     if (atomic_exchange(&net_up, 1))
-        return DOUBLE_INIT;
+        return atomic_load(&double_ok) ? 0 : DOUBLE_INIT;
     atomic_store(&last_size, w->size);
     active_pool = (unsigned char *)(uintptr_t)w->memory;
     firmware_touch();
@@ -73,6 +75,8 @@ static int load(void)
     atomic_fetch_add(&modules, 1);
     return 0;
 }
+
+static int is_loaded(void) { return atomic_load(&modules) > 0; }
 
 static int unload(void)
 {
@@ -124,7 +128,7 @@ static void prof_evict(void)
 static int prof_acquire(void)
 {
     pthread_mutex_lock(&prof_lock);
-    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, prof_evict);
+    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, is_loaded, prof_evict);
     if (!rc)
         atomic_store(&agent_running, 1);
     pthread_mutex_unlock(&prof_lock);
@@ -373,15 +377,33 @@ static void case_legacy_then_cell_no_prof(void)
     CHECK(atomic_load(&modules) == 0);
 }
 
-/* Someone outside libnet brought the network up: the profiler's bring-up fails and holds nothing. */
-static void case_foreign_network(void)
+/* Someone outside libnet brought the network up (NET loaded, no libnet record): the profiler assumes it is foreign. */
+static void foreign(int firmware_double_ok)
 {
-    atomic_store(&net_up, 1);
+    atomic_store(&double_ok, firmware_double_ok);
+    atomic_store(&net_up, 1); /* brought up outside libnet: no front end's record */
     atomic_store(&modules, 1);
-    CHECK(prof_acquire() == DOUBLE_INIT);
-    COUNTS(1, 0, 1, 1);
-    CHECK(prof_release() == 0 && atomic_load(&net_up));
-    COUNTS(1, 0, 1, 1);
+    CHECK(prof_acquire() == 0); /* joined: the NET module was already loaded */
+    COUNTS(0, 0, 0, 0);         /* no raw call at all: ownership is never read from an init's result */
+    CHECK(prof_release() == 0 && atomic_load(&net_up) && atomic_load(&modules) == 1);
+    COUNTS(0, 0, 0, 0);         /* never finalized, nothing unloaded */
+}
+static void case_foreign_network(void) { foreign(0); }
+/* The measured firmware: a double initialize answers 0, so only libnet's own records (and the loaded module) can
+ * tell a foreign network; the profiler still never finalizes it. */
+static void case_foreign_network_double_ok(void) { foreign(1); }
+
+/* With the measured firmware, the profiler bringing the network up itself (module not loaded, no record) still owns
+ * and finalizes only its own network; a later netInitialize joins without a second raw init. */
+static void case_prof_owner_double_ok(void)
+{
+    atomic_store(&double_ok, 1);
+    CHECK(prof_acquire() == 0);
+    CHECK(legacy_init() == 0);
+    COUNTS(1, 0, 1, 0);
+    CHECK(legacy_deinit() == 0 && atomic_load(&net_up));
+    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&modules));
+    COUNTS(1, 1, 1, 1);
 }
 
 /* The profiler's own finalize fails: it keeps the hold and may retry. */
@@ -451,6 +473,8 @@ static const struct {
     {"legacy_joined_then_cell", case_legacy_joined_then_cell},
     {"legacy_then_cell_no_prof", case_legacy_then_cell_no_prof},
     {"foreign_network", case_foreign_network},
+    {"foreign_network_double_ok", case_foreign_network_double_ok},
+    {"prof_owner_double_ok", case_prof_owner_double_ok},
     {"prof_finalize_fails", case_prof_finalize_fails},
     {"concurrent", case_concurrent},
 };

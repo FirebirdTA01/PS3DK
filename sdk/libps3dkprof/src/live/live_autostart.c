@@ -117,7 +117,7 @@ static void on_evict(void);
 #include <cell/sysmodule.h>
 /* sdk/libnet/src/net_hold.h (libnet, linked with -lnet) */
 extern int __ps3dk_net_prof_acquire(void *pool, uint32_t pool_bytes, int (*load)(void), int (*unload)(void),
-                                    void (*evict)(void));
+                                    int (*is_loaded)(void), void (*evict)(void));
 extern int __ps3dk_net_prof_release(void);
 extern void *__ps3dk_net_default_pool(uint32_t *bytes);
 
@@ -131,11 +131,16 @@ static int unload_net(void)
     return cellSysmoduleUnloadModule(CELL_SYSMODULE_NET);
 }
 
+static int net_loaded(void)
+{
+    return cellSysmoduleIsLoaded(CELL_SYSMODULE_NET) == CELL_SYSMODULE_LOADED;
+}
+
 static int net_acquire(void *pool, uint32_t bytes)
 {
     if (!pool)
         pool = __ps3dk_net_default_pool(&bytes);
-    return __ps3dk_net_prof_acquire(pool, bytes, load_net, unload_net, on_evict);
+    return __ps3dk_net_prof_acquire(pool, bytes, load_net, unload_net, net_loaded, on_evict);
 }
 
 static int net_release(void)
