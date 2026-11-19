@@ -128,7 +128,9 @@ fn constants_match_the_c_schema() {
     assert_eq!(def("LIVE_MAX_PAYLOAD"), MAX_PAYLOAD as u64);
     assert_eq!(def("LIVE_T_CLIENT_HELLO"), T_CLIENT_HELLO as u64);
     assert_eq!(def("LIVE_MAGIC"), MAGIC as u64);
-    assert_eq!(def("LIVE_VERSION"), VERSION as u64);
+    // the agent serves every version up to LIVE_VERSION; this viewer asks for at most its own
+    assert_eq!(def("LIVE_VERSION"), 3);
+    assert!(VERSION as u64 <= def("LIVE_VERSION"));
     assert_eq!(def("LIVE_VERSION_MIN"), VERSION_MIN as u64);
     assert_eq!(def("LIVE_CAP_TRIGGERS"), CAP_TRIGGERS as u64);
     assert_eq!(def("LIVE_T_CAPTURE_BEGIN"), T_CAPTURE_BEGIN as u64);
@@ -138,6 +140,12 @@ fn constants_match_the_c_schema() {
     assert_eq!(def("LIVE_MAX_WINDOW_NAME"), MAX_WINDOW_NAME as u64);
     assert_eq!(def("LIVE_MAX_WINDOW_FRAMES"), MAX_WINDOW_FRAMES as u64);
     assert_eq!(def("LIVE_ACK_BYTES"), ACK_BYTES as u64);
+    assert_eq!(def("LIVE_CAP_RSX_FRAME"), CAP_RSX_FRAME as u64);
+    assert_eq!(def("LIVE_T_RSX_FRAME_REQ"), T_RSX_FRAME_REQ as u64);
+    assert_eq!(def("LIVE_T_RSX_FRAME_ACK"), T_RSX_FRAME_ACK as u64);
+    assert_eq!(def("LIVE_T_RSX_FRAME_STATE"), T_RSX_FRAME_STATE as u64);
+    assert_eq!(def("LIVE_RSXF_ACK_BYTES"), RSXF_ACK_BYTES as u64);
+    assert_eq!(def("LIVE_RSXF_STATE_BYTES"), RSXF_STATE_BYTES as u64);
     assert!(h.contains("#define LIVE_CMD_MAX_BYTES (12u + LIVE_MAX_WINDOW_NAME)"));
     assert_eq!(def("LIVE_T_HELLO"), T_HELLO as u64);
     assert_eq!(def("LIVE_MAX_APP"), MAX_APP as u64);
