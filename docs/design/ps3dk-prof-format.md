@@ -1035,6 +1035,10 @@ invalidates (0x1710, 0x1714), texture cache control (0x1fd8), report writes (0x1
 (0x1d70, 0x1d74); nor are the VP constant and instruction upload pointers (0x1efc, 0x1e9c: the decoder interprets them)
 or SEMAPHORE_OFFSET (0x1d6c, which AUTO's own markers rewrite). A register is known from its first write after attach or after a decoder reset
 (any rejected or unfollowed word); its value is then the last one written.
+A reset also forgets every data-port destination cursor (the VP instruction load slot, the VP constant id, the inline
+transfer's destination DMA, offset, start pixel and size, the M2MF copy's destination): an unseen word may have moved
+it, so data words written before their cursor is written again are dropped (never applied at a stale slot or address),
+and an M2MF copy launched in that state makes every remembered inline word UNKNOWN.
 
 - BASELINE: the known registers at arming, before the first DRAW or STATE of the capture; n >= 1; register indices
   strictly increasing across all BASELINE records of the capture.

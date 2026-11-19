@@ -1460,7 +1460,8 @@ pub struct UniformValue {
     pub profile: Profile,
     pub name: String,
     pub resource: u32,
-    /// One vec4 per slot (VP) or per embedded constant (FP); a component None when unknown.
+    /// One vec4 per slot (VP) or per embedded constant (FP); a component None when unknown (FP: provenance UNKNOWN).
+    /// FP values are never exact: see `provenance`.
     pub values: Vec<[Option<f32>; 4]>,
     /// FP: where each component comes from (None for VP: the stream is exact).
     pub provenance: Option<[Provenance; 4]>,
@@ -1917,7 +1918,12 @@ pub fn uniforms(f: &FrameView, d: &Draw) -> Vec<UniformValue> {
             for u in &f.programs[i].uniforms {
                 let e = fc.entries.iter().find(|e| e.offset == u.resource);
                 out.push(UniformValue { profile: Profile::Fragment, name: u.name.clone(), resource: u.resource,
-                    values: vec![e.map_or([None; 4], |e| e.floats().map(Some))],
+                    // an UNKNOWN component is None: the word the record carries for it is only the container's
+                    // fallback, not the value the draw ran with
+                    values: vec![e.map_or([None; 4], |e| {
+                        let f = e.floats();
+                        std::array::from_fn(|k| (e.provenance[k] != Provenance::Unknown).then_some(f[k]))
+                    })],
                     provenance: Some(e.map_or([Provenance::Unknown; 4], |e| e.provenance)) });
             }
         }
