@@ -1,14 +1,11 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  * Explicit raw-PRX compatibility API. Tagged BSD descriptors are rejected.
  */
-#include <pthread.h>
 #include <net/net.h>
 #include <cell/sysmodule.h>
 #include <limits.h>
 #include <stdint.h>
-static pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
-static unsigned init_users;
-static unsigned char init_memory[128 * 1024] __attribute__((aligned(16)));
+#include "net_hold.h"
 int *netErrnoLoc(void) { return _sys_net_errno_loc(); }
 int *netHErrnoLoc(void) { return _sys_net_h_errno_loc(); }
 static int raw_fd_ok(int fd)
@@ -17,32 +14,19 @@ static int raw_fd_ok(int fd)
     int *e = _sys_net_errno_loc(); if (e) *e = 9;
     return 0;
 }
+static int load_net(void) { return cellSysmoduleLoadModule(CELL_SYSMODULE_NET); }
+static int unload_net(void) { return cellSysmoduleUnloadModule(CELL_SYSMODULE_NET); }
+/* Exactly the load, init and unload sequence this API has always made,
+ * unless the profiler holds the network (net_hold.h). */
 int netInitialize(void)
 {
-    int rc = pthread_mutex_lock(&init_lock);
-    if (rc) return -1;
-    if (init_users) rc = 0;
-    else {
-        sys_net_initialize_parameter_t p = {init_memory, sizeof(init_memory), 0};
-        rc = cellSysmoduleLoadModule(CELL_SYSMODULE_NET);
-        if (!rc) {
-            rc = sys_net_initialize_network_ex(&p);
-            if (!rc) init_users = 1;
-            else cellSysmoduleUnloadModule(CELL_SYSMODULE_NET);
-        }
-    }
-    pthread_mutex_unlock(&init_lock); return rc;
+    uint32_t bytes;
+    void *pool = __ps3dk_net_default_pool(&bytes);
+    return __ps3dk_net_legacy_init(pool, bytes, load_net, unload_net);
 }
 int netDeinitialize(void)
 {
-    int rc = pthread_mutex_lock(&init_lock);
-    if (rc) return -1;
-    if (!init_users) rc = 0;
-    else {
-        rc = sys_net_finalize_network();
-        if (!rc) { init_users = 0; rc = cellSysmoduleUnloadModule(CELL_SYSMODULE_NET); }
-    }
-    pthread_mutex_unlock(&init_lock); return rc;
+    return __ps3dk_net_legacy_deinit();
 }
 int netInitializeNetworkEx(netInitParam *p)
 {

@@ -25,10 +25,12 @@ CONFIG := $(BUILD)/config.h
 # Cold mixed-format retention has real PAL dependencies even at O0. These
 # members do not enable rolling output, semantic encoders or a public option.
 CORE := prof_core prof_drain prof_version pal_lv2 roll_file roll_retention_inspect roll_store
-# The live link (ps3dk_prof_live_start/stop) is manual-lifecycle only: separate members, pulled in by a reference.
-LIVE := live_agent live_os_lv2 live_api
+# The live link (ps3dk_prof_live_start/stop) and its opt-in auto-start (live_autostart, extracted only by the
+# __ps3dk_prof_live_autostart_anchor request): separate members, pulled in by a reference.  The automatic archive
+# carries them too, so PS3_PROF_LIVE_AUTOSTART works with every lifecycle; a program that requests neither pulls none.
+LIVE := live_agent live_os_lv2 live_api live_autostart
 MANUAL := $(CORE) $(LIVE)
-AUTO := $(CORE) prof_arcs_writer startup
+AUTO := $(CORE) prof_arcs_writer startup $(LIVE)
 ILP32_CORE := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(MANUAL)))
 LP64_CORE := $(addprefix $(BUILD)/lp64/,$(addsuffix .o,$(MANUAL)))
 ILP32_LIVE := $(addprefix $(BUILD)/ilp32/,$(addsuffix .o,$(LIVE)))

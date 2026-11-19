@@ -1411,7 +1411,20 @@ void *p_drain_main(void *arg)
     return NULL;
 }
 
+/* Weak: linked only with the live auto-start member (prof_frame_hook.h). */
+extern void ps3dk_prof__live_autostart_after_shutdown(void) __attribute__((weak));
+
+static int shutdown_impl(int *finalized);
+
 int ps3dk_prof_shutdown(void)
+{
+    int finalized = 0, rc = shutdown_impl(&finalized);
+    if (finalized && ps3dk_prof__live_autostart_after_shutdown)
+        ps3dk_prof__live_autostart_after_shutdown();   /* after the finalization a live viewer's END needs */
+    return rc;
+}
+
+static int shutdown_impl(int *finalized)
 {
     prof *p = ready_prof();
     tls_state *t = &g_tls;
@@ -1448,6 +1461,7 @@ int ps3dk_prof_shutdown(void)
         ST_REL(&p->phase, 3u);
         rc = retain_completed(p, rc);
         publish_finalization(p, rc);
+        *finalized = 1;
         return rc;
     }
 
@@ -1463,5 +1477,6 @@ int ps3dk_prof_shutdown(void)
         rc = PS3DK_PROF_ETHREAD;   /* after every sink and trailer severity */
     rc = retain_completed(p, rc);
     publish_finalization(p, rc);
+    *finalized = 1;
     return rc;
 }

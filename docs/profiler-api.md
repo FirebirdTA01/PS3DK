@@ -114,7 +114,8 @@ successful (or terminally failed) init; `EINVAL` for a bad config; `EEXIST` (fil
 init publishes nothing and every later profiler call stays harmless. The thread that calls it becomes the APP-mode
 drain thread. Caller-serialized. Off build: `PS3DK_PROF_INIT(cfg)` is `OK` and does nothing.
 AUTO builds and `libps3prof.a` call init themselves before `main` (THREAD mode, `auto_register` 1).
-PC app equivalent: none yet (live auto-start, card t_276ffda7; startup knobs, card t_9d1f2c10).
+PC app equivalent: none for init itself; with `PS3_PROF_LIVE_AUTOSTART` the live agent starts after it with no app
+code (see `ps3dk_prof_live_autostart_options`); startup knobs are card t_9d1f2c10.
 
 ```c
 ps3dk_prof_config cfg;
@@ -709,9 +710,35 @@ Each finished admitted connection ends in exactly one `drop_*` reason.
 After a successful init. Starts one agent thread that serves this run's file to one viewer at a time and applies
 viewer capture triggers (protocol 2) inside `ps3dk_prof_frame`. Returns `OK`; `ENOTINIT`; `ESTOPPED`; `ENOTSUP`
 (callback sink, rolling capture, capture outside `/dev_hdd0/`); `EALREADY` (once per run); `EINVAL`; `ENET`;
-`ETHREAD`. Caller-serialized. Off build: `ENOTSUP`.
-PC app equivalent: **Connect…** connects to a running agent; starting the agent without app code is card
-t_276ffda7.
+`ETHREAD`. Caller-serialized. Off build: `ENOTSUP`. While an auto-started agent runs (below), it returns `OK` and does
+nothing when every non-zero field of `cfg` matches that agent, `EALREADY` otherwise.
+PC app equivalent: **Connect…** connects to a running agent; `PS3_PROF_LIVE_AUTOSTART` starts the agent with no app
+code.
+
+### Live viewer auto-start: `PS3DK_PROF_LIVE_AUTOSTART`, `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib)`
+
+```c
+typedef struct ps3dk_prof_live_autostart_options {
+    uint32_t size;           /* sizeof(ps3dk_prof_live_autostart_options) */
+    uint16_t port;           /* 0: 31750 */
+    uint16_t reserved;       /* 0 */
+    void *net_pool;          /* NULL: libnet's default 128 KiB pool */
+    uint32_t net_pool_bytes; /* with net_pool */
+    uint32_t reserved2;      /* 0 */
+} ps3dk_prof_live_autostart_options;
+extern const ps3dk_prof_live_autostart_options ps3dk_prof_live_autostart_settings;
+```
+
+Opt-in, off by default. `-DPS3DK_PROF_LIVE_AUTOSTART=1` on one unit that includes `<ps3dk/prof.h>` (or CMake
+`PS3_PROF_LIVE_AUTOSTART=ON`, or `-Wl,-u,__ps3dk_prof_live_autostart_anchor`), with `-lnet -lsysmodule_stub`,
+links the auto-start: after every successful init the runtime takes its libnet network hold and starts the agent as
+`ps3dk_prof_live_start(NULL)` would, and after the shutdown's finalization it stops the agent (a viewer gets `END`) and
+releases only that hold. `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);`, once per program at file scope,
+defines `ps3dk_prof_live_autostart_settings` (port 0 is `31750`; pool 0 shares libnet's `netInitialize` pool) and also
+requests auto-start; settings with a wrong size or nonzero reserved fields are refused with one TTY line and the
+defaults are used. Every outcome prints one `ps3prof: live ...` TTY line; a failure never stops profiling. Off build:
+both macros compile to nothing that is linked. When to turn it on, its cost and the shared-network rules: guide
+section 4.3.
 
 ### `int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)` / `PS3DK_PROF_LIVE_STOP(g, j)`
 
@@ -837,9 +864,9 @@ There is no app-side API for snapshots or exporting part of a capture.
 
 | App API action | PC app action | Status |
 |---|---|---|
-| `ps3dk_prof_init` (manual lifecycle) | none | none yet: live auto-start t_276ffda7, startup knobs t_9d1f2c10 |
+| `ps3dk_prof_init` (manual lifecycle) | none | none yet: startup knobs t_9d1f2c10 |
 | config fields, `set_sink_path`, `set_capture_retention` | none | none yet: startup knobs t_9d1f2c10 |
-| `ps3dk_prof_live_start` | **Connect…** (needs the agent running) | partial: connect works; starting the agent from the PC is t_276ffda7 |
+| `ps3dk_prof_live_start` | **Connect…** (needs the agent running) | available: `PS3_PROF_LIVE_AUTOSTART` starts the agent with no app code |
 | `ps3dk_prof_live_stop` | **Disconnect** (ends the PC session only) | partial |
 | `PS3DK_PROF_CAPTURE_BEGIN` | **Begin** | available (live) |
 | `PS3DK_PROF_CAPTURE_END` | **End** (windows the PC opened) | available (live) |

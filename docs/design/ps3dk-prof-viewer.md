@@ -483,6 +483,56 @@ hardware package.
 debugger channels, resume, the automatic lifecycle, and any change to the
 capture format.
 
+### Live agent auto-start (opt-in, 2026-11-18)
+
+The design above needs app code: the app initializes networking and calls
+`ps3dk_prof_live_start`. An outside team could not connect the viewer to
+their game for that reason. Auto-start removes the app code. It is an
+option for every build that links the profiler, **off by default**
+(director, 2026-11-18). User documentation, including when to turn it on
+and when to leave it off: `docs/profiler-guide.md`, "Live viewer
+auto-start (opt-in)".
+
+- **Selection.** The member `live_autostart.o` is in every archive that
+  carries the live link. That now includes the automatic `libps3prof.a`,
+  the wait/function/counter variants, and `libps3dkprof_ext_live.a`. The
+  member is extracted only by a reference to
+  `__ps3dk_prof_live_autostart_anchor`. The reference comes from CMake
+  `PS3_PROF_LIVE_AUTOSTART=ON`, from the header define
+  `PS3DK_PROF_LIVE_AUTOSTART`, or from `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS`.
+  The core reaches the member only through weak references, so a program
+  without it links no live object, exactly as before.
+- **Start.** After every successful init, the core calls the member's
+  hook. The hook creates one start-up thread and returns at once; in the
+  automatic lifecycles the hook runs inside constructor(100). Under the
+  live lock, the start-up thread checks that the capture can be served,
+  takes the profiler's network hold, and starts the agent through the
+  same path as `ps3dk_prof_live_start`. Every failure prints one TTY line,
+  and profiling continues unchanged.
+- **Network.** libnet's holders (`sdk/libnet/src/net_hold.h`): while
+  the profiler holds nothing, every app front end makes exactly its old
+  calls. While it holds the network, the network stays its creator's.
+  The profiler joins an app's network and is evicted (agent stopped,
+  hold dropped, no further network call) before the app's teardown
+  reaches the system. When the profiler brought the network up,
+  `netInitialize` joins and a Cell initialize with the app's own pool
+  makes the profiler step aside first. The profiler never finalizes a
+  network the app or the ps3dk-run hook brought up.
+- **Stop.** The core calls the member's shutdown hook after
+  `ps3dk_prof_shutdown` has published its finalization. The hook stops
+  the agent, so a connected viewer gets `END`. Only after the stop
+  returns `OK` does it release the network hold. A manual-lifecycle
+  program that exits without shutdown is covered by destructor(101),
+  which stops the agent without `END`.
+- **Compatibility.** An explicit `ps3dk_prof_live_start` while the
+  auto-started agent runs returns `OK` when every field it sets matches
+  the running agent; otherwise it returns `EALREADY`. If auto-start
+  failed, the explicit start behaves exactly as before.
+- **Measured before relying on it.** The firmware's result for a second
+  `sys_net_initialize_network_ex` has not been relied on yet:
+  `tests/hardware/net-init-probe` measures it. Until it is measured, any
+  bring-up failure turns auto-start off with its one line.
+
 ## Phase 3: PPU, SPU and RSX on one timeline (planned)
 
 Lanes for SPU jobs and RSX work, fed by the SPU raw-clock transport now in

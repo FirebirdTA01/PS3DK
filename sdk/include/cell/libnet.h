@@ -139,6 +139,9 @@ int socketpoll(struct pollfd *fds, nfds_t nfds, int timeout);
 int socketselect(int nfds, fd_set *readfds, fd_set *writefds,
                  fd_set *exceptfds, struct timeval *timeout);
 
+/* Both reach the system exactly as before.  Only while the profiler's opt-in live auto-start holds the network does
+ * libnet act first: the profiler's agent is stopped (and, over a network the profiler brought up, that network is
+ * finalized with the NET module left loaded) before the app's call goes through unchanged. */
 int sys_net_initialize_network_ex(sys_net_initialize_parameter_t *param);
 int sys_net_finalize_network(void);
 int sys_net_abort_socket(int sockfd, int flags);

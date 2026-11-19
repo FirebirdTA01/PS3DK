@@ -531,7 +531,7 @@ def arch_rows():
     ]
 
 
-LV_AR = 'live_agent.o\nlive_os_lv2.o\nlive_api.o\n'
+LV_AR = 'live_agent.o\nlive_os_lv2.o\nlive_api.o\nlive_autostart.o\n'
 LV_ATTR = ''.join(f'\nFile: y.a({n})\nAttribute Section: gnu\nFile Attributes\n  Tag_GNU_Power_CellOS_Data_Model: LP64\n'
                   for n in LV.LIVE_MEMBERS)
 LV_NM = ''.join(f'\n{n}:\n                 U ps3dk_prof__lock\n0000000000000000 T live_{n[:-2]}\n'

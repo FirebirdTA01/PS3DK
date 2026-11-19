@@ -10,4 +10,12 @@
 #ifndef PS3DK_PROF_FRAME_HOOK_H
 #define PS3DK_PROF_FRAME_HOOK_H
 void ps3dk_prof__set_frame_hook(void (*fn)(void));
+
+/* Live viewer auto-start (live/live_autostart.c, opt-in).  The core calls these only when that member is linked: the
+ * core's references are weak (prof_core.c, prof_drain.c), so a program without the member links neither.
+ * after_init: once, at the end of every successful init (any init entry point), on the initializing thread; it must
+ * return quickly (it may run in a constructor).  after_shutdown: once, at the end of the shutdown that claimed it,
+ * after that shutdown published its finalization, on the shutting-down thread; it may wait for the agent. */
+void ps3dk_prof__live_autostart_after_init(void);
+void ps3dk_prof__live_autostart_after_shutdown(void);
 #endif
