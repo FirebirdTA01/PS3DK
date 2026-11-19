@@ -2295,7 +2295,7 @@ int ps3dk_prof_auto_range_begin(ps3dk_prof_desc *desc,uint32_t timed)
         uint32_t why=0;
         if(!c || c->reason || a->active || a->segment_active) why=AUTO_RR_STATE;
         else if(!a->coverage.active) why=AUTO_RR_NO_FRAME;
-        else if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) why=AUTO_RR_STATE;
+        else if(!auto_config_can_admit(&configuration) || LD_ACQ(&g_prof->stop_latch)) why=AUTO_RR_STATE;
         else if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<8)
             why=AUTO_RR_RING;
         else if(!initialize_device(a)) why=AUTO_RR_STATE;
@@ -2338,7 +2338,7 @@ int ps3dk_prof_auto_range_end(void)
         if(c->reason || a->active || a->segment_active) why=AUTO_RR_STATE;
         else if(!a->coverage.active) why=AUTO_RR_NO_FRAME;
         else if(a->coverage.live.frame!=r.frame) why=AUTO_RR_OTHER_FRAME;
-        else if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration)) why=AUTO_RR_STATE;
+        else if(!auto_config_can_admit(&configuration) || LD_ACQ(&g_prof->stop_latch)) why=AUTO_RR_STATE;
         else if((uintptr_t)(void *)ctx->begin!=clean_begin || !end_clean(a,end) || (cur&3u) || cur>end || end-cur<24)
             why=AUTO_RR_RING;
         else if(!(e=auto_queue_claim_held(&a->operations,r.pair,0))) why=AUTO_RR_METADATA;
