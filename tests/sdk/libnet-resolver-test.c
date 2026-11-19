@@ -27,6 +27,7 @@ static int failures, herr, neterr, null_result, legacy_init, init_calls, final_c
 static int load_calls, unload_calls, load_result, init_result;
 int cellSysmoduleLoadModule(uint16_t id) { ++load_calls; if (id != 0) return -1; return load_result; }
 int cellSysmoduleUnloadModule(uint16_t id) { ++unload_calls; return id != 0 ? -1 : 0; }
+/* the raw PRX finalize (raw-symbols.txt); sys_net_finalize_network is libnet's front end over it */
 int __ps3dk_raw_sys_net_finalize_network(void) { ++final_calls; return 0; }
 int __ps3dk_raw_socketclose(int fd) { (void)fd; return 0; }
 static char hostname[] = "fixture.example", alias[] = "alias.example";
@@ -68,7 +69,6 @@ int main(void)
     sys_net_initialize_parameter_t param = {memory, sizeof(memory), 1};
     CHECK(sys_net_initialize_network_ex(&param) == 0);
     CHECK(load_calls == 0 && unload_calls == 0);
-    CHECK(sys_net_finalize_network() == 0 && final_calls == 1 && unload_calls == 0); /* the Cell holder's own finalize */
     CHECK(netInitialize && netDeinitialize && netClose);
     if (!netInitialize || !netDeinitialize || !netClose) return 1;
     legacy_init = 1; init_calls = 0;
@@ -78,8 +78,8 @@ int main(void)
     CHECK(netInitialize() == -8 && init_calls == 1 && unload_calls == 1);
     init_result = 0;
     CHECK(netInitialize() == 0 && netInitialize() == 0 && init_calls == 2 && load_calls == 3);
-    CHECK(netDeinitialize() == 0 && final_calls == 2 && unload_calls == 2);
-    CHECK(netDeinitialize() == 0 && final_calls == 2 && unload_calls == 2);
+    CHECK(netDeinitialize() == 0 && final_calls == 1 && unload_calls == 2);
+    CHECK(netDeinitialize() == 0 && final_calls == 1 && unload_calls == 2);
     CHECK(netClose(SOCKET_FD_MASK | 3) == -1 && neterr == 9);
     CHECK(sys_net_abort_socket && sys_net_get_sockinfo && sys_net_get_sockinfo_ex && netGetSockInfo);
     if (!sys_net_abort_socket || !sys_net_get_sockinfo || !sys_net_get_sockinfo_ex || !netGetSockInfo) return 1;

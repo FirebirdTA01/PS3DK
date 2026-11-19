@@ -1,13 +1,15 @@
-/* libnet's process-wide network holders (sdk/libnet/src/net_hold.c) on the host, with the raw PRX calls and the
- * sysmodule load replaced by a model of the firmware's network: init only while it is down, finalize only while it
- * is up.  One case per process.  usage: libnet-hold-test --list | <case> */
+/* libnet's network holders (sdk/libnet/src/net_hold.c) on the host, with the raw PRX calls and the sysmodule load
+ * replaced by a model of the firmware: init only while the network is down, finalize only while it is up, a counted
+ * module load, and the network's pool written by the "firmware" while it is up (so a freed pool is an ASan report).
+ * One case per process.  usage: libnet-hold-test --list | <case> */
+#define _GNU_SOURCE
 #include "net_hold.h"
-#include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #define CHECK(c)                                                                                                    \
     do {                                                                                                            \
@@ -20,18 +22,31 @@
 /* ---- the modelled firmware ---------------------------------------------------------------------------------------- */
 
 struct wire_init { uint32_t memory, size; int32_t flags; };
-#define DOUBLE_INIT (-0x7fffff01) /* the model's "already initialized" result (the firmware's is measured on target) */
-static atomic_int net_up, module_loaded, inits, finals, loads, unloads, init_fail, final_fail, load_fail, protocol;
+#define DOUBLE_INIT (-0x7fffff01) /* the model's "already initialized" (the firmware's is measured on target) */
+#define NOT_INIT (-0x7fffff02)
+static atomic_int net_up, modules, inits, finals, loads, unloads, init_fail, final_fail, load_fail, protocol;
 static atomic_uint last_size;
+static unsigned char *volatile active_pool; /* the pool the "firmware" uses while up */
+
+static void firmware_touch(void)
+{
+    unsigned char *p = active_pool;
+    if (p)
+        p[0]++, p[127]++; /* the firmware works in the pool it was given */
+}
 
 int __ps3dk_raw_sys_net_initialize_network_ex(const struct wire_init *w)
 {
     atomic_fetch_add(&inits, 1);
     if (atomic_load(&init_fail))
         return atomic_load(&init_fail);
+    if (!atomic_load(&modules))
+        atomic_store(&protocol, 1); /* sys_net called with the NET module unloaded */
     if (atomic_exchange(&net_up, 1))
         return DOUBLE_INIT;
     atomic_store(&last_size, w->size);
+    active_pool = (unsigned char *)(uintptr_t)w->memory;
+    firmware_touch();
     return 0;
 }
 
@@ -40,8 +55,13 @@ int __ps3dk_raw_sys_net_finalize_network(void)
     atomic_fetch_add(&finals, 1);
     if (atomic_load(&final_fail))
         return atomic_load(&final_fail);
-    if (!atomic_exchange(&net_up, 0))
-        return -0x7fffff02; /* not initialized */
+    if (!atomic_load(&modules))
+        atomic_store(&protocol, 1);
+    if (!atomic_load(&net_up))
+        return NOT_INIT;
+    firmware_touch();
+    active_pool = NULL;
+    atomic_store(&net_up, 0);
     return 0;
 }
 
@@ -50,42 +70,90 @@ static int load(void)
     atomic_fetch_add(&loads, 1);
     if (atomic_load(&load_fail))
         return atomic_load(&load_fail);
-    if (atomic_exchange(&module_loaded, 1))
-        atomic_store(&protocol, 1); /* the model loads once; a second load is a protocol error here */
+    atomic_fetch_add(&modules, 1);
     return 0;
 }
 
 static int unload(void)
 {
     atomic_fetch_add(&unloads, 1);
-    if (!atomic_exchange(&module_loaded, 0))
-        atomic_store(&protocol, 1); /* never unload a module that is not loaded */
+    if (atomic_fetch_sub(&modules, 1) <= 0)
+        atomic_store(&protocol, 1); /* an unload with no load counted */
     return 0;
 }
 
-/* The front ends, as sdk/libnet/src/legacy.c, init.c and the profiler call the layer. */
+/* ---- the front ends and a stand-in profiler --------------------------------------------------------------------- */
+
 static int legacy_init(void)
 {
     uint32_t bytes;
     void *pool = __ps3dk_net_default_pool(&bytes);
     CHECK(pool && bytes == 128u * 1024u);
-    return __ps3dk_net_hold_acquire(PS3DK_NET_HOLD_LEGACY, pool, bytes, 0, load, unload);
+    return __ps3dk_net_legacy_init(pool, bytes, load, unload);
 }
-static int legacy_deinit(void) { return __ps3dk_net_hold_release(PS3DK_NET_HOLD_LEGACY); }
-static unsigned char cell_pool[256 * 1024], prof_pool[64 * 1024];
-static int cell_init(uint32_t bytes) { return __ps3dk_net_hold_acquire(PS3DK_NET_HOLD_CELL, cell_pool, bytes, 0, 0, 0); }
-static int cell_finalize(void) { return __ps3dk_net_hold_release(PS3DK_NET_HOLD_CELL); }
-static int prof_init(void)
+static int legacy_deinit(void) { return __ps3dk_net_legacy_deinit(); }
+static unsigned char static_cell_pool[256 * 1024];
+/* An app's own pool below 4 GiB (the layer refuses a higher one, as the console never has one); unmapping it is the
+ * app's free, so a later firmware touch faults the test. */
+static unsigned char *app_pool(size_t n)
 {
-    return __ps3dk_net_hold_acquire(PS3DK_NET_HOLD_PROF, prof_pool, sizeof prof_pool, 0, load, unload);
+    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    CHECK(p != MAP_FAILED);
+    return p;
 }
-static int prof_release(void) { return __ps3dk_net_hold_release(PS3DK_NET_HOLD_PROF); }
+static int cell_init_pool(void *pool, uint32_t bytes) { return __ps3dk_net_cell_init(pool, bytes, 0); }
+static int cell_init(void) { return cell_init_pool(static_cell_pool, sizeof static_cell_pool); }
+static int cell_finalize(void) { return __ps3dk_net_cell_finalize(); }
+/* A Cell-style app loads the NET module itself, around its own init/finalize. */
+static void cell_app_load(void) { CHECK(load() == 0); }
+static void cell_app_unload(void) { CHECK(unload() == 0); }
+
+static unsigned char prof_pool[64 * 1024];
+static atomic_int evicts, agent_running, net_up_at_evict;
+/* The profiler's own lock (live_api.c's live lock): its bring-up and its eviction are serialized on it. */
+static pthread_mutex_t prof_lock = PTHREAD_MUTEX_INITIALIZER;
+static void prof_evict(void)
+{
+    pthread_mutex_lock(&prof_lock);
+    atomic_fetch_add(&evicts, 1);
+    atomic_store(&net_up_at_evict, atomic_load(&net_up)); /* told BEFORE the teardown */
+    atomic_store(&agent_running, 0);
+    CHECK(__ps3dk_net_prof_release() == 0);
+    pthread_mutex_unlock(&prof_lock);
+}
+static int prof_acquire(void)
+{
+    pthread_mutex_lock(&prof_lock);
+    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, prof_evict);
+    if (!rc)
+        atomic_store(&agent_running, 1);
+    pthread_mutex_unlock(&prof_lock);
+    return rc;
+}
+static int prof_release(void)
+{
+    pthread_mutex_lock(&prof_lock);
+    atomic_store(&agent_running, 0);
+    int rc = __ps3dk_net_prof_release();
+    pthread_mutex_unlock(&prof_lock);
+    return rc;
+}
+/* The agent's socket use: only while it runs (under the profiler's lock), and the network must be up then. */
+static void agent_uses_network(void)
+{
+    pthread_mutex_lock(&prof_lock);
+    if (atomic_load(&agent_running)) {
+        CHECK(atomic_load(&net_up));
+        firmware_touch();
+    }
+    pthread_mutex_unlock(&prof_lock);
+}
 
 #define COUNTS(i, f, l, u)                                                                                          \
     CHECK(atomic_load(&inits) == (i) && atomic_load(&finals) == (f) && atomic_load(&loads) == (l) &&                \
           atomic_load(&unloads) == (u))
 
-/* ---- one holder: exactly the sequence each front end made before holders existed ------------------------------- */
+/* ---- no profiler: every app call exactly as before holders existed ---------------------------------------------- */
 
 static void case_legacy_alone(void)
 {
@@ -101,123 +169,166 @@ static void case_legacy_alone(void)
     COUNTS(2, 0, 3, 1);
     CHECK(atomic_load(&last_size) == 128u * 1024u);
     atomic_store(&final_fail, -9);
-    CHECK(legacy_deinit() == -9); /* a failed finalize keeps the holder */
-    COUNTS(2, 1, 3, 1);
+    CHECK(legacy_deinit() == -9); /* a failed finalize keeps it up */
     atomic_store(&final_fail, 0);
     CHECK(legacy_deinit() == 0 && !atomic_load(&net_up));
     COUNTS(2, 2, 3, 2);
-    CHECK(legacy_deinit() == 0); /* nothing held: no call */
+    CHECK(legacy_deinit() == 0);
     COUNTS(2, 2, 3, 2);
 }
 
 static void case_cell_alone(void)
 {
-    CHECK(cell_init(sizeof cell_pool) == 0);
-    COUNTS(1, 0, 0, 0);
-    CHECK(cell_init(sizeof cell_pool) == DOUBLE_INIT); /* a repeated Cell init reaches the raw call, as before */
-    COUNTS(2, 0, 0, 0);
+    cell_app_load();
+    CHECK(cell_init() == 0);
+    CHECK(cell_init() == DOUBLE_INIT); /* straight to the firmware, as before */
     CHECK(cell_finalize() == 0);
-    COUNTS(2, 1, 0, 0);
-    CHECK(cell_finalize() == -0x7fffff02); /* a finalize with no holder reaches the raw call, as before */
-    COUNTS(2, 2, 0, 0);
-    atomic_store(&init_fail, -5);
-    CHECK(cell_init(sizeof cell_pool) == -5); /* a failed init holds nothing */
-    atomic_store(&init_fail, 0);
-    CHECK(cell_finalize() == -0x7fffff02);
-    COUNTS(3, 3, 0, 0);
+    CHECK(cell_finalize() == NOT_INIT);
+    COUNTS(2, 2, 1, 0);
+    cell_app_unload();
 }
+
+/* The two front ends mixed, no profiler: the results they gave before (each reaches the firmware on its own). */
+static void case_mixed_cell_then_legacy(void)
+{
+    cell_app_load();
+    CHECK(cell_init() == 0);
+    CHECK(legacy_init() == DOUBLE_INIT); /* load, init refused, unload: netInitialize's own sequence */
+    COUNTS(2, 0, 2, 1);
+    CHECK(legacy_deinit() == 0); /* never initialized: no call */
+    CHECK(cell_finalize() == 0);
+    COUNTS(2, 1, 2, 1);
+    cell_app_unload();
+}
+
+static void case_mixed_legacy_then_cell(void)
+{
+    CHECK(legacy_init() == 0);
+    CHECK(cell_init() == DOUBLE_INIT);
+    CHECK(cell_finalize() == 0 && !atomic_load(&net_up)); /* a Cell finalize tears it down, as before */
+    CHECK(legacy_deinit() == NOT_INIT);                   /* and netDeinitialize then gets the firmware's refusal */
+    COUNTS(2, 2, 1, 0);
+    CHECK(legacy_deinit() == NOT_INIT); /* and keeps getting it, as before: its flag stays set */
+}
+
+/* ---- the profiler ---------------------------------------------------------------------------------------------- */
 
 static void case_prof_alone(void)
 {
-    CHECK(prof_init() == 0 && prof_init() == 0);
+    CHECK(prof_acquire() == 0 && prof_acquire() == 0);
     COUNTS(1, 0, 1, 0);
     CHECK(atomic_load(&last_size) == sizeof prof_pool);
-    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&module_loaded));
+    agent_uses_network();
+    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&modules));
     COUNTS(1, 1, 1, 1);
     CHECK(prof_release() == 0);
     COUNTS(1, 1, 1, 1);
 }
 
-/* ---- several holders ------------------------------------------------------------------------------------------- */
-
-/* The app (or the ps3dk-run hook) brought the network up first; the profiler joins and leaves without touching it. */
+/* netInitialize first (an app or the ps3dk-run hook): the profiler joins and leaves without a raw call. */
 static void case_legacy_then_prof(void)
 {
     CHECK(legacy_init() == 0);
-    CHECK(prof_init() == 0);
+    CHECK(prof_acquire() == 0);
     COUNTS(1, 0, 1, 0);
+    agent_uses_network();
     CHECK(prof_release() == 0 && atomic_load(&net_up)); /* the hook's network survives the profiler */
-    COUNTS(1, 0, 1, 0);
+    CHECK(atomic_load(&evicts) == 0);
     CHECK(legacy_deinit() == 0 && !atomic_load(&net_up));
     COUNTS(1, 1, 1, 1);
 }
 
-/* The profiler first; the app's netInitialize joins; the app's netDeinitialize no longer pulls the network from
- * under the agent; the profiler's release finalizes it and unloads the module the profiler loaded. */
+/* The network is netInitialize's: its netDeinitialize is never swallowed; the profiler is told first. */
+static void case_legacy_owner_deinit_evicts(void)
+{
+    CHECK(legacy_init() == 0);
+    CHECK(prof_acquire() == 0);
+    CHECK(legacy_deinit() == 0 && !atomic_load(&net_up));
+    CHECK(atomic_load(&evicts) == 1 && atomic_load(&net_up_at_evict) == 1);
+    COUNTS(1, 1, 1, 1);
+    CHECK(prof_release() == 0); /* nothing left to release: no raw call */
+    COUNTS(1, 1, 1, 1);
+}
+
+/* The profiler first: netInitialize joins its static pool; netDeinitialize leaves the profiler's network up. */
 static void case_prof_then_legacy(void)
 {
-    CHECK(prof_init() == 0);
+    CHECK(prof_acquire() == 0);
     CHECK(legacy_init() == 0);
     COUNTS(1, 0, 1, 0);
     CHECK(legacy_deinit() == 0 && atomic_load(&net_up));
+    agent_uses_network();
+    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&modules));
+    COUNTS(1, 1, 1, 1);
+    CHECK(atomic_load(&evicts) == 0);
+}
+
+/* The profiler first, netInitialize joins, the profiler leaves first: the network is then netDeinitialize's. */
+static void case_prof_leaves_first(void)
+{
+    CHECK(prof_acquire() == 0);
+    CHECK(legacy_init() == 0);
+    CHECK(prof_release() == 0 && atomic_load(&net_up));
     COUNTS(1, 0, 1, 0);
-    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&module_loaded));
+    CHECK(legacy_deinit() == 0 && !atomic_load(&net_up) && !atomic_load(&modules));
     COUNTS(1, 1, 1, 1);
 }
 
-/* Prof first, then a Cell-style app with its own larger pool: it joins (the profiler's pool stays in use, one TTY
- * line), its finalize leaves the network up, and its re-init with a different pool joins again (the documented edge). */
-static void case_prof_then_cell_pool(void)
+/* A Cell app owns its pool: init, the profiler joins, the app's finalize evicts the profiler first and reaches the
+ * firmware, the app frees its pool and unloads NET itself; the profiler never touches the network again. */
+static void case_cell_pool_owner(void)
 {
-    CHECK(prof_init() == 0);
-    CHECK(cell_init(sizeof cell_pool) == 0); /* larger than the profiler's pool: warned, joined */
+    unsigned char *pool = app_pool(128 * 1024);
+    cell_app_load();
+    CHECK(cell_init_pool(pool, 128 * 1024) == 0);
+    CHECK(prof_acquire() == 0);
     COUNTS(1, 0, 1, 0);
-    CHECK(atomic_load(&last_size) == sizeof prof_pool);
-    CHECK(cell_finalize() == 0 && atomic_load(&net_up));
-    CHECK(cell_init(16 * 1024) == 0); /* re-init, different pool: still the profiler's network */
-    COUNTS(1, 0, 1, 0);
-    CHECK(prof_release() == 0 && atomic_load(&net_up)); /* the Cell holder remains */
+    agent_uses_network();
+    CHECK(cell_finalize() == 0 && !atomic_load(&net_up)); /* not swallowed */
+    CHECK(atomic_load(&evicts) == 1 && atomic_load(&net_up_at_evict) == 1);
+    CHECK(munmap(pool, 128 * 1024) == 0); /* the app's own pool goes */
+    cell_app_unload(); /* and the app unloads NET itself: the layer never sees it */
+    agent_uses_network();      /* the stopped agent does nothing (an ASan report otherwise) */
+    CHECK(prof_release() == 0); /* no raw call after an unload it did not count */
+    COUNTS(1, 1, 1, 1);
+    CHECK(!atomic_load(&modules));
+}
+
+/* The profiler first (its static pool), then a Cell app with its own pool: the profiler steps aside (evicted, its
+ * network finalized, NET left loaded), the app's init/finalize reach the firmware as before. */
+static void case_prof_then_cell(void)
+{
+    unsigned char *pool = app_pool(96 * 1024);
+    CHECK(prof_acquire() == 0);
+    cell_app_load();
+    CHECK(cell_init_pool(pool, 96 * 1024) == 0);
+    CHECK(atomic_load(&evicts) == 1 && atomic_load(&last_size) == 96u * 1024u);
+    COUNTS(2, 1, 2, 0); /* the profiler's network finalized, the app's brought up */
+    agent_uses_network();
+    CHECK(cell_init_pool(pool, 96 * 1024) == DOUBLE_INIT); /* the app's repeated init: the firmware's answer */
     CHECK(cell_finalize() == 0 && !atomic_load(&net_up));
-    COUNTS(1, 1, 1, 1); /* the module the profiler loaded is unloaded with the last release */
-}
-
-/* A Cell app first (it loaded the module itself): the profiler joins and leaves; nothing of the app's is unloaded. */
-static void case_cell_then_prof(void)
-{
-    CHECK(cell_init(sizeof cell_pool) == 0);
-    CHECK(prof_init() == 0);
-    CHECK(cell_finalize() == 0 && atomic_load(&net_up));
-    CHECK(prof_release() == 0 && !atomic_load(&net_up));
-    COUNTS(1, 1, 0, 0);
-}
-
-/* A Cell finalize from an app that never initialized must not finalize a network the profiler holds. */
-static void case_stray_cell_finalize(void)
-{
-    CHECK(prof_init() == 0);
-    CHECK(cell_finalize() == 0 && atomic_load(&net_up));
-    COUNTS(1, 0, 1, 0);
+    CHECK(munmap(pool, 96 * 1024) == 0);
+    cell_app_unload();
     CHECK(prof_release() == 0);
-    COUNTS(1, 1, 1, 1);
+    COUNTS(3, 2, 2, 1);
+    CHECK(atomic_load(&modules) == 1); /* the profiler's load stays counted: never unloaded on the app's behalf */
 }
 
-/* Someone outside this layer brought the network up: the profiler's first init fails with the firmware's result and
- * holds nothing (the auto-start then stays off). */
+/* Someone outside libnet brought the network up: the profiler's bring-up fails and holds nothing. */
 static void case_foreign_network(void)
 {
     atomic_store(&net_up, 1);
-    CHECK(prof_init() == DOUBLE_INIT);
-    COUNTS(1, 0, 1, 1); /* loaded, failed, unloaded: as netInitialize has always done */
-    CHECK(prof_release() == 0);
+    atomic_store(&modules, 1);
+    CHECK(prof_acquire() == DOUBLE_INIT);
     COUNTS(1, 0, 1, 1);
-    CHECK(atomic_load(&net_up)); /* never finalized */
+    CHECK(prof_release() == 0 && atomic_load(&net_up));
+    COUNTS(1, 0, 1, 1);
 }
 
-/* The last holder's finalize fails: it stays a holder and may retry. */
-static void case_last_finalize_fails(void)
+/* The profiler's own finalize fails: it keeps the hold and may retry. */
+static void case_prof_finalize_fails(void)
 {
-    CHECK(legacy_init() == 0 && prof_init() == 0);
-    CHECK(legacy_deinit() == 0);
+    CHECK(prof_acquire() == 0);
     atomic_store(&final_fail, -3);
     CHECK(prof_release() == -3 && atomic_load(&net_up));
     atomic_store(&final_fail, 0);
@@ -225,7 +336,7 @@ static void case_last_finalize_fails(void)
     COUNTS(1, 2, 1, 1);
 }
 
-/* ---- concurrency: three holders in loops; the model checks every raw call happens in a legal state -------------- */
+/* ---- concurrency: an app's netInitialize/netDeinitialize against the profiler's acquire/release ---------------- */
 
 static atomic_int go;
 static void *loop(void *arg)
@@ -237,12 +348,11 @@ static void *loop(void *arg)
         if (which == 0) {
             CHECK(legacy_init() == 0);
             CHECK(legacy_deinit() == 0);
-        } else if (which == 1) {
-            CHECK(prof_init() == 0);
-            CHECK(prof_release() == 0);
         } else {
-            CHECK(cell_init(sizeof cell_pool) == 0);
-            CHECK(cell_finalize() == 0);
+            int rc = prof_acquire();
+            CHECK(rc == 0 || rc == -1); /* -1 only while an eviction runs */
+            agent_uses_network();
+            CHECK(prof_release() == 0);
         }
     }
     return NULL;
@@ -250,15 +360,15 @@ static void *loop(void *arg)
 
 static void case_concurrent(void)
 {
-    pthread_t t[3];
-    for (int i = 0; i < 3; ++i)
+    pthread_t t[2];
+    for (int i = 0; i < 2; ++i)
         CHECK(pthread_create(&t[i], NULL, loop, (void *)(intptr_t)i) == 0);
     atomic_store(&go, 1);
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 2; ++i)
         CHECK(pthread_join(t[i], NULL) == 0);
-    CHECK(!atomic_load(&net_up) && !atomic_load(&module_loaded) && !atomic_load(&protocol));
+    CHECK(!atomic_load(&net_up) && !atomic_load(&modules) && !atomic_load(&protocol));
     CHECK(atomic_load(&inits) == atomic_load(&finals));
-    printf("MEASURE concurrent inits=%d loads=%d\n", atomic_load(&inits), atomic_load(&loads));
+    printf("MEASURE concurrent inits=%d evicts=%d\n", atomic_load(&inits), atomic_load(&evicts));
 }
 
 static const struct {
@@ -267,14 +377,17 @@ static const struct {
 } cases[] = {
     {"legacy_alone", case_legacy_alone},
     {"cell_alone", case_cell_alone},
+    {"mixed_cell_then_legacy", case_mixed_cell_then_legacy},
+    {"mixed_legacy_then_cell", case_mixed_legacy_then_cell},
     {"prof_alone", case_prof_alone},
     {"legacy_then_prof", case_legacy_then_prof},
+    {"legacy_owner_deinit_evicts", case_legacy_owner_deinit_evicts},
     {"prof_then_legacy", case_prof_then_legacy},
-    {"prof_then_cell_pool", case_prof_then_cell_pool},
-    {"cell_then_prof", case_cell_then_prof},
-    {"stray_cell_finalize", case_stray_cell_finalize},
+    {"prof_leaves_first", case_prof_leaves_first},
+    {"cell_pool_owner", case_cell_pool_owner},
+    {"prof_then_cell", case_prof_then_cell},
     {"foreign_network", case_foreign_network},
-    {"last_finalize_fails", case_last_finalize_fails},
+    {"prof_finalize_fails", case_prof_finalize_fails},
     {"concurrent", case_concurrent},
 };
 

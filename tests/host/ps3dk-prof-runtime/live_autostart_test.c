@@ -48,7 +48,10 @@ int __ps3dk_raw_sys_net_finalize_network(void)
     return atomic_exchange(&net_up, 0) ? 0 : -0x7fffff02;
 }
 
-static int prof_acquire(void *pool, uint32_t bytes)
+static int fake_load(void) { return 0; }
+static int fake_unload(void) { return 0; }
+
+static int prof_acquire(void *pool, uint32_t bytes, void (*evict)(void))
 {
     atomic_fetch_add(&acquires, 1);
     if (atomic_load(&block_acquire)) {
@@ -60,7 +63,7 @@ static int prof_acquire(void *pool, uint32_t bytes)
         return atomic_load(&acquire_result);
     if (!pool)
         pool = __ps3dk_net_default_pool(&bytes);
-    return __ps3dk_net_hold_acquire(PS3DK_NET_HOLD_PROF, pool, bytes, 0, NULL, NULL);
+    return __ps3dk_net_prof_acquire(pool, bytes, NULL, NULL, evict);
 }
 
 static int prof_release(void)
@@ -68,7 +71,7 @@ static int prof_release(void)
     const live_agent *a = ps3dk_prof__live_agent();
     atomic_store(&end_seen_at_release, (int)atomic_load(&a->drops[LIVE_DROP_END]));
     atomic_fetch_add(&releases, 1);
-    int rc = __ps3dk_net_hold_release(PS3DK_NET_HOLD_PROF);
+    int rc = __ps3dk_net_prof_release();
     char line[96];
     int n = snprintf(line, sizeof line, "NET_RELEASE rc=%d net_up=%d\n", rc, atomic_load(&net_up));
     (void)!write(1, line, (size_t)n); /* also from the exit destructor, after main returned */
@@ -82,7 +85,7 @@ static void hook_up(void)
 {
     uint32_t bytes;
     void *pool = __ps3dk_net_default_pool(&bytes);
-    CHECK(__ps3dk_net_hold_acquire(PS3DK_NET_HOLD_LEGACY, pool, bytes, 0, NULL, NULL) == 0);
+    CHECK(__ps3dk_net_legacy_init(pool, bytes, fake_load, fake_unload) == 0);
     CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, hook_fd) == 0);
 }
 static void hook_exit_works(void)
@@ -292,22 +295,66 @@ static void case_sole_holder(const char *dir)
     CHECK(atomic_load(&releases) == 1 && atomic_load(&finals) == 1 && !atomic_load(&net_up));
 }
 
-/* The app initializes and tears down networking itself, before and after the profiler: its teardown no longer pulls
- * the network from under the agent; the last release (the profiler's) finalizes it. */
-static void case_app_net_around(const char *dir)
+/* A streaming viewer whose agent is stopped by an eviction: it sees the link close, never END. */
+static void evicted_stream(const char *dir, int (*app_takes_back)(void), int prof_first)
 {
     hooks_on();
     uint32_t bytes;
     void *pool = __ps3dk_net_default_pool(&bytes);
-    CHECK(__ps3dk_net_hold_acquire(PS3DK_NET_HOLD_LEGACY, pool, bytes, 0, NULL, NULL) == 0); /* netInitialize */
+    if (!prof_first)
+        CHECK(__ps3dk_net_legacy_init(pool, bytes, fake_load, fake_unload) == 0); /* the app's netInitialize */
     file_init(dir, PS3DK_PROF_MODE_APP);
-    CHECK(wait_port() != 0);
-    CHECK(__ps3dk_net_hold_release(PS3DK_NET_HOLD_LEGACY) == 0 && atomic_load(&net_up)); /* netDeinitialize */
-    int fd = connect_client(ps3dk_prof__live_port()); /* still served */
-    CHECK(close(fd) == 0);
+    uint16_t port = wait_port();
+    CHECK(port != 0);
+    CHECK(atomic_load(&inits) == 1); /* one bring-up: the app's, or the profiler's */
+    struct client c = {.data = calloc(64u << 20, 1)};
+    CHECK(c.data != NULL);
+    c.fd = connect_client(port);
+    pthread_t t;
+    CHECK(pthread_create(&t, NULL, client_main, &c) == 0);
     CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    some_zones(200);
+    CHECK(ps3dk_prof_drain() == PS3DK_PROF_OK);
+    const live_agent *a = ps3dk_prof__live_agent();
+    for (int i = 0; i < 5000 && atomic_load(&a->bytes_delivered) == 0; ++i)
+        usleep(1000);
+    CHECK(app_takes_back() == 0); /* the app's call: the profiler is told first, then it reaches the "firmware" */
+    CHECK(atomic_load(&releases) == 1);
+    CHECK(ps3dk_prof_live_stop(0, 0) == PS3DK_PROF_EALREADY); /* stopped by the eviction */
+    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(c.got_hello && !c.got_end); /* a disconnect, never a claimed-complete download */
     CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    CHECK(atomic_load(&releases) == 1); /* nothing more to give back, and no network call after the eviction */
+    CHECK(close(c.fd) == 0);
+    free(c.data);
+}
+static unsigned char cell_pool[128 * 1024];
+static int legacy_deinit(void) { return __ps3dk_net_legacy_deinit(); }
+static int cell_init_then_finalize(void)
+{
+    return __ps3dk_net_cell_init(cell_pool, sizeof cell_pool, 0) == 0 ? __ps3dk_net_cell_finalize() : -1;
+}
+/* netInitialize's network: its netDeinitialize is never swallowed; the agent goes first. */
+static void case_evict_legacy_owner(const char *dir)
+{
+    evicted_stream(dir, legacy_deinit, 0);
     CHECK(atomic_load(&finals) == 1 && !atomic_load(&net_up));
+}
+/* A Cell app owns its pool: init, the profiler joins, the app's finalize evicts the agent and reaches the firmware. */
+static int cell_finalize_only(void) { return __ps3dk_net_cell_finalize(); }
+static void case_evict_cell_owner(const char *dir)
+{
+    hooks_on();
+    CHECK(__ps3dk_net_cell_init(cell_pool, sizeof cell_pool, 0) == 0);
+    evicted_stream(dir, cell_finalize_only, 1); /* prof_first=1 here only skips the netInitialize */
+    CHECK(atomic_load(&finals) == 1 && !atomic_load(&net_up));
+}
+/* The profiler first, then a Cell app with its own pool: the agent goes, the profiler's network is finalized and the
+ * app's init reaches the firmware. */
+static void case_evict_prof_then_cell(const char *dir)
+{
+    evicted_stream(dir, cell_init_then_finalize, 1);
+    CHECK(atomic_load(&finals) == 2 && atomic_load(&inits) == 2 && !atomic_load(&net_up));
 }
 
 /* The network cannot be brought up: one line, no agent, profiling unchanged, nothing released; an app that then
@@ -416,8 +463,8 @@ static void case_explicit_compat(const char *dir)
     CHECK(atomic_load(&releases) == 1 && !atomic_load(&net_up));
 }
 
-/* The app starts the live link before the start-up thread gets the lock: the runtime leaves it alone, takes no hold,
- * and stops nothing at shutdown; the app keeps its own teardown. */
+/* The app starts the live link before the start-up thread gets the lock: the runtime leaves it alone, gives back the
+ * hold it took, and stops nothing at shutdown; the app keeps its own teardown. */
 static void case_app_first(const char *dir)
 {
     hooks_on();
@@ -425,12 +472,14 @@ static void case_app_first(const char *dir)
     file_init(dir, PS3DK_PROF_MODE_APP);
     CHECK(ps3dk_prof__live_start_locked(NULL, 0) == PS3DK_PROF_OK); /* what ps3dk_prof_live_start does inside */
     ps3dk_prof__live_unlock();
-    settle();
-    CHECK(atomic_load(&acquires) == 0);
+    for (int i = 0; i < 5000 && atomic_load(&releases) == 0; ++i)
+        usleep(1000);
+    /* the bring-up took its hold outside the lock, found the app's agent, and gave the hold straight back */
+    CHECK(atomic_load(&acquires) == 1 && atomic_load(&releases) == 1 && !atomic_load(&net_up));
     CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
     CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
     CHECK(ps3dk_prof_live_stop(1000000, 1000000) == PS3DK_PROF_OK); /* still the app's to stop */
-    CHECK(atomic_load(&releases) == 0);
+    CHECK(atomic_load(&releases) == 1);
 }
 
 struct start_arg {
@@ -445,7 +494,8 @@ static void *explicit_start(void *arg)
     return NULL;
 }
 
-/* An explicit start during the bring-up waits for its outcome, then is the no-op OK. */
+/* An explicit start during the bring-up does not wait: the app's own start runs as without auto-start, and the
+ * auto-start then backs off. */
 static void case_start_during_bringup(const char *dir)
 {
     hooks_on();
@@ -457,13 +507,16 @@ static void case_start_during_bringup(const char *dir)
     struct start_arg s = {.rc = -100};
     pthread_t t;
     CHECK(pthread_create(&t, NULL, explicit_start, &s) == 0);
-    usleep(50000);
-    CHECK(!atomic_load(&s.done)); /* waiting for the bring-up */
-    atomic_store(&acquire_go, 1);
-    CHECK(pthread_join(t, NULL) == 0);
+    CHECK(pthread_join(t, NULL) == 0); /* the bring-up holds no lock the app's start needs */
     CHECK(s.rc == PS3DK_PROF_OK && ps3dk_prof__live_port() != 0);
+    atomic_store(&acquire_go, 1);
+    settle(); /* the auto-start finds the app's agent, backs off and gives its hold back */
+    for (int i = 0; i < 5000 && atomic_load(&releases) == 0; ++i)
+        usleep(1000);
+    CHECK(atomic_load(&releases) == 1);
     CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
     CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    CHECK(ps3dk_prof_live_stop(1000000, 1000000) == PS3DK_PROF_OK); /* the app's agent: the app stops it */
     CHECK(atomic_load(&releases) == 1);
 }
 
@@ -492,6 +545,31 @@ static void case_shutdown_during_bringup(const char *dir)
     CHECK(rc == PS3DK_PROF_OK);
     CHECK(ps3dk_prof__live_port() == 0);
     CHECK(atomic_load(&acquires) == 1 && atomic_load(&releases) == 1 && !atomic_load(&net_up));
+}
+
+/* The start-up thread is stuck in the network bring-up past the bound: shutdown goes on without it (one line), and
+ * when the bring-up finally returns, the thread sees the teardown and gives its hold back. */
+static void case_start_stuck_bounded(const char *dir)
+{
+    hooks_on();
+    atomic_store(&block_acquire, 1);
+    file_init(dir, PS3DK_PROF_MODE_APP);
+    for (int i = 0; i < 5000 && !atomic_load(&acquire_entered); ++i)
+        usleep(1000);
+    CHECK(atomic_load(&acquire_entered));
+    CHECK(ps3dk_prof_thread_begin("main") == PS3DK_PROF_OK);
+    struct timeval t0, t1;
+    gettimeofday(&t0, NULL);
+    CHECK(ps3dk_prof_shutdown() == PS3DK_PROF_OK);
+    gettimeofday(&t1, NULL);
+    long ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_usec - t0.tv_usec) / 1000L;
+    CHECK(ms >= 4500 && ms < 20000); /* the bound, not the bring-up, ended the wait */
+    CHECK(atomic_load(&releases) == 0 && ps3dk_prof__live_port() == 0);
+    atomic_store(&acquire_go, 1);
+    for (int i = 0; i < 5000 && atomic_load(&releases) == 0; ++i)
+        usleep(1000);
+    CHECK(atomic_load(&releases) == 1 && !atomic_load(&net_up) && ps3dk_prof__live_port() == 0);
+    printf("MEASURE bounded_wait_ms=%ld\n", ms);
 }
 
 /* The agent does not stop (held inside a file read): the hold is kept (its thread may still use a socket), one line;
@@ -542,7 +620,9 @@ static const struct {
     {"stream_app", case_stream_app},
     {"stream_thread", case_stream_thread},
     {"sole_holder", case_sole_holder},
-    {"app_net_around", case_app_net_around},
+    {"evict_legacy_owner", case_evict_legacy_owner},
+    {"evict_cell_owner", case_evict_cell_owner},
+    {"evict_prof_then_cell", case_evict_prof_then_cell},
     {"net_unavailable", case_net_unavailable},
     {"listen_fails", case_listen_fails},
     {"not_servable", case_not_servable},
@@ -551,6 +631,7 @@ static const struct {
     {"app_first", case_app_first},
     {"start_during_bringup", case_start_during_bringup},
     {"shutdown_during_bringup", case_shutdown_during_bringup},
+    {"start_stuck_bounded", case_start_stuck_bounded},
     {"stop_timeout_keeps_hold", case_stop_timeout_keeps_hold},
     {"exit_without_shutdown", case_exit_without_shutdown},
 };

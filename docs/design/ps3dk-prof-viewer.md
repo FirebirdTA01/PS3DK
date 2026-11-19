@@ -509,14 +509,15 @@ auto-start (opt-in)".
   takes the profiler's network hold, and starts the agent through the
   same path as `ps3dk_prof_live_start`. Every failure prints one TTY line,
   and profiling continues unchanged.
-- **Network.** libnet keeps one holder set for `netInitialize`,
-  `sys_net_initialize_network_ex` and the profiler
-  (`sdk/libnet/src/net_hold.h`). The first holder brings the network up.
-  Later holders join it. Only the last release finalizes it and unloads
-  the module that libnet loaded. With a single holder, the raw calls are
-  unchanged. The profiler never releases a hold it did not take, so an
-  app's network and the ps3dk-run hook's network survive the profiler's
-  teardown.
+- **Network.** libnet's holders (`sdk/libnet/src/net_hold.h`): while
+  the profiler holds nothing, every app front end makes exactly its old
+  calls. While it holds the network, the network stays its creator's.
+  The profiler joins an app's network and is evicted (agent stopped,
+  hold dropped, no further network call) before the app's teardown
+  reaches the system. When the profiler brought the network up,
+  `netInitialize` joins and a Cell initialize with the app's own pool
+  makes the profiler step aside first. The profiler never finalizes a
+  network the app or the ps3dk-run hook brought up.
 - **Stop.** The core calls the member's shutdown hook after
   `ps3dk_prof_shutdown` has published its finalization. The hook stops
   the agent, so a connected viewer gets `END`. Only after the stop

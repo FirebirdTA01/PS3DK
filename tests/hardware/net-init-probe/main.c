@@ -5,9 +5,11 @@
  * Build it against an SDK whose libnet still exports the RAW finalize as sys_net_finalize_network (v0.27.x and
  * earlier): it calls the raw PRX entry points directly, so the holder layer under test never answers in their place.
  *
- * When the network is already up at entry (the ps3dk-run hook brought it up from main before this program's main),
- * the first init answers the double-init question and every step that could tear the network or the module down is
- * skipped, so the hook's EXIT still reaches the PC.
+ * Two SELFs.  The HOOKED one (configured with the run hook injected, NETPROBE_HOOKED=1) measures only the double
+ * initialize, which under the hook answers the question directly, and never finalizes or unloads anything, so the
+ * hook's EXIT still reaches the PC.  The UNHOOKED one measures finalize-while-down and the module counting too; it
+ * cannot report through the hook, so its results come from the file below.  Either build also stays off the
+ * teardown when the NET module was already loaded at entry or the first init failed; each condition is printed.
  *
  * Output: one "NETPROBE key=value" line per measurement on the TTY, the same lines in
  * /dev_hdd0/tmp/ps3dk-netprobe.txt, and "NETPROBE done" last. */
@@ -71,18 +73,31 @@ int main(void)
 {
     out = fopen("/dev_hdd0/tmp/ps3dk-netprobe.txt", "w");
     puts("NETPROBE begin");
-    put("isloaded_at_entry", cellSysmoduleIsLoaded(CELL_SYSMODULE_NET));
+    int loaded_at_entry = cellSysmoduleIsLoaded(CELL_SYSMODULE_NET);
+    put("isloaded_at_entry", loaded_at_entry);
     put("load_1", cellSysmoduleLoadModule(CELL_SYSMODULE_NET));
     put("isloaded_after_load_1", cellSysmoduleIsLoaded(CELL_SYSMODULE_NET));
     int init_1 = raw_init(pool_a);
     put("init_1", init_1);
     put("init_2_while_up", raw_init(pool_b)); /* the double-init answer */
     socket_check("up");
-    if (init_1 != 0) {
-        /* someone else (the ps3dk-run hook) holds the network: never tear it or the module down */
+    /* Someone else may hold the network: never tear it or the module down then.  Any one condition is enough: the
+     * hooked build (NETPROBE_HOOKED, set by CMakeLists.txt whenever the run hook is injected), the NET module already
+     * loaded at entry, or a first init that failed.  A second init answering 0 under the hook (as RPCS3 does) cannot
+     * tell the two apart, so the hooked build never takes the teardown branch. */
+    int hooked = 0;
+#ifdef NETPROBE_HOOKED
+    hooked = NETPROBE_HOOKED;
+#endif
+    put("held_hooked_build", hooked);
+    put("held_module_at_entry", loaded_at_entry == CELL_SYSMODULE_LOADED);
+    put("held_init_1_failed", init_1 != 0);
+    if (hooked || loaded_at_entry == CELL_SYSMODULE_LOADED || init_1 != 0) {
         put("held_elsewhere", 1);
+        put("teardown_measured", 0); /* the unhooked SELF measures finalize and module counting */
     } else {
         put("held_elsewhere", 0);
+        put("teardown_measured", 1);
         put("finalize_1", raw_finalize());
         put("finalize_2_while_down", raw_finalize()); /* the not-initialized answer */
         put("init_3_after_finalize", raw_init(pool_b));

@@ -253,25 +253,31 @@ What the runtime does:
 5. A manual-lifecycle program that returns from `main` without `ps3dk_prof_shutdown` is covered by a late destructor:
    the agent is cancelled (no `END`; nothing was finalized) and the hold released.
 
-**Networking is shared, not taken over.** libnet keeps one record of the network's users (`netInitialize`,
-`sys_net_initialize_network_ex`, the profiler). The first brings it up, later ones join it, and only the last release
-finalizes it and unloads the NET module libnet loaded:
+**The app's network stays the app's.** With auto-start off, or while the profiler holds no network, every
+`netInitialize`, `netDeinitialize`, `sys_net_initialize_network_ex` and `sys_net_finalize_network` call behaves exactly as
+before. While the profiler holds the network, libnet applies these rules:
 
-- The app may initialize networking before or after the profiler and tear it down whenever it likes; its
-  `netDeinitialize` or `sys_net_finalize_network` no longer pulls the network from under the agent.
-- The profiler never finalizes a network the app or the ps3dk-run hook still holds.
-- An app with one network user sees exactly the calls and results it saw before.
-- **Edge:** whoever brings the network up first chooses its memory pool. If the profiler is first, an app that later
-  initializes with a bigger pool joins and keeps the profiler's pool (libnet prints one line), and so does an app that
-  finalizes and re-initializes with a different pool while the profiler holds the network. Set
-  `PS3_PROF_LIVE_NET_POOL_KB` (or the options macro) to the size the app needs.
+- The network belongs to whoever brought it up, and so does its memory pool.
+- If the app brought it up first, the profiler joins without a call of its own. When the app tears it down
+  (`netDeinitialize`, `sys_net_finalize_network`), the profiler is told first: the agent stops at once (a connected
+  viewer sees a disconnect, not `END`), the profiler drops its hold and never touches the network again, and the app's
+  call then reaches the system exactly as before. Live viewing ends there, with one `ps3prof: live auto-start stopped`
+  line.
+- If the profiler brought it up first (with its own static pool, by default the 128 KiB `netInitialize` pool), a later
+  `netInitialize` joins it and the matching `netDeinitialize` leaves it up for the profiler. A later
+  `sys_net_initialize_network_ex` brings the app's own pool: the profiler steps aside first (agent stopped, its network
+  finalized, the NET module left loaded, one TTY line from libnet) and the app's call goes straight to the system.
+- The profiler never finalizes a network an app front end or the ps3dk-run hook brought up, and never unloads a module
+  it did not load.
 - If something outside libnet brought the network up, the profiler's bring-up fails and auto-start stays off with its
   one line.
 
 **Existing `ps3dk_prof_live_start` calls keep working.** While the auto-started agent runs, the call returns `OK` and
-does nothing when every non-zero field of its config matches, `EALREADY` otherwise. If auto-start failed (for example
-no network yet), the app's own start behaves as always. The app may also stop the auto-started agent; the runtime then
-only releases its hold.
+does nothing when every non-zero field of its config matches, `EALREADY` otherwise. Before the auto-started agent is
+up (its start-up thread is still bringing the network up) or after auto-start failed, the app's own start behaves as
+always, and the auto-start then backs off. The app may also stop the auto-started agent; the runtime then only
+releases its hold. Shutdown waits at most 5 s for the start-up thread; one still inside the network bring-up is left
+to finish on its own (one TTY line) and gives its hold back when it does.
 
 - Cost (on top of the live link above): the start-up thread at init; the libnet pool (by default the 128 KiB
   `netInitialize` pool, shared with an app that also uses `netInitialize`) and the NET module; a listening socket on

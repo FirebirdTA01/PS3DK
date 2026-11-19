@@ -10,8 +10,9 @@
 #   - extension links (ps3dkprof_ext and its fifo/func/counters forms) and PS3_PROF_AUTO: the matching
 #     libps3dkprof_ext_live.a as well, unless the target already links it;
 #   - PS3_PROF_WAITS (any mode): every executable, whose wait archive carries the live members.
-# Every selected executable gets -Wl,-u,__ps3dk_prof_live_autostart_anchor, then net and sysmodule_stub.  An
-# executable that links no profiler is left alone.  PS3_PROF_LIVE_PORT / PS3_PROF_LIVE_NET_POOL_KB other than the
+# Every selected executable gets -Wl,-u,__ps3dk_prof_live_autostart_anchor, then net and sysmodule_stub.  The
+# profiler archive is found through library targets too (INTERFACE and static wrappers).  An executable that links
+# no profiler is left alone with a status line; a project where no executable links one fails to configure.  PS3_PROF_LIVE_PORT / PS3_PROF_LIVE_NET_POOL_KB other than the
 # defaults add one generated source defining ps3dk_prof_live_autostart_settings.
 get_property(_ps3_live_try GLOBAL PROPERTY IN_TRY_COMPILE)
 if(_ps3_live_try)
@@ -33,11 +34,59 @@ if(NOT PS3_PROF_LIVE_NET_POOL_KB MATCHES "^[0-9]+$" OR PS3_PROF_LIVE_NET_POOL_KB
     message(FATAL_ERROR "PS3_PROF_LIVE_NET_POOL_KB must be 0..4096 (got '${PS3_PROF_LIVE_NET_POOL_KB}')")
 endif()
 
+# Every link item a target brings into its link, through library targets (their LINK_LIBRARIES and
+# INTERFACE_LINK_LIBRARIES, $<LINK_ONLY:...> unwrapped, ALIAS targets resolved, imported locations included), so a
+# profiler archive behind an INTERFACE or static wrapper library is found.  Other generator expressions are kept as
+# text (a profiler archive named inside one still matches below).
+function(_ps3_live_closure target out)
+    set(seen "")
+    set(items "")
+    set(queue "${target}")
+    while(queue)
+        list(POP_FRONT queue t)
+        if(t IN_LIST seen)
+            continue()
+        endif()
+        list(APPEND seen "${t}")
+        get_target_property(aliased "${t}" ALIASED_TARGET)
+        if(aliased)
+            list(APPEND queue "${aliased}")
+            continue()
+        endif()
+        get_target_property(kind "${t}" TYPE)
+        set(links "")
+        if(NOT kind STREQUAL "INTERFACE_LIBRARY")
+            get_target_property(l "${t}" LINK_LIBRARIES)
+            if(l)
+                list(APPEND links ${l})
+            endif()
+        endif()
+        get_target_property(il "${t}" INTERFACE_LINK_LIBRARIES)
+        if(il)
+            list(APPEND links ${il})
+        endif()
+        get_target_property(imported "${t}" IMPORTED)
+        if(imported)
+            get_target_property(loc "${t}" IMPORTED_LOCATION)
+            if(loc)
+                list(APPEND items "${loc}")
+            endif()
+        endif()
+        foreach(item IN LISTS links)
+            if(item MATCHES "^\\$<LINK_ONLY:([^<>]+)>$")
+                set(item "${CMAKE_MATCH_1}")
+            endif()
+            list(APPEND items "${item}")
+            if(TARGET "${item}")
+                list(APPEND queue "${item}")
+            endif()
+        endforeach()
+    endwhile()
+    set(${out} "${items}" PARENT_SCOPE)
+endfunction()
+
 function(_ps3_live_target target)
-    get_target_property(items "${target}" LINK_LIBRARIES)
-    if(NOT items)
-        set(items "")
-    endif()
+    _ps3_live_closure("${target}" items)
     set(profiler FALSE)
     set(ext FALSE)
     set(has_live FALSE)
@@ -62,8 +111,11 @@ function(_ps3_live_target target)
         set(profiler TRUE)
     endif()
     if(NOT profiler)
+        message(STATUS "PS3_PROF_LIVE_AUTOSTART: '${target}' links no profiler archive (searched through its library "
+            "targets); left unchanged")
         return()
     endif()
+    set_property(GLOBAL APPEND PROPERTY PS3_LIVE_AUTOSTART_TARGETS "${target}")
     if(ext AND NOT has_live)
         if(PS3_PROF_AUTO)
             # the AUTO selector maps this name onto its checked live archive
@@ -116,4 +168,14 @@ function(_ps3_live_targets directory)
         _ps3_live_targets("${child}")
     endforeach()
 endfunction()
-cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _ps3_live_targets "${CMAKE_SOURCE_DIR}")
+function(_ps3_live_start directory)
+    _ps3_live_targets("${directory}")
+    get_property(selected GLOBAL PROPERTY PS3_LIVE_AUTOSTART_TARGETS)
+    if(NOT selected)
+        message(FATAL_ERROR "PS3_PROF_LIVE_AUTOSTART=ON, but no executable in this project links a profiler archive "
+            "(ps3dkprof, ps3prof, ps3dkprof_ext* or their variants), directly or through its library targets, and "
+            "neither PS3_PROF_AUTO nor PS3_PROF_WAITS is on: the option would have no effect. Link the profiler, or "
+            "turn the option off.")
+    endif()
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _ps3_live_start "${CMAKE_SOURCE_DIR}")

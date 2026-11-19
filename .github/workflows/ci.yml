@@ -322,6 +322,7 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/live-api-test.py "$RUNNER_TEMP/live-e2e/api"
           python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
           python3 tests/host/ps3dk-prof-runtime/live-autostart-test.py "$RUNNER_TEMP/live-e2e/autostart"
+          python3 tests/host/ps3dk-prof-runtime/live-autostart-cmake-test.py "$RUNNER_TEMP/live-e2e/autostart-cmake"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"

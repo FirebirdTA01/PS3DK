@@ -139,9 +139,9 @@ int socketpoll(struct pollfd *fds, nfds_t nfds, int timeout);
 int socketselect(int nfds, fd_set *readfds, fd_set *writefds,
                  fd_set *exceptfds, struct timeval *timeout);
 
-/* One user of the shared network (see netInitialize in <net/net.h>): when another user already brought it up, this
- * joins it (its pool stays in use; a larger request prints one TTY line), and finalize leaves it up until the last
- * user releases it.  Alone, a repeated initialize or a finalize with no user reaches the firmware exactly as before. */
+/* Both reach the system exactly as before.  Only while the profiler's opt-in live auto-start holds the network does
+ * libnet act first: the profiler's agent is stopped (and, over a network the profiler brought up, that network is
+ * finalized with the NET module left loaded) before the app's call goes through unchanged. */
 int sys_net_initialize_network_ex(sys_net_initialize_parameter_t *param);
 int sys_net_finalize_network(void);
 int sys_net_abort_socket(int sockfd, int flags);

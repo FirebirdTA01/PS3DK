@@ -16,18 +16,17 @@ static int raw_fd_ok(int fd)
 }
 static int load_net(void) { return cellSysmoduleLoadModule(CELL_SYSMODULE_NET); }
 static int unload_net(void) { return cellSysmoduleUnloadModule(CELL_SYSMODULE_NET); }
-/* One holder among others (net_hold.h): alone, exactly the load, init and
- * unload sequence this API has always made; a network another holder brought
- * up is joined, and is finalized only when its last holder releases it. */
+/* Exactly the load, init and unload sequence this API has always made,
+ * unless the profiler holds the network (net_hold.h). */
 int netInitialize(void)
 {
     uint32_t bytes;
     void *pool = __ps3dk_net_default_pool(&bytes);
-    return __ps3dk_net_hold_acquire(PS3DK_NET_HOLD_LEGACY, pool, bytes, 0, load_net, unload_net);
+    return __ps3dk_net_legacy_init(pool, bytes, load_net, unload_net);
 }
 int netDeinitialize(void)
 {
-    return __ps3dk_net_hold_release(PS3DK_NET_HOLD_LEGACY);
+    return __ps3dk_net_legacy_deinit();
 }
 int netInitializeNetworkEx(netInitParam *p)
 {

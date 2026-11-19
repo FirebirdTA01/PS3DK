@@ -67,15 +67,20 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
-- **libnet shares one network among its users.** `netInitialize`,
-  `sys_net_initialize_network_ex` and the profiler's live auto-start are
-  holders of one network. The first brings it up, later ones join it, and
-  only the last `netDeinitialize` / `sys_net_finalize_network` finalizes it
-  (and unloads the NET module libnet loaded). A program with one network user
-  makes exactly the calls it made before. An app's teardown no longer pulls
-  the network from under another user, such as the live agent or the ps3dk-run
-  hook. A later initialize with a larger memory pool joins the existing
-  network, keeps that network's pool, and prints one TTY line.
+- **libnet coordinates with the profiler's live auto-start.** Nothing
+  changes unless a program links the opt-in auto-start: `netInitialize`,
+  `netDeinitialize`, `sys_net_initialize_network_ex` and
+  `sys_net_finalize_network` make the same system calls with the same results
+  as before, in any mix. While the auto-started agent holds the network, the
+  network stays its creator's. When the app brought it up, the profiler joins
+  it, and the app's teardown first stops the agent (a viewer sees a
+  disconnect) and then reaches the system unchanged. When the profiler
+  brought it up, `netInitialize` joins it and the matching `netDeinitialize`
+  leaves it up. A `sys_net_initialize_network_ex` with the app's own pool
+  makes the profiler step aside: its network is finalized, the NET module
+  stays loaded, one TTY line is printed, and the app's call goes through
+  unchanged. `sys_net_finalize_network` is now a libnet function over the
+  same system call.
 
 - **Pinned Ubuntu release for builds.** CI and release builds run on the
   `ubuntu-26.04` runner label instead of the moving `ubuntu-latest`, so a move
