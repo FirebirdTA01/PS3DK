@@ -80,20 +80,20 @@ def run(doc, work, name):
 
 def main():
     meta, rows = cc.load_table(TOOL.parent.parent / 'expected/draws.tsv')
-    assert len(rows) == int(meta['draws']) == 16, (len(rows), meta)
+    assert len(rows) == int(meta['draws']) == 19, (len(rows), meta)
     state_rows = cc.load_state(TOOL.parent.parent / 'expected/state.tsv')
     assert len(state_rows) > 100, len(state_rows)
     const_rows = cc.load_constants(TOOL.parent.parent / 'expected/constants.tsv')
-    assert len(const_rows) == 15, len(const_rows)
+    assert len(const_rows) == 18, len(const_rows)
     base = matching(meta, rows, state_rows, const_rows)
     # the BOTH capture: two views of the same draws (the second's ordinals after the first's), every draw paired,
     # every program's bytes complete
     one = base['captures'][0]
-    for half, mode, off in (('first', 'pipelined', 0), ('second', 'isolated', 16)):
+    for half, mode, off in (('first', 'pipelined', 0), ('second', 'isolated', 19)):
         v = copy.deepcopy(one)
         v.update(name='matrix-both', half=half, timing_mode=mode,
                  program_bytes=[{'index': p['index'], 'bytes': 64, 'complete': True} for p in one['programs']],
-                 pairs=[{'first': i, 'second': i} for i in range(16)] if half == 'second' else [])
+                 pairs=[{'first': i, 'second': i} for i in range(19)] if half == 'second' else [])
         for dr in v['draws']:
             dr['ordinal'] += off
         base['captures'].append(v)
@@ -119,15 +119,15 @@ def main():
         'hooked': (lambda x: d(x, 0).__setitem__('hooked', False), 'draw 0 hooked'),
         'status': (lambda x: x['captures'][0].__setitem__('status', 'PENDING TIMING (1 AUTO records not yet present)'),
                    'capture status'),
-        'extra draw': (lambda x: x['captures'][0]['draws'].append(dict(d(x, 15), ordinal=16)), 'draw 16'),
-        'missing draw': (lambda x: x['captures'][0]['draws'].pop(), 'draw 15: missing'),
+        'extra draw': (lambda x: x['captures'][0]['draws'].append(dict(d(x, 18), ordinal=19)), 'draw 19'),
+        'missing draw': (lambda x: x['captures'][0]['draws'].pop(), 'draw 18: missing'),
         'clear with fp': (lambda x: d(x, 0).__setitem__('fp', 1), 'draw 0 fp'),
         'no capture': (lambda x: x['captures'][0].__setitem__('name', 'other'), 'no capture named'),
         'depth test': (lambda x: d(x, 2)['state']['render'].__setitem__('depth.test', False), 'draw 2 render depth.test'),
         'texture format': (lambda x: d(x, 3)['state']['textures'][0].__setitem__('format', 'A8R8G8B8'),
                            'draw 3 textures.0 format'),
-        'attribute stride': (lambda x: d(x, 0)['state']['attributes'][3].__setitem__('stride', 16),
-                             'draw 0 attributes.3 stride'),
+        'attribute stride': (lambda x: d(x, 1)['state']['attributes'][3].__setitem__('stride', 16),
+                             'draw 1 attributes.3 stride'),
         'surface unknown': (lambda x: d(x, 11)['state']['surfaces'].__setitem__('zeta_format', None),
                             'draw 11 surfaces zeta_format'),
         'index type': (lambda x: d(x, 7)['state']['index'].__setitem__('type', 'u32'), 'draw 7 index type'),

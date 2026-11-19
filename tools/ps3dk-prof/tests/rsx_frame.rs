@@ -329,6 +329,34 @@ fn not_revalidated_program() {
     assert_eq!(rule_of(&f), Rule::RsxFrame);
 }
 
+/// Inline-array and immediate draws are timed by ARRAY-class AUTO operations and inline-index draws by INDEX-class ones;
+/// the draw keeps its own kind and primitive, and an inline index draw timed by an ARRAY op is a mismatch.
+#[test]
+fn inline_and_immediate_draws_timed_by_their_class() {
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let Some(&(op, _)) = bind.ops.iter().find(|o| o.1 == 1) else { panic!("an ARRAY op in the fixture") };
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 1, 0, 0, u32::MAX, 0, 0, 0, 0];
+    for (kind, name, timed) in [(7u16, "INLINE_ARRAY", true), (9, "IMMEDIATE", true), (8, "INLINE_INDEX", false)] {
+        let mut d = XDraw::timed(0, kind, op);
+        if kind == 8 {
+            d.index_type = 1;
+        }
+        if kind == 9 {
+            d.count = 0;
+        }
+        let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, bind.frame, "i").chunk(),
+            one_draw(1, &d), end.clone().chunk()]);
+        let cap = reader::read(&f.bytes()).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let fr = &rf::frames(&cap)[0];
+        assert_eq!(fr.draws[0].raw.kind.name(), name);
+        assert_eq!(matches!(fr.draws[0].timing, Timing::Timed { .. }), timed, "{name}");
+        assert_eq!(fr.draws[0].op_mismatch, !timed, "{name}");
+        assert_eq!(fr.draws[0].primitives().is_none(), kind != 8, "{name}");
+    }
+}
+
 #[test]
 fn flag_rules() {
     let base = tags_fixture();
@@ -404,7 +432,6 @@ fn every_rule_refused_once() {
     case("op with untimed", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw::timed(0, 1, 5).with_untimed(3))]);
     case("unknown reason", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { untimed: 12, ..dec() })]);
     case("op on a decoded draw", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { op: 5, untimed: 0, ..dec() })]);
-    case("op on an inline draw", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { kind: 7, ..XDraw::timed(0, 1, 5) })]);
     case("index args on array", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { index_type: 1, ..dec() })]);
     case("clear with mode", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { mode: 5, ..XDraw::decoded(0, 3) })]);
     case("mode out of range", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { mode: 11, ..dec() })]);

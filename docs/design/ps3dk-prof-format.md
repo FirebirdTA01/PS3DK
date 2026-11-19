@@ -965,7 +965,7 @@ DRAW (type 1, length 96):
 | 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
 | 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); at least one of bits 0..1; other bits 0 |
 | 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
-| 16 | u64 | AUTO operation id: nonzero iff the reason is 0 |
+| 16 | u64 | AUTO operation id: nonzero iff the reason is 0; INLINE_ARRAY and IMMEDIATE draws are timed by ARRAY operations and INLINE_INDEX draws by INDEX operations (the AUTO kinds stay 1..3), ARRAY, INDEX and CLEAR by their own kind |
 | 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
 | 28 | u32 | first vertex / first index |
 | 32 | u32 | count (vertices or indices) |

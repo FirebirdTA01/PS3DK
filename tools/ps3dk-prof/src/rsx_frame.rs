@@ -237,13 +237,14 @@ impl DrawKind {
             DrawKind::Immediate => "IMMEDIATE",
         }
     }
-    /// The AUTO operation kind that times this draw kind (None: AUTO has no kind for it yet).
+    /// The AUTO operation kind that times this draw kind. Inline-array and immediate draws are timed as operations of
+    /// the ARRAY class and inline-index draws of the INDEX class (the AUTO tables keep three kinds); the capture keeps
+    /// the real kind.
     pub fn auto_kind(self) -> Option<u16> {
         match self {
-            DrawKind::Array => Some(auto_rsx::KIND_ARRAY),
-            DrawKind::Index => Some(auto_rsx::KIND_INDEX),
+            DrawKind::Array | DrawKind::InlineArray | DrawKind::Immediate => Some(auto_rsx::KIND_ARRAY),
+            DrawKind::Index | DrawKind::InlineIndex => Some(auto_rsx::KIND_INDEX),
             DrawKind::Clear => Some(auto_rsx::KIND_CLEAR),
-            _ => None,
         }
     }
 }
@@ -1464,8 +1465,12 @@ impl Draw {
     pub fn decoded(&self) -> bool {
         self.raw.flags & DF_DECODED != 0
     }
+    /// Primitives drawn (None for a clear, an inline array, whose count is data words, and an immediate draw).
     pub fn primitives(&self) -> Option<u64> {
-        if self.raw.kind == DrawKind::Clear { None } else { primitive_count(self.raw.mode, self.raw.count) }
+        match self.raw.kind {
+            DrawKind::Clear | DrawKind::InlineArray | DrawKind::Immediate => None,
+            _ => primitive_count(self.raw.mode, self.raw.count),
+        }
     }
 }
 

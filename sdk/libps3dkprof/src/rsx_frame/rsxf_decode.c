@@ -12,7 +12,7 @@ enum {
     M_FP_ADDRESS = 0x08e4, M_VP_INST_FIRST = 0x0b80, M_VP_INST_END = 0x0c00, M_BEGIN_END = 0x1808,
     M_ELEMENT_U16 = 0x180c, M_ELEMENT_U32 = 0x1810, M_VERTEX_BATCH = 0x1814, M_VERTEX_DATA = 0x1818,
     M_INDEX_OFFSET = 0x181c, M_INDEX_DMA = 0x1820, M_INDEX_DRAW = 0x1824, M_ATTR_DATA_FIRST = 0x1880,
-    M_ATTR_DATA_END = 0x1c00, M_CLEAR = 0x1d94, M_VP_UPLOAD_FROM = 0x1e9c, M_VP_START_FROM = 0x1ea0
+    M_ATTR_DATA_END = 0x1d00, /* VTX_ATTR_2F/2I/4UB/4I (0x1880..) through VTX_ATTR_4F (..0x1cfc) */ M_CLEAR = 0x1d94, M_VP_UPLOAD_FROM = 0x1e9c, M_VP_START_FROM = 0x1ea0
 };
 
 void ps3dk_prof__rsxf_decode_init(rsxf_decoder *d)
@@ -164,6 +164,7 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
         return;
     case M_VERTEX_DATA:
         group_kind(d, RSXF_K_INLINE_ARRAY);
+        d->group.count += 1; /* inline arrays count their data words */
         return;
     default:
         if (m >= M_ATTR_DATA_FIRST && m < M_ATTR_DATA_END)

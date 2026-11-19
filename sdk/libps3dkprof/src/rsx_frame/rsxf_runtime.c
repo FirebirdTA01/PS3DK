@@ -1094,7 +1094,8 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
         }
         w.clear_mask = s->hook.kind == RSXF_K_CLEAR ? s->hook.clear_mask : 0;
         w.flags = RSXF_DF_HOOKED | (e ? RSXF_DF_DECODED : 0);
-        if (e && (e->kind != s->hook.kind || (e->kind != RSXF_K_CLEAR && e->count != s->hook.count))) {
+        if (e && (e->kind != s->hook.kind ||
+                  (e->kind != RSXF_K_CLEAR && e->kind != RSXF_K_IMMEDIATE && e->count != s->hook.count))) {
             w.flags |= RSXF_DF_MISMATCH;
             s->mismatches++;
         }
@@ -1107,7 +1108,7 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
         w.kind = (uint16_t)e->kind;
         w.mode = e->kind == RSXF_K_CLEAR ? 0 : (e->mode > 10 ? 0 : e->mode);
         w.first = e->kind == RSXF_K_ARRAY || e->kind == RSXF_K_INDEX ? e->first : 0;
-        w.count = e->kind == RSXF_K_INLINE_ARRAY || e->kind == RSXF_K_IMMEDIATE || e->kind == RSXF_K_CLEAR ? 0 : e->count;
+        w.count = e->kind == RSXF_K_IMMEDIATE || e->kind == RSXF_K_CLEAR ? 0 : e->count;
         if (e->kind == RSXF_K_INDEX) {
             w.index_offset = e->index_offset;
             w.index_location = (uint8_t)e->index_location;

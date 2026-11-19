@@ -492,7 +492,9 @@ With `PS3_PROF_AUTO=ON` and `PS3_PROF_AUTO_RING=ON` (refused without the ring). 
 One requested frame of the AUTO owner: every draw and clear of its command buffer in submission order, with its RSX
 time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
 used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
-tag, an app label (5.7), the AUTO range it ran in, and the render state, texture slots, vertex attributes, index
+tag, an app label (5.7), the AUTO range it ran in (inline-array, inline-index and immediate draws through the SDK's
+safe writers are timed too while the capture is selected; draws written by `Unsafe` or raw writers are listed with
+the reason they are untimed), and the render state, texture slots, vertex attributes, index
 stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader), its VP
 constants and FP embedded constants by uniform name, and the instance runs (consecutive draws identical except their
 constants). The captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This
@@ -1058,7 +1060,8 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
   what the owner's command buffer wrote: a CALL into another buffer resets the decoder (registers unknown until
   written again) and writes from other contexts are not seen; the baseline needs room in the staging blocks (16 KiB
   at most); draws inside
-  CALL segments are timed by AUTO but not listed; a fragment program bound without a program container is recorded by
+  CALL segments are timed by AUTO but not listed; an immediate draw whose vertex data wraps or flushes the command
+  buffer is listed with its timing incomplete; a fragment program bound without a program container is recorded by
   address only. A program is hashed when it is bound: every bind while a capture is armed hashes all its
   instruction bytes. A program bound before the capture keeps the identity of that bind and is shown as "bound before
   capture, not revalidated" (an in-place rewrite since then would not be seen); one whose sampled bytes (first, middle
