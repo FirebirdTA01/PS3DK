@@ -12,27 +12,46 @@ pub enum Row {
     Run(usize),
     Member(usize),
 }
-/// Collapse instance runs in a sorted, filtered draw list: a run appears once, where its first listed draw sorts,
-/// as `Run`; an expanded run lists all of its draws after it in submission order.
-pub fn display_rows(f: &FrameView, ids: &[usize], expanded: &BTreeSet<usize>) -> Vec<Row> {
+/// Collapse instance runs in a sorted, filtered draw list: a run appears once, as `Run`; an expanded run lists all of
+/// its draws after it in submission order. A run takes its first listed draw's position, except in a time sort
+/// (`by_time = Some(descending)`), where it is placed by its total time (the cost being hunted), ties by first ordinal.
+pub fn display_rows(f: &FrameView, ids: &[usize], expanded: &BTreeSet<usize>, by_time: Option<bool>) -> Vec<Row> {
     let mut seen = BTreeSet::new();
-    let mut out = Vec::with_capacity(ids.len());
+    let mut blocks: Vec<Vec<Row>> = Vec::with_capacity(ids.len());
     for &i in ids {
         match f.draws[i].run.filter(|&r| r < f.instance_runs.len()) {
-            None => out.push(Row::Draw(i)),
+            None => blocks.push(vec![Row::Draw(i)]),
             Some(r) => {
                 if !seen.insert(r) {
                     continue;
                 }
-                out.push(Row::Run(r));
+                let mut b = vec![Row::Run(r)];
                 if expanded.contains(&r) {
                     let run = &f.instance_runs[r];
-                    out.extend((run.first..run.first + run.len).map(Row::Member));
+                    b.extend((run.first..run.first + run.len).map(Row::Member));
                 }
+                blocks.push(b);
             }
         }
     }
-    out
+    if let Some(descending) = by_time {
+        let key = |b: &Vec<Row>| match b[0] {
+            Row::Run(r) => (run_time(f, r).0, f.draws[f.instance_runs[r].first].raw.ordinal),
+            Row::Draw(i) | Row::Member(i) => (f.draws[i].timing.interval(), f.draws[i].raw.ordinal),
+        };
+        blocks.sort_by(|a, b| {
+            let ((ta, oa), (tb, ob)) = (key(a), key(b));
+            let t = match (ta, tb) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, _) => std::cmp::Ordering::Greater,
+                (_, None) => std::cmp::Ordering::Less,
+                (Some(x), Some(y)) if descending => y.cmp(&x),
+                (Some(x), Some(y)) => x.cmp(&y),
+            };
+            t.then(oa.cmp(&ob))
+        });
+    }
+    blocks.into_iter().flatten().collect()
 }
 /// The draws a row stands for.
 pub fn row_draws(f: &FrameView, row: Row) -> std::ops::Range<usize> {

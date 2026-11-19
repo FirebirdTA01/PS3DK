@@ -85,10 +85,10 @@ fn instance_runs_collapse_into_one_expandable_row() {
     let v = d.rsx_frames.get(d.analysis().unwrap());
     let fr = &v.frames[0];
     let mut expanded = Default::default();
-    assert_eq!(display_rows(fr, &[0, 1, 2, 3], &expanded), vec![Row::Run(0), Row::Draw(3)]);
-    assert_eq!(display_rows(fr, &[3, 1, 0, 2], &expanded), vec![Row::Draw(3), Row::Run(0)]);
+    assert_eq!(display_rows(fr, &[0, 1, 2, 3], &expanded, None), vec![Row::Run(0), Row::Draw(3)]);
+    assert_eq!(display_rows(fr, &[3, 1, 0, 2], &expanded, None), vec![Row::Draw(3), Row::Run(0)]);
     std::collections::BTreeSet::insert(&mut expanded, 0);
-    assert_eq!(display_rows(fr, &[0, 1, 2, 3], &expanded),
+    assert_eq!(display_rows(fr, &[0, 1, 2, 3], &expanded, None),
         vec![Row::Run(0), Row::Member(0), Row::Member(1), Row::Member(2), Row::Draw(3)]);
     assert_eq!(varies(&fr.instance_runs[0]), "c5");
     assert!(run_label(fr, 0, false).ends_with("x3"));
@@ -106,4 +106,21 @@ fn instance_runs_collapse_into_one_expandable_row() {
         eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
     });
     assert_eq!(drawn.rows, 5);
+}
+
+#[test]
+fn a_time_sort_places_a_run_by_its_total_time() {
+    use ps3dk_prof::rsx_frame::Timing;
+    let d = doc();
+    let v = d.rsx_frames.get(d.analysis().unwrap());
+    let mut fr = v.frames[0].clone();
+    for (i, t) in [10u64, 10, 10, 20].into_iter().enumerate() {
+        fr.draws[i].timing = Timing::Timed { raw_begin: 100 * i as u64, raw_end: 100 * i as u64 + t };
+    }
+    let none = Default::default();
+    // per-draw time order puts draw 3 (20) first; the run's total (30) outranks it
+    assert_eq!(display_rows(&fr, &[3, 0, 1, 2], &none, Some(true)), vec![Row::Run(0), Row::Draw(3)]);
+    assert_eq!(display_rows(&fr, &[0, 1, 2, 3], &none, Some(false)), vec![Row::Draw(3), Row::Run(0)]);
+    // other sorts keep the first listed draw's position
+    assert_eq!(display_rows(&fr, &[3, 0, 1, 2], &none, None), vec![Row::Draw(3), Row::Run(0)]);
 }

@@ -116,7 +116,7 @@ impl State {
         let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| {
             let ids = sorted_draws(f, &self.filter, self.column, self.descending, names);
             Rows {
-            display: crate::rsx_constants_ui::display_rows(f, &ids, &self.expanded),
+            display: crate::rsx_constants_ui::display_rows(f, &ids, &self.expanded, (self.column==DrawColumn::Time).then_some(self.descending)),
             ids,
             groups: if self.by_target { crate::rsx_state_ui::target_groups(f) } else { self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)) },
         }}));

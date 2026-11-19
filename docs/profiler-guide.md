@@ -874,6 +874,7 @@ provenance badge: **FIFO exact** (written in the command stream), **container: m
 program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset). Values
 changed since the previous draw are highlighted. Consecutive draws that differ only in their constants collapse in
 the draw list into one **xN** row with the run's total time and the slots that vary; click it to list its draws.
+Sorted by time, a run is placed by its total time; other sorts keep it where its first draw falls.
 Selecting a draw of a run adds a per-instance table of those slots to Constants. PIPELINED intervals may overlap: their sum is
 not isolated execution cost.
 Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
