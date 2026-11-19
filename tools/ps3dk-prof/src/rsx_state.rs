@@ -244,7 +244,6 @@ fn table<'a>(regs: &'a Registers) -> Table<'a> {
     Table { regs, out: Vec::new() }
 }
 
-const ALL: u32 = u32::MAX;
 const LO16: u32 = 0xffff;
 
 fn render(r: &Registers) -> Vec<Field> {

@@ -393,7 +393,7 @@ fn every_rule_refused_once() {
     });
     case("record count", { let mut b = Buf::default(); dec().encode(&mut b); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 2, &b.0)] });
     case("empty block", vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 0, &[])]);
-    case("unknown record", { let mut b = Buf::default(); b.u16(9).u16(8).u32(0); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
+    case("unknown record", { let mut b = Buf::default(); b.u16(0xff).u16(8).u32(0); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
     case("draw length", { let mut b = Buf::default(); dec().encode(&mut b); b.0[2] = 104; b.0.extend_from_slice(&[0; 8]);
         vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
     case("draw kind", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { kind: 4, ..dec() })]);
