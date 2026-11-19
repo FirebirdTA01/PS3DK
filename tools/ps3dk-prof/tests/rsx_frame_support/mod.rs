@@ -355,7 +355,7 @@ pub fn binding(base: &[u8]) -> Binding {
 /// The sample: capture 1 "sample", live request 7, on the binding frame of tags.prof. Its draws, in order:
 /// every bound AUTO op as a timed hooked draw (labels "terrain/rock" on even ordinals, "water" on odd; VP 1 on all,
 /// FP 2 on all but the first), then one decoded-only INDEX draw, then one hooked draw untimed for report capacity
-/// (reason 3). Two blocks (sequences 0 and 2; block 1 dropped). Programs: 1 VP (stream), 2 FP (container, named
+/// (reason 3). Two blocks (sequences 0 and 1). Programs: 1 VP (stream), 2 FP (container, named
 /// "water.fpo"). END DONE.
 pub fn sample() -> (Vec<u8>, Binding) {
     let base = tags_fixture();
@@ -404,7 +404,7 @@ pub fn sample() -> (Vec<u8>, Binding) {
     let draws = bind.ops.len() as u32 + 2;
     let mut end = XEnd::done(1);
     // blocks, dropped, seen, recorded, hooked, decoded-only, mismatches, truncated_at, programs, labels, refused x2
-    end.n = [2, 1, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
+    end.n = [2, 0, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
     end.bytes = ((recs1.0.len() + recs2.0.len()) as u64, 0);
     end.untimed = 2;
     let begin = XBegin::live(1, bind.owner, bind.frame, "sample");
@@ -412,7 +412,7 @@ pub fn sample() -> (Vec<u8>, Binding) {
         XConfig::default().chunk(),
         begin.chunk(),
         draws_chunk(1, 0, n1, &recs1.0),
-        draws_chunk(1, 2, n2, &recs2.0),
+        draws_chunk(1, 1, n2, &recs2.0),
         end.chunk(),
     ];
     (with_rsxf(&base, extra).bytes(), bind)
@@ -438,10 +438,10 @@ pub fn vpc_rec(b: &mut Buf, ordinal: u32, flags: u16, e: &[(u16, u8, [u32; 4])])
 }
 
 /// An FPCONST record (type 8): (ucode offset, provenance, words as in memory).
-pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, u8, [u32; 4])]) {
+pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, [u8; 4], [u32; 4])]) {
     b.u16(8).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(program);
     for &(off, prov, w) in e {
-        b.u32(off).u8(prov).u8(0).u16(0);
+        b.u32(off).u8(prov[0]).u8(prov[1]).u8(prov[2]).u8(prov[3]);
         for v in w {
             b.u32(v);
         }

@@ -159,7 +159,8 @@ int ps3dk_prof_shutdown(void);
  * if the owner never runs again they stay allocated until the process exits. */
 typedef struct ps3dk_prof_rsx_frame_options {
     uint32_t size;          /* sizeof(ps3dk_prof_rsx_frame_options) = 16 */
-    uint32_t staging_kb;    /* each staging block: 4..1024 KiB (256 default) */
+    uint32_t staging_kb;    /* each staging block: 32..1024 KiB (256 default; below 32 is raised to 32: one draw's
+                             * records, about 31 KiB at most, never span blocks) */
     uint32_t blocks;        /* staging blocks: 2..16 (2 default) */
     uint32_t fp_bytes_kb;   /* FP ucode bytes stored per capture when requested: 0 (the 256 KiB default)..4096 KiB */
 } ps3dk_prof_rsx_frame_options;

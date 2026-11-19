@@ -8,7 +8,7 @@ use combined_auto_support::put16;
 use combined_auto_invalid_support::{baseline,forged,rejected,Forgery};
 fn unknown()->Forgery {
     Forgery{name:"ops-unknown-flags",ty:35,occurrence:0,rule:Rule::AutoOps,
-        edit:|p|put16(p,16+14,1|2|128|256)}
+        edit:|p|put16(p,16+14,1|2|128|512)}
 }
 #[test]
 fn ordinary_unknown_auto_flag_is_rejected_before_c(){forged(&baseline(),&unknown());}

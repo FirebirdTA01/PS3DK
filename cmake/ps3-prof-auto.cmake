@@ -233,7 +233,7 @@ endfunction()
 # PS3_PROF_AUTO_RING=ON (the captured frame times every draw through the report ring). Cost: about 150 KiB of decoder
 # state from attach, and PS3_PROF_RSX_FRAME_STAGING_KB x 2 of MAIN memory only while a capture is being written.
 set(PS3_PROF_RSX_FRAME OFF CACHE BOOL "RSX frame capture: per-draw time, programs and labels of one requested frame")
-set(PS3_PROF_RSX_FRAME_STAGING_KB 256 CACHE STRING "RSX frame capture staging block size in KiB (4..1024), two blocks")
+set(PS3_PROF_RSX_FRAME_STAGING_KB 256 CACHE STRING "RSX frame capture staging block size in KiB (32..1024), two blocks")
 set(PS3_PROF_RSX_FRAME_FP_BYTES_KB 256 CACHE STRING
     "RSX frame capture: FP ucode bytes stored per capture when a request asks for them, KiB (1..4096)")
 if(PS3_PROF_RSX_FRAME)
@@ -243,8 +243,9 @@ if(PS3_PROF_RSX_FRAME)
     endif()
     string(LENGTH "${PS3_PROF_RSX_FRAME_STAGING_KB}" _ps3_rsxf_digits)
     if(NOT PS3_PROF_RSX_FRAME_STAGING_KB MATCHES "^[1-9][0-9]*$" OR _ps3_rsxf_digits GREATER 4 OR
-       PS3_PROF_RSX_FRAME_STAGING_KB LESS 4 OR PS3_PROF_RSX_FRAME_STAGING_KB GREATER 1024)
-        message(FATAL_ERROR "PS3_PROF_RSX_FRAME_STAGING_KB must be a whole number of KiB in 4..1024, got "
+       PS3_PROF_RSX_FRAME_STAGING_KB LESS 32 OR PS3_PROF_RSX_FRAME_STAGING_KB GREATER 1024)
+        message(FATAL_ERROR "PS3_PROF_RSX_FRAME_STAGING_KB must be a whole number of KiB in 32..1024 (a block holds the largest per-draw "
+            "unit, about 31 KiB), got "
             "'${PS3_PROF_RSX_FRAME_STAGING_KB}'")
     endif()
     string(LENGTH "${PS3_PROF_RSX_FRAME_FP_BYTES_KB}" _ps3_rsxf_fp_digits)

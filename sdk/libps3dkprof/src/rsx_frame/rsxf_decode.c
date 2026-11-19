@@ -37,6 +37,9 @@ int ps3dk_prof__rsxf_shadowed(uint32_t m)
     case 0x1800u: /* report write (GET_REPORT: every AUTO marker) */
     case 0x1d70u: case 0x1d74u: /* back-end write and texture-read semaphore releases */
         return 0; /* one-shot actions: their last value is not state (it would differ between identical draws) */
+    case 0x1efcu: case M_VP_UPLOAD_FROM: /* the VP constant and instruction upload pointers (ports' cursors) */
+    case 0x1d6cu: /* SEMAPHORE_OFFSET: AUTO's own markers rewrite it */
+        return 0; /* interpreted by the decoder, not render state */
     default:
         return 1;
     }
@@ -54,8 +57,10 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
     memset(d->vpc_known, 0, sizeof d->vpc_known);
     /* unseen words may have held inline transfers: no remembered word can be trusted */
     memset(d->imap_addr, 0, sizeof d->imap_addr);
+    memset(d->imap_unk, 0, sizeof d->imap_unk);
     d->imap_used = 0;
     d->imap_cleared++;
+    d->ntaint = 0;
     memset(d->vp_known, 0, sizeof d->vp_known);
     d->vp_generation++;
     d->in_group = 0;
@@ -113,7 +118,7 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
         return;
     }
     switch (m) {
-    case 0x1efc: d->vpc_id = v; return; /* VP_UPLOAD_CONST_ID */
+    case 0x1efc: d->vpc_id = v & 511u; return; /* VP_UPLOAD_CONST_ID (9 bits: slot + data-port vec4 stays bounded) */
     case M_VP_UPLOAD_FROM: d->vp_upload = v; d->vp_word = 0; return;
     case M_VP_START_FROM: d->vp_start = v; d->known |= 1u; return;
     case M_FP_ADDRESS: d->fp_address = v; d->known |= 2u; return;
@@ -189,24 +194,102 @@ static void imap_store(rsxf_decoder *d, uint32_t addr, uint32_t v)
                 d->imap_used++;
             d->imap_addr[i] = addr + 1u;
             d->imap_val[i] = v;
+            d->imap_unk[i] = 0;
             return;
         }
     }
     d->imap_overflow++; /* not remembered: a later lookup of it reports UNKNOWN, never an older value */
 }
 
-int ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v)
+uint32_t ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v)
 {
     uint32_t i = imap_slot(addr);
     for (uint32_t k = 0; k < 16; k++, i = (i + 1u) & (RSXF_INLINE_MAP - 1u)) {
         if (d->imap_addr[i] == addr + 1u) {
+            if (d->imap_unk[i])
+                return RSXF_FPC_UNKNOWN;
             *v = d->imap_val[i];
-            return 1;
+            return RSXF_FPC_INLINE;
         }
         if (!d->imap_addr[i])
-            return 0;
+            break;
     }
-    return 0;
+    if (d->imap_overflow || d->imap_cleared || d->taint_all)
+        return RSXF_FPC_UNKNOWN; /* a write may have been lost (map full) or unseen (a reset, many copies) */
+    for (uint32_t t = 0; t < d->ntaint; t++)
+        if (addr >= d->taint_lo[t] && addr < d->taint_hi[t])
+            return RSXF_FPC_UNKNOWN; /* an M2MF copy wrote it after any inline write */
+    return RSXF_FPC_CONTAINER;
+}
+
+/* The remembered words in [lo, hi) become UNKNOWN (a lookup of one no longer gives its last inline value). */
+static void imap_mark(rsxf_decoder *d, uint32_t lo, uint32_t hi)
+{
+    if (!d->imap_used)
+        return; /* nothing remembered: nothing to mark */
+    for (uint32_t i = 0; i < RSXF_INLINE_MAP; i++)
+        if (d->imap_addr[i] && d->imap_addr[i] - 1u >= lo && d->imap_addr[i] - 1u < hi)
+            d->imap_unk[i] = 1;
+}
+
+void ps3dk_prof__rsxf_inline_forget(rsxf_decoder *d, uint32_t lo, uint32_t hi)
+{
+    if (lo < hi)
+        imap_mark(d, lo, hi);
+}
+
+/* An M2MF copy into local [lo, hi): what was remembered there is overwritten and every word of it is UNKNOWN from now
+ * on (an inline write after it is remembered again). */
+static void imap_taint(rsxf_decoder *d, uint32_t lo, uint32_t hi)
+{
+    if (lo >= hi)
+        return;
+    imap_mark(d, lo, hi);
+    for (uint32_t t = 0; t < d->ntaint; t++)
+        if (lo <= d->taint_hi[t] && hi >= d->taint_lo[t]) { /* overlapping or adjacent: merge */
+            d->taint_lo[t] = lo < d->taint_lo[t] ? lo : d->taint_lo[t];
+            d->taint_hi[t] = hi > d->taint_hi[t] ? hi : d->taint_hi[t];
+            return;
+        }
+    if (d->ntaint < RSXF_TAINT_RANGES) {
+        d->taint_lo[d->ntaint] = lo;
+        d->taint_hi[d->ntaint++] = hi;
+    } else {
+        d->taint_all = 1;
+    }
+}
+
+/* Subchannel 1, M2MF as this SDK's transfer writers bind it: the DMA objects, OFFSET_IN..FORMAT, then BUF_NOTIFY
+ * launches the copy of m2mf_count lines of m2mf_len bytes, m2mf_pitch_out apart, to m2mf_out. */
+static void method_m2mf(rsxf_decoder *d, uint32_t m, uint32_t v)
+{
+    switch (m) {
+    case 0x188u: d->m2mf_dma_out = v; return;
+    case 0x310u: d->m2mf_out = v; return;
+    case 0x318u: d->m2mf_pitch_out = v; return;
+    case 0x31cu: d->m2mf_len = v; return;
+    case 0x320u: d->m2mf_count = v; return;
+    case 0x328u: {
+        int64_t pitch = (int32_t)d->m2mf_pitch_out, span = d->m2mf_count ? pitch * (int64_t)(d->m2mf_count - 1u) : 0;
+        int64_t lo = (int64_t)d->m2mf_out + (span < 0 ? span : 0), hi = (int64_t)d->m2mf_out + (span > 0 ? span : 0) +
+                     (int64_t)d->m2mf_len;
+        d->m2mf_copies++;
+        if (!d->m2mf_count || !d->m2mf_len)
+            return;
+        if (d->m2mf_dma_out != 0xfeed0000u) {
+            d->main_written = 1;
+            return;
+        }
+        if (lo < 0)
+            lo = 0;
+        if (hi > 0xffffffffll)
+            hi = 0xffffffffll;
+        imap_taint(d, (uint32_t)lo, (uint32_t)hi);
+        return;
+    }
+    default:
+        return;
+    }
 }
 
 /* Subchannels 3 (surfaces 2D) and 5 (image from CPU), as this SDK's inline transfer binds and writes them: the
@@ -224,10 +307,16 @@ static void method_2d(rsxf_decoder *d, uint32_t sub, uint32_t m, uint32_t v)
         d->s5_x = v & 0xffffu;
     else if (m == 0x308u)
         d->s5_w = v & 0xffffu;
-    else if (m >= 0x400u && m < 0x480u) {
+    else if (m >= 0x400u && m <= 0x1ffcu) {
+        /* COLOR data, the whole packet (0x400..0x1ffc: up to 1792 words); words past the width are padding the RSX
+         * does not write */
         uint32_t i = (m - 0x400u) >> 2;
-        if (i < d->s5_w && d->s3_dma == 0xfeed0000u)
+        if (i >= d->s5_w)
+            return;
+        if (d->s3_dma == 0xfeed0000u)
             imap_store(d, d->s3_offset + 4u * (d->s5_x + i), v);
+        else
+            d->main_written = 1;
     }
 }
 
@@ -263,6 +352,9 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
         else if (sub == 3 || sub == 5)
             for (uint32_t i = 0; i < count; i++)
                 method_2d(d, sub, (h & 0x40000000u) ? m : m + 4u * i, p[at + i]);
+        else if (sub == 1)
+            for (uint32_t i = 0; i < count; i++)
+                method_m2mf(d, (h & 0x40000000u) ? m : m + 4u * i, p[at + i]);
         at += count;
     }
     return ok;

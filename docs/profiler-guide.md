@@ -486,7 +486,9 @@ process uses the directory).
 ### 4.12 `PS3_PROF_RSX_FRAME`, `PS3_PROF_RSX_FRAME_STAGING_KB` (CMake, beta)
 
 With `PS3_PROF_AUTO=ON` and `PS3_PROF_AUTO_RING=ON` (refused without the ring). Default OFF.
-`_STAGING_KB`: each of the two staging blocks, 4..1024, default 256. The selector compiles
+`_STAGING_KB`: each of the two staging blocks, 32..1024, default 256 (a block must hold the largest per-draw unit,
+about 31 KiB: every register changed, every VP constant changed and two programs defined at one draw; a value below 32
+set directly in the options macro is raised to 32). The selector compiles
 `<target>-auto-rsx-frame.c` into each executable and requires its symbol at link time.
 
 One requested frame of the AUTO owner: every draw and clear of its command buffer in submission order, with its RSX
@@ -681,6 +683,8 @@ Flags (the macro requests none; call `ps3dk_prof_rsx_frame_capture(name, flags)`
 - `PS3DK_PROF_RSX_FRAME_ISOLATED`: every captured draw runs alone (a WAIT_FOR_IDLE before each of its two markers),
   so its interval is its own cost. Turn it on to rank draws by cost; leave it off to see the frame as it really runs
   (the isolated frame is slower and its overlap is gone). It costs 4 command words per draw in the captured frame.
+  AUTO marks the operations of an isolated frame ISOLATED: `ps3dk-prof auto` labels that frame row ISOLATED and keeps
+  it out of the `--by-tag` tag and range summaries (its numbers are not comparable with pipelined frames).
 - `PS3DK_PROF_RSX_FRAME_BOTH`: two consecutive frames, the first pipelined, the second isolated, read as two frames
   with their draws paired (kind, label, programs). Costs as ISOLATED for the second frame; the staging must hold two
   frames of records.
@@ -1054,9 +1058,11 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
 - The live link needs app code, a FILE sink on `/dev_hdd0/`, and no rolling output; one viewer at a time.
 - Rolling output is AUTO-only and refuses active SPU lanes.
 - AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
-- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are exact only when the app
-  patches them through the command stream (cell gcm `cellGcmSetFragmentProgramParameter` does); a value written by the
-  CPU into the program's memory shows the container's value marked "may differ at GPU time"; uniform names come from
+- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are never exact: each component
+  shows the last inline write the decoder saw to it in the command stream (cell gcm `cellGcmSetFragmentProgramParameter`
+  writes them so), else the container's value marked "may differ at GPU time" (a value the CPU wrote into the program's
+  memory is not seen), and UNKNOWN after a decoder reset, a full inline-write map, an M2MF copy over it or another
+  program bound at its address; uniform names come from
   cell gcm program containers (the PSL1GHT `rsx*` program objects are not read yet), at most 32 per program and 16
   programs remembered; register state is
   what the owner's command buffer wrote: a CALL into another buffer resets the decoder (registers unknown until

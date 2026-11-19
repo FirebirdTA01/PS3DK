@@ -49,14 +49,26 @@ enum { RSXF_DECODER = 4 };
 enum { RSXF_VP_CONSTS = 468, RSXF_VPC_PER_REC = 128, RSXF_FPC_MAX = 32, RSXF_UNI_MAX = 32, RSXF_UNI_NAME = 32,
        RSXF_VPC_ENTRY = 24, RSXF_FPC_ENTRY = 24, RSXF_UNI_ENTRY = 40 };
 enum { RSXF_VPC_RESET = 1, RSXF_VPC_BASELINE = 2, RSXF_FPC_TRUNCATED = 1, RSXF_UNI_TRUNCATED = 1 };
-/* FP constant provenance: written by an inline transfer in the command stream, the container's value (no write
- * seen since attach: the memory may have been patched by the CPU, so it may differ at GPU time), or unknown (the
- * decoder reset or the inline-write map was full since). */
-enum { RSXF_FPC_FIFO = 1, RSXF_FPC_CONTAINER = 2, RSXF_FPC_UNKNOWN = 3 };
+/* FP constant provenance, per component (FPCONST entry bytes 4..7): INLINE the last inline transfer the decoder saw
+ * write that word (not exact: a CPU write after it, or a write the decoder could not see, is not reflected), CONTAINER
+ * the container's value (no FIFO write to that word seen; a CPU patch would not be seen, so it may differ at GPU
+ * time), UNKNOWN (the decoder reset, its inline-write map was full, an M2MF copy wrote the word's range, or a
+ * different program was placed at that address after an inline write there). */
+enum { RSXF_FPC_INLINE = 1, RSXF_FPC_CONTAINER = 2, RSXF_FPC_UNKNOWN = 3 };
 enum { RSXF_UNI_VP = 1, RSXF_UNI_FP = 2 };
-enum { RSXF_INLINE_MAP = 4096 };
+enum { RSXF_INLINE_MAP = 4096, RSXF_TAINT_RANGES = 8 };
 /* Register records: at most this many (register, value) pairs each (16 + 8 x 255 bytes). */
 enum { RSXF_REG_PAIRS_MAX = 255, RSXF_REG_HEADER = 16, RSXF_STATE_RESET = 1 };
+/* The largest per-draw unit (it never spans blocks): STATE for every register, VPCONST for every slot, UNIFORM for two
+ * programs defined at the draw, FPCONST, the definitions and DRAW (RSXF_UNIT_DEFS bytes at most). A staging block is
+ * at least RSXF_STAGING_KB_MIN KiB, so every unit fits one empty block. */
+enum { RSXF_UNIT_DEFS = 512,
+       RSXF_UNIT_WORST = ((2048 + RSXF_REG_PAIRS_MAX - 1) / RSXF_REG_PAIRS_MAX) * RSXF_REG_HEADER + 8 * 2048 +
+                         ((RSXF_VP_CONSTS + RSXF_VPC_PER_REC - 1) / RSXF_VPC_PER_REC) * RSXF_REG_HEADER +
+                         RSXF_VPC_ENTRY * RSXF_VP_CONSTS + 2 * (RSXF_REG_HEADER + RSXF_UNI_ENTRY * RSXF_UNI_MAX) +
+                         RSXF_REG_HEADER + RSXF_FPC_ENTRY * RSXF_FPC_MAX + RSXF_UNIT_DEFS,
+       RSXF_STAGING_KB_MIN = 32 };
+typedef char rsxf_unit_fits_min_block[(RSXF_DRAWS_HEADER + RSXF_UNIT_WORST <= RSXF_STAGING_KB_MIN * 1024) ? 1 : -1];
 enum { RSXF_AVAILABLE = 0, RSXF_NO_AUTO = 1, RSXF_NO_RING = 2, RSXF_NO_DECODER = 3 };
 enum { RSXF_K_ARRAY = 1, RSXF_K_INDEX = 2, RSXF_K_CLEAR = 3, RSXF_K_INLINE_ARRAY = 7, RSXF_K_INLINE_INDEX = 8,
        RSXF_K_IMMEDIATE = 9 };
@@ -159,11 +171,17 @@ typedef struct rsxf_decoder {
     uint8_t vpc_known[RSXF_VP_CONSTS];
     uint32_t vpc_dirty[(RSXF_VP_CONSTS + 31) / 32];
     uint32_t vpc_id;
-    /* inline transfers into local memory (subchannel 3 surfaces-2D destination, subchannel 5 image-from-CPU data):
-     * the last word written at each address, open addressing; a full map counts imap_overflow, a reset clears it */
+    /* inline transfers into local memory (subchannel 3 surfaces-2D destination, subchannel 5 image-from-CPU data, the
+     * whole packet): the last word written at each address, open addressing; a full map counts imap_overflow, a reset
+     * clears it. An entry marked unk is a word whose last inline value can no longer be trusted (a different program
+     * placed over it); taint holds local ranges an M2MF copy (subchannel 1) wrote, taint_all when more did than fit.
+     * main_written: an inline write or copy went to main memory (not mapped). */
     uint32_t s3_dma, s3_offset, s5_x, s5_w;
     uint32_t imap_addr[RSXF_INLINE_MAP], imap_val[RSXF_INLINE_MAP]; /* addr + 1; 0 empty */
+    uint8_t imap_unk[RSXF_INLINE_MAP];
     uint32_t imap_used, imap_overflow, imap_cleared;
+    uint32_t m2mf_dma_out, m2mf_out, m2mf_pitch_out, m2mf_len, m2mf_count;
+    uint32_t taint_lo[RSXF_TAINT_RANGES], taint_hi[RSXF_TAINT_RANGES], ntaint, taint_all, main_written, m2mf_copies;
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
     uint32_t bad_header, bad_reason, resets; /* the first rejection (AUTO_RING_REJECT_* numbering) */
@@ -183,8 +201,12 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
 /* Decodes n complete owner words; completed draws and clears are appended to events. Returns 0 after a rejection
  * (the registers are then unknown; decoding resumes at the next word given). */
 int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n);
-/* 1 with *v when an inline transfer wrote the local-memory word at addr since the map was last cleared. */
-int ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v);
+/* The local-memory word at addr: RSXF_FPC_INLINE with *v (the last inline transfer the decoder saw write it),
+ * RSXF_FPC_CONTAINER (no write to it seen: the memory's own value stands), or RSXF_FPC_UNKNOWN (see the provenance
+ * enum). */
+uint32_t ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v);
+/* A different program was placed at [lo, hi) of local memory: the inline words remembered there become UNKNOWN. */
+void ps3dk_prof__rsxf_inline_forget(rsxf_decoder *d, uint32_t lo, uint32_t hi);
 
 /* ---- runtime hooks (rsxf_runtime.c), called from auto_runtime.c -------------------------------------------------- */
 struct _gcmCtxData;

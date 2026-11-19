@@ -53,38 +53,44 @@ pub const REC_VPCONST: u16 = 7;
 pub const REC_FPCONST: u16 = 8;
 pub const REC_UNIFORM: u16 = 9;
 pub const VPC_PER_REC: usize = 128;
+/// The smallest staging block (32 KiB): the largest per-draw unit (about 31 KiB) fits one, so a unit never spans blocks.
+pub const STAGING_MIN: u32 = 32 << 10;
 pub const FPC_MAX: usize = 32;
 pub const UNI_MAX: usize = 32;
 pub const UNI_NAME: usize = 32;
 pub const VPC_RESET: u16 = 1;
 pub const VPC_BASELINE: u16 = 2;
 
-/// Where an FP embedded constant's value comes from.
+/// Where one component of an FP embedded constant comes from. None of them is exact: the capture sees the owner's
+/// command stream, not memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provenance {
-    /// Written by an inline transfer in the owner's command stream: the value the RSX reads.
-    Fifo,
-    /// The program container's value: no write seen since attach, so a CPU write to the copy in memory would not be
-    /// seen; it may differ at GPU time.
+    /// The last inline transfer the decoder saw write this word in the owner's command stream. Not exact: a CPU write
+    /// after it, or a write the decoder could not see, is not reflected.
+    Inline,
+    /// The program container's value: no command-stream write to this word seen since attach, so a CPU write to the
+    /// copy in memory would not be seen; it may differ at GPU time.
     Container,
-    /// Unknown: the decoder reset or its inline-write map was full since attach (the container's value is shown).
+    /// Unknown: the decoder reset or its inline-write map was full since attach, an M2MF copy wrote the word's range,
+    /// or a different program was placed at this address after an inline write there (the container's value is shown).
     Unknown,
 }
 impl Provenance {
     pub fn name(self) -> &'static str {
         match self {
-            Provenance::Fifo => "fifo",
+            Provenance::Inline => "last inline write seen",
             Provenance::Container => "container (may differ at GPU time)",
             Provenance::Unknown => "unknown",
         }
     }
 }
 
-/// One FP embedded constant at a draw: its ucode byte offset, provenance and words as in memory.
+/// One FP embedded constant at a draw: its ucode byte offset, the provenance of each component and the words as in
+/// memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FpConstant {
     pub offset: u32,
-    pub provenance: Provenance,
+    pub provenance: [Provenance; 4],
     pub words: [u32; 4],
 }
 impl FpConstant {
@@ -609,7 +615,7 @@ impl Reader {
         let Some(availability) = Availability::of(avail) else {
             return bad(format!("RSXF_CONFIG availability {avail}"));
         };
-        if !(4096..=1 << 20).contains(&block_bytes) || block_bytes % 8 != 0 || !(1..=16).contains(&blocks)
+        if !(STAGING_MIN..=1 << 20).contains(&block_bytes) || block_bytes % 8 != 0 || !(1..=16).contains(&blocks)
             || !(1..=65535).contains(&program_capacity) || !(1..=65535).contains(&label_capacity)
             || !(1..=255).contains(&label_bytes)
         {
@@ -745,8 +751,9 @@ impl Reader {
         if id != rec.begin.id {
             return bad(format!("RSXF_DRAWS for capture {id} while capture {} is open", rec.begin.id));
         }
-        if rec.block_seqs.last().is_some_and(|&s| seq <= s) {
-            return bad(format!("RSXF_DRAWS block sequence {seq} after {}", rec.block_seqs.last().unwrap()));
+        let want = rec.block_seqs.last().map_or(0, |&s| s.wrapping_add(1));
+        if seq != want {
+            return bad(format!("RSXF_DRAWS block sequence {seq}, expected {want} (blocks are written in order, none                 skipped)"));
         }
         if bytes != p.len() - DRAWS_HEADER.min(p.len()) || n == 0 {
             return bad(format!("RSXF_DRAWS: {n} records in {bytes} bytes, payload {}", p.len()));
@@ -1045,18 +1052,18 @@ impl Reader {
                     let mut entries: Vec<FpConstant> = Vec::with_capacity(n);
                     for _ in 0..n {
                         let offset = c.u32()?;
-                        let prov = c.u8()?;
-                        let r = c.u8()?;
-                        let r2 = c.u16()?;
+                        let mut provenance = [Provenance::Unknown; 4];
+                        for p in provenance.iter_mut() {
+                            *p = match c.u8()? {
+                                1 => Provenance::Inline,
+                                2 => Provenance::Container,
+                                3 => Provenance::Unknown,
+                                v => return bad(format!("FPCONST: provenance {v}")),
+                            };
+                        }
                         let words = [c.u32()?, c.u32()?, c.u32()?, c.u32()?];
-                        let provenance = match prov {
-                            1 => Provenance::Fifo,
-                            2 => Provenance::Container,
-                            3 => Provenance::Unknown,
-                            v => return bad(format!("FPCONST: provenance {v}")),
-                        };
-                        if r != 0 || r2 != 0 || entries.last().is_some_and(|l| offset <= l.offset) {
-                            return bad(format!("FPCONST: offset {offset:#x} not increasing or reserved bits"));
+                        if entries.last().is_some_and(|l| offset <= l.offset) {
+                            return bad(format!("FPCONST: offset {offset:#x} not increasing"));
                         }
                         entries.push(FpConstant { offset, provenance, words });
                     }
@@ -1211,8 +1218,8 @@ impl Reader {
         if blocks as usize != rec.block_seqs.len() {
             return bad(format!("RSXF_END: {blocks} blocks emitted, {} seen", rec.block_seqs.len()));
         }
-        if rec.block_seqs.last().is_some_and(|&s| u64::from(s) >= u64::from(blocks) + u64::from(blocks_dropped)) {
-            return bad("RSXF_END: a block sequence beyond emitted + dropped");
+        if blocks_dropped != 0 {
+            return bad(format!("RSXF_END: {blocks_dropped} blocks dropped (reserved 0: blocks are written in order,                 none skipped)"));
         }
         if u64::from(draws_recorded) != recorded || draws_recorded > draws_seen
             || hooked.saturating_add(decoded_only) > draws_seen || untimed > draws_seen
@@ -1455,8 +1462,8 @@ pub struct UniformValue {
     pub resource: u32,
     /// One vec4 per slot (VP) or per embedded constant (FP); a component None when unknown.
     pub values: Vec<[Option<f32>; 4]>,
-    /// FP: where the value comes from (None for VP: the stream is exact).
-    pub provenance: Option<Provenance>,
+    /// FP: where each component comes from (None for VP: the stream is exact).
+    pub provenance: Option<[Provenance; 4]>,
 }
 impl Draw {
     pub fn hooked(&self) -> bool {
@@ -1911,7 +1918,7 @@ pub fn uniforms(f: &FrameView, d: &Draw) -> Vec<UniformValue> {
                 let e = fc.entries.iter().find(|e| e.offset == u.resource);
                 out.push(UniformValue { profile: Profile::Fragment, name: u.name.clone(), resource: u.resource,
                     values: vec![e.map_or([None; 4], |e| e.floats().map(Some))],
-                    provenance: Some(e.map_or(Provenance::Unknown, |e| e.provenance)) });
+                    provenance: Some(e.map_or([Provenance::Unknown; 4], |e| e.provenance)) });
             }
         }
     }
@@ -2185,9 +2192,9 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
             "slot": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>()})).collect();
         let fp: Vec<Value> = us.iter().filter(|u| u.profile == Profile::Fragment).map(|u| json!({"name": u.name,
             "offset": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>(),
-            "provenance": u.provenance.map(|p| p.name())})).collect();
+            "provenance": u.provenance.map(|p| p.map(Provenance::name))})).collect();
         let list: Vec<Value> = d.fp_constants.as_ref().map_or_else(Vec::new, |c| c.entries.iter().map(|e| json!({
-            "offset": e.offset, "provenance": e.provenance.name(), "value": e.floats()})).collect());
+            "offset": e.offset, "provenance": e.provenance.map(Provenance::name), "value": e.floats()})).collect());
         o.insert("constants".into(), json!({"vp": vp, "fp": fp, "vp_changed": d.vpc_changed, "fp_list": list}));
         o.insert("run".into(), json!(d.run));
     }

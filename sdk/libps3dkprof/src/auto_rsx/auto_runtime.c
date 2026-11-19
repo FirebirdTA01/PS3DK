@@ -786,6 +786,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.kind=(uint16_t)call->kind;e->op.caller=caller;e->op.generation=c->generation;
     e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;e->op.flags=AUTO_OP_RING;
     if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+    if(a->iso_active) e->op.flags|=AUTO_OP_ISOLATED; /* timed with WAIT_FOR_IDLE around its markers */
     e->op.args[0]=(uint32_t)words;
     if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
     if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;
@@ -1517,6 +1518,9 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
         /* inline array (7), inline index (8), immediate (9): timed only for the RSX frame capture, as operations of
          * the ARRAY or INDEX class (the AUTO coverage tables keep three kinds); the capture keeps the real kind */
         if(!RSXF_ON()) return 0;
+        /* the owner's own context only: a segment writer's or another thread's inline or immediate draw never reaches
+         * AUTO's segment, CALL or unobserved-build accounting (AUTO never saw these shapes before the capture) */
+        if(!context || !owner_capture((gpp_ctx *)(void *)context,0)) return 0;
         shape=call->kind;cls=*call;cls.kind=shape==8 ? 2u:1u;
         if(shape!=8) cls.start=0;
         cls.offset=cls.location=0;
@@ -1548,6 +1552,7 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
     if(!ctx || !p_ready()) return 0;
     if(!p_window_gate(g_prof)) {
         /* no draw timing outside a capture window; a stopped owner still acknowledges the stop here */
+        if(shape) return 0; /* inline and immediate shapes leave AUTO's accounting as it was without them */
         if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
         else unobserved_build(ctx,call);
         return 0;
@@ -1556,7 +1561,7 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
     const auto_wire_config *c;
     auto_queue_entry *e;
     uint64_t words;
-    if(!a) return foreign_begin(ctx,call,caller);
+    if(!a) return shape ? 0u:foreign_begin(ctx,call,caller);
     if(!call || call->kind<1 || call->kind>3) return 0;
     if(g_tls.in_gpu && !a->active) {increment(a,&a->internal_suppressed);return 0;}
     late_row(a);
@@ -1618,6 +1623,7 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
     e->op.kind=(uint16_t)call->kind;e->op.caller=caller;e->op.generation=c->generation;
     e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;
     if(a->coverage.active) {e->op.flags=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+    if(a->iso_active) e->op.flags|=AUTO_OP_ISOLATED; /* timed with WAIT_FOR_IDLE around its markers */
     e->op.args[0]=(uint32_t)words;
     if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
     if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;

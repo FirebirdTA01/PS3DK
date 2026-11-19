@@ -91,9 +91,9 @@ fn sample_reads_and_joins_auto_timing() {
             assert!(f.passes[p].raw_begin <= *raw_begin);
         }
     }
-    // the second block was sequence 2: one block dropped, as END says
+    // two blocks, sequences 0 and 1, none dropped
     let e = f.end.as_ref().unwrap();
-    assert_eq!((e.blocks, e.blocks_dropped), (2, 1));
+    assert_eq!((e.blocks, e.blocks_dropped), (2, 0));
 }
 
 #[test]
@@ -485,8 +485,11 @@ fn every_rule_refused_once() {
     case("truncated without ordinal", { let mut e = end1(); e.outcome = 2; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("ordinal without truncation", { let mut e = end1(); e.n[7] = 5; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("draw at the truncation", { let mut e = end1(); e.outcome = 2; e.n[7] = 0; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
-    case("seq beyond emitted + dropped", vec![cfg.chunk(), begin().chunk(), {
+    case("first seq not 0", vec![cfg.chunk(), begin().chunk(), {
         let mut b = Buf::default(); dec().encode(&mut b); draws_chunk(1, 3, 1, &b.0) }, end1().chunk()]);
+    case("seq gap", vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), {
+        let mut b = Buf::default(); XDraw::decoded(1, 1).encode(&mut b); draws_chunk(1, 2, 1, &b.0) }, end1().chunk()]);
+    case("end blocks dropped", { let mut e = end1(); e.n[1] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("reject header without reason", { let mut e = end1(); e.reject = (5, 0); vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("end baseline count", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("end reserved 104", { let mut e = end1().chunk(); e.payload[104] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });

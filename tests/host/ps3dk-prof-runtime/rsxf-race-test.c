@@ -35,8 +35,8 @@
         }                                                                                                              \
     } while (0)
 
-PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(4, 2));
-enum { BLOCK = 4096, NBLOCKS = 2 };
+PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(32, 2));
+enum { BLOCK = 32768, NBLOCKS = 2 };
 
 /* ---- stubs for the runtime's dependencies ---- */
 static prof g_prof_storage;

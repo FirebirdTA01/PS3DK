@@ -27,7 +27,7 @@
 extern const ps3dk_prof_rsx_frame_options ps3dk_prof_automatic_rsx_frame_options __attribute__((weak));
 
 enum { BIND_SLOTS = 64, FP_CACHE = 32, FP_SAMPLE = 48, PROGRAMS = 512, LABELS = 256, SCOPES = 8, BLOCKS_MAX = 16,
-       UNIT_MAX = 512 };
+       UNIT_MAX = RSXF_UNIT_DEFS };
 enum { B_FREE = 0, B_FILLING = 1, B_SEALED = 2 };
 #define F_STOP RSXCAP_F_STOP
 #define F_OWNER_OUT 0x400ull   /* the owner observed STOP and will not touch a block again */
@@ -55,7 +55,7 @@ typedef struct prog_info {
     uint32_t c_def[RSXF_FPC_MAX][4];
 } prog_info;
 enum { PINFO = 16 };
-typedef struct fpc_entry { uint32_t off, prov, v[4]; } fpc_entry;
+typedef struct fpc_entry { uint32_t off, prov[4], v[4]; } fpc_entry; /* provenance per component */
 
 typedef struct block {
     uint8_t *base;
@@ -153,10 +153,11 @@ static uint32_t g_config_emitted;
 static uint32_t g_drain_sealed;  /* drainer: the seal ran; nothing is written after it */
 static ps3dk_prof_desc g_window_desc = {"rsx-frame", "", "<ps3dk-rsxf>", 1u, 1u, 0u, 0u};
 
+/* Staging block KiB: 256 by default, never below RSXF_STAGING_KB_MIN (the largest per-draw unit fits one block). */
 static uint32_t opt_kb(void)
 {
     uint32_t kb = ps3dk_prof_automatic_rsx_frame_options.staging_kb;
-    return kb ? kb : 256u;
+    return !kb ? 256u : kb < RSXF_STAGING_KB_MIN ? RSXF_STAGING_KB_MIN : kb;
 }
 /* FP ucode bytes stored per capture when requested (PS3_PROF_RSX_FRAME_FP_BYTES_KB; 256 KiB by default). */
 static uint32_t opt_fp_cap(void)
@@ -755,7 +756,8 @@ void ps3dk_prof__rsxf_container(void *ctx, const void *container, uint32_t kind)
     }
 }
 
-/* The FP embedded constants of the draw's FP: each block's value from the inline-write map, else the container's. */
+/* The FP embedded constants of the draw's FP, component by component: the last inline write the decoder saw to that
+ * word (INLINE), else the container's value (CONTAINER when no FIFO write to it can have been missed, else UNKNOWN). */
 static uint32_t fp_constants(rsxf_state *s, uint32_t fp_index, fpc_entry *out, uint32_t *trunc)
 {
     const rsxf_decoder *d = &s->dec;
@@ -769,18 +771,16 @@ static uint32_t fp_constants(rsxf_state *s, uint32_t fp_index, fpc_entry *out, u
     base = fp_offset(d->fp_address);
     local = (d->fp_address & 3u) == 1u;
     for (uint32_t i = 0; i < pi->nconst; i++) {
-        uint32_t got = 0;
         out[i].off = pi->c_off[i];
         for (uint32_t k = 0; k < 4; k++) {
-            uint32_t v;
-            if (local && ps3dk_prof__rsxf_inline_word(d, base + pi->c_off[i] + 4u * k, &v)) {
-                out[i].v[k] = v;
-                got++;
-            } else {
-                out[i].v[k] = pi->c_def[i][k];
-            }
+            uint32_t v = 0, p;
+            if (local)
+                p = ps3dk_prof__rsxf_inline_word(d, base + pi->c_off[i] + 4u * k, &v);
+            else
+                p = d->main_written || d->imap_cleared ? RSXF_FPC_UNKNOWN : RSXF_FPC_CONTAINER; /* main: not mapped */
+            out[i].prov[k] = p;
+            out[i].v[k] = p == RSXF_FPC_INLINE ? v : pi->c_def[i][k];
         }
-        out[i].prov = got ? RSXF_FPC_FIFO : (d->imap_overflow || d->imap_cleared) ? RSXF_FPC_UNKNOWN : RSXF_FPC_CONTAINER;
     }
     *trunc = pi->const_trunc;
     return pi->nconst;
@@ -799,7 +799,8 @@ static uint32_t put_fpc_record(uint8_t *p, uint32_t ordinal, uint32_t program, c
     for (uint32_t i = 0; i < n; i++) {
         uint8_t *q = p + RSXF_REG_HEADER + RSXF_FPC_ENTRY * i;
         put32(q, e[i].off);
-        q[4] = (uint8_t)e[i].prov;
+        for (uint32_t k = 0; k < 4; k++)
+            q[4 + k] = (uint8_t)e[i].prov[k];
         for (uint32_t k = 0; k < 4; k++)
             put32(q + 8 + 4 * k, e[i].v[k]);
     }
@@ -1381,6 +1382,11 @@ void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_
         s->fp_hashed++;
     }
     b = &s->binds[(fp_offset(offset) >> 6) % BIND_SLOTS];
+    /* another program (or one this slot does not know) at this address: the inline words remembered over its ucode
+     * may belong to the program that was there before, so they are UNKNOWN until written again */
+    if ((flags & RSXF_PF_UNREADABLE) ||
+        !(b->valid && fp_offset(b->offset) == fp_offset(offset) && b->h.hash == c->h.hash && b->h.bytes == c->h.bytes))
+        ps3dk_prof__rsxf_inline_forget(&s->dec, fp_offset(offset), fp_offset(offset) + bytes);
     b->offset = offset;
     b->h = c->h;
     b->flags = flags;

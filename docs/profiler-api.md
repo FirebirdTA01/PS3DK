@@ -574,7 +574,7 @@ PC app equivalent: none.
 | `void ps3dk_prof_draw_scope_begin(const char *name)` / `PS3DK_PROF_DRAW_SCOPE_BEGIN(s)` | AUTO owner | none; depth 8, deeper calls counted and balanced by their ends |
 | `void ps3dk_prof_draw_scope_end(void)` / `PS3DK_PROF_DRAW_SCOPE_END()` | AUTO owner | none |
 
-`ps3dk_prof_rsx_frame_options` (`{size = 16, staging_kb 4..1024, blocks 2..16, reserved 0}`) is defined by the
+`ps3dk_prof_rsx_frame_options` (`{size = 16, staging_kb 32..1024 (below 32 is raised to 32), blocks 2..16, fp_bytes_kb}`) is defined by the
 CMake option through `PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(kb, blocks))`;
 without that constant the capture is dormant. Live equivalent: protocol 3 `RSX_FRAME_REQ`
 (`sdk/libps3dkprof/src/live/live_proto.h`).
