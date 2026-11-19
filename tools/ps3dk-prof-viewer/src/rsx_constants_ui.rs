@@ -84,7 +84,7 @@ pub fn varies(run: &rf::InstanceRun) -> String {
 pub fn run_label(f: &FrameView, r: usize, open: bool) -> String {
     let run = &f.instance_runs[r];
     let (a, b) = (&f.draws[run.first], &f.draws[run.first + run.len - 1]);
-    format!("{} #{}–#{} {} x{}", if open { "▾" } else { "▸" }, a.raw.ordinal, b.raw.ordinal, a.raw.kind.name(), run.len)
+    format!("{} #{}–#{} {} x{}", if open { "[-]" } else { "[+]" }, a.raw.ordinal, b.raw.ordinal, a.raw.kind.name(), run.len)
 }
 
 /// A vec4 with unknown components as `?`.

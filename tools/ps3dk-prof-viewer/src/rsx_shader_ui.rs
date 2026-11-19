@@ -169,10 +169,17 @@ pub fn shader_page(p: &mut egui::Ui, v: &RsxFrameView, f: &FrameView, names: &Na
         rows.len(),
         if f.isolated { "isolated" } else { "pipelined" }
     ));
-    for r in rows.iter() {
+    for (n, r) in rows.iter().enumerate() {
         let prog = &f.programs[r.index];
-        let header = format!("{} · {} · {} draws", program_label(prog, names), prog.id_text(), r.draws);
-        egui::CollapsingHeader::new(header).id_salt(("rsxf-shader", f.id, f.half == ps3dk_prof::rsx_frame::Half::Second, r.index)).show(p, |p| {
+        let label = program_label(prog, names);
+        // a program with no name is labelled by its id: do not repeat it
+        let header = if label.starts_with(&prog.id_text()) {
+            format!("{label} · {} draws", r.draws)
+        } else {
+            format!("{label} · {} · {} draws", prog.id_text(), r.draws)
+        };
+        // the most expensive program opens first
+        egui::CollapsingHeader::new(header).id_salt(("rsxf-shader", f.id, f.half == ps3dk_prof::rsx_frame::Half::Second, r.index)).default_open(n == 0).show(p, |p| {
             p.label(format!("{} · source {} · {} instructions", match prog.profile { Profile::Vertex => "Vertex program", Profile::Fragment => "Fragment program" }, prog.source.name(), prog.instructions));
             if let Some((what, why)) = provenance(prog) {
                 ui::field_message(p, ui::Tone::Warning, &format!("{what}: {why}"));
