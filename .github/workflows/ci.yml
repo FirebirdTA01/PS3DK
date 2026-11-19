@@ -414,6 +414,20 @@ jobs:
             test "$rc" -eq 1
           done
 
+      # RSX frame capture units (stream decoder, encoders, canonical program hash), plain and ASan+UBSan, then the
+      # reader on the chunks the C encoders wrote, inside the AUTO tags capture.
+      - name: RSX frame capture units and reader round trip
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/rsxf-test.py --out "$RUNNER_TEMP/rsxf-plain" --reader tools/target/debug/ps3dk-prof
+          python3 tests/host/ps3dk-prof-runtime/rsxf-test.py --out "$RUNNER_TEMP/rsxf-address" --reader tools/target/debug/ps3dk-prof --sanitize
+
+      # RSX frame capture runtime racing shutdown: the owner, an app and a live requester against the drainer's seal,
+      # TSan and ASan+UBSan, one round per process; each reviewed defect (a seal freeing under the owner, an owner
+      # that never leaves, a plain REQUESTED store over STOP, a lazy FP hash) put back must fail; the bind-hook cost.
+      - name: RSX frame capture shutdown races
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/rsxf-race-test.py --out "$RUNNER_TEMP/rsxf-race"
+
       # Named counters: end-to-end values against the reader, unchanged zone records, and the counter-mutex lock
       # failures (each fails the capture closed, no FINAL after a failed freeze, nothing emitted twice), plain and
       # ASan+UBSan, with a mutant that discards the emission error.
@@ -503,6 +517,11 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringlabel --mutant seal-ignores-held --out "$RUNNER_TEMP/auto-ring-mutant-seal-ignores-held"
           # the flip's CALL into the reserved prefix needs the init's io_address record
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringflip --mutant flip-unrecorded --out "$RUNNER_TEMP/auto-ring-mutant-flip-unrecorded"
+          # RSX frame capture selected (PS3_PROF_RSX_FRAME): requests, labels, programs, hooked and raw draws, truncation;
+          # the capture is read back by the reader built above
+          for san in "" address thread; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case ringrsxf ${san:+--sanitize "$san"} --reader tools/target/debug/ps3dk-prof --out "$RUNNER_TEMP/auto-runtime-ringrsxf${san:+-$san}"
+          done
           # the build-option ring constant (PS3_PROF_AUTO_RING): sizes, setter precedence, start-up refusal, OFF unchanged
           for case in ringopt ringopt2 ringoptset ringoptsetring ringoptbad ringoptoff; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"

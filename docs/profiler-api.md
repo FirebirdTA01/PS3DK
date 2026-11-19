@@ -565,6 +565,20 @@ PC app equivalent: none.
 
 ---
 
+### RSX frame capture (`PS3_PROF_RSX_FRAME`)
+
+| Call | Thread | Result |
+|---|---|---|
+| `int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags)` / `PS3DK_PROF_RSX_FRAME_CAPTURE(name)` | any | capture id (> 0); `EBUSY` one outstanding, `ENOTSUP` not selected / no ring / no AUTO owner, `EINVAL` flags not 0 or name over 63 bytes, `ENOTINIT` not initialized, `ENOMEM` staging blocks, `ESTOPPED` shutdown begun; the name is copied as UTF-8 (an invalid byte becomes `?`); the macro is 0 without `PS3_PROF_AUTO` |
+| `void ps3dk_prof_draw_label(const char *label)` / `PS3DK_PROF_DRAW_LABEL(s)` | AUTO owner | none; other threads ignored |
+| `void ps3dk_prof_draw_scope_begin(const char *name)` / `PS3DK_PROF_DRAW_SCOPE_BEGIN(s)` | AUTO owner | none; depth 8, deeper calls counted and balanced by their ends |
+| `void ps3dk_prof_draw_scope_end(void)` / `PS3DK_PROF_DRAW_SCOPE_END()` | AUTO owner | none |
+
+`ps3dk_prof_rsx_frame_options` (`{size = 16, staging_kb 4..1024, blocks 2..16, reserved 0}`) is defined by the
+CMake option through `PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(kb, blocks))`;
+without that constant the capture is dormant. Live equivalent: protocol 3 `RSX_FRAME_REQ`
+(`sdk/libps3dkprof/src/live/live_proto.h`).
+
 ## 9. Waits (`prof_wait.h`)
 
 Archive: `libps3dkprof_wait.a` / `libps3prof_wait.a` / `libps3dkprof_ext_wait.a`, selected by `PS3_PROF_WAITS`.

@@ -91,7 +91,7 @@ prof=plan(current,trees[1],'auto-rsx')
 compile_lines=[line for line in prof.splitlines() if ' -c ' in line]
 required={'auto_runtime','auto_startup','auto_config','auto_wire','auto_writer','auto_queue',
           'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer',
-          'auto_ring','auto_ring_commands','auto_ring_layout',
+          'auto_ring','auto_ring_commands','auto_ring_layout','rsxf_runtime','rsxf_wire','rsxf_decode',
           'roll_runtime','roll_public','roll_output','roll_ppu','roll_combined','roll_combined2'}
 for member in required:
     lines=[line for line in compile_lines if '/'+member+'.c' in line]

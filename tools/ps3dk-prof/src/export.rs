@@ -529,9 +529,26 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     // Placement rule: EXPORT is emitted strictly right after HEADER/CLOCKS (and PROFILE if present).
     let mut emitted_chunks: Vec<(u32, Vec<u8>)> = Vec::new();
     let mut prev_emitted_seq: BTreeMap<u32, u64> = BTreeMap::new();
+    // RSX frame captures (bit 10): CONFIG always; a capture's BEGIN, DRAWS and END only when its frame is exported
+    let mut rsxf_keep = false;
 
     for chunk in &raw_chunks {
         match chunk.ty {
+            crate::rsx_frame::CHUNK_BEGIN if chunk.payload.len() >= 24 => {
+                let frame = u64::from_le_bytes(chunk.payload[16..24].try_into().unwrap());
+                rsxf_keep = range.contains(&frame);
+                if rsxf_keep {
+                    emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                }
+            }
+            crate::rsx_frame::CHUNK_DRAWS | crate::rsx_frame::CHUNK_END => {
+                if rsxf_keep {
+                    emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                }
+                if chunk.ty == crate::rsx_frame::CHUNK_END {
+                    rsxf_keep = false;
+                }
+            }
             CHUNK_HEADER => {
                 emitted_chunks.push((CHUNK_HEADER, chunk.payload.to_vec()));
             }

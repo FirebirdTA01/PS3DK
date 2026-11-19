@@ -51,8 +51,12 @@ fn all_flag_bytes_full_partial_and_high_bytes(){
   let r=reader::read(&bytes);
   if MASKS.contains(&flags){r.unwrap();}else{assert_eq!(r.unwrap_err().rule,Rule::FileFlagsNonzero);}
  }
- // byte 13 bits 0 and 1 are file_flags bits 8 and 9 (COUNTERS, WINDOWS); every other high bit is refused
- for flags in MASKS {for high in 13..16 {let mut b=headers(flags).bytes();b[high]=if high==13{4}else{1};for n in high+1..=16{assert_eq!(reader::read(&b[..n]).unwrap_err().rule,Rule::FileFlagsNonzero);}}}
+ // byte 13 bits 0..2 are file_flags bits 8..10 (COUNTERS, WINDOWS, RSX frame captures; bit 10 needs bit 7); every
+ // other high bit is refused
+ for flags in MASKS {for high in 13..16 {let mut b=headers(flags).bytes();b[high]=if high==13{8}else{1};for n in high+1..=16{assert_eq!(reader::read(&b[..n]).unwrap_err().rule,Rule::FileFlagsNonzero);}}}
+ for flags in MASKS {let mut b=headers(flags).bytes();b[13]=4;for n in 14..=16{
+  let r=reader::read(&b[..n]);
+  if flags&128!=0{assert!(r.unwrap().rsx_frame.is_some(),"flags={flags} n={n}");}else{assert_eq!(r.unwrap_err().rule,Rule::FileFlagsNonzero,"flags={flags} n={n}");}}}
  for flags in MASKS {let mut b=headers(flags).bytes();b[13]=1;for n in 14..16{assert!(reader::read(&b[..n]).unwrap().counters.is_some());}}
 }
 #[test]

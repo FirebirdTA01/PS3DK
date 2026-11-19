@@ -14,11 +14,19 @@ pub const T_CLIENT_HELLO: u16 = 1;
 pub const MAGIC: u32 = 0x564c_3350;
 /// The oldest protocol version an agent serves (and the one a v1 agent speaks).
 pub const VERSION_MIN: u16 = 1;
-/// The newest protocol version: capture triggers.
+/// The newest protocol version this viewer asks for: capture triggers. Agents serve version 3 (the RSX frame request,
+/// the constants below); asking for it needs a 3 -> 2 -> 1 fallback, since a version 2 agent closes a version 3 hello.
 pub const VERSION: u16 = 2;
 pub const T_HELLO: u16 = 2;
 /// HELLO capability bit (version 2): the agent applies capture commands.
 pub const CAP_TRIGGERS: u32 = 1;
+/// HELLO capability bit (version 3): the agent serves RSX_FRAME_REQ (sdk/libps3dkprof/src/live/live_proto.h).
+pub const CAP_RSX_FRAME: u32 = 2;
+pub const T_RSX_FRAME_REQ: u16 = 12;
+pub const T_RSX_FRAME_ACK: u16 = 13;
+pub const T_RSX_FRAME_STATE: u16 = 14;
+pub const RSXF_ACK_BYTES: u32 = 16;
+pub const RSXF_STATE_BYTES: u32 = 32;
 pub const MAX_APP: usize = 32;
 pub const MAX_BUILD_ID: usize = 512;
 pub const MAX_NAME: usize = 255;

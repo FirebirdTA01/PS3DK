@@ -437,6 +437,11 @@ about three frames; the defaults cover about 5,000 such draws per frame. Too sma
 `ring_full` or "metadata capacity", or a capture reading `FINAL (lower bounds)`: raise the matching option.
 `PS3DK_PROF_AUTO_OPTIONS_SET` before `cellGcmInit` overrides these values.
 
+Recommended ring when you only need the RSX frame capture (4.12): `_MB=1` with `_RECORDS=4096`, about 2 MiB of pages
+(1 MiB of extents, 4096 records of 184 bytes, 256 extent descriptors), enough for about 1,300 draws a frame across
+three frames of RSX lag. The record count, not the extent size, sets most of the ring's memory: 16,384 records alone
+take 2.9 MiB.
+
 ### 4.10 `PS3_PROF_AUTO_ROLLING` (CMake)
 
 With `PS3_PROF_AUTO=ON`. Empty (default) keeps an append capture. A value is the file ceiling in MiB, 24..4096
@@ -477,6 +482,37 @@ failed. A crash can leave `.ps3dk-retain-<app>.lock`; cleanup then refuses until
 process uses the directory).
 
 ---
+
+### 4.12 `PS3_PROF_RSX_FRAME`, `PS3_PROF_RSX_FRAME_STAGING_KB` (CMake, beta)
+
+With `PS3_PROF_AUTO=ON` and `PS3_PROF_AUTO_RING=ON` (refused without the ring). Default OFF.
+`_STAGING_KB`: each of the two staging blocks, 4..1024, default 256. The selector compiles
+`<target>-auto-rsx-frame.c` into each executable and requires its symbol at link time.
+
+One requested frame of the AUTO owner: every draw and clear of its command buffer in submission order, with its RSX
+time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
+used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
+tag, an app label (5.7) and the AUTO range it ran in. The captured frame times every covered draw, whatever
+`PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This release does not record render state, textures, buffers or constant
+values.
+
+```cmake
+-DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_AUTO_RING_MB=1 -DPS3_PROF_AUTO_RING_RECORDS=4096 -DPS3_PROF_RSX_FRAME=ON
+```
+
+- Cost: the ring (2 MiB at the sizes above); about 52 KiB of decoder and program state from AUTO attach (none
+  without the ring); while a capture is being written, the two staging blocks (512 KiB at the default), freed when it
+  is written; one pass of the profiler over the owner's command words, at each covered draw and at wraps and flushes;
+  at each fragment-program bind on the owner, a hash of the program the first time it is bound and a table lookup
+  after that (host-measured for a 35 KiB program: about 30 us once, under 10 ns per rebind; not yet measured on the
+  console). The captured frame itself runs slower by its per-draw records.
+- Turn it on when: you need to know which draws, programs or labelled entities take a frame's RSX time, beyond the
+  pass totals AUTO ranges give.
+- Leave it off when: you are measuring memory, or pass and frame totals are enough. Off, nothing is generated or
+  linked, no memory is reserved, each AUTO hook costs one load and a branch, and the capture file is the same as an
+  AUTO build without the option (tested byte for byte outside its run-dependent fields).
+
+Files with a capture set file_flags bit 10; a reader older than this release refuses them.
 
 ## 5. Hard-coding features in app code
 
@@ -621,6 +657,35 @@ not been tested.
 copies the agent's final counters after a successful stop.
 
 ---
+
+### 5.7 RSX frame capture and draw labels
+
+With `PS3_PROF_RSX_FRAME` (4.12), `<ps3dk/prof_auto.h>`:
+
+```c
+int id = PS3DK_PROF_RSX_FRAME_CAPTURE("after-camera-cut");  /* any thread: > 0 the capture id */
+PS3DK_PROF_DRAW_SCOPE_BEGIN("terrain");                      /* owner thread */
+PS3DK_PROF_DRAW_LABEL("rock_large/lod1");                    /* later draws read terrain/rock_large/lod1 */
+draw_rocks();
+PS3DK_PROF_DRAW_SCOPE_END();
+```
+
+A request is armed at the AUTO owner's next frame boundary when a capture window is open (an app's
+`PS3DK_PROF_CAPTURE_WHOLE_RUN()` counts); otherwise the capture opens a two-frame window named `rsx-frame` and arms at
+the boundary after. The frame from the arming boundary to the next one is captured. A request that finds no window
+after three boundaries is abandoned and nothing is written. Results: the capture id, `PS3DK_PROF_EBUSY` (one
+outstanding), `PS3DK_PROF_ENOTSUP` (not selected, no ring, no AUTO owner), `PS3DK_PROF_EINVAL`, `PS3DK_PROF_ENOTINIT`
+(the profiler is not initialized), `PS3DK_PROF_ENOMEM` (no staging memory), `PS3DK_PROF_ESTOPPED` (shutdown has
+begun); 0 without `PS3_PROF_AUTO`.
+
+Labels are owner-thread only. A label applies until replaced, its scope ends or the frame ends; scopes nest to depth
+8; a path is cut at 63 bytes on a UTF-8 character boundary. Names and labels are written as UTF-8: a byte that is not
+part of a valid sequence becomes `?`. The strings must stay valid until then; they are copied only into a capture.
+Outside a capture each call stores one pointer.
+
+At shutdown a capture in flight ends ABANDONED: the file keeps what was written. Its staging blocks are freed once
+both the drainer and the owner thread have left the capture; if the owner thread never runs again, they stay allocated
+until the process exits.
 
 ## 6. The PC app (`ps3dk-prof-viewer`)
 
@@ -773,8 +838,12 @@ clock evidence are never drawn. The AUTO-declared RSX domain with no extension e
 pointing to `rsx.auto` for clock validity, and a PPU lane holding only frame marks says **no zones in this build**.
 These labels do not claim complete coverage or per-draw state.
 
-**Capture RSX frame** (requesting an RSX frame capture from the PC) is not available: there is no request button or
-live command. The RSX frames page lists capture markers already in a file.
+**Capture RSX frame** in an app built with `PS3_PROF_RSX_FRAME` (4.12): the live link (protocol 3) carries the request
+and its progress (requested, armed on frame N, closed with D draws, written); the capture arrives in the session's data
+and `ps3dk-prof rsx-frame` reads it. A link follows one capture at a time: a request sent before the previous
+capture's final state arrived is answered `EBUSY`. The status a link follows is the live request's own; a capture
+requested from app code never replaces it. The PC app's button and RSX Frame page are in progress; an older agent or
+an app built without the option does not advertise the capability.
 
 ### 6.7 Windows: picker, Save window, Save range
 
@@ -811,7 +880,7 @@ Today several PC app features depend on app code or a specific build:
 | FIFO page | no | FIFO selector | yes |
 | Automatic, Passes | no | no | yes (Passes needs tags or ranges) |
 | Rolling | no | no | `PS3_PROF_AUTO_ROLLING`, not live |
-| Capture RSX frame | no | no | no |
+| Capture RSX frame | no | no | `PS3_PROF_RSX_FRAME` + ring; live request (protocol 3) or app call |
 
 Work in progress to close these gaps: a default capture window (t_7adaacd4); per-capture timing choices
 (t_6dd7fb83); SPU, zone and function switches (t_2873fe00); until-marker windows (t_3ea33a77); finishing a capture
@@ -852,6 +921,8 @@ ps3dk-prof fifo [--json] capture.prof               # FIFO wrap phases
 ps3dk-prof auto [--window <id|name>] [--json] capture.prof   # AUTO coverage, clock map, per-frame verdicts
 ps3dk-prof auto --ops [--frame N] [--json] capture.prof      # every AUTO operation record
 ps3dk-prof auto --by-tag [--json] capture.prof      # per frame and tag; range time per name
+ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--json] capture.prof
+ps3dk-prof shader-hash [--json] file.vpo file.fpo   # canonical program hashes, as captures name programs
 ps3dk-prof export --window W | --frame N | --frames A..B in.prof out.prof   # standalone sub-capture
 ps3dk-prof rolling [--json] [--max-bytes N] [--max-analysis-bytes N] [--max-analysis-work N] capture.profr
 ps3dk-prof clockmap [--premise spu-nowrap] capture.prof
@@ -880,7 +951,7 @@ suffix), not the stripped `.elf` placed beside the SELF. A build-id mismatch pri
 - **`.profr` (rolling).** A fixed-size store of retained segments and checkpoints written by AUTO rolling output.
   [ps3dk-prof-rolling-runtime.md](design/ps3dk-prof-rolling-runtime.md),
   [ps3dk-prof-rolling-store.md](design/ps3dk-prof-rolling-store.md).
-- **Live protocol (v1, v2 with capture triggers).** [ps3dk-prof-viewer.md](design/ps3dk-prof-viewer.md); schema in
+- **Live protocol (v1, v2 with capture triggers, v3 with the RSX frame request).** [ps3dk-prof-viewer.md](design/ps3dk-prof-viewer.md); schema in
   `sdk/libps3dkprof/src/live/live_proto.h`.
 - **AUTO records.** [ps3dk-prof-auto-rsx.md](design/ps3dk-prof-auto-rsx.md),
   [ps3dk-prof-auto-lifecycle.md](design/ps3dk-prof-auto-lifecycle.md).
@@ -889,6 +960,8 @@ suffix), not the stripped `.elf` placed beside the SELF. A build-id mismatch pri
 - **Arc companion (`.arcs`).** [ps3dk-prof-arcs.md](design/ps3dk-prof-arcs.md).
 - **Bookmarks (`<name>.frames.txt`).** Written by the PC app beside a saved capture; reopening one re-reads the whole
   capture and reports a changed or refused file.
+- **RSX frame captures (file_flags bit 10, chunks 44..48).** Format section 12 of
+  [ps3dk-prof-format.md](design/ps3dk-prof-format.md).
 
 ### 8.2 Verdicts
 
@@ -934,6 +1007,14 @@ The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `
 - The live link needs app code, a FILE sink on `/dev_hdd0/`, and no rolling output; one viewer at a time.
 - Rolling output is AUTO-only and refuses active SPU lanes.
 - AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
-- Capture RSX frame has no request path.
+- RSX frame capture (beta): one capture at a time; no render state, textures, buffers or constants yet; draws inside
+  CALL segments are timed by AUTO but not listed; a fragment program bound without a program container is recorded by
+  address only. A program is hashed when it is bound: every bind while a capture is armed hashes all its
+  instruction bytes. A program bound before the capture keeps the identity of that bind and is shown as "bound before
+  capture, not revalidated" (an in-place rewrite since then would not be seen); one whose sampled bytes (first, middle
+  and last 16) changed between two binds outside a capture has no identity. A draw whose AUTO operation is of
+  another kind or frame, or whose hooked call and decoded words disagree, is listed as a timing mismatch and left out
+  of every total. Times are reached-marker
+  intervals (they include queued work and overlap neighbours).
 - `quick_exit` makes one best-effort drain of PPU zones and frames only (no trailer, no extension data).
 - SPU durations are decrementer ticks, not wall time; SPU zones in SPURS jobs are untested.

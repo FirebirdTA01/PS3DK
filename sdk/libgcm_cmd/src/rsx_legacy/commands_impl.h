@@ -619,6 +619,15 @@ void RSX_FUNC(LoadFragmentProgramLocation)(gcmContextData *context,const rsxFrag
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FP_ADDRESS,1);
 	RSX_CONTEXT_CURRENTP[1] = ((location + 1) | (offset&0x1fffffff));
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED)) {
+		/* RSX frame capture: the program bound at this offset (identity only; one load and a branch unless active) */
+		void *ucode = NULL;
+		u32 size = 0;
+		rsxFragmentProgramGetUCode(program,&ucode,&size);
+		ps3dk_prof__rsxf_fp_bind(context,ucode,size,offset);
+	}
+#endif
 
 	texcoords = program->texcoords;
 	texcoord2D = program->texcoord2D;

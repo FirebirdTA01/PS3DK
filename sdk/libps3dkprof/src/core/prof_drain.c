@@ -368,6 +368,9 @@ static void enc_profile(prof *p)
  * A sink failure here is recorded exactly as one in the first drain was: init still succeeds and the next drain or
  * shutdown reports ESINKFAIL.  A CALLBACK sink keeps the first-drain start step: no callback runs during init.
  * AUTO RSX CONFIG is not part of this step; it stays mutable after init and the drainer writes it once frozen. */
+#ifdef PS3DK_PROF_WITH_AUTO
+int ps3dk_prof__rsxf_selected(void);
+#endif
 static void original_header(prof *p, uint8_t head[16])
 {
     static const uint8_t magic[16] = {'P', 'S', '3', 'D', 'K', 'P', 'R', 'F', 1, 0, 0, 0, 0, 0, 0, 0};
@@ -390,8 +393,11 @@ static void original_header(prof *p, uint8_t head[16])
         head[12] |= 64; /* file_flags bit 6: FIFO wrap events (chunk types 31-33); needs bit 0 */
 #endif
 #ifdef PS3DK_PROF_WITH_AUTO
-    if (p->ext_flags)
+    if (p->ext_flags) {
         head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
+        if (ps3dk_prof__rsxf_selected())
+            head[13] |= 4; /* file_flags bit 10: RSX frame captures (chunks 44..48), selected by the executable */
+    }
 #endif
     head[13] |= 2;   /* file_flags bit 9: capture windows (chunks 41, 42); heavy data only inside them */
 }

@@ -238,6 +238,45 @@ static void live_frame_hook(void)
 
 static const live_cmd_ops g_cmd_ops = {.submit = cmd_submit, .poll = cmd_poll, .cancel = cmd_cancel};
 
+/* RSX frame capture (protocol v3): present when the AUTO runtime is linked and selected the capture. A weak
+ * symbol keeps this archive independent of AUTO; its types match rsx_frame/rsxf.h field for field. */
+typedef struct rsxf_status_view {
+    uint32_t id, request, state, reason, draws;
+    uint64_t frame, bytes;
+} rsxf_status_view;
+typedef struct rsxf_ops_view {
+    int (*request)(uint32_t, uint32_t, const char *, uint32_t, uint32_t *);
+    void (*status)(rsxf_status_view *);
+    int (*available)(void);
+} rsxf_ops_view;
+extern const rsxf_ops_view *ps3dk_prof__rsxf_live_ops(void) __attribute__((weak));
+static const rsxf_ops_view *rsxf_ops(void)
+{
+    return ps3dk_prof__rsxf_live_ops ? ps3dk_prof__rsxf_live_ops() : NULL;
+}
+static int rsxf_request(uint32_t req, uint32_t flags, const char *name, uint32_t n, uint32_t *id)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    return o ? o->request(req, flags, name, n, id) : PS3DK_PROF_ENOTSUP;
+}
+static void rsxf_status(live_rsxf_status *out)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    rsxf_status_view m;
+    memset(out, 0, sizeof *out);
+    if (!o)
+        return;
+    o->status(&m);
+    out->id = m.id; out->request = m.request; out->state = m.state; out->reason = m.reason; out->draws = m.draws;
+    out->frame = m.frame; out->bytes = m.bytes;
+}
+static int rsxf_available(void)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    return o && o->available();
+}
+static const live_rsxf_ops g_rsxf_ops = {.request = rsxf_request, .status = rsxf_status, .available = rsxf_available};
+
 static const struct ps3dk_prof_finalization *runtime_finalization(void *ctx)
 {
     (void)ctx;
@@ -334,7 +373,8 @@ int ps3dk_prof__live_start_locked(const ps3dk_prof_live_config *cfg, int is_auto
 #endif
     live_source src = {.path = rec.path, .session_id = rec.session_id, .app = rec.app, .app_len = rec.app_len,
                        .build_id = (const char *)rec.build_id, .build_id_len = rec.build_id_len,
-                       .finalization = runtime_finalization, .cmd = &g_cmd_ops};
+                       .finalization = runtime_finalization, .cmd = &g_cmd_ops,
+                       .rsxf = rsxf_ops() ? &g_rsxf_ops : NULL};
     ps3dk_prof__set_frame_hook(live_frame_hook); /* before a viewer can send a command */
     rc = live_agent_start(&g_agent, &c, &src);
     if (rc != LIVE_OK)

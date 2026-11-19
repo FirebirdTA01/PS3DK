@@ -14,7 +14,11 @@
  *   6 flip: the context begins 4 KiB into the cellGcmInit host buffer (IO 0); each flip CALLs a default-state routine
  *          at IO 0 (synthetic, the firmware's layout) that rebinds subchannel 1 to M2MF and sets IN/OUT, changed
  *          between two flips: the shadow stays valid, the flush restores the routine's IN/OUT, every draw is timed.
- *   7 segment: the same layout, a CALL into the command buffer (an application segment): refused, admission halts. */
+ *   7 segment: the same layout, a CALL into the command buffer (an application segment): refused, admission halts.
+ *   8 rsxf: RSX frame capture selected (PS3_PROF_RSX_FRAME, 4 KiB staging blocks): a VP uploaded in the stream and an FP
+ *          bound through its container, labels in a scope, hooked array draws and clears, raw draws the hooks never
+ *          see, refusals (busy, flags), then a second capture with the drainer held that truncates when both staging
+ *          blocks are full. auto-runtime-test.py reads the capture back with the reader. */
 #include <assert.h>
 #include <sched.h>
 #include <stdio.h>
@@ -27,6 +31,10 @@
 #include "gpu_port_gcm.h"
 #include "auto_internal.h"
 #include "ps3tc_prof_auto.h"
+#if TEST_RING_MODE==8
+#include "rsxf.h"
+PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(4u, 2u));
+#endif
 
 #ifndef TEST_RING_MODE
 #define TEST_RING_MODE 0
@@ -39,7 +47,7 @@ int32_t ps3tc_fifo_wrap_callback(struct _gcmCtxData *,uint32_t);
 
 #define WORDS 8192u
 #define PHYS (WORDS-4u)
-#if TEST_RING_MODE>=6
+#if (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)
 /* the cellGcmInit host buffer: IO offset 0, a reserved prefix, then the command buffer (the context) */
 #define PREFIX 1024u
 static uint32_t host[PREFIX+WORDS];
@@ -100,7 +108,7 @@ static void apply(uint32_t sub,uint32_t m,uint32_t v)
         else if(m==0x1800) st64(&reports[(v&0xffffffu)/16u][0],++gpu_clock);
         return;
     }
-    if(sub>1 && TEST_RING_MODE>=6) return;   /* the routine's other subchannels */
+    if(sub>1 && (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)) return;   /* the routine's other subchannels */
     assert(sub==1 && m<0x1000);
     m2mf[m/4u]=v;
     if(m!=0x328) return;
@@ -125,7 +133,7 @@ static void apply(uint32_t sub,uint32_t m,uint32_t v)
 /* one CALL level: a routine in the host buffer's reserved prefix, run to its RET */
 static void gpu_call(uint32_t target)
 {
-#if TEST_RING_MODE>=6
+#if (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)
     const uint32_t *w=host+target/4u;
     assert(target<IO);
     for(;;) {
@@ -259,7 +267,7 @@ __attribute__((unused)) static void frame(uint32_t draws)
 }
 
 /* ---- modes 6, 7: a default-state routine at IO 0 (synthetic, the firmware's layout, not its words) and the flip ---- */
-#if TEST_RING_MODE>=6
+#if (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)
 static void install_routine(uint32_t in,uint32_t out)
 {
     const uint32_t r[]={M(0,0,1),0x31337000u,M(0,0x180,2),0x66604200u,0xfeed0000u,M(7,0,1),0xcafebabeu,
@@ -294,7 +302,7 @@ int main(void)
     ctrl.put=ctrl.get=IO;
     ps3dk_prof_test_hooks.gpu_gpp_dev=&device;
     ps3dk_prof_test_hooks.auto_ring_memory=&memory;
-#if TEST_RING_MODE>=6
+#if (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)
     ps3dk_prof__auto_gcm_init_result(&context,4u*WORDS,(uint32_t)sizeof host,host,0);
 #else
     ps3dk_prof__auto_gcm_init_result(&context,4u*WORDS,4u*WORDS,fifo,0);
@@ -495,6 +503,84 @@ int main(void)
                a->ring_reject[1]==at);
     }
     puts("AUTO ring CALL into an application segment refused PASS");
+#elif TEST_RING_MODE==8
+    {
+        static const ps3tc_auto_call array={1,5,0,36,0,0,0,0};
+        /* FP container ucode: inst 0 reads a constant (its 16-byte block follows), inst 1 ends (halfword-swapped) */
+        static const uint8_t fp_ucode[48]={0x3e,0x80,0x00,0x00, 0xc8,0x02,0x00,0x00, 0xc8,0x00,0x00,0x00,
+            0xc8,0x00,0x00,0x00, 1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16, 0x3e,0x81,0x00,0x00,
+            0xc8,0x00,0x00,0x00, 0xc8,0x00,0x00,0x00, 0xc8,0x00,0x00,0x00};
+        const rsxf_live_ops *ops=ps3dk_prof__rsxf_live_ops();
+        rsxf_status st;
+        uint32_t *w,lid=0;
+        int id,rc;
+        assert(ops && ops->available());
+        /* the program state before the capture: a VP uploaded at slot 5 (3 instructions), an FP bound at 0x2000 */
+        w=reserve(19);
+        w[0]=M(0,0x1e9c,2);w[1]=5;w[2]=5;w[3]=M(0,0x0b80,12);
+        for(uint32_t i=0;i<12;i++) w[4+i]=0x10000000u+(i<<8);   /* bit 0 clear: only the last instruction ends */
+        w[15]|=1u;                                         /* word 3 of the last instruction: last */
+        w[16]=M(0,0x08e4,1);w[17]=0x2001u;w[18]=0;           /* FP_ADDRESS (location 0 + 1 | offset), a NOP word */
+        ps3dk_prof__rsxf_fp_bind((void *)&context,fp_ucode,sizeof fp_ucode,0x2000u);
+        ps3dk_prof_frame();
+        draw();
+        assert(ps3dk_prof_rsx_frame_capture("bad",1u)==PS3DK_PROF_EINVAL);
+        id=ps3dk_prof_rsx_frame_capture("first",0u);
+        assert(id>0);
+        assert(ps3dk_prof_rsx_frame_capture("again",0u)==PS3DK_PROF_EBUSY);
+        ps3dk_prof_frame();                                  /* the window is open: armed for this frame */
+        ops->status(&st);
+        assert(st.id==0 && st.state==0);                     /* an app request never touches the live status */
+        ps3dk_prof_draw_scope_begin("terrain");
+        ps3dk_prof_draw_label("rock");
+        for(uint32_t i=0;i<10;i++) {
+            uint32_t t=ps3dk_prof__auto_begin((void *)&context,&array,0x1234);
+            w=reserve(10);
+            w[0]=M(0,0x100,3)|0x40000000u;w[1]=w[2]=w[3]=0;
+            w[4]=M(0,0x1808,1);w[5]=5;w[6]=M(0,0x1814,1);w[7]=(35u<<24)|0u;w[8]=M(0,0x1808,1);w[9]=0;
+            ps3dk_prof__auto_end((void *)&context,t);
+        }
+        ps3dk_prof_draw_label("water");
+        for(uint32_t i=0;i<10;i++) draw();
+        ps3dk_prof_draw_scope_end();
+        /* two raw draws: the hooks never see them, the decoder does */
+        for(uint32_t i=0;i<2;i++) {
+            w=reserve(6);
+            w[0]=M(0,0x1808,1);w[1]=4;w[2]=M(0,0x1814,1);w[3]=(5u<<24)|7u;w[4]=M(0,0x1808,1);w[5]=0;
+        }
+        ps3dk_prof__auto_preflush((void *)&context);         /* the decoder catches up before the boundary */
+        ps3dk_prof_frame();                                  /* closes the capture */
+        app_flush(0);app_flush(0);settle_drainer(a);
+        /* the next request is accepted once the first capture is written */
+        for(int i=0;i<20000;i++) {
+            rc=ops->request(9u,0u,"second",6u,&lid);
+            if(rc!=PS3DK_PROF_EBUSY) break;
+            struct timespec t={0,100000};nanosleep(&t,NULL);
+        }
+        assert(rc==PS3DK_PROF_OK && lid==(uint32_t)id+1u);
+        printf("capture %d written\n",id);
+        /* a second capture, live, with the drainer held: both 4 KiB blocks fill and it truncates, never waits */
+        park_drainer();
+        ops->status(&st);
+        assert(st.id==lid && st.request==9u && st.state==5u);
+        ps3dk_prof_frame();
+        ops->status(&st);
+        assert(st.id==lid && st.state==1u && st.frame);
+        for(uint32_t i=0;i<200;i++) draw();
+        ps3dk_prof_frame();
+        ops->status(&st);
+        assert(st.id==lid && st.state==2u && st.reason==RSXF_R_STAGING && st.draws==200u);
+        __atomic_store_n(&hold,0u,__ATOMIC_RELEASE);
+        app_flush(0);app_flush(0);settle_drainer(a);
+        for(int i=0;i<20000;i++) {ops->status(&st);if(st.state==3u) break;struct timespec t={0,100000};nanosleep(&t,NULL);}
+        assert(st.state==3u);
+        printf("capture %u: truncated, %u draws seen\n",lid,st.draws);
+        /* an app request after it leaves the live link's final state in place (nothing written: never armed) */
+        assert(ps3dk_prof_rsx_frame_capture("third",0u)==(int)lid+1);
+        ops->status(&st);
+        assert(st.id==lid && st.state==3u);
+    }
+    puts("RSX frame capture runtime PASS");
 #else
     /* fixture: one frame over 504 draws and a small one, all timed and published */
     frame(520);app_flush(1);

@@ -32,10 +32,12 @@ PINS=(DRAIN,CORE,LIVE,PPU,INSPECT)
 # private mutation semantics unchanged, isolated baselines remain mandatory.
 # Repinned for the live auto-start: core/drain gain weak hook calls after init and finalization; live_api.c moves
 # its admission checks (the rolling refusal anchor byte for byte) into servable() under a lock.
+# DRAIN/LIVE repinned again for RSX frame capture (file_flags bit 10 when selected; the protocol v3 RSX frame ops and
+# the live source's .rsxf field): no mutation anchor moved.
 APPROVED_PINS={
-    'sdk/libps3dkprof/src/core/prof_drain.c': '9275db8bd1e3591080dee2d263e396301e42c394c0142a8a8cc5b89224277e57',
+    'sdk/libps3dkprof/src/core/prof_drain.c': '9dc59f583b8a1c880c06c4c68127cfd9199a61a49ef53ee4bccd15fd3c7f4346',
     'sdk/libps3dkprof/src/core/prof_core.c': 'fd8ced34b812dd6f2a62a0274db1c5c9a97a1c79737722ee7a6043ad7cd71327',
-    'sdk/libps3dkprof/src/live/live_api.c': 'adbaf6fd03c81370abd1744e01a0c67cebebbcc070941330222416fd2f45127c',
+    'sdk/libps3dkprof/src/live/live_api.c': 'fdf9c776041e74f477aebd926d10d5e8b34f31ed7d89e579c14ceb56c9b17090',
     'sdk/libps3dkprof/src/rolling/roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
     'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': '959224ba03ebc3b9965e64f4d3b0f2d5a453fc7dc52720ee307ea46f596391f0',
 }

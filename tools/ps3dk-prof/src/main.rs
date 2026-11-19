@@ -10,6 +10,7 @@
 //! NO-TRAILER` line), 1 INCOMPLETE, 2 MALFORMED, 3 usage or I/O error, 4 (domain-extension files only)
 //! TRANSPORT COMPLETE but an extension source is not STRUCTURE COMPLETE and RAW VALID.
 
+use std::io::Write as _;
 use std::process::ExitCode;
 mod rolling_cli;
 
@@ -37,6 +38,13 @@ const USAGE: &str = "usage:
                              per frame and per tag: records, timed RSX busy (merged intervals) and the
                              draws its CALL brackets ran untimed; AUTO range time per name; a whole-
                              window summary; 1 without automatic observation or without tags
+  ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--json] <file>
+                             RSX frame captures (file_flags bit 10): per capture its draws in submission
+                             order with kind, primitive, counts, tag, label, programs, pass and time (raw RSX
+                             ticks of the AUTO op); 1 when the capture has no RSX frame family
+  ps3dk-prof shader-hash [--json] <file>...
+                             the canonical program hash of each program container (.vpo/.fpo), as RSX frame
+                             captures name programs
   ps3dk-prof export --window W | --frame N | --frames A..B <in.prof> <out.prof>
                              write one frame or a frame range of a capture as a standalone .prof
   ps3dk-prof fifo [--json] <file>    FIFO wrap phase waits (file_flags bit 6) on the PPU clock: per-wrap
@@ -405,6 +413,89 @@ fn counters(args: &[String]) -> ExitCode {
             verdict_code(&a)
         }
     }
+}
+
+fn rsx_frame(args: &[String]) -> ExitCode {
+    use ps3dk_prof::rsx_frame::{self as rf, GroupBy};
+    let (mut json, mut capture, mut draw, mut by, mut path) = (false, None::<u32>, None::<u32>, None::<GroupBy>, None);
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        let val = args.get(i + 1);
+        match a {
+            "--json" if !json => json = true,
+            "--capture" if capture.is_none() => match val.and_then(|v| v.parse().ok()) {
+                Some(v) => { capture = Some(v); i += 1; }
+                None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+            },
+            "--draw" if draw.is_none() && by.is_none() => match val.and_then(|v| v.parse().ok()) {
+                Some(v) => { draw = Some(v); i += 1; }
+                None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+            },
+            "--group-by" if by.is_none() && draw.is_none() => match val.and_then(|v| GroupBy::parse(v)) {
+                Some(v) => { by = Some(v); i += 1; }
+                None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+            },
+            p if !p.starts_with('-') && path.is_none() => path = Some(p.to_string()),
+            _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+        }
+        i += 1;
+    }
+    let Some(path) = path else { eprintln!("{USAGE}"); return ExitCode::from(3); };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    match load_file(&bytes) {
+        Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        Outcome::Analysed(a) => {
+            let mut frames = rf::frames(&a.capture);
+            if let Some(id) = capture {
+                frames.retain(|f| f.id == id);
+                if frames.is_empty() { eprintln!("ps3dk-prof: no RSX frame capture {id}"); return ExitCode::from(1); }
+            }
+            let mut out = std::io::stdout().lock();
+            let result = if json {
+                serde_json::to_writer_pretty(&mut out, &rf::to_json(&a.capture, &frames)).map_err(std::io::Error::other)
+                    .and_then(|_| writeln!(out))
+            } else {
+                rf::write_text(&mut out, &a.capture, &frames, draw, by)
+            };
+            if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
+            if a.capture.rsx_frame.is_none() { ExitCode::from(1) } else { verdict_code(&a) }
+        }
+    }
+}
+
+fn shader_hash(args: &[String]) -> ExitCode {
+    use ps3dk_prof::rsx_frame::{container_hash, Profile};
+    let (json, files) = match args.first() {
+        Some(f) if f == "--json" => (true, &args[1..]),
+        _ => (false, args),
+    };
+    if files.is_empty() || files.iter().any(|f| f.starts_with('-')) { eprintln!("{USAGE}"); return ExitCode::from(3); }
+    let mut code = ExitCode::SUCCESS;
+    let mut rows = Vec::new();
+    for f in files {
+        let r = std::fs::read(f).map_err(|e| e.to_string()).and_then(|b| container_hash(&b));
+        match &r {
+            Ok(h) if !json => println!("{} {:016x} {} instructions{}{}  {f}",
+                if h.profile == Profile::Vertex { "vp" } else { "fp" }, h.hash, h.instructions,
+                if h.const_blocks > 0 { format!(", {} constant blocks", h.const_blocks) } else { String::new() },
+                if h.unterminated { ", UNTERMINATED" } else { "" }),
+            Err(e) if !json => { eprintln!("ps3dk-prof: {f}: {e}"); code = ExitCode::from(1); }
+            Err(_) => code = ExitCode::from(1),
+            _ => {}
+        }
+        rows.push(match r {
+            Ok(h) => serde_json::json!({"file": f, "profile": if h.profile == Profile::Vertex { "vp" } else { "fp" },
+                "hash": format!("{:016x}", h.hash), "instructions": h.instructions, "bytes": h.bytes,
+                "const_blocks": h.const_blocks, "unterminated": h.unterminated}),
+            Err(e) => serde_json::json!({"file": f, "error": e}),
+        });
+    }
+    if json { println!("{}", serde_json::to_string_pretty(&rows).expect("json")); }
+    code
 }
 
 fn find_window<'a>(windows: &'a [ps3dk_prof::CaptureWindow], query: &str) -> Option<&'a ps3dk_prof::CaptureWindow> {
@@ -1053,6 +1144,12 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|c| c == "counters") {
         return counters(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "rsx-frame") {
+        return rsx_frame(&args[1..]);
+    }
+    if args.first().is_some_and(|c| c == "shader-hash") {
+        return shader_hash(&args[1..]);
     }
     if args.first().is_some_and(|c| c == "fifo") {
         return fifo(&args[1..]);
