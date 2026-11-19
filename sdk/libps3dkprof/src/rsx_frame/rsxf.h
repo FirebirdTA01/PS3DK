@@ -42,7 +42,9 @@ enum { RSXF_UNTIMED_OUTSIDE_RANGE = 32, RSXF_UNTIMED_RING_FULL = 33, RSXF_UNTIME
        RSXF_UNTIMED_NOT_HOOKED = 64, RSXF_UNTIMED_NO_WINDOW = 65 };
 enum { RSXF_PROFILE_VP = 1, RSXF_PROFILE_FP = 2 };
 enum { RSXF_SRC_STREAM = 1, RSXF_SRC_CONTAINER = 2, RSXF_SRC_MEMORY = 3, RSXF_SRC_APP = 4 };
-enum { RSXF_PF_UNTERMINATED = 1, RSXF_PF_UNREADABLE = 2 };
+/* NOT_REVALIDATED: the identity comes from a bind before the capture was armed (the container may have been
+ * rewritten in place since); a bind while armed always hashes every instruction byte. */
+enum { RSXF_PF_UNTERMINATED = 1, RSXF_PF_UNREADABLE = 2, RSXF_PF_NOT_REVALIDATED = 4 };
 enum { RSXF_OUT_DONE = 1, RSXF_OUT_TRUNCATED = 2, RSXF_OUT_ABANDONED = 3 };
 enum { RSXF_R_NONE = 0, RSXF_R_STAGING = 1, RSXF_R_PROGRAMS = 2, RSXF_R_LABELS = 3, RSXF_R_SHUTDOWN = 4,
        RSXF_R_RESET = 5, RSXF_R_DECODER = 6, RSXF_R_CANCELLED = 7 };

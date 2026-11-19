@@ -271,6 +271,64 @@ fn mismatched_op_is_not_timed() {
     assert_eq!((g[0].timed, g[0].sum), (0, 0));
 }
 
+/// The runtime's own mismatch flag (hooked call and decoded words disagree, same kind and frame as the op) is not
+/// timed either: no timed count, sum, span, group or pass.
+#[test]
+fn flagged_mismatch_is_not_timed() {
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let (op, op_kind) = bind.ops[0];
+    let mut d = XDraw::timed(0, op_kind, op);
+    d.flags |= 4;
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 1, 0, 1, u32::MAX, 0, 0, 0, 0];
+    let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, bind.frame, "f").chunk(),
+        one_draw(1, &d), end.chunk()]);
+    let cap = reader::read(&f.bytes()).unwrap();
+    let fr = &rf::frames(&cap)[0];
+    assert!(!fr.draws[0].op_mismatch);
+    assert_eq!(fr.draws[0].timing, Timing::Invalid("hooked call and decoded draw disagree"));
+    assert_eq!((fr.totals.timed, fr.totals.mismatched, fr.totals.sum, fr.totals.span), (0, 1, 0, None));
+    assert_eq!(fr.draws[0].pass, None);
+    for by in [GroupBy::Kind, GroupBy::Pass] {
+        assert!(rf::group(fr, by, &Default::default()).iter().all(|g| g.timed == 0 && g.sum == 0));
+    }
+}
+
+/// PROGRAM flag 4: identity from a bind before the capture, shown as such; the same hash exact and tagged are two
+/// programs, a tagged one twice is MALFORMED like any duplicate.
+#[test]
+fn not_revalidated_program() {
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let prog = |index: u32, flags: u16| {
+        let mut b = Buf::default();
+        b.u16(2).u16(48).u32(index).u8(2).u8(2).u16(flags).u32(2).u64(0x77).u32(32).u32(0).u32(0x40).u32(0).u64(0);
+        b
+    };
+    let mut b = prog(1, 4);
+    b.0.extend_from_slice(&prog(2, 0).0);
+    let mut d = XDraw::decoded(0, 1);
+    d.fp = 1;
+    d.encode(&mut b);
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 0, 1, 0, u32::MAX, 2, 0, 0, 0];
+    end.untimed = 1;
+    let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, 0, "n").chunk(),
+        draws_chunk(1, 0, 3, &b.0), end.chunk()]);
+    let cap = reader::read(&f.bytes()).expect("tagged and exact programs of one hash");
+    let fr = &rf::frames(&cap)[0];
+    assert!(fr.programs[0].not_revalidated && !fr.programs[1].not_revalidated);
+    let (rc, out) = cli(&["rsx-frame", &temp("notreval.prof", &f.bytes())]);
+    assert_eq!(rc, 0);
+    assert!(out.contains("bound before capture, not revalidated"), "{out}");
+    let mut b = prog(1, 4);
+    b.0.extend_from_slice(&prog(2, 4).0);
+    let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, 0, "n").chunk(),
+        draws_chunk(1, 0, 2, &b.0)]);
+    assert_eq!(rule_of(&f), Rule::RsxFrame);
+}
+
 #[test]
 fn flag_rules() {
     let base = tags_fixture();

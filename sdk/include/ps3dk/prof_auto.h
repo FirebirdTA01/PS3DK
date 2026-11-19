@@ -154,7 +154,7 @@ int ps3dk_prof_shutdown(void);
  * same as an AUTO build without it. Present, it needs the report ring (PS3_PROF_AUTO_RING): without it the capture
  * records availability "no report ring", stays dormant (no state, no decoder pass) and refuses every request.
  * Memory: staging_kb x blocks of MAIN memory allocated when a request is accepted and freed after the capture is
- * written (2 x 256 KiB by default), plus about 48 KiB of decoder and program state from AUTO attach with the ring.
+ * written (2 x 256 KiB by default), plus about 52 KiB of decoder and program state from AUTO attach with the ring.
  * At shutdown the blocks of a capture in flight are freed once both the drainer and the owner thread have left it;
  * if the owner never runs again they stay allocated until the process exits. */
 typedef struct ps3dk_prof_rsx_frame_options {

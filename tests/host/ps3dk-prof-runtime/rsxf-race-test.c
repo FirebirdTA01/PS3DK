@@ -7,8 +7,13 @@
  *                      may free it under an owner that could still run); every written capture is checked (each
  *                      BEGIN has its END, every END count matches the records), every free is of a live block, and
  *                      after the seal every request is refused ESTOPPED.
- *   rsxf-race bench    the FP bind hook's cost: the first bind of a 35 KiB program, a rebind (cache hit) and a bind
- *                      whose sampled bytes changed (a new hash).
+ *   rsxf-race bench    the FP bind hook's cost outside a capture: the first bind of a 35 KiB program (a full hash, as
+ *                      every bind while a capture is armed), a rebind (cache hit) and a bind whose sampled bytes
+ *                      changed (identity unavailable, no hash).
+ *   rsxf-race identity FP identity across binds: an unsampled instruction byte rewritten between binds (before the
+ *                      capture: the stale hash is tagged not revalidated; while armed: a new identity), a sampled byte
+ *                      rewritten before the capture (identity unavailable), an unchanged program, a constant-only
+ *                      patch while armed (the same identity).
  * The runtime's dependencies are stubbed here: no core profiler is linked. */
 #define _POSIX_C_SOURCE 200809L
 #include "../../../sdk/libps3dkprof/src/core/prof_internal.h"
@@ -321,16 +326,125 @@ static int bench(void)
         ps3dk_prof__rsxf_bind(&g_ctx, u, BYTES, 0x40);
     t2 = now_ns();
     for (int i = 0; i < MISSES; i++) {
-        u[5] = (uint8_t)(i + 1); /* a sampled byte changed: the container was rewritten in place */
+        u[7] = (uint8_t)(i + 1); /* a sampled byte changed: the container was rewritten in place */
         ps3dk_prof__rsxf_bind(&g_ctx, u, BYTES, 0x40);
     }
     t3 = now_ns();
     ps3dk_prof__rsxf_test_bind_stats(&hashed, &reused);
-    CHECK(hashed == 1 + MISSES && reused == HITS);
+    CHECK(reused == HITS && hashed >= 1 && hashed <= 1 + MISSES / 2); /* a rewrite is never a silent reuse */
     printf("bind cost (host, 35 KiB FP program): first bind %.0f ns, rebind %.1f ns, rewritten %.0f ns\n", t1 - t0,
            (t2 - t1) / HITS, (t3 - t2) / MISSES);
     printf("standing state: %zu bytes (host, 64-bit pointers)\n", ps3dk_prof__rsxf_test_state_bytes());
     free(u);
+    return 0;
+}
+
+/* ---- FP identity across binds ---- */
+enum { FPB = 256 };
+/* 16 instructions of 16 bytes as they lie in memory (halfword-swapped words), the last one ending the program; with
+ * `constant`, instruction 0 reads a constant (word 1 source type 2) and bytes 16..31 are its block. */
+static void fp_make(uint8_t *u, uint8_t seed, int constant)
+{
+    memset(u, 0, FPB);
+    for (int i = 0; i < FPB / 16; i++)
+        u[16 * i + 3] = (uint8_t)(seed + i); /* word 0 bits 16..23: an opcode-like byte, not the end bit */
+    if (constant) {
+        u[5] = 2;
+        memset(u + 16, 0x5a, 16);
+    }
+    u[FPB - 16 + 1] = 1; /* the end bit of the last instruction */
+}
+static uint64_t fp_canon(const uint8_t *u)
+{
+    rsxf_hash h;
+    ps3dk_prof__rsxf_fp_hash(u, FPB, &h);
+    CHECK(!h.unterminated);
+    return h.hash;
+}
+static void fp_draw(uint32_t offset)
+{
+    const uint32_t w[] = {M(0x8e4, 1), offset | 1u, M(0x1808, 1), 5, M(0x1814, 1), 2u << 24, M(0x1808, 1), 0};
+    put(w, 8);
+    ps3dk_prof__rsxf_scan(&g_ctx);
+}
+static int identity(void)
+{
+    static uint8_t a[FPB], b[FPB], c[FPB], k[FPB];
+    uint64_t ha, hb0, hb1, hb2, hk;
+    struct { uint64_t hash; uint32_t flags; } prog[16];
+    uint32_t nprog = 0, fps[16], nd = 0;
+    fp_make(a, 0x10, 0);
+    fp_make(b, 0x40, 0);
+    fp_make(c, 0x70, 0);
+    fp_make(k, 0xa0, 1);
+    ha = fp_canon(a);
+    hb0 = fp_canon(b);
+    ps3dk_prof__rsxf_attach(&g_ctx, 1);
+    /* before the capture */
+    ps3dk_prof__rsxf_bind(&g_ctx, a, FPB, 0x100);
+    ps3dk_prof__rsxf_bind(&g_ctx, b, FPB, 0x200);
+    ps3dk_prof__rsxf_bind(&g_ctx, c, FPB, 0x300);
+    b[35] ^= 0x10; /* instruction 2, outside the sampled first/middle/last 16 bytes */
+    hb1 = fp_canon(b);
+    CHECK(hb1 != hb0);
+    ps3dk_prof__rsxf_bind(&g_ctx, b, FPB, 0x200); /* the sample matches: the old hash, tagged later */
+    c[3] ^= 0x10; /* a sampled byte */
+    ps3dk_prof__rsxf_bind(&g_ctx, c, FPB, 0x300); /* the sample differs: identity unavailable */
+    CHECK(ps3dk_prof_rsx_frame_capture("identity", 0) > 0);
+    ps3dk_prof__rsxf_frame(1, p_tb(), 1, 1, 1); /* armed */
+    fp_draw(0x100);                              /* A, bound before: hash(A), not revalidated */
+    fp_draw(0x200);                              /* B, bound before: the stale hash, not revalidated */
+    fp_draw(0x300);                              /* C: unavailable */
+    ps3dk_prof__rsxf_bind(&g_ctx, b, FPB, 0x200); /* while armed: every instruction byte */
+    fp_draw(0x200);                              /* hash(B now), exact */
+    b[35] ^= 0x20;
+    hb2 = fp_canon(b);
+    ps3dk_prof__rsxf_bind(&g_ctx, b, FPB, 0x200);
+    fp_draw(0x200);                              /* an unsampled rewrite between armed binds: a new identity */
+    hk = fp_canon(k);
+    ps3dk_prof__rsxf_bind(&g_ctx, k, FPB, 0x400);
+    fp_draw(0x400);
+    k[20] ^= 0xff;                               /* constant values only */
+    CHECK(fp_canon(k) == hk);
+    ps3dk_prof__rsxf_bind(&g_ctx, k, FPB, 0x400);
+    fp_draw(0x400);                              /* the same identity */
+    ps3dk_prof__rsxf_bind(&g_ctx, a, FPB, 0x100);
+    fp_draw(0x100);                              /* unchanged, rebound while armed: hash(A), exact */
+    ps3dk_prof__rsxf_frame(2, p_tb(), 1, 1, 1); /* closed */
+    ps3dk_prof__rsxf_drain(emit, NULL, 1, 0);
+    ps3dk_prof__rsxf_drain(emit, NULL, 1, 1);
+    CHECK(check_stream() == 1);
+    for (size_t at = 0; at < g_len;) {
+        uint32_t type = rd32(g_out + at), n = rd32(g_out + at + 4);
+        const uint8_t *p = g_out + at + 8;
+        at += 8 + n;
+        if (type != RSXF_CHUNK_DRAWS)
+            continue;
+        for (size_t r = RSXF_DRAWS_HEADER; r < n;) {
+            uint32_t ty = p[r] | p[r + 1] << 8, len = p[r + 2] | p[r + 3] << 8;
+            if (ty == RSXF_REC_PROGRAM && p[r + 8] == RSXF_PROFILE_FP) {
+                CHECK(rd32(p + r + 4) == nprog + 1u && nprog < 16);
+                prog[nprog].hash = rd64(p + r + 16);
+                prog[nprog++].flags = p[r + 10] | p[r + 11] << 8;
+            } else if (ty == RSXF_REC_DRAW) {
+                CHECK(nd < 16);
+                fps[nd++] = rd32(p + r + 60);
+            }
+            r += len;
+        }
+    }
+    CHECK(nd == 8);
+#define FP_OF(i) prog[fps[i] - 1u]
+    for (uint32_t i = 0; i < nd; i++)
+        CHECK(fps[i] >= 1 && fps[i] <= nprog);
+    CHECK(FP_OF(0).hash == ha && FP_OF(0).flags == RSXF_PF_NOT_REVALIDATED);
+    CHECK(FP_OF(1).hash == hb0 && FP_OF(1).flags == RSXF_PF_NOT_REVALIDATED); /* tagged, never shown as exact */
+    CHECK(FP_OF(2).hash == 0 && (FP_OF(2).flags & RSXF_PF_UNREADABLE));
+    CHECK(FP_OF(3).hash == hb1 && FP_OF(3).flags == 0);
+    CHECK(FP_OF(4).hash == hb2 && FP_OF(4).flags == 0 && fps[4] != fps[3]);
+    CHECK(FP_OF(5).hash == hk && FP_OF(5).flags == 0 && fps[6] == fps[5]);
+    CHECK(FP_OF(7).hash == ha && FP_OF(7).flags == 0 && fps[7] != fps[0]);
+    printf("FP identity across binds PASS (%u programs, %u draws)\n", nprog, nd);
     return 0;
 }
 
@@ -339,5 +453,7 @@ int main(int argc, char **argv)
     CHECK(argc == 2);
     if (!strcmp(argv[1], "bench"))
         return bench();
+    if (!strcmp(argv[1], "identity"))
+        return identity();
     return round_run((unsigned)strtoul(argv[1], NULL, 10));
 }

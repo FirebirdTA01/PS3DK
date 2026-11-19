@@ -984,7 +984,7 @@ PROGRAM (type 2, length 48), the first time a program identity is seen in the ca
 | 4 | u32 | index: 1.., dense, in definition order (VP and FP share the numbering) |
 | 8 | u8 | profile: 1 VP, 2 FP |
 | 9 | u8 | source: 1 command stream, 2 program container at bind, 3 RSX memory read, 4 app registration |
-| 10 | u16 | flags: bit 0 UNTERMINATED (no end bit within the bound), bit 1 UNREADABLE (no hash); other bits 0 |
+| 10 | u16 | flags: bit 0 UNTERMINATED (no end bit within the bound), bit 1 UNREADABLE (no hash), bit 2 NOT_REVALIDATED (FP container identity from a bind made before the capture was armed; the container may have been rewritten in place since; a bind while armed hashes every instruction byte and never sets it); other bits 0 |
 | 12 | u32 | instruction count |
 | 16 | u64 | canonical hash (12.6); 0 iff UNREADABLE |
 | 24 | u32 | ucode bytes walked (instructions and constant blocks) |
@@ -993,7 +993,9 @@ PROGRAM (type 2, length 48), the first time a program identity is seen in the ca
 | 36 | u32 | ordinal of the first draw using it |
 | 40 | u64 | reserved = 0 |
 
-Two PROGRAM records of one capture with the same (profile, nonzero hash) are MALFORMED.
+Two PROGRAM records of one capture with the same (profile, nonzero hash, NOT_REVALIDATED bit) are MALFORMED. A
+draw whose flags carry MISMATCH is not timed by its AUTO operation: the reader leaves it out of every timed count
+and sum, as it does for an operation of another kind or frame.
 
 LABEL (type 3) and NAME (type 4), length 16 + n rounded up to 8:
 
