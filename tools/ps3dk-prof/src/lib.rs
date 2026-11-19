@@ -30,6 +30,7 @@ pub mod elf_symbols;
 pub mod frames_foreign;
 pub mod hash;
 pub mod model;
+pub mod nv40_disasm;
 pub mod paths;
 pub mod profile;
 pub mod reader;

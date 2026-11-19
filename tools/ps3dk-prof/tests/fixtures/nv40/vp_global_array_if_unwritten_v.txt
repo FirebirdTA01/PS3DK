@@ -1,0 +1,15 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_global_array_if_unwritten_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 00001c6c 009d200d 810000c3 6041fffc
+w 00009c6c 049d2000 011540c3 60411ffc
+w 00011c6c 005d300d 8186c083 6041fffc
+w 201fdc6c 00400000 0286c083 60411ffc
+w 00013400 0040000d 8086c083 6041fffc
+w 401f9c6c 0040000d 8486c083 6041ff81
+r 0 MUL dst=R0 mask=xyzw src0=IN0.xyzw src1=C466.xxxx src2=IN0.xyzw
+r 1 SGT dst=R1 mask=x src0=IN0.xxxx src1=C466.yyyy src2=IN0.xyzw
+r 2 MOV dst=R2 mask=xyzw src0=C467.xyzw src1=IN0.xyzw src2=IN0.xyzw
+r 3 MOV dst=R63 mask=x src0=R1.xxxx src1=IN0.xyzw src2=IN0.xyzw
+r 4 MOV dst=R2 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=IN0.xyzw
+r 5 MOV dst=o0 mask=xyzw src0=R2.xyzw src1=IN0.xyzw src2=IN0.xyzw

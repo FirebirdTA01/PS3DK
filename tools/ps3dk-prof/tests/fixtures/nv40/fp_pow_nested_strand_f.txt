@@ -1,0 +1,33 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_pow_nested_strand_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 90040500 b6011c9c b6010000 c800bfe1
+w 90020500 48011c9d 48010001 c800bfe1
+w 8e040100 b6011c9c c8000001 c800bfe1
+w 0e043b00 c8081c9d fe080001 c8000001
+w 8e020100 48011c9d c8000001 c800bfe1
+w 0e023b00 c8041c9d fe040001 c8000001
+w 02020500 c8041c9d c8080001 c8000001
+w 02020400 00041c9e 00040000 00020000
+w 00003f80 00000000 00000000 00000000
+w 02020200 00041c9c 00040000 c8000001
+w 02000100 00041c9c c8000001 c8000001
+w 04000100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 08000100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 10010100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+r 0 DP3 dst=R2 mask=w prec=0 sat=0 end=0 s0=TEX0.wzyy s1=TEX0.wzyy
+r 1 DP3 dst=R1 mask=w prec=0 sat=0 end=0 s0=TEX0.xyzz s1=TEX0.xyzz
+r 2 MOV dst=R2 mask=xyz prec=0 sat=0 end=0 s0=TEX0.wzyy
+r 3 DIVSQR dst=R2 mask=xyz prec=0 sat=0 end=0 s0=R2.xyzw s1=R2.wwww
+r 4 MOV dst=R1 mask=xyz prec=0 sat=0 end=0 s0=TEX0.xyzz
+r 5 DIVSQR dst=R1 mask=xyz prec=0 sat=0 end=0 s0=R1.xyzw s1=R1.wwww
+r 6 DP3 dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xyzw s1=R2.xyzw
+r 7 MAD dst=R1 mask=x prec=0 sat=0 end=0 s0=-R1.xxxx s1=R1.xxxx s2=c0.xxxx
+r 8 MUL dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xxxx s1=R1.xxxx
+r 9 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=R1.xxxx
+r 10 MOV dst=R0 mask=y prec=0 sat=0 end=0 s0=c0.xxxx
+r 11 MOV dst=R0 mask=z prec=0 sat=0 end=0 s0=c0.xxxx
+r 12 MOV dst=R0 mask=w prec=0 sat=0 end=1 s0=c0.xxxx

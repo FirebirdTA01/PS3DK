@@ -1,0 +1,13 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_array_uniform_dyn_chain_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 00001c6c 03400900 0106c083 60411ffc
+w 00001c6c 009d000d 8186c083 6041fffe
+w 00001c6c 0080000d 8086c043 6041fffc
+w 00001c6c 0080000d 8086c043 6041fffc
+w 401f9c6c 0100000d 8086c043 6041ff81
+r 0 ARL dst=A0 mask=x src0=IN9.xxxx src1=IN9.xyzw src2=IN9.xyzw
+r 1 MUL dst=R0 mask=xyzw src0=C[A0.x+464].xyzw src1=IN0.xyzw src2=IN0.xyzw
+r 2 MUL dst=R0 mask=xyzw src0=R0.xyzw src1=R0.xyzw src2=IN0.xyzw
+r 3 MUL dst=R0 mask=xyzw src0=R0.xyzw src1=R0.xyzw src2=IN0.xyzw
+r 4 MAD dst=o0 mask=xyzw src0=R0.xyzw src1=R0.xyzw src2=IN0.xyzw

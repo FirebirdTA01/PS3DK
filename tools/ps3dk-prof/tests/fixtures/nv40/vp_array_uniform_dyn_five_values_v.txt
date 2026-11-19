@@ -1,0 +1,17 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_array_uniform_dyn_five_values_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 00001c6c 0340090d 8106c083 6041fffc
+w 00001c6c 00dd000d 8106c083 6061fffe
+w 00001c6d 00dd000d 8086c083 6061fffe
+w 00001c6e 00dd000d 8086c083 6061fffe
+w 00001c6f 00dd000d 8086c083 6061fffe
+w 00009c6c 03400a00 0106c083 60411ffc
+w 411f9c6c 00dd000d 8086c083 6061ff83
+r 0 ARL dst=A0 mask=xyzw src0=IN9.xyzw src1=IN9.xyzw src2=IN9.xyzw
+r 1 ADD dst=R0 mask=xyzw src0=IN0.xyzw src1=IN0.xyzw src2=C[A0.x+464].xyzw
+r 2 ADD dst=R0 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=C[A0.y+464].xyzw
+r 3 ADD dst=R0 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=C[A0.z+464].xyzw
+r 4 ADD dst=R0 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=C[A0.w+464].xyzw
+r 5 ARL dst=A1 mask=x src0=IN10.xxxx src1=IN10.xyzw src2=IN10.xyzw
+r 6 ADD dst=o0 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=C[A1.x+464].xyzw

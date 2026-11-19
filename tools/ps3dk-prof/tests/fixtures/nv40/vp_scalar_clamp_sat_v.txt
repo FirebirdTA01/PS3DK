@@ -1,0 +1,7 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_scalar_clamp_sat_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 441f9c6c 0040080d 8106c083 6041ff9c
+w 401f9c6c 0040000d 8106c083 6041ff81
+r 0 MOV dst=o7 mask=xyzw src0=IN8.xyzw src1=IN8.xyzw src2=IN8.xyzw
+r 1 MOV dst=o0 mask=xyzw src0=IN0.xyzw src1=IN0.xyzw src2=IN0.xyzw
