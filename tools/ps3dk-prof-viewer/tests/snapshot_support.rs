@@ -118,3 +118,55 @@ fn extreme_lane_bounds_refuse_without_panicking() {
     p[176..184].copy_from_slice(&u64::MAX.to_le_bytes());
     assert!(reader::read(&encode(&h, &cs)).is_err());
 }
+
+#[test]
+fn review_unrelated_auto_row_cannot_authorize_itself_by_count() {
+    let (h, mut cs) = fixture();
+    let row = &mut cs.iter_mut().find(|c| c.0 == 36).unwrap().1;
+    row[16..24].copy_from_slice(&99999u64.to_le_bytes());
+    let mut hash = Sha256::new();
+    hash.update(&h);
+    for (ty, p) in &cs {
+        if *ty != 49 {
+            hash.update(&ty.to_le_bytes());
+            hash.update(&(p.len() as u32).to_le_bytes());
+            hash.update(p);
+        }
+    }
+    cs.iter_mut().find(|c| c.0 == 49).unwrap().1[72..104].copy_from_slice(&hash.finish());
+    assert!(
+        reader::read(&encode(&h, &cs)).is_err(),
+        "a matching self-declared count cannot admit an unrelated coverage row"
+    );
+}
+
+#[test]
+fn lazy_projection_never_recovers_auto_records_dropped_by_the_source_reader() {
+    use ps3dk_prof::{snapshot_export as ex, snapshot_support::MAX_BYTES};
+    let (h, mut cs) = fixture();
+    let projected = reader::read(&encode(&h, &cs)).unwrap();
+    let mut selector = projected.snapshot.unwrap();
+    cs.retain(|c| c.0 != 49);
+    cs.iter_mut().find(|c| c.0 == 40).unwrap().1[2] &= !4;
+    let source = encode(&h, &cs);
+    let mut cap = reader::read(&source).unwrap();
+    let a = cap.auto.as_mut().unwrap();
+    assert!(a.ops.len() > 2);
+    let kept = a.ops.len() / 2;
+    a.ops_dropped += (a.ops.len() - kept) as u64;
+    a.ops.truncate(kept);
+    let last = a.ops.last().unwrap().id;
+    a.frames.clear(); // no coverage row retained by this analysis
+    selector.source_bytes = source.len() as u64;
+    let mut keep = ex::Keep::default();
+    keep.frames.insert((selector.owner, selector.frame));
+    let inputs = ex::freeze(&cap, &source, selector, keep, MAX_BYTES).unwrap();
+    drop(cap); // the save inputs must stand alone, without the source Analysis
+    let ready = inputs.prepare(&source, MAX_BYTES).unwrap();
+    let saved = ready.render(&source, [1; 32], MAX_BYTES).unwrap();
+    let parsed = reader::read(&saved).unwrap();
+    let a = parsed.auto.unwrap();
+    assert_eq!(a.ops.len(), kept);
+    assert!(a.ops.iter().all(|op| op.id <= last));
+    assert!(a.frames.is_empty());
+}

@@ -31,6 +31,223 @@ fn save(s: &FrameSnapshot) -> Vec<u8> {
         .unwrap()
         .bytes
 }
+
+// A run-long root contributes to the selected frame. Its one earlier child is
+// required for exclusive time; that child's completed descendants are not.
+fn long_root_history(children: u64, loss: bool) -> Vec<u8> {
+    root_history(children, loss, false)
+}
+fn root_history(children: u64, loss: bool, direct: bool) -> Vec<u8> {
+    let mut r = vec![frame(0, 10, 0)];
+    r.extend(zone(0, 0, 0, 20, 1, 0));
+    if !direct {
+        r.extend(zone(0, 0, 1, 30, 2, 1));
+    }
+    for i in 0..children {
+        r.extend(zone(
+            0,
+            0,
+            if direct { 1 } else { 2 },
+            40 + 2 * i,
+            i + 3,
+            if direct { 1 } else { 2 },
+        ));
+        r.push(end(0, 0, if direct { 1 } else { 2 }, 41 + 2 * i, i + 3));
+    }
+    if !direct {
+        r.push(end(0, 0, 1, 50 + 2 * children, 2));
+    }
+    if loss {
+        let next = r.len() as u64;
+        r.push(gap(next, next + 1));
+    }
+    r.extend([
+        frame(0, 100 + 2 * children, 1),
+        end(0, 0, 0, 150 + 2 * children, 1),
+        frame(0, 200 + 2 * children, 2),
+    ]);
+    let mut lanes = vec![lane(if loss { 2 } else { 1 }, seqd(0, r))];
+    if loss {
+        lanes.push(lane(
+            1,
+            seqd(
+                0,
+                vec![
+                    frame(0, 10, 0),
+                    frame(0, 100 + 2 * children, 1),
+                    frame(0, 200 + 2 * children, 2),
+                ],
+            ),
+        ));
+    }
+    let src = scenario(lanes);
+    let mut f = src.file();
+    f.chunks.retain(|c| c.ty != T_RECORDS);
+    let insert = f.chunks.iter().position(|c| c.ty == T_TRAILER).unwrap();
+    let mut records = Vec::new();
+    for l in &src.lanes {
+        let mut at = 0;
+        while at < l.recs.len() {
+            let mut end = (at + 30_000).min(l.recs.len());
+            if matches!(l.recs[end - 1].kind, 1 | 5) {
+                end -= 1;
+            }
+            records.push(chunk(T_RECORDS, records_payload(l.inc, &l.recs[at..end])));
+            at = end;
+        }
+    }
+    f.chunks.splice(insert..insert, records);
+    f.bytes()
+}
+
+#[test]
+fn review_root_support_drops_unrelated_grandchildren_even_with_gap() {
+    for loss in [false, true] {
+        let mut sizes = Vec::new();
+        for n in [1, 2000] {
+            let bytes = long_root_history(n, loss);
+            let s = freeze(&bytes, 1);
+            let saved = ps3dk_prof_viewer::capture_save::encode(&s, 64 << 20).unwrap();
+            assert_eq!(saved.direct_child_bytes, 96);
+            let out = saved.bytes;
+            same(&s, &freeze(&out, 1));
+            let cap = ps3dk_prof::reader::read(&out).unwrap();
+            assert_eq!(
+                cap.spans.len(),
+                2,
+                "only root + its direct child are timing support"
+            );
+            sizes.push(out.len());
+        }
+        assert_eq!(
+            sizes[0], sizes[1],
+            "unrelated old grandchildren cannot grow support"
+        );
+    }
+}
+
+#[test]
+fn recipe_cap_disables_only_save_and_names_direct_children() {
+    let bytes = root_history(30_000, false, true);
+    let s = freeze(&bytes, 1);
+    assert_ne!(s.lane_counts(), (0,0,0), "view survives save dependency refusal (the root overlaps but is claimed by the earlier frame)");
+    let why = s
+        .save_refusal()
+        .expect("direct children exceed the recipe share");
+    assert!(why.contains("direct-child"), "{why}");
+    assert!(ps3dk_prof_viewer::capture_save::encode(&s, 64 << 20).is_err());
+}
+
+#[test]
+fn optional_save_scratch_does_not_refuse_a_snapshot_in_a_small_pool() {
+    let bytes = long_root_history(2, false);
+    let d = Document::from_bytes("small.prof".into(), &bytes);
+    let mut c = Captures::with_budget("small", Home::Live, 1 << 20);
+    c.bind_source(&bytes);
+    let s = c
+        .capture(
+            &d,
+            Some(1),
+            Some(1),
+            Premise {
+                w32: true,
+                show_extrapolated: false,
+            },
+            "test",
+            &mut |n| Some(bytes[..n as usize].to_vec()),
+        )
+        .unwrap();
+    assert!(s.save_refusal().is_some());
+    same(&s, &freeze(&bytes, 1));
+    assert!(c.ledger.used <= 1 << 20);
+}
+
+#[test]
+fn review_tiny_snapshot_from_source_over_ten_mib_saves_with_bounded_workspace() {
+    use ps3dk_prof_viewer::{capture::Pool, capture_save::SaveJob};
+    let bytes = long_root_history(120_000, false);
+    assert!(bytes.len() > 10 << 20);
+    let s = freeze(&bytes, 1);
+    let path =
+        std::env::temp_dir().join(format!("snapshot-large-source-{}.prof", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let pool = Pool::new(64 << 20);
+    let mut job = SaveJob::snapshot(s.clone(), path.clone(), pool.clone())
+        .unwrap_or_else(|e| panic!("tiny selection of {} source bytes: {e}", bytes.len()));
+    assert!(
+        pool.held() <= 64 << 20,
+        "preparation stays within its bounded 64 MiB scratch, independent of the source"
+    );
+    job.wait().unwrap();
+    let out = std::fs::read(&path).unwrap();
+    assert!(out.len() < 100_000);
+    same(&s, &freeze(&out, 1));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn review_mossbrook_freeze_cost() {
+    let Some(path) = std::env::var_os("PS3DK_SNAPSHOT_CAPTURE") else {
+        return;
+    };
+    let bytes = std::fs::read(path).unwrap();
+    let d = Document::from_bytes("capture.prof".into(), &bytes);
+    let mut times = Vec::new();
+    for i in 0..17 {
+        let mut c = Captures::new("freeze-cost", Home::Live);
+        c.bind_source(&bytes);
+        let start = std::time::Instant::now();
+        c.capture(
+            &d,
+            Some(1),
+            Some(1112),
+            Premise {
+                w32: true,
+                show_extrapolated: false,
+            },
+            "timing",
+            &mut |n| Some(bytes[..n as usize].to_vec()),
+        )
+        .unwrap();
+        if i > 1 {
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    println!(
+        "freeze_mossbrook_ms median={} min={} max={} samples={:?}",
+        times[7], times[0], times[14], times
+    );
+}
+
+#[test]
+fn review_old_gap_is_provenance_not_a_reason_to_retain_old_zones() {
+    let mut r = vec![frame(0, 10, 0)];
+    r.extend(zone(0, 0, 0, 20, 1, 0));
+    r.push(end(0, 0, 0, 30, 1));
+    r.push(gap(4, 5));
+    r.push(frame(0, 100, 1));
+    r.extend(zone(0, 0, 0, 120, 2, 0));
+    r.extend([end(0, 0, 0, 130, 2), frame(0, 200, 2)]);
+    let bytes = scenario(vec![
+        lane(2, seqd(0, r)),
+        lane(
+            1,
+            seqd(0, vec![frame(0, 10, 0), frame(0, 100, 1), frame(0, 200, 2)]),
+        ),
+    ])
+    .bytes();
+    let s = freeze(&bytes, 1);
+    let out = save(&s);
+    same(&s, &freeze(&out, 1));
+    let cap = ps3dk_prof::reader::read(&out).unwrap();
+    assert_eq!(cap.spans.len(), 1);
+    assert_eq!(
+        cap.lanes[&2].gap_count, 0,
+        "this GAP affects no retained timing; its source count is provenance"
+    );
+    assert_eq!(cap.snapshot.as_ref().unwrap().diagnostic(3, 2), Some(1));
+}
 fn same(a: &FrameSnapshot, b: &FrameSnapshot) {
     assert_eq!(
         (a.owner, a.frame, a.tb, a.next_tb, a.premise),
@@ -129,11 +346,12 @@ fn mossbrook_snapshot_saved_size_and_clock_support() {
         let out = saved.bytes;
         same(&s, &freeze(&out, frame));
         println!(
-            "frame={frame} source={} saved={} clock={} ext={}",
+            "frame={frame} source={} saved={} clock={} ext={} direct_child={}",
             bytes.len(),
             out.len(),
             saved.clock_bytes,
-            saved.ext_bytes
+            saved.ext_bytes,
+            saved.direct_child_bytes
         );
         if let Some(dir) = std::env::var_os("PS3DK_SNAPSHOT_OUTPUT") {
             let dir = std::path::PathBuf::from(dir);
@@ -469,7 +687,11 @@ fn app_allows_one_save_and_does_not_replace_existing_destination() {
     let saved = std::fs::read(&out).unwrap();
     app.save_snapshot_to(id, out.clone());
     app.wait_save();
-    assert!(matches!(app.save_result, Some((true, _))));
+    assert!(
+        matches!(&app.save_result, Some((false, m)) if m.contains("already saved")),
+        "{:?}",
+        app.save_result
+    );
     assert_eq!(saved, std::fs::read(&out).unwrap());
     for p in [source, out, dir.join("source.frames.txt")] {
         let _ = std::fs::remove_file(p);

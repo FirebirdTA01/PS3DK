@@ -646,7 +646,10 @@ impl App {
                     if self.saved_paths.len()==128 {self.saved_paths.pop_first();}
                     self.saved_paths.insert(pending.key,path.clone());
                 }
-                (false,format!("Saved {}",path.display()))
+                (false,match pending.job.direct_child_bytes {
+                    Some(n)=>format!("Saved {} ({n} bytes of direct-child timing support)",path.display()),
+                    None=>format!("Saved {}",path.display()),
+                })
             }
             Err(e)=>(true,format!("Save failed: {e}")),
         });
@@ -654,6 +657,9 @@ impl App {
 
     pub fn save_snapshot_to(&mut self,id:u32,path:PathBuf){
         if !self.save_available(){return;}
+        if self.saved_paths.get(&(0,id)) == Some(&path) {
+            self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+        }
         let Some(s)=self.captures.list.iter().find(|s|s.id==id).cloned()else{
             self.save_result=Some((true,"This snapshot is no longer retained".into()));return;
         };
@@ -662,6 +668,11 @@ impl App {
 
     fn save_snapshot(&mut self,id:u32,save_as:bool){
         if !self.save_available(){return;}
+        if !save_as {
+            if let Some(path)=self.saved_paths.get(&(0,id)) {
+                self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+            }
+        }
         let Some(s)=self.captures.list.iter().find(|s|s.id==id)else{return};
         let filename=format!("snapshot_{}_{}_{}.prof",s.owner,s.frame,id);
         let suggested=self.saved_paths.get(&(0,id)).cloned().unwrap_or_else(||match &self.captures.home{

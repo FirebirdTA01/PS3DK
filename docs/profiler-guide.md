@@ -641,6 +641,8 @@ the page. Bookmarks are written next to the saved capture as `<name>.frames.txt`
 replaced. Reopening this file selects the frozen frame and its W32/R64 and extrapolation premises, without needing
 the original session, console or bookmark file. Saving during live reception uses the frozen bytes; later network
 data does not change the saved result. One background save runs at a time.
+Save on an already-saved snapshot reports its existing path immediately; Save as
+can publish another independent copy without replacing a file.
 
 A saved snapshot contains its raw timing dependencies, including cross-edge zones and children needed for exact
 exclusive time, overlapping AUTO operations, and the original clock-map inputs. It also carries the original
@@ -649,13 +651,25 @@ timing bars. Before publishing, the viewer reopens the projection and compares t
 Source seal proofs are not carried: their chunk references belong to the original file. When present in the
 original, their count is shown as provenance, not as completion proof for the saved snapshot.
 The support-file limit is 64 MiB; an oversized dependency is named in the refusal, and the viewer never falls back
-to copying the whole session. Temporary save work also uses the shared viewer budget.
+to copying the whole session. Only contributors' direct children are needed for
+exclusive time, not all grandchildren below a run-long root. The save result
+reports the direct-child record bytes. A large direct-child dependency is named
+when it exceeds the allowance.
 
-In the Mossbrook beta 4.10 example, frames 1112 and 1134 save as 101,017 and 101,533 bytes from a 2,157,057-byte
+Freezing retains bounded closure inputs from the already-parsed document. The
+first Save prepares raw support in its worker and parses only that support,
+without reanalysing the whole session. Frozen-input retention has
+an 8 MiB per-snapshot allowance and counts against the shared viewer budget. If
+preparation cannot fit, the snapshot remains viewable and only Save is unavailable,
+with its reason shown. Save preparation reserves at most 64 MiB of scratch; after projection, parsing
+and output work is charged from the actual selected support size. Neither
+reservation grows with the original session length.
+
+In the Mossbrook beta 4.10 example, frames 1112 and 1134 save as 101,049 and 101,565 bytes from a 2,157,057-byte
 capture, including 19,472 bytes of clock support each. Clock anchors are capture-wide and grow with run length;
 a sufficiently long capture can exceed the support limit from clock inputs alone. Raw EXT epoch/event inputs
 needed to validate an SPU or explicit RSX map are also kept and charged to this limit.
-An EXT-heavy test with 4,096 SPU pairs saves 67,030 bytes, including 65,976 bytes of raw EXT support.
+An EXT-heavy test with 4,096 SPU pairs saves 67,062 bytes, including 65,976 bytes of raw EXT support.
 
 The live strip keeps the latest 64 successfully requested windows, including after Disconnect. Each has Save and
 Save as controls. An ACK does not prove that its records have arrived: the viewer explains when the window is

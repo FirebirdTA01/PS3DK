@@ -104,6 +104,12 @@ impl Selection {
                 3 => d.source_kind == 1 && lanes.contains_key(&d.source),
                 4 => d.source_kind == 4 && d.source == 0,
                 5 => d.source_kind == 0 && d.source == 0,
+                6 => {
+                    d.source_kind == 0
+                        && d.source == 0
+                        && d.value <= MAX_BYTES as u64
+                        && d.value % 32 == 0
+                }
                 _ => false,
             };
             if !valid || d.key != 0 || d.auxiliary != 0 || previous.is_some_and(|v| key <= v) {
@@ -227,6 +233,18 @@ impl Selection {
         }
         if cap.auto.as_ref().map_or(0, |a| a.frames_parsed) != self.auto_rows {
             return bad("AUTO row count differs");
+        }
+        if let Some(a) = &cap.auto {
+            let mut frames = std::collections::BTreeSet::from([(self.owner, self.frame)]);
+            for op in &a.ops {
+                frames.extend([op.token(), op.build].into_iter().flatten());
+            }
+            if a.frames
+                .iter()
+                .any(|r| !frames.contains(&(r.owner, r.frame)))
+            {
+                return bad("AUTO row is outside the selected execution/build support");
+            }
         }
         if self.diagnostic(4, 0).is_some()
             && cap.auto.as_ref().and_then(|a| a.config.as_ref()).is_none()

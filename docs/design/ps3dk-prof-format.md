@@ -920,7 +920,10 @@ Source kinds are PPU=1, SPU=2, RSX=3, AUTO=4. The initial kinds are PPU original
 frame-only lane (1, boolean), PPU clock anomaly (2, boolean), source PPU GAP count
 (3), capture-wide AUTO operation-retention loss (4), and original SOURCE_SEAL
 record count (5, source kind 0 and source id 0). Presence of kind 5 means the
-original declared checkpoint proofs; those proofs are not carried. Keys and auxiliary are
+original declared checkpoint proofs; those proofs are not carried. Kind 6 records
+the raw record bytes retained for outside direct children of contributing PPU
+spans (source kind/id zero, a multiple of 32 no greater than the file cap). This
+is a projection-cost count, not a timing measurement. Keys and auxiliary are
 zero for these kinds. PPU kinds require a declared PPU incarnation; AUTO kind
 requires AUTO_CONFIG and source id zero. Unknown kinds, duplicate keys, invalid
 booleans, nonexistent sources and trailing bytes refuse. These facts do not
@@ -941,6 +944,11 @@ session. A 64 MiB cap includes the entire saved file; a refusal identifies the
 oversized dependency. Publication requires exact canonical freeze/save/reopen
 identity. On reopen, provenance is shown explicitly and every bar is recomputed
 from retained raw support. Saved diagnostics never supply missing time values.
+An included ancestor or outside child does not recursively include its descendants.
+Lossy lanes keep only the GAP and stack witnesses needed by retained timing; a
+source GAP count is not permission to copy the whole lane. Every retained AUTO
+coverage row must name the selected frame or an execution/build token of a retained
+operation. Matching the declared row count alone is insufficient.
 The unrelated frame membership/close/source proof family (19,20,21,25,26) is
 omitted and file flag 8 is cleared: its original outer chunk-sequence references
 would not survive projection. Kind 5 records the omission and original seal

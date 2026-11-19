@@ -127,6 +127,9 @@ pub fn page(p: &mut egui::Ui, s: &FrameSnapshot, drawn: &mut Drawn) -> Option<Ac
     if s.saved_support {
         ui::field_message(p, ui::Tone::Neutral, "Saved snapshot: timing is resolved from retained raw records. Source-wide diagnostic counts are carried from the original capture; they are not additional timing events.");
     }
+    if let Some(why) = s.save_refusal() {
+        ui::field_message(p, ui::Tone::Warning, why);
+    }
     drawn.premise = format!(
         "premise (frozen): SPU {} · extrapolated pairs {} · analysed {} bytes ({}), sha256 {}… · sources declared: {}",
         if s.premise.w32 { "W32 (no decrementer wrap)" } else { "R64" },

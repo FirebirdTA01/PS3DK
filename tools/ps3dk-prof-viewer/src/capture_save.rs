@@ -1,20 +1,17 @@
 //! Standalone frozen snapshots: bounded raw support, exact re-resolution, then publication.
 use crate::{
-    capture::{self, Class, FrameSnapshot, PpuEnd, Premise, Pt},
+    capture::{Class, FrameSnapshot, Premise, Pt},
     capture_ctl::{Captures, Home},
     model::Document,
 };
-use ps3dk_prof::{
-    auto_rsx as ar,
-    snapshot_export::Keep,
-    snapshot_support::{Selection, MAX_BYTES},
-};
+use ps3dk_prof::snapshot_support::{Selection, MAX_BYTES};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 pub struct SavedSnapshot {
     pub bytes: Vec<u8>,
     pub clock_bytes: u64,
     pub ext_bytes: u64,
+    pub direct_child_bytes: u64,
 }
 
 fn pt(p: Pt) -> serde_json::Value {
@@ -98,7 +95,41 @@ pub fn reopen(bytes: &[u8]) -> Result<Arc<FrameSnapshot>, String> {
     Ok(s)
 }
 
+/// Build only the bounded recipe from analysis already owned by the document.
+pub(crate) fn prepare(
+    s: &mut FrameSnapshot,
+    doc: &Document,
+) -> Result<ps3dk_prof::snapshot_export::Frozen, String> {
+    let a = doc.analysis().ok_or("Frozen source has no analysis")?;
+    let cut = a.prefix.as_ref().map_or(s.snap.bytes.len(), |p| p.cut);
+    let source = &s.snap.bytes[..cut];
+    let mut keep = s
+        .save_seeds
+        .take()
+        .ok_or("Save unavailable: selection exceeds the per-snapshot recipe allowance")?;
+    keep.frames.insert((s.owner, s.frame));
+    let sel = Selection {
+        flags: u16::from(s.premise.w32) | u16::from(s.premise.show_extrapolated) * 2,
+        owner: s.owner,
+        frame: s.frame,
+        tb: s.tb,
+        next_tb: s.next_tb,
+        source_bytes: source.len() as u64,
+        source_sha: [0; 32],
+        support_sha: [0; 32],
+        semantic_sha: [0; 32],
+        clock_bytes: 0,
+        auto_rows: 0,
+        lanes: BTreeMap::new(),
+        diagnostics: Vec::new(),
+    };
+    ps3dk_prof::snapshot_export::freeze(&a.capture, source, sel, keep, MAX_BYTES)
+}
+
 pub fn encode(s: &FrameSnapshot, limit: usize) -> Result<SavedSnapshot, String> {
+    if !s.saved_support {
+        return encode_prepared(s, limit);
+    }
     let doc = if s.snap.prefix_ok {
         Document::from_bytes("frozen.prof".into(), &s.snap.bytes)
     } else {
@@ -142,77 +173,31 @@ pub fn encode(s: &FrameSnapshot, limit: usize) -> Result<SavedSnapshot, String> 
             bytes,
             clock_bytes: sel.clock_bytes,
             ext_bytes: ext_bytes(source),
+            direct_child_bytes: sel.diagnostic(6, 0).unwrap_or(0),
         });
     }
-    let key = (s.owner, s.frame);
-    let mut keep = Keep::default();
-    keep.frames.insert(key);
-    for (i, p) in a.capture.spans.iter().enumerate() {
-        let end = if p.is_censored() {
-            PpuEnd::Censored
-        } else {
-            p.end_tb
-                .filter(|_| p.inclusive().is_some())
-                .map_or(PpuEnd::Unavailable, PpuEnd::Measured)
-        };
-        let c = capture::ppu_class(
-            a.spans.get(i).and_then(|v| v.attribution.claim()),
-            p.begin_tb,
-            end,
-            key,
-            s.tb,
-            s.next_tb,
-        );
-        if matches!(c, Class::Claimed | Class::Possible)
-            || c == Class::Other
-                && capture::ppu_class(None, p.begin_tb, end, key, s.tb, s.next_tb)
-                    == Class::Possible
-        {
-            keep.spans.insert((p.incarnation, p.span_id));
-        }
-    }
-    if let Some(inv) = &a.capture.auto {
-        let map = doc
-            .auto
-            .as_ref()
-            .and_then(|v| v.report.map.as_ref())
-            .and_then(|m| match m {
-                ar::MapState::Qualified(m) => Some(m.as_ref()),
-                _ => None,
-            });
-        for o in &inv.ops {
-            // Unclaimed invalid records are source-wide unknown membership and
-            // must not vanish merely because they cannot be placed on the axis.
-            let overlaps = map.is_some_and(|m| {
-                match (
-                    ar::raw_to_ppu_bounds(&inv.clocks, m, o.raw_begin),
-                    ar::raw_to_ppu_bounds(&inv.clocks, m, o.raw_end),
-                ) {
-                    (Some(b), Some(e)) => b.0 < s.next_tb && e.1 > s.tb,
-                    _ => false,
-                }
-            });
-            if o.token().is_none() || o.token() == Some(key) || overlaps {
-                keep.ops.insert(o.id);
-            }
-        }
-    }
-    let sel = Selection {
-        flags: u16::from(s.premise.w32) | u16::from(s.premise.show_extrapolated) * 2,
-        owner: s.owner,
-        frame: s.frame,
-        tb: s.tb,
-        next_tb: s.next_tb,
-        source_bytes: source.len() as u64,
-        source_sha: crate::sha256::digest(source),
-        support_sha: [0; 32],
-        semantic_sha: crate::sha256::digest(&canonical(s)),
-        clock_bytes: 0,
-        auto_rows: 0,
-        lanes: BTreeMap::new(),
-        diagnostics: Vec::new(),
-    };
-    let bytes = ps3dk_prof::snapshot_export::project(source, sel, keep, limit)?;
+    return Err("Saved snapshot has no selector".into());
+}
+
+fn encode_prepared(s: &FrameSnapshot, limit: usize) -> Result<SavedSnapshot, String> {
+    let p = s.save.as_ref().ok_or_else(|| {
+        s.save_error
+            .as_deref()
+            .unwrap_or("Save unavailable: no bounded support recipe")
+            .to_string()
+    })?;
+    let source = &s.snap.bytes[..p.source_bytes()];
+    let ready = p.prepare(source, limit)?;
+    encode_ready(s, &ready, limit)
+}
+
+fn encode_ready(
+    s: &FrameSnapshot,
+    p: &ps3dk_prof::snapshot_export::Prepared,
+    limit: usize,
+) -> Result<SavedSnapshot, String> {
+    let source = &s.snap.bytes[..p.source_bytes()];
+    let bytes = p.render(source, crate::sha256::digest(&canonical(s)), limit)?;
     // Compare values, not only hashes, before any destination is created.
     let frozen = freeze(&bytes, s.owner, s.frame, s.premise)?;
     if canonical(s) != canonical(&frozen) {
@@ -233,6 +218,7 @@ pub fn encode(s: &FrameSnapshot, limit: usize) -> Result<SavedSnapshot, String> 
         ps3dk_prof::snapshot_support::support_digest(&bytes).map_err(|e| e.to_string())?;
     Ok(SavedSnapshot {
         ext_bytes: ext_bytes(&bytes),
+        direct_child_bytes: p.direct_child_bytes,
         bytes,
         clock_bytes,
     })
@@ -271,18 +257,20 @@ pub fn window_range(doc: &Document, id: u32) -> Result<std::ops::RangeInclusive<
 /// the worker still owns buffers. The receiver is not locked during any work.
 pub struct SaveJob {
     rx: std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>,
+    pub direct_child_bytes: Option<u64>,
 }
 impl SaveJob {
     fn reservation(
         input: usize,
         pool: Arc<crate::capture::Pool>,
     ) -> Result<crate::capture::Ledger, String> {
-        // Same accounting pool as snapshots. Include simultaneous parser trees,
-        // graph indexes, canonical values and output/reopened support buffers.
+        // Same accounting pool as snapshots. Snapshot input here is the planned
+        // support size, never the length of the original session. Include parser
+        // trees, canonical values and simultaneous output/reopened support.
         // This is an accounting bound, not a process-memory guarantee.
         let charge = (input as u64)
-            .checked_mul(64)
-            .and_then(|n| n.checked_add(6 * MAX_BYTES as u64))
+            .checked_mul(70)
+            .and_then(|n| n.checked_add(4 << 20))
             .ok_or("Save workspace size overflow")?;
         let mut ledger = crate::capture::Ledger::on(pool);
         ledger
@@ -293,29 +281,71 @@ impl SaveJob {
     fn spawn(
         ledger: crate::capture::Ledger,
         path: std::path::PathBuf,
-        work: impl FnOnce(&Path) -> Result<(), String> + Send + 'static,
+        work: impl FnOnce(&Path, &mut crate::capture::Ledger) -> Result<(), String> + Send + 'static,
     ) -> Result<Self, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("capture-save".into())
             .spawn(move || {
-                let result = work(&path).map(|()| path);
+                let mut ledger = ledger;
+                let result = work(&path, &mut ledger).map(|()| path);
                 drop(ledger); // release before signalling completion, including errors
                 let _ = tx.send(result);
             })
             .map_err(|e| format!("Cannot start save worker: {e}"))?;
-        Ok(Self { rx })
+        Ok(Self {
+            rx,
+            direct_child_bytes: None,
+        })
     }
     pub fn snapshot(
         s: Arc<FrameSnapshot>,
         path: std::path::PathBuf,
         pool: Arc<crate::capture::Pool>,
     ) -> Result<Self, String> {
-        let ledger = Self::reservation(s.snap.bytes.len(), pool)?;
-        Self::spawn(ledger, path, move |path| {
-            save(&s, path)?;
+        let direct = s.save.as_ref().map(|p| p.direct_child_bytes);
+        let mut ledger = crate::capture::Ledger::on(pool);
+        if !s.saved_support && s.save.is_none() {
+            return Err(s.save_refusal().unwrap_or("Save unavailable").into());
+        }
+        // Fixed preparation ceiling follows the 8 MiB selector/recipe limits,
+        // independent of the source session length. Replaced before output parse.
+        let preparation = 8 * ps3dk_prof::snapshot_export::RECIPE_BYTES as u64;
+        ledger
+            .reserve(preparation)
+            .map_err(|e| format!("Save preparation workspace unavailable: {e}"))?;
+        let mut job = Self::spawn(ledger, path, move |path, ledger| {
+            let ready = if s.saved_support {
+                None
+            } else {
+                let f = s.save.as_ref().unwrap();
+                Some(f.prepare(&s.snap.bytes[..f.source_bytes()], MAX_BYTES)?)
+            };
+            let output = ready
+                .as_ref()
+                .map_or(s.snap.bytes.len(), |p| p.output_bytes());
+            // The bounded projection is ready, so temporary closure structures
+            // are gone. Reserve parsing/canonical/output buffers before allocation.
+            let quote = (output as u64)
+                .checked_mul(70)
+                .and_then(|n| n.checked_add(4 << 20))
+                .ok_or("Save workspace size overflow")?;
+            if quote > preparation {
+                ledger
+                    .reserve(quote - preparation)
+                    .map_err(|e| format!("Save workspace unavailable: {e}"))?;
+            } else {
+                ledger.settle(preparation, quote);
+            }
+            let out = match ready {
+                Some(p) => encode_ready(&s, &p, MAX_BYTES)?,
+                None => encode(&s, MAX_BYTES)?,
+            };
+            ps3dk_prof::export::publish_projection(&out.bytes, path).map_err(|e| e.to_string())?;
             Ok(())
-        })
+        })?;
+        job.direct_child_bytes = direct;
+        Ok(job)
     }
     /// Reserve before acquiring the immutable accepted prefix. `bytes` copies
     /// only received blocks and releases the receive lock before returning.
@@ -331,7 +361,7 @@ impl SaveJob {
         if data.len() != len {
             return Err("Displayed capture changed before saving".into());
         }
-        Self::spawn(ledger, path, move |path| {
+        Self::spawn(ledger, path, move |path, _ledger| {
             ps3dk_prof::export_bytes_no_clobber(&data, path, range).map_err(|e| e.to_string())
         })
     }
@@ -345,7 +375,7 @@ impl SaveJob {
         pool: Arc<crate::capture::Pool>,
     ) -> Result<Self, String> {
         let ledger = Self::reservation(len, pool)?;
-        Self::spawn(ledger, path, move |path| {
+        Self::spawn(ledger, path, move |path, _ledger| {
             use std::io::Read;
             let mut data = Vec::new();
             std::fs::File::open(source)
