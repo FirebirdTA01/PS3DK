@@ -72,7 +72,8 @@ The manual-lifecycle variants of counters, function paths and waits already cont
 forms need `libps3dkprof_ext_live.a` for live, like `libps3dkprof_ext.a`.
 
 **For the live link** also link `net` (the sample links `net netctl_stub`; `netctl` is used only to show the console's
-IP address) and call `netInitialize()` before `ps3dk_prof_live_start`.
+IP address) and call `netInitialize()` before `ps3dk_prof_live_start`, or turn on live auto-start (section 4.3), which
+needs no app code.
 
 **CMake.** There is no helper for the manual and extension archives: name them in `target_link_libraries`. Example
 for an ILP32 app with the live link:
@@ -213,14 +214,75 @@ with heavy SPU zone traffic.
 
 ### 4.3 Live link
 
-Linked with `libps3dkprof.a` (or `libps3dkprof_ext_live.a` in extension builds) and started by app code (section 5.6).
-There is no build option that starts it.
+Linked with `libps3dkprof.a` (or `libps3dkprof_ext_live.a` in extension builds) and started by app code (section 5.6),
+or with no app code by the opt-in auto-start below.
 
 - Cost: one agent thread (64 KiB stack by default), a listening socket, and file reads while a viewer is connected.
   The writer never waits for the viewer. Overhead on the console has not been measured.
 - Turn it on when: you want to watch a run while it happens, or start and stop capture windows from the PC.
 - Leave it off when: the app has no network, the capture uses a callback sink, the capture is not on `/dev_hdd0/`,
   or it uses rolling output (all refused with `ENOTSUP`).
+
+#### Live viewer auto-start (`PS3_PROF_LIVE_AUTOSTART`, opt-in)
+
+With auto-start, the PC app can connect to an app that has no live or network code. **It is off by default.** Every
+profiler build can turn it on: plain `PS3DK_PROF` builds (`libps3dkprof.a`), the classic automatic lifecycle
+(`libps3prof.a`), the extension and its FIFO/function/counter forms (with `libps3dkprof_ext_live.a`), `PS3_PROF_WAITS`
+and `PS3_PROF_AUTO`.
+
+- **CMake:** `-DPS3_PROF_LIVE_AUTOSTART=ON`. Every executable that links the profiler gets the link request, `net` and
+  `sysmodule_stub`; an extension or `PS3_PROF_AUTO` executable also gets `libps3dkprof_ext_live.a`. Optional:
+  `PS3_PROF_LIVE_PORT` (default `31750`) and `PS3_PROF_LIVE_NET_POOL_KB` (default `0`, see below).
+- **Without CMake:** compile one unit that includes `<ps3dk/prof.h>` with `-DPS3DK_PROF_LIVE_AUTOSTART=1` (or link with
+  `-Wl,-u,__ps3dk_prof_live_autostart_anchor`) and link `-lnet -lsysmodule_stub` after the profiler. A missing library
+  is a link error, never a silent off. `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);`, written once at file
+  scope, sets the port and pool and also requests auto-start.
+
+What the runtime does:
+
+1. After every successful `ps3dk_prof_init` it creates one short-lived start-up thread (64 KiB stack). In the automatic
+   lifecycles init runs in a constructor; the thread keeps the network work out of it.
+2. The thread checks that the capture can be served (a FILE sink under `/dev_hdd0/`, no rolling), takes the profiler's
+   network hold and starts the agent as `ps3dk_prof_live_start(NULL)` would. The TTY shows
+   `ps3prof: live viewer: connect to this console on port 31750`.
+3. Any failure prints one `ps3prof: live auto-start off: ...` line with the reason (no servable capture, network
+   bring-up failed, port taken, thread not created) and profiling continues unchanged.
+4. After `ps3dk_prof_shutdown` has written the finalization, the runtime stops the agent, so a connected viewer gets
+   `END` (up to 2 s for the viewer, 1 s for the thread, then 2 s more if needed). It releases its network hold only
+   after the stop succeeded; an agent that does not stop keeps it until the process exits, with one line saying so.
+5. A manual-lifecycle program that returns from `main` without `ps3dk_prof_shutdown` is covered by a late destructor:
+   the agent is cancelled (no `END`; nothing was finalized) and the hold released.
+
+**Networking is shared, not taken over.** libnet keeps one record of the network's users (`netInitialize`,
+`sys_net_initialize_network_ex`, the profiler). The first brings it up, later ones join it, and only the last release
+finalizes it and unloads the NET module libnet loaded:
+
+- The app may initialize networking before or after the profiler and tear it down whenever it likes; its
+  `netDeinitialize` or `sys_net_finalize_network` no longer pulls the network from under the agent.
+- The profiler never finalizes a network the app or the ps3dk-run hook still holds.
+- An app with one network user sees exactly the calls and results it saw before.
+- **Edge:** whoever brings the network up first chooses its memory pool. If the profiler is first, an app that later
+  initializes with a bigger pool joins and keeps the profiler's pool (libnet prints one line), and so does an app that
+  finalizes and re-initializes with a different pool while the profiler holds the network. Set
+  `PS3_PROF_LIVE_NET_POOL_KB` (or the options macro) to the size the app needs.
+- If something outside libnet brought the network up, the profiler's bring-up fails and auto-start stays off with its
+  one line.
+
+**Existing `ps3dk_prof_live_start` calls keep working.** While the auto-started agent runs, the call returns `OK` and
+does nothing when every non-zero field of its config matches, `EALREADY` otherwise. If auto-start failed (for example
+no network yet), the app's own start behaves as always. The app may also stop the auto-started agent; the runtime then
+only releases its hold.
+
+- Cost (on top of the live link above): the start-up thread at init; the libnet pool (by default the 128 KiB
+  `netInitialize` pool, shared with an app that also uses `netInitialize`) and the NET module; a listening socket on
+  every interface for the whole run; a wake-up every 10 ms; and, only while a viewer is still downloading, up to about
+  3 s (5 s at worst) added to shutdown.
+- Turn it on when: you want to watch or control a development or test build from the PC, especially an app whose
+  source you cannot or do not want to change; RPCS3 or HEN sessions with the viewer.
+- Leave it off when: the build ships; overhead and benchmark runs (the wake-ups and file reads perturb timing); the
+  network is not trusted (the listener is unauthenticated: anyone who reaches the port can read the capture); the app
+  needs a larger libnet pool and you have not set the pool option; or the capture cannot be served (callback sink,
+  rolling, outside `/dev_hdd0/`; it only prints why).
 
 ### 4.4 SPU lanes and RSX domains (extension, EXPERIMENTAL)
 
@@ -594,8 +656,9 @@ With a rolling file open, the other pages show "Needs a complete capture": they 
 
 ### 6.4 Connecting live
 
-What the app needs today: the profiler linked (section 2), `netInitialize` and `ps3dk_prof_live_start` in its code
-(section 5.6), a FILE sink on `/dev_hdd0/`, and no rolling output.
+What the app needs: the profiler linked (section 2), and either live auto-start turned on (section 4.3, no app code) or
+`netInitialize` and `ps3dk_prof_live_start` in its code (section 5.6); a FILE sink on `/dev_hdd0/`, and no rolling
+output.
 
 Press **Connect…**: console IP address (a literal IP), port (default `31750`), and the folder for the saved copy
 (default `Documents/PS3DK Captures` in your home folder). While data arrives the app bar shows `LIVE · PROVISIONAL`;
@@ -676,7 +739,7 @@ Today several PC app features depend on app code or a specific build:
 | Open file, Overview, Capture full frame, picker, Save | yes | yes | yes |
 | Timeline, Zones, Hot paths | need zones and a window | same | window; zones optional |
 | Frames | needs `PS3DK_PROF_FRAME` | same | from flips |
-| Live connect and triggers | needs `netInitialize` + `ps3dk_prof_live_start` | same + `libps3dkprof_ext_live.a` | same + app-linked `ps3dkprof_ext_live`; untested |
+| Live connect and triggers | `PS3_PROF_LIVE_AUTOSTART=ON`, or `netInitialize` + `ps3dk_prof_live_start` | same + `libps3dkprof_ext_live.a` (added by the option) | `PS3_PROF_LIVE_AUTOSTART=ON`; untested on AUTO |
 | SPU/RSX rows | no | needs SPU lane / GPU attach code | RSX automatic |
 | Functions view | no | `_func` variants | no |
 | Waits | no | `PS3_PROF_WAITS` | no (refused) |
@@ -685,8 +748,7 @@ Today several PC app features depend on app code or a specific build:
 | Rolling | no | no | `PS3_PROF_AUTO_ROLLING`, not live |
 | Capture RSX frame | no | no | no |
 
-Work in progress to close these gaps: an opt-in live auto-start so the PC app can connect to and control any
-profiler build without app code (t_276ffda7); a default capture window (t_7adaacd4); per-capture timing choices
+Work in progress to close these gaps: a default capture window (t_7adaacd4); per-capture timing choices
 (t_6dd7fb83); SPU, zone and function switches (t_2873fe00); until-marker windows (t_3ea33a77); finishing a capture
 from the PC (t_dd5b7ce1); startup settings (t_9d1f2c10); rolling captures in the viewer (t_149a6545, t_914a084f); and
 RSX frame capture requested from the PC app (t_1eec0d29). The [API reference](profiler-api.md#16-parallels-app-api-and-pc-app)
@@ -695,8 +757,9 @@ lists each app call next to its PC app equivalent.
 ### 6.10 Troubleshooting
 
 - **Live never connects.** The PC can open a TCP connection to the console's IP on `31750` (or the configured port);
-  the app called `ps3dk_prof_live_start` and it returned `OK` (log its result); the capture is on `/dev_hdd0/`, not
-  a callback sink, not rolling. The connect dialog says "The app must be running with the live agent enabled."
+  the app called `ps3dk_prof_live_start` and it returned `OK` (log its result), or, with auto-start, the TTY shows
+  `ps3prof: live viewer: ...` and not `ps3prof: live auto-start off: ...`; the capture is on `/dev_hdd0/`, not a
+  callback sink, not rolling. The connect dialog says "The app must be running with the live agent enabled."
 - **The capture is empty** (no zones, Zones page "No zones recorded"). No capture window was open: add a window in
   code or press Begin in a live session.
 - **Frames page "No FRAME records".** The app does not call `PS3DK_PROF_FRAME()` (non-AUTO builds).

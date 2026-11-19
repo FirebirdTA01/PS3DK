@@ -19,7 +19,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import r4b_archive as A  # noqa: E402
 
-LIVE_MEMBERS = ('live_agent.o', 'live_os_lv2.o', 'live_api.o')
+LIVE_MEMBERS = ('live_agent.o', 'live_os_lv2.o', 'live_api.o', 'live_autostart.o')
 
 
 def judge_members(ar_t_text):

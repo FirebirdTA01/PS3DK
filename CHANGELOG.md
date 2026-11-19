@@ -54,7 +54,28 @@ The version stamped into builds is generated from the most recent
   temporary breakpoints and disables the current breakpoint before continuing.
   Windows GDB packaging and the released Linux GDB dependency fix remain pending.
 
+- **Profiler live viewer auto-start (opt-in).** With `PS3_PROF_LIVE_AUTOSTART=ON`
+  (CMake) or `PS3DK_PROF_LIVE_AUTOSTART=1` plus `-lnet -lsysmodule_stub`, any
+  profiler build starts the live agent after init, with no application code.
+  This covers plain, extension, wait, function, counter, the classic automatic
+  lifecycle, and `PS3_PROF_AUTO` builds. The runtime brings up the network it
+  needs, stops the agent after the capture is finalized (a connected viewer
+  gets `END`), and releases only its own network hold. Off by default; see
+  "Live viewer auto-start" in [docs/profiler-guide.md](docs/profiler-guide.md)
+  for when to turn it on, its cost, and the optional `PS3_PROF_LIVE_PORT` and
+  `PS3_PROF_LIVE_NET_POOL_KB` settings.
+
 ### Changed
+
+- **libnet shares one network among its users.** `netInitialize`,
+  `sys_net_initialize_network_ex` and the profiler's live auto-start are
+  holders of one network. The first brings it up, later ones join it, and
+  only the last `netDeinitialize` / `sys_net_finalize_network` finalizes it
+  (and unloads the NET module libnet loaded). A program with one network user
+  makes exactly the calls it made before. An app's teardown no longer pulls
+  the network from under another user, such as the live agent or the ps3dk-run
+  hook. A later initialize with a larger memory pool joins the existing
+  network, keeps that network's pool, and prints one TTY line.
 
 - **Pinned Ubuntu release for builds.** CI and release builds run on the
   `ubuntu-26.04` runner label instead of the moving `ubuntu-latest`, so a move

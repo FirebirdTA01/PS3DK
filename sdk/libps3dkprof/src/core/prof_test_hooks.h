@@ -109,6 +109,9 @@ typedef struct ps3dk_prof_test_hooks_t {
     void (*rolling_stop_claimed)(uint32_t owner);
     int live_ephemeral_port;           /* ps3dk_prof_live_start binds port 0 (an ephemeral port), for host tests */
     uint16_t live_listen_port;         /* nonzero: ps3dk_prof_live_start binds 127.0.0.1 on this port (wins) */
+    /* Live auto-start (live_autostart.c, host): the network hold it takes and releases; NULL: always 0. */
+    int (*live_net_acquire)(void *pool, uint32_t pool_bytes);
+    int (*live_net_release)(void);
     unsigned join_calls;               /* host PAL: pal_thread_join calls, counted (controlling thread only) */
     /* Capture RSX frame S2 (host test builds only) */
     void (*rsxcap_step)(int point);    /* the runtime's step points (rsxcap.h RT_* / HK_* / AG_* / DT_*) */
