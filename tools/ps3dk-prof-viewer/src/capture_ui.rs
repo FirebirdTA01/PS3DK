@@ -20,6 +20,7 @@ pub enum Action {
     Show(u32),
     OpenMark(usize),
     Delete(u32),
+    Save(u32, bool),
     Reresolve(Premise),
     Back,
 }
@@ -89,6 +90,8 @@ pub fn sidebar(side: &mut egui::Ui, caps: &Captures, shown: Option<u32>, items: 
 /// Where the page drew its controls, and the bar layout it used (for tests).
 #[derive(Debug, Clone, Default)]
 pub struct Drawn {
+    pub save: Option<Rect>,
+    pub save_as: Option<Rect>,
     pub reresolve: Option<Rect>,
     pub delete: Option<Rect>,
     pub back: Option<Rect>,
@@ -121,6 +124,9 @@ pub fn page(p: &mut egui::Ui, s: &FrameSnapshot, drawn: &mut Drawn) -> Option<Ac
         ),
     };
     ui::field_message(p, ui::Tone::Warning, &drawn.strip);
+    if s.saved_support {
+        ui::field_message(p, ui::Tone::Neutral, "Saved snapshot: timing is resolved from retained raw records. Source-wide diagnostic counts are carried from the original capture; they are not additional timing events.");
+    }
     drawn.premise = format!(
         "premise (frozen): SPU {} · extrapolated pairs {} · analysed {} bytes ({}), sha256 {}… · sources declared: {}",
         if s.premise.w32 { "W32 (no decrementer wrap)" } else { "R64" },
@@ -132,6 +138,10 @@ pub fn page(p: &mut egui::Ui, s: &FrameSnapshot, drawn: &mut Drawn) -> Option<Ac
     );
     p.label(egui::RichText::new(&drawn.premise).small().color(pal.text_muted));
     p.horizontal(|h| {
+        let r=ui::quiet_button(h,"Save snapshot").on_hover_text("Save this frozen result as a standalone .prof; never replace an existing file.");
+        drawn.save=Some(r.rect);if r.clicked(){act=Some(Action::Save(s.id,false));}
+        let r=ui::quiet_button(h,"Save as…");
+        drawn.save_as=Some(r.rect);if r.clicked(){act=Some(Action::Save(s.id,true));}
         let other_premise = Premise { w32: !s.premise.w32, ..s.premise };
         let r = ui::quiet_button(h, &format!("Re-resolve with {}", if other_premise.w32 { "W32" } else { "R64" }))
             .on_hover_text("Makes a NEW snapshot of the same bytes under the other SPU premise; this one is unchanged.");

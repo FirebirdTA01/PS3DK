@@ -1020,6 +1020,8 @@ fn live_save_cuts_the_displayed_prefix_and_survives_disconnect() {
     let cap = ps3dk_prof::reader::read(&saved).unwrap();
     assert_eq!(cap.export.unwrap().source_size, accepted as u64);
     assert_eq!(saved, ps3dk_prof::export_bytes(&torn[..accepted], 3..=5).unwrap());
+    let window = exported_path(&base, "window_2");
+    app.save_live_window_to(2, window.clone());
     // The receiver continues after Save. Without polling the App its document stays at the old prefix.
     go.send(()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1027,15 +1029,15 @@ fn live_save_cuts_the_displayed_prefix_and_survives_disconnect() {
         assert!(Instant::now() < deadline, "Save blocked the receiver");
         std::thread::sleep(Duration::from_millis(5));
     }
-    app.save_window(2);
+    app.wait_save();
     assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
-    let window = exported_path(&base, "window_2");
     let cap = ps3dk_prof::reader::read(&std::fs::read(&window).unwrap()).unwrap();
     assert_eq!(cap.export.unwrap().source_size, accepted as u64, "not the newer received bytes");
     std::fs::remove_file(&window).unwrap();
     app.live.as_ref().unwrap().client.disconnect();
     poll_app_until(&mut app, |a| a.live.as_ref().unwrap().client.finished());
-    app.save_window(2);
+    app.save_live_window_to(2, window.clone());
+    app.wait_save();
     assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
     assert!(ps3dk_prof::reader::read(&std::fs::read(&window).unwrap()).is_ok());
     drop(app);

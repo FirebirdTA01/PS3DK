@@ -689,6 +689,8 @@ pub struct Capture {
     pub profile: Option<crate::profile::ProfileRecord>,
     /// Standalone export metadata (chunk 40); Some when exported from another capture.
     pub export: Option<ExportRecord>,
+    /// Host-created bounded frame snapshot (chunk 49); not whole-run evidence.
+    pub snapshot: Option<crate::snapshot_support::Selection>,
 }
 
 impl Capture {

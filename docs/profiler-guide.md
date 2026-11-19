@@ -637,6 +637,33 @@ domain with solid cores, whiskers for timing uncertainty, possible and extrapola
 the page. Bookmarks are written next to the saved capture as `<name>.frames.txt`. Limits: 64 snapshots per session,
 1 GiB accounted memory across sessions.
 
+**Save snapshot** writes an independent `.prof`; **Save as…** chooses its destination. Existing files are never
+replaced. Reopening this file selects the frozen frame and its W32/R64 and extrapolation premises, without needing
+the original session, console or bookmark file. Saving during live reception uses the frozen bytes; later network
+data does not change the saved result. One background save runs at a time.
+
+A saved snapshot contains its raw timing dependencies, including cross-edge zones and children needed for exact
+exclusive time, overlapping AUTO operations, and the original clock-map inputs. It also carries the original
+source's diagnostic aggregates, explicitly marked as source-wide provenance on reopen. Those counts never create
+timing bars. Before publishing, the viewer reopens the projection and compares the resolved snapshot exactly.
+Source seal proofs are not carried: their chunk references belong to the original file. When present in the
+original, their count is shown as provenance, not as completion proof for the saved snapshot.
+The support-file limit is 64 MiB; an oversized dependency is named in the refusal, and the viewer never falls back
+to copying the whole session. Temporary save work also uses the shared viewer budget.
+
+In the Mossbrook beta 4.10 example, frames 1112 and 1134 save as 101,017 and 101,533 bytes from a 2,157,057-byte
+capture, including 19,472 bytes of clock support each. Clock anchors are capture-wide and grow with run length;
+a sufficiently long capture can exceed the support limit from clock inputs alone. Raw EXT epoch/event inputs
+needed to validate an SPU or explicit RSX map are also kept and charged to this limit.
+An EXT-heavy test with 4,096 SPU pairs saves 67,030 bytes, including 65,976 bytes of raw EXT support.
+
+The live strip keeps the latest 64 successfully requested windows, including after Disconnect. Each has Save and
+Save as controls. An ACK does not prove that its records have arrived: the viewer explains when the window is
+absent or has no observed frames in the displayed accepted prefix. An open window saves the frames observed so
+far and remains open in the saved file; Save as creates a later revision without overwriting the earlier one.
+Window files use the ordinary window exporter described
+below; their timing is reconstructed from the records retained in that export.
+
 In AUTO builds the snapshot also has an `rsx.auto` row with the retained draw, CALL and range records, placed through
 the reader's qualified AUTO clock map within its interpolation support. Their execution-frame tokens select the frame,
 including CALL-segment draws built in an earlier frame. A ranges-only capture shows recorded ranges, not individual

@@ -108,6 +108,21 @@ impl Captures {
         self.source = Some((data.len() as u64, crate::sha256::digest(data)));
     }
 
+    /// Restores the selector in a standalone saved snapshot without creating a
+    /// bookmark sidecar. Timing is resolved again from its validated raw support.
+    pub fn restore_saved(&mut self, doc: &Document, data: &[u8]) -> Result<Arc<FrameSnapshot>, String> {
+        let sel=doc.analysis().and_then(|a|a.capture.snapshot.as_ref()).ok_or("Not a saved frame snapshot")?;
+        let s=self.capture_inner(doc,Some(sel.owner),Some(sel.frame),
+            Premise{w32:sel.flags&1!=0,show_extrapolated:sel.flags&2!=0},
+            Origin::Frozen{taken:"the original saved selection".into()},
+            &mut |n|Some(data[..n as usize].to_vec()),Some((sel.tb,sel.next_tb)),None)?;
+        if crate::sha256::digest(&crate::capture_save::canonical(&s))!=sel.semantic_sha {
+            self.delete(s.id);drop(s);self.sweep();
+            return Err("Saved snapshot semantic identity differs from its frozen result".into());
+        }
+        Ok(s)
+    }
+
     /// Why a capture of `doc` is not possible now, or None.
     pub fn blocked(&self, doc: Option<&Document>) -> Option<String> {
         let Some(d) = doc else { return Some("No capture is open.".into()) };

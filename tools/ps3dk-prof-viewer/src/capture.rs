@@ -653,6 +653,9 @@ pub struct FrameSnapshot {
     pub premise: Premise,
     pub freq_hz: Option<u64>,
     pub origin: Origin,
+    /// Diagnostic aggregates are values carried from the original source;
+    /// all timing still comes from the retained raw support.
+    pub saved_support: bool,
     pub lanes: Box<[CLane]>,
     pub bars: Box<[CBar]>,
     pub labels: Box<[Box<str>]>,
@@ -897,6 +900,7 @@ pub const fn pending_bytes() -> u64 {
 
 /// The classified frame, before admission.
 pub struct Plan {
+    saved_support: bool,
     owner: u32,
     owner_name: String,
     frame: u64,
@@ -986,7 +990,7 @@ fn plan_auto(
     if lanes.len() >= u16::MAX as usize { return Err("too many lanes".into()); }
     let li = lanes.len() as u16;
     let mut ev = Evidence { open: inv.final_seen.then_some(0), loss: inv.final_seen.then_some(0),
-        auto_dropped: inv.ops_dropped, ..Evidence::default() };
+        auto_dropped: src.a.capture.snapshot.as_ref().and_then(|s|s.diagnostic(4,0)).unwrap_or(inv.ops_dropped), ..Evidence::default() };
     let report = src.auto;
     let map = report.and_then(|r| r.map.as_ref()).and_then(|m| match m {
         ar::MapState::Qualified(m) => Some(m.as_ref()), _ => None,
@@ -1088,6 +1092,10 @@ pub fn plan(
                 && lane.gap_count == 0 && !lane.clock_anomaly,
             ..Evidence::default()
         };
+        if let Some(saved)=&cap.snapshot {
+            if let Some(value)=saved.diagnostic(1,inc){ev.frame_only=value!=0;}
+            if let Some(value)=saved.diagnostic(3,inc){ev.gaps=value;}
+        }
         let mut max_depth = 0u8;
         w.ops(1 + lane.spans.len() as u64)?;
         for &idx in &lane.spans {
@@ -1335,6 +1343,7 @@ pub fn plan(
     )?;
     w.ops((members.len() as u64).saturating_mul(log2(members.len())))?;
     let mut p = Plan {
+        saved_support: src.a.capture.snapshot.is_some(),
         owner,
         owner_name: o.name.clone(),
         frame,
@@ -1439,6 +1448,7 @@ pub fn build(p: Plan, id: u32, snap: Arc<SnapshotBytes>, origin: Origin) -> Fram
         premise: p.premise,
         freq_hz: p.freq_hz,
         origin,
+        saved_support: p.saved_support,
         lanes: lanes.into_boxed_slice(),
         bars: bars.into_boxed_slice(),
         labels: labels.into_boxed_slice(),
