@@ -14,11 +14,14 @@ struct RowKey {
     descending: bool,
     group: Option<GroupBy>,
     by_target: bool,
+    expanded: std::collections::BTreeSet<usize>,
     scan: u64,
 }
 #[derive(Default)]
 pub struct Rows {
     pub ids: Vec<usize>,
+    /// `ids` with instance runs collapsed into one row (expanded runs list their draws).
+    pub display: Vec<crate::rsx_constants_ui::Row>,
     pub groups: Vec<rf::Group>,
 }
 /// Header warnings with their reasons: mismatched draws, lost decoder events, replaced text.
@@ -69,6 +72,8 @@ pub struct State {
     pub group: Option<GroupBy>,
     /// Group by render target (viewer-side, from the register state); exclusive with `group`.
     pub by_target: bool,
+    /// Instance runs (indices into the capture's `instance_runs`) shown expanded in the draw list.
+    pub expanded: std::collections::BTreeSet<usize>,
     pub legacy: bool,
     pub focus: bool,
     /// The capture switched to when the live link ended, and why its timing is incomplete.
@@ -88,6 +93,7 @@ impl Default for State {
             tab: Tab::Summary,
             group: None,
             by_target: false,
+            expanded: Default::default(),
             legacy: false,
             focus: false,
             link_ended: None,
@@ -103,15 +109,18 @@ impl State {
     pub fn rows(&mut self, v: &RsxFrameView, names: &Names, scan: u64) -> Arc<Rows> {
         if let Some((k, rows)) = &self.rows {
             if k.generation == v.generation && k.capture == self.selected && k.filter == self.filter
-                && k.column == self.column && k.descending == self.descending && k.group == self.group && k.by_target == self.by_target && k.scan == scan {
+                && k.column == self.column && k.descending == self.descending && k.group == self.group && k.by_target == self.by_target && k.expanded == self.expanded && k.scan == scan {
                 return rows.clone();
             }
         }
-        let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| Rows {
-            ids: sorted_draws(f, &self.filter, self.column, self.descending, names),
+        let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| {
+            let ids = sorted_draws(f, &self.filter, self.column, self.descending, names);
+            Rows {
+            display: crate::rsx_constants_ui::display_rows(f, &ids, &self.expanded),
+            ids,
             groups: if self.by_target { crate::rsx_state_ui::target_groups(f) } else { self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)) },
-        }));
-        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, by_target:self.by_target, scan}, rows.clone()));
+        }}));
+        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, by_target:self.by_target, expanded:self.expanded.clone(), scan}, rows.clone()));
         rows
     }
     /// The link-ended reason, shown only while that capture is selected.
@@ -120,6 +129,7 @@ impl State {
     }
     pub fn select(&mut self, f: &FrameView) {
         self.rows = None;
+        self.expanded.clear();
         self.selected = Some(f.id);
         self.column = DrawColumn::Time;
         self.descending = true;
@@ -286,7 +296,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
    let cached=st.rows(v,names,scan);let ids=&cached.ids;
    if st.group.is_some()||st.by_target {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    if ids.is_empty(){p.label(if f.draws.is_empty(){"No draw records retained in this capture."}else{"No draws match the filter."});}
-   draw_table(p,v,f,names,st,out,&ids);
+   draw_table(p,v,f,names,st,out,&cached.display);
    p.separator();
    let Some(di)=st.draw.and_then(|n|f.draws.iter().position(|d|d.raw.ordinal==n))else{return};let d=&f.draws[di];
    let sx=crate::rsx_state_ui::Ctx{f,index:di};
@@ -314,7 +324,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      Tab::State=>crate::rsx_state_ui::state_tab(p,&sx,&mut st.state_cache),
      Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache),
      Tab::Buffers=>crate::rsx_state_ui::buffers_tab(p,&sx,&mut st.state_cache),
-     Tab::Constants=>{ui::field_message(p,ui::Tone::Neutral,"Shader constants are not recorded in this capture format.");},
+     Tab::Constants=>crate::rsx_constants_ui::constants_tab(p,f,di,v),
    }
  });
 }
@@ -325,8 +335,9 @@ fn draw_table(
     names: &Names,
     st: &mut State,
     out: &mut Drawn,
-    ids: &[usize],
+    rows: &[crate::rsx_constants_ui::Row],
 ) {
+    use crate::rsx_constants_ui::{self as rc, Row};
     const ROW: f32 = 28.0;
     egui::ScrollArea::horizontal()
         .id_salt("rsxf-table-x")
@@ -357,44 +368,68 @@ fn draw_table(
                 .id_salt(("rsxf-draws", f.id))
                 .max_height(200.0);
             if st.focus {
-                if let Some(pos) = ids
+                if let Some(pos) = rows
                     .iter()
-                    .position(|&i| Some(f.draws[i].raw.ordinal) == st.draw)
+                    .position(|&r| rc::row_draws(f, r).any(|i| Some(f.draws[i].raw.ordinal) == st.draw))
                 {
                     list = list
                         .vertical_scroll_offset(pos as f32 * (ROW + p.spacing().item_spacing.y));
                 }
             }
-            list.show_rows(p, ROW, ids.len(), |p, range| {
+            list.show_rows(p, ROW, rows.len(), |p, range| {
                 for i in range {
-                    let d = &f.draws[ids[i]];
+                    let row = rows[i];
+                    let span = rc::row_draws(f, row);
+                    let d = &f.draws[span.start];
+                    let holds = span.clone().any(|j| Some(f.draws[j].raw.ordinal) == st.draw);
                     out.rows += 1;
                     p.horizontal(|p| {
-                        let r = p.add_sized(
-                            [cols[0], ROW],
-                            egui::SelectableLabel::new(
-                                st.draw == Some(d.raw.ordinal),
-                                format!("#{} {}", d.raw.ordinal, d.raw.kind.name()),
-                            ),
-                        );
-                        if st.focus && st.draw == Some(d.raw.ordinal) {
+                        let text = match row {
+                            Row::Draw(_) => format!("#{} {}", d.raw.ordinal, d.raw.kind.name()),
+                            Row::Member(_) => format!("   #{} {}", d.raw.ordinal, d.raw.kind.name()),
+                            Row::Run(r) => rc::run_label(f, r, st.expanded.contains(&r)),
+                        };
+                        let selected = match row {
+                            Row::Run(r) => holds && !st.expanded.contains(&r),
+                            _ => st.draw == Some(d.raw.ordinal),
+                        };
+                        let r = p.add_sized([cols[0], ROW], egui::SelectableLabel::new(selected, text));
+                        if st.focus && selected {
                             r.request_focus();
                             st.focus = false;
                         }
                         if r.has_focus() {
-                            out.focused = Some(d.raw.ordinal);
+                            out.focused = st.draw.filter(|_| holds);
                         }
                         if r.clicked() {
-                            st.draw = Some(d.raw.ordinal);
+                            if let Row::Run(run) = row {
+                                if !st.expanded.remove(&run) {
+                                    st.expanded.insert(run);
+                                }
+                                if !holds {
+                                    st.draw = Some(d.raw.ordinal);
+                                }
+                            } else {
+                                st.draw = Some(d.raw.ordinal);
+                            }
                         }
-                        let time = v.duration(d.timing.interval());
-                        let args = if d.raw.kind == rf::DrawKind::Clear {
+                        let (time, timing_text) = match row {
+                            Row::Run(r) => {
+                                let (sum, timed) = rc::run_time(f, r);
+                                (v.duration(sum), format!("run total: {timed} of {} draws timed", span.len()))
+                            }
+                            _ => (v.duration(d.timing.interval()), d.timing.text()),
+                        };
+                        let mut args = if d.raw.kind == rf::DrawKind::Clear {
                             format!("mask {:#x}", d.raw.clear_mask)
                         } else {
                             format!("{} · {}", rf::primitive_name(d.raw.mode), d.raw.count)
                         };
+                        if let Row::Run(r) = row {
+                            args = format!("{args} · varies {}", rc::varies(&f.instance_runs[r]));
+                        }
                         let cells = [
-                            (time.text, format!("{}\n{}", time.hover, d.timing.text())),
+                            (time.text, format!("{}\n{}", time.hover, timing_text)),
                             (args.clone(), args),
                             (
                                 d.label.clone().unwrap_or("(no label)".into()),

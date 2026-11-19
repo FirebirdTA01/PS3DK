@@ -864,8 +864,17 @@ the index stream of an indexed draw, and the surfaces). Values this draw changed
 from the register state when the capture was armed are tinted and labelled **differs from frame start** (not
 "non-default": hardware reset values are not known), and a register not written since the last decoder reset reads
 **unknown**, never a default. Summary and State list the registers changed since the previous draw with their old
-and new values. Group by **Render target** to total draws per colour/zeta surface. Constants are not recorded;
-older (decoder 1) captures say that no register state was recorded. PIPELINED intervals may overlap: their sum is
+and new values. Group by **Render target** to total draws per colour/zeta surface. Older (decoder 1) captures say
+that no register state was recorded.
+
+**Constants** (decoder 3 captures) lists the draw's vertex-program uniforms, then its fragment-program uniforms, by
+name with their vec4 values; components not written since the last decoder reset show as `?`. Slots and blocks
+without a uniform name (the VP literal pool, unnamed FP constants) follow by slot or offset. Each FP constant has a
+provenance badge: **FIFO exact** (written in the command stream), **container: may differ at GPU time** (the
+program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset). Values
+changed since the previous draw are highlighted. Consecutive draws that differ only in their constants collapse in
+the draw list into one **xN** row with the run's total time and the slots that vary; click it to list its draws.
+Selecting a draw of a run adds a per-instance table of those slots to Constants. PIPELINED intervals may overlap: their sum is
 not isolated execution cost.
 Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
 raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
