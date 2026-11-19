@@ -115,9 +115,13 @@ static void on_evict(void);
 
 #ifdef PS3DK_PROF_PAL_LV2
 #include <cell/sysmodule.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 /* sdk/libnet/src/net_hold.h (libnet, linked with -lnet) */
 extern int __ps3dk_net_prof_acquire(void *pool, uint32_t pool_bytes, int (*load)(void), int (*unload)(void),
-                                    void (*evict)(void));
+                                    int (*is_loaded)(void), int (*probe_up)(void), void (*evict)(void));
 extern int __ps3dk_net_prof_release(void);
 extern void *__ps3dk_net_default_pool(uint32_t *bytes);
 
@@ -131,11 +135,29 @@ static int unload_net(void)
     return cellSysmoduleUnloadModule(CELL_SYSMODULE_NET);
 }
 
+static int net_loaded(void)
+{
+    return cellSysmoduleIsLoaded(CELL_SYSMODULE_NET) == CELL_SYSMODULE_LOADED;
+}
+
+/* Whether a network is up, without touching it: one socket created and closed.  1 up; 0 not initialized (the
+ * system reports ENETDOWN); any other failure as a negative errno. */
+static int net_probe(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd >= 0) {
+        (void)close(fd);
+        return 1;
+    }
+    int e = errno;
+    return e == ENETDOWN ? 0 : (e > 0 ? -e : -1);
+}
+
 static int net_acquire(void *pool, uint32_t bytes)
 {
     if (!pool)
         pool = __ps3dk_net_default_pool(&bytes);
-    return __ps3dk_net_prof_acquire(pool, bytes, load_net, unload_net, on_evict);
+    return __ps3dk_net_prof_acquire(pool, bytes, load_net, unload_net, net_loaded, net_probe, on_evict);
 }
 
 static int net_release(void)

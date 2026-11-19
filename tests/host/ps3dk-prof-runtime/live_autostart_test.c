@@ -63,7 +63,7 @@ static int prof_acquire(void *pool, uint32_t bytes, void (*evict)(void))
         return atomic_load(&acquire_result);
     if (!pool)
         pool = __ps3dk_net_default_pool(&bytes);
-    return __ps3dk_net_prof_acquire(pool, bytes, NULL, NULL, evict);
+    return __ps3dk_net_prof_acquire(pool, bytes, NULL, NULL, NULL, NULL, evict);
 }
 
 static int prof_release(void)

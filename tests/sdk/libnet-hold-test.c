@@ -25,6 +25,8 @@ struct wire_init { uint32_t memory, size; int32_t flags; };
 #define DOUBLE_INIT (-0x7fffff01) /* the model's "already initialized" (the firmware's is measured on target) */
 #define NOT_INIT (-0x7fffff02)
 static atomic_int net_up, modules, inits, finals, loads, unloads, init_fail, final_fail, load_fail, protocol;
+/* The firmware as measured on HEN and in RPCS3: a second initialize while up answers 0 (no refusal). */
+static atomic_int double_ok;
 static atomic_uint last_size;
 static unsigned char *volatile active_pool; /* the pool the "firmware" uses while up */
 
@@ -43,7 +45,7 @@ int __ps3dk_raw_sys_net_initialize_network_ex(const struct wire_init *w)
     if (!atomic_load(&modules))
         atomic_store(&protocol, 1); /* sys_net called with the NET module unloaded */
     if (atomic_exchange(&net_up, 1))
-        return DOUBLE_INIT;
+        return atomic_load(&double_ok) ? 0 : DOUBLE_INIT;
     atomic_store(&last_size, w->size);
     active_pool = (unsigned char *)(uintptr_t)w->memory;
     firmware_touch();
@@ -72,6 +74,18 @@ static int load(void)
         return atomic_load(&load_fail);
     atomic_fetch_add(&modules, 1);
     return 0;
+}
+
+static int is_loaded(void) { return atomic_load(&modules) > 0; }
+/* The profiler's probe (a socket created and closed): up when a network is up, 0 when it is not initialized, or the
+ * error the test injects. */
+static atomic_int probe_error, probes;
+static int probe_up(void)
+{
+    atomic_fetch_add(&probes, 1);
+    if (atomic_load(&probe_error))
+        return atomic_load(&probe_error);
+    return atomic_load(&net_up) ? 1 : 0;
 }
 
 static int unload(void)
@@ -124,7 +138,7 @@ static void prof_evict(void)
 static int prof_acquire(void)
 {
     pthread_mutex_lock(&prof_lock);
-    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, prof_evict);
+    int rc = __ps3dk_net_prof_acquire(prof_pool, sizeof prof_pool, load, unload, is_loaded, probe_up, prof_evict);
     if (!rc)
         atomic_store(&agent_running, 1);
     pthread_mutex_unlock(&prof_lock);
@@ -373,15 +387,62 @@ static void case_legacy_then_cell_no_prof(void)
     CHECK(atomic_load(&modules) == 0);
 }
 
-/* Someone outside libnet brought the network up: the profiler's bring-up fails and holds nothing. */
-static void case_foreign_network(void)
+/* Someone outside libnet brought the network up (NET loaded, no libnet record): the profiler assumes it is foreign. */
+static void foreign(int firmware_double_ok)
 {
-    atomic_store(&net_up, 1);
+    atomic_store(&double_ok, firmware_double_ok);
+    atomic_store(&net_up, 1); /* brought up outside libnet: no front end's record */
     atomic_store(&modules, 1);
-    CHECK(prof_acquire() == DOUBLE_INIT);
-    COUNTS(1, 0, 1, 1);
-    CHECK(prof_release() == 0 && atomic_load(&net_up));
-    COUNTS(1, 0, 1, 1);
+    CHECK(prof_acquire() == 0); /* joined: the NET module was loaded and the probe found a network up */
+    CHECK(atomic_load(&probes) == 1);
+    COUNTS(0, 0, 0, 0);         /* no raw call at all: ownership is never read from an init's result */
+    CHECK(prof_release() == 0 && atomic_load(&net_up) && atomic_load(&modules) == 1);
+    COUNTS(0, 0, 0, 0);         /* never finalized, nothing unloaded */
+}
+static void case_foreign_network(void) { foreign(0); }
+
+/* NET loaded early by the app (or a library) but no network initialized yet: the probe says so, and the profiler
+ * brings the network up as its owner without loading the module, so it finalizes its own network and never unloads
+ * the module someone else loaded. */
+static void case_loaded_but_down(void)
+{
+    atomic_store(&double_ok, 1);
+    atomic_store(&modules, 1); /* the app's early cellSysmoduleLoadModule */
+    CHECK(prof_acquire() == 0);
+    CHECK(atomic_load(&probes) == 1 && atomic_load(&net_up));
+    COUNTS(1, 0, 0, 0); /* one raw init, no load */
+    CHECK(prof_release() == 0 && !atomic_load(&net_up));
+    COUNTS(1, 1, 0, 0); /* its own network finalized, nothing unloaded */
+    CHECK(atomic_load(&modules) == 1);
+}
+
+/* The probe fails some other way: no hold, no raw call; the profiler reports the error (auto-start off). */
+static void case_loaded_probe_error(void)
+{
+    atomic_store(&double_ok, 1);
+    atomic_store(&modules, 1);
+    atomic_store(&probe_error, -5);
+    CHECK(prof_acquire() == -5);
+    COUNTS(0, 0, 0, 0);
+    CHECK(prof_release() == 0);
+    COUNTS(0, 0, 0, 0);
+    CHECK(atomic_load(&modules) == 1);
+}
+/* The measured firmware: a double initialize answers 0, so only libnet's own records (and the loaded module) can
+ * tell a foreign network; the profiler still never finalizes it. */
+static void case_foreign_network_double_ok(void) { foreign(1); }
+
+/* With the measured firmware, the profiler bringing the network up itself (module not loaded, no record) still owns
+ * and finalizes only its own network; a later netInitialize joins without a second raw init. */
+static void case_prof_owner_double_ok(void)
+{
+    atomic_store(&double_ok, 1);
+    CHECK(prof_acquire() == 0);
+    CHECK(legacy_init() == 0);
+    COUNTS(1, 0, 1, 0);
+    CHECK(legacy_deinit() == 0 && atomic_load(&net_up));
+    CHECK(prof_release() == 0 && !atomic_load(&net_up) && !atomic_load(&modules));
+    COUNTS(1, 1, 1, 1);
 }
 
 /* The profiler's own finalize fails: it keeps the hold and may retry. */
@@ -451,6 +512,10 @@ static const struct {
     {"legacy_joined_then_cell", case_legacy_joined_then_cell},
     {"legacy_then_cell_no_prof", case_legacy_then_cell_no_prof},
     {"foreign_network", case_foreign_network},
+    {"foreign_network_double_ok", case_foreign_network_double_ok},
+    {"loaded_but_down", case_loaded_but_down},
+    {"loaded_probe_error", case_loaded_probe_error},
+    {"prof_owner_double_ok", case_prof_owner_double_ok},
     {"prof_finalize_fails", case_prof_finalize_fails},
     {"concurrent", case_concurrent},
 };
