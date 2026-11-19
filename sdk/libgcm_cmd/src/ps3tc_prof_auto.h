@@ -54,6 +54,8 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData 
 void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
 /* cellGcmSetFragmentProgram in a PS3TC_PROF_AUTO unit (cell/gcm/gcm_cg_bridge.h): the offset just bound. */
 void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
+/* RSX frame capture: the program container's ucode bound at an FP offset (rsxLoadFragmentProgramLocation). */
+void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context, const void *ucode, uint32_t bytes, uint32_t offset);
 void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key, const void *buffer, uint32_t size);
 void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key);
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),
