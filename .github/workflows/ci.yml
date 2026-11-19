@@ -399,6 +399,7 @@ jobs:
           python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --out "$RUNNER_TEMP/wait-sample-lifecycle"
           python3 samples/profiling/wait-observations/host-tests/test_lifecycle.py --exercise-failure --out "$RUNNER_TEMP/wait-sample-failure-release"
           python3 -B samples/profiling/wait-observations/host-tests/test_verify.py
+          python3 -B samples/profiling/rsx-frame/host-tests/test_check.py
 
       # quick_exit: the at_quick_exit drain (one last pass, no trailer) under four schedules, plain and ASan+UBSan;
       # the no-bound mutant (unbounded drain_busy wait) must fail the parked-drainer schedule (exit 1).

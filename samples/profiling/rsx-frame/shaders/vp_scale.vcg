@@ -1,0 +1,15 @@
+// rsx-frame sample: vertex program 1. The quad scaled and moved by one constant (xy offset, zw scale), its texture
+// coordinates mirrored: a different instruction stream from vp_offset.
+void main(
+    float2 in_position      : POSITION,
+    float4 in_color         : COLOR,
+    float2 in_uv            : TEXCOORD0,
+    uniform float4 xform,
+    out float4 out_position : POSITION,
+    out float4 out_color    : COLOR,
+    out float2 out_uv       : TEXCOORD0)
+{
+    out_position = float4(in_position * xform.zw + xform.xy, 0.5f, 1.0f);
+    out_color = in_color.bgra;
+    out_uv = float2(1.0f, 1.0f) - in_uv;
+}
