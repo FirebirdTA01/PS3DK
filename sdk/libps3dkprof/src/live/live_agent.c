@@ -232,8 +232,10 @@ static int on_rsx_frame(live_agent *a, live_conn *c)
         return -1;
     if (c->end_queued)
         return 0;
-    rc = a->rsxf && a->rsxf->available() ? a->rsxf->request(req, flags, (const char *)p + 12, name_len, &id)
-                                         : PS3DK_PROF_ENOTSUP;
+    /* one followed capture per link: a request before the previous capture's final STATE is sent would lose it */
+    rc = c->rsxf_id ? PS3DK_PROF_EBUSY
+         : a->rsxf && a->rsxf->available() ? a->rsxf->request(req, flags, (const char *)p + 12, name_len, &id)
+                                           : PS3DK_PROF_ENOTSUP;
     live_put32(c->rsxf_ack, req);
     live_put32(c->rsxf_ack + 4, (uint32_t)rc);
     live_put32(c->rsxf_ack + 8, rc == 0 ? id : 0u);

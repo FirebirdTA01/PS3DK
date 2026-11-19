@@ -149,12 +149,14 @@ int ps3dk_prof_shutdown(void);
 /* RSX frame capture (CMake PS3_PROF_RSX_FRAME=ON, docs/profiler-guide.md): one owner frame, every draw with its
  * AUTO timing, program identities, label and draw counts, streamed into the capture (file_flags bit 10). The selector
  * compiles a generated unit defining ps3dk_prof_automatic_rsx_frame_options with
- * PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS; the runtime reads it through a weak reference. Absent, the capture
+ * PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS; the runtime reads it through a weak symbol. Absent, the capture
  * code is dormant: no decoder pass, no memory, no file flag, each hook one load and a branch, and the file is the
  * same as an AUTO build without it. Present, it needs the report ring (PS3_PROF_AUTO_RING): without it the capture
- * records availability "no report ring" and refuses every request.
+ * records availability "no report ring", stays dormant (no state, no decoder pass) and refuses every request.
  * Memory: staging_kb x blocks of MAIN memory allocated when a request is accepted and freed after the capture is
- * written (2 x 256 KiB by default), plus about 64 KiB of decoder state while the option is selected. */
+ * written (2 x 256 KiB by default), plus about 48 KiB of decoder and program state from AUTO attach with the ring.
+ * At shutdown the blocks of a capture in flight are freed once both the drainer and the owner thread have left it;
+ * if the owner never runs again they stay allocated until the process exits. */
 typedef struct ps3dk_prof_rsx_frame_options {
     uint32_t size;          /* sizeof(ps3dk_prof_rsx_frame_options) = 16 */
     uint32_t staging_kb;    /* each staging block: 4..1024 KiB (256 default) */
@@ -171,14 +173,15 @@ typedef struct ps3dk_prof_rsx_frame_options {
 /* Requesting a capture from app code (any thread): the next owner frame boundary arms it (opening a 2-frame capture
  * window when none is open, so the frame after that one is captured), the boundary after closes it. Returns the
  * capture id (> 0), or PS3DK_PROF_EBUSY (one outstanding), PS3DK_PROF_ENOTSUP (not selected, no ring, no AUTO
- * owner), PS3DK_PROF_EINVAL (flags not 0 in this release, name over 63 bytes), PS3DK_PROF_ENOMEM (staging blocks
- * not available), PS3DK_PROF_ESTOPPED. name may be NULL; it is copied. The PC app's "Capture RSX frame" is the same
- * request over the live link. */
+ * owner), PS3DK_PROF_EINVAL (flags not 0 in this release, name over 63 bytes), PS3DK_PROF_ENOTINIT (the profiler
+ * is not initialized), PS3DK_PROF_ENOMEM (staging blocks not available), PS3DK_PROF_ESTOPPED (shutdown has begun).
+ * name may be NULL; it is copied as UTF-8 (a byte that is not part of a valid sequence becomes '?'). The PC app's
+ * "Capture RSX frame" is the same request over the live link. */
 int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags);
 /* Per-draw labels (owner thread; other threads are ignored): a label applies to later draws until replaced, its
  * scope ends or the frame ends; scopes nest to depth 8 and a draw's label is "scope/scope/label" (at most 63 bytes,
- * longer paths keep their first 63 bytes). The strings must stay valid until then; they are copied only into a
- * capture. Cost outside a capture: one call that stores a pointer. */
+ * a longer path is cut on a UTF-8 character boundary; an invalid byte becomes '?'). The strings must stay valid until
+ * then; they are copied only into a capture. Cost outside a capture: one call that stores a pointer. */
 void ps3dk_prof_draw_label(const char *label);
 void ps3dk_prof_draw_scope_begin(const char *name);
 void ps3dk_prof_draw_scope_end(void);

@@ -73,9 +73,9 @@ typedef struct rsxf_wire_program {
 } rsxf_wire_program;
 typedef struct rsxf_wire_end {
     uint32_t id, blocks, blocks_dropped, draws_seen, draws_recorded, hooked, decoded_only, mismatches, truncated_at,
-             programs, labels, labels_refused, programs_refused, reject_header, reject_reason, fp_reads, untimed;
+             programs, labels, labels_refused, programs_refused, reject_header, reject_reason, lost_events, untimed;
     uint16_t outcome, reason;
-    uint64_t bytes_streamed, bytes_dropped, tb_end, decoder_words, fp_read_ticks;
+    uint64_t bytes_streamed, bytes_dropped, tb_end, decoder_words;
 } rsxf_wire_end;
 
 /* Return the bytes written, or 0 (nothing written) when capacity is short or an argument is out of range. */
@@ -88,6 +88,10 @@ size_t ps3dk_prof__rsxf_put_draws_header(uint8_t *out, size_t cap, uint32_t id, 
                                          uint32_t record_bytes);
 size_t ps3dk_prof__rsxf_put_end(uint8_t *out, size_t cap, const rsxf_wire_end *e);
 size_t ps3dk_prof__rsxf_text_bytes(uint32_t n); /* a LABEL/NAME record's length for n text bytes */
+/* Appends at most `n` bytes of `src` (stopping at a NUL) to dst[at..cap) as valid UTF-8: every invalid byte becomes
+ * '?', and a sequence that does not fit whole is left out (the text is cut on a character boundary). Returns the new
+ * length. A label path and a capture name go through it, so every LABEL and NAME text is valid UTF-8. */
+uint32_t ps3dk_prof__rsxf_utf8_append(char *dst, uint32_t at, uint32_t cap, const char *src, size_t n);
 
 /* ---- canonical program hash (rsxf_wire.c; format 12.6) ------------------------------------------------------------ */
 typedef struct rsxf_hash {
@@ -117,7 +121,10 @@ typedef struct rsxf_decoder {
     /* the open BEGIN_END group */
     uint32_t in_group, group_batches;
     rsxf_draw_event group;
-    /* events completed by the last scan, read by the runtime; overflow sets lost */
+    /* each completed draw or clear goes to sink at once (the registers are then those of that draw); without a sink
+     * it is kept in events, and one that does not fit is counted in lost_events */
+    void (*sink)(void *user, const rsxf_draw_event *e);
+    void *sink_user;
     rsxf_draw_event events[16];
     uint32_t n_events, lost_events;
 } rsxf_decoder;
@@ -131,9 +138,10 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n);
 /* ---- runtime hooks (rsxf_runtime.c), called from auto_runtime.c -------------------------------------------------- */
 struct _gcmCtxData;
 struct prof;
-/* 1 when the executable selected the capture (a cached weak-reference test: one load). */
+/* 1 when the executable selected the capture (a cached weak-symbol test: one load). */
 int rsxf_selected(void);
-/* At AUTO attach on the owner: the owner context and whether the report ring is attached. */
+/* At AUTO attach on the owner: the owner context and whether the report ring is attached. Without the ring the
+ * capture stays dormant (ps3dk_prof__rsxf_active NULL: no hook, no decoder, no state allocated). */
 void rsxf_attach(void *ctx, int ringed);
 /* Owner hooks: catch the decoder up to ctx->current (prewrap first resets the cursor to begin after scanning). */
 void rsxf_scan(void *ctx);
@@ -143,7 +151,7 @@ void rsxf_reset(void *ctx);
  * exclusion column AUTO counted), end after the application's words and AUTO's end marker. */
 void rsxf_hook_begin(void *ctx, uint32_t kind, uint32_t mode, uint32_t first, uint32_t count, uint32_t offset,
                      uint32_t index_type, uint32_t location, uint32_t clear_mask, uint64_t caller, uint32_t tag);
-void rsxf_hook_admitted(uint64_t op_id);
+void rsxf_hook_admitted(void *ctx, uint64_t op_id);
 void rsxf_hook_end(void *ctx);
 /* AUTO counted a covered visit in exclusion column c (2..11), outside a timed range (32) or ring full/state (33/34). */
 void rsxf_note_column(uint32_t c);
@@ -158,7 +166,7 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal);
 /* Program bind hooks (SDK headers in a PS3TC_PROF_AUTO unit; symbols in auto_runtime.c, forwarded when selected). */
 void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
 
-/* ---- live link (protocol v3), read by live_api.c through a weak reference ---------------------------------------- */
+/* ---- live link (protocol v3), read by live_api.c through a weak symbol ------------------------------------------- */
 typedef struct rsxf_status {
     uint32_t id, request, state, reason, draws;   /* state: 0 none, 1 ARMED, 2 CLOSED, 3 ENCODED, 4 ABANDONED, 5 REQUESTED */
     uint64_t frame, bytes;
@@ -166,7 +174,7 @@ typedef struct rsxf_status {
 typedef struct rsxf_live_ops {
     /* 0 with *id, or a PS3DK_PROF_* refusal; flags must be 0 in this release */
     int (*request)(uint32_t request_id, uint32_t flags, const char *name, uint32_t name_len, uint32_t *id);
-    /* the latest capture's status (id 0: none yet) */
+    /* the latest LIVE request's status (id 0: none yet); an app request never replaces it */
     void (*status)(rsxf_status *out);
     int (*available)(void); /* 1: requests can be served (selected, AUTO attached with the ring) */
 } rsxf_live_ops;

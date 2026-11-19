@@ -890,7 +890,11 @@ it is recorded: one RSXF_BEGIN, then RSXF_DRAWS chunks (one per sealed staging b
 not in these chunks: a draw record carries the id of its AUTO operation, and the reader joins the two.
 
 All integers are little-endian. Every reserved field and every padding byte is zero. Every rule in this section is
-MALFORMED (reader rule `RsxFrame`) when broken.
+MALFORMED (reader rule `RsxFrame`) when broken, with one exception: a text field (the BEGIN name, a LABEL or NAME
+text) whose bytes are not valid UTF-8 or contain a NUL is not MALFORMED. The reader shows that field with U+FFFD
+replacements and counts it (`text_replaced`); its length and padding rules still apply. The runtime writes valid
+UTF-8 only: a name or label byte that is not part of a valid sequence becomes `?`, and a text longer than its limit is
+cut on a character boundary.
 
 ### 12.1 RSXF_CONFIG (44), exactly once
 
@@ -1033,14 +1037,19 @@ reader refuses it.
 | 80 | u64 | decoder words in the frame |
 | 88 | u32 | decoder first rejected header (0 none) |
 | 92 | u32 | decoder rejection reason (`RING_REJECT_REASONS` numbering; 0 none) |
-| 96 | u32 | FP memory reads |
+| 96 | u32 | decoder draw events lost (0 in this release: each event is recorded as it completes) |
 | 100 | u32 | reserved = 0 |
-| 104 | u64 | FP memory read PPU ticks |
+| 104 | u64 | reserved = 0 |
 | 112 | u32 | draws not timed |
 | 116 | u32 | reserved = 0 |
 | 120 | u64 | reserved = 0 |
 
 A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.
+
+At shutdown a capture in flight ends ABANDONED (reason 4). When the owner thread has already left the capture, END
+carries its counters; when it has not (it may still be running, or never run again), END carries only what the
+drainer wrote: blocks, draws seen = draws recorded, programs, labels and bytes of the emitted DRAWS chunks, with the
+hooked, decoded-only, mismatch, decoder and untimed counts 0. Either way every count matches the records.
 
 ### 12.6 Canonical program hash
 

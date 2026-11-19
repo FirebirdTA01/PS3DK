@@ -512,8 +512,8 @@ int main(void)
             0xc8,0x00,0x00,0x00, 0xc8,0x00,0x00,0x00, 0xc8,0x00,0x00,0x00};
         const rsxf_live_ops *ops=ps3dk_prof__rsxf_live_ops();
         rsxf_status st;
-        uint32_t *w;
-        int id,id2;
+        uint32_t *w,lid=0;
+        int id,rc;
         assert(ops && ops->available());
         /* the program state before the capture: a VP uploaded at slot 5 (3 instructions), an FP bound at 0x2000 */
         w=reserve(19);
@@ -530,7 +530,7 @@ int main(void)
         assert(ps3dk_prof_rsx_frame_capture("again",0u)==PS3DK_PROF_EBUSY);
         ps3dk_prof_frame();                                  /* the window is open: armed for this frame */
         ops->status(&st);
-        assert(st.id==(uint32_t)id && st.state==1u && st.frame);
+        assert(st.id==0 && st.state==0);                     /* an app request never touches the live status */
         ps3dk_prof_draw_scope_begin("terrain");
         ps3dk_prof_draw_label("rock");
         for(uint32_t i=0;i<10;i++) {
@@ -550,26 +550,35 @@ int main(void)
         }
         ps3dk_prof__auto_preflush((void *)&context);         /* the decoder catches up before the boundary */
         ps3dk_prof_frame();                                  /* closes the capture */
-        ops->status(&st);
-        assert(st.state==2u && st.draws==22u);
         app_flush(0);app_flush(0);settle_drainer(a);
-        for(int i=0;i<20000;i++) {ops->status(&st);if(st.state==3u) break;struct timespec t={0,100000};nanosleep(&t,NULL);}
-        assert(st.state==3u);
-        printf("capture %d: %u draws, %llu record bytes\n",id,st.draws,(unsigned long long)st.bytes);
-        /* a second capture with the drainer held: both 4 KiB blocks fill and the capture truncates, never waits */
+        /* the next request is accepted once the first capture is written */
+        for(int i=0;i<20000;i++) {
+            rc=ops->request(9u,0u,"second",6u,&lid);
+            if(rc!=PS3DK_PROF_EBUSY) break;
+            struct timespec t={0,100000};nanosleep(&t,NULL);
+        }
+        assert(rc==PS3DK_PROF_OK && lid==(uint32_t)id+1u);
+        printf("capture %d written\n",id);
+        /* a second capture, live, with the drainer held: both 4 KiB blocks fill and it truncates, never waits */
         park_drainer();
-        id2=ps3dk_prof_rsx_frame_capture(NULL,0u);
-        assert(id2==id+1);
+        ops->status(&st);
+        assert(st.id==lid && st.request==9u && st.state==5u);
         ps3dk_prof_frame();
+        ops->status(&st);
+        assert(st.id==lid && st.state==1u && st.frame);
         for(uint32_t i=0;i<200;i++) draw();
         ps3dk_prof_frame();
         ops->status(&st);
-        assert(st.id==(uint32_t)id2 && st.state==2u && st.reason==RSXF_R_STAGING && st.draws==200u);
+        assert(st.id==lid && st.state==2u && st.reason==RSXF_R_STAGING && st.draws==200u);
         __atomic_store_n(&hold,0u,__ATOMIC_RELEASE);
         app_flush(0);app_flush(0);settle_drainer(a);
         for(int i=0;i<20000;i++) {ops->status(&st);if(st.state==3u) break;struct timespec t={0,100000};nanosleep(&t,NULL);}
         assert(st.state==3u);
-        printf("capture %d: truncated, %u draws seen\n",id2,st.draws);
+        printf("capture %u: truncated, %u draws seen\n",lid,st.draws);
+        /* an app request after it leaves the live link's final state in place (nothing written: never armed) */
+        assert(ps3dk_prof_rsx_frame_capture("third",0u)==(int)lid+1);
+        ops->status(&st);
+        assert(st.id==lid && st.state==3u);
     }
     puts("RSX frame capture runtime PASS");
 #else

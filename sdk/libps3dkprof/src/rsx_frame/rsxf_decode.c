@@ -35,7 +35,9 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
 
 static void event(rsxf_decoder *d, const rsxf_draw_event *e)
 {
-    if (d->n_events < sizeof d->events / sizeof d->events[0])
+    if (d->sink)
+        d->sink(d->sink_user, e); /* at once: the registers are this draw's */
+    else if (d->n_events < sizeof d->events / sizeof d->events[0])
         d->events[d->n_events++] = *e;
     else
         d->lost_events++;

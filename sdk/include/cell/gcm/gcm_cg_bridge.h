@@ -59,7 +59,9 @@ extern "C" {
 #if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FP_HOOK)
 /* PS3_PROF_AUTO observation (libps3dkprof_auto.a): the fragment-program offset just bound on a context. */
 void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
-/* RSX frame capture (PS3_PROF_RSX_FRAME): the program container's ucode bound at that offset (identity only). */
+/* RSX frame capture (PS3_PROF_RSX_FRAME): the program container's ucode bound at that offset (identity only),
+ * called only while the capture is active (non-NULL): unselected, the bind costs one load and a branch. */
+extern void *ps3dk_prof__rsxf_active;
 void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context, const void *ucode, uint32_t bytes, uint32_t offset);
 #endif
 
@@ -414,7 +416,8 @@ static inline void cellGcmSetFragmentProgram(CellGcmContextData *ctx,
 #if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_FP_HOOK)
         /* PS3_PROF_AUTO: the automatic profiler records this context's program offset with later operations */
         ps3dk_prof__auto_fragment_program((struct _gcmCtxData *)ctx, offset);
-        ps3dk_prof__rsxf_fp_bind((struct _gcmCtxData *)ctx, (const uint8_t *)p + p->ucode, p->ucodeSize, offset);
+        if (__atomic_load_n(&ps3dk_prof__rsxf_active, __ATOMIC_RELAXED))
+            ps3dk_prof__rsxf_fp_bind((struct _gcmCtxData *)ctx, (const uint8_t *)p + p->ucode, p->ucodeSize, offset);
 #endif
     }
 

@@ -309,8 +309,8 @@ pub struct End {
     pub decoder_words: u64,
     /// (first rejected header, reason) when the decoder rejected anything.
     pub decoder_reject: Option<(u32, u32)>,
-    pub fp_reads: u32,
-    pub fp_read_ticks: u64,
+    /// Draw events the decoder could not hand to the capture (0 in this release: every event is recorded at once).
+    pub lost_events: u32,
     pub untimed: u32,
 }
 
@@ -339,6 +339,8 @@ pub struct CaptureRecord {
     pub end: Option<End>,
     /// DRAW records parsed but not kept (the file's retention bound).
     pub draws_not_retained: u64,
+    /// Text fields (name, labels, program names) that were not valid UTF-8 and are shown with U+FFFD replacements.
+    pub text_replaced: u32,
 }
 
 /// The decoded family of one file: present exactly when file_flags bit 10 is.
@@ -364,11 +366,16 @@ fn bad<T>(msg: impl Into<String>) -> Result<T, Malformed> {
     malformed(Rule::RsxFrame, msg.into())
 }
 
-fn text(bytes: &[u8], what: &str) -> Result<String, Malformed> {
-    if bytes.contains(&0) {
-        return bad(format!("{what}: contains NUL"));
+/// A capture's text field (BEGIN name, LABEL, NAME). Invalid UTF-8 or a NUL degrades THAT field to U+FFFD
+/// replacements (counted in `replaced`); the file stays readable. The runtime writes valid UTF-8 only.
+fn text(bytes: &[u8], replaced: &mut u32) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(t) if !t.contains('\0') => t.to_string(),
+        _ => {
+            *replaced += 1;
+            String::from_utf8_lossy(bytes).replace('\0', "\u{fffd}")
+        }
     }
-    String::from_utf8(bytes.to_vec()).or_else(|_| bad(format!("{what}: not UTF-8")))
 }
 
 fn zeros(c: &mut Cursor<'_>, n: usize, what: &str) -> Result<(), Malformed> {
@@ -478,7 +485,8 @@ impl Reader {
         if p.len() != BEGIN_FIXED + pad8(n) {
             return bad(format!("RSXF_BEGIN is {} bytes for a {n}-byte name", p.len()));
         }
-        let name = text(c.take(n)?, "RSXF_BEGIN name")?;
+        let mut replaced = 0;
+        let name = text(c.take(n)?, &mut replaced);
         zeros(&mut c, pad8(n) - n, "RSXF_BEGIN")?;
         let prev = self.result.captures.last().map_or(0, |x| x.begin.id);
         if id == 0 || id <= prev {
@@ -522,6 +530,7 @@ impl Reader {
             block_seqs: Vec::new(),
             end: None,
             draws_not_retained: 0,
+            text_replaced: replaced,
         });
         self.open = true;
         self.last_ordinal = None;
@@ -691,7 +700,7 @@ impl Reader {
                     if len != 16 + pad8(n) || n == 0 || n > label_bytes || r0 != 0 || r1 != 0 {
                         return bad(format!("record type {ty}: length {len} text {n} bytes"));
                     }
-                    let s = text(c.take(n)?, "label")?;
+                    let s = text(c.take(n)?, &mut rec.text_replaced);
                     zeros(&mut c, pad8(n) - n, "label")?;
                     if ty == REC_LABEL {
                         if index as usize != rec.labels.len() + 1 {
@@ -737,9 +746,9 @@ impl Reader {
         let decoder_words = c.u64()?;
         let rej_header = c.u32()?;
         let rej_reason = c.u32()?;
-        let fp_reads = c.u32()?;
+        let lost_events = c.u32()?;
         let r0 = c.u32()?;
-        let fp_read_ticks = c.u64()?;
+        let r3 = c.u64()?;
         let untimed = c.u32()?;
         let r1 = c.u32()?;
         let r2 = c.u64()?;
@@ -753,7 +762,7 @@ impl Reader {
             3 => Outcome::Abandoned,
             o => return bad(format!("RSXF_END outcome {o}")),
         };
-        if reason > 7 || r0 != 0 || r1 != 0 || r2 != 0 || (rej_reason == 0 && rej_header != 0) {
+        if reason > 7 || r0 != 0 || r1 != 0 || r2 != 0 || r3 != 0 || (rej_reason == 0 && rej_header != 0) {
             return bad(format!("RSXF_END reason {reason} or reserved fields"));
         }
         let recorded = rec.draws.len() as u64 + rec.draws_not_retained;
@@ -782,7 +791,7 @@ impl Reader {
             outcome, reason, blocks, blocks_dropped, draws_seen, draws_recorded, hooked, decoded_only, mismatches,
             truncated_at: truncated.then_some(truncated_at), programs, labels, labels_refused, programs_refused,
             bytes_streamed, bytes_dropped, tb_end, decoder_words,
-            decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), fp_reads, fp_read_ticks, untimed,
+            decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), lost_events, untimed,
         });
         self.open = false;
         Ok(())
@@ -1014,6 +1023,8 @@ pub struct Totals {
     pub timed: u32,
     pub untimed: u32,
     pub missing: u32,
+    /// Draws whose AUTO operation is of another kind or frame: neither timed nor counted in any sum.
+    pub mismatched: u32,
     /// Sum of timed intervals (raw ticks): in a PIPELINED capture overlapping intervals are each counted.
     pub sum: u64,
     /// First timed begin .. last timed end.
@@ -1040,6 +1051,7 @@ pub struct FrameView {
     pub totals: Totals,
     pub end: Option<End>,
     pub draws_not_retained: u64,
+    pub text_replaced: u32,
 }
 
 fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
@@ -1093,9 +1105,14 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
                 None => Timing::Missing,
                 Some(o) => {
                     op_mismatch = d.kind.auto_kind() != Some(o.kind) || o.token() != Some((b.owner, b.frame));
-                    match op_interval(o) {
-                        Ok((rb, re)) => Timing::Timed { raw_begin: rb, raw_end: re },
-                        Err(why) => Timing::Invalid(why),
+                    if op_mismatch {
+                        // the op is not this draw's (another kind or frame): its interval is not the draw's time
+                        Timing::Invalid("AUTO operation of another kind or frame")
+                    } else {
+                        match op_interval(o) {
+                            Ok((rb, re)) => Timing::Timed { raw_begin: rb, raw_end: re },
+                            Err(why) => Timing::Invalid(why),
+                        }
                     }
                 }
             }
@@ -1120,6 +1137,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
                     .map(|(i, _)| i);
             }
             Timing::Missing => totals.missing += 1,
+            _ if op_mismatch => totals.mismatched += 1,
             _ => totals.untimed += 1,
         }
         if let Some(i) = pass {
@@ -1158,6 +1176,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         totals,
         end: c.end.clone(),
         draws_not_retained: c.draws_not_retained,
+        text_replaced: c.text_replaced,
     }
 }
 
@@ -1260,14 +1279,16 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
             f.frame, f.window, if f.source == Source::Live { format!("live request {}", f.request_id) } else { "app".into() },
             if f.isolated { "ISOLATED" } else { "PIPELINED (reached-marker intervals)" }, f.status.text())?;
         let t = &f.totals;
-        writeln!(out, "  draws {} (timed {}, untimed {}, timing absent {}); primitives {}; interval sum {} raw; span {}; gaps {} raw{}",
-            t.draws, t.timed, t.untimed, t.missing, t.primitives, t.sum,
+        writeln!(out, "  draws {} (timed {}, untimed {}, timing absent {}, op mismatch {}); primitives {}; interval sum {} raw; span {}; gaps {} raw{}{}",
+            t.draws, t.timed, t.untimed, t.missing, t.mismatched, t.primitives, t.sum,
             t.span.map_or_else(|| "-".into(), |(a, b)| format!("{a}..{b} ({} raw)", b - a)), t.gaps,
-            if f.draws_not_retained > 0 { format!("; {} draw records not retained", f.draws_not_retained) } else { String::new() })?;
+            if f.draws_not_retained > 0 { format!("; {} draw records not retained", f.draws_not_retained) } else { String::new() },
+            if f.text_replaced > 0 { format!("; {} text fields not UTF-8 (shown with replacements)", f.text_replaced) } else { String::new() })?;
         if let Some(e) = &f.end {
-            writeln!(out, "  end: seen {} recorded {} hooked {} decoded-only {} mismatches {}; blocks {} dropped {}; bytes {} dropped {}; programs {} (+{} refused) labels {} (+{} refused); fp reads {}",
+            writeln!(out, "  end: seen {} recorded {} hooked {} decoded-only {} mismatches {}; blocks {} dropped {}; bytes {} dropped {}; programs {} (+{} refused) labels {} (+{} refused); lost events {}",
                 e.draws_seen, e.draws_recorded, e.hooked, e.decoded_only, e.mismatches, e.blocks, e.blocks_dropped,
-                e.bytes_streamed, e.bytes_dropped, e.programs, e.programs_refused, e.labels, e.labels_refused, e.fp_reads)?;
+                e.bytes_streamed, e.bytes_dropped, e.programs, e.programs_refused, e.labels, e.labels_refused,
+                e.lost_events)?;
             if let Some((h, r)) = e.decoder_reject {
                 writeln!(out, "  decoder: first rejection {h:#010x}: {}", auto_rsx::reject_reason(r))?;
             }
@@ -1391,8 +1412,7 @@ fn end_json(e: &End) -> Value {
     o.insert("bytes_dropped".into(), json!(e.bytes_dropped));
     o.insert("programs_refused".into(), json!(e.programs_refused));
     o.insert("labels_refused".into(), json!(e.labels_refused));
-    o.insert("fp_reads".into(), json!(e.fp_reads));
-    o.insert("fp_read_ticks".into(), json!(e.fp_read_ticks));
+    o.insert("lost_events".into(), json!(e.lost_events));
     o.insert("decoder_words".into(), json!(e.decoder_words));
     o.insert("untimed".into(), json!(e.untimed));
     o.insert("decoder_reject".into(),
@@ -1403,7 +1423,7 @@ fn end_json(e: &End) -> Value {
 fn frame_json(f: &FrameView) -> Value {
     let t = &f.totals;
     let totals = json!({"draws": t.draws, "timed": t.timed, "untimed": t.untimed, "missing": t.missing,
-        "sum": t.sum, "gaps": t.gaps, "primitives": t.primitives, "span": t.span.map(|(a, b)| json!([a, b]))});
+        "mismatched": t.mismatched, "sum": t.sum, "gaps": t.gaps, "primitives": t.primitives, "span": t.span.map(|(a, b)| json!([a, b]))});
     let passes: Vec<Value> = f.passes.iter().map(|p| json!({"name": p.name, "depth": p.depth, "tag": p.tag,
         "raw_begin": p.raw_begin, "raw_end": p.raw_end, "draws": p.draws})).collect();
     let mut v = json!({
@@ -1414,6 +1434,7 @@ fn frame_json(f: &FrameView) -> Value {
     let o = v.as_object_mut().expect("object");
     o.insert("totals".into(), totals);
     o.insert("draws_not_retained".into(), json!(f.draws_not_retained));
+    o.insert("text_replaced".into(), json!(f.text_replaced));
     o.insert("programs".into(), Value::Array(f.programs.iter().map(program_json).collect()));
     o.insert("passes".into(), Value::Array(passes));
     o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d)).collect()));

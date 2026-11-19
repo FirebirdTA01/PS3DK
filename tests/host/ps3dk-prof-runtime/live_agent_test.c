@@ -1286,6 +1286,14 @@ static void case_rsxf_round_trip(void)
     CHECK(c->rsxf_acks == 1 && atomic_load(&g_rf.requests) == 1 && g_rf.req == 11 && g_rf.flags == 0);
     CHECK(strcmp(g_rf.name, "frame-a") == 0);
     CHECK(live_get32(c->rsxf_ack) == 11 && live_get32(c->rsxf_ack + 4) == 0 && live_get32(c->rsxf_ack + 8) == 4);
+    /* a second request while the link still follows capture 4 (no final STATE yet): EBUSY from the agent itself,
+     * the source is not asked, so capture 4's final state cannot be lost */
+    c->rsxf_acks = 0;
+    send_rsxf(c->fd, 13, 0, 1, "frame-b", 0);
+    cl_pump(c, 2000, has_rsxf_ack);
+    CHECK(c->rsxf_acks == 1 && live_get32(c->rsxf_ack) == 13);
+    CHECK((int32_t)live_get32(c->rsxf_ack + 4) == PS3DK_PROF_EBUSY && live_get32(c->rsxf_ack + 8) == 0);
+    CHECK(atomic_load(&g_rf.requests) == 1);
     g_rf.st.id = 4;
     g_rf.st.request = 11;
     g_rf.st.bytes = 777;

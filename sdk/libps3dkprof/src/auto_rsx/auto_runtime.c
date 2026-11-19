@@ -10,20 +10,23 @@
  * with one load before calling the capture code, so an unselected build does nothing more. */
 extern void *ps3dk_prof__rsxf_active;
 #define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)
-/* The exclusion column of the last covered visit AUTO counted, for the capture's untimed reason. */
+/* The owner's AUTO capture (NULL on any other thread, in the drainer or before CONFIG froze). */
+static auto_capture *owner_capture(gpp_ctx *ctx, int observe);
+#define RSXF_OWNER() (RSXF_ON() && owner_capture(NULL,0)!=NULL)
+/* The exclusion column of the last covered visit AUTO counted on the owner, for the capture's untimed reason. */
 static int counted(auto_frames *f,uint32_t kind,uint32_t column)
 {
-    if(RSXF_ON()) rsxf_note_column(column);
+    if(RSXF_OWNER()) rsxf_note_column(column);
     return ps3dk_prof__auto_frames_count(f,kind,column);
 }
 __attribute__((unused)) static int counted_outside(auto_frames *f,uint32_t kind)
 {
-    if(RSXF_ON()) rsxf_note_column(RSXF_UNTIMED_OUTSIDE_RANGE);
+    if(RSXF_OWNER()) rsxf_note_column(RSXF_UNTIMED_OUTSIDE_RANGE);
     return ps3dk_prof__auto_frames_outside(f,kind);
 }
 __attribute__((unused)) static int counted_ring(auto_frames *f,uint32_t kind,uint32_t which)
 {
-    if(RSXF_ON()) rsxf_note_column(which ? RSXF_UNTIMED_RING_STATE:RSXF_UNTIMED_RING_FULL);
+    if(RSXF_OWNER()) rsxf_note_column(which ? RSXF_UNTIMED_RING_STATE:RSXF_UNTIMED_RING_FULL);
     return ps3dk_prof__auto_frames_ring(f,kind,which);
 }
 #undef auto_frames_count
@@ -1476,13 +1479,16 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
 {
     uint32_t ticket;
     auto_capture *a;
+    int mine;
     if(!RSXF_ON()) return auto_begin(context,call,caller);
-    a=capture;
-    if(call && context && a && (void *)context==(void *)a->context)
+    /* the owner's own covered call only: another thread's draw never touches the owner's pending hook */
+    a=owner_capture((gpp_ctx *)(void *)context,0);
+    mine=call && context && a;
+    if(mine)
         rsxf_hook_begin(context,call->kind,call->mode,call->start,call->count,call->offset,call->index_type,
                         call->location,call->clear_mask,caller,a->tag);
     ticket=auto_begin(context,call,caller);
-    rsxf_hook_admitted(ticket && a && a->active ? a->active->op.id:0);
+    if(mine) rsxf_hook_admitted(context,ticket && a->active ? a->active->op.id:0);
     return ticket;
 }
 static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
@@ -1585,7 +1591,7 @@ static void auto_end(struct _gcmCtxData *context,uint32_t ticket);
 void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
 {
     auto_end(context,ticket);
-    if(RSXF_ON()) rsxf_hook_end(context);
+    if(RSXF_ON() && context && owner_capture((gpp_ctx *)(void *)context,0)) rsxf_hook_end(context);
 }
 static void auto_end(struct _gcmCtxData *context,uint32_t ticket)
 {
