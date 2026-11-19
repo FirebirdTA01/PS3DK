@@ -524,7 +524,8 @@ int main(void)
         ps3dk_prof__rsxf_fp_bind((void *)&context,fp_ucode,sizeof fp_ucode,0x2000u);
         ps3dk_prof_frame();
         draw();
-        assert(ps3dk_prof_rsx_frame_capture("bad",1u)==PS3DK_PROF_EINVAL);
+        assert(ps3dk_prof_rsx_frame_capture("bad",8u)==PS3DK_PROF_EINVAL);   /* an unknown flag */
+        assert(ps3dk_prof_rsx_frame_capture("bad",5u)==PS3DK_PROF_EINVAL);   /* ISOLATED with BOTH */
         id=ps3dk_prof_rsx_frame_capture("first",0u);
         assert(id>0);
         assert(ps3dk_prof_rsx_frame_capture("again",0u)==PS3DK_PROF_EBUSY);
@@ -576,9 +577,18 @@ int main(void)
         assert(st.state==3u);
         printf("capture %u: truncated, %u draws seen\n",lid,st.draws);
         /* an app request after it leaves the live link's final state in place (nothing written: never armed) */
-        assert(ps3dk_prof_rsx_frame_capture("third",0u)==(int)lid+1);
+        assert(ps3dk_prof_rsx_frame_capture("third",PS3DK_PROF_RSX_FRAME_ISOLATED)==(int)lid+1);
         ops->status(&st);
         assert(st.id==lid && st.state==3u);
+        /* the ISOLATED capture: armed at the next boundary, each draw's markers behind WAIT_FOR_IDLE (room for the
+         * four extra words kept in the extent like the draw's own) */
+        ps3dk_prof_frame();
+        for(uint32_t i=0;i<10;i++) {
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            draw();
+        }
+        ps3dk_prof_frame();
+        app_flush(0);app_flush(0);settle_drainer(a);
     }
     puts("RSX frame capture runtime PASS");
 #else

@@ -14,12 +14,15 @@
 #   tag        PS3DK_PROF_AUTO_TAG value
 #   pass       the innermost AUTO range ("-": none)
 #   timing     the reader's timing state (every covered draw of the captured frame is timed)
+# "@ both" names the BOTH capture: its two views (pipelined, isolated) must each match the draw rows (ordinals of the
+# second view counted from its first draw), every draw must be paired and every program's bytes stored.
 # "@ instance_runs" lists every instance run as first ordinal:length:the VP uniforms that differ (comma-separated).
 # Every draw is also checked hooked and decoded, with no mismatch, no unknown state, and every program exact
 # (readable, terminated, not "bound before capture").
 @ name	matrix
 @ decoder	3
 @ instance_runs	8:8:offset
+@ both	matrix-both
 @ source	app
 @ status	COMPLETE
 @ timing_mode	pipelined

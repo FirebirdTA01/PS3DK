@@ -28,16 +28,23 @@
 #define rsxf_forced ps3dk_prof__rsxf_forced
 #define rsxf_drain ps3dk_prof__rsxf_drain
 #define rsxf_note_column ps3dk_prof__rsxf_note_column
+#define rsxf_isolated ps3dk_prof__rsxf_isolated
 
 /* ---- wire (rsxf_wire.c): pure encoders, little-endian, every reserved byte zero ---------------------------------- */
 enum { RSXF_CHUNK_CONFIG = 44, RSXF_CHUNK_BEGIN = 45, RSXF_CHUNK_DRAWS = 46, RSXF_CHUNK_END = 48 };
 enum { RSXF_CONFIG_BYTES = 64, RSXF_BEGIN_FIXED = 56, RSXF_DRAWS_HEADER = 16, RSXF_END_BYTES = 128,
        RSXF_DRAW_BYTES = 96, RSXF_PROGRAM_BYTES = 48, RSXF_NAME_MAX = 63, RSXF_TEXT_MAX = 63 };
 enum { RSXF_REC_DRAW = 1, RSXF_REC_PROGRAM = 2, RSXF_REC_LABEL = 3, RSXF_REC_NAME = 4, RSXF_REC_BASELINE = 5,
-       RSXF_REC_STATE = 6, RSXF_REC_VPCONST = 7, RSXF_REC_FPCONST = 8, RSXF_REC_UNIFORM = 9 };
+       RSXF_REC_STATE = 6, RSXF_REC_VPCONST = 7, RSXF_REC_FPCONST = 8, RSXF_REC_UNIFORM = 9, RSXF_REC_UCODE = 10,
+       RSXF_REC_SECOND = 11 };
+/* Request flags (= BEGIN flags): ISOLATED (WAIT_FOR_IDLE around every captured draw's markers), FP_BYTES (store FP
+ * ucode bytes, up to the per-capture cap), BOTH (two consecutive frames: the first pipelined, the second isolated). */
+enum { RSXF_REQ_ISOLATED = 1, RSXF_REQ_FP_BYTES = 2, RSXF_REQ_BOTH = 4, RSXF_REQ_ALL = 7 };
+/* UCODE: a program's bytes in parts of at most RSXF_UCODE_PART bytes; header bytes. */
+enum { RSXF_UCODE_PART = 2048, RSXF_UCODE_HEADER = 32, RSXF_UCODE_LAST = 1, RSXF_SENT_MAX = 256 };
 /* CONFIG decoder version: 1 draws and programs; 2 also the 3D register shadow (BASELINE and STATE records); 3 also VP
  * constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM). */
-enum { RSXF_DECODER = 3 };
+enum { RSXF_DECODER = 4 };
 /* VP constant slots; VPCONST entries per record; FP constants per draw and uniforms per program, at most. */
 enum { RSXF_VP_CONSTS = 468, RSXF_VPC_PER_REC = 128, RSXF_FPC_MAX = 32, RSXF_UNI_MAX = 32, RSXF_UNI_NAME = 32,
        RSXF_VPC_ENTRY = 24, RSXF_FPC_ENTRY = 24, RSXF_UNI_ENTRY = 40 };
@@ -67,7 +74,7 @@ enum { RSXF_R_NONE = 0, RSXF_R_STAGING = 1, RSXF_R_PROGRAMS = 2, RSXF_R_LABELS =
 #define RSXF_NO_ORDINAL 0xffffffffu
 
 typedef struct rsxf_wire_config {
-    uint32_t availability, block_bytes, blocks, programs, labels, label_bytes;
+    uint32_t availability, block_bytes, blocks, programs, labels, label_bytes, fp_bytes_cap;
 } rsxf_wire_config;
 typedef struct rsxf_wire_begin {
     uint32_t id, request, owner, window, vp_start, fp_address, known;
@@ -92,7 +99,7 @@ typedef struct rsxf_wire_program {
 typedef struct rsxf_wire_end {
     uint32_t id, blocks, blocks_dropped, draws_seen, draws_recorded, hooked, decoded_only, mismatches, truncated_at,
              programs, labels, labels_refused, programs_refused, reject_header, reject_reason, lost_events, untimed,
-             baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records;
+             baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records, ucode_records;
     uint16_t outcome, reason;
     uint64_t bytes_streamed, bytes_dropped, tb_end, decoder_words;
 } rsxf_wire_end;
@@ -203,6 +210,8 @@ void rsxf_note_column(uint32_t c);
 void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, uint32_t window_id);
 /* 1 while a capture is armed: AUTO times every covered draw (overrides PS3DK_PROF_AUTO_TIMED_RANGES_ONLY). */
 int rsxf_forced(void);
+/* 1 while an armed capture records ISOLATED draws: AUTO writes WAIT_FOR_IDLE before each of their two markers. */
+int rsxf_isolated(void);
 /* The drainer, after AUTO's own drain step. emit(type, payload, bytes) returns 0 when the sink took it. */
 typedef int (*rsxf_emit_fn)(void *user, uint32_t type, const uint8_t *data, size_t bytes);
 void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal);
@@ -219,7 +228,7 @@ typedef struct rsxf_status {
     uint64_t frame, bytes;
 } rsxf_status;
 typedef struct rsxf_live_ops {
-    /* 0 with *id, or a PS3DK_PROF_* refusal; flags must be 0 in this release */
+    /* 0 with *id, or a PS3DK_PROF_* refusal; flags: RSXF_REQ_* (ISOLATED, FP_BYTES, BOTH; not ISOLATED with BOTH) */
     int (*request)(uint32_t request_id, uint32_t flags, const char *name, uint32_t name_len, uint32_t *id);
     /* the latest LIVE request's status (id 0: none yet); an app request never replaces it */
     void (*status)(rsxf_status *out);

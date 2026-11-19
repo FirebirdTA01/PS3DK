@@ -86,6 +86,17 @@ def main():
     const_rows = cc.load_constants(TOOL.parent.parent / 'expected/constants.tsv')
     assert len(const_rows) == 15, len(const_rows)
     base = matching(meta, rows, state_rows, const_rows)
+    # the BOTH capture: two views of the same draws (the second's ordinals after the first's), every draw paired,
+    # every program's bytes complete
+    one = base['captures'][0]
+    for half, mode, off in (('first', 'pipelined', 0), ('second', 'isolated', 16)):
+        v = copy.deepcopy(one)
+        v.update(name='matrix-both', half=half, timing_mode=mode,
+                 program_bytes=[{'index': p['index'], 'bytes': 64, 'complete': True} for p in one['programs']],
+                 pairs=[{'first': i, 'second': i} for i in range(16)] if half == 'second' else [])
+        for dr in v['draws']:
+            dr['ordinal'] += off
+        base['captures'].append(v)
 
     def d(doc, i):
         return doc['captures'][0]['draws'][i]
@@ -122,6 +133,12 @@ def main():
         'index type': (lambda x: d(x, 7)['state']['index'].__setitem__('type', 'u32'), 'draw 7 index type'),
         'no state': (lambda x: d(x, 9).pop('state'), 'draw 9: no register state'),
         'decoder 1': (lambda x: x.__setitem__('decoder', 1), 'decoder: 1'),
+        'both half missing': (lambda x: x['captures'].pop(), "halves ['first']"),
+        'both unpaired': (lambda x: x['captures'][2]['pairs'][3].__setitem__('second', None), '1 unpaired'),
+        'both bytes incomplete': (lambda x: x['captures'][1]['program_bytes'][2].__setitem__('complete', False),
+                                  'program 3 bytes'),
+        'both isolated draw kind': (lambda x: x['captures'][2]['draws'][7].__setitem__('kind', 'ARRAY'),
+                                    'matrix-both isolated: draw 7 kind'),
         'constant value': (lambda x: d(x, 10)['constants']['vp'][0].__setitem__('values', [[-0.36, -0.8, 0, 0]]),
                            'draw 10 vp.offset'),
         'uniform missing': (lambda x: d(x, 4)['constants'].__setitem__('vp', []), 'draw 4 vp.xform: no such uniform'),

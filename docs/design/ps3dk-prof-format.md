@@ -904,7 +904,7 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 |---|---|---|
 | 0 | u16 | schema = 1 |
 | 2 | u16 | flags = 0 |
-| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); other values MALFORMED |
+| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); 4 also program bytes and BOTH captures (UCODE, SECOND) and the FP bytes cap below; other values MALFORMED |
 | 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
 | 12 | u32 | staging block bytes: 4096..1048576, a multiple of 8 |
 | 16 | u32 | staging blocks: 1..16 |
@@ -914,6 +914,9 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 | 32 | 32 bytes | reserved = 0 |
 
 A capture (BEGIN) in a file whose CONFIG availability is nonzero is MALFORMED.
+
+Decoder 4 CONFIG: offset 32 u32 is the FP bytes cap (bytes of FP ucode a capture stores at most when requested, at
+most 16 MiB; 0 for earlier decoders); offsets 36..63 stay reserved.
 
 ### 12.2 RSXF_BEGIN (45)
 
@@ -934,6 +937,11 @@ A capture (BEGIN) in a file whose CONFIG availability is nonzero is MALFORMED.
 | 52 | u16 | name length n: 0..63, UTF-8 without NUL |
 | 54 | u16 | reserved = 0 |
 | 56 | n bytes | name, then zero padding to a multiple of 8 |
+
+Flags (offset 6): bit 0 ISOLATED (every draw's begin and end markers follow a WAIT_FOR_IDLE: each interval is that
+draw alone), bit 1 FP_BYTES (FP ucode bytes requested), bit 2 BOTH (two consecutive frames, the first pipelined, the
+second isolated, from the SECOND record on); ISOLATED with BOTH is MALFORMED, other bits 0. A reader never sums or
+compares intervals of the two modes as one: a BOTH capture reads as two frames, one per mode.
 
 At most one capture is open (BEGIN without its END) at a time.
 
@@ -1073,6 +1081,30 @@ table at bind, once per program, after its PROGRAM record.
 | 12 | u32 | reserved = 0 |
 | 16 | n x 40 | {u32 resource, u16 count >= 1, u8 kind, u8 name length 1..32, 32 bytes name then zeros}; kind 1 VP constant (VP programs; resource the first slot, resource + count <= 468) or 2 FP embedded constant (FP programs; resource the first ucode offset, count the offsets it is patched at) |
 
+UCODE (type 10), decoder 4, length 32 + n rounded up to 8: one part of a program's bytes, once per (profile, hash)
+in a capture. VP: the instructions from the command stream, 16 bytes each, words big-endian, from the start slot
+through the last instruction (always stored). FP: the bytes as they lay in memory at a bind while the capture was
+armed (words big-endian, 16-bit halves swapped, constant blocks inline), through the end instruction; only with
+FP_BYTES and within the CONFIG cap.
+
+| off | type | field |
+|---|---|---|
+| 4 | u8 | profile: 1 VP, 2 FP |
+| 5 | u8 | flags: bit 0 LAST (offset + n = total); other bits 0 |
+| 6 | u16 | part: 0, 1, ... in order for the program |
+| 8 | u32 | total bytes of the program (at most 16 MiB, the same in every part) |
+| 12 | u64 | the program's canonical hash (12.6) |
+| 20 | u32 | offset: the bytes of the earlier parts |
+| 24 | u32 | n: bytes in this part, 1..2048 |
+| 28 | u32 | reserved = 0 |
+| 32 | n bytes | the bytes, then zero padding |
+
+A program whose parts stop before LAST (a truncated capture) is reported incomplete; a completed program given again is
+MALFORMED.
+
+SECOND (type 11), decoder 4, length 16, only in a BOTH capture, once, between draws: u32 the first ordinal of the
+second (isolated) frame (greater than every earlier draw's), u64 that frame's number.
+
 ### 12.4 RSXF_PROGRAMS (47)
 
 Allocated for parameter tables and program bytes (later phases). Schema 1 writers never write it; a schema 1
@@ -1110,7 +1142,7 @@ reader refuses it.
 | 112 | u32 | draws not timed |
 | 116 | u32 | STATE records (must equal the records seen; 0 for decoder 1) |
 | 120 | u32 | UNIFORM records (likewise) |
-| 124 | u32 | reserved = 0 |
+| 124 | u32 | UCODE records (must equal the records seen; 0 before decoder 4) |
 
 A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.
 
