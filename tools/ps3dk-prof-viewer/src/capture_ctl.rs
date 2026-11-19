@@ -254,7 +254,7 @@ impl Captures {
                 return Err(format!("stale: frame {frame}'s interval in these bytes differs from the bookmark"));
             }
         }
-        let src = Source { a, ix, len: doc.size as u64 };
+        let src = Source { a, ix, len: doc.size as u64, auto: doc.auto.as_ref().map(|v| &v.report) };
         let p = plan(&src, &ft, &declared, owner, frame, premise, &origin, self.caps, &mut m).map_err(|e| format!("Not captured: {e}"))?;
         drop(ft);
         let more = p.bound - min_extract();

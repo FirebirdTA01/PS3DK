@@ -7,6 +7,8 @@
 //!   PPU span's attribution, or a foreign pair whose exact BEGIN projection lies inside I: the Frames page's DEFINITE),
 //!   OTHER (claimed by another frame), POSSIBLE (unclaimed; some realisation within its exact bounds meets I) or
 //!   OUTSIDE.  CLAIMED means claimed, not "running throughout I".  Bounds compare exactly (u64 or `Rat`), never as f64.
+//!   AUTO records use execution tokens for membership, reader-qualified AUTO clock bounds for placement, and no
+//!   extrapolation. Unclaimed AUTO records can be POSSIBLE; FRAME markers are delimiters, not operation bars.
 //! - **Coverage.** Every PPU lane and every DECLARED foreign source gets an [`Evidence`] and one [`Status`]; an
 //!   unmappable epoch is UNKNOWN (never NO DATA) and leaves usable epochs in place; a reader retention refusal makes
 //!   every declared source UNMAPPABLE.
@@ -32,6 +34,7 @@ use ps3dk_prof::foreign_timeline::{
 };
 use ps3dk_prof::frames_foreign::{owner_frames, place, Placement, Retention};
 use ps3dk_prof::Analysis;
+use ps3dk_prof::auto_rsx as ar;
 
 use crate::frames::{FramesIndex, Owner, SlotKind};
 use crate::timeline_foreign::source_label;
@@ -221,6 +224,8 @@ pub enum Status {
     NoData,
     Partial,
     Observed,
+    AutoRecords,
+    NoZones,
 }
 
 impl Status {
@@ -230,6 +235,8 @@ impl Status {
             Status::NoData => "NODATA",
             Status::Partial => "PARTIAL",
             Status::Observed => "OBSERVED",
+            Status::AutoRecords => "AUTO_RECORDS",
+            Status::NoZones => "NO_ZONES",
         }
     }
     fn parse(s: &str) -> Option<Status> {
@@ -238,6 +245,8 @@ impl Status {
             "NODATA" => Status::NoData,
             "PARTIAL" => Status::Partial,
             "OBSERVED" => Status::Observed,
+            "AUTO_RECORDS" => Status::AutoRecords,
+            "NO_ZONES" => Status::NoZones,
             _ => return None,
         })
     }
@@ -247,6 +256,8 @@ impl Status {
             Status::NoData => "NO DATA",
             Status::Partial => "PARTIAL",
             Status::Observed => "OBSERVED",
+            Status::AutoRecords => "TIMED BY AUTO RECORDS",
+            Status::NoZones => "NO ZONES IN THIS BUILD",
         }
     }
 }
@@ -325,6 +336,17 @@ pub enum SourceRefusal {
 /// One lane's or source's evidence for the frame.  `None` counts are UNKNOWN.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Evidence {
+    /// Identity-only EXT declaration: timing (including any refusal) is reported on rsx.auto.
+    pub auto_domain: bool,
+    pub frame_only: bool,
+    /// Records lacking usable AUTO timing; unclaimed records cannot be assigned to a frame.
+    pub auto_unplaced: u64,
+    /// Draws excluded in the selected coverage row (including outside timed ranges).
+    pub auto_untimed: u64,
+    pub auto_unrepresented: u64,
+    /// Capture-wide operation retention loss, not attributed to this frame.
+    pub auto_dropped: u64,
+    pub auto_reason: Option<&'static str>,
     pub claimed: u64,
     pub possible: u64,
     pub other: u64,
@@ -350,10 +372,14 @@ impl Evidence {
     }
 
     pub fn status(&self) -> Status {
+        if self.auto_domain { return Status::AutoRecords; }
+        if self.frame_only { return Status::NoZones; }
+        if self.auto_reason.is_some() { return Status::Unmappable; }
         if self.refused.is_some() || (self.placed_epochs == 0 && self.unknown_total() > 0) {
             return Status::Unmappable;
         }
         let incomplete = self.unknown_total() > 0
+            || self.auto_unplaced > 0 || self.auto_untimed > 0 || self.auto_unrepresented > 0 || self.auto_dropped > 0
             || self.too_deep > 0
             || self.open != Some(0)
             || self.loss != Some(0)
@@ -393,6 +419,10 @@ impl Evidence {
         put("UNPAIRED", self.unpaired);
         put("TOODEEP", self.too_deep);
         put("PLACED", self.placed_epochs);
+        put("AUTO_UNPLACED", self.auto_unplaced);
+        put("AUTO_UNTIMED", self.auto_untimed);
+        put("AUTO_UNREPRESENTED", self.auto_unrepresented);
+        put("AUTO_DROPPED", self.auto_dropped);
         for w in EpochWhy::ALL {
             put(w.code(), self.unknown.get(&w).copied().unwrap_or(0));
         }
@@ -412,6 +442,17 @@ impl Evidence {
 
     pub fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
+        if self.auto_domain {
+            return vec!["timed by AUTO records: see rsx.auto for placement and clock validity; this domain has no EXT events".into()];
+        }
+        if self.frame_only {
+            return vec!["no zones in this build: this lane's retained PPU records are frame marks only".into()];
+        }
+        if let Some(reason) = self.auto_reason { out.push(reason.into()); }
+        if self.auto_unplaced > 0 { out.push(format!("{} AUTO record(s) not placed: invalid timestamps or outside clock support; unclaimed records may belong to this frame", self.auto_unplaced)); }
+        if self.auto_untimed > 0 { out.push(format!("{} draws excluded from individual timing in this coverage row (including outside timed ranges); no draw positions invented", self.auto_untimed)); }
+        if self.auto_unrepresented > 0 { out.push(format!("{} unrepresented segment draws in this coverage row; CALL timing, when present, is a whole bracket", self.auto_unrepresented)); }
+        if self.auto_dropped > 0 { out.push(format!("{} AUTO records not retained in the capture (capture-wide count)", self.auto_dropped)); }
         out.push(format!(
             "{} claimed, {} possible (unclaimed overlap), {} of other frames overlap",
             self.claimed, self.possible, self.other
@@ -479,6 +520,7 @@ pub enum LaneId {
     Ppu(u32),
     Spu(u32),
     Rsx(u32),
+    Auto,
 }
 
 impl LaneId {
@@ -487,9 +529,11 @@ impl LaneId {
             LaneId::Ppu(i) => format!("ppu.{i}"),
             LaneId::Spu(i) => format!("spu.{i}"),
             LaneId::Rsx(i) => format!("rsx.{i}"),
+            LaneId::Auto => "rsx.auto".into(),
         }
     }
     fn parse(s: &str) -> Option<LaneId> {
+        if s == "rsx.auto" { return Some(LaneId::Auto); }
         let (k, n) = s.split_once('.')?;
         let n = parse_u64(n).and_then(|v| u32::try_from(v).ok())?;
         Some(match k {
@@ -654,6 +698,8 @@ pub struct Source<'a> {
     pub a: &'a Analysis,
     pub ix: &'a FramesIndex,
     pub len: u64,
+    /// Cached reader report from the same immutable Document; no clock solving during a freeze.
+    pub auto: Option<&'a ar::Report>,
 }
 
 /// The per-freeze caps.
@@ -928,6 +974,88 @@ fn zone_text(a: &Analysis, spu: &BTreeMap<(u32, u32), &str>, image: Option<u32>,
     }
 }
 
+/// AUTO is a separate timing source, not an EXT epoch. Map each retained operation using the reader's
+/// qualified map, preserve its execution token (a segment's build token is not execution), and never
+/// substitute the PPU submission interval for an unavailable RSX timestamp.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn plan_auto(
+    src: &Source, key: (u32, u64), tb: u64, next: u64, caps: Caps, w: &mut Work,
+    lanes: &mut Vec<(LaneId, String, Evidence, u8)>, members: &mut Vec<Pending>,
+) -> Result<(), String> {
+    let Some(inv) = &src.a.capture.auto else { return Ok(()) };
+    if lanes.len() >= u16::MAX as usize { return Err("too many lanes".into()); }
+    let li = lanes.len() as u16;
+    let mut ev = Evidence { open: inv.final_seen.then_some(0), loss: inv.final_seen.then_some(0),
+        auto_dropped: inv.ops_dropped, ..Evidence::default() };
+    let report = src.auto;
+    let map = report.and_then(|r| r.map.as_ref()).and_then(|m| match m {
+        ar::MapState::Qualified(m) => Some(m.as_ref()), _ => None,
+    });
+    ev.auto_reason = if inv.refusal.is_some() || report.is_some_and(|r| r.refusal.is_some()
+        || r.status.as_ref().is_some_and(|s| s.flags & (ar::ST_SEGMENT_REPLAY | ar::ST_RESOURCE_CONFLICT | ar::ST_CONTEXT_RESET) != 0)) {
+        Some("AUTO timing invalidated by the reader (refusal, replay, resource conflict or context reset); nothing placed")
+    } else if map.is_none() {
+        Some("AUTO clock map not qualified; nothing placed")
+    } else { None };
+    if let Some(r) = report {
+        w.ops(r.frames.len() as u64)?;
+        if let Some(f) = r.frames.iter().find(|f| (f.owner,f.frame) == key) {
+            ev.auto_untimed = f.excluded.iter().chain(&f.outside_timed).fold(0u64, |a,&b| a.saturating_add(b));
+            ev.auto_unrepresented = u64::from(f.segment_unrepresented);
+        }
+    }
+    let mut depth = 0;
+    // raw_to_ppu_bounds scans the anchors twice per endpoint. Its short-lived rational arithmetic is
+    // bounded by u64 anchors and the reader's slope bounds; reuse this scratch allowance, not per-op storage.
+    w.alloc(8192)?;
+    for o in &inv.ops {
+        w.ops(1)?;
+        if o.kind == ar::KIND_FRAME { continue; } // frame marks delimit; they are not draw/range bars
+        let mine = o.token() == Some(key);
+        let unclaimed = o.token().is_none();
+        let valid = o.raw_valid() && o.flags & (ar::OP_CLOCK_INVALID | ar::OP_INCOMPLETE | ar::OP_READ_REFUSED | ar::OP_PUBLICATION_UNKNOWN) == 0
+            && o.raw_end >= o.raw_begin && (o.flags & ar::OP_SEGMENT == 0 || o.call != 0);
+        if ev.auto_reason.is_some() || !valid {
+            if mine || unclaimed { ev.auto_unplaced += 1; }
+            continue;
+        }
+        w.ops((inv.clocks.len() as u64).saturating_mul(4).saturating_add(128))?;
+        let map = map.expect("qualified above");
+        let (Some(b),Some(e)) = (ar::raw_to_ppu_bounds(&inv.clocks,map,o.raw_begin), ar::raw_to_ppu_bounds(&inv.clocks,map,o.raw_end)) else {
+            if mine || unclaimed { ev.auto_unplaced += 1; }
+            continue;
+        };
+        let overlaps = b.0 < next && e.1 > tb;
+        let class = if mine { Class::Claimed } else if unclaimed && overlaps { Class::Possible } else {
+            if !unclaimed && overlaps { ev.other += 1; }
+            continue;
+        };
+        let kind = match o.kind { ar::KIND_ARRAY => "ARRAY", ar::KIND_INDEX => "INDEX", ar::KIND_CLEAR => "CLEAR",
+            ar::KIND_CALL => "CALL", ar::KIND_RANGE => "RANGE", _ => "UNKNOWN" };
+        w.ops(log2(src.a.capture.descriptors.len()))?;
+        let name = if o.kind == ar::KIND_RANGE {
+            o.args[0].checked_sub(1).and_then(|i| src.a.capture.descriptors.get(&i)).map(|d| d.name.as_str()).unwrap_or("descriptor unavailable")
+        } else { "" };
+        // Bound the fixed fields before formatting; 20-digit ids and 10-digit tag/segment/call fit in 160.
+        charge_label(w,160 + name.len() as u64,caps.bars)?;
+        if members.len() as u64 >= caps.bars { return Err(format!("the frame has more than {} member bars: not captured",caps.bars)); }
+        w.grow(members)?;
+        let label = format!("op {} {kind} {name}; tag {}; segment {} call {}",o.id,o.tag.unwrap_or(0),o.segment,o.call);
+        let d = if o.kind == ar::KIND_RANGE { o.depth.saturating_sub(1).min(3) as u8 } else { 0 };
+        depth = depth.max(d);
+        if mine { ev.claimed += 1; } else { ev.possible += 1; }
+        members.push(Pending { lane:li, depth:d, flags:if b.1 < e.0 { F_CORE } else {0}, class, label,
+            b_lo:Pt::exact(rel_u64(b.0,tb)), b_hi:Pt::exact(rel_u64(b.1,tb)),
+            e_lo:Pt::exact(rel_u64(e.0,tb)), e_hi:Pt::exact(rel_u64(e.1,tb)),
+            inclusive:Some(o.raw_end-o.raw_begin), exclusive:None });
+    }
+    let name = "rsx.auto";
+    w.alloc(alloc_bytes(name.len() as u64))?;
+    w.grow(lanes)?;
+    lanes.push((LaneId::Auto,name.into(),ev,depth));
+    Ok(())
+}
+
 /// Classifies one (owner, frame) of an analysis.  Pure: nothing is retained.  `ft` is the analysis's foreign placement
 /// under the same premise; `declared` its declared sources.  Every step, copy and growth is charged to `w` BEFORE it
 /// happens, and the build's scratch is charged too; any refusal is atomic.
@@ -954,7 +1082,12 @@ pub fn plan(
     let cap = &a.capture;
     for (&inc, lane) in &cap.lanes {
         let li = lanes.len() as u16;
-        let mut ev = Evidence { open: Some(0), loss: Some(0), gaps: lane.gap_count, ..Evidence::default() };
+        let mut ev = Evidence {
+            open: Some(0), loss: Some(0), gaps: lane.gap_count,
+            frame_only: !lane.frames.is_empty() && lane.spans.is_empty() && lane.written == lane.frames.len() as u64
+                && lane.gap_count == 0 && !lane.clock_anomaly,
+            ..Evidence::default()
+        };
         let mut max_depth = 0u8;
         w.ops(1 + lane.spans.len() as u64)?;
         for &idx in &lane.spans {
@@ -1051,6 +1184,17 @@ pub fn plan(
     // Foreign: every DECLARED source, in declaration order, looked up once each in a metered index.
     let spu = spu_names(a, w)?;
     let index = source_index(ft, w)?;
+    // AUTO declares its GPU identity in EXT, but timestamps live in AUTO_OPS. Only that exact domain with
+    // genuinely no EXT events/errors is delegated; all other EXT sources keep their ordinary evidence.
+    let auto_domain = cap.auto.as_ref().and_then(|i| i.config.as_ref()).and_then(|c| c.attached()).map(|c| c.domain);
+    let mut delegated = None;
+    if let (Some(domain), Some(ext)) = (auto_domain, &cap.ext) {
+        w.ops(ext.sources.len() as u64)?;
+        if ext.sources.iter().any(|s| s.key == SourceKey::Gpu(domain) && s.events_total == 0
+            && s.raw.events.is_empty() && s.lost_total == 0 && s.invalid.is_empty() && s.protocol_error.is_none()) {
+            delegated = Some(SourceKey::Gpu(domain));
+        }
+    }
     w.ops(1 + declared.len() as u64)?;
     for k in declared {
         let li = lanes.len() as u16;
@@ -1059,6 +1203,7 @@ pub fn plan(
         let mut ev = Evidence::default();
         let mut max_depth = 0u8;
         match s {
+            _ if delegated == Some(*k) => { ev.auto_domain = true; }
             None if ft.retention_refused => ev.refused = Some(SourceRefusal::Retention),
             None => {
                 ev.open = Some(0);
@@ -1176,6 +1321,7 @@ pub fn plan(
         w.grow(&mut lanes)?;
         lanes.push((LaneId::of(*k), source_label(*k), ev, max_depth));
     }
+    plan_auto(src, key, tb, next_tb, caps, w, &mut lanes, &mut members)?;
     // The build's scratch: the dedup map (entries; keys are moved, not copied), the boxed label copies, the bars and
     // lanes vectors and the per-lane ranges.
     let labels_bytes: u64 = members.iter().map(|m| alloc_bytes(m.label.len() as u64)).sum();
@@ -1721,10 +1867,11 @@ pub fn record_line(b: &Bookmark) -> String {
     )
 }
 
-const ITEM_CODES: [&str; 24] = [
+const ITEM_CODES: [&str; 28] = [
     "CLAIMED", "POSSIBLE", "OTHER", "EXTRAP", "OPENMEM", "UNAVAIL", "AFFECTED", "GAPS", "CENSORED", "UNPAIRED",
     "TOODEEP", "PLACED", "E_NOOBS", "E_AMBIG", "E_CLOCK", "E_INCONS", "E_DUR", "E_ORDER", "E_REFUSED", "E_NOTCOMP",
     "OPEN", "LOSS", "REFUSED", "RETENTION",
+    "AUTO_UNPLACED", "AUTO_UNTIMED", "AUTO_UNREPRESENTED", "AUTO_DROPPED",
 ];
 
 fn parse_header(line: &str) -> Result<Header, String> {
