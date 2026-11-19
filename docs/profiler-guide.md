@@ -651,7 +651,10 @@ timing bars. Before publishing, the viewer reopens the projection and compares t
 Source seal proofs are not carried: their chunk references belong to the original file. When present in the
 original, their count is shown as provenance, not as completion proof for the saved snapshot.
 The support-file limit is 64 MiB; an oversized dependency is named in the refusal, and the viewer never falls back
-to copying the whole session. Only contributors' direct children are needed for
+to copying the whole session. The default 1 GiB shared budget imposes a lower practical save limit of about
+14 MiB of selected support: workspace is charged at 70 times the output size plus 4 MiB, and retained snapshots
+reduce the available budget further. Larger saves are refused for workspace even below the 64 MiB file cap.
+Only contributors' direct children are needed for
 exclusive time, not all grandchildren below a run-long root. The save result
 reports the direct-child record bytes. A large direct-child dependency is named
 when it exceeds the allowance.
