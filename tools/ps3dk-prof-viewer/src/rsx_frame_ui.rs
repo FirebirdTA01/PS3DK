@@ -13,6 +13,7 @@ struct RowKey {
     column: DrawColumn,
     descending: bool,
     group: Option<GroupBy>,
+    by_target: bool,
     scan: u64,
 }
 #[derive(Default)]
@@ -66,12 +67,15 @@ pub struct State {
     pub descending: bool,
     pub tab: Tab,
     pub group: Option<GroupBy>,
+    /// Group by render target (viewer-side, from the register state); exclusive with `group`.
+    pub by_target: bool,
     pub legacy: bool,
     pub focus: bool,
     /// The capture switched to when the live link ended, and why its timing is incomplete.
     pub link_ended: Option<(u32, String)>,
     rows: Option<(RowKey, Arc<Rows>)>,
     consumed: Option<(u32, u32)>,
+    state_cache: crate::rsx_state_ui::Cache,
 }
 impl Default for State {
     fn default() -> Self {
@@ -83,11 +87,13 @@ impl Default for State {
             descending: true,
             tab: Tab::Summary,
             group: None,
+            by_target: false,
             legacy: false,
             focus: false,
             link_ended: None,
             rows: None,
             consumed: None,
+            state_cache: Default::default(),
         }
     }
 }
@@ -97,15 +103,15 @@ impl State {
     pub fn rows(&mut self, v: &RsxFrameView, names: &Names, scan: u64) -> Arc<Rows> {
         if let Some((k, rows)) = &self.rows {
             if k.generation == v.generation && k.capture == self.selected && k.filter == self.filter
-                && k.column == self.column && k.descending == self.descending && k.group == self.group && k.scan == scan {
+                && k.column == self.column && k.descending == self.descending && k.group == self.group && k.by_target == self.by_target && k.scan == scan {
                 return rows.clone();
             }
         }
         let rows = Arc::new(v.frames.iter().find(|f|Some(f.id)==self.selected).map_or_else(Rows::default, |f| Rows {
             ids: sorted_draws(f, &self.filter, self.column, self.descending, names),
-            groups: self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)),
+            groups: if self.by_target { crate::rsx_state_ui::target_groups(f) } else { self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)) },
         }));
-        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, scan}, rows.clone()));
+        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, by_target:self.by_target, scan}, rows.clone()));
         rows
     }
     /// The link-ended reason, shown only while that capture is selected.
@@ -270,17 +276,20 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
    p.separator();
    p.horizontal_wrapped(|p|{
      p.label("Filter");p.add(egui::TextEdit::singleline(&mut st.filter).hint_text("Label, shader, kind or ordinal").desired_width(250.0));
-     egui::ComboBox::from_id_salt("rsxf-group").selected_text(st.group.map_or("No grouping",group_name)).show_ui(p,|p|{
-       p.selectable_value(&mut st.group,None,"No grouping");for by in [GroupBy::Program,GroupBy::Vp,GroupBy::Fp,GroupBy::Label,GroupBy::Tag,GroupBy::Pass,GroupBy::Kind]{p.selectable_value(&mut st.group,Some(by),group_name(by));}
+     egui::ComboBox::from_id_salt("rsxf-group").selected_text(if st.by_target{"Render target"}else{st.group.map_or("No grouping",group_name)}).show_ui(p,|p|{
+       if p.selectable_label(st.group.is_none()&&!st.by_target,"No grouping").clicked(){st.group=None;st.by_target=false;}
+       for by in [GroupBy::Program,GroupBy::Vp,GroupBy::Fp,GroupBy::Label,GroupBy::Tag,GroupBy::Pass,GroupBy::Kind]{if p.selectable_label(!st.by_target&&st.group==Some(by),group_name(by)).clicked(){st.group=Some(by);st.by_target=false;}}
+       if p.selectable_label(st.by_target,"Render target").clicked(){st.group=None;st.by_target=true;}
      });
    });
    p.horizontal_wrapped(|p|{p.label("Sort");for (column,name) in [(DrawColumn::Time,"Time"),(DrawColumn::Ordinal,"Ordinal"),(DrawColumn::Kind,"Kind"),(DrawColumn::Count,"Count"),(DrawColumn::Gap,"Gap")]{if p.selectable_label(st.column==column,name).clicked(){if st.column==column{st.descending=!st.descending}else{st.column=column;st.descending=column!=DrawColumn::Ordinal;}}}p.label(if st.descending{"Descending"}else{"Ascending"});});
    let cached=st.rows(v,names,scan);let ids=&cached.ids;
-   if st.group.is_some() {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
+   if st.group.is_some()||st.by_target {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    if ids.is_empty(){p.label(if f.draws.is_empty(){"No draw records retained in this capture."}else{"No draws match the filter."});}
    draw_table(p,v,f,names,st,out,&ids);
    p.separator();
-   let Some(d)=st.draw.and_then(|n|f.draws.iter().find(|d|d.raw.ordinal==n))else{return};
+   let Some(di)=st.draw.and_then(|n|f.draws.iter().position(|d|d.raw.ordinal==n))else{return};let d=&f.draws[di];
+   let sx=crate::rsx_state_ui::Ctx{f,index:di};
    p.horizontal_wrapped(|p|{for (tab,name) in [(Tab::Summary,"Summary"),(Tab::Shaders,"Shaders"),(Tab::State,"State"),(Tab::Textures,"Textures"),(Tab::Buffers,"Buffers"),(Tab::Constants,"Constants")]{p.selectable_value(&mut st.tab,tab,name);}});
    match st.tab {
      Tab::Summary=>{
@@ -292,6 +301,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
        if d.raw.kind==rf::DrawKind::Clear{p.label(format!("Clear mask {:#x}",d.raw.clear_mask));}
        p.label(format!("{}{}{}{}",if d.hooked(){"Hooked "}else{""},if d.decoded(){"Decoded "}else{""},if d.raw.flags&rf::DF_STATE_UNKNOWN!=0{"State unknown "}else{""},if d.op_mismatch{"AUTO kind mismatch"}else{""}));
        p.label(format!("Caller {:#x} · {} command words · PPU tick {}",d.raw.caller,d.raw.words,d.raw.tb));
+       crate::rsx_state_ui::changed_list(p,&sx);
      },
      Tab::Shaders=>{for (title,id) in [("Vertex program",d.vp),("Fragment program",d.fp)]{
        ui::section_label(p,title);if let Some(prog)=id.and_then(|i|f.programs.get(i)){
@@ -301,7 +311,10 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
          if prog.unterminated{ui::field_message(p,ui::Tone::Warning,"Unterminated: no end bit within the bound");}
        }else{p.label("Program identity unavailable for this draw.");}
      }},
-     _=>{ui::field_message(p,ui::Tone::Neutral,"Not recorded by RSX frame schema 1. This capture contains draw arguments and program identities; these state values are unavailable.");},
+     Tab::State=>crate::rsx_state_ui::state_tab(p,&sx,&mut st.state_cache),
+     Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache),
+     Tab::Buffers=>crate::rsx_state_ui::buffers_tab(p,&sx,&mut st.state_cache),
+     Tab::Constants=>{ui::field_message(p,ui::Tone::Neutral,"Shader constants are not recorded in this capture format.");},
    }
  });
 }

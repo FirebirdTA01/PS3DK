@@ -856,8 +856,14 @@ agents are negotiated as protocol 2 then 1 and show why the button is unavailabl
 
 Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
 ordinal, change the sort, or group by program pair, VP, FP, label, tag, pass or kind. Summary and Shaders show the
-reader's arguments, provenance and stable identities. State, Textures, Buffers and Constants explicitly report that
-schema 1 did not record those values. PIPELINED intervals may overlap: their sum is not isolated execution cost.
+reader's arguments, provenance and stable identities. Captures with register state (decoder 2) fill **State**
+(render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot: size, format, mips,
+filter, wrap, offset and location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
+the index stream of an indexed draw, and the surfaces). Values this draw changed are highlighted, values that differ
+from the state when the capture was armed are tinted, and a register not written since the last decoder reset reads
+**unknown**, never a default. Summary and State list the registers changed since the previous draw with their old
+and new values. Group by **Render target** to total draws per colour/zeta surface. Constants are not recorded;
+older (decoder 1) captures say that no register state was recorded. PIPELINED intervals may overlap: their sum is not isolated execution cost.
 Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
 raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
 

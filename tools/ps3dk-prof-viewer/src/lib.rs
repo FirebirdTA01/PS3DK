@@ -37,6 +37,7 @@ pub mod rsx;
 pub mod rsx_ui;
 pub mod rsx_frame_view;
 pub mod rsx_frame_ui;
+pub mod rsx_state_ui;
 pub mod shader_names;
 pub mod sha256;
 pub mod timeline;
