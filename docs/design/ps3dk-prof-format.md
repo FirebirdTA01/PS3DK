@@ -904,7 +904,7 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 |---|---|---|
 | 0 | u16 | schema = 1 |
 | 2 | u16 | flags = 0 |
-| 4 | u32 | decoder version = 1 |
+| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); other values MALFORMED |
 | 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
 | 12 | u32 | staging block bytes: 4096..1048576, a multiple of 8 |
 | 16 | u32 | staging blocks: 1..16 |
@@ -1009,6 +1009,31 @@ LABEL (type 3) and NAME (type 4), length 16 + n rounded up to 8:
 
 A label is the full scope path joined with `/` (scopes outermost first, then the label).
 
+BASELINE (type 5) and STATE (type 6), decoder 2 only, length 16 + 8 x n:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | BASELINE: 0; STATE: the ordinal of the draw it belongs to |
+| 8 | u16 | n: register pairs, 0..255 |
+| 10 | u16 | flags: STATE bit 0 RESET (every register unknown before these pairs); BASELINE 0; other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 8 | pairs {u16 register index (method byte address / 4, 0..2047), u16 reserved = 0, u32 value} |
+
+The register file is the 3D object's methods 0x0000..0x1ffc on subchannel 0 as the decoder last saw them written. Data
+ports are interpreted, never stored: the object bind and the channel words below 0x100, VP instruction upload
+(0x0b80..0x0bfc), VP constant upload (0x1f00..0x1f7c), BEGIN_END, inline vertex and index data, the vertex and index
+batch triggers and CLEAR_BUFFERS. A register is known from its first write after attach or after a decoder reset
+(any rejected or unfollowed word); its value is then the last one written.
+
+- BASELINE: the known registers at arming, before the first DRAW or STATE of the capture; n >= 1; register indices
+  strictly increasing across all BASELINE records of the capture.
+- STATE: what changed since the previous draw (registers written with a different value, or newly known). Each draw's
+  STATE records come right before its definitions and DRAW, in the same DRAWS chunk; their ordinal is that DRAW's and
+  greater than the previous draw's; register indices strictly increasing across the draw's records; RESET only on the
+  first; n = 0 only with RESET. A draw with no STATE record has the register file of the draw before it.
+- The register file at a draw is the BASELINE, then every STATE record up to and including that draw's, in order (a
+  RESET makes every register unknown first). A truncated capture's draws not recorded carry no state.
+
 ### 12.4 RSXF_PROGRAMS (47)
 
 Allocated for parameter tables and program bytes (later phases). Schema 1 writers never write it; a schema 1
@@ -1040,10 +1065,10 @@ reader refuses it.
 | 88 | u32 | decoder first rejected header (0 none) |
 | 92 | u32 | decoder rejection reason (`RING_REJECT_REASONS` numbering; 0 none) |
 | 96 | u32 | decoder draw events lost (0 in this release: each event is recorded as it completes) |
-| 100 | u32 | reserved = 0 |
+| 100 | u32 | register pairs in BASELINE records (must equal the pairs seen; 0 for decoder 1) |
 | 104 | u64 | reserved = 0 |
 | 112 | u32 | draws not timed |
-| 116 | u32 | reserved = 0 |
+| 116 | u32 | STATE records (must equal the records seen; 0 for decoder 1) |
 | 120 | u64 | reserved = 0 |
 
 A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.

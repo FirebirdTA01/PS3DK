@@ -20,6 +20,23 @@ void ps3dk_prof__rsxf_decode_init(rsxf_decoder *d)
     memset(d, 0, sizeof *d);
 }
 
+int ps3dk_prof__rsxf_shadowed(uint32_t m)
+{
+    if (m < 0x0100u || m > 0x1ffcu || (m & 3u))
+        return 0; /* the object bind and the channel words below NOP */
+    if (m >= M_VP_INST_FIRST && m < M_VP_INST_END)
+        return 0; /* VP instruction upload port */
+    if (m >= 0x1f00u && m <= 0x1f7cu)
+        return 0; /* VP constant upload port */
+    switch (m) {
+    case M_BEGIN_END: case M_ELEMENT_U16: case M_ELEMENT_U32: case M_VERTEX_BATCH: case M_VERTEX_DATA:
+    case M_INDEX_DRAW: case M_CLEAR:
+        return 0; /* draw triggers and inline data */
+    default:
+        return 1;
+    }
+}
+
 void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t reason)
 {
     if (reason && !d->bad_reason) {
@@ -27,6 +44,8 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
         d->bad_reason = reason;
     }
     d->known = 0;
+    memset(d->reg_known, 0, sizeof d->reg_known);
+    d->regs_cleared++;
     memset(d->vp_known, 0, sizeof d->vp_known);
     d->vp_generation++;
     d->in_group = 0;
@@ -53,6 +72,12 @@ static void group_kind(rsxf_decoder *d, uint32_t kind)
 
 static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
 {
+    if (ps3dk_prof__rsxf_shadowed(m)) {
+        uint32_t i = m >> 2, bit = 1u << (i & 31u);
+        d->reg[i] = v;
+        d->reg_known[i >> 5] |= bit;
+        d->reg_dirty[i >> 5] |= bit;
+    }
     if (m >= M_VP_INST_FIRST && m < M_VP_INST_END) {
         uint32_t slot = d->vp_upload;
         if (slot < RSXF_VP_SLOTS) {

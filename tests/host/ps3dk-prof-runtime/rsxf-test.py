@@ -93,6 +93,11 @@ def main():
     assert d[0]['label'] == 'terrain/rock' and d[0]['fp'] == 1 and d[0]['timing']['state'] == 'untimed'
     assert d[0]['timing']['reason'].startswith('not hooked'), d[0]
     assert c['end']['lost_events'] == 2 and 'fp_reads' not in c['end'], c['end']
+    # the register records: BASELINE (blend and depth test on), the draw's STATE (DEPTH_FUNC LEQUAL)
+    assert (c['end']['baseline_registers'], c['end']['state_records']) == (2, 1), c['end']
+    st = d[0]['state']['render']
+    assert (st['blend.enable'], st['depth.test'], st['depth.func']) == (True, True, 'LEQUAL'), st
+    assert d[0]['changed'] == ['DEPTH_FUNC'] and st['cull.enable'] is None, d[0]['changed']
     print('RSX frame capture units and reader round trip PASS')
 
 

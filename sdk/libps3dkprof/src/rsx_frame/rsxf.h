@@ -33,7 +33,12 @@
 enum { RSXF_CHUNK_CONFIG = 44, RSXF_CHUNK_BEGIN = 45, RSXF_CHUNK_DRAWS = 46, RSXF_CHUNK_END = 48 };
 enum { RSXF_CONFIG_BYTES = 64, RSXF_BEGIN_FIXED = 56, RSXF_DRAWS_HEADER = 16, RSXF_END_BYTES = 128,
        RSXF_DRAW_BYTES = 96, RSXF_PROGRAM_BYTES = 48, RSXF_NAME_MAX = 63, RSXF_TEXT_MAX = 63 };
-enum { RSXF_REC_DRAW = 1, RSXF_REC_PROGRAM = 2, RSXF_REC_LABEL = 3, RSXF_REC_NAME = 4 };
+enum { RSXF_REC_DRAW = 1, RSXF_REC_PROGRAM = 2, RSXF_REC_LABEL = 3, RSXF_REC_NAME = 4, RSXF_REC_BASELINE = 5,
+       RSXF_REC_STATE = 6 };
+/* CONFIG decoder version: 1 draws and programs; 2 also the 3D register shadow (BASELINE and STATE records). */
+enum { RSXF_DECODER = 2 };
+/* Register records: at most this many (register, value) pairs each (16 + 8 x 255 bytes). */
+enum { RSXF_REG_PAIRS_MAX = 255, RSXF_REG_HEADER = 16, RSXF_STATE_RESET = 1 };
 enum { RSXF_AVAILABLE = 0, RSXF_NO_AUTO = 1, RSXF_NO_RING = 2, RSXF_NO_DECODER = 3 };
 enum { RSXF_K_ARRAY = 1, RSXF_K_INDEX = 2, RSXF_K_CLEAR = 3, RSXF_K_INLINE_ARRAY = 7, RSXF_K_INLINE_INDEX = 8,
        RSXF_K_IMMEDIATE = 9 };
@@ -75,7 +80,8 @@ typedef struct rsxf_wire_program {
 } rsxf_wire_program;
 typedef struct rsxf_wire_end {
     uint32_t id, blocks, blocks_dropped, draws_seen, draws_recorded, hooked, decoded_only, mismatches, truncated_at,
-             programs, labels, labels_refused, programs_refused, reject_header, reject_reason, lost_events, untimed;
+             programs, labels, labels_refused, programs_refused, reject_header, reject_reason, lost_events, untimed,
+             baseline_registers, state_records;
     uint16_t outcome, reason;
     uint64_t bytes_streamed, bytes_dropped, tb_end, decoder_words;
 } rsxf_wire_end;
@@ -90,6 +96,10 @@ size_t ps3dk_prof__rsxf_put_draws_header(uint8_t *out, size_t cap, uint32_t id, 
                                          uint32_t record_bytes);
 size_t ps3dk_prof__rsxf_put_end(uint8_t *out, size_t cap, const rsxf_wire_end *e);
 size_t ps3dk_prof__rsxf_text_bytes(uint32_t n); /* a LABEL/NAME record's length for n text bytes */
+/* A BASELINE (ordinal 0, flags 0) or STATE record of n (register index, value) pairs, indices strictly increasing
+ * and below RSXF_REGS; n 1..RSXF_REG_PAIRS_MAX, except a STATE record with RSXF_STATE_RESET may have none. */
+size_t ps3dk_prof__rsxf_put_regs(uint8_t *out, size_t cap, uint16_t type, uint32_t ordinal, uint32_t flags,
+                                 const uint16_t *index, const uint32_t *value, uint32_t n);
 /* Appends at most `n` bytes of `src` (stopping at a NUL) to dst[at..cap) as valid UTF-8: every invalid byte becomes
  * '?', and a sequence that does not fit whole is left out (the text is cut on a character boundary). Returns the new
  * length. A label path and a capture name go through it, so every LABEL and NAME text is valid UTF-8. */
@@ -108,7 +118,11 @@ uint64_t ps3dk_prof__rsxf_fnv(uint64_t h, const void *bytes, size_t n);
 #define RSXF_FNV_OFFSET 0xcbf29ce484222325ull
 
 /* ---- command-stream decoder (rsxf_decode.c): subchannel 0 only, owner words only ------------------------------- */
-enum { RSXF_VP_SLOTS = 512 };
+/* The 3D register file: methods 0x0000..0x1ffc as 2048 words. Data ports (VP instruction and constant upload, inline
+ * vertex and index data, draw triggers, the clear trigger, the object bind) are interpreted, not stored. */
+enum { RSXF_VP_SLOTS = 512, RSXF_REGS = 2048, RSXF_REG_WORDS = RSXF_REGS / 32 };
+/* 1 when the method (byte address 0..0x1ffc) is shadowed as a register. */
+int ps3dk_prof__rsxf_shadowed(uint32_t method);
 typedef struct rsxf_draw_event {
     uint32_t kind, mode, first, count, index_offset, index_type, index_location, clear_mask, words;
 } rsxf_draw_event;
@@ -117,6 +131,11 @@ typedef struct rsxf_decoder {
     uint8_t vp_known[RSXF_VP_SLOTS];
     uint32_t vp_upload, vp_word, vp_start, fp_address, index_offset, index_dma;
     uint32_t known;            /* bit 0 vp_start, bit 1 fp_address, bit 2 index registers */
+    /* the register shadow: the last value written, KNOWN (written since the last reset) and DIRTY (written since the
+     * runtime last cleared it) bits per register; regs_cleared counts resets (every KNOWN bit cleared) */
+    uint32_t reg[RSXF_REGS];
+    uint32_t reg_known[RSXF_REG_WORDS], reg_dirty[RSXF_REG_WORDS];
+    uint32_t regs_cleared;
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
     uint32_t bad_header, bad_reason, resets; /* the first rejection (AUTO_RING_REJECT_* numbering) */

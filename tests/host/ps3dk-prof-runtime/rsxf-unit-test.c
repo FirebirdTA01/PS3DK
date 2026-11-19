@@ -130,6 +130,51 @@ static void rejections_forget_and_recover(void)
     }
 }
 
+/* The 3D register shadow: plain methods stored with KNOWN and DIRTY bits, data ports and triggers not; a rejection
+ * clears every KNOWN bit and counts the reset. */
+static void register_shadow(void)
+{
+    const uint32_t w[] = {M(0, 0x310, 2), 1, 0x03020302,       /* BLEND_ENABLE, BLEND_FUNC_SRC (incrementing) */
+                          M(0, 0x1d94, 1) | NI, 0xf3,           /* CLEAR_BUFFERS: a trigger, not a register */
+                          M(0, 0x0b80, 4), 1, 2, 3, 4,          /* VP instruction port */
+                          M(0, 0x1f00, 1), 7,                   /* VP constant port */
+                          M(0, 0x1a00, 2) | NI, 0x100, 0x200,   /* TEX_OFFSET(0) twice (non-incrementing) */
+                          M(2, 0x0320, 1), 9};                  /* another subchannel: not this object */
+    uint32_t cleared;
+    ps3dk_prof__rsxf_decode_init(&d);
+    decode(w, sizeof w / 4, 1);
+#define KNOWN(m) ((d.reg_known[((m) >> 2) >> 5] >> (((m) >> 2) & 31u)) & 1u)
+#define DIRTY(m) ((d.reg_dirty[((m) >> 2) >> 5] >> (((m) >> 2) & 31u)) & 1u)
+    assert(KNOWN(0x310) && d.reg[0x310 >> 2] == 1 && KNOWN(0x314) && d.reg[0x314 >> 2] == 0x03020302);
+    assert(DIRTY(0x310) && DIRTY(0x314));
+    assert(KNOWN(0x1a00) && d.reg[0x1a00 >> 2] == 0x200); /* the last value written */
+    assert(!KNOWN(0x1d94) && !KNOWN(0x0b80) && !KNOWN(0x0b8c) && !KNOWN(0x1f00) && !KNOWN(0x320));
+    assert(!ps3dk_prof__rsxf_shadowed(0x1808) && !ps3dk_prof__rsxf_shadowed(0x1814) &&
+           !ps3dk_prof__rsxf_shadowed(0x0000) && ps3dk_prof__rsxf_shadowed(0x181c) && ps3dk_prof__rsxf_shadowed(0x1fc0));
+    cleared = d.regs_cleared;
+    ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
+    assert(!KNOWN(0x310) && !KNOWN(0x1a00) && d.regs_cleared == cleared + 1);
+    assert(d.reg[0x310 >> 2] == 1); /* the value stays; it is just not known */
+#undef KNOWN
+#undef DIRTY
+    ps3dk_prof__rsxf_decode_init(&d);
+}
+
+static void register_records(void)
+{
+    uint8_t o[64];
+    const uint16_t idx[2] = {0x310 >> 2, 0xa74 >> 2}, bad[2] = {0xa74 >> 2, 0x310 >> 2}, far[1] = {2048};
+    const uint32_t val[2] = {1, 1};
+    assert(ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_BASELINE, 0, 0, idx, val, 2) == 32);
+    assert(o[0] == RSXF_REC_BASELINE && o[2] == 32 && o[8] == 2 && o[16] == (0x310 >> 2) && o[20] == 1);
+    assert(!ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_BASELINE, 0, 0, bad, val, 2));   /* not increasing */
+    assert(!ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_BASELINE, 0, 0, far, val, 1));   /* past the file */
+    assert(!ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_BASELINE, 3, 0, idx, val, 2));   /* an ordinal */
+    assert(!ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_STATE, 3, 0, idx, val, 0));      /* empty, no reset */
+    assert(ps3dk_prof__rsxf_put_regs(o, sizeof o, RSXF_REC_STATE, 3, RSXF_STATE_RESET, idx, val, 0) == 16);
+    assert(!ps3dk_prof__rsxf_put_regs(o, 31, RSXF_REC_STATE, 3, 0, idx, val, 2));            /* capacity */
+}
+
 static void utf8(void)
 {
     char o[16];
@@ -218,9 +263,23 @@ static void encoders(FILE *out, uint32_t owner)
     memset(&w, 0, sizeof w);
     w.ordinal = 0; w.kind = RSXF_K_ARRAY; w.flags = RSXF_DF_DECODED; w.untimed = RSXF_UNTIMED_NOT_HOOKED;
     w.mode = 5; w.count = 36; w.label = 1; w.fp = 1; w.fp_address = 0x40;
+    {
+        /* the register file at arming, then what the draw changed */
+        const uint16_t bi[2] = {0x310 >> 2, 0xa74 >> 2}, si[1] = {0xa6c >> 2};
+        const uint32_t bv[2] = {1, 1}, sv[1] = {0x203};
+        uint8_t tmp[1024];
+        size_t pre = ps3dk_prof__rsxf_put_regs(tmp, sizeof tmp, RSXF_REC_BASELINE, 0, 0, bi, bv, 2);
+        assert(pre == 32);
+        pre += ps3dk_prof__rsxf_put_regs(tmp + pre, sizeof tmp - pre, RSXF_REC_STATE, 0, 0, si, sv, 1);
+        assert(pre == 56);
+        /* BASELINE, then the draw's STATE, then its definitions and the DRAW */
+        memmove(rec + pre, rec, r);
+        memcpy(rec, tmp, pre);
+        r += pre;
+    }
     r += ps3dk_prof__rsxf_put_draw(rec + r, sizeof rec - r, &w);
-    assert(r == RSXF_PROGRAM_BYTES + 32 + RSXF_DRAW_BYTES);
-    n = ps3dk_prof__rsxf_put_draws_header(buf, sizeof buf, 1, 0, 3, (uint32_t)r);
+    assert(r == 56 + RSXF_PROGRAM_BYTES + 32 + RSXF_DRAW_BYTES);
+    n = ps3dk_prof__rsxf_put_draws_header(buf, sizeof buf, 1, 0, 5, (uint32_t)r);
     memcpy(buf + n, rec, r);
     n += r;
     fwrite("D", 1, 1, out); fwrite(&n, 4, 1, out); fwrite(buf, 1, n, out);
@@ -228,6 +287,8 @@ static void encoders(FILE *out, uint32_t owner)
     e.id = 1; e.outcome = RSXF_OUT_DONE; e.blocks = 1; e.draws_seen = 1; e.draws_recorded = 1; e.decoded_only = 1;
     e.truncated_at = RSXF_NO_ORDINAL; e.programs = 1; e.labels = 1; e.untimed = 1; e.bytes_streamed = r;
     e.lost_events = 2;
+    e.baseline_registers = 2;
+    e.state_records = 1;
     e.outcome = RSXF_OUT_TRUNCATED;
     assert(!ps3dk_prof__rsxf_put_end(buf, sizeof buf, &e)); /* TRUNCATED needs an ordinal */
     e.outcome = RSXF_OUT_DONE;
@@ -245,6 +306,8 @@ int main(int argc, char **argv)
     draws_and_clears();
     rejections_forget_and_recover();
     hashes();
+    register_shadow();
+    register_records();
     utf8();
     encoders(out, owner);
     assert(fclose(out) == 0);

@@ -17,6 +17,7 @@
 # Every draw is also checked hooked and decoded, with no mismatch, no unknown state, and every program exact
 # (readable, terminated, not "bound before capture").
 @ name	matrix
+@ decoder	2
 @ source	app
 @ status	COMPLETE
 @ timing_mode	pipelined

@@ -30,16 +30,19 @@ pub struct XConfig {
     pub programs: u32,
     pub labels: u32,
     pub label_bytes: u32,
+    /// 1: draws and programs only; 2: also BASELINE and STATE register records.
+    pub decoder: u32,
 }
 impl Default for XConfig {
     fn default() -> Self {
-        XConfig { schema: 1, availability: 0, block_bytes: 256 << 10, blocks: 2, programs: 512, labels: 256, label_bytes: 63 }
+        XConfig { schema: 1, availability: 0, block_bytes: 256 << 10, blocks: 2, programs: 512, labels: 256, label_bytes: 63,
+            decoder: 1 }
     }
 }
 impl XConfig {
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
-        b.u16(self.schema).u16(0).u32(1).u32(self.availability).u32(self.block_bytes).u32(self.blocks)
+        b.u16(self.schema).u16(0).u32(self.decoder).u32(self.availability).u32(self.block_bytes).u32(self.blocks)
             .u32(self.programs).u32(self.labels).u32(self.label_bytes);
         b.0.extend_from_slice(&[0; 32]);
         chunk(T_CONFIG, b.0)
@@ -186,11 +189,15 @@ pub struct XEnd {
     pub reject: (u32, u32),
     pub lost_events: u32,
     pub untimed: u32,
+    /// BASELINE register pairs and STATE records (offsets 100 and 116).
+    pub baseline: u32,
+    pub states: u32,
 }
 impl XEnd {
     pub fn done(id: u32) -> Self {
         XEnd { id, outcome: 1, reason: 0, n: [0, 0, 0, 0, 0, 0, 0, u32::MAX, 0, 0, 0, 0], bytes: (0, 0), tb_end: 9000,
-            decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0 }
+            decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0,
+            baseline: 0, states: 0 }
     }
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
@@ -199,7 +206,7 @@ impl XEnd {
             b.u32(v);
         }
         b.u64(self.bytes.0).u64(self.bytes.1).u64(self.tb_end).u64(self.decoder_words).u32(self.reject.0)
-            .u32(self.reject.1).u32(self.lost_events).u32(0).u64(0).u32(self.untimed).u32(0).u64(0);
+            .u32(self.reject.1).u32(self.lost_events).u32(self.baseline).u64(0).u32(self.untimed).u32(self.states).u64(0);
         chunk(T_END, b.0)
     }
 }
@@ -376,4 +383,12 @@ pub fn sample() -> (Vec<u8>, Binding) {
         end.chunk(),
     ];
     (with_rsxf(&base, extra).bytes(), bind)
+}
+
+/// A BASELINE (type 5) or STATE (type 6) record: (register index, value) pairs.
+pub fn regs_rec(b: &mut Buf, ty: u16, ordinal: u32, flags: u16, pairs: &[(u16, u32)]) {
+    b.u16(ty).u16((16 + 8 * pairs.len()) as u16).u32(ordinal).u16(pairs.len() as u16).u16(flags).u32(0);
+    for &(i, v) in pairs {
+        b.u16(i).u16(0).u32(v);
+    }
 }

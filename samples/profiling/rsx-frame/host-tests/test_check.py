@@ -23,8 +23,8 @@ HASHES = [{'file': f'build/shaders/{s}.{ext}', 'profile': ext[:2], 'hash': f'{0x
                                         ('fp_tex', 'fpo'), ('fp_texmod', 'fpo')])]
 
 
-def matching(meta, rows):
-    """The reader JSON of a capture equal to the table."""
+def matching(meta, rows, state_rows=()):
+    """The reader JSON of a capture equal to the tables."""
     stems = cc.hashes_by_stem(HASHES)
     programs, index_of = [], {}
     for r in rows:
@@ -46,8 +46,15 @@ def matching(meta, rows):
             'vp': index_of.get(r['vp']), 'fp': index_of.get(r['fp']),
             'pass': pass_names.index(r['pass']) if r['pass'] != '-' else None,
             'timing': {'state': r['timing']}, 'hooked': True, 'decoded': True, 'mismatch': False,
-            'state_unknown': False})
-    return {'schema': 1, 'capability': True, 'availability': 'available', 'captures': [{
+            'state_unknown': False,
+            'state': {'render': {}, 'surfaces': {}, 'index': {}, 'textures': [{} for _ in range(16)],
+                      'attributes': [{} for _ in range(16)]}})
+    for ordinal, table, field, value in state_rows:
+        for d in draws:
+            if ordinal is None or d['ordinal'] == ordinal:
+                section, _, slot = table.partition('.')
+                (d['state'][section][int(slot)] if slot else d['state'][section])[field] = value
+    return {'schema': 1, 'capability': True, 'availability': 'available', 'decoder': 2, 'captures': [{
         'id': 1, 'name': meta['name'], 'source': meta['source'], 'status': meta['status'],
         'timing_mode': meta['timing_mode'], 'text_replaced': 0,
         'totals': {'draws': len(draws), 'timed': len(draws), 'untimed': 0, 'missing': 0, 'mismatched': 0},
@@ -66,7 +73,9 @@ def run(doc, work, name):
 def main():
     meta, rows = cc.load_table(TOOL.parent.parent / 'expected/draws.tsv')
     assert len(rows) == int(meta['draws']) == 16, (len(rows), meta)
-    base = matching(meta, rows)
+    state_rows = cc.load_state(TOOL.parent.parent / 'expected/state.tsv')
+    assert len(state_rows) > 100, len(state_rows)
+    base = matching(meta, rows, state_rows)
 
     def d(doc, i):
         return doc['captures'][0]['draws'][i]
@@ -93,6 +102,16 @@ def main():
         'missing draw': (lambda x: x['captures'][0]['draws'].pop(), 'draw 15: missing'),
         'clear with fp': (lambda x: d(x, 0).__setitem__('fp', 1), 'draw 0 fp'),
         'no capture': (lambda x: x['captures'][0].__setitem__('name', 'other'), 'no capture named'),
+        'depth test': (lambda x: d(x, 2)['state']['render'].__setitem__('depth.test', False), 'draw 2 render depth.test'),
+        'texture format': (lambda x: d(x, 3)['state']['textures'][0].__setitem__('format', 'A8R8G8B8'),
+                           'draw 3 textures.0 format'),
+        'attribute stride': (lambda x: d(x, 0)['state']['attributes'][3].__setitem__('stride', 16),
+                             'draw 0 attributes.3 stride'),
+        'surface unknown': (lambda x: d(x, 11)['state']['surfaces'].__setitem__('zeta_format', None),
+                            'draw 11 surfaces zeta_format'),
+        'index type': (lambda x: d(x, 7)['state']['index'].__setitem__('type', 'u32'), 'draw 7 index type'),
+        'no state': (lambda x: d(x, 9).pop('state'), 'draw 9: no register state'),
+        'decoder 1': (lambda x: x.__setitem__('decoder', 1), 'decoder: 1'),
     }
     with tempfile.TemporaryDirectory() as t:
         work = Path(t)

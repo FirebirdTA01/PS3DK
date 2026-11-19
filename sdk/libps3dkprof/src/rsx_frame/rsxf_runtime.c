@@ -45,7 +45,7 @@ typedef struct block {
     uint8_t *base;
     uint32_t state;              /* atomic: B_* */
     uint32_t used, records, seq; /* owner while FILLING, drainer while SEALED */
-    uint32_t draws, programs, labels;
+    uint32_t draws, programs, labels, states, baseline; /* baseline: BASELINE register pairs */
 } block;
 
 typedef struct rsxf_state {
@@ -79,8 +79,12 @@ typedef struct rsxf_state {
     uint64_t end_words;
     uint32_t end_reject_reason, end_reject_header, end_lost;
     /* the records of sealed blocks: what END counts (an open block at seal is not written) */
-    uint32_t sealed_draws, sealed_programs, sealed_labels;
+    uint32_t sealed_draws, sealed_programs, sealed_labels, sealed_states, sealed_baseline;
     uint64_t sealed_bytes;
+    /* the register state the records describe so far (owner, armed): a STATE record carries what differs */
+    uint32_t emit_val[RSXF_REGS];
+    uint32_t emit_known[RSXF_REG_WORDS];
+    uint32_t emit_cleared; /* dec.regs_cleared when emit_known was last valid */
     program programs[PROGRAMS];
     label labels[LABELS];
     uint64_t vp_key;             /* (start, generation) of the cached VP index */
@@ -91,7 +95,7 @@ typedef struct rsxf_state {
     uint8_t end_buf[RSXF_END_BYTES];
     uint32_t end_ready;               /* atomic */
     /* drainer: the blocks it wrote for the open capture */
-    uint32_t begin_emitted, drain_seq, blocks_emitted, d_draws, d_programs, d_labels;
+    uint32_t begin_emitted, drain_seq, blocks_emitted, d_draws, d_programs, d_labels, d_states, d_baseline;
     uint64_t d_bytes;
     /* the latest LIVE request's status for the live link (single-word atomics; app requests leave it alone) */
     uint32_t st_id, st_request, st_state, st_reason, st_draws;
@@ -207,6 +211,8 @@ static void seal_current(rsxf_state *s)
     s->sealed_draws += b->draws;
     s->sealed_programs += b->programs;
     s->sealed_labels += b->labels;
+    s->sealed_states += b->states;
+    s->sealed_baseline += b->baseline;
     s->sealed_bytes += b->used - RSXF_DRAWS_HEADER;
     ST_REL(&b->state, B_SEALED);
 }
@@ -218,7 +224,7 @@ static int take_block(rsxf_state *s)
         if (LD_ACQ(&s->blocks[i].state) == B_FREE) {
             block *b = &s->blocks[i];
             b->used = RSXF_DRAWS_HEADER;
-            b->records = b->draws = b->programs = b->labels = 0;
+            b->records = b->draws = b->programs = b->labels = b->states = b->baseline = 0;
             ST_RLX(&b->state, B_FILLING);
             s->cur = i;
             return 1;
@@ -227,26 +233,171 @@ static int take_block(rsxf_state *s)
     return 0;
 }
 
-/* One unit (definitions then the draw) into the current block, or a new one; 0 when no block is free. */
-static int append(rsxf_state *s, const uint8_t *unit, uint32_t len, uint32_t records, uint32_t draws,
-                  uint32_t programs, uint32_t labels)
+/* Room for `len` bytes of records in the current block, or a new one: where to write them, or NULL when no block is
+ * free or they would not fit an empty block (records never span blocks). Nothing is counted until commit(). */
+static uint8_t *reserve(rsxf_state *s, uint32_t len)
 {
     block *b = &s->blocks[s->cur];
-    if (s->truncated_at != RSXF_NO_ORDINAL)
-        return 0;
+    if (s->truncated_at != RSXF_NO_ORDINAL || len > s->block_bytes - RSXF_DRAWS_HEADER)
+        return NULL;
     if (LD_RLX(&b->state) != B_FILLING || b->used + len > s->block_bytes) {
         seal_current(s);
         if (!take_block(s))
-            return 0;
+            return NULL;
         b = &s->blocks[s->cur];
     }
-    memcpy(b->base + b->used, unit, len);
+    return b->base + b->used;
+}
+
+typedef struct counts { uint32_t records, draws, programs, labels, states, baseline; } counts;
+
+static void commit(rsxf_state *s, uint32_t len, const counts *c)
+{
+    block *b = &s->blocks[s->cur];
     b->used += len;
-    b->records += records;
-    b->draws += draws;
-    b->programs += programs;
-    b->labels += labels;
+    b->records += c->records;
+    b->draws += c->draws;
+    b->programs += c->programs;
+    b->labels += c->labels;
+    b->states += c->states;
+    b->baseline += c->baseline;
     s->bytes_streamed += len;
+}
+
+/* ---- register records (owner) ------------------------------------------------------------------------------------- */
+
+static void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void put32(uint8_t *p, uint32_t v) { put16(p, v); put16(p + 2, v >> 16); }
+
+/* Writes the pairs of `want` (a register bitmap) as records of `type` from `at`, RSXF_REG_PAIRS_MAX pairs each (a STATE
+ * reset with no pair still gets one record). Returns the bytes; `records` the records. */
+static uint32_t put_reg_records(rsxf_state *s, uint8_t *at, uint16_t type, uint32_t ordinal, uint32_t reset,
+                                const uint32_t *want, uint32_t n, uint32_t *records)
+{
+    uint8_t *p = at, *head = NULL;
+    uint32_t in = 0, left = n, recs = 0;
+    for (uint32_t w = 0; w < RSXF_REG_WORDS && left; w++) {
+        for (uint32_t bits = want[w]; bits; bits &= bits - 1u) {
+            uint32_t i = w * 32u + (uint32_t)__builtin_ctz(bits);
+            if (!head || in == RSXF_REG_PAIRS_MAX) {
+                uint32_t take = left < RSXF_REG_PAIRS_MAX ? left : RSXF_REG_PAIRS_MAX;
+                head = p;
+                memset(head, 0, RSXF_REG_HEADER);
+                put16(head, type);
+                put16(head + 2, RSXF_REG_HEADER + 8u * take);
+                put32(head + 4, ordinal);
+                put16(head + 8, take);
+                put16(head + 10, recs == 0 ? reset : 0u);
+                p += RSXF_REG_HEADER;
+                in = 0;
+                recs++;
+            }
+            put16(p, i);
+            put16(p + 2, 0);
+            put32(p + 4, s->dec.reg[i]);
+            p += 8;
+            in++;
+            left--;
+        }
+    }
+    if (!recs && reset) {
+        memset(p, 0, RSXF_REG_HEADER);
+        put16(p, type);
+        put16(p + 2, RSXF_REG_HEADER);
+        put32(p + 4, ordinal);
+        put16(p + 10, reset);
+        p += RSXF_REG_HEADER;
+        recs = 1;
+    }
+    *records = recs;
+    return (uint32_t)(p - at);
+}
+
+static uint32_t reg_bytes(uint32_t n, uint32_t reset)
+{
+    uint32_t recs = (n + RSXF_REG_PAIRS_MAX - 1u) / RSXF_REG_PAIRS_MAX;
+    if (!recs && reset)
+        recs = 1;
+    return recs * RSXF_REG_HEADER + 8u * n;
+}
+
+/* The registers a STATE record must carry at this draw: known, written since the last record, and different from
+ * what the records already say (every known one after a decoder reset). */
+static uint32_t state_delta(rsxf_state *s, uint32_t *want, uint32_t *reset)
+{
+    const rsxf_decoder *d = &s->dec;
+    uint32_t n = 0;
+    *reset = d->regs_cleared != s->emit_cleared ? RSXF_STATE_RESET : 0u;
+    for (uint32_t w = 0; w < RSXF_REG_WORDS; w++) {
+        uint32_t cand = d->reg_dirty[w] & d->reg_known[w], keep = 0;
+        for (uint32_t bits = cand; bits; bits &= bits - 1u) {
+            uint32_t b = (uint32_t)__builtin_ctz(bits), i = w * 32u + b;
+            if (*reset || !(s->emit_known[w] & (1u << b)) || s->emit_val[i] != d->reg[i])
+                keep |= 1u << b;
+        }
+        want[w] = keep;
+        n += (uint32_t)__builtin_popcount(keep);
+    }
+    return n;
+}
+
+/* After the records were written: they now describe the shadow. */
+static void state_emitted(rsxf_state *s, const uint32_t *want, uint32_t reset)
+{
+    rsxf_decoder *d = &s->dec;
+    if (reset)
+        memset(s->emit_known, 0, sizeof s->emit_known);
+    for (uint32_t w = 0; w < RSXF_REG_WORDS; w++) {
+        for (uint32_t bits = want[w]; bits; bits &= bits - 1u)
+            s->emit_val[w * 32u + (uint32_t)__builtin_ctz(bits)] = d->reg[w * 32u + (uint32_t)__builtin_ctz(bits)];
+        s->emit_known[w] |= want[w];
+    }
+    memset(d->reg_dirty, 0, sizeof d->reg_dirty);
+    s->emit_cleared = d->regs_cleared;
+}
+
+/* At arming: every known register as BASELINE records, the first records of the capture. 0 when they do not fit. */
+static int put_baseline(rsxf_state *s)
+{
+    rsxf_decoder *d = &s->dec;
+    uint32_t n = 0;
+    for (uint32_t w = 0; w < RSXF_REG_WORDS; w++)
+        n += (uint32_t)__builtin_popcount(d->reg_known[w]);
+    s->emit_cleared = d->regs_cleared;
+    memset(s->emit_known, 0, sizeof s->emit_known);
+    memset(d->reg_dirty, 0, sizeof d->reg_dirty);
+    /* each record on its own (a block may end between them) */
+    for (uint32_t w = 0, done = 0; done < n;) {
+        uint32_t want[RSXF_REG_WORDS], take = 0, recs = 0, len;
+        uint8_t *p;
+        counts c;
+        memset(want, 0, sizeof want);
+        for (; w < RSXF_REG_WORDS && take < RSXF_REG_PAIRS_MAX; w++) {
+            uint32_t bits = d->reg_known[w] & ~s->emit_known[w];
+            while (bits && take < RSXF_REG_PAIRS_MAX) {
+                uint32_t b = bits & (0u - bits);
+                want[w] |= b;
+                bits &= bits - 1u;
+                take++;
+            }
+            if (bits)
+                break; /* this word continues in the next record */
+        }
+        len = reg_bytes(take, 0);
+        if (!(p = reserve(s, len)))
+            return 0;
+        (void)put_reg_records(s, p, RSXF_REC_BASELINE, 0, 0, want, take, &recs);
+        memset(&c, 0, sizeof c);
+        c.records = recs;
+        c.baseline = take;
+        commit(s, len, &c);
+        for (uint32_t k = 0; k < RSXF_REG_WORDS; k++) {
+            for (uint32_t bits = want[k]; bits; bits &= bits - 1u)
+                s->emit_val[k * 32u + (uint32_t)__builtin_ctz(bits)] = d->reg[k * 32u + (uint32_t)__builtin_ctz(bits)];
+            s->emit_known[k] |= want[k];
+        }
+        done += take;
+    }
     return 1;
 }
 
@@ -532,14 +683,32 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
     if (unknown)
         w.flags |= RSXF_DF_STATE_UNKNOWN;
     len += (uint32_t)ps3dk_prof__rsxf_put_draw(unit + len, UNIT_MAX - len, &w);
-    if (!append(s, unit, len, defs_p + defs_l + 1u, 1, defs_p, defs_l)) {
-        /* no block: this draw and every later one are counted only; definitions made for it are undone */
-        if (s->truncated_at == RSXF_NO_ORDINAL)
-            s->truncated_at = ordinal;
-        s->bytes_dropped += len;
-        s->nprograms = programs_before;
-        s->nlabels = labels_before;
-        s->vp_cached = s->fp_cached = 0;
+    {
+        /* the draw's STATE records (what changed since the last draw) right before its definitions and DRAW, in the
+         * same block */
+        uint32_t want[RSXF_REG_WORDS], reset, n = state_delta(s, want, &reset), sbytes = reg_bytes(n, reset), recs = 0;
+        uint8_t *p = reserve(s, sbytes + len);
+        if (p) {
+            counts c;
+            (void)put_reg_records(s, p, RSXF_REC_STATE, ordinal, reset, want, n, &recs);
+            memcpy(p + sbytes, unit, len);
+            memset(&c, 0, sizeof c);
+            c.records = recs + defs_p + defs_l + 1u;
+            c.draws = 1;
+            c.programs = defs_p;
+            c.labels = defs_l;
+            c.states = recs;
+            commit(s, sbytes + len, &c);
+            state_emitted(s, want, reset);
+        } else {
+            /* no block: this draw and every later one are counted only; definitions made for it are undone */
+            if (s->truncated_at == RSXF_NO_ORDINAL)
+                s->truncated_at = ordinal;
+            s->bytes_dropped += sbytes + len;
+            s->nprograms = programs_before;
+            s->nlabels = labels_before;
+            s->vp_cached = s->fp_cached = 0;
+        }
     }
     if (s->req_source == 1u) {
         ST_RLX(&s->st_draws, s->draws_seen);
@@ -843,7 +1012,7 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     s->labels_refused = s->programs_refused = s->nprograms = s->nlabels = 0;
     s->truncated_at = RSXF_NO_ORDINAL;
     s->bytes_streamed = s->bytes_dropped = s->sealed_bytes = 0;
-    s->sealed_draws = s->sealed_programs = s->sealed_labels = 0;
+    s->sealed_draws = s->sealed_programs = s->sealed_labels = s->sealed_states = s->sealed_baseline = 0;
     s->vp_cached = s->fp_cached = 0;
     s->next_seq = 0;
     s->cur = s->nblocks - 1u;
@@ -851,6 +1020,8 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     s->lost_at_arm = s->dec.lost_events;
     s->hook.active = 0;
     (void)take_block(s);
+    if (!put_baseline(s))
+        s->truncated_at = 0; /* the baseline does not fit the staging: no draw gets a record (larger blocks help) */
     memset(&b, 0, sizeof b);
     b.id = e;
     b.source = (uint16_t)s->req_source;
@@ -898,6 +1069,8 @@ static void build_end(rsxf_state *s, uint8_t *out, uint32_t id, uint16_t outcome
     e.truncated_at = outcome == RSXF_OUT_TRUNCATED ? s->truncated_at : RSXF_NO_ORDINAL;
     e.programs = s->sealed_programs;
     e.labels = s->sealed_labels;
+    e.state_records = s->sealed_states;
+    e.baseline_registers = s->sealed_baseline;
     e.labels_refused = s->labels_refused;
     e.programs_refused = s->programs_refused;
     e.bytes_streamed = s->sealed_bytes;
@@ -925,6 +1098,8 @@ static void build_end_drained(rsxf_state *s, uint8_t *out, uint32_t id)
     e.truncated_at = RSXF_NO_ORDINAL;
     e.programs = s->d_programs;
     e.labels = s->d_labels;
+    e.state_records = s->d_states;
+    e.baseline_registers = s->d_baseline;
     e.bytes_streamed = s->d_bytes;
     e.tb_end = p_tb();
     (void)ps3dk_prof__rsxf_put_end(out, RSXF_END_BYTES, &e);
@@ -1013,6 +1188,8 @@ static int emit_blocks(rsxf_state *s, rsxf_emit_fn emit, void *user, uint32_t id
         s->d_draws += b->draws;
         s->d_programs += b->programs;
         s->d_labels += b->labels;
+        s->d_states += b->states;
+        s->d_baseline += b->baseline;
         s->d_bytes += b->used - RSXF_DRAWS_HEADER;
         ST_REL(&b->state, B_FREE);
     }
@@ -1112,7 +1289,7 @@ void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal)
             return;
         s->begin_emitted = 1;
         s->drain_seq = s->blocks_emitted = 0;
-        s->d_draws = s->d_programs = s->d_labels = 0;
+        s->d_draws = s->d_programs = s->d_labels = s->d_states = s->d_baseline = 0;
         s->d_bytes = 0;
     }
     if (s->begin_emitted && !emit_blocks(s, emit, user, id))

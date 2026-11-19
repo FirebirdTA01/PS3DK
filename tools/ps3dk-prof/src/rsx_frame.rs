@@ -15,6 +15,8 @@ use std::io::{self, Write};
 use serde_json::{json, Value};
 
 use crate::auto_rsx::{self, Op};
+use crate::rsx_state::{self, Registers};
+use std::sync::Arc;
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
 
@@ -25,7 +27,8 @@ pub const CHUNK_DRAWS: u32 = 46;
 pub const CHUNK_PROGRAMS: u32 = 47;
 pub const CHUNK_END: u32 = 48;
 pub const SCHEMA: u16 = 1;
-pub const DECODER: u32 = 1;
+/// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records).
+pub const DECODER: u32 = 2;
 pub const CONFIG_BYTES: usize = 64;
 pub const BEGIN_FIXED: usize = 56;
 pub const DRAWS_HEADER: usize = 16;
@@ -34,6 +37,11 @@ pub const REC_DRAW: u16 = 1;
 pub const REC_PROGRAM: u16 = 2;
 pub const REC_LABEL: u16 = 3;
 pub const REC_NAME: u16 = 4;
+pub const REC_BASELINE: u16 = 5;
+pub const REC_STATE: u16 = 6;
+/// (register, value) pairs per BASELINE or STATE record, at most.
+pub const REG_PAIRS_MAX: usize = 255;
+pub const STATE_RESET: u16 = 1;
 pub const DRAW_BYTES: usize = 96;
 pub const PROGRAM_BYTES: usize = 48;
 pub const NAME_MAX: usize = 63;
@@ -217,6 +225,10 @@ pub struct RawDraw {
     pub caller: u64,
     pub words: u32,
     pub tb: u64,
+    /// The STATE records before this draw: every register unknown first (a decoder reset), then these
+    /// (register index, value) pairs.
+    pub state_reset: bool,
+    pub state: Vec<(u16, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -315,6 +327,9 @@ pub struct End {
     /// Draw events the decoder could not hand to the capture (0 in this release: every event is recorded at once).
     pub lost_events: u32,
     pub untimed: u32,
+    /// Register pairs in the BASELINE records, and STATE records (decoder 2; both 0 for decoder 1).
+    pub baseline_registers: u32,
+    pub state_records: u32,
 }
 
 /// END reason text.
@@ -344,6 +359,10 @@ pub struct CaptureRecord {
     pub draws_not_retained: u64,
     /// Text fields (name, labels, program names) that were not valid UTF-8 and are shown with U+FFFD replacements.
     pub text_replaced: u32,
+    /// The register file at arming (BASELINE records): (register index, value), increasing.
+    pub baseline: Vec<(u16, u32)>,
+    /// STATE records parsed (also those of draws not retained).
+    pub state_records: u32,
 }
 
 /// The decoded family of one file: present exactly when file_flags bit 10 is.
@@ -363,6 +382,11 @@ pub struct Reader {
     last_ordinal: Option<u32>,
     by_hash: BTreeMap<(Profile, u64, bool), u32>,
     named: Vec<bool>,
+    /// STATE records read for the next DRAW: its ordinal, reset flag, pairs, and the last register index.
+    pending: Option<(u32, bool, Vec<(u16, u32)>)>,
+    pending_last: Option<u16>,
+    /// A DRAW or STATE record was read in the open capture (a BASELINE must come before both).
+    past_baseline: bool,
 }
 
 fn bad<T>(msg: impl Into<String>) -> Result<T, Malformed> {
@@ -432,7 +456,7 @@ impl Reader {
         if schema != SCHEMA {
             return bad(format!("RSXF_CONFIG schema {schema}"));
         }
-        if flags != 0 || decoder != DECODER {
+        if flags != 0 || !(1..=DECODER).contains(&decoder) {
             return bad(format!("RSXF_CONFIG flags {flags:#x} decoder {decoder}"));
         }
         let Some(availability) = Availability::of(avail) else {
@@ -534,11 +558,16 @@ impl Reader {
             end: None,
             draws_not_retained: 0,
             text_replaced: replaced,
+            baseline: Vec::new(),
+            state_records: 0,
         });
         self.open = true;
         self.last_ordinal = None;
         self.by_hash.clear();
         self.named.clear();
+        self.pending = None;
+        self.pending_last = None;
+        self.past_baseline = false;
         Ok(())
     }
 
@@ -547,6 +576,7 @@ impl Reader {
             return bad("RSXF_DRAWS without an open capture");
         }
         let label_bytes = self.result.config.as_ref().expect("checked").label_bytes as usize;
+        let decoder = self.result.config.as_ref().expect("checked").decoder;
         let mut c = Cursor::new(p, "RSXF_DRAWS");
         let id = c.u32()?;
         let seq = c.u32()?;
@@ -605,6 +635,13 @@ impl Reader {
                         return bad(format!("draw ordinal {ordinal} after {}", self.last_ordinal.unwrap()));
                     }
                     self.last_ordinal = Some(ordinal);
+                    self.past_baseline = true;
+                    let (state_reset, state) = match self.pending.take() {
+                        Some((o, reset, pairs)) if o == ordinal => (reset, pairs),
+                        Some((o, _, _)) => return bad(format!("STATE for draw {o} before draw {ordinal}")),
+                        None => (false, Vec::new()),
+                    };
+                    self.pending_last = None;
                     if flags & !15 != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 || r1 != 0 {
                         return bad(format!("draw {ordinal}: flags {flags:#x}"));
                     }
@@ -648,6 +685,7 @@ impl Reader {
                     rec.draws.push(RawDraw {
                         ordinal, kind, flags, untimed, op_id, mode, first, count, index_offset, index_type,
                         index_location, clear_mask, tag, label, vp, fp, fp_address, vp_start, caller, words, tb,
+                        state_reset, state,
                     });
                 }
                 REC_PROGRAM => {
@@ -720,11 +758,80 @@ impl Reader {
                         rec.programs[i - 1].name = Some(s);
                     }
                 }
+                REC_BASELINE | REC_STATE => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 2 {
+                        return bad(format!("record type {ty} with decoder {decoder}"));
+                    }
+                    if len != 16 + 8 * n || n > REG_PAIRS_MAX || r0 != 0 {
+                        return bad(format!("register record type {ty}: length {len} for {n} pairs"));
+                    }
+                    let mut pairs = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let index = c.u16()?;
+                        let r = c.u16()?;
+                        let value = c.u32()?;
+                        if usize::from(index) >= rsx_state::REGS || r != 0 {
+                            return bad(format!("register record type {ty}: register {index}"));
+                        }
+                        pairs.push((index, value));
+                    }
+                    if ty == REC_BASELINE {
+                        if self.past_baseline || ordinal != 0 || flags != 0 || n == 0 {
+                            return bad("BASELINE after a draw, or with an ordinal, flags or no register");
+                        }
+                        let mut last = rec.baseline.last().map(|p| p.0);
+                        for &(i, _) in &pairs {
+                            if last.is_some_and(|l| i <= l) {
+                                return bad(format!("BASELINE register {i} not increasing"));
+                            }
+                            last = Some(i);
+                        }
+                        rec.baseline.extend(pairs);
+                    } else {
+                        self.past_baseline = true;
+                        let reset = flags & STATE_RESET != 0;
+                        if flags & !STATE_RESET != 0 || (n == 0 && !reset)
+                            || self.last_ordinal.is_some_and(|o| ordinal <= o)
+                        {
+                            return bad(format!("STATE for draw {ordinal}: flags {flags:#x}, {n} pairs"));
+                        }
+                        match &mut self.pending {
+                            Some((o, _, list)) if *o == ordinal && !reset => {
+                                for &(i, _) in &pairs {
+                                    if self.pending_last.is_some_and(|l| i <= l) {
+                                        return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
+                                    }
+                                    self.pending_last = Some(i);
+                                }
+                                list.extend(pairs);
+                            }
+                            Some(_) => return bad(format!("STATE for draw {ordinal} out of order")),
+                            None => {
+                                self.pending_last = None;
+                                for &(i, _) in &pairs {
+                                    if self.pending_last.is_some_and(|l| i <= l) {
+                                        return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
+                                    }
+                                    self.pending_last = Some(i);
+                                }
+                                self.pending = Some((ordinal, reset, pairs));
+                            }
+                        }
+                        rec.state_records += 1;
+                    }
+                }
                 _ => return bad(format!("record type {ty}")),
             }
         }
         if c.remaining() != 0 {
             return bad("RSXF_DRAWS: bytes after the last record");
+        }
+        if self.pending.is_some() {
+            return bad("RSXF_DRAWS: a STATE record without its DRAW in the same block");
         }
         Ok(())
     }
@@ -751,10 +858,10 @@ impl Reader {
         let rej_header = c.u32()?;
         let rej_reason = c.u32()?;
         let lost_events = c.u32()?;
-        let r0 = c.u32()?;
+        let baseline_registers = c.u32()?;
         let r3 = c.u64()?;
         let untimed = c.u32()?;
-        let r1 = c.u32()?;
+        let state_records = c.u32()?;
         let r2 = c.u64()?;
         let rec = self.result.captures.last_mut().expect("open");
         if id != rec.begin.id {
@@ -766,7 +873,7 @@ impl Reader {
             3 => Outcome::Abandoned,
             o => return bad(format!("RSXF_END outcome {o}")),
         };
-        if reason > 7 || r0 != 0 || r1 != 0 || r2 != 0 || r3 != 0 || (rej_reason == 0 && rej_header != 0) {
+        if reason > 7 || r2 != 0 || r3 != 0 || (rej_reason == 0 && rej_header != 0) {
             return bad(format!("RSXF_END reason {reason} or reserved fields"));
         }
         let recorded = rec.draws.len() as u64 + rec.draws_not_retained;
@@ -780,6 +887,10 @@ impl Reader {
             || hooked.saturating_add(decoded_only) > draws_seen || untimed > draws_seen
         {
             return bad(format!("RSXF_END draw counts: seen {draws_seen} recorded {draws_recorded} (records {recorded})"));
+        }
+        if baseline_registers as usize != rec.baseline.len() || state_records != rec.state_records {
+            return bad(format!("RSXF_END: {baseline_registers} baseline registers and {state_records} STATE records \
+                against {} and {}", rec.baseline.len(), rec.state_records));
         }
         if programs as usize != rec.programs.len() || labels as usize != rec.labels.len() {
             return bad(format!("RSXF_END: {programs} programs and {labels} labels against the records"));
@@ -796,6 +907,7 @@ impl Reader {
             truncated_at: truncated.then_some(truncated_at), programs, labels, labels_refused, programs_refused,
             bytes_streamed, bytes_dropped, tb_end, decoder_words,
             decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), lost_events, untimed,
+            baseline_registers, state_records,
         });
         self.open = false;
         Ok(())
@@ -972,6 +1084,11 @@ pub struct Draw {
     pub pass: Option<usize>,
     /// The AUTO op kind disagrees with the draw kind (a mismatch the reader found).
     pub op_mismatch: bool,
+    /// The 3D register file at this draw (decoder 2 captures; None for decoder 1), shared with the draws after it
+    /// until a register changes. Interpret it with [`rsx_state::interpret`].
+    pub registers: Option<Arc<Registers>>,
+    /// The registers (byte addresses) this draw's STATE records changed, increasing; every known one after a reset.
+    pub changed: Vec<u32>,
 }
 impl Draw {
     pub fn hooked(&self) -> bool {
@@ -1056,6 +1173,8 @@ pub struct FrameView {
     pub end: Option<End>,
     pub draws_not_retained: u64,
     pub text_replaced: u32,
+    /// The register file at arming (decoder 2 captures).
+    pub baseline: Option<Arc<Registers>>,
 }
 
 fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
@@ -1098,6 +1217,16 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
     });
     passes.sort_by_key(|p| (p.raw_begin, p.depth));
     let mut draws = Vec::with_capacity(c.draws.len());
+    // the register file, replayed from the baseline through each draw's STATE records
+    let stateful = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).is_some_and(|k| k.decoder >= 2);
+    let baseline = stateful.then(|| {
+        let mut r = Registers::new();
+        for &(i, v) in &c.baseline {
+            r.set(i, v);
+        }
+        Arc::new(r)
+    });
+    let mut regs = baseline.clone();
     let mut totals = Totals::default();
     let mut last_end: Option<u64> = None;
     for d in &c.draws {
@@ -1155,7 +1284,20 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         let label = (d.label != 0).then(|| c.labels[d.label as usize - 1].clone());
         let vp = (d.vp != 0).then(|| d.vp as usize - 1);
         let fp = (d.fp != 0).then(|| d.fp as usize - 1);
-        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch };
+        let mut changed = Vec::new();
+        if let Some(cur) = regs.as_mut() {
+            if d.state_reset || !d.state.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.state_reset {
+                    next.clear();
+                }
+                for &(i, v) in &d.state {
+                    next.set(i, v);
+                    changed.push(u32::from(i) * 4);
+                }
+            }
+        }
+        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed };
         totals.primitives += item.primitives().unwrap_or(0);
         draws.push(item);
     }
@@ -1185,6 +1327,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         end: c.end.clone(),
         draws_not_retained: c.draws_not_retained,
         text_replaced: c.text_replaced,
+        baseline,
     }
 }
 
@@ -1359,7 +1502,32 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
         d.fp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.fp_address)?;
     writeln!(out, "    seen by: {}{}{}; words {}; caller {:#x}; tb {}", if d.hooked() { "hook " } else { "" },
         if d.decoded() { "stream" } else { "" }, if r.flags & DF_STATE_UNKNOWN != 0 { " (state unknown)" } else { "" },
-        r.words, r.caller, r.tb)
+        r.words, r.caller, r.tb)?;
+    if let Some(regs) = &d.registers {
+        let v = rsx_state::interpret(regs);
+        let known = |fs: &[rsx_state::Field]| fs.iter().filter(|f| f.value != rsx_state::Value::Unknown)
+            .map(|f| format!("{}={}", f.name, f.value.text())).collect::<Vec<_>>().join(" ");
+        writeln!(out, "    state: {} registers known{}", regs.known_count(),
+            if r.state_reset { ", decoder reset before this draw" } else { "" })?;
+        if !d.changed.is_empty() {
+            writeln!(out, "    changed: {}", d.changed.iter().map(|&m| rsx_state::register_name(m))
+                .collect::<Vec<_>>().join(" "))?;
+        }
+        writeln!(out, "    render: {}", known(&v.render))?;
+        writeln!(out, "    surfaces: {}", known(&v.surfaces))?;
+        writeln!(out, "    index: {}", known(&v.index))?;
+        for (i, t) in v.textures.iter().enumerate() {
+            if t.iter().any(|f| f.name == "enable" && f.value == rsx_state::Value::Bool(true)) {
+                writeln!(out, "    texture {i}: {}", known(t))?;
+            }
+        }
+        for (i, a) in v.attributes.iter().enumerate() {
+            if a.iter().any(|f| f.name == "enabled" && f.value == rsx_state::Value::Bool(true)) {
+                writeln!(out, "    attribute {i}: {}", known(a))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn program_json(p: &Program) -> Value {
@@ -1406,6 +1574,11 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
     o.insert("caller".into(), json!(r.caller));
     o.insert("words".into(), json!(r.words));
     o.insert("tb".into(), json!(r.tb));
+    if let Some(regs) = &d.registers {
+        o.insert("state".into(), rsx_state::view_json(&rsx_state::interpret(regs)));
+        o.insert("changed".into(), json!(d.changed.iter().map(|&m| rsx_state::register_name(m)).collect::<Vec<_>>()));
+        o.insert("state_reset".into(), json!(r.state_reset));
+    }
     v
 }
 
@@ -1424,6 +1597,8 @@ fn end_json(e: &End) -> Value {
     o.insert("lost_events".into(), json!(e.lost_events));
     o.insert("decoder_words".into(), json!(e.decoder_words));
     o.insert("untimed".into(), json!(e.untimed));
+    o.insert("baseline_registers".into(), json!(e.baseline_registers));
+    o.insert("state_records".into(), json!(e.state_records));
     o.insert("decoder_reject".into(),
         json!(e.decoder_reject.map(|(h, r)| json!({"header": h, "reason": auto_rsx::reject_reason(r)}))));
     v
@@ -1458,6 +1633,7 @@ pub fn to_json(cap: &Capture, frames: &[FrameView]) -> Value {
         "schema": 1,
         "capability": cap.rsx_frame.is_some(),
         "availability": cfg.map(|c| c.availability.text()),
+        "decoder": cfg.map(|c| c.decoder),
         "captures": Value::Array(frames.iter().map(frame_json).collect()),
     })
 }

@@ -4,6 +4,7 @@
     check_capture.py --reader ps3dk-prof --capture run.prof --shaders build/shaders
     check_capture.py --reader-json frame.json --hashes-json hashes.json      (no reader run: saved outputs)
 
+expected/state.tsv is checked too (--state): each listed register-state field of each draw (decoder 2 captures).
 The reader output is `ps3dk-prof rsx-frame --json <capture>`; program names in the table are shader file stems,
 mapped to canonical hashes with `ps3dk-prof shader-hash --json <dir>/*.vpo <dir>/*.fpo` (the files the build
 compiled). The capture checked is the one named by the table's `@ name` (the first if several). Prints one line per
@@ -41,6 +42,50 @@ def load_table(path):
     return meta, rows
 
 
+def load_state(path):
+    '''[(ordinal or None for every draw, table, field, expected value)] from a state table.'''
+    rows = []
+    for n, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+        if not line.strip() or line.startswith('#'):
+            continue
+        cells = line.split('\t')
+        if len(cells) != 4:
+            die(f'{path}:{n}: {len(cells)} columns, expected 4')
+        try:
+            value = json.loads(cells[3])
+        except ValueError:
+            die(f'{path}:{n}: value {cells[3]!r} is not a JSON value')
+        rows.append((None if cells[0] == '*' else int(cells[0]), cells[1], cells[2], value))
+    return rows
+
+
+def compare_state(rows, doc, name):
+    '''The differences between each draw's register state and the state table.'''
+    bad = []
+    caps = [c for c in doc.get('captures', []) if c.get('name') == name]
+    if not caps:
+        return bad
+    draws = caps[0].get('draws', [])
+    for ordinal, table, field, want in rows:
+        targets = draws if ordinal is None else [d for d in draws if d.get('ordinal') == ordinal]
+        for d in targets:
+            where = f'draw {d.get("ordinal")} {table} {field}'
+            state = d.get('state')
+            if state is None:
+                bad.append(f'draw {d.get("ordinal")}: no register state (a decoder 1 capture?)')
+                continue
+            section, _, slot = table.partition('.')
+            t = state.get(section)
+            if slot:
+                t = t[int(slot)] if isinstance(t, list) and int(slot) < len(t) else None
+            if not isinstance(t, dict) or field not in t:
+                bad.append(f'{where}: no such field')
+            elif t[field] != want:
+                bad.append(f'{where}: {t[field]!r}, expected {want!r}')
+    # one line per missing state, not per field
+    return list(dict.fromkeys(bad))
+
+
 def run_json(cmd):
     r = subprocess.run([str(c) for c in cmd], capture_output=True, timeout=300)
     if r.returncode != 0:
@@ -63,6 +108,8 @@ def compare(meta, rows, doc, hashes):
     caps = [c for c in doc.get('captures', []) if c.get('name') == meta.get('name')]
     if doc.get('availability') != 'available':
         bad.append(f'availability: {doc.get("availability")!r}, expected available')
+    if 'decoder' in meta and str(doc.get('decoder')) != meta['decoder']:
+        bad.append(f'decoder: {doc.get("decoder")!r}, expected {meta["decoder"]}')
     if not caps:
         return bad + [f'no capture named {meta.get("name")!r} (captures: {[c.get("name") for c in doc.get("captures", [])]})']
     c = caps[0]
@@ -127,6 +174,8 @@ def compare(meta, rows, doc, hashes):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--expected', type=Path, default=HERE.parent / 'expected/draws.tsv')
+    ap.add_argument('--state', type=Path, default=HERE.parent / 'expected/state.tsv',
+                    help='the register-state table; "-" skips it')
     ap.add_argument('--reader', type=Path, help='ps3dk-prof')
     ap.add_argument('--capture', type=Path, help='the sample\'s .prof')
     ap.add_argument('--shaders', type=Path, help='the build\'s shaders directory (*.vpo, *.fpo)')
@@ -150,6 +199,8 @@ def main():
     else:
         ap.error('give --reader and --shaders, or --hashes-json')
     bad = compare(meta, rows, doc, hashes_by_stem(hdoc))
+    if str(a.state) != '-':
+        bad += compare_state(load_state(a.state), doc, meta.get('name'))
     for b in bad:
         print('DIFF', b)
     print(f'rsx-frame capture {"MATCHES" if not bad else "DIFFERS from"} {a.expected.name}: {len(rows)} draws, '

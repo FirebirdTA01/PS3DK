@@ -15,8 +15,9 @@ The app requests the capture itself at frame 30 (`PS3DK_PROF_RSX_FRAME_CAPTURE("
 with the PC app connected (live auto-start is on), its Capture RSX frame button requests more. After 120 frames the
 sample drains the RSX, seals the capture and returns 0 (2 if the request was refused, 1 after a failure).
 
-Textures and fixed-function state vary across the matrix for the later phases that record them; schema 1 records
-draws, programs, labels, tags, ranges and time, and the checker compares exactly those.
+Textures and fixed-function state vary across the matrix: `expected/state.tsv` lists, per draw, the render state,
+texture slot 0, the three vertex attributes, the index stream and the surfaces the capture must show (decoder 2);
+fields that depend on the display or on memory placement are left out.
 
 ## Build
 
@@ -38,7 +39,8 @@ The TTY shows `RSXFRAME start ...`, `RSXFRAME request frame=30 result=<id>`, `RS
 python3 tools/check_capture.py --reader ps3dk-prof --capture <executable>-<timebase>.prof --shaders build/shaders
 ```
 
-It prints one `DIFF` line per field that differs and exits 0 only on a full match. The programs are named by shader
+It prints one `DIFF` line per field that differs (draw table and state table; `--state -` skips the state) and
+exits 0 only on a full match. The programs are named by shader
 file stem; the checker maps each to its canonical hash with `ps3dk-prof shader-hash` on the built `.vpo`/`.fpo`. Every
 draw must also be hooked and decoded, with no mismatch and no unknown state, and every program exact (readable,
 terminated, not bound before the capture). `host-tests/test_check.py` checks the checker itself without a capture.

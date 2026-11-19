@@ -460,7 +460,7 @@ fn every_rule_refused_once() {
     case("seq beyond emitted + dropped", vec![cfg.chunk(), begin().chunk(), {
         let mut b = Buf::default(); dec().encode(&mut b); draws_chunk(1, 3, 1, &b.0) }, end1().chunk()]);
     case("reject header without reason", { let mut e = end1(); e.reject = (5, 0); vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
-    case("end reserved", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
+    case("end baseline count", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("end reserved 104", { let mut e = end1().chunk(); e.payload[104] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("open at trailer", vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec())]);
 }
