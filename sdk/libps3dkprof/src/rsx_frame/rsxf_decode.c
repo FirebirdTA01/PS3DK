@@ -61,6 +61,7 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
     d->imap_used = 0;
     d->imap_cleared++;
     d->ntaint = 0;
+    d->ports_ok = 0; /* the next data words wait for their destination to be written again */
     memset(d->vp_known, 0, sizeof d->vp_known);
     d->vp_generation++;
     d->in_group = 0;
@@ -95,6 +96,10 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
     }
     if (m >= M_VP_INST_FIRST && m < M_VP_INST_END) {
         uint32_t slot = d->vp_upload;
+        if (!(d->ports_ok & RSXF_PORT_VP_SLOT)) {
+            d->port_dropped++; /* the load slot is unknown since attach or a reset */
+            return;
+        }
         if (slot < RSXF_VP_SLOTS) {
             d->vp[slot][d->vp_word] = v;
             if (d->vp_word == 3)
@@ -110,6 +115,10 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
     if (m >= 0x1f00u && m <= 0x1f7cu) {
         /* VP constant data port: slot = the uploaded id + the vec4 the method address selects */
         uint32_t slot = d->vpc_id + ((m - 0x1f00u) >> 4), comp = (m >> 2) & 3u;
+        if (!(d->ports_ok & RSXF_PORT_VPC_ID)) {
+            d->port_dropped++; /* the constant id is unknown since attach or a reset */
+            return;
+        }
         if (slot < RSXF_VP_CONSTS) {
             d->vpc[slot][comp] = v;
             d->vpc_known[slot] |= (uint8_t)(1u << comp);
@@ -118,8 +127,8 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
         return;
     }
     switch (m) {
-    case 0x1efc: d->vpc_id = v & 511u; return; /* VP_UPLOAD_CONST_ID (9 bits: slot + data-port vec4 stays bounded) */
-    case M_VP_UPLOAD_FROM: d->vp_upload = v; d->vp_word = 0; return;
+    case 0x1efc: d->vpc_id = v & 511u; d->ports_ok |= RSXF_PORT_VPC_ID; return; /* VP_UPLOAD_CONST_ID (9 bits) */
+    case M_VP_UPLOAD_FROM: d->vp_upload = v; d->vp_word = 0; d->ports_ok |= RSXF_PORT_VP_SLOT; return;
     case M_VP_START_FROM: d->vp_start = v; d->known |= 1u; return;
     case M_FP_ADDRESS: d->fp_address = v; d->known |= 2u; return;
     case M_INDEX_OFFSET: d->index_offset = v; d->known |= 4u; return;
@@ -264,12 +273,20 @@ static void imap_taint(rsxf_decoder *d, uint32_t lo, uint32_t hi)
 static void method_m2mf(rsxf_decoder *d, uint32_t m, uint32_t v)
 {
     switch (m) {
-    case 0x188u: d->m2mf_dma_out = v; return;
-    case 0x310u: d->m2mf_out = v; return;
-    case 0x318u: d->m2mf_pitch_out = v; return;
-    case 0x31cu: d->m2mf_len = v; return;
-    case 0x320u: d->m2mf_count = v; return;
+    case 0x188u: d->m2mf_dma_out = v; d->ports_ok |= RSXF_PORT_M2MF_DMA; return;
+    case 0x310u: d->m2mf_out = v; d->ports_ok |= RSXF_PORT_M2MF_OUT; return;
+    case 0x318u: d->m2mf_pitch_out = v; d->ports_ok |= RSXF_PORT_M2MF_PITCH; return;
+    case 0x31cu: d->m2mf_len = v; d->ports_ok |= RSXF_PORT_M2MF_LEN; return;
+    case 0x320u: d->m2mf_count = v; d->ports_ok |= RSXF_PORT_M2MF_COUNT; return;
     case 0x328u: {
+        if ((d->ports_ok & RSXF_PORT_M2MF) != RSXF_PORT_M2MF) {
+            /* a copy to a destination not fully seen since the reset: it may have overwritten any remembered word */
+            d->m2mf_copies++;
+            d->port_dropped++;
+            imap_mark(d, 0, 0xffffffffu);
+            d->taint_all = 1;
+            return;
+        }
         int64_t pitch = (int32_t)d->m2mf_pitch_out, span = d->m2mf_count ? pitch * (int64_t)(d->m2mf_count - 1u) : 0;
         int64_t lo = (int64_t)d->m2mf_out + (span < 0 ? span : 0), hi = (int64_t)d->m2mf_out + (span > 0 ? span : 0) +
                      (int64_t)d->m2mf_len;
@@ -297,20 +314,29 @@ static void method_m2mf(rsxf_decoder *d, uint32_t m, uint32_t v)
 static void method_2d(rsxf_decoder *d, uint32_t sub, uint32_t m, uint32_t v)
 {
     if (sub == 3) {
-        if (m == 0x188u)
+        if (m == 0x188u) {
             d->s3_dma = v;
-        else if (m == 0x30cu)
+            d->ports_ok |= RSXF_PORT_S3_DMA;
+        } else if (m == 0x30cu) {
             d->s3_offset = v;
+            d->ports_ok |= RSXF_PORT_S3_OFFSET;
+        }
         return;
     }
-    if (m == 0x304u)
+    if (m == 0x304u) {
         d->s5_x = v & 0xffffu;
-    else if (m == 0x308u)
+        d->ports_ok |= RSXF_PORT_S5_POINT;
+    } else if (m == 0x308u) {
         d->s5_w = v & 0xffffu;
-    else if (m >= 0x400u && m <= 0x1ffcu) {
+        d->ports_ok |= RSXF_PORT_S5_SIZE;
+    } else if (m >= 0x400u && m <= 0x1ffcu) {
         /* COLOR data, the whole packet (0x400..0x1ffc: up to 1792 words); words past the width are padding the RSX
          * does not write */
         uint32_t i = (m - 0x400u) >> 2;
+        if ((d->ports_ok & RSXF_PORT_INLINE) != RSXF_PORT_INLINE) {
+            d->port_dropped++; /* destination not fully seen since attach or a reset: never stored at a stale one */
+            return;
+        }
         if (i >= d->s5_w)
             return;
         if (d->s3_dma == 0xfeed0000u)

@@ -55,8 +55,8 @@ fn four_draws() -> (Vec<u8>, u32) {
     let mut b = Buf::default();
     vpc_rec(&mut b, 0, 2, &[(5, 15, [f(1.0), f(2.0), 0, 0]), (467, 15, [0, f(1.0), 0, 0])]);
     programs(&mut b);
-    // a float2 patch: x and y written inline, z and w the container's
-    fpc_rec(&mut b, 0, 2, 0, &[(0x30, [1, 1, 2, 2], [h(0.5); 4])]);
+    // a float2 patch: x and y written inline, z the container's, w unknown (its word is only the container fallback)
+    fpc_rec(&mut b, 0, 2, 0, &[(0x30, [1, 1, 2, 3], [h(0.5); 4])]);
     draw(0, 36).encode(&mut b);
     vpc_rec(&mut b, 1, 0, &[(5, 15, [f(3.0), f(2.0), 0, 0])]);
     draw(1, 36).encode(&mut b);
@@ -78,8 +78,8 @@ fn constants_uniforms_and_instance_runs() {
     assert_eq!(u0.len(), 2);
     assert_eq!((u0[0].name.as_str(), u0[0].values[0]), ("offset", [Some(1.0), Some(2.0), Some(0.0), Some(0.0)]));
     assert_eq!((u0[1].name.as_str(), u0[1].values[0], u0[1].provenance),
-        ("tint", [Some(0.5); 4], Some([Provenance::Inline, Provenance::Inline, Provenance::Container,
-            Provenance::Container])));
+        ("tint", [Some(0.5), Some(0.5), Some(0.5), None], Some([Provenance::Inline, Provenance::Inline,
+            Provenance::Container, Provenance::Unknown])));
     let u2 = rf::uniforms(fr, &fr.draws[2]);
     assert_eq!(u2[0].values[0][0], Some(4.0));
     // the FP list carries forward to the draws after its FPCONST
@@ -97,7 +97,8 @@ fn constants_uniforms_and_instance_runs() {
     assert_eq!(c["instance_runs"][0]["vp_uniforms"], serde_json::json!(["offset"]));
     assert_eq!(c["draws"][1]["constants"]["vp"][0]["values"][0][0], 3.0);
     assert_eq!(c["draws"][0]["constants"]["fp"][0]["provenance"], serde_json::json!(["last inline write seen",
-        "last inline write seen", "container (may differ at GPU time)", "container (may differ at GPU time)"]));
+        "last inline write seen", "container (may differ at GPU time)", "unknown"]));
+    assert_eq!(c["draws"][0]["constants"]["fp"][0]["values"][0][3], serde_json::Value::Null);
     assert_eq!(c["draws"][0]["constants"]["fp_list"][0]["provenance"][2], "container (may differ at GPU time)");
     assert_eq!(c["programs"][0]["uniforms"][0]["name"], "offset");
     assert_eq!(c["end"]["uniform_records"], 2);

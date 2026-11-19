@@ -57,6 +57,12 @@ enum { RSXF_VPC_RESET = 1, RSXF_VPC_BASELINE = 2, RSXF_FPC_TRUNCATED = 1, RSXF_U
 enum { RSXF_FPC_INLINE = 1, RSXF_FPC_CONTAINER = 2, RSXF_FPC_UNKNOWN = 3 };
 enum { RSXF_UNI_VP = 1, RSXF_UNI_FP = 2 };
 enum { RSXF_INLINE_MAP = 4096, RSXF_TAINT_RANGES = 8 };
+/* Data-port destination cursors: VP instruction load slot, VP constant id, inline transfer (subchannel 3 destination
+ * DMA and offset, subchannel 5 start pixel and size), M2MF copy (destination DMA, offset, pitch, line length, count). */
+enum { RSXF_PORT_VP_SLOT = 1, RSXF_PORT_VPC_ID = 2, RSXF_PORT_S3_DMA = 4, RSXF_PORT_S3_OFFSET = 8, RSXF_PORT_S5_POINT = 16,
+       RSXF_PORT_S5_SIZE = 32, RSXF_PORT_INLINE = 4 | 8 | 16 | 32, RSXF_PORT_M2MF_DMA = 64, RSXF_PORT_M2MF_OUT = 128,
+       RSXF_PORT_M2MF_PITCH = 256, RSXF_PORT_M2MF_LEN = 512, RSXF_PORT_M2MF_COUNT = 1024,
+       RSXF_PORT_M2MF = 64 | 128 | 256 | 512 | 1024 };
 /* Register records: at most this many (register, value) pairs each (16 + 8 x 255 bytes). */
 enum { RSXF_REG_PAIRS_MAX = 255, RSXF_REG_HEADER = 16, RSXF_STATE_RESET = 1 };
 /* The largest per-draw unit (it never spans blocks): STATE for every register, VPCONST for every slot, UNIFORM for two
@@ -181,6 +187,9 @@ typedef struct rsxf_decoder {
     uint8_t imap_unk[RSXF_INLINE_MAP];
     uint32_t imap_used, imap_overflow, imap_cleared;
     uint32_t m2mf_dma_out, m2mf_out, m2mf_pitch_out, m2mf_len, m2mf_count;
+    /* RSXF_PORT_* bits: each destination cursor of a data port observed since attach or the last reset. Data words
+     * whose destination is not fully known are dropped (port_dropped), never applied at a stale slot or address. */
+    uint32_t ports_ok, port_dropped;
     uint32_t taint_lo[RSXF_TAINT_RANGES], taint_hi[RSXF_TAINT_RANGES], ntaint, taint_all, main_written, m2mf_copies;
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
@@ -196,7 +205,8 @@ typedef struct rsxf_decoder {
     uint32_t n_events, lost_events;
 } rsxf_decoder;
 void ps3dk_prof__rsxf_decode_init(rsxf_decoder *d);
-/* Forgets every known register (unseen words may have changed them); counts a reset; keeps the first rejection. */
+/* Forgets every known register (unseen words may have changed them) and every data-port destination cursor (an unseen
+ * word may have moved it); counts a reset; keeps the first rejection. */
 void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t reason);
 /* Decodes n complete owner words; completed draws and clears are appended to events. Returns 0 after a rejection
  * (the registers are then unknown; decoding resumes at the next word given). */

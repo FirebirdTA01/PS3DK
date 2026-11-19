@@ -234,6 +234,79 @@ static void inline_map_limits(void)
     ps3dk_prof__rsxf_decode_init(&d);
 }
 
+/* Unknown flow (an unseen CALL may have moved any destination cursor): data words after it stay unknown until their
+ * destination is written again, then become known at the new destination. VP constants: id 7, a reset, four data
+ * words (the GPU may write c20: not c7), then id 20 and data (c20 known). Inline transfer: a destination, a reset, a
+ * COLOR packet (dropped, not remembered at the old offset), then a complete destination and data (remembered). VP
+ * instructions: a slot, a reset, an instruction (dropped), then a slot and an instruction (known). M2MF: a copy whose
+ * destination was not seen since the reset makes every remembered word UNKNOWN. */
+static void cursors_after_unknown_flow(void)
+{
+    uint32_t v = 0, dropped;
+    ps3dk_prof__rsxf_decode_init(&d);
+    {
+        const uint32_t a[] = {M(0, 0x1efc, 1), 7};
+        const uint32_t b[] = {M(0, 0x1f00, 4), 1, 2, 3, 4};
+        const uint32_t c[] = {M(0, 0x1efc, 5), 20, 5, 6, 7, 8};
+        decode(a, sizeof a / 4, 1);
+        ps3dk_prof__rsxf_decode_unknown(&d, 2, AUTO_RING_REJECT_CALL);
+        dropped = d.port_dropped;
+        decode(b, sizeof b / 4, 1);
+        assert(!d.vpc_known[7] && !d.vpc_known[20] && d.port_dropped == dropped + 4);
+        decode(c, sizeof c / 4, 1);
+        assert(d.vpc_known[20] == 15 && d.vpc[20][0] == 5 && !d.vpc_known[7]);
+    }
+    {
+        const uint32_t a[] = {M(3, 0x188, 1), 0xfeed0000u, M(3, 0x30c, 1), 0x4000, M(5, 0x304, 2), 0, (1u << 16) | 2u,
+                              M(5, 0x400, 2), 0x11, 0x12};
+        const uint32_t b[] = {M(5, 0x400, 2), 0x21, 0x22};
+        const uint32_t c[] = {M(3, 0x188, 1), 0xfeed0000u, M(3, 0x30c, 1), 0x5000, M(5, 0x304, 2), 0, (1u << 16) | 2u,
+                              M(5, 0x400, 2), 0x31, 0x32};
+        decode(a, sizeof a / 4, 1);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x4000, &v) == RSXF_FPC_INLINE && v == 0x11);
+        ps3dk_prof__rsxf_decode_unknown(&d, 0x20000000u, AUTO_RING_REJECT_JUMP);
+        dropped = d.port_dropped;
+        decode(b, sizeof b / 4, 1);
+        assert(d.port_dropped == dropped + 2 && d.imap_used == 0);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x4000, &v) == RSXF_FPC_UNKNOWN); /* never 0x21 at the old offset */
+        /* a partial destination is not enough: the offset alone leaves the rest unknown */
+        {
+            const uint32_t p[] = {M(3, 0x30c, 1), 0x5000, M(5, 0x400, 2), 0x41, 0x42};
+            decode(p, sizeof p / 4, 1);
+            assert(d.imap_used == 0 && d.port_dropped == dropped + 4);
+        }
+        decode(c, sizeof c / 4, 1);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x5000, &v) == RSXF_FPC_INLINE && v == 0x31);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x5004, &v) == RSXF_FPC_INLINE && v == 0x32);
+    }
+    {
+        const uint32_t a[] = {M(0, 0x1e9c, 1), 10};
+        const uint32_t b[] = {M(0, 0x0b80, 4), 1, 2, 3, 4};
+        const uint32_t c[] = {M(0, 0x1e9c, 1), 12, M(0, 0x0b80, 4), 5, 6, 7, 8};
+        decode(a, sizeof a / 4, 1);
+        ps3dk_prof__rsxf_decode_unknown(&d, 2, AUTO_RING_REJECT_CALL);
+        decode(b, sizeof b / 4, 1);
+        assert(!d.vp_known[10] && !d.vp_known[0]);
+        decode(c, sizeof c / 4, 1);
+        assert(d.vp_known[12] && d.vp[12][0] == 5 && !d.vp_known[10]);
+    }
+    {
+        /* an M2MF launch after a reset before its destination is written again: everything remembered is UNKNOWN */
+        const uint32_t b[] = {M(1, 0x328, 1), 0};
+        ps3dk_prof__rsxf_decode_unknown(&d, 2, AUTO_RING_REJECT_CALL);
+        {
+            /* re-establish the inline destination only, remember one word, then the blind copy */
+            const uint32_t c[] = {M(3, 0x188, 1), 0xfeed0000u, M(3, 0x30c, 1), 0x6000, M(5, 0x304, 2), 0,
+                                  (1u << 16) | 1u, M(5, 0x400, 1), 0x77};
+            decode(c, sizeof c / 4, 1);
+        }
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x6000, &v) == RSXF_FPC_INLINE && v == 0x77);
+        decode(b, sizeof b / 4, 1);
+        assert(ps3dk_prof__rsxf_inline_word(&d, 0x6000, &v) == RSXF_FPC_UNKNOWN && d.taint_all);
+    }
+    ps3dk_prof__rsxf_decode_init(&d);
+}
+
 static void register_records(void)
 {
     uint8_t o[64];
@@ -383,6 +456,7 @@ int main(int argc, char **argv)
     register_shadow();
     constants_and_inline_writes();
     inline_map_limits();
+    cursors_after_unknown_flow();
     register_records();
     utf8();
     encoders(out, owner);
