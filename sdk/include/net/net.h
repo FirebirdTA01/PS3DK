@@ -47,6 +47,9 @@ int netSetUdpp2pTestParam(sys_net_test_param_t *p);
 int netSetlibNameServer(struct in_addr *a, struct in_addr *b);
 int netSetnetemutestparam(sys_net_test_param_t *p);
 int netShowNameserver(void);
+/* The network is shared by its users (netInitialize, sys_net_initialize_network_ex, the profiler's live auto-start):
+ * the first brings it up, later ones join it, and only the last release finalizes it.  netInitialize is idempotent;
+ * with no other user, both calls make exactly the sysmodule and sys_net calls they always made. */
 int netInitialize(void);
 int netDeinitialize(void);
 int *netErrnoLoc(void);
