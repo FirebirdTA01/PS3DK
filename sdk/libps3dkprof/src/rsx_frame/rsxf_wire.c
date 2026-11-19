@@ -180,7 +180,8 @@ size_t ps3dk_prof__rsxf_put_end(uint8_t *o, size_t cap, const rsxf_wire_end *e)
     le32(o + 52, e->programs_refused); le64(o + 56, e->bytes_streamed); le64(o + 64, e->bytes_dropped);
     le64(o + 72, e->tb_end); le64(o + 80, e->decoder_words); le32(o + 88, e->reject_header);
     le32(o + 92, e->reject_reason); le32(o + 96, e->lost_events); le32(o + 100, e->baseline_registers);
-    le32(o + 112, e->untimed); le32(o + 116, e->state_records);
+    le32(o + 104, e->vpconst_records); le32(o + 108, e->fpconst_records); le32(o + 112, e->untimed);
+    le32(o + 116, e->state_records); le32(o + 120, e->uniform_records);
     return RSXF_END_BYTES;
 }
 

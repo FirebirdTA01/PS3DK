@@ -192,12 +192,16 @@ pub struct XEnd {
     /// BASELINE register pairs and STATE records (offsets 100 and 116).
     pub baseline: u32,
     pub states: u32,
+    /// VPCONST, FPCONST and UNIFORM records (offsets 104, 108 and 120).
+    pub vpcs: u32,
+    pub fpcs: u32,
+    pub unis: u32,
 }
 impl XEnd {
     pub fn done(id: u32) -> Self {
         XEnd { id, outcome: 1, reason: 0, n: [0, 0, 0, 0, 0, 0, 0, u32::MAX, 0, 0, 0, 0], bytes: (0, 0), tb_end: 9000,
             decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0,
-            baseline: 0, states: 0 }
+            baseline: 0, states: 0, vpcs: 0, fpcs: 0, unis: 0 }
     }
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
@@ -206,7 +210,8 @@ impl XEnd {
             b.u32(v);
         }
         b.u64(self.bytes.0).u64(self.bytes.1).u64(self.tb_end).u64(self.decoder_words).u32(self.reject.0)
-            .u32(self.reject.1).u32(self.lost_events).u32(self.baseline).u64(0).u32(self.untimed).u32(self.states).u64(0);
+            .u32(self.reject.1).u32(self.lost_events).u32(self.baseline).u32(self.vpcs).u32(self.fpcs).u32(self.untimed)
+            .u32(self.states).u32(self.unis).u32(0);
         chunk(T_END, b.0)
     }
 }
@@ -390,5 +395,38 @@ pub fn regs_rec(b: &mut Buf, ty: u16, ordinal: u32, flags: u16, pairs: &[(u16, u
     b.u16(ty).u16((16 + 8 * pairs.len()) as u16).u32(ordinal).u16(pairs.len() as u16).u16(flags).u32(0);
     for &(i, v) in pairs {
         b.u16(i).u16(0).u32(v);
+    }
+}
+
+/// A VPCONST record (type 7): (slot, known mask, words).
+pub fn vpc_rec(b: &mut Buf, ordinal: u32, flags: u16, e: &[(u16, u8, [u32; 4])]) {
+    b.u16(7).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(0);
+    for &(slot, mask, w) in e {
+        b.u16(slot).u8(mask).u8(0).u32(0);
+        for v in w {
+            b.u32(v);
+        }
+    }
+}
+
+/// An FPCONST record (type 8): (ucode offset, provenance, words as in memory).
+pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, u8, [u32; 4])]) {
+    b.u16(8).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(program);
+    for &(off, prov, w) in e {
+        b.u32(off).u8(prov).u8(0).u16(0);
+        for v in w {
+            b.u32(v);
+        }
+    }
+}
+
+/// A UNIFORM record (type 9): (resource, count, kind, name).
+pub fn uni_rec(b: &mut Buf, program: u32, flags: u16, e: &[(u32, u16, u8, &str)]) {
+    b.u16(9).u16((16 + 40 * e.len()) as u16).u32(program).u16(e.len() as u16).u16(flags).u32(0);
+    for &(res, count, kind, name) in e {
+        b.u32(res).u16(count).u8(kind).u8(name.len() as u8);
+        let mut n = name.as_bytes().to_vec();
+        n.resize(32, 0);
+        b.0.extend_from_slice(&n);
     }
 }

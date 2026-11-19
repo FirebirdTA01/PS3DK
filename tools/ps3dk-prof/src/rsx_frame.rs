@@ -15,7 +15,7 @@ use std::io::{self, Write};
 use serde_json::{json, Value};
 
 use crate::auto_rsx::{self, Op};
-use crate::rsx_state::{self, Registers};
+use crate::rsx_state::{self, Registers, VpConstants};
 use std::sync::Arc;
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
@@ -27,8 +27,9 @@ pub const CHUNK_DRAWS: u32 = 46;
 pub const CHUNK_PROGRAMS: u32 = 47;
 pub const CHUNK_END: u32 = 48;
 pub const SCHEMA: u16 = 1;
-/// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records).
-pub const DECODER: u32 = 2;
+/// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records); 3
+/// also VP constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM).
+pub const DECODER: u32 = 3;
 pub const CONFIG_BYTES: usize = 64;
 pub const BEGIN_FIXED: usize = 56;
 pub const DRAWS_HEADER: usize = 16;
@@ -42,6 +43,76 @@ pub const REC_STATE: u16 = 6;
 /// (register, value) pairs per BASELINE or STATE record, at most.
 pub const REG_PAIRS_MAX: usize = 255;
 pub const STATE_RESET: u16 = 1;
+pub const REC_VPCONST: u16 = 7;
+pub const REC_FPCONST: u16 = 8;
+pub const REC_UNIFORM: u16 = 9;
+pub const VPC_PER_REC: usize = 128;
+pub const FPC_MAX: usize = 32;
+pub const UNI_MAX: usize = 32;
+pub const UNI_NAME: usize = 32;
+pub const VPC_RESET: u16 = 1;
+pub const VPC_BASELINE: u16 = 2;
+
+/// Where an FP embedded constant's value comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Written by an inline transfer in the owner's command stream: the value the RSX reads.
+    Fifo,
+    /// The program container's value: no write seen since attach, so a CPU write to the copy in memory would not be
+    /// seen; it may differ at GPU time.
+    Container,
+    /// Unknown: the decoder reset or its inline-write map was full since attach (the container's value is shown).
+    Unknown,
+}
+impl Provenance {
+    pub fn name(self) -> &'static str {
+        match self {
+            Provenance::Fifo => "fifo",
+            Provenance::Container => "container (may differ at GPU time)",
+            Provenance::Unknown => "unknown",
+        }
+    }
+}
+
+/// One FP embedded constant at a draw: its ucode byte offset, provenance and words as in memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FpConstant {
+    pub offset: u32,
+    pub provenance: Provenance,
+    pub words: [u32; 4],
+}
+impl FpConstant {
+    pub fn floats(&self) -> [f32; 4] {
+        self.words.map(rsx_state::fp_word_float)
+    }
+}
+
+/// The FP constants a draw ran with (an FPCONST record; carried to later draws until the next one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FpConstants {
+    /// The FP PROGRAM index (0: unknown FP).
+    pub program: u32,
+    /// The program has more constant blocks than were captured.
+    pub truncated: bool,
+    pub entries: Vec<FpConstant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UniformKind {
+    /// A VP constant: `resource` is the first slot, `count` the slots of this table entry.
+    VpConstant,
+    /// An FP embedded constant: `resource` is the first ucode offset it is patched at, `count` the offsets.
+    FpEmbedded,
+}
+
+/// One named uniform of a program (UNIFORM record, from the container's parameter table at bind).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uniform {
+    pub name: String,
+    pub kind: UniformKind,
+    pub resource: u32,
+    pub count: u32,
+}
 pub const DRAW_BYTES: usize = 96;
 pub const PROGRAM_BYTES: usize = 48;
 pub const NAME_MAX: usize = 63;
@@ -229,6 +300,11 @@ pub struct RawDraw {
     /// (register index, value) pairs.
     pub state_reset: bool,
     pub state: Vec<(u16, u32)>,
+    /// The VPCONST records before this draw: every slot unknown first (a reset), then (slot, known mask, words).
+    pub vpc_reset: bool,
+    pub vpc: Vec<(u16, u8, [u32; 4])>,
+    /// The FPCONST record of this draw, if one was written (else the previous draw's list still applies).
+    pub fpc: Option<FpConstants>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -283,6 +359,9 @@ pub struct Program {
     pub first_draw: u32,
     /// The app-registered name (NAME record), if any.
     pub name: Option<String>,
+    /// Its uniforms (UNIFORM record; decoder 3), and whether the parameter table had more than were kept.
+    pub uniforms: Vec<Uniform>,
+    pub uniforms_truncated: bool,
 }
 impl Program {
     /// `vp:0123456789abcdef` (or `vp:unreadable`).
@@ -330,6 +409,10 @@ pub struct End {
     /// Register pairs in the BASELINE records, and STATE records (decoder 2; both 0 for decoder 1).
     pub baseline_registers: u32,
     pub state_records: u32,
+    /// VPCONST, FPCONST and UNIFORM records (decoder 3; 0 before).
+    pub vpconst_records: u32,
+    pub fpconst_records: u32,
+    pub uniform_records: u32,
 }
 
 /// END reason text.
@@ -363,6 +446,11 @@ pub struct CaptureRecord {
     pub baseline: Vec<(u16, u32)>,
     /// STATE records parsed (also those of draws not retained).
     pub state_records: u32,
+    /// The VP constants at arming (VPCONST BASELINE records): (slot, known mask, words), increasing.
+    pub vpc_baseline: Vec<(u16, u8, [u32; 4])>,
+    pub vpconst_records: u32,
+    pub fpconst_records: u32,
+    pub uniform_records: u32,
 }
 
 /// The decoded family of one file: present exactly when file_flags bit 10 is.
@@ -382,11 +470,42 @@ pub struct Reader {
     last_ordinal: Option<u32>,
     by_hash: BTreeMap<(Profile, u64, bool), u32>,
     named: Vec<bool>,
-    /// STATE records read for the next DRAW: its ordinal, reset flag, pairs, and the last register index.
-    pending: Option<(u32, bool, Vec<(u16, u32)>)>,
-    pending_last: Option<u16>,
+    /// STATE / VPCONST / FPCONST records read for the next DRAW.
+    pending: Option<PendingDraw>,
+    /// Programs that already have their UNIFORM record.
+    uniformed: Vec<bool>,
     /// A DRAW or STATE record was read in the open capture (a BASELINE must come before both).
     past_baseline: bool,
+}
+
+/// The per-draw records read so far for the next DRAW.
+#[derive(Debug, Default)]
+struct PendingDraw {
+    ordinal: u32,
+    state_any: bool,
+    state_reset: bool,
+    state: Vec<(u16, u32)>,
+    vpc_any: bool,
+    vpc_reset: bool,
+    vpc: Vec<(u16, u8, [u32; 4])>,
+    fpc: Option<FpConstants>,
+}
+
+/// The pending draw for `ordinal` (a new one when none is open): its records must all name the same next draw.
+fn pending_for<'a>(p: &'a mut Option<PendingDraw>, ordinal: u32, last: Option<u32>, what: &str)
+                   -> Result<&'a mut PendingDraw, Malformed> {
+    if last.is_some_and(|o| ordinal <= o) {
+        return bad(format!("{what} for draw {ordinal} after draw {}", last.unwrap()));
+    }
+    if let Some(d) = p.as_ref() {
+        if d.ordinal != ordinal {
+            return bad(format!("{what} for draw {ordinal} while draw {}'s are open", d.ordinal));
+        }
+    }
+    if p.is_none() {
+        *p = Some(PendingDraw { ordinal, ..PendingDraw::default() });
+    }
+    Ok(p.as_mut().expect("set above"))
 }
 
 fn bad<T>(msg: impl Into<String>) -> Result<T, Malformed> {
@@ -560,13 +679,17 @@ impl Reader {
             text_replaced: replaced,
             baseline: Vec::new(),
             state_records: 0,
+            vpc_baseline: Vec::new(),
+            vpconst_records: 0,
+            fpconst_records: 0,
+            uniform_records: 0,
         });
         self.open = true;
         self.last_ordinal = None;
         self.by_hash.clear();
         self.named.clear();
         self.pending = None;
-        self.pending_last = None;
+        self.uniformed.clear();
         self.past_baseline = false;
         Ok(())
     }
@@ -636,12 +759,19 @@ impl Reader {
                     }
                     self.last_ordinal = Some(ordinal);
                     self.past_baseline = true;
-                    let (state_reset, state) = match self.pending.take() {
-                        Some((o, reset, pairs)) if o == ordinal => (reset, pairs),
-                        Some((o, _, _)) => return bad(format!("STATE for draw {o} before draw {ordinal}")),
-                        None => (false, Vec::new()),
+                    let pd = match self.pending.take() {
+                        Some(pd) if pd.ordinal == ordinal => pd,
+                        Some(pd) => return bad(format!("records for draw {} before draw {ordinal}", pd.ordinal)),
+                        None => PendingDraw::default(),
                     };
-                    self.pending_last = None;
+                    if let Some(f) = &pd.fpc {
+                        match f.program {
+                            0 => {}
+                            i if rec.programs.get(i as usize - 1).is_some_and(|p| p.profile == Profile::Fragment) => {}
+                            i => return bad(format!("draw {ordinal}: FPCONST for program {i}, not a defined FP")),
+                        }
+                    }
+                    let PendingDraw { state_reset, state, vpc_reset, vpc, fpc, .. } = pd;
                     if flags & !15 != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 || r1 != 0 {
                         return bad(format!("draw {ordinal}: flags {flags:#x}"));
                     }
@@ -685,7 +815,7 @@ impl Reader {
                     rec.draws.push(RawDraw {
                         ordinal, kind, flags, untimed, op_id, mode, first, count, index_offset, index_type,
                         index_location, clear_mask, tag, label, vp, fp, fp_address, vp_start, caller, words, tb,
-                        state_reset, state,
+                        state_reset, state, vpc_reset, vpc, fpc,
                     });
                 }
                 REC_PROGRAM => {
@@ -730,7 +860,8 @@ impl Reader {
                     }
                     rec.programs.push(Program {
                         index, profile, source, unterminated: flags & 1 != 0, unreadable, not_revalidated, instructions, hash,
-                        ucode_bytes, const_blocks, address, first_draw, name: None,
+                        ucode_bytes, const_blocks, address, first_draw, name: None, uniforms: Vec::new(),
+                        uniforms_truncated: false,
                     });
                     self.named.push(false);
                 }
@@ -799,30 +930,149 @@ impl Reader {
                         {
                             return bad(format!("STATE for draw {ordinal}: flags {flags:#x}, {n} pairs"));
                         }
-                        match &mut self.pending {
-                            Some((o, _, list)) if *o == ordinal && !reset => {
-                                for &(i, _) in &pairs {
-                                    if self.pending_last.is_some_and(|l| i <= l) {
-                                        return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
-                                    }
-                                    self.pending_last = Some(i);
-                                }
-                                list.extend(pairs);
+                        let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "STATE")?;
+                        if reset && pd.state_any {
+                            return bad(format!("STATE for draw {ordinal}: RESET on a later record"));
+                        }
+                        pd.state_any = true;
+                        pd.state_reset |= reset;
+                        for &(i, v) in &pairs {
+                            if pd.state.last().is_some_and(|l| i <= l.0) {
+                                return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
                             }
-                            Some(_) => return bad(format!("STATE for draw {ordinal} out of order")),
-                            None => {
-                                self.pending_last = None;
-                                for &(i, _) in &pairs {
-                                    if self.pending_last.is_some_and(|l| i <= l) {
-                                        return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
-                                    }
-                                    self.pending_last = Some(i);
-                                }
-                                self.pending = Some((ordinal, reset, pairs));
-                            }
+                            pd.state.push((i, v));
                         }
                         rec.state_records += 1;
                     }
+                }
+                REC_VPCONST => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 3 || len != 16 + 24 * n || n > VPC_PER_REC || r0 != 0 {
+                        return bad(format!("VPCONST: length {len} for {n} slots, decoder {decoder}"));
+                    }
+                    let mut list = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let slot = c.u16()?;
+                        let mask = c.u8()?;
+                        let r = c.u8()?;
+                        let r2 = c.u32()?;
+                        let w = [c.u32()?, c.u32()?, c.u32()?, c.u32()?];
+                        if usize::from(slot) >= rsx_state::VP_CONSTS || mask == 0 || mask > 15 || r != 0 || r2 != 0 {
+                            return bad(format!("VPCONST: slot {slot} mask {mask:#x}"));
+                        }
+                        list.push((slot, mask, w));
+                    }
+                    if flags == VPC_BASELINE {
+                        if self.past_baseline || ordinal != 0 || n == 0 {
+                            return bad("VPCONST BASELINE after a draw, or with an ordinal or no slot");
+                        }
+                        let mut last = rec.vpc_baseline.last().map(|p| p.0);
+                        for e in &list {
+                            if last.is_some_and(|l| e.0 <= l) {
+                                return bad(format!("VPCONST BASELINE slot {} not increasing", e.0));
+                            }
+                            last = Some(e.0);
+                        }
+                        rec.vpc_baseline.extend(list);
+                    } else {
+                        self.past_baseline = true;
+                        let reset = flags & VPC_RESET != 0;
+                        if flags & !VPC_RESET != 0 || (n == 0 && !reset) {
+                            return bad(format!("VPCONST for draw {ordinal}: flags {flags:#x}, {n} slots"));
+                        }
+                        let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "VPCONST")?;
+                        if reset && pd.vpc_any {
+                            return bad(format!("VPCONST for draw {ordinal}: RESET on a later record"));
+                        }
+                        pd.vpc_any = true;
+                        pd.vpc_reset |= reset;
+                        for e in list {
+                            if pd.vpc.last().is_some_and(|l| e.0 <= l.0) {
+                                return bad(format!("VPCONST for draw {ordinal}: slot {} not increasing", e.0));
+                            }
+                            pd.vpc.push(e);
+                        }
+                    }
+                    rec.vpconst_records += 1;
+                }
+                REC_FPCONST => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let program = c.u32()?;
+                    if decoder < 3 || len != 16 + 24 * n || n > FPC_MAX || flags & !1 != 0 || (program == 0 && n != 0) {
+                        return bad(format!("FPCONST: length {len} for {n} constants, flags {flags:#x}"));
+                    }
+                    let mut entries: Vec<FpConstant> = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let offset = c.u32()?;
+                        let prov = c.u8()?;
+                        let r = c.u8()?;
+                        let r2 = c.u16()?;
+                        let words = [c.u32()?, c.u32()?, c.u32()?, c.u32()?];
+                        let provenance = match prov {
+                            1 => Provenance::Fifo,
+                            2 => Provenance::Container,
+                            3 => Provenance::Unknown,
+                            v => return bad(format!("FPCONST: provenance {v}")),
+                        };
+                        if r != 0 || r2 != 0 || entries.last().is_some_and(|l| offset <= l.offset) {
+                            return bad(format!("FPCONST: offset {offset:#x} not increasing or reserved bits"));
+                        }
+                        entries.push(FpConstant { offset, provenance, words });
+                    }
+                    self.past_baseline = true;
+                    let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "FPCONST")?;
+                    if pd.fpc.is_some() {
+                        return bad(format!("a second FPCONST for draw {ordinal}"));
+                    }
+                    pd.fpc = Some(FpConstants { program, truncated: flags & 1 != 0, entries });
+                    rec.fpconst_records += 1;
+                }
+                REC_UNIFORM => {
+                    let program = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 3 || len != 16 + 40 * n || n == 0 || n > UNI_MAX || flags & !1 != 0 || r0 != 0 {
+                        return bad(format!("UNIFORM: length {len} for {n} uniforms, flags {flags:#x}"));
+                    }
+                    let i = program as usize;
+                    if i == 0 || i > rec.programs.len() || self.uniformed.get(i - 1).copied().unwrap_or(false) {
+                        return bad(format!("UNIFORM for program {program}"));
+                    }
+                    let profile = rec.programs[i - 1].profile;
+                    let mut list = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let resource = c.u32()?;
+                        let count = u32::from(c.u16()?);
+                        let kind = c.u8()?;
+                        let name_len = c.u8()? as usize;
+                        let raw = c.take(UNI_NAME)?;
+                        let kind = match (kind, profile) {
+                            (1, Profile::Vertex) => UniformKind::VpConstant,
+                            (2, Profile::Fragment) => UniformKind::FpEmbedded,
+                            (k, p) => return bad(format!("UNIFORM kind {k} for a {} program", p.short())),
+                        };
+                        if name_len == 0 || name_len > UNI_NAME || raw[name_len..].iter().any(|&b| b != 0) || count == 0
+                            || (kind == UniformKind::VpConstant
+                                && resource as usize + count as usize > rsx_state::VP_CONSTS)
+                        {
+                            return bad(format!("UNIFORM of program {program}: name length {name_len}, resource {resource} x {count}"));
+                        }
+                        let name = text(&raw[..name_len], &mut rec.text_replaced);
+                        list.push(Uniform { name, kind, resource, count });
+                    }
+                    if self.uniformed.len() < rec.programs.len() {
+                        self.uniformed.resize(rec.programs.len(), false);
+                    }
+                    self.uniformed[i - 1] = true;
+                    rec.programs[i - 1].uniforms = list;
+                    rec.programs[i - 1].uniforms_truncated = flags & 1 != 0;
+                    rec.uniform_records += 1;
                 }
                 _ => return bad(format!("record type {ty}")),
             }
@@ -831,7 +1081,7 @@ impl Reader {
             return bad("RSXF_DRAWS: bytes after the last record");
         }
         if self.pending.is_some() {
-            return bad("RSXF_DRAWS: a STATE record without its DRAW in the same block");
+            return bad("RSXF_DRAWS: a STATE, VPCONST or FPCONST record without its DRAW in the same block");
         }
         Ok(())
     }
@@ -859,10 +1109,13 @@ impl Reader {
         let rej_reason = c.u32()?;
         let lost_events = c.u32()?;
         let baseline_registers = c.u32()?;
-        let r3 = c.u64()?;
+        let vpconst_records = c.u32()?;
+        let fpconst_records = c.u32()?;
         let untimed = c.u32()?;
         let state_records = c.u32()?;
-        let r2 = c.u64()?;
+        let uniform_records = c.u32()?;
+        let r2 = c.u32()?;
+        let r3 = 0u32;
         let rec = self.result.captures.last_mut().expect("open");
         if id != rec.begin.id {
             return bad(format!("RSXF_END for capture {id} while capture {} is open", rec.begin.id));
@@ -888,6 +1141,12 @@ impl Reader {
         {
             return bad(format!("RSXF_END draw counts: seen {draws_seen} recorded {draws_recorded} (records {recorded})"));
         }
+        if vpconst_records != rec.vpconst_records || fpconst_records != rec.fpconst_records
+            || uniform_records != rec.uniform_records
+        {
+            return bad(format!("RSXF_END: {vpconst_records} VPCONST, {fpconst_records} FPCONST and {uniform_records} \
+                UNIFORM records against {}, {} and {}", rec.vpconst_records, rec.fpconst_records, rec.uniform_records));
+        }
         if baseline_registers as usize != rec.baseline.len() || state_records != rec.state_records {
             return bad(format!("RSXF_END: {baseline_registers} baseline registers and {state_records} STATE records \
                 against {} and {}", rec.baseline.len(), rec.state_records));
@@ -907,7 +1166,7 @@ impl Reader {
             truncated_at: truncated.then_some(truncated_at), programs, labels, labels_refused, programs_refused,
             bytes_streamed, bytes_dropped, tb_end, decoder_words,
             decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), lost_events, untimed,
-            baseline_registers, state_records,
+            baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records,
         });
         self.open = false;
         Ok(())
@@ -1089,6 +1348,37 @@ pub struct Draw {
     pub registers: Option<Arc<Registers>>,
     /// The registers (byte addresses) this draw's STATE records changed, increasing; every known one after a reset.
     pub changed: Vec<u32>,
+    /// The VP constant file at this draw (decoder 3), and the slots its VPCONST records changed.
+    pub vp_constants: Option<Arc<VpConstants>>,
+    pub vpc_changed: Vec<u16>,
+    /// The FP embedded constants it ran with (decoder 3; the latest FPCONST up to this draw).
+    pub fp_constants: Option<Arc<FpConstants>>,
+    /// Index into [`FrameView::instance_runs`].
+    pub run: Option<usize>,
+}
+
+/// Consecutive draws identical except for their constants (same kind, primitive, counts, index stream, programs,
+/// label, tag and register state): an instance run, drawn once per set of constants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceRun {
+    /// Indices into [`FrameView::draws`]: the first draw and how many.
+    pub first: usize,
+    pub len: usize,
+    /// VP constant slots and FP constant offsets whose values differ within the run.
+    pub vp_slots: Vec<u16>,
+    pub fp_offsets: Vec<u32>,
+}
+
+/// One uniform's value at a draw.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UniformValue {
+    pub profile: Profile,
+    pub name: String,
+    pub resource: u32,
+    /// One vec4 per slot (VP) or per embedded constant (FP); a component None when unknown.
+    pub values: Vec<[Option<f32>; 4]>,
+    /// FP: where the value comes from (None for VP: the stream is exact).
+    pub provenance: Option<Provenance>,
 }
 impl Draw {
     pub fn hooked(&self) -> bool {
@@ -1175,6 +1465,7 @@ pub struct FrameView {
     pub text_replaced: u32,
     /// The register file at arming (decoder 2 captures).
     pub baseline: Option<Arc<Registers>>,
+    pub instance_runs: Vec<InstanceRun>,
 }
 
 fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
@@ -1227,6 +1518,15 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         Arc::new(r)
     });
     let mut regs = baseline.clone();
+    let constants = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).is_some_and(|k| k.decoder >= 3);
+    let mut vpcs = constants.then(|| {
+        let mut v = VpConstants::new();
+        for &(s, m, w) in &c.vpc_baseline {
+            v.set(s, m, w);
+        }
+        Arc::new(v)
+    });
+    let mut fpcs: Option<Arc<FpConstants>> = None;
     let mut totals = Totals::default();
     let mut last_end: Option<u64> = None;
     for d in &c.draws {
@@ -1297,7 +1597,25 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
                 }
             }
         }
-        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed };
+        let mut vpc_changed = Vec::new();
+        if let Some(cur) = vpcs.as_mut() {
+            if d.vpc_reset || !d.vpc.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.vpc_reset {
+                    next.clear();
+                }
+                for &(s, m, w) in &d.vpc {
+                    next.set(s, m, w);
+                    vpc_changed.push(s);
+                }
+            }
+        }
+        if let Some(f) = &d.fpc {
+            fpcs = Some(Arc::new(f.clone()));
+        }
+        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed,
+            vp_constants: vpcs.clone(), vpc_changed, fp_constants: if constants { fpcs.clone() } else { None },
+            run: None };
         totals.primitives += item.primitives().unwrap_or(0);
         draws.push(item);
     }
@@ -1310,7 +1628,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
             Outcome::Done => FrameStatus::Complete,
         },
     };
-    FrameView {
+    let mut view = FrameView {
         id: b.id,
         name: b.name.clone(),
         source: b.source,
@@ -1328,7 +1646,84 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         draws_not_retained: c.draws_not_retained,
         text_replaced: c.text_replaced,
         baseline,
+        instance_runs: Vec::new(),
+    };
+    let runs = instance_runs(&view);
+    for (k, r) in runs.iter().enumerate() {
+        for d in &mut view.draws[r.first..r.first + r.len] {
+            d.run = Some(k);
+        }
     }
+    view.instance_runs = runs;
+    view
+}
+
+/// The two draws differ only in their constants.
+fn same_but_constants(a: &Draw, b: &Draw) -> bool {
+    let (x, y) = (&a.raw, &b.raw);
+    (x.kind, x.mode, x.first, x.count, x.index_offset, x.index_type, x.index_location, x.clear_mask, x.tag)
+        == (y.kind, y.mode, y.first, y.count, y.index_offset, y.index_type, y.index_location, y.clear_mask, y.tag)
+        && (a.vp, a.fp, &a.label) == (b.vp, b.fp, &b.label)
+        && a.vp.is_some()
+        && match (&a.registers, &b.registers) {
+            (Some(p), Some(q)) => Arc::ptr_eq(p, q) || p == q,
+            _ => false,
+        }
+}
+
+/// Every instance run of `f` (two or more draws), in draw order.
+pub fn instance_runs(f: &FrameView) -> Vec<InstanceRun> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < f.draws.len() {
+        let mut j = i + 1;
+        while j < f.draws.len() && same_but_constants(&f.draws[j - 1], &f.draws[j]) {
+            j += 1;
+        }
+        if j - i >= 2 {
+            let mut vp_slots: Vec<u16> = f.draws[i + 1..j].iter().flat_map(|d| d.vpc_changed.iter().copied()).collect();
+            vp_slots.sort_unstable();
+            vp_slots.dedup();
+            let mut fp_offsets = Vec::new();
+            for w in f.draws[i..j].windows(2) {
+                if let (Some(a), Some(b)) = (&w[0].fp_constants, &w[1].fp_constants) {
+                    for e in &b.entries {
+                        if a.entries.iter().find(|x| x.offset == e.offset).map(|x| x.words) != Some(e.words) {
+                            fp_offsets.push(e.offset);
+                        }
+                    }
+                }
+            }
+            fp_offsets.sort_unstable();
+            fp_offsets.dedup();
+            out.push(InstanceRun { first: i, len: j - i, vp_slots, fp_offsets });
+        }
+        i = j;
+    }
+    out
+}
+
+/// The values of the uniforms of a draw's programs (decoder 3 captures; empty otherwise).
+pub fn uniforms(f: &FrameView, d: &Draw) -> Vec<UniformValue> {
+    let mut out = Vec::new();
+    if let (Some(i), Some(v)) = (d.vp, &d.vp_constants) {
+        for u in &f.programs[i].uniforms {
+            let values = (u.resource..u.resource + u.count).map(|s| v.floats(s as usize)).collect();
+            out.push(UniformValue { profile: Profile::Vertex, name: u.name.clone(), resource: u.resource, values,
+                provenance: None });
+        }
+    }
+    if let (Some(i), Some(fc)) = (d.fp, &d.fp_constants) {
+        if fc.program as usize == i + 1 {
+            for u in &f.programs[i].uniforms {
+                let e = fc.entries.iter().find(|e| e.offset == u.resource);
+                out.push(UniformValue { profile: Profile::Fragment, name: u.name.clone(), resource: u.resource,
+                    values: vec![e.map_or([None; 4], |e| e.floats().map(Some))],
+                    provenance: Some(e.map_or(Provenance::Unknown, |e| e.provenance)) });
+            }
+        }
+    }
+    out
 }
 
 /// What [`group`] groups by.
@@ -1534,7 +1929,10 @@ fn program_json(p: &Program) -> Value {
     json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
         "name": p.name, "source": p.source.name(), "instructions": p.instructions, "ucode_bytes": p.ucode_bytes,
         "const_blocks": p.const_blocks, "address": p.address, "first_draw": p.first_draw,
-        "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated})
+        "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated,
+        "uniforms": p.uniforms.iter().map(|u| json!({"name": u.name, "resource": u.resource, "count": u.count,
+            "kind": if u.kind == UniformKind::VpConstant { "vp_constant" } else { "fp_embedded" }})).collect::<Vec<_>>(),
+        "uniforms_truncated": p.uniforms_truncated})
 }
 
 fn timing_json(t: &Timing) -> Value {
@@ -1579,6 +1977,19 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
         o.insert("changed".into(), json!(d.changed.iter().map(|&m| rsx_state::register_name(m)).collect::<Vec<_>>()));
         o.insert("state_reset".into(), json!(r.state_reset));
     }
+    if d.vp_constants.is_some() {
+        let fl = |v: &[Option<f32>; 4]| json!(v.map(|c| c.map(|x| json!(x)).unwrap_or(Value::Null)));
+        let us = uniforms(f, d);
+        let vp: Vec<Value> = us.iter().filter(|u| u.profile == Profile::Vertex).map(|u| json!({"name": u.name,
+            "slot": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>()})).collect();
+        let fp: Vec<Value> = us.iter().filter(|u| u.profile == Profile::Fragment).map(|u| json!({"name": u.name,
+            "offset": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>(),
+            "provenance": u.provenance.map(|p| p.name())})).collect();
+        let list: Vec<Value> = d.fp_constants.as_ref().map_or_else(Vec::new, |c| c.entries.iter().map(|e| json!({
+            "offset": e.offset, "provenance": e.provenance.name(), "value": e.floats()})).collect());
+        o.insert("constants".into(), json!({"vp": vp, "fp": fp, "vp_changed": d.vpc_changed, "fp_list": list}));
+        o.insert("run".into(), json!(d.run));
+    }
     v
 }
 
@@ -1599,6 +2010,9 @@ fn end_json(e: &End) -> Value {
     o.insert("untimed".into(), json!(e.untimed));
     o.insert("baseline_registers".into(), json!(e.baseline_registers));
     o.insert("state_records".into(), json!(e.state_records));
+    o.insert("vpconst_records".into(), json!(e.vpconst_records));
+    o.insert("fpconst_records".into(), json!(e.fpconst_records));
+    o.insert("uniform_records".into(), json!(e.uniform_records));
     o.insert("decoder_reject".into(),
         json!(e.decoder_reject.map(|(h, r)| json!({"header": h, "reason": auto_rsx::reject_reason(r)}))));
     v
@@ -1619,6 +2033,13 @@ fn frame_json(f: &FrameView) -> Value {
     o.insert("totals".into(), totals);
     o.insert("draws_not_retained".into(), json!(f.draws_not_retained));
     o.insert("text_replaced".into(), json!(f.text_replaced));
+    o.insert("instance_runs".into(), Value::Array(f.instance_runs.iter().map(|r| {
+        let vp_names: Vec<String> = f.draws[r.first].vp.map_or_else(Vec::new, |i| f.programs[i].uniforms.iter()
+            .filter(|u| r.vp_slots.iter().any(|&s| (u.resource..u.resource + u.count).contains(&u32::from(s))))
+            .map(|u| u.name.clone()).collect());
+        json!({"first": f.draws[r.first].raw.ordinal, "length": r.len, "vp_slots": r.vp_slots,
+            "fp_offsets": r.fp_offsets, "vp_uniforms": vp_names})
+    }).collect()));
     o.insert("programs".into(), Value::Array(f.programs.iter().map(program_json).collect()));
     o.insert("passes".into(), Value::Array(passes));
     o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d)).collect()));

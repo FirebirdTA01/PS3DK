@@ -4,7 +4,9 @@
     check_capture.py --reader ps3dk-prof --capture run.prof --shaders build/shaders
     check_capture.py --reader-json frame.json --hashes-json hashes.json      (no reader run: saved outputs)
 
-expected/state.tsv is checked too (--state): each listed register-state field of each draw (decoder 2 captures).
+expected/state.tsv is checked too (--state): each listed register-state field of each draw (decoder 2 captures);
+expected/constants.tsv (--constants): each listed uniform value of each draw, and the table's `@ instance_runs`
+(decoder 3 captures).
 The reader output is `ps3dk-prof rsx-frame --json <capture>`; program names in the table are shader file stems,
 mapped to canonical hashes with `ps3dk-prof shader-hash --json <dir>/*.vpo <dir>/*.fpo` (the files the build
 compiled). The capture checked is the one named by the table's `@ name` (the first if several). Prints one line per
@@ -83,6 +85,61 @@ def compare_state(rows, doc, name):
             elif t[field] != want:
                 bad.append(f'{where}: {t[field]!r}, expected {want!r}')
     # one line per missing state, not per field
+    return list(dict.fromkeys(bad))
+
+
+def load_constants(path):
+    '''[(ordinal, profile, uniform name, expected vec4)] from a constants table.'''
+    rows = []
+    for n, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+        if not line.strip() or line.startswith('#'):
+            continue
+        cells = line.split('\t')
+        profile, _, name = cells[1].partition('.') if len(cells) == 3 else ('', '', '')
+        if len(cells) != 3 or profile not in ('vp', 'fp') or not name:
+            die(f'{path}:{n}: expected ordinal, vp.<name> or fp.<name>, value')
+        try:
+            value = json.loads(cells[2])
+        except ValueError:
+            die(f'{path}:{n}: value {cells[2]!r} is not JSON')
+        rows.append((int(cells[0]), profile, name, value))
+    return rows
+
+
+def compare_constants(rows, meta, doc):
+    '''The differences in uniform values and instance runs.'''
+    bad = []
+    caps = [c for c in doc.get('captures', []) if c.get('name') == meta.get('name')]
+    if not caps:
+        return bad
+    c = caps[0]
+    draws = {d.get('ordinal'): d for d in c.get('draws', [])}
+    for ordinal, profile, name, want in rows:
+        d = draws.get(ordinal)
+        where = f'draw {ordinal} {profile}.{name}'
+        if d is None:
+            continue  # the draw table reports a missing draw
+        consts = d.get('constants')
+        if consts is None:
+            bad.append(f'draw {ordinal}: no constants (a capture before decoder 3?)')
+            continue
+        u = [x for x in consts.get(profile, []) if x.get('name') == name]
+        if not u:
+            bad.append(f'{where}: no such uniform')
+            continue
+        got = (u[0].get('values') or [None])[0]
+        if not isinstance(got, list) or len(got) != len(want) or any(
+                g is None or abs(g - w) > 1e-5 for g, w in zip(got, want)):
+            bad.append(f'{where}: {got!r}, expected {want!r}')
+    if 'instance_runs' in meta:
+        want_runs = []
+        for item in filter(None, meta['instance_runs'].split()):
+            first, length, names = item.split(':')
+            want_runs.append((int(first), int(length), sorted(filter(None, names.split(',')))))
+        got_runs = [(r.get('first'), r.get('length'), sorted(r.get('vp_uniforms', [])))
+                    for r in c.get('instance_runs', [])]
+        if got_runs != want_runs:
+            bad.append(f'instance runs: {got_runs!r}, expected {want_runs!r}')
     return list(dict.fromkeys(bad))
 
 
@@ -176,6 +233,8 @@ def main():
     ap.add_argument('--expected', type=Path, default=HERE.parent / 'expected/draws.tsv')
     ap.add_argument('--state', type=Path, default=HERE.parent / 'expected/state.tsv',
                     help='the register-state table; "-" skips it')
+    ap.add_argument('--constants', type=Path, default=HERE.parent / 'expected/constants.tsv',
+                    help='the uniform-value table; "-" skips it and the instance runs')
     ap.add_argument('--reader', type=Path, help='ps3dk-prof')
     ap.add_argument('--capture', type=Path, help='the sample\'s .prof')
     ap.add_argument('--shaders', type=Path, help='the build\'s shaders directory (*.vpo, *.fpo)')
@@ -201,6 +260,8 @@ def main():
     bad = compare(meta, rows, doc, hashes_by_stem(hdoc))
     if str(a.state) != '-':
         bad += compare_state(load_state(a.state), doc, meta.get('name'))
+    if str(a.constants) != '-':
+        bad += compare_constants(load_constants(a.constants), meta, doc)
     for b in bad:
         print('DIFF', b)
     print(f'rsx-frame capture {"MATCHES" if not bad else "DIFFERS from"} {a.expected.name}: {len(rows)} draws, '

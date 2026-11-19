@@ -23,7 +23,7 @@ HASHES = [{'file': f'build/shaders/{s}.{ext}', 'profile': ext[:2], 'hash': f'{0x
                                         ('fp_tex', 'fpo'), ('fp_texmod', 'fpo')])]
 
 
-def matching(meta, rows, state_rows=()):
+def matching(meta, rows, state_rows=(), const_rows=()):
     """The reader JSON of a capture equal to the tables."""
     stems = cc.hashes_by_stem(HASHES)
     programs, index_of = [], {}
@@ -49,16 +49,24 @@ def matching(meta, rows, state_rows=()):
             'state_unknown': False,
             'state': {'render': {}, 'surfaces': {}, 'index': {}, 'textures': [{} for _ in range(16)],
                       'attributes': [{} for _ in range(16)]}})
+    for ordinal, profile, name, value in const_rows:
+        d = draws[ordinal]
+        d.setdefault('constants', {'vp': [], 'fp': [], 'vp_changed': [], 'fp_list': []})
+        d['constants'][profile].append({'name': name, 'values': [value]})
+    for d in draws:
+        d.setdefault('constants', {'vp': [], 'fp': [], 'vp_changed': [], 'fp_list': []})
     for ordinal, table, field, value in state_rows:
         for d in draws:
             if ordinal is None or d['ordinal'] == ordinal:
                 section, _, slot = table.partition('.')
                 (d['state'][section][int(slot)] if slot else d['state'][section])[field] = value
-    return {'schema': 1, 'capability': True, 'availability': 'available', 'decoder': 2, 'captures': [{
+    return {'schema': 1, 'capability': True, 'availability': 'available', 'decoder': 3, 'captures': [{
         'id': 1, 'name': meta['name'], 'source': meta['source'], 'status': meta['status'],
         'timing_mode': meta['timing_mode'], 'text_replaced': 0,
         'totals': {'draws': len(draws), 'timed': len(draws), 'untimed': 0, 'missing': 0, 'mismatched': 0},
-        'programs': programs, 'passes': [{'name': n} for n in pass_names], 'draws': draws}]}
+        'programs': programs, 'passes': [{'name': n} for n in pass_names], 'draws': draws,
+        'instance_runs': [{'first': int(f), 'length': int(n), 'vp_uniforms': [u for u in names.split(',') if u]}
+                          for f, n, names in (x.split(':') for x in meta.get('instance_runs', '').split())]}]}
 
 
 def run(doc, work, name):
@@ -75,7 +83,9 @@ def main():
     assert len(rows) == int(meta['draws']) == 16, (len(rows), meta)
     state_rows = cc.load_state(TOOL.parent.parent / 'expected/state.tsv')
     assert len(state_rows) > 100, len(state_rows)
-    base = matching(meta, rows, state_rows)
+    const_rows = cc.load_constants(TOOL.parent.parent / 'expected/constants.tsv')
+    assert len(const_rows) == 15, len(const_rows)
+    base = matching(meta, rows, state_rows, const_rows)
 
     def d(doc, i):
         return doc['captures'][0]['draws'][i]
@@ -112,6 +122,13 @@ def main():
         'index type': (lambda x: d(x, 7)['state']['index'].__setitem__('type', 'u32'), 'draw 7 index type'),
         'no state': (lambda x: d(x, 9).pop('state'), 'draw 9: no register state'),
         'decoder 1': (lambda x: x.__setitem__('decoder', 1), 'decoder: 1'),
+        'constant value': (lambda x: d(x, 10)['constants']['vp'][0].__setitem__('values', [[-0.36, -0.8, 0, 0]]),
+                           'draw 10 vp.offset'),
+        'uniform missing': (lambda x: d(x, 4)['constants'].__setitem__('vp', []), 'draw 4 vp.xform: no such uniform'),
+        'no constants': (lambda x: d(x, 7).pop('constants'), 'draw 7: no constants'),
+        'run shorter': (lambda x: x['captures'][0]['instance_runs'][0].__setitem__('length', 7), 'instance runs'),
+        'extra run': (lambda x: x['captures'][0]['instance_runs'].append({'first': 1, 'length': 2, 'vp_uniforms': []}),
+                      'instance runs'),
     }
     with tempfile.TemporaryDirectory() as t:
         work = Path(t)

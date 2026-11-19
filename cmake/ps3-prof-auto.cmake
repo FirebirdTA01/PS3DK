@@ -230,7 +230,7 @@ endfunction()
 # Opt-in RSX frame capture (one frame, every draw with its AUTO time, programs and label; docs/profiler-guide.md).
 # OFF: nothing generated or linked, the capture code stays dormant and the file is unchanged. ON: the executable gets
 # a generated constant (ps3dk_prof_automatic_rsx_frame_options) the runtime reads through a weak symbol; it needs
-# PS3_PROF_AUTO_RING=ON (the captured frame times every draw through the report ring). Cost: about 70 KiB of decoder
+# PS3_PROF_AUTO_RING=ON (the captured frame times every draw through the report ring). Cost: about 150 KiB of decoder
 # state from attach, and PS3_PROF_RSX_FRAME_STAGING_KB x 2 of MAIN memory only while a capture is being written.
 set(PS3_PROF_RSX_FRAME OFF CACHE BOOL "RSX frame capture: per-draw time, programs and labels of one requested frame")
 set(PS3_PROF_RSX_FRAME_STAGING_KB 256 CACHE STRING "RSX frame capture staging block size in KiB (4..1024), two blocks")

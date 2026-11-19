@@ -2329,6 +2329,12 @@ void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context,const void *ucode,uint
     if(!RSXF_ON() || !context || !p_ready() || !owner_capture((gpp_ctx *)(void *)context,0)) return;
     ps3dk_prof__rsxf_bind(context,ucode,bytes,offset);
 }
+void ps3dk_prof__rsxf_container(void *ctx, const void *container, uint32_t kind);
+void ps3dk_prof__rsxf_container_bind(struct _gcmCtxData *context,const void *container,uint32_t kind)
+{
+    if(!RSXF_ON() || !context || !p_ready() || !owner_capture((gpp_ctx *)(void *)context,0)) return;
+    ps3dk_prof__rsxf_container(context,container,kind);
+}
 /* 1 on the registered AUTO owner thread (labels are owner-only). */
 int ps3dk_prof__auto_owner_self(void)
 {
