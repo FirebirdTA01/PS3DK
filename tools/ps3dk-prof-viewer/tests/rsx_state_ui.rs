@@ -91,9 +91,9 @@ fn render_state_groups_marks_and_unknown_text() {
     assert_eq!(mark(&s0.render[func], base.render.get(func), &f.draws[0].changed), Mark::Plain);
     assert_eq!(mark(&s0.render[dst], base.render.get(dst), &f.draws[0].changed), Mark::Unknown);
     assert_eq!(text(&Value::Unknown), "unknown");
-    // after the reset depth.func differs from the state at arming
+    // after the reset depth.func differs from frame start
     let s1 = rs::interpret(f.draws[1].registers.as_ref().unwrap());
-    assert_eq!(mark(&s1.render[func], base.render.get(func), &[]), Mark::NonDefault);
+    assert_eq!(mark(&s1.render[func], base.render.get(func), &[]), Mark::FrameStart);
 }
 
 #[test]

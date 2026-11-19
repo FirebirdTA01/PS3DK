@@ -860,10 +860,12 @@ reader's arguments, provenance and stable identities. Captures with register sta
 (render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot: size, format, mips,
 filter, wrap, offset and location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
 the index stream of an indexed draw, and the surfaces). Values this draw changed are highlighted, values that differ
-from the state when the capture was armed are tinted, and a register not written since the last decoder reset reads
+from the register state when the capture was armed are tinted and labelled **differs from frame start** (not
+"non-default": hardware reset values are not known), and a register not written since the last decoder reset reads
 **unknown**, never a default. Summary and State list the registers changed since the previous draw with their old
 and new values. Group by **Render target** to total draws per colour/zeta surface. Constants are not recorded;
-older (decoder 1) captures say that no register state was recorded. PIPELINED intervals may overlap: their sum is not isolated execution cost.
+older (decoder 1) captures say that no register state was recorded. PIPELINED intervals may overlap: their sum is
+not isolated execution cost.
 Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
 raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
 

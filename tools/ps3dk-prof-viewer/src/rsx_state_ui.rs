@@ -151,11 +151,12 @@ pub fn target_groups(f: &FrameView) -> Vec<rf::Group> {
 
 const NO_STATE: &str = "This capture has no register state (decoder 1): render state, textures and buffers were not recorded.";
 
-/// How a value cell is emphasised: changed by this draw, different from the capture baseline, unknown.
+/// How a value cell is emphasised: changed by this draw, differs from frame start (the register
+/// state when the capture was armed), or unknown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Changed,
-    NonDefault,
+    FrameStart,
     Unknown,
     Plain,
 }
@@ -165,7 +166,7 @@ pub fn mark(field: &Field, baseline: Option<&Field>, changed: &[u32]) -> Mark {
     } else if changed.binary_search(&field.register).is_ok() {
         Mark::Changed
     } else if baseline.is_some_and(|b| b.value != field.value) {
-        Mark::NonDefault
+        Mark::FrameStart
     } else {
         Mark::Plain
     }
@@ -176,12 +177,12 @@ fn cell(p: &mut egui::Ui, field: &Field, m: Mark) {
     let r = match m {
         Mark::Unknown => p.label(RichText::new(t).weak().italics()),
         Mark::Changed => p.label(RichText::new(t).strong().color(ui::Tone::Warning.color(&pal))),
-        Mark::NonDefault => p.label(RichText::new(t).color(ui::Tone::Accent.color(&pal))),
+        Mark::FrameStart => p.label(RichText::new(t).color(ui::Tone::Accent.color(&pal))),
         Mark::Plain => p.label(t),
     };
     r.on_hover_text(format!("{} ({:#06x}){}", rs::register_name(field.register), field.register, match m {
         Mark::Changed => " · changed by this draw",
-        Mark::NonDefault => " · differs from the state at arming",
+        Mark::FrameStart => " · differs from frame start",
         Mark::Unknown => " · not written since the last decoder reset",
         Mark::Plain => "",
     }));
@@ -190,7 +191,7 @@ fn legend(p: &mut egui::Ui) {
     let pal = ui::Palette::of(p);
     p.horizontal_wrapped(|p| {
         p.label(RichText::new("changed by this draw").strong().color(ui::Tone::Warning.color(&pal)));
-        p.label(RichText::new("differs from the state at arming").color(ui::Tone::Accent.color(&pal)));
+        p.label(RichText::new("differs from frame start").color(ui::Tone::Accent.color(&pal)));
         p.label(RichText::new("unknown").weak().italics());
     });
 }
