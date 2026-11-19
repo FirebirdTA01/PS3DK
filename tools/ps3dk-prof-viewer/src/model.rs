@@ -42,6 +42,7 @@ pub struct Document {
     pub passes: crate::auto::PassesView,
     /// The RSX frames page (captures found in the data): built once, on first need.
     pub rsx: crate::rsx::RsxSlot,
+    pub rsx_frames: crate::rsx_frame_view::Slot,
 }
 
 /// What the Overview's EXTENSION SOURCES section shows.
@@ -156,6 +157,7 @@ impl Document {
             func_paths: crate::funcpaths::FuncSlot::default(),
             foreign_tl: crate::timeline_foreign::ForeignTimelineSlot::default(),
             rsx: crate::rsx::RsxSlot::default(),
+            rsx_frames: Default::default(),
         }
     }
 

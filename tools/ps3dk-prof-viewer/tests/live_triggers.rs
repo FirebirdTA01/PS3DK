@@ -378,6 +378,11 @@ fn a_v1_agent_is_detected_and_never_sent_a_command() {
     let stream = data_and_end(&cap);
     let (port, seen) = agent(vec![
         Box::new(|mut s: TcpStream, seen: Seen| {
+            let (t,p)=read_frame(&mut s).unwrap();
+            assert_eq!((t,&p[4..6]),(T_CLIENT_HELLO,&3u16.to_le_bytes()[..]));
+            seen.lock().unwrap().push((t,p));
+        }),
+        Box::new(|mut s: TcpStream, seen: Seen| {
             let (t, p) = read_frame(&mut s).unwrap();
             assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &2u16.to_le_bytes()[..]));
             seen.lock().unwrap().push((t, p));
@@ -417,8 +422,8 @@ fn a_v1_agent_is_detected_and_never_sent_a_command() {
     let v = client.join();
     assert!(matches!(v.outcome, Some(Outcome::Published(_))), "{:?}", v.outcome);
     let types: Vec<u16> = seen.lock().unwrap().iter().map(|f| f.0).collect();
-    assert_eq!(types[..2], [T_CLIENT_HELLO, T_CLIENT_HELLO]);
-    assert!(types[2..].iter().all(|t| *t == T_PING), "only PINGs on the v1 session: {types:?}");
+    assert_eq!(types[..3], [T_CLIENT_HELLO, T_CLIENT_HELLO, T_CLIENT_HELLO]);
+    assert!(types[3..].iter().all(|t| *t == T_PING), "only PINGs on the v1 session: {types:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -430,7 +435,7 @@ fn a_v2_agent_gets_one_command_at_a_time_and_its_answers_are_shown() {
     let stream = data_and_end(&cap);
     let (port, seen) = agent(vec![Box::new(move |mut s: TcpStream, seen: Seen| {
         let (t, p) = read_frame(&mut s).unwrap();
-        assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &2u16.to_le_bytes()[..]));
+        assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &VERSION.to_le_bytes()[..]));
         seen.lock().unwrap().push((t, p));
         s.write_all(&hello(2, CAP_TRIGGERS)).unwrap();
         let mut answered = 0;

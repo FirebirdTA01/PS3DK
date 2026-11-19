@@ -30,6 +30,7 @@ fn main() -> eframe::Result<()> {
         Some((t0.parse::<f64>().ok()?, dt.parse::<f64>().ok()?))
     });
     let explicit_page = args.iter().any(|a| a.starts_with("--page="));
+    let shader_tab = args.iter().any(|a| a == "--rsx-tab=shaders");
     let page = if args.iter().any(|a| a == "--page=rolling") {
         Page::Rolling
     } else if args.iter().any(|a| a == "--page=zones") {
@@ -44,6 +45,8 @@ fn main() -> eframe::Result<()> {
         Page::Waits
     } else if args.iter().any(|a| a == "--page=fifo") {
         Page::Fifo
+    } else if args.iter().any(|a| a == "--page=rsx") {
+        Page::RsxFrames
     } else if args.iter().any(|a| a == "--page=auto" || a == "--page=automatic") {
         Page::Automatic
     } else {
@@ -106,6 +109,7 @@ fn main() -> eframe::Result<()> {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
             let mut app = App::new(open);
+            if shader_tab {app.rsx_frame.tab=ps3dk_prof_viewer::rsx_frame_ui::Tab::Shaders;}
             // Without --page the open decides (a rolling file opens on its own page).
             if explicit_page {
                 app.page = page;

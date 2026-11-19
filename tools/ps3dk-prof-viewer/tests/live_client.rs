@@ -1065,3 +1065,25 @@ fn live_save_refuses_a_failed_session_without_creating_an_export() {
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn rsx_save_is_stable_while_receiving_and_after_disconnect_and_never_clobbers(){
+    let bytes=include_bytes!("../../ps3dk-prof/tests/fixtures/rsx_frame/sample.prof");
+    let torn=&bytes[..bytes.len()-3];let accepted=ps3dk_prof::load_prefix(torn).unwrap().prefix.unwrap().cut;
+    let(go,gate)=std::sync::mpsc::channel();let mut script=vec![Step::Send(hello_frame())];
+    script.extend(data_frames(torn,65536).into_iter().map(Step::Send));script.push(Step::Wait(gate));
+    let mut rest=(torn.len()as u64).to_le_bytes().to_vec();rest.extend_from_slice(&bytes[torn.len()..torn.len()+1]);script.push(Step::Send(wire(T_DATA,&rest)));script.push(Step::Hold(500));
+    let(port,_)=mock(script);let dir=out_dir("rsxf-live-save");let mut app=export_app(port,&dir);
+    poll_app_until(&mut app,|a|a.doc.as_ref().is_some_and(|d|d.size==torn.len()));
+    let f=ps3dk_prof::rsx_frame::frames(&app.doc.as_ref().unwrap().analysis().unwrap().capture).remove(0);
+    let path=dir.join("frame.prof");app.save_rsx_frame_to(f.id,path.clone());go.send(()).unwrap();
+    let deadline=Instant::now()+Duration::from_secs(5);while app.live.as_ref().unwrap().client.view().received!=(torn.len()+1)as u64{assert!(Instant::now()<deadline,"receiver blocked by Save");std::thread::sleep(Duration::from_millis(5));}
+    app.wait_save();assert!(matches!(&app.save_result,Some((false,_))),"{:?}",app.save_result);
+    let saved=std::fs::read(&path).unwrap();let cap=ps3dk_prof::reader::read(&saved).unwrap();assert_eq!(cap.export.unwrap().source_size,accepted as u64);
+    assert_eq!(ps3dk_prof::rsx_frame::frames(&ps3dk_prof::reader::read(&saved).unwrap())[0],f);
+    app.save_rsx_frame_to(f.id,path.clone());assert!(matches!(&app.save_result,Some((false,s))if s.contains("already saved")));
+    let other=dir.join("existing.prof");std::fs::write(&other,b"untouched").unwrap();app.save_rsx_frame_to(f.id,other.clone());app.wait_save();assert!(matches!(&app.save_result,Some((true,_))));assert_eq!(std::fs::read(other).unwrap(),b"untouched");
+    app.live.as_ref().unwrap().client.disconnect();poll_app_until(&mut app,|a|a.live.as_ref().unwrap().client.finished());
+    app.save_rsx_frame_to(f.id,dir.join("disconnected.prof"));app.wait_save();assert!(matches!(&app.save_result,Some((false,_))),"{:?}",app.save_result);
+    drop(app);std::fs::remove_dir_all(dir).unwrap();
+}

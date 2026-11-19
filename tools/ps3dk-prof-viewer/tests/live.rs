@@ -428,7 +428,7 @@ fn bad_hellos_fail() {
     let bad = [
         {
             let mut p = hello_payload(b"a", b"", b"x.prof");
-            p[0] = 3; // protocol version 3 (newer than any this viewer asks for)
+            p[0] = (VERSION + 1) as u8; // newer than any version this viewer asks for
             p
         },
         hello_payload(&[b'a'; MAX_APP + 1], b"", b"x.prof"),
