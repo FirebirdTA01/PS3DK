@@ -213,3 +213,21 @@ fn header_notes_explain_mismatched_lost_and_replaced_text() {
     assert!(notes.iter().any(|s| s.starts_with("3 draw events lost")));
     assert!(notes.last().unwrap().starts_with("Text replaced: 1 "));
 }
+
+#[test]
+fn program_identity_shows_not_revalidated_and_unavailable_with_reasons() {
+    use ps3dk_prof_viewer::rsx_frame_view::{program_label, provenance};
+    let d = doc();
+    let v = d.rsx_frames.get(d.analysis().unwrap());
+    let mut p = v.frames[0].programs[0].clone();
+    let names = Default::default();
+    p.name = Some("water".into());
+    assert_eq!(program_label(&p, &names), "water");
+    assert!(provenance(&p).is_none());
+    p.not_revalidated = true;
+    assert_eq!(program_label(&p, &names), "water (bound before capture, not revalidated)");
+    assert!(provenance(&p).unwrap().1.contains("before the capture was armed"));
+    p.unreadable = true;
+    assert_eq!(program_label(&p, &names), "water (identity unavailable)");
+    assert!(provenance(&p).unwrap().1.contains("rewritten in place outside a capture"));
+}

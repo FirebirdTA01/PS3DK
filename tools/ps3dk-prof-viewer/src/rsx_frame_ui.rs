@@ -1,5 +1,5 @@
 //! AUTO draw captures. All timing, grouping and identities come from the reader.
-use crate::rsx_frame_view::{sorted_draws, DrawColumn, Names, RsxFrameView};
+use crate::rsx_frame_view::{program_label, provenance, sorted_draws, DrawColumn, Names, RsxFrameView};
 use eframe::egui::{self, RichText};
 use ps3dk_prof::rsx_frame::{self as rf, FrameStatus, FrameView, GroupBy};
 use ps3dk_ui as ui;
@@ -166,9 +166,18 @@ fn duration(p: &mut egui::Ui, v: &RsxFrameView, n: Option<u64>) {
     let d = v.duration(n);
     p.label(d.text).on_hover_text(d.hover);
 }
-fn program(f: &FrameView, i: Option<usize>, names: &Names) -> String {
-    i.and_then(|i| f.programs.get(i))
-        .map_or_else(|| "unknown".into(), |p| rf::program_name(p, names))
+fn program(f: &FrameView, i: Option<usize>, names: &Names) -> (String, String) {
+    i.and_then(|i| f.programs.get(i)).map_or_else(
+        || ("unknown".into(), "unknown".into()),
+        |p| {
+            let text = program_label(p, names);
+            let hover = match provenance(p) {
+                Some((_, why)) => format!("{text}\n{}: {why}", p.id_text()),
+                None => format!("{text}\n{}", p.id_text()),
+            };
+            (text, hover)
+        },
+    )
 }
 pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &mut State, out: &mut Drawn) {
     *out = Drawn::default();
@@ -286,9 +295,10 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      },
      Tab::Shaders=>{for (title,id) in [("Vertex program",d.vp),("Fragment program",d.fp)]{
        ui::section_label(p,title);if let Some(prog)=id.and_then(|i|f.programs.get(i)){
-         p.label(rf::program_name(prog,names));p.monospace(prog.id_text());p.label(format!("{} instructions · {} bytes · {} inline constant blocks · source {}",prog.instructions,prog.ucode_bytes,prog.const_blocks,prog.source.name()));
+         p.label(program_label(prog,names));p.monospace(prog.id_text());
+         if let Some((what,why))=provenance(prog){ui::field_message(p,ui::Tone::Warning,&format!("{}{}: {why}",what[..1].to_uppercase(),&what[1..]));}p.label(format!("{} instructions · {} bytes · {} inline constant blocks · source {}",prog.instructions,prog.ucode_bytes,prog.const_blocks,prog.source.name()));
          p.label(format!("Address {:#x} (diagnostic only) · first draw {}",prog.address,prog.first_draw));
-         if prog.unterminated||prog.unreadable{ui::field_message(p,ui::Tone::Warning,&format!("Unterminated: {} · unreadable: {}",prog.unterminated,prog.unreadable));}
+         if prog.unterminated{ui::field_message(p,ui::Tone::Warning,"Unterminated: no end bit within the bound");}
        }else{p.label("Program identity unavailable for this draw.");}
      }},
      _=>{ui::field_message(p,ui::Tone::Neutral,"Not recorded by RSX frame schema 1. This capture contains draw arguments and program identities; these state values are unavailable.");},
@@ -377,8 +387,8 @@ fn draw_table(
                                 d.label.clone().unwrap_or("(no label)".into()),
                                 d.label.clone().unwrap_or_default(),
                             ),
-                            (program(f, d.vp, names), program(f, d.vp, names)),
-                            (program(f, d.fp, names), program(f, d.fp, names)),
+                            program(f, d.vp, names),
+                            program(f, d.fp, names),
                         ];
                         for ((text, hover), width) in cells.into_iter().zip(cols[1..].iter()) {
                             p.add_sized([*width, ROW], egui::Label::new(text).truncate())

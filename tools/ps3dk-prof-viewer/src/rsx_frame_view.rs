@@ -9,6 +9,24 @@ use std::{
     sync::{Arc, OnceLock},
 };
 pub type Names = BTreeMap<(Profile, u64), String>;
+/// How far a program identity can be trusted, with the reason, when it is not exact.
+pub fn provenance(p: &rf::Program) -> Option<(&'static str, &'static str)> {
+    if p.unreadable {
+        Some(("identity unavailable", "the container could not be read, or it was rewritten in place outside a capture; no hash is claimed"))
+    } else if p.not_revalidated {
+        Some(("bound before capture, not revalidated", "the identity comes from a bind made before the capture was armed; the container may have been rewritten in place since"))
+    } else {
+        None
+    }
+}
+/// The display name with its provenance wherever a program identity is shown.
+pub fn program_label(p: &rf::Program, names: &Names) -> String {
+    let name = rf::program_name(p, names);
+    match provenance(p) {
+        Some((what, _)) => format!("{name} ({what})"),
+        None => name,
+    }
+}
 pub struct RsxFrameView {
     pub generation: u64,
     pub frames: Vec<FrameView>,
@@ -111,7 +129,7 @@ pub fn sorted_draws(
             }
             let prog = |id: Option<usize>| {
                 id.and_then(|i| f.programs.get(i))
-                    .map(|p| rf::program_name(p, names))
+                    .map(|p| program_label(p, names))
                     .unwrap_or_default()
             };
             format!(
