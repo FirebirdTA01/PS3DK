@@ -18,6 +18,8 @@ fn main() -> eframe::Result<()> {
     // --view sets the timeline window in ticks from the capture start (for
     // screenshots and bug reports); --connect starts a live session at once,
     // as the Connect dialog would, saving captures in the default folder.
+    // --rsx-link-ended (screenshots): treat the opened file's first Open or
+    // Pending timing RSX capture as the request of a live link that ended.
     let capture_dir = args
         .iter()
         .find_map(|a| a.strip_prefix("--capture-dir=").map(str::to_string));
@@ -30,6 +32,8 @@ fn main() -> eframe::Result<()> {
         Some((t0.parse::<f64>().ok()?, dt.parse::<f64>().ok()?))
     });
     let explicit_page = args.iter().any(|a| a.starts_with("--page="));
+    let shader_tab = args.iter().any(|a| a == "--rsx-tab=shaders");
+    let rsx_link_ended = args.iter().any(|a| a == "--rsx-link-ended");
     let page = if args.iter().any(|a| a == "--page=rolling") {
         Page::Rolling
     } else if args.iter().any(|a| a == "--page=zones") {
@@ -44,6 +48,8 @@ fn main() -> eframe::Result<()> {
         Page::Waits
     } else if args.iter().any(|a| a == "--page=fifo") {
         Page::Fifo
+    } else if args.iter().any(|a| a == "--page=rsx") {
+        Page::RsxFrames
     } else if args.iter().any(|a| a == "--page=auto" || a == "--page=automatic") {
         Page::Automatic
     } else {
@@ -106,6 +112,10 @@ fn main() -> eframe::Result<()> {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
             let mut app = App::new(open);
+            if shader_tab {app.rsx_frame.tab=ps3dk_prof_viewer::rsx_frame_ui::Tab::Shaders;}
+            if rsx_link_ended {
+                link_ended_preview(&mut app);
+            }
             // Without --page the open decides (a rolling file opens on its own page).
             if explicit_page {
                 app.page = page;
@@ -135,4 +145,21 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// The disconnect switch through the same tracker and follow rule a live session uses.
+fn link_ended_preview(app: &mut App) {
+    use ps3dk_prof::rsx_frame::FrameStatus;
+    use ps3dk_prof_viewer::live_rsx_frame::{RequestTracker, RsxFrameAck};
+    let Some(d) = app.doc.clone() else { return };
+    let Some(a) = d.analysis() else { return };
+    let v = d.rsx_frames.get(a);
+    let Some(f) = v.frames.iter().find(|f| matches!(f.status, FrameStatus::Open | FrameStatus::PendingTiming { .. })) else {
+        return;
+    };
+    let mut t = RequestTracker::default();
+    t.request = Some(f.request_id);
+    t.ack = Some(RsxFrameAck { request: f.request_id, capture: f.id, result: 0 });
+    t.ended = true;
+    app.follow_rsx_frame(&t, &v);
 }

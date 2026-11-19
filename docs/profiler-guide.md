@@ -839,11 +839,39 @@ pointing to `rsx.auto` for clock validity, and a PPU lane holding only frame mar
 These labels do not claim complete coverage or per-draw state.
 
 **Capture RSX frame** in an app built with `PS3_PROF_RSX_FRAME` (4.12): the live link (protocol 3) carries the request
-and its progress (requested, armed on frame N, closed with D draws, written); the capture arrives in the session's data
-and `ps3dk-prof rsx-frame` reads it. A link follows one capture at a time: a request sent before the previous
-capture's final state arrived is answered `EBUSY`. The status a link follows is the live request's own; a capture
-requested from app code never replaces it. The PC app's button and RSX Frame page are in progress; an older agent or
-an app built without the option does not advertise the capability.
+and its progress. Press the button in the live strip: once the reader has the capture and its timing, the viewer
+opens **RSX frames**, selects the new capture, and focuses its slowest timed draw. Written progress alone does not
+mean Ready: missing AUTO records show **Pending timing** and the strip reads `Waiting for RSX (timed/total)`. Once
+the agent reports the capture written, a new request is allowed; the earlier capture stays listed as pending. A
+capture still being received shows **Open**. A truncated or abandoned capture opens as **Partial** with its reason.
+A request without a new frame boundary stays waiting. Disconnect keeps the received evidence: an Open or Pending
+timing capture is then opened once, with the reason that the live link ended before its timing completed. A link
+follows one capture at a time: until the previous capture's final state (written or abandoned) arrives the button
+stays disabled, and an agent that still answers `EBUSY` shows that refusal and allows a new request. The status a
+link follows is the live request's own; a capture requested from app code never replaces it. The header counts
+**mismatched** draws (their AUTO operation belongs to another draw kind or frame: in no timed count or sum) and
+reports lost draw events and **Text replaced** (fields that were not valid UTF-8, shown with U+FFFD). Older
+agents are negotiated as protocol 2 then 1 and show why the button is unavailable; requests are never retried.
+
+Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
+ordinal, change the sort, or group by program pair, VP, FP, label, tag, pass or kind. Summary and Shaders show the
+reader's arguments, provenance and stable identities. State, Textures, Buffers and Constants explicitly report that
+schema 1 did not record those values. PIPELINED intervals may overlap: their sum is not isolated execution cost.
+Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
+raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
+
+**Shader folder…** scans that folder's `.vpo`/`.fpo` files in the background, matching the reader's canonical hash.
+Names supplied by the app take precedence over local filenames, then stable hashes. The folder is session-local;
+the scan visits at most 4096 directory entries and reads at most 64 MiB, reporting invalid files or a reached limit.
+
+Each RSX capture has **Save** and **Save as…**. These use the accepted file/live prefix and the frame exporter, then
+reopen the result and require identical capture data, timing and partial status before publishing. Existing paths
+are never overwritten; repeat Save reports the saved path. Saves work after Disconnect when the prefix was accepted.
+Other captures from the same frame can be included and remain selectable on reopen. One save worker uses the shared
+viewer budget, sized by the selected frame rather than the session: a fixed 64 MiB preparation allowance and one
+copy of the accepted source, then about 70 times the exported frame's bytes plus 4 MiB before it is written and
+reopened. The session is not parsed again. Insufficient workspace refuses visibly. A sole capture
+is selected automatically on reopen. The original session file is untouched.
 
 ### 6.7 Windows: picker, Save window, Save range
 

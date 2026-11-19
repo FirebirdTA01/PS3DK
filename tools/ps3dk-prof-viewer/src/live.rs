@@ -7,6 +7,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+pub use crate::live_rsx_frame::{RsxFrameRequest,RsxFrameAck,RsxFrameState,RsxFrameEvent};
 
 pub const HDR_BYTES: usize = 8;
 pub const MAX_PAYLOAD: u32 = 65536;
@@ -14,9 +15,8 @@ pub const T_CLIENT_HELLO: u16 = 1;
 pub const MAGIC: u32 = 0x564c_3350;
 /// The oldest protocol version an agent serves (and the one a v1 agent speaks).
 pub const VERSION_MIN: u16 = 1;
-/// The newest protocol version this viewer asks for: capture triggers. Agents serve version 3 (the RSX frame request,
-/// the constants below); asking for it needs a 3 -> 2 -> 1 fallback, since a version 2 agent closes a version 3 hello.
-pub const VERSION: u16 = 2;
+/// RSX frame requests. Older agents close newer hellos, so the client tries 3 -> 2 -> 1.
+pub const VERSION: u16 = 3;
 pub const T_HELLO: u16 = 2;
 /// HELLO capability bit (version 2): the agent applies capture commands.
 pub const CAP_TRIGGERS: u32 = 1;
@@ -336,6 +336,9 @@ pub struct Session {
     outstanding: Option<(u32, u16)>,
     /// ACKs received and not yet taken (`take_acks`); at most one per command sent.
     acks: Vec<Ack>,
+    rsx_outstanding: Option<u32>,
+    rsx_active: Option<(u32,u32,u8)>,
+    rsx_events: Vec<RsxFrameEvent>,
 }
 
 impl Default for Session {
@@ -366,6 +369,9 @@ impl Session {
             asked: version,
             outstanding: None,
             acks: Vec::new(),
+            rsx_outstanding: None,
+            rsx_active: None,
+            rsx_events: Vec::new(),
         }
     }
 
@@ -409,6 +415,13 @@ impl Session {
     pub fn take_acks(&mut self) -> Vec<Ack> {
         std::mem::take(&mut self.acks)
     }
+
+    pub fn expect_rsx_frame(&mut self,request:u32)->Result<(),String>{
+        if !matches!(self.state,LinkState::Streaming)||!self.hello.as_ref().is_some_and(|h|h.protocol>=3&&h.capabilities&CAP_RSX_FRAME!=0){return Err("RSX capture unavailable on this link".into())}
+        if request==0||self.rsx_outstanding.is_some()||self.rsx_active.is_some_and(|(_,_,s)|s<3){return Err("RSX request invalid or outstanding".into())}
+        self.rsx_outstanding=Some(request);Ok(())
+    }
+    pub fn take_rsx_events(&mut self)->Vec<RsxFrameEvent>{std::mem::take(&mut self.rsx_events)}
 
     pub fn failed(&self) -> bool {
         matches!(self.state, LinkState::Failed(_))
@@ -560,6 +573,23 @@ impl Session {
                 self.outstanding = None;
                 self.acks.push(ack);
                 Ok(())
+            }
+            (T_RSX_FRAME_ACK,LinkState::Streaming) if self.hello.as_ref().is_some_and(|h|h.protocol>=3&&h.capabilities&CAP_RSX_FRAME!=0)=>{
+                let bad=||LinkError::BadFrame("RSX_FRAME_ACK layout/identity".into());
+                if p.len()!=16||p[12..16]!=[0;4]{return Err(bad())}
+                let a=RsxFrameAck{request:u32::from_le_bytes(p[..4].try_into().unwrap()),result:i32::from_le_bytes(p[4..8].try_into().unwrap()),capture:u32::from_le_bytes(p[8..12].try_into().unwrap())};
+                if self.rsx_outstanding!=Some(a.request)||a.result>0||(a.result==0)!=(a.capture!=0){return Err(bad())}
+                self.rsx_outstanding=None;
+                if a.result==0{self.rsx_active=Some((a.request,a.capture,0));}
+                self.rsx_events.push(RsxFrameEvent::Ack(a));Ok(())
+            }
+            (T_RSX_FRAME_STATE,LinkState::Streaming) if self.protocol().is_some_and(|v|v>=3)=>{
+                let bad=||LinkError::BadFrame("RSX_FRAME_STATE layout/order/identity".into());
+                if p.len()!=32||p[6..8]!=[0;2]||!(1..=4).contains(&p[4])||p[5]>7{return Err(bad())}
+                let s=RsxFrameState{capture:u32::from_le_bytes(p[..4].try_into().unwrap()),state:p[4],reason:p[5],draws:u32::from_le_bytes(p[8..12].try_into().unwrap()),request:u32::from_le_bytes(p[12..16].try_into().unwrap()),frame:u64::from_le_bytes(p[16..24].try_into().unwrap()),bytes:u64::from_le_bytes(p[24..32].try_into().unwrap())};
+                let Some((request,capture,old))=self.rsx_active else{return Err(bad())};
+                if request!=s.request||capture!=s.capture||old>=3||s.state<=old{return Err(bad())}
+                self.rsx_active=Some((request,capture,s.state));self.rsx_events.push(RsxFrameEvent::State(s));Ok(())
             }
             (t, _) => Err(LinkError::BadFrame(format!("unexpected type {t}"))),
         }

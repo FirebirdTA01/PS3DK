@@ -12,10 +12,9 @@
 //!
 //! - Capture triggers (protocol 2): `send` queues one command frame for the
 //!   network thread, which writes it within one read wait; the session
-//!   checks its one ACK. CLIENT_HELLO asks for version 2; a v1 agent closes
-//!   that hello without a reply, and the client then reconnects ONCE asking
-//!   for version 1, with the triggers disabled. No command frame is ever sent
-//!   on a version-1 session.
+//!   checks its one ACK. RSX frame requests (protocol 3) have an independent
+//!   outstanding request. CLIENT_HELLO tries 3, then 2, then 1 only after an
+//!   early close with no response bytes. Capture commands are never retried.
 //!
 //! Waits: connecting is bounded by `connect_timeout`, HELLO must arrive
 //! within `hello_timeout`, and while streaming some byte (data or PONG)
@@ -27,6 +26,7 @@
 
 use crate::live::*;
 use crate::live_triggers::Triggers;
+use crate::live_rsx_frame::RequestTracker;
 use crate::model::{Document, VerdictTone};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream};
@@ -171,6 +171,7 @@ pub struct LiveView {
     pub snapshot_buffers_estimate: u64,
     /// Capture triggers: availability, the pending command and the last answer.
     pub triggers: Triggers,
+    pub rsx_frame: RequestTracker,
     /// The session reconnected asking for protocol 1 after the agent closed a version-2 hello.
     pub v1_fallback: bool,
 }
@@ -179,7 +180,7 @@ struct Inner {
     session: Session,
     view: LiveView,
     /// A command frame for the network thread to send: (request id, frame).
-    outbox: Option<(u32, Vec<u8>)>,
+    outbox: std::collections::VecDeque<(u32, Vec<u8>)>,
     dirty: bool,
     /// The network side is done: the received bytes are final.
     net_done: bool,
@@ -220,9 +221,10 @@ impl LiveClient {
                     outcome: None,
                     snapshot_buffers_estimate: 0,
                     triggers: Triggers::default(),
+                    rsx_frame: RequestTracker::default(),
                     v1_fallback: false,
                 },
-                outbox: None,
+                outbox: Default::default(),
                 dirty: false,
                 net_done: false,
                 final_parsed: false,
@@ -266,7 +268,7 @@ impl LiveClient {
         });
         match frame {
             Ok(f) => {
-                g.outbox = Some((request, f));
+                g.outbox.push_back((request, f));
                 Ok(request)
             }
             Err(why) => {
@@ -274,6 +276,14 @@ impl LiveClient {
                 Err(why)
             }
         }
+    }
+
+    /// Queues one independent protocol-3 RSX request. The capture arrives in DATA.
+    pub fn request_rsx_frame(&self,name:String)->Result<u32,String>{
+        let mut g=self.shared.inner.lock().unwrap();
+        let (request,frame)=g.view.rsx_frame.start(name)?;
+        if let Err(e)=g.session.expect_rsx_frame(request){g.view.rsx_frame.send_failed(request,&e);return Err(e)}
+        g.outbox.push_back((request,frame));Ok(request)
     }
 
     /// Asks the session to end; valid data that arrived is published as a capture that ended early.
@@ -332,11 +342,13 @@ fn run_worker(sh: &Shared, every: Duration) {
         // far; the final snapshot (no byte can follow) keeps the final placement rules.
         doc.foreign_tl.spu.options.provisional = !is_final;
         let doc = Arc::new(doc);
+        let rsx_frames=doc.analysis().map(|a|doc.rsx_frames.get(a));
         let working = snap.len() + tail + bytes.len() as u64;
         drop(bytes);
         {
             let mut g = sh.inner.lock().unwrap();
             g.view.snapshot_buffers_estimate = g.view.snapshot_buffers_estimate.max(working);
+            if let Some(v)=rsx_frames {g.view.rsx_frame.observe(&v.frames);}
             g.view.doc = Some(doc);
             g.view.generation += 1;
             g.view.parses += 1;
@@ -370,8 +382,10 @@ fn set_link(sh: &Shared, g: &mut Inner) {
     for ack in g.session.take_acks() {
         g.view.triggers.on_ack(ack);
     }
+    for event in g.session.take_rsx_events(){g.view.rsx_frame.event(event);}
     let (link, hello) = (g.view.link.clone(), g.view.hello.clone());
     g.view.triggers.on_link(&link, hello.as_ref());
+    g.view.rsx_frame.on_link(&link, hello.as_ref());
     g.view.received = g.session.received.len();
     g.view.pongs = g.session.pongs;
     g.dirty = true;
@@ -432,12 +446,12 @@ fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
             }
             Err(e) => r.extra.push(format!("could not connect to {addr}: {e}")),
         }
-        // A v1 agent closes a version-2 hello without a byte: ask once more for version 1.
+        // An older agent closes a newer hello without a byte; try the next version once.
         if retry && version > VERSION_MIN && !sh.cancel.load(Ordering::SeqCst) {
-            version = VERSION_MIN;
+            version -= 1;
             let mut g = sh.inner.lock().unwrap();
             g.session = Session::asking(cfg.cap, version);
-            g.view.v1_fallback = true;
+            g.view.v1_fallback = version == 1;
             continue;
         }
         break;
@@ -446,7 +460,7 @@ fn run_net(sh: &Shared, cfg: &ClientConfig, addr: SocketAddr) {
 }
 
 /// Returns true only when the agent closed the connection during the handshake without sending a single byte (what
-/// a v1 agent does with a version-2 hello): nothing was recorded, and the caller may retry with version 1.
+/// an older agent does with a newer hello): nothing was recorded; try the next lower version.
 fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut NetResult, version: u16) -> bool {
     if let Err(e) = stream.write_all(&client_hello_version(version)) {
         r.extra.push(format!("could not send the hello: {e}"));
@@ -466,12 +480,15 @@ fn stream_loop(sh: &Shared, cfg: &ClientConfig, stream: &mut TcpStream, r: &mut 
         }
         let (state, outbox) = {
             let mut g = sh.inner.lock().unwrap();
-            (g.session.state.clone(), g.outbox.take())
+            (g.session.state.clone(), g.outbox.pop_front())
         };
         if let Some((request, frame)) = outbox {
             if let Err(e) = stream.write_all(&frame) {
                 let why = format!("could not send a capture command: {e}");
-                sh.inner.lock().unwrap().view.triggers.send_failed(request, &why);
+                let mut g=sh.inner.lock().unwrap();
+                if u16::from_le_bytes([frame[0],frame[1]])==T_RSX_FRAME_REQ {g.view.rsx_frame.send_failed(request,&why);}
+                else {g.view.triggers.send_failed(request,&why);}
+                drop(g);
                 r.extra.push(why.clone());
                 r.early = Some(why);
                 return false;
