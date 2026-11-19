@@ -314,6 +314,65 @@ static void case_prof_then_cell(void)
     CHECK(atomic_load(&modules) == 1); /* the profiler's load stays counted: never unloaded on the app's behalf */
 }
 
+/* A sys_net_finalize_network from an app that never initialized: straight to the firmware with the result the same
+ * sequence gives without the profiler, and the profiler is not evicted (its hold and module count stay). */
+static void case_stray_cell_finalize_no_prof(void)
+{
+    /* the baseline: netInitialize, a stray Cell finalize, netDeinitialize, without the profiler */
+    CHECK(legacy_init() == 0);
+    CHECK(cell_finalize() == 0);
+    CHECK(legacy_deinit() == NOT_INIT);
+    COUNTS(1, 2, 1, 0);
+}
+
+static void case_stray_cell_finalize_prof_joined(void)
+{
+    CHECK(legacy_init() == 0);
+    CHECK(prof_acquire() == 0);
+    CHECK(cell_finalize() == 0);         /* the same result as without the profiler */
+    CHECK(atomic_load(&evicts) == 0);    /* not evicted */
+    CHECK(legacy_deinit() == NOT_INIT);  /* and the same result as without the profiler */
+    CHECK(prof_release() == 0);          /* the joined hold: dropped without a raw call */
+    COUNTS(1, 2, 1, 0);
+}
+
+static void case_stray_cell_finalize_prof_owner(void)
+{
+    CHECK(prof_acquire() == 0);
+    CHECK(cell_finalize() == 0);      /* passed straight through */
+    CHECK(atomic_load(&evicts) == 0); /* the profiler keeps its hold and its module count */
+    CHECK(prof_release() == NOT_INIT); /* its own finalize then meets the firmware's refusal: hold kept, no unload */
+    COUNTS(1, 2, 1, 0);
+    CHECK(atomic_load(&modules) == 1);
+}
+
+/* netInitialize joined the profiler's network, then a Cell init: the results are those of the same sequence without
+ * the profiler (netInitialize 0, Cell init refused as a double init, netDeinitialize 0 with NET unloaded). */
+static void case_legacy_joined_then_cell(void)
+{
+    CHECK(prof_acquire() == 0);
+    CHECK(legacy_init() == 0);
+    cell_app_load();
+    CHECK(cell_init() == DOUBLE_INIT); /* as without the profiler: netInitialize's network is up */
+    CHECK(atomic_load(&evicts) == 1);  /* the profiler let go; the network is now netInitialize's */
+    CHECK(legacy_deinit() == 0 && !atomic_load(&net_up));
+    cell_app_unload();
+    CHECK(prof_release() == 0);
+    COUNTS(2, 1, 2, 2);
+    CHECK(atomic_load(&modules) == 0);
+}
+
+static void case_legacy_then_cell_no_prof(void)
+{
+    CHECK(legacy_init() == 0);
+    cell_app_load();
+    CHECK(cell_init() == DOUBLE_INIT);
+    CHECK(legacy_deinit() == 0 && !atomic_load(&net_up));
+    cell_app_unload();
+    COUNTS(2, 1, 2, 2);
+    CHECK(atomic_load(&modules) == 0);
+}
+
 /* Someone outside libnet brought the network up: the profiler's bring-up fails and holds nothing. */
 static void case_foreign_network(void)
 {
@@ -386,6 +445,11 @@ static const struct {
     {"prof_leaves_first", case_prof_leaves_first},
     {"cell_pool_owner", case_cell_pool_owner},
     {"prof_then_cell", case_prof_then_cell},
+    {"stray_cell_finalize_no_prof", case_stray_cell_finalize_no_prof},
+    {"stray_cell_finalize_prof_joined", case_stray_cell_finalize_prof_joined},
+    {"stray_cell_finalize_prof_owner", case_stray_cell_finalize_prof_owner},
+    {"legacy_joined_then_cell", case_legacy_joined_then_cell},
+    {"legacy_then_cell_no_prof", case_legacy_then_cell_no_prof},
     {"foreign_network", case_foreign_network},
     {"prof_finalize_fails", case_prof_finalize_fails},
     {"concurrent", case_concurrent},

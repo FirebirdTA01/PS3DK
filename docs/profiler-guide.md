@@ -262,11 +262,19 @@ before. While the profiler holds the network, libnet applies these rules:
   (`netDeinitialize`, `sys_net_finalize_network`), the profiler is told first: the agent stops at once (a connected
   viewer sees a disconnect, not `END`), the profiler drops its hold and never touches the network again, and the app's
   call then reaches the system exactly as before. Live viewing ends there, with one `ps3prof: live auto-start stopped`
-  line.
+  line. The stop holds the app's call for at most about 3 s (1 s, then 2 s more, for the agent thread). If the agent
+  still has not stopped (for example, it is inside a file read), the app's call goes ahead anyway with one
+  `... the agent did not stop ...` line, and the agent's sockets can stay open for a while after the app's finalize,
+  until that thread leaves its loop; its socket calls then fail rather than reach a live network.
+- A `sys_net_finalize_network` from an app that never called `sys_net_initialize_network_ex` goes straight to the
+  system with its old result, and the profiler keeps its hold (if that call tears down the network the profiler is
+  using, the agent's connection simply fails).
 - If the profiler brought it up first (with its own static pool, by default the 128 KiB `netInitialize` pool), a later
   `netInitialize` joins it and the matching `netDeinitialize` leaves it up for the profiler. A later
   `sys_net_initialize_network_ex` brings the app's own pool: the profiler steps aside first (agent stopped, its network
-  finalized, the NET module left loaded, one TTY line from libnet) and the app's call goes straight to the system.
+  finalized, the NET module left loaded, one TTY line from libnet) and the app's call goes straight to the system. If
+  a `netInitialize` had joined first, the profiler instead hands the network to it (agent stopped, network left up),
+  so that call and the later `netDeinitialize` give the results the same sequence gives without the profiler.
 - The profiler never finalizes a network an app front end or the ps3dk-run hook brought up, and never unloads a module
   it did not load.
 - If something outside libnet brought the network up, the profiler's bring-up fails and auto-start stays off with its

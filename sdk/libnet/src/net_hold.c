@@ -109,14 +109,23 @@ int __ps3dk_net_cell_init(void *pool, uint32_t bytes, int32_t flags)
     int rc = pthread_mutex_lock(&hold_lock);
     if (rc) return -1;
     settle();
-    if (prof_held && prof_owner) {
+    if (prof_held && prof_owner && legacy_joined) {
+        /* netInitialize joined the profiler's network: without the profiler that network would have been
+         * netInitialize's own.  Hand it (and the module the profiler loaded) to netInitialize, so this call and a later
+         * netDeinitialize give exactly the results the same sequence gives without the profiler. */
+        int (*unload)(void) = prof_unload;
+        evict();
+        prof_owner = 0;
+        prof_unload = 0;
+        legacy_joined = 0;
+        if (unload) legacy_unload = unload;
+    } else if (prof_held && prof_owner) {
         /* The app brings its own pool: the profiler steps aside and its network goes; the NET module stays loaded
          * (the app loaded it as well, and an unload here could not be counted against the app's). */
         evict();
         (void)__ps3dk_raw_sys_net_finalize_network();
         prof_owner = 0;
         prof_unload = 0;
-        legacy_joined = 0;
         say("libnet: the app initialized the network with its own pool; the profiler's live auto-start stopped\n");
     }
     rc = raw_init(pool, bytes, flags);
@@ -129,11 +138,13 @@ int __ps3dk_net_cell_finalize(void)
     int rc = pthread_mutex_lock(&hold_lock);
     if (rc) return -1;
     settle();
-    if (prof_held) {
-        evict(); /* never finalize under the profiler: it lets go first */
+    if (prof_held && cell_up) {
+        evict(); /* the Cell app's own network: the profiler lets go first */
         prof_owner = 0;
         prof_unload = 0;
     }
+    /* A finalize from an app that never initialized reaches the firmware exactly as before, and the profiler keeps
+     * its hold and its module count: the call is the app's, its result the firmware's. */
     rc = __ps3dk_raw_sys_net_finalize_network();
     if (!rc) cell_up = 0;
     pthread_mutex_unlock(&hold_lock); return rc;
