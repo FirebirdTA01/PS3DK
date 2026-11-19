@@ -1059,3 +1059,80 @@ allocations and uniform updates. `ps3dk-prof shader-hash <files>` computes it fo
 
 Verified by: `tools/ps3dk-prof/tests/rsx_frame.rs` (every rule above refused once; the hash against hand-built
 containers).
+
+## Saved snapshots (host projection, chunk 49)
+
+A saved frame snapshot is a projection of reader-accepted source bytes. EXPORT
+flag 4 requires exactly one SNAPSHOT_SUPPORT chunk (49), immediately after the
+EXPORT chunk. No other position is valid. A normal EXPORT has no chunk 49 and
+keeps its existing frame-range rules. The host reconstructs timing from retained
+raw records; source-wide diagnostic counts carry original-source provenance and
+are never measurements or bars.
+
+The schema-1 header is 160 bytes, little endian:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u16 | Schema 1 |
+| 2 | u16 | Premise flags: W32=1, show extrapolated=2; other bits zero |
+| 4 | u32 | Selected PPU frame owner |
+| 8 | u64 | Selected frame |
+| 16,24 | u64 | Selected FRAME and next FRAME timebase ticks; next > first |
+| 32 | u64 | Original accepted source-prefix bytes |
+| 40 | 32 bytes | SHA-256 of that original prefix; identity, not authentication |
+| 72 | 32 bytes | SHA-256 of retained support (definition below) |
+| 104,108 | u32 | Lane-manifest and diagnostic-entry counts |
+| 112 | u64 | Bytes of retained clock-input chunks, including their outer framing |
+| 120 | u64 | Exact retained AUTO_COVERAGE row count |
+| 128 | 32 bytes | Canonical frozen-snapshot digest checked by the viewer |
+
+Follow with `lane_count` 32-byte lane manifests, sorted by incarnation: u32
+incarnation, u32 zero, u64 first retained frame, u64 last retained frame, u64
+retained frame count. A lane without frames has all three values zero. Every PPU
+lane has exactly one manifest. First/last/count must equal parsed raw FRAME
+records; frame IDs still obey the writer's sequence rules. The selector must
+name the owner and two consecutive retained FRAME records with exactly the
+stated ticks. This replaces only the ordinary EXPORT's single first/last frame
+range equations. Kept/dropped records, sequence bounds, GAP arithmetic and
+unchanged writer trailer equations remain exact.
+
+Then `diagnostic_count` 32-byte entries sorted by (kind,source kind,source id,key):
+u16 kind, u16 source kind, u32 source id, u64 key, u64 value, u64 auxiliary.
+Source kinds are PPU=1, SPU=2, RSX=3, AUTO=4. The initial kinds are PPU original
+frame-only lane (1, boolean), PPU clock anomaly (2, boolean), source PPU GAP count
+(3), capture-wide AUTO operation-retention loss (4), and original SOURCE_SEAL
+record count (5, source kind 0 and source id 0). Presence of kind 5 means the
+original declared checkpoint proofs; those proofs are not carried. Kind 6 records
+the raw record bytes retained for outside direct children of contributing PPU
+spans (source kind/id zero, a multiple of 32 no greater than the file cap). This
+is a projection-cost count, not a timing measurement. Keys and auxiliary are
+zero for these kinds. PPU kinds require a declared PPU incarnation; AUTO kind
+requires AUTO_CONFIG and source id zero. Unknown kinds, duplicate keys, invalid
+booleans, nonexistent sources and trailing bytes refuse. These facts do not
+make invalid retained evidence valid: negative evidence is retained and original
+GAP counts cannot be less than the parsed source GAP count.
+
+The support digest hashes the 16-byte preamble, then every chunk except49 in
+emission order: LE u32 type, LE u32 payload size, payload bytes. Sequence numbers
+and chunk CRCs are validated normally but are not hashed again. This binds the
+selector/provenance to the retained support. It does not authenticate the source
+SHA or assert that the file is a complete capture. No synthetic trailer is added.
+
+The snapshot writer keeps complete raw timing dependencies (including direct
+children needed for exclusive duration), all original calibration and AUTO
+clock anchors, and raw EXT epoch inputs used for map and ordering validation.
+The latter are a named bounded dependency, not a license to copy the whole
+session. A 64 MiB cap includes the entire saved file; a refusal identifies the
+oversized dependency. Publication requires exact canonical freeze/save/reopen
+identity. On reopen, provenance is shown explicitly and every bar is recomputed
+from retained raw support. Saved diagnostics never supply missing time values.
+An included ancestor or outside child does not recursively include its descendants.
+Lossy lanes keep only the GAP and stack witnesses needed by retained timing; a
+source GAP count is not permission to copy the whole lane. Every retained AUTO
+coverage row must name the selected frame or an execution/build token of a retained
+operation. Matching the declared row count alone is insufficient.
+The unrelated frame membership/close/source proof family (19,20,21,25,26) is
+omitted and file flag 8 is cleared: its original outer chunk-sequence references
+would not survive projection. Kind 5 records the omission and original seal
+count as provenance, never as proof that the projected frame is complete.
+Raw frame tokens and timing/map inputs are unaffected.

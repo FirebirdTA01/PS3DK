@@ -685,7 +685,7 @@ impl Reader {
             CHUNK_AUTO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_AUTO_OPS => self.ops(payload),
             CHUNK_AUTO_COVERAGE => self.coverage(payload),
-            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref()),
+            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref(), cap.snapshot.as_ref()),
             CHUNK_AUTO_CLOCK => self.clock(payload),
             _ => unreachable!("AUTO chunk type {ty}"),
         }
@@ -1373,7 +1373,7 @@ impl Reader {
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>, snapshot: Option<&crate::snapshot_support::Selection>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
         let ringed = self.result.config.as_ref().and_then(Config::attached).is_some_and(Attached::ringed);
         let width = if ringed { STATUS_BYTES_RING } else { STATUS_BYTES };
@@ -1503,7 +1503,7 @@ impl Reader {
                 n[2] == self.result.ops_parsed as u64
             };
             let frames_ok = if let Some(exp) = export {
-                self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+                self.result.frames_parsed == snapshot.map_or(exp.frame_last - exp.frame_first + 1, |s|s.auto_rows)
                     && n[5] == exp.source_auto_frames
             } else {
                 n[5] == self.result.frames_parsed
