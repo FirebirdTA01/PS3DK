@@ -579,11 +579,89 @@ The same window controls are available in the GUI. With a capture open, the app 
 
 ---
 
-## 6. Capture RSX frame (PLANNED)
+## 6. Capture RSX frame (`PS3_PROF_RSX_FRAME`, beta)
 
-A **Capture RSX frame** button next to **Capture full frame** is planned: it will time the supported draw calls of one frame on an RSX domain (safe-form array, index and inline draws and surface clears, from PSL1GHT `rsx*` and cell-style GCM callers), each only when it can be timed safely.  Other calls (the `Unsafe` forms, immediate mode, calls that do not fit the current command-buffer segment or are refused) are counted, not timed, and leave the capture PARTIAL, as can a per-frame draw cap or lost data.  It is a supported-draw timing, not a full frame acquisition.  It is planned to be opted into at build time by linking a hooked `librsx_prof.a` (with the extension archive) instead of `librsx.a`; that archive is not shipped by the normal SDK build described here.
+One frame of a running AUTO build, captured on request: every draw and clear of the AUTO owner's command buffer in
+submission order, with its time on the RSX (the AUTO operation that timed it), its kind and primitive, vertex or
+index counts, the vertex and fragment program it used, its tag and an app-supplied label, and the AUTO ranges it ran
+in (passes). Programs are named by a canonical hash of their instructions, so a program keeps its identity across
+boots, load addresses and uniform values; the PC app names them from a folder of the app's program containers.
 
-**Status: partial implementation, follow-up feature.** The reader and RSX frames page can inspect supported capture markers already present in a file, and runtime support exists. The live request/button integration and draw-hook packaging are not an available end-to-end capture workflow in this SDK tree. Names, flags and libraries may change before release.
+This release (phase 1) does not record render state, textures, buffers or constant values; those follow.
+
+### 6.0 Turning it on
+
+```
+cmake ... -DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_AUTO_RING_MB=1 -DPS3_PROF_AUTO_RING_RECORDS=4096 \
+          -DPS3_PROF_RSX_FRAME=ON [-DPS3_PROF_RSX_FRAME_STAGING_KB=256]
+```
+
+It needs the report ring: the captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY`
+says, and a busy frame has more draws than the local report pool holds. Recommended ring for the capture:
+`PS3_PROF_AUTO_RING_MB=1` with `PS3_PROF_AUTO_RING_RECORDS=4096`, about 2 MiB of pages (1 MiB of extents, 4096 records
+of 184 bytes, 256 extent descriptors), which covers about 1,300 draws a frame across three frames of RSX lag. The
+record count, not the extent size, is what sets the ring's memory: 16,384 records alone take 2.9 MiB. Keep a larger
+ring only when you also want every frame timed.
+
+- Turn it on when: you need to know which draws, programs or labelled entities take a frame's RSX time, beyond the
+  pass totals that AUTO ranges give.
+- Leave it off when: you are measuring memory, or pass and frame totals are enough. Off, nothing is generated or
+  linked, no memory is reserved, each AUTO hook costs one load and a branch, and the capture file is the same as an
+  AUTO build without it.
+- Cost on: the ring (2 MiB at the sizes above); about 64 KiB of decoder state from `cellGcmInit`; while a capture is
+  being written, two staging blocks of `PS3_PROF_RSX_FRAME_STAGING_KB` (256 KiB each by default, 4..1024) of MAIN
+  memory, freed when it is written; a pass of the profiler over the owner's command words at each covered draw
+  (about one word read per command word written). The captured frame itself runs slower by the per-draw records.
+
+Files with captures set file_flags bit 10 (format section 12); a reader older than this release refuses them.
+
+### 6.0.1 Requesting a capture
+
+- From the PC app: **Capture RSX frame** in the live strip (protocol 3; the button is disabled when the app was not
+  built with the option). The request is answered at once; progress follows: requested, armed on frame N, closed with
+  D draws, written. The viewer then opens the captured frame.
+- From app code (any thread): `PS3DK_PROF_RSX_FRAME_CAPTURE("name")` returns the capture id (> 0) or
+  `PS3DK_PROF_EBUSY` (one outstanding), `PS3DK_PROF_ENOTSUP` (not built with the option, no ring, no AUTO owner),
+  `PS3DK_PROF_ENOMEM` (no staging memory), `PS3DK_PROF_ESTOPPED`.
+
+The next frame boundary of the AUTO owner arms the request when a capture window is open (an app's
+`PS3DK_PROF_CAPTURE_WHOLE_RUN()` counts); otherwise the capture opens a two-frame window named `rsx-frame` and arms at
+the boundary after. The frame from the arming boundary to the next one is captured. A request that finds no window
+after three boundaries is abandoned and nothing is written.
+
+### 6.0.2 Labels
+
+```c
+PS3DK_PROF_DRAW_SCOPE_BEGIN("terrain");
+PS3DK_PROF_DRAW_LABEL("rock_large/lod1");   /* later draws read terrain/rock_large/lod1 */
+...
+PS3DK_PROF_DRAW_SCOPE_END();
+```
+
+On the AUTO owner thread (other threads are ignored). A label applies until replaced, its scope ends or the frame
+ends; scopes nest to depth 8; a path is cut at 63 bytes. The strings must stay valid until then: they are copied only
+into a capture. Outside a capture each call stores one pointer.
+
+### 6.0.3 Reading a capture
+
+`ps3dk-prof rsx-frame capture.prof` lists each capture and its draws (submission order: kind, primitive, count, tag,
+label, programs, pass, time and gap in raw RSX ticks). `--group-by program|vp|fp|label|tag|pass|kind` totals the timed
+draws per group, largest first; `--draw K` shows one draw; `--json` gives everything. `ps3dk-prof shader-hash
+file.vpo file.fpo` prints the canonical hash of program containers, the identity a capture names.
+
+What the time means: in this release a draw's time is AUTO's reached-marker interval (the RSX reaching the marker
+before the draw to reaching the one after it). It includes queued work ahead of the draw and overlaps neighbouring
+draws, so it is not the draw's isolated cost; sums of overlapping intervals can exceed the frame. The gap column is
+the time from the previous timed draw's end to this draw's start.
+
+Draws AUTO did not see through its hooks (raw command writers, `Unsafe` forms, inline arrays) are listed from the
+command stream, untimed. A draw whose program could not be identified reads `unknown` (its program was bound before
+the profiler saw the command stream, or bound through a path without a program container); a fragment program bound
+by address only reads `fp:unreadable@<address>`.
+
+Limits: one capture at a time; draws inside CALL segments are timed by AUTO but listed only when their segment's
+words are decoded (a later phase); a capture whose staging blocks are full at a draw is TRUNCATED there (later draws
+are counted and still timed in the AUTO records). Format: `docs/design/ps3dk-prof-format.md` section 12.
 
 ### 6.1 Automatic RSX observation (`PS3_PROF_AUTO`, beta)
 
