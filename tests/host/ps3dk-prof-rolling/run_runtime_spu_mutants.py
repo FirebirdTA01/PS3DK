@@ -34,8 +34,10 @@ RTEST = Path('tools/ps3dk-prof/tests/rolling_runtime_spu.rs')
 # PPU/combined/schema2 selection. Combined witnesses and baseline stay unchanged.
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
+# CORE repinned for the live auto-start: one weak hook call at the end of a successful init; the mutation anchors
+# are unchanged.
 APPROVED_PINS = {
-    'sdk/libps3dkprof/src/core/prof_core.c': 'd3ef8a105899e764fd15401a4b55127b9fb838f83dd4ebd2f8acdba765307cab',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'fd8ced34b812dd6f2a62a0274db1c5c9a97a1c79737722ee7a6043ad7cd71327',
     'sdk/libps3dkprof/src/rolling/roll_runtime.c': 'bb7b76245a7134a77281e057138606ea532b3ca59caaaeda04834d9e1cb681ea',
     'sdk/libps3dkprof/src/spu/psp_ppu.c': '202ea84699da83f036a9fabc39f3b444283113c6d901d1abb24b5499776dcada',
     'sdk/libps3dkprof/src/spu/ext_runtime.c': '2505d2676406d920172bf950359c97bfee82d69c2cebde8bcc61ebaf54ad4714',

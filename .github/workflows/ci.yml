@@ -321,6 +321,8 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/live-os-test.py "$RUNNER_TEMP/live-e2e/os"
           python3 tests/host/ps3dk-prof-runtime/live-api-test.py "$RUNNER_TEMP/live-e2e/api"
           python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
+          python3 tests/host/ps3dk-prof-runtime/live-autostart-test.py "$RUNNER_TEMP/live-e2e/autostart"
+          python3 tests/host/ps3dk-prof-runtime/live-autostart-cmake-test.py "$RUNNER_TEMP/live-e2e/autostart-cmake"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"
@@ -1053,6 +1055,13 @@ jobs:
       # libnetctl.h and netinet/in.h in any order, the PRX record types and
       # SYS_SPU_QUEUE, and the SDK-owned sys/tty.h + sys/interrupt.h (ILP32
       # pointers reach the system call zero-extended).
+      # libnet's shared-network holders (netInitialize, sys_net_initialize_network_ex
+      # and the profiler's live auto-start share one network) and the front ends
+      # over the replaced PRX boundary, on the host.
+      - name: Test libnet's shared-network holders and front ends on the host
+        run: |
+          python3 tests/sdk/libnet-hold-test.py "$RUNNER_TEMP/libnet-hold"
+          python3 tests/sdk/libnet-host-test.py
       - name: Test struct in_addr across libnetctl.h and netinet/in.h orders
         run: bash tests/sdk/in-addr-order-test.sh
       - name: Test the PRX record types and event queue type constants

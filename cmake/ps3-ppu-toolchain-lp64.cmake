@@ -123,6 +123,17 @@ if(NOT PS3_PROF_WAITS STREQUAL "OFF" AND NOT PS3_PROF_WAITS STREQUAL "")
     endif()
 endif()
 
+# Live viewer auto-start (opt-in): every executable that links the profiler starts
+# the live agent with no app code. Registered before the AUTO selector, so its
+# deferred step runs first and the selector maps the live archive it adds.
+option(PS3_PROF_LIVE_AUTOSTART "Profiler live viewer auto-start (opt-in)" OFF)
+if(PS3_PROF_LIVE_AUTOSTART)
+    set(_ps3_live_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-live.cmake")
+    if(NOT _ps3_live_include IN_LIST CMAKE_PROJECT_INCLUDE)
+        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_live_include}")
+    endif()
+endif()
+
 # Automatic RSX observation selects its own providers and init seam. Default
 # builds do not include the selector and keep the existing library selection.
 option(PS3_PROF_AUTO "Automatic RSX observation" OFF)

@@ -887,6 +887,8 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *h)
 /* ---- frames (5.6) -------------------------------------------------------------------------------------------------- */
 
 static void (*g_frame_hook)(void);   /* prof_frame_hook.h */
+/* Weak: linked only with the live auto-start member (prof_frame_hook.h). */
+extern __typeof__(ps3dk_prof__live_autostart_after_init) ps3dk_prof__live_autostart_after_init __attribute__((weak));
 void ps3dk_prof__set_frame_hook(void (*fn)(void)) { __atomic_store_n(&g_frame_hook, fn, __ATOMIC_RELEASE); }
 
 void ps3dk_prof_frame(void)
@@ -2026,6 +2028,8 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
     /* quick_exit: one last drain (prof_drain.c p_quick_exit_drain).  One capture per process, so this registers once;
      * a registration failure leaves quick_exit as before (whatever the drainer last wrote). */
     (void)at_quick_exit(p_quick_exit_drain);
+    if (ps3dk_prof__live_autostart_after_init)
+        ps3dk_prof__live_autostart_after_init();   /* opt-in live viewer auto-start (prof_frame_hook.h) */
     return PS3DK_PROF_OK;
 }
 
