@@ -1,0 +1,37 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_length_scaled_divr_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 86060100 a8011c9c c8000001 c8003fe1
+w 06060400 c80c1c9d 00020000 b2020000
+w 00003e80 0000be00 0000bec0 00000000
+w 06060100 c80c1c9d c8000001 c8000001
+w 02063800 c80c1c9d c80c0001 c8000001
+w 02061b00 c80c1c9d c8000001 c8000001
+w 02063a00 00021c9c 000c0000 c8000001
+w 00004020 00000000 00000000 00000000
+w 02040200 000c1c9c 00020000 c8000001
+w 00003e00 00000000 00000000 00000000
+w 02020200 000c1c9c 00020000 c8000001
+w 00003e80 00000000 00000000 00000000
+w 02060300 00021c9c 000c0002 c8000001
+w 00003f80 00000000 00000000 00000000
+w 02068100 000c1c9c c8000001 c8000001
+w 02000100 000c1c9c c8000001 c8000001
+w 04000100 00041c9c c8000001 c8000001
+w 08000100 00081c9c c8000001 c8000001
+w 10010100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+r 0 MOV dst=R3 mask=xy prec=0 sat=0 end=0 s0=TEX0.xyyy
+r 1 MAD dst=R3 mask=xy prec=0 sat=0 end=0 s0=R3.xyzw s1=c0.xxxx s2=c0.yzyy
+r 2 MOV dst=R3 mask=xy prec=0 sat=0 end=0 s0=R3.xyzw
+r 3 DP2 dst=R3 mask=x prec=0 sat=0 end=0 s0=R3.xyzw s1=R3.xyzw
+r 4 RSQ dst=R3 mask=x prec=0 sat=0 end=0 s0=R3.xyzw
+r 5 DIV dst=R3 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R3.xxxx
+r 6 MUL dst=R2 mask=x prec=0 sat=0 end=0 s0=R3.xxxx s1=c0.xxxx
+r 7 MUL dst=R1 mask=x prec=0 sat=0 end=0 s0=R3.xxxx s1=c0.xxxx
+r 8 ADD dst=R3 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=-R3.xxxx
+r 9 MOV dst=R3 mask=x prec=0 sat=1 end=0 s0=R3.xxxx
+r 10 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=R3.xxxx
+r 11 MOV dst=R0 mask=y prec=0 sat=0 end=0 s0=R1.xxxx
+r 12 MOV dst=R0 mask=z prec=0 sat=0 end=0 s0=R2.xxxx
+r 13 MOV dst=R0 mask=w prec=0 sat=0 end=1 s0=c0.xxxx

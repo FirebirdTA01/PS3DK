@@ -1,0 +1,13 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_div_reciprocal_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 001f9c6c 101d300d 8106c080 00621fa0
+w 001f9c6c 101d300d 8106c08a a0641fa0
+w 001f9c6c 101d300d 8106c095 40681fa0
+w 001f9c6c 101d300d 8106c09f e0701fa0
+w 401f9c6c 0040000d 8106c083 6041ff81
+r 0 NOP dst=R63 mask=- src0=IN0.xyzw src1=IN0.xyzw src2=C467.xxxx
+r 1 NOP dst=R63 mask=- src0=IN0.xyzw src1=IN0.xyzw src2=C467.yyyy
+r 2 NOP dst=R63 mask=- src0=IN0.xyzw src1=IN0.xyzw src2=C467.zzzz
+r 3 NOP dst=R63 mask=- src0=IN0.xyzw src1=IN0.xyzw src2=C467.wwww
+r 4 MOV dst=o0 mask=xyzw src0=IN0.xyzw src1=IN0.xyzw src2=IN0.xyzw

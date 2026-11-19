@@ -1,0 +1,17 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_cast_narrow_mat3_ctor_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 401f9c6c 0150420d 810680c3 60411f9c
+w 401f9c6c 0150520d 810680c3 60409f9c
+w 401f9c6c 0150620d 810680c3 60405f9c
+w 401f9c6c 01d0300d 8106c0c3 60403f80
+w 401f9c6c 01d0200d 8106c0c3 60405f80
+w 401f9c6c 01d0100d 8106c0c3 60409f80
+w 401f9c6c 01d0000d 8106c0c3 60411f81
+r 0 DP3 dst=o7 mask=x src0=IN2.xyzw src1=C260.xyzz src2=IN2.xyzw
+r 1 DP3 dst=o7 mask=y src0=IN2.xyzw src1=C261.xyzz src2=IN2.xyzw
+r 2 DP3 dst=o7 mask=z src0=IN2.xyzw src1=C262.xyzz src2=IN2.xyzw
+r 3 DP4 dst=o0 mask=w src0=IN0.xyzw src1=C259.xyzw src2=IN0.xyzw
+r 4 DP4 dst=o0 mask=z src0=IN0.xyzw src1=C258.xyzw src2=IN0.xyzw
+r 5 DP4 dst=o0 mask=y src0=IN0.xyzw src1=C257.xyzw src2=IN0.xyzw
+r 6 DP4 dst=o0 mask=x src0=IN0.xyzw src1=C256.xyzw src2=IN0.xyzw

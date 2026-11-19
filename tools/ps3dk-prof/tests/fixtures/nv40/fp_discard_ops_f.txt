@@ -1,0 +1,57 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_discard_ops_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 82020100 00011c9c c8000001 c8003fe1
+w a2000100 00011c9c c8000001 c8003fe1
+w 037e4a80 c8041c9d c8000169 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w 82000100 aa011c9c c8000001 c8003fe1
+w a2020100 aa011c9c c8000001 c8003fe1
+w 037e4d80 c8001c9d c8040169 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w 82020100 54011c9d c8000001 c8003fe1
+w a2000100 54011c9d c8000001 c8003fe1
+w 037e4c80 c8041c9d c8000169 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w 82000100 fe011c9d c8000001 c8003fe1
+w a2020100 fe011c9d c8000001 c8003fe1
+w 037e4b00 c8001c9d c8040001 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w 82020100 00011c9c c8000001 c8003fe1
+w a2000100 aa011c9c c8000001 c8003fe1
+w 037e4f80 c8041c9d c8000169 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w 82000100 aa011c9c c8000001 c8003fe1
+w a2020100 54011c9d c8000001 c8003fe1
+w 037e4e80 c8001c9d c8040169 c8000001
+w 067e5200 c8000015 c8000001 c8000001
+w be020100 c8011c9d c8000001 c8003fe1
+w 9e000100 c8011c9d c8000001 c8003fe1
+w 1e010300 c8001c9d c8040001 c8000001
+r 0 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX0.xxxx
+r 1 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX1.xxxx
+r 2 SLT dst=none mask=x(raw) prec=2 sat=0 end=0 s0=R1.xyzw s1=R0.xyzw
+r 3 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 4 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX0.yyyy
+r 5 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX1.yyyy
+r 6 SGT dst=none mask=x(raw) prec=2 sat=0 end=0 s0=R0.xyzw s1=R1.xyzw
+r 7 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 8 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX0.zzzz
+r 9 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX1.zzzz
+r 10 SLE dst=none mask=x(raw) prec=2 sat=0 end=0 s0=R1.xyzw s1=R0.xyzw
+r 11 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 12 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX0.wwww
+r 13 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX1.wwww
+r 14 SGE dst=none mask=x(raw) prec=0 sat=0 end=0 s0=R0.xyzw s1=R1.xyzw
+r 15 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 16 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX0.xxxx
+r 17 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX1.yyyy
+r 18 SEQ dst=none mask=x(raw) prec=2 sat=0 end=0 s0=R1.xyzw s1=R0.xyzw
+r 19 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 20 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX0.yyyy
+r 21 MOV dst=R1 mask=x prec=0 sat=0 end=0 s0=TEX1.zzzz
+r 22 SNE dst=none mask=x(raw) prec=2 sat=0 end=0 s0=R0.xyzw s1=R1.xyzw
+r 23 KIL dst=none mask=xy(raw) prec=0 sat=0 end=0
+r 24 MOV dst=R1 mask=xyzw prec=0 sat=0 end=0 s0=TEX1.xyzw
+r 25 MOV dst=R0 mask=xyzw prec=0 sat=0 end=0 s0=TEX0.xyzw
+r 26 ADD dst=R0 mask=xyzw prec=0 sat=0 end=1 s0=R0.xyzw s1=R1.xyzw
