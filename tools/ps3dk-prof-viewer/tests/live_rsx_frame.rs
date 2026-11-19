@@ -208,6 +208,12 @@ fn encoded_pending_timing_has_counts_and_allows_the_next_request() {
     assert!(t.start("two".into()).is_ok());
     // No mutation of the reader's retained first capture.
     assert!(matches!(frames[0].status, ps3dk_prof::rsx_frame::FrameStatus::PendingTiming { .. }));
+    // The first capture's timing arriving later never marks the second request Ready.
+    frames[0].status = ps3dk_prof::rsx_frame::FrameStatus::Complete;
+    t.observe(&frames);
+    assert!(!t.resolved);
+    assert_eq!(t.status_line().unwrap(), "Requested: waiting for a frame");
+    assert!(t.blocked().is_some(), "the second request is outstanding");
 }
 
 #[test]

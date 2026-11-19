@@ -85,23 +85,28 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     // 1. Structural parse of the source capture using the reader.
     let cap = crate::reader::read(bytes).map_err(|_| ExportError::Malformed("source capture malformed".into()))?;
 
-    let prepared = prepare_export_bytes(bytes, &cap, range, usize::MAX)?;
-    prepared.render()
+    // The ordinary export keeps its historical behaviour: no preparation or output cap.
+    prepare(bytes, &cap, range, usize::MAX, usize::MAX)?.render()
 }
 
 /// Bounded frame-export preparation from an already accepted immutable source.
 /// `cap` must be the reader result for exactly `bytes`. This entry point avoids
 /// reparsing an entire live session. The raw CRC walk still checks every chunk.
 /// The caller must reserve output/reparse workspace before calling `render`.
+/// Preparation is capped at [`EXPORT_PREPARATION_BYTES`] (conservative accounting, not RSS); the
+/// output at `limit` bytes. Unchanged chunks are borrowed from `bytes`, never copied.
 pub fn prepare_export_bytes<'a>(bytes: &'a [u8], cap: &Capture, range: RangeInclusive<u64>, limit: usize) -> Result<PreparedExport<'a>, ExportError> {
-    let mut prep = Preparation::default();
+    prepare(bytes, cap, range, limit, EXPORT_PREPARATION_BYTES)
+}
+
+fn prepare<'a>(bytes: &'a [u8], cap: &Capture, range: RangeInclusive<u64>, limit: usize, prep_limit: usize) -> Result<PreparedExport<'a>, ExportError> {
+    let mut prep = Preparation { used: 0, limit: prep_limit };
     if cap.export.is_some() {
         return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));
     }
 
     // 2. Collect all present frames and verify the requested range.
     // Only the requested frame numbers need membership storage.
-    if range.is_empty() { return Err(ExportError::Refused("empty frame range")); }
     let mut present_frames = BTreeSet::new();
     if let Some(auto) = &cap.auto {
         for cov in &auto.frames {
@@ -190,7 +195,7 @@ pub fn prepare_export_bytes<'a>(bytes: &'a [u8], cap: &Capture, range: RangeIncl
             if !clipped_span_ids.contains(&(span.incarnation, span.span_id)) {
                 if clipped_span_ids.contains(&(span.incarnation, span.parent)) {
                     prep.charge(128)?;
-            clipped_span_ids.insert((span.incarnation, span.span_id));
+                    clipped_span_ids.insert((span.incarnation, span.span_id));
                     changed = true;
                 }
             }
@@ -225,7 +230,11 @@ pub fn prepare_export_bytes<'a>(bytes: &'a [u8], cap: &Capture, range: RangeIncl
     for (&inc, lane) in &cap.lanes {
         let is_owner = lane.is_frame_owner();
         let all_recs = raw_chunks.clone().filter(move |c| c.ty == CHUNK_RECORDS && c.payload.len() >= 8 && u32::from_le_bytes(c.payload[..4].try_into().unwrap()) == inc)
-            .flat_map(|c| c.payload[8..].chunks_exact(RECORD_LEN).map(RawRecord::decode));
+            .flat_map(|c| {
+                // Exactly the declared count, as far as it fits (the former per-lane vector rule).
+                let n = u32::from_le_bytes(c.payload[4..8].try_into().unwrap()) as usize;
+                c.payload[8..].chunks_exact(RECORD_LEN).take(n).map(RawRecord::decode)
+            });
 
         let mut worker_window_seq_range: Option<(u64, u64)> = None;
         if !is_owner {
@@ -508,7 +517,7 @@ pub fn prepare_export_bytes<'a>(bytes: &'a [u8], cap: &Capture, range: RangeIncl
 
     // 7. Pass 2: Filter and serialize chunks.
     // Placement rule: EXPORT is emitted strictly right after HEADER/CLOCKS (and PROFILE if present).
-    let mut emitted_chunks = Pieces::new(limit, prep.used);
+    let mut emitted_chunks = Pieces::new(limit, prep);
     let mut prev_emitted_seq: BTreeMap<u32, u64> = BTreeMap::new();
     // RSX frame captures (bit 10): CONFIG always; a capture's BEGIN, DRAWS and END only when its frame is exported
     let mut rsxf_keep = false;
@@ -747,18 +756,17 @@ impl PreparedExport<'_> {
 }
 /// Bounded preparation (separate from the caller's output/reopen budget).
 pub const EXPORT_PREPARATION_BYTES: usize = 64 << 20;
-#[derive(Default)]
-struct Preparation { used: usize }
+struct Preparation { used: usize, limit: usize }
 impl Preparation {
     fn charge(&mut self, bytes: usize) -> Result<(), ExportError> {
         self.used = self.used.checked_add(bytes).ok_or(ExportError::Refused("export preparation overflow"))?;
-        if self.used > EXPORT_PREPARATION_BYTES { return Err(ExportError::Refused("frame dependencies exceed export preparation budget")); }
+        if self.used > self.limit { return Err(ExportError::Refused("frame dependencies exceed export preparation budget")); }
         Ok(())
     }
 }
 struct Pieces<'a> { chunks: Vec<(u32, Cow<'a, [u8]>)>, bytes: usize, limit: usize, prep: Preparation }
 impl<'a> Pieces<'a> {
-    fn new(limit: usize, used: usize) -> Self { Self { chunks:Vec::new(), bytes:16, limit, prep:Preparation {used} } }
+    fn new(limit: usize, prep: Preparation) -> Self { Self { chunks:Vec::new(), bytes:16, limit, prep } }
     fn charge(&mut self, n: usize) -> Result<(), ExportError> { self.prep.charge(n) }
     fn push(&mut self, c:(u32,Cow<'a,[u8]>)) -> Result<(),ExportError> {
         let n=c.1.len().checked_add(20).and_then(|n|n.checked_add(self.bytes)).ok_or(ExportError::Refused("export byte size overflow"))?;

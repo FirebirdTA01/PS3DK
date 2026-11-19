@@ -71,7 +71,11 @@ fn terminal_selection_focuses_slowest_once_and_refresh_does_not_steal_navigation
     assert!(!app.follow_rsx_frame(&t, &view));
     t.ended = true;
     assert!(app.follow_rsx_frame(&t, &view), "link end exposes the received partial capture");
-    assert!(app.rsx_frame.link_ended_reason.is_some());
+    assert!(app.rsx_frame.link_ended_reason().is_some());
+    // The reason belongs to that capture: it survives reselecting it.
+    let selected = view.frames[0].clone();
+    app.rsx_frame.select(&selected);
+    assert!(app.rsx_frame.link_ended_reason().is_some());
     app.page = Page::Overview;
     assert!(!app.follow_rsx_frame(&t, &view));
     assert_eq!(app.page, Page::Overview);
@@ -95,23 +99,25 @@ fn pending_and_open_badges_are_distinct_and_cached_rows_refresh_only_on_inputs()
     st.select(&v.frames[0]);
     st.group = Some(ps3dk_prof::rsx_frame::GroupBy::Kind);
     let names = Default::default();
-    let a = st.rows(&v, &names);
-    let b = st.rows(&v, &names);
+    let a = st.rows(&v, &names, 0);
+    let b = st.rows(&v, &names, 0);
     assert!(Arc::ptr_eq(&a, &b), "idle repaint must reuse sort/group work");
     st.filter = "missing-label".into();
-    let c = st.rows(&v, &names);
+    let c = st.rows(&v, &names, 0);
     assert!(!Arc::ptr_eq(&b, &c));
     assert!(c.ids.is_empty());
     st.filter.clear();
     st.descending = false;
-    let e = st.rows(&v, &names);
+    let e = st.rows(&v, &names, 0);
     assert!(!Arc::ptr_eq(&c, &e));
     let mut changed = names;
     changed.insert((ps3dk_prof::rsx_frame::Profile::Vertex, 1), "new scan".into());
-    assert!(!Arc::ptr_eq(&e, &st.rows(&v, &changed)));
+    let f = st.rows(&v, &changed, 1);
+    assert!(!Arc::ptr_eq(&e, &f), "a new shader scan regroups");
+    assert!(Arc::ptr_eq(&f, &st.rows(&v, &changed, 1)));
     let next = doc();
     let next = next.rsx_frames.get(next.analysis().unwrap());
-    assert!(!Arc::ptr_eq(&e, &st.rows(&next, &changed)));
+    assert!(!Arc::ptr_eq(&f, &st.rows(&next, &changed, 1)), "a new document view rebuilds");
 }
 #[test]
 fn empty_untimed_and_virtualized_draw_lists_are_explicit() {
@@ -137,7 +143,7 @@ fn empty_untimed_and_virtualized_draw_lists_are_explicit() {
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
         eframe::egui::CentralPanel::default().show(ctx, |ui| {
-            page(ui, &v, &Default::default(), &mut st, &mut drawn)
+            page(ui, &v, &Default::default(), 0, &mut st, &mut drawn)
         });
     });
     assert!(drawn.rows < 100);
@@ -182,7 +188,7 @@ fn long_decoded_capture_renders_a_bounded_number_of_rows() {
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
         eframe::egui::CentralPanel::default().show(ctx, |p| {
-            page(p, &v, &Default::default(), &mut st, &mut drawn)
+            page(p, &v, &Default::default(), 0, &mut st, &mut drawn)
         });
     });
     assert!(drawn.rows < 100);

@@ -826,8 +826,11 @@ These labels do not claim complete coverage or per-draw state.
 **Capture RSX frame** in an app built with `PS3_PROF_RSX_FRAME` (4.12): the live link (protocol 3) carries the request
 and its progress. Press the button in the live strip: once the reader has the capture and its timing, the viewer
 opens **RSX frames**, selects the new capture, and focuses its slowest timed draw. Written progress alone does not
-mean Ready: missing AUTO records show **Pending timing**. A truncated or abandoned capture opens as **Partial** with
-its reason. A request without a new frame boundary stays waiting; Disconnect keeps the received evidence. Older
+mean Ready: missing AUTO records show **Pending timing** and the strip reads `Waiting for RSX (timed/total)`. Once
+the agent reports the capture written, a new request is allowed; the earlier capture stays listed as pending. A
+capture still being received shows **Open**. A truncated or abandoned capture opens as **Partial** with its reason.
+A request without a new frame boundary stays waiting. Disconnect keeps the received evidence: an Open or Pending
+timing capture is then opened once, with the reason that the live link ended before its timing completed. Older
 agents are negotiated as protocol 2 then 1 and show why the button is unavailable; requests are never retried.
 
 Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
@@ -845,7 +848,9 @@ Each RSX capture has **Save** and **Save as…**. These use the accepted file/li
 reopen the result and require identical capture data, timing and partial status before publishing. Existing paths
 are never overwritten; repeat Save reports the saved path. Saves work after Disconnect when the prefix was accepted.
 Other captures from the same frame can be included and remain selectable on reopen. One save worker uses the shared
-viewer budget (about 70 times the source bytes plus 4 MiB); insufficient workspace refuses visibly. A sole capture
+viewer budget, sized by the selected frame rather than the session: a fixed 64 MiB preparation allowance and one
+copy of the accepted source, then about 70 times the exported frame's bytes plus 4 MiB before it is written and
+reopened. The session is not parsed again. Insufficient workspace refuses visibly. A sole capture
 is selected automatically on reopen. The original session file is untouched.
 
 ### 6.7 Windows: picker, Save window, Save range

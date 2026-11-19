@@ -13,7 +13,7 @@ struct RowKey {
     column: DrawColumn,
     descending: bool,
     group: Option<GroupBy>,
-    names: Names,
+    scan: u64,
 }
 #[derive(Default)]
 pub struct Rows {
@@ -49,7 +49,8 @@ pub struct State {
     pub group: Option<GroupBy>,
     pub legacy: bool,
     pub focus: bool,
-    pub link_ended_reason: Option<String>,
+    /// The capture switched to when the live link ended, and why its timing is incomplete.
+    pub link_ended: Option<(u32, String)>,
     rows: Option<(RowKey, Arc<Rows>)>,
     consumed: Option<(u32, u32)>,
 }
@@ -65,17 +66,19 @@ impl Default for State {
             group: None,
             legacy: false,
             focus: false,
-            link_ended_reason: None,
+            link_ended: None,
             rows: None,
             consumed: None,
         }
     }
 }
 impl State {
-    pub fn rows(&mut self, v: &RsxFrameView, names: &Names) -> Arc<Rows> {
+    /// Sorted and grouped draws, rebuilt only when the immutable view, the selection,
+    /// filter, sort, grouping or shader-name scan (`scan`, its generation) changes.
+    pub fn rows(&mut self, v: &RsxFrameView, names: &Names, scan: u64) -> Arc<Rows> {
         if let Some((k, rows)) = &self.rows {
             if k.generation == v.generation && k.capture == self.selected && k.filter == self.filter
-                && k.column == self.column && k.descending == self.descending && k.group == self.group && &k.names == names {
+                && k.column == self.column && k.descending == self.descending && k.group == self.group && k.scan == scan {
                 return rows.clone();
             }
         }
@@ -83,12 +86,15 @@ impl State {
             ids: sorted_draws(f, &self.filter, self.column, self.descending, names),
             groups: self.group.map_or_else(Vec::new, |by|rf::group(f, by, names)),
         }));
-        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, names:names.clone()}, rows.clone()));
+        self.rows = Some((RowKey {generation:v.generation, capture:self.selected, filter:self.filter.clone(), column:self.column, descending:self.descending, group:self.group, scan}, rows.clone()));
         rows
+    }
+    /// The link-ended reason, shown only while that capture is selected.
+    pub fn link_ended_reason(&self) -> Option<&str> {
+        self.link_ended.as_ref().filter(|(id, _)| self.selected == Some(*id)).map(|(_, why)| why.as_str())
     }
     pub fn select(&mut self, f: &FrameView) {
         self.rows = None;
-        self.link_ended_reason = None;
         self.selected = Some(f.id);
         self.column = DrawColumn::Time;
         self.descending = true;
@@ -123,7 +129,7 @@ impl State {
         };
         self.select(f);
         if t.ended && matches!(f.status, FrameStatus::Open | FrameStatus::PendingTiming { .. }) {
-            self.link_ended_reason = Some("Live link ended; this received capture has incomplete timing".into());
+            self.link_ended = Some((f.id, "Live link ended; this received capture has incomplete timing".into()));
         }
         self.consumed = Some((ack.request, ack.capture));
         true
@@ -145,7 +151,7 @@ fn program(f: &FrameView, i: Option<usize>, names: &Names) -> String {
     i.and_then(|i| f.programs.get(i))
         .map_or_else(|| "unknown".into(), |p| rf::program_name(p, names))
 }
-pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, st: &mut State, out: &mut Drawn) {
+pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &mut State, out: &mut Drawn) {
     *out = Drawn::default();
     ui::page_header(
         p,
@@ -219,7 +225,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, st: &mut State, o
      ui::badge(p,badge(&f.status),if matches!(f.status,FrameStatus::Complete){ui::Tone::Success}else{ui::Tone::Warning}).on_hover_text(&status);
      p.label(format!("{} · owner {} · frame {} · window {}",f.name,f.owner,f.frame,f.window));p.label(&status);
    });
-   if let Some(why)=&st.link_ended_reason {ui::field_message(p,ui::Tone::Warning,why);}
+   if let Some(why)=st.link_ended_reason() {ui::field_message(p,ui::Tone::Warning,why);}
    p.label(if f.isolated{"ISOLATED timing"}else{"PIPELINED: reached-marker intervals can overlap. Their sum is not isolated execution cost."});
    p.horizontal_wrapped(|p|{
      p.label(format!("{} draws · {} timed · {} untimed · {} missing · {} primitives",f.totals.draws,f.totals.timed,f.totals.untimed,f.totals.missing,f.totals.primitives));
@@ -240,7 +246,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, st: &mut State, o
      });
    });
    p.horizontal_wrapped(|p|{p.label("Sort");for (column,name) in [(DrawColumn::Time,"Time"),(DrawColumn::Ordinal,"Ordinal"),(DrawColumn::Kind,"Kind"),(DrawColumn::Count,"Count"),(DrawColumn::Gap,"Gap")]{if p.selectable_label(st.column==column,name).clicked(){if st.column==column{st.descending=!st.descending}else{st.column=column;st.descending=column!=DrawColumn::Ordinal;}}}p.label(if st.descending{"Descending"}else{"Ascending"});});
-   let cached=st.rows(v,names);let ids=&cached.ids;
+   let cached=st.rows(v,names,scan);let ids=&cached.ids;
    if st.group.is_some() {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    if ids.is_empty(){p.label(if f.draws.is_empty(){"No draw records retained in this capture."}else{"No draws match the filter."});}
    draw_table(p,v,f,names,st,out,&ids);

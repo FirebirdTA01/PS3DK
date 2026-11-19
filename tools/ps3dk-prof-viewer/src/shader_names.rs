@@ -106,6 +106,8 @@ pub fn scan(path: &Path, limits: Limits) -> Scan {
 pub struct Lookup {
     pub folder: Option<PathBuf>,
     pub result: Scan,
+    /// Bumped whenever `result` changes, so name-dependent caches refresh.
+    pub generation: u64,
     rx: Option<mpsc::Receiver<Scan>>,
 }
 impl Lookup {
@@ -133,10 +135,12 @@ impl Lookup {
             match rx.try_recv() {
                 Ok(v) => {
                     self.result = v;
+                    self.generation += 1;
                     self.rx = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.result.limit = Some("Shader scan ended without a result".into());
+                    self.generation += 1;
                     self.rx = None;
                 }
                 _ => {}

@@ -733,10 +733,10 @@ impl App {
             let len=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
             if let Some(live)=&self.live{
                 if matches!(live.client.view().outcome,Some(Outcome::Incomplete{..})){return Err("The live session failed validation; it cannot be exported".into())}
-                crate::capture_save::SaveJob::rsx_frame(len,path,frame,self.pool.clone(),||live.client.received_prefix(len as u64).ok_or_else(||"Displayed live prefix is no longer available".into()))
+                crate::capture_save::SaveJob::rsx_frame(doc.clone(),len,path,frame,self.pool.clone(),||live.client.received_prefix(len as u64).ok_or_else(||"Displayed live prefix is no longer available".into()))
             }else{
                 let(source_len,sha)=self.captures.source.ok_or("Source identity is unavailable")?;
-                crate::capture_save::SaveJob::rsx_file(doc.path.clone(),source_len as usize,sha,len,path,frame,self.pool.clone())
+                crate::capture_save::SaveJob::rsx_file(doc.clone(),doc.path.clone(),source_len as usize,sha,len,path,frame,self.pool.clone())
             }
         })();self.start_save((2,id),result);
     }
@@ -1546,7 +1546,7 @@ impl eframe::App for App {
                             p.horizontal(|p|{p.selectable_value(&mut rsx_frame.legacy,false,"AUTO draw captures");p.selectable_value(&mut rsx_frame.legacy,true,"EXT marker captures");});
                         }
                         if v.available&&!rsx_frame.legacy{
-                            crate::rsx_frame_ui::page(p,&v,&shader_names.result.names,rsx_frame,&mut rsxf_actions);
+                            crate::rsx_frame_ui::page(p,&v,&shader_names.result.names,shader_names.generation,rsx_frame,&mut rsxf_actions);
                             if shader_names.busy(){p.label("Scanning shader folder…");}
                             if let Some(folder)=&shader_names.folder{p.label(format!("Shader folder: {} · {} files · {} invalid",folder.display(),shader_names.result.files,shader_names.result.invalid));}
                             if let Some(why)=&shader_names.result.limit{ui::field_message(p,ui::Tone::Warning,why);}
