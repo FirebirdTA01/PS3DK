@@ -130,3 +130,61 @@ fn a_time_sort_places_a_run_by_its_total_time() {
     // other sorts keep the first listed draw's position
     assert_eq!(display_rows(&fr, &[3, 0, 1, 2], &none, None), vec![Row::Draw(3), Row::Run(0)]);
 }
+
+/// Review control: an instance run whose FP constant at 0x30 changes, every FP constant with mixed per-component
+/// provenance [Inline, Container, Unknown, Inline] and distinct nonzero fallback words.
+#[test]
+fn unknown_fp_components_read_as_unknown_and_keep_their_caveats_everywhere() {
+    use ps3dk_prof_viewer::rsx_constants_ui::{fp_cell, fp_values};
+    let mut b = Buf::default();
+    vpc_rec(&mut b, 0, 2, &[(5, 15, [f(1.0), 0, 0, 0])]);
+    XProgram { index: 1, profile: 1, source: 1, flags: 0, instructions: 3, hash: 0x11, bytes: 48, consts: 0, address: 0,
+        first_draw: 0 }.encode(&mut b);
+    XProgram { index: 2, profile: 2, source: 2, flags: 0, instructions: 2, hash: 0x22, bytes: 48, consts: 2,
+        address: 0x40, first_draw: 0 }.encode(&mut b);
+    uni_rec(&mut b, 2, 0, &[(0x30, 1, 2, "tint")]);
+    let mixed = [1u8, 2, 3, 1];
+    fpc_rec(&mut b, 0, 2, 0, &[(0x30, mixed, [h(1.0), h(2.0), h(3.0), h(4.0)]),
+        (0x40, mixed, [h(5.0), h(6.0), h(7.0), h(8.0)])]);
+    let draw = |ordinal: u32| {
+        let mut d = XDraw::decoded(ordinal, 1);
+        d.vp = 1;
+        d.fp = 2;
+        d
+    };
+    draw(0).encode(&mut b);
+    fpc_rec(&mut b, 1, 2, 0, &[(0x30, mixed, [h(9.0), h(2.0), h(3.0), h(4.0)]),
+        (0x40, mixed, [h(5.0), h(6.0), h(7.0), h(8.0)])]);
+    draw(1).encode(&mut b);
+    let mut e = XEnd::done(1);
+    e.n = [1, 0, 2, 2, 0, 2, 0, u32::MAX, 2, 0, 0, 0];
+    e.untimed = 2;
+    e.vpcs = 1;
+    e.fpcs = 2;
+    e.unis = 1;
+    let base = tags_fixture();
+    let bind = binding(&base);
+    let file = with_rsxf(&base, vec![XConfig { decoder: 3, ..XConfig::default() }.chunk(),
+        XBegin::live(1, bind.owner, 0, "c").chunk(), draws_chunk(1, 0, 8, &b.0), e.chunk()]);
+    let d = Document::from_bytes("mixed.prof".into(), &file.bytes());
+    let v = d.rsx_frames.get(d.analysis().expect("the fixture reads"));
+    let fr = &v.frames[0];
+    assert_eq!(fr.instance_runs.len(), 1);
+    assert_eq!(fr.instance_runs[0].fp_offsets, vec![0x30]);
+    // the per-instance table cell
+    let (values, badges, raw) = fp_cell(&fr.draws[1], 0x30).unwrap();
+    assert_eq!(values, "(9, 2, ?, 4)");
+    let badges: Vec<String> = badges.into_iter().map(|(t, _)| t).collect();
+    assert_eq!(badges, vec!["x w: last inline write seen".to_string(), "y: container: may differ at GPU time".to_string(),
+        "z: unknown".to_string()]);
+    assert!(raw.contains(&format!("{:#010x} (container fallback", h(3.0))), "{raw}");
+    // named and unnamed rows
+    let rows = rows(fr, 1);
+    let tint = rows.iter().find(|r| r.name.as_deref() == Some("tint")).unwrap();
+    assert_eq!(tint.values[0], [Some(9.0), Some(2.0), None, Some(4.0)]);
+    assert_eq!(tint.provenance, Some([Provenance::Inline, Provenance::Container, Provenance::Unknown, Provenance::Inline]));
+    let unnamed = rows.iter().find(|r| r.name.is_none() && r.profile == Profile::Fragment).unwrap();
+    assert_eq!((unnamed.resource, unnamed.values[0]), (0x40, [Some(5.0), Some(6.0), None, Some(8.0)]));
+    let c = fr.draws[0].fp_constants.as_ref().unwrap().entries[0].clone();
+    assert_eq!(fp_values(&c)[2], None);
+}

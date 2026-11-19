@@ -126,6 +126,32 @@ pub fn provenance_badges(p: [Provenance; 4]) -> Vec<(String, ui::Tone)> {
         .collect()
 }
 
+/// An FP constant's values with Unknown components as None: their words are the container fallback the runtime
+/// stores, not the value the draw ran with.
+pub fn fp_values(e: &rf::FpConstant) -> [Option<f32>; 4] {
+    let f = e.floats();
+    std::array::from_fn(|k| (e.provenance[k] != Provenance::Unknown).then_some(f[k]))
+}
+/// The raw words of an FP constant, Unknown components marked as container fallback (a diagnostic, never a value).
+pub fn fp_raw(e: &rf::FpConstant) -> String {
+    let w: Vec<String> = (0..4)
+        .map(|k| {
+            if e.provenance[k] == Provenance::Unknown {
+                format!("{:#010x} (container fallback, not the draw's value)", e.words[k])
+            } else {
+                format!("{:#010x}", e.words[k])
+            }
+        })
+        .collect();
+    format!("raw words: {}", w.join(", "))
+}
+/// One per-instance FP cell: values with '?' for unknown components, the per-component provenance badges and the
+/// raw-word diagnostic; None when the draw has no constant at that offset.
+pub fn fp_cell(d: &rf::Draw, offset: u32) -> Option<(String, Vec<(String, ui::Tone)>, String)> {
+    let e = fp_entry(d, d.fp, offset)?;
+    Some((vec4(&fp_values(e)), provenance_badges(e.provenance), fp_raw(e)))
+}
+
 /// One Constants row: a named uniform or an unnamed slot/offset.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstRow {
@@ -157,7 +183,16 @@ pub fn rows(f: &FrameView, index: usize) -> Vec<ConstRow> {
     };
     let mut out: Vec<ConstRow> = rf::uniforms(f, d)
         .into_iter()
-        .map(|u| {
+        .map(|mut u| {
+            if let Some(pv) = u.provenance {
+                for v in &mut u.values {
+                    for k in 0..4 {
+                        if pv[k] == Provenance::Unknown {
+                            v[k] = None;
+                        }
+                    }
+                }
+            }
             let changed = match u.profile {
                 Profile::Vertex => (u.resource..u.resource + u.values.len() as u32)
                     .any(|s| d.vpc_changed.contains(&(s as u16))),
@@ -197,7 +232,7 @@ pub fn rows(f: &FrameView, index: usize) -> Vec<ConstRow> {
                 .collect();
             for e in c.entries.iter().filter(|e| !named.contains(&e.offset)) {
                 out.push(ConstRow { profile: Profile::Fragment, name: None, resource: e.offset,
-                    values: vec![e.floats().map(Some)], provenance: Some(e.provenance), changed: fp_changed(e.offset) });
+                    values: vec![fp_values(e)], provenance: Some(e.provenance), changed: fp_changed(e.offset) });
             }
         }
     }
@@ -313,7 +348,21 @@ fn run_instances(p: &mut egui::Ui, f: &FrameView, r: usize, v: &crate::rsx_frame
                     p.monospace(d.vp_constants.as_ref().map_or_else(|| "unknown".into(), |c| vec4(&c.floats(s as usize))));
                 }
                 for &o in &run.fp_offsets {
-                    p.monospace(fp_entry(d, d.fp, o).map_or_else(|| "unknown".into(), |e| vec4(&e.floats().map(Some))));
+                    match fp_cell(d, o) {
+                        None => {
+                            p.label(RichText::new("unknown").italics().weak());
+                        }
+                        Some((values, badges, raw)) => {
+                            p.vertical(|p| {
+                                p.monospace(values).on_hover_text(raw);
+                                p.horizontal_wrapped(|p| {
+                                    for (t, tone) in badges {
+                                        ui::badge(p, &t, tone);
+                                    }
+                                });
+                            });
+                        }
+                    }
                 }
                 p.end_row();
             }
