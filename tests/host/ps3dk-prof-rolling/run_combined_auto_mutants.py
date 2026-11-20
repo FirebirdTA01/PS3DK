@@ -24,7 +24,7 @@ SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
 PINS = {
     "roll_combined2.c": 'c6b9deb18059bb459d0cc99bae551c9dec05e730872ab0a517ee56174615d454',
     "roll_combined2.h": '5cc46860e697320289fd9b864b0dbb33b609711a588db9c8b1a0841a8f05ca8e',
-    "roll_combined2_auto.h": 'e6c09a88a87f994d7afba4ba8d2424085e1f283c0667b0cbbd63aacdbe7a9ec1',
+    "roll_combined2_auto.h": 'c02b732fa6e1759cef33f92adf2854ece2c877aa5ed0b51929c01133cc8548b1',
     "roll_combined2_fifo.h": '49e2976f7a04f6eb4224825014eeb823da43fc764473c67fc799fecc685a4bb8',
     "roll_combined.c": 'b4f5f050acc187615c32a73fc07aa403a4dbd490d033346b598af9bdd5c4f5d1',
     "roll_combined.h": '0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431',
@@ -41,6 +41,7 @@ B2 = 'c_auto_mask63_build_execution_and_abandoned_population'
 CALL = 'c_auto_mask255_whole_call_build_excluded_population'
 INVALID = 'c_auto_ring_generation_geometry_and_state_refusals_are_atomic'
 FLAGS = 'c_auto_unknown_flag_refusal_is_atomic'
+ISOLATED = 'c_auto_isolated_ring_ops_are_admitted'
 SOURCES = {
     'b1': 'modeled_legacy7_and_ring2047_mixed_sources_validate_before_encoder',
     'b2': 'independent_remaining_masks_and_refused_sources_validate_before_c',
@@ -56,6 +57,7 @@ SITES = {
     'C AUTO schema2 encoder rejected valid original': ('rolling_combined_c_auto.rs', 132),
     'C canonical AUTO schema2 at original cut': ('rolling_combined_c_auto.rs', 139),
     'semantic C refusal must exit1, not crash:': ('combined_auto_invalid_support/mod.rs', 164),
+    'C rejected ordinary valid source:': ('combined_auto_invalid_support/mod.rs', 151),
     'C atomic semantic refusal for': ('combined_auto_invalid_support/mod.rs', 166),
 }
 
@@ -169,7 +171,10 @@ def specs():
          [(h, 'r32(p+60)!=width', 'r32(p+60)!=128 || width==0')]),
         ('unknown_ops_flags_ignored', 'flags', FLAGS,
          ['semantic C refusal must exit1, not crash: ops-unknown-flags', 'left: Some(0)'],
-         [(h, '(flags&~(ring?255u:mask!=7?127u:63u))', '0')]),
+         [(h, '(flags&~(ring?511u:mask!=7?127u:63u))', '0')]),
+        ('isolated_ops_flag_refused', 'flags', ISOLATED,
+         ['C rejected ordinary valid source:'],
+         [(h, '(flags&~(ring?511u:mask!=7?127u:63u))', '(flags&~(ring?255u:mask!=7?127u:63u))')]),
         ('ring_generation_gap_admitted', 'invalid', INVALID,
          ['C atomic semantic refusal for generation-gap'],
          [(h, 'if(g!=old+1||ord)return PFR_INVALID;', 'if(ord)return PFR_INVALID;')]),
