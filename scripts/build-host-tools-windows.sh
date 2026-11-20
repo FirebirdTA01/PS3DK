@@ -699,7 +699,9 @@ build_psl1ght_tools() {
     local fself_cflags="-O2 -I$fself_src/include -I$DEPS_ROOT/include $REPRO_CC"
     local fself_ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lz $REPRO_LD"
     local fself_srcs=()
-    mapfile -t fself_srcs < <(find "$fself_src/source" -maxdepth 1 -name '*.c' -print)
+    # Sorted: find returns directory order, which differs between checkouts,
+    # and the link order it implies made two builds of fself.exe differ.
+    mapfile -t fself_srcs < <(find "$fself_src/source" -maxdepth 1 -name '*.c' -print | LC_ALL=C sort)
     [[ ${#fself_srcs[@]} -gt 0 ]] || die "no .c sources under $fself_src/source"
     "$cc" $fself_cflags "${fself_srcs[@]}" $fself_ldflags -o "$STAGE_BIN/fself.exe"
     say "  staged fself.exe"

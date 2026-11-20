@@ -272,6 +272,48 @@ sdk_core  spu/include/ps3dk/prof_spu_lane.h
 sdk_core  spu/include/ps3dk/psp_desc.h
 sdk_core  spu/include/ps3dk/psp_spu.h
 sdk_core  spu/include/ps3dk/psp_layout.h
+# The opt-in profiler packages, both data models, installed by
+# scripts/build-sdk.sh after the sublib install (not by `make -C sdk install`
+# alone, so they are ppu_stub rows: package validation and
+# check-release-tree.sh, never the cmake freshness probe).
+# Function paths (install-func, install-func-ext):
+ppu_stub  ppu/lib/libps3dkprof_func.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_func.a
+ppu_stub  ppu/lib/libps3dkprof_ext_func.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_ext_func.a
+# Wait observations (install-waits) with their manifests, and the observed
+# pthread runtime (scripts/build-prof-wait-runtime.py) with its -lrt redirect:
+ppu_stub  ppu/lib/libps3dkprof_wait.a
+ppu_stub  ppu/lib/libps3dkprof_wait.a.json
+ppu_stub  ppu/lib/lp64/libps3dkprof_wait.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_wait.a.json
+ppu_stub  ppu/lib/libps3prof_wait.a
+ppu_stub  ppu/lib/libps3prof_wait.a.json
+ppu_stub  ppu/lib/lp64/libps3prof_wait.a
+ppu_stub  ppu/lib/lp64/libps3prof_wait.a.json
+ppu_stub  ppu/lib/libps3dkprof_ext_wait.a
+ppu_stub  ppu/lib/libps3dkprof_ext_wait.a.json
+ppu_stub  ppu/lib/lp64/libps3dkprof_ext_wait.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_ext_wait.a.json
+ppu_stub  ppu/lib/librt_profwait.a
+ppu_stub  ppu/lib/lp64/librt_profwait.a
+ppu_stub  ppu/lib/prof-waits/librt.a
+ppu_stub  ppu/lib/prof-waits/runtime-manifest.json
+ppu_stub  ppu/lib/lp64/prof-waits/librt.a
+ppu_stub  ppu/lib/lp64/prof-waits/runtime-manifest.json
+# Counters (install-counters):
+ppu_stub  ppu/lib/libps3dkprof_counters.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_counters.a
+ppu_stub  ppu/lib/libps3dkprof_ext_counters.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_ext_counters.a
+# AUTO RSX observation (libgcm_cmd install-auto, install-auto-package) and
+# its per-ABI seal:
+ppu_stub  ppu/lib/libgcm_cmd_prof_auto.a
+ppu_stub  ppu/lib/lp64/libgcm_cmd_prof_auto.a
+ppu_stub  ppu/lib/libps3dkprof_auto.a
+ppu_stub  ppu/lib/lp64/libps3dkprof_auto.a
+ppu_stub  ppu/lib/prof-auto.json
+ppu_stub  ppu/lib/lp64/prof-auto.json
 # pthread shim (2026-08-30): the shadow header fronts newlib's _POSIX_THREADS-
 # gated <pthread.h>; libpthread.a is an INPUT(-lrt) LINKER SCRIPT, not an
 # archive (validated by presence -- an alias row would demand byte-identity

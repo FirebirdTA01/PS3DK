@@ -68,6 +68,10 @@ LP64 in `$PS3DK/ppu/lib/lp64`. Link the one that matches the app's ABI.
 | + FIFO wrap waits | chosen by `ps3_target_prof_fifo` (section 4.7) | no: `install-fifo-package` |
 | AUTO RSX observation | chosen by `PS3_PROF_AUTO=ON` (section 4.8) | no: `install-auto-package` |
 
+`scripts/build-sdk.sh`, and so every release package, also installs the counter, function-path, wait and AUTO
+packages for both ABIs. The make targets in the last column are for an SDK installed with `make -C sdk install` alone,
+and for FIFO wrap waits, which are always installed separately.
+
 The manual-lifecycle variants of counters, function paths and waits already contain the live agent; their extension
 forms need `libps3dkprof_ext_live.a` for live, like `libps3dkprof_ext.a`.
 
@@ -233,6 +237,8 @@ and `PS3_PROF_AUTO`.
 - **CMake:** `-DPS3_PROF_LIVE_AUTOSTART=ON`. Every executable that links the profiler gets the link request, `net` and
   `sysmodule_stub`; an extension or `PS3_PROF_AUTO` executable also gets `libps3dkprof_ext_live.a`. Optional:
   `PS3_PROF_LIVE_PORT` (default `31750`) and `PS3_PROF_LIVE_NET_POOL_KB` (default `0`, see below).
+  Turning on `PS3_PROF_LIVE_AUTOSTART` together with `PS3_PROF_AUTO` needs CMake 3.29 or newer (two project-include
+  files); older CMake stops at configure.
 - **Without CMake:** compile one unit that includes `<ps3dk/prof.h>` with `-DPS3DK_PROF_LIVE_AUTOSTART=1` (or link with
   `-Wl,-u,__ps3dk_prof_live_autostart_anchor`) and link `-lnet -lsysmodule_stub` after the profiler. A missing library
   is a link error, never a silent off. `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);`, written once at file
@@ -346,8 +352,9 @@ counts as an orphan and adds no path.
 
 Values `OFF` (default), `MANUAL` (`libps3dkprof_wait.a`), `AUTO` (`libps3prof_wait.a`, the automatic-lifecycle form)
 or `EXT` (`libps3dkprof_ext_wait.a`). `PS3_PROF_WAITS_ROOT` (default `$PS3DK`) names the prefix holding them and the
-observed runtime redirect `ppu/lib[/lp64]/prof-waits/librt.a`. These are not part of the normal install: they are
-built by `make -C sdk/libps3dkprof waits` with measured `WAIT_*` inputs and `scripts/build-prof-wait-runtime.py`.
+observed runtime redirect `ppu/lib[/lp64]/prof-waits/librt.a`. `scripts/build-sdk.sh` installs them; after
+`make -C sdk install` alone they are built by `make -C sdk/libps3dkprof waits` with measured `WAIT_*` inputs and
+`scripts/build-prof-wait-runtime.py`.
 Records elapsed time around pthread mutex lock, timed mutex lock and condition wait/timedwait.
 
 - Turn it on when: you suspect lock or condition-variable waits.
@@ -378,7 +385,8 @@ Events are PPU wall time between wrap-protocol boundaries, never GPU busy or idl
 
 ### 4.8 `PS3_PROF_AUTO` (CMake, beta)
 
-Automatic RSX observation. Install the providers once, against the same headers and toolchain as the SDK:
+Automatic RSX observation. `scripts/build-sdk.sh` (and so a release package) installs the providers. After
+`make -C sdk install` alone, install them once, against the same headers and toolchain as the SDK:
 
 ```sh
 make -C sdk/libgcm_cmd install-auto
