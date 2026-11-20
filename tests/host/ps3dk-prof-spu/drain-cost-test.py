@@ -103,6 +103,20 @@ r = subprocess.run([str(sanexe), '--cost-gate'], capture_output=True, text=True,
 if r.returncode or r.stderr:
     raise SystemExit('ASan cost/stream check failed')
 
+# UBSan alone keeps glibc's allocator, so a heap object allocated with less than its type's alignment is reported
+# (-fsanitize=alignment); ASan's allocator over-aligns and hides it (lane_h, 128-aligned, came from calloc).
+ubexe = out / 'drain-cost-ubsan'
+ub = subprocess.run([*cmd[:-2], '-fsanitize=undefined', '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer',
+                     '-o', str(ubexe)], capture_output=True, text=True)
+(out / 'ubsan-build.log').write_text(ub.stdout + ub.stderr)
+if ub.returncode:
+    raise SystemExit('UBSan build failed')
+r = subprocess.run([str(ubexe), '--cost-gate'], capture_output=True, text=True, timeout=120,
+                   env=dict(os.environ, UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1'))
+(out / 'ubsan.log').write_text(r.stdout + r.stderr)
+if r.returncode or r.stderr:
+    raise SystemExit('UBSan cost/stream check failed: ' + r.stderr[-2000:])
+
 guard = 'if (w.pl_count && flush_loss(p, l, &w) != 0)'
 if instrumented.count(guard) != 1:
     raise SystemExit('empty-loss guard mutant drift')
@@ -118,4 +132,4 @@ r = subprocess.run([str(mutexe), '--cost-gate'], capture_output=True, text=True,
 (out / 'mutant.log').write_text(r.stdout + r.stderr)
 if r.returncode != 1 or 'empty loss work scales with events' not in r.stderr:
     raise SystemExit('empty-loss guard mutant not caught')
-print('drain-cost: ASan and removed-guard mutant PASS')
+print('drain-cost: ASan, UBSan and removed-guard mutant PASS')
