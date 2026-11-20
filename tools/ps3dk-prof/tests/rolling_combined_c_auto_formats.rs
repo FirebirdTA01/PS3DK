@@ -11,11 +11,20 @@ use combined_auto_support::{config,op,coverage,clock,status,put16,put32,put64};
 use combined_auto_c_support::{references,parity};
 use ps3dk_prof::{auto_rsx,rolling_combined as combined};
 
-fn op_width(mask:u32)->usize {if mask==1023{160}else if mask>=63{144}else{128}}
-fn row_width(mask:u32)->usize {if mask==1023{480}else if mask==511{416}else if mask>=31{384}else{352}}
+fn op_width(mask:u32)->usize {if mask&512!=0{160}else if mask>=63{144}else{128}}
+fn row_width(mask:u32)->usize {if mask==3071{544}else if mask==1023{480}else if mask==511{416}else if mask>=31{384}else{352}}
+/// 3071/11: the refusals by reason. Frame 7's row refused two ranges for no pair (slot 6) and one for depth (slot 0);
+/// every STATUS carries those and one no_frame refusal (slot 3), which counts in no row.
+fn reasons_row(mask:u32,c:&mut Chunk,frame:u64){
+    if mask==3071&&frame==7 {put32(&mut c.payload,440,3);put32(&mut c.payload,480,1);put32(&mut c.payload,480+24,2);}
+}
+fn reasons_status(mask:u32,mut c:Chunk)->Chunk {
+    if mask==3071 {c.payload.resize(256,0);put64(&mut c.payload,128,1);put64(&mut c.payload,128+24,1);put64(&mut c.payload,128+48,2);}
+    c
+}
 fn row(mask:u32,frame:u64,observed:u64)->Chunk {
     let mut c=coverage(frame,(frame*100000,(frame+1)*100000),observed);
-    c.payload.resize(row_width(mask),0);
+    c.payload.resize(row_width(mask),0);reasons_row(mask,&mut c,frame);
     if frame==7&&mask>=255 {
         // One segment visit lacked a per-draw record and is covered by the
         // later genuine whole-CALL bracket's build-excluded population.
@@ -49,12 +58,12 @@ fn base()->(File,Chunk) {
     (f,trailer)
 }
 fn source(mask:u32)->File {
-    assert!([15,31,63,127,255,511,1023].contains(&mask));
+    assert!([15,31,63,127,255,511,1023,3071].contains(&mask));
     let (mut f,trailer)=base();f.chunks.push(config(mask));
     for id in 1..=9 {let mut c=clock(id);if mask<127{put32(&mut c.payload,64,id);put32(&mut c.payload,68,id);}f.chunks.push(c);}
     f.chunks.push(operation(mask,1,7,4,false,false));
     f.chunks.push(operation(mask,2,7,3,false,false));
-    f.chunks.push(row(mask,7,3));f.chunks.push(status(0,2,1,9));
+    f.chunks.push(row(mask,7,3));f.chunks.push(reasons_status(mask,status(0,2,1,9)));
     f.chunks.push(fifo_support::St::new(2,0,0,0,0,0,0,0).chunk());
     // The building frame's final row was already accepted. The real segment
     // records arrive at CALL/drain time, including one abandoned build.
@@ -62,11 +71,11 @@ fn source(mask:u32)->File {
     f.chunks.push(operation(mask,4,0,3,true,true));
     let mut next=5;
     if mask>=255{f.chunks.push(operation(mask,next,8,5,false,false));next+=1;}
-    if mask==1023{f.chunks.push(operation(mask,next,8,6,false,false));next+=1;}
+    if mask&512!=0{f.chunks.push(operation(mask,next,8,6,false,false));next+=1;}
     f.chunks.push(operation(mask,next,8,4,false,false));
     for mut e in fifo_support::wrap(1,1,210000,30000,30000){e.frame=8;f.chunks.push(fifo_support::events(&[e]));}
     f.chunks.push(fifo_support::St::new(1,6,6,0,6,1,1,0).chunk());
-    f.chunks.push(row(mask,8,0));f.chunks.push(status(1,next,2,9));f.chunks.push(trailer);f
+    f.chunks.push(row(mask,8,0));f.chunks.push(reasons_status(mask,status(1,next,2,9)));f.chunks.push(trailer);f
 }
 fn refused(width:usize)->File {
     let (mut f,trailer)=base();let mut p=vec![0;width];
@@ -84,12 +93,12 @@ fn truth(f:&File,mask:Option<u32>){
         spu_profile_table:&[],causal_limits:Default::default()}).unwrap();
     let a=retained.auto.unwrap();assert!(a.final_seen);assert!(retained.terminal);
     if let Some(mask)=mask {
-        let n=5+u64::from(mask>=255)+u64::from(mask==1023);
+        let n=5+u64::from(mask>=255)+u64::from(mask&512!=0);
         assert_eq!((inv.ops_parsed,inv.frames_parsed,inv.clocks_parsed,inv.statuses),(n,2,9,2));
         assert_eq!(inv.ops.iter().filter(|o|o.flags&64!=0).count(),2);
         assert_eq!(inv.ops.iter().filter(|o|o.flags&64!=0&&o.call==0).count(),1);
         assert_eq!(inv.ops.iter().filter(|o|o.kind==5).count(),usize::from(mask>=255));
-        assert_eq!(inv.ops.iter().filter(|o|o.kind==6).count(),usize::from(mask==1023));
+        assert_eq!(inv.ops.iter().filter(|o|o.kind==6).count(),usize::from(mask&512!=0));
         assert_eq!(inv.ops.iter().filter(|o|o.kind==4).count(),2);
         assert_eq!(a.cumulative.ops,n);assert_eq!(a.clocks.len(),9);
         if mask>=63 {
@@ -97,7 +106,11 @@ fn truth(f:&File,mask:Option<u32>){
             assert_eq!((b.records,b.abandoned,b.call_excluded),([0,0,3],1,u64::from(mask>=255)));
             assert!(b.coverage.is_some());
         }
-        if mask==1023{let r=inv.ops.iter().find(|o|o.kind==6).unwrap();assert_eq!((r.depth,r.tag,r.fp_offset),(2,Some(0x42),Some(0x1000)));}
+        if mask==3071 {
+            assert_eq!(inv.frames.iter().find(|r|r.frame==7).unwrap().range_refused,Some([1,0,0,0,0,0,2,0,0,0]));
+            assert_eq!(inv.last_status.as_ref().unwrap().range_refused,Some([1,0,0,1,0,0,2,0,0,0]));
+        }
+        if mask&512!=0{let r=inv.ops.iter().find(|o|o.kind==6).unwrap();assert_eq!((r.depth,r.tag,r.fp_offset),(2,Some(0x42),Some(0x1000)));}
     }else{
         assert!(matches!(inv.config,Some(auto_rsx::Config::Refused{reason:9,application_rc:-7,..})));
         assert_eq!((a.cumulative.ops,a.cumulative.frames,a.cumulative.clocks,a.cumulative.statuses),(0,0,0,1));
@@ -108,7 +121,7 @@ fn truth(f:&File,mask:Option<u32>){
 
 #[test]
 fn independent_remaining_masks_and_refused_sources_validate_before_c(){
-    for mask in [15,31,63,127,255,511,1023]{truth(&source(mask),Some(mask));}
+    for mask in [15,31,63,127,255,511,1023,3071]{truth(&source(mask),Some(mask));}
     for width in [160,176]{truth(&refused(width),None);}
 }
 macro_rules! c_format {
@@ -122,6 +135,7 @@ c_format!(c_auto_mask127_bracketed_clocks_and_build_state,127);
 c_format!(c_auto_mask255_whole_call_build_excluded_population,255);
 c_format!(c_auto_mask511_label_coverage_width,511);
 c_format!(c_auto_mask1023_tagged_ranges_and_call_rows,1023);
+c_format!(c_auto_mask3071_range_refusal_tails,3071);
 #[test] #[ignore="requires prebuilt actual C AUTO encoder"]
 fn c_auto_refused_config160_has_no_invented_domain_or_population(){let f=refused(160);truth(&f,None);parity(f.bytes());}
 #[test] #[ignore="requires prebuilt actual C AUTO encoder"]

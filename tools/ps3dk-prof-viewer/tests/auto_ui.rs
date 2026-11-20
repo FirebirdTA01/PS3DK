@@ -486,6 +486,7 @@ fn unsealed_capture_shows_unavailable_totals_and_the_tail() {
             value: None,
             note: auto_rsx::TOTAL_NO_STATUS.into(),
             retained_rows: None,
+            by_reason: None,
         }).collect(),
     });
     let mut app = App::new(None);
@@ -898,4 +899,29 @@ fn ring_stopped_fixture_shows_reject_and_lower_bound_verdict() {
     let w = &json["windows"][0];
     assert_eq!(w["state"], v.report.state);
     assert_eq!(w["status"]["ring"]["decoder_rejected"]["reason_text"], expected_reason);
+}
+
+/// AUTO ranges refused (tagged captures): a 3071/11 capture shows the reader's STATUS total by reason; a 1023/11
+/// capture (STATUS records none) shows UNAVAILABLE with the reader's note; an untagged capture shows no row.
+#[test]
+fn ranges_refused_by_reason_from_the_reader() {
+    let doc = Document::from_bytes(PathBuf::from("range-reasons.prof"), &fixture_bytes("range-reasons"));
+    let want = doc.auto.as_ref().unwrap().report.status.as_ref().unwrap().range_refused.expect("3071/11 totals");
+    let mut app = App::new(None);
+    app.install(Arc::new(doc), true);
+    let drawn = Ui::new().frame(vec![], &mut app);
+    let r = drawn.ranges_refused.expect("drawn total");
+    assert_eq!(r.by_reason, want);
+    assert_eq!(r.by_reason, [1, 1, 1, 1, 1, 5, 1, 1, 3, 1]);
+    assert_eq!((r.total, r.at_least), (16, true), "a FINAL (lower bounds) STATUS: at least");
+    assert_eq!(drawn.ranges_refused_text.as_deref(), Some(auto_rsx::reasons_text(&want).as_str()));
+    let doc = Document::from_bytes(PathBuf::from("tags.prof"), &fixture_bytes("tags"));
+    app.install(Arc::new(doc), true);
+    let drawn = Ui::new().frame(vec![], &mut app);
+    assert!(drawn.ranges_refused.is_none(), "UNAVAILABLE, not 0");
+    assert_eq!(drawn.ranges_refused_text.as_deref(), Some(auto_rsx::RANGES_REFUSED_UNRECORDED));
+    let doc = Document::from_bytes(PathBuf::from("frames.prof"), &fixture_bytes("frames"));
+    app.install(Arc::new(doc), true);
+    let drawn = Ui::new().frame(vec![], &mut app);
+    assert!(drawn.ranges_refused.is_none() && drawn.ranges_refused_text.is_none(), "no row without tags");
 }

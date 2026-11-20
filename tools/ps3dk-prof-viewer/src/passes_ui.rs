@@ -24,6 +24,33 @@ pub struct Drawn {
     pub tag_rows: usize,
     pub range_rows: usize,
     pub frame_rows: usize,
+    /// Rows of the refused-ranges card (frames whose coverage row counts a refused AUTO range).
+    pub refused_rows: usize,
+    /// Each refused-ranges row as drawn: frame, refused count, reasons text.
+    pub refused: Vec<(u64, u32, String)>,
+    /// The capture total line of the refused-ranges card.
+    pub refused_total: String,
+}
+
+/// The capture total of refused AUTO ranges as the Passes page states it.
+pub fn refused_total_text(v: &PassesView) -> String {
+    match &v.ranges_refused {
+        Some(r) => format!("capture total {}{} (last STATUS)", if r.at_least { ">= " } else { "" },
+            ps3dk_prof::auto_rsx::reasons_text(&r.by_reason)),
+        None => "capture total UNAVAILABLE: this writer records no capture-level count".to_string(),
+    }
+}
+
+/// A frame's refusals by reason as the Passes page states them.
+pub fn refused_reasons_text(f: &ps3dk_prof::auto_rsx::TagFrame) -> String {
+    match &f.range_refused {
+        Some(by) => {
+            let named: Vec<String> = ps3dk_prof::auto_rsx::RANGE_REASONS.iter().zip(by.iter()).filter(|&(_, &n)| n != 0)
+                .map(|(r, n)| format!("{r} {n}")).collect();
+            named.join(", ")
+        }
+        None => "not recorded by this writer".to_string(),
+    }
 }
 
 /// Reduces a series to at most `cols` columns, each the maximum of the values that fall into it, so a long series
@@ -179,6 +206,29 @@ pub fn page(p: &mut egui::Ui, v: &PassesView, drawn: &mut Drawn) {
         &range_rows,
         pal.success,
         &mut drawn.range_rows,
+    );
+
+    // AUTO ranges refused, per frame and by reason (3071/11 and later); older writers count them without a reason.
+    let refused: Vec<&ps3dk_prof::auto_rsx::TagFrame> = v.by.frames.iter().filter(|f| f.ranges_refused != 0).collect();
+    drawn.refused = refused.iter().map(|f| (f.frame, f.ranges_refused, refused_reasons_text(f))).collect();
+    drawn.refused_total = refused_total_text(v);
+    let refused_rows: Vec<(String, Vec<Cell>, Vec<u64>)> = refused
+        .iter()
+        .map(|f| {
+            let reasons = refused_reasons_text(f);
+            (format!("#{}", f.frame), vec![plain(f.ranges_refused), (reasons.clone(), Some(reasons))],
+                vec![u64::from(f.ranges_refused)])
+        })
+        .collect();
+    group_card(
+        p,
+        "Frames with refused ranges",
+        &format!("AUTO ranges refused in each frame, by reason; {}. A range refused with no frame open counts in \
+            no frame.", drawn.refused_total),
+        &["frame", "refused", "reasons"],
+        &refused_rows,
+        pal.warning,
+        &mut drawn.refused_rows,
     );
 
     // Only frames with something to show get a row: a capture has thousands of frames.

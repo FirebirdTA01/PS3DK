@@ -139,6 +139,7 @@ typedef struct auto_capture {
     uint32_t tag, fp_ring, timing, timed_open, range_depth, range_excess;
     auto_range ranges[AUTO_RANGE_DEPTH];
     uint64_t ranges_done, ranges_refused;
+    uint64_t range_reasons[AUTO_RANGE_REASONS]; /* ranges_refused by reason (AUTO_RR_* - 1), STATUS range tail */
     /* owner only: frame source. A flip opens frames until an explicit
      * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
      * ignored (counted). Both kinds are reported in STATUS. */

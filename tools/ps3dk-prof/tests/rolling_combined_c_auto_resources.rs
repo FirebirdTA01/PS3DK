@@ -149,7 +149,8 @@ fn c_auto_exact_conservative_plan_bound_and_one_byte_below_are_distinct() {
     // The planner reserves schema3 capacity even for an unprojected fixture:
     // 128-byte FIFO prefix, plus an 8-byte origin index per run and group.
     let fifo=128+404+32*32+40*8;
-    let auto=32+532+216+208+4096+24*(64+64)+608*64+104*64;
+    // STATUS336 and 592-byte COVERAGE: the 4095/11 range-reason widths are the worst case
+    let auto=32+532+216+336+4096+24*(64+64)+(80+592)*64+104*64;
     let expected:usize=shared+48+128+fifo+auto; // conservative schema3 header allowance
     let dir=directory();let mut cmd=Command::new(executable("PS3DK_PROF_ROLLING_COMBINED_AUTO_RESOURCE"));
     cmd.arg("--plan").env_remove("PFM2_AUTO_FIELD").env_remove("PFM2_AUTO_VALUE");

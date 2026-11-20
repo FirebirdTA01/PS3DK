@@ -27,6 +27,8 @@ typedef struct auto_writer {
     uint64_t publication_max;
     uint64_t ring_published_max; /* REPORT_RING: the largest ring label value of a written ring record */
     uint64_t prior[15];
+    /* RANGE_REASONS: the last STATUS range totals and the per-reason sums of the rows written (saturating) */
+    uint64_t prior_ranges[AUTO_RANGE_REASONS], row_ranges[AUTO_RANGE_REASONS];
 } auto_writer;
 
 int auto_writer_init(auto_writer *, const auto_config_store *, uint8_t *, size_t, auto_chunk_sink, void *);
@@ -37,7 +39,10 @@ int auto_writer_begin(auto_writer *);
 int auto_writer_ops(auto_writer *, const auto_wire_op *, uint32_t count);
 int auto_writer_frame(auto_writer *, const auto_wire_frame *);
 int auto_writer_clock(auto_writer *, const auto_wire_clock *);
-int auto_writer_status(auto_writer *, uint16_t flags, const uint64_t counters[15]);
+/* ranges: the capture's AUTO range refusals by reason (AUTO_RR_* - 1). Refused unless each is at least the prior
+ * STATUS's and at least the sum of that reason over the rows written (a SATURATED status excepted). */
+int auto_writer_status(auto_writer *, uint16_t flags, const uint64_t counters[15],
+                       const uint64_t ranges[AUTO_RANGE_REASONS]);
 /* REPORT_RING CONFIG (ring_bytes nonzero) only, and the only STATUS such a config accepts. ring[8]: issued blocks,
  * retired blocks, published ring label, held extents, copied bytes, untouched-state and restored-state flushes, decoded
  * words. Refused unless retired <= issued, held == issued - retired, the label is even, at most 2 x issued and at
@@ -45,5 +50,5 @@ int auto_writer_status(auto_writer *, uint16_t flags, const uint64_t counters[15
  * reject[3]: the decoder's first rejected header, its byte offset and reason 1..AUTO_STATUS_RING_REJECT_MAX, or all
  * zero; a held extent requires LOWER_BOUND on a FINAL status. */
 int auto_writer_status_ring(auto_writer *, uint16_t flags, const uint64_t counters[15], const uint64_t ring[8],
-                            const uint32_t reject[3]);
+                            const uint32_t reject[3], const uint64_t ranges[AUTO_RANGE_REASONS]);
 #endif

@@ -143,3 +143,31 @@ fn empty_state_when_no_tags() {
     assert_eq!(drawn.range_rows, 0);
     assert_eq!(drawn.frame_rows, 0);
 }
+
+/// The Passes page lists the frames whose rows count refused AUTO ranges, by reason, beside the range rows, with the
+/// capture total from the last STATUS; a 1023/11 capture lists its counts without reasons and no capture total.
+#[test]
+fn refused_ranges_by_reason_per_frame() {
+    let path = fixture_path("range-reasons");
+    let bytes = std::fs::read(&path).expect("read fixture");
+    let doc = Document::from_bytes(path.clone(), &bytes);
+    let drawn = render(&doc.passes);
+    assert_eq!(drawn.refused_rows, 2);
+    assert_eq!(drawn.refused, vec![
+        (0, 10, "depth 1, segment_build 1, state 1, ring 1, no_descriptor 5, unmatched_end 1".to_string()),
+        (1, 5, "no_pair 1, other_frame 1, no_metadata 3".to_string()),
+    ]);
+    assert_eq!(drawn.refused_total, "capture total >= 16 (depth 1, segment_build 1, state 1, no_frame 1, ring 1, \
+        no_descriptor 5, no_pair 1, other_frame 1, no_metadata 3, unmatched_end 1) (last STATUS)");
+    // the per-frame counts are the CLI's
+    let json = by_tag_json(&path);
+    for (f, (frame, n, _)) in json["frames"].as_array().unwrap().iter().zip(drawn.refused.iter()) {
+        assert_eq!((f["frame"].as_u64(), f["ranges_refused"].as_u64()), (Some(*frame), Some(u64::from(*n))));
+    }
+    let path = fixture_path("tags");
+    let doc = Document::from_bytes(path.clone(), &std::fs::read(&path).unwrap());
+    let drawn = render(&doc.passes);
+    assert_eq!(drawn.refused.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(), vec![(0, 3), (1, 10)]);
+    assert!(drawn.refused.iter().all(|r| r.2 == "not recorded by this writer"));
+    assert!(drawn.refused_total.starts_with("capture total UNAVAILABLE"), "{}", drawn.refused_total);
+}

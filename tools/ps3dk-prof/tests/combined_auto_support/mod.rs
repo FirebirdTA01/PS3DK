@@ -13,7 +13,7 @@ pub fn get32(b: &[u8], at: usize) -> u32 { u32::from_le_bytes(b[at..at+4].try_in
 pub fn repair(b: &mut [u8]) { let n=b.len()-4; let c=crc32(&b[..n]); put32(b,n,c); }
 
 pub fn config(mask: u32) -> Chunk {
-    let tagged=mask==1023; let mut b=vec![0; if tagged {176}else{160}];
+    let tagged=mask==1023||mask==3071; let mut b=vec![0; if tagged {176}else{160}];
     put16(&mut b,0,1); put32(&mut b,4,1);
     let width=if tagged {160}else if mask>=63 {144}else{128};
     for (i,n) in [D,1,OWNER,1,mask,if mask==7 {15}else{11},1024,1024,239,238,504,1024,256,width].into_iter().enumerate() {

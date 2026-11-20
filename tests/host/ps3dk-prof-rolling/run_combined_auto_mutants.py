@@ -22,9 +22,9 @@ SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
 # Reviewed LF hashes: C110 set plus the integration PREINIT_FOREIGN mask and
 # sticky-bit change (ordinary-source/old-C RED in gate137).
 PINS = {
-    "roll_combined2.c": 'c6b9deb18059bb459d0cc99bae551c9dec05e730872ab0a517ee56174615d454',
+    "roll_combined2.c": 'd690a550814c25cc6d46c4eece72453330ce2777b89fe5fb1ac3aa27da3f69ac',
     "roll_combined2.h": '5cc46860e697320289fd9b864b0dbb33b609711a588db9c8b1a0841a8f05ca8e',
-    "roll_combined2_auto.h": 'c02b732fa6e1759cef33f92adf2854ece2c877aa5ed0b51929c01133cc8548b1',
+    "roll_combined2_auto.h": '40f336f61a87dffd1d1d01971d07c799c55d31d48afd8450d3728aa982370c64',
     "roll_combined2_fifo.h": '49e2976f7a04f6eb4224825014eeb823da43fc764473c67fc799fecc685a4bb8',
     "roll_combined.c": 'b4f5f050acc187615c32a73fc07aa403a4dbd490d033346b598af9bdd5c4f5d1',
     "roll_combined.h": '0990f047c5bfd0575e5f627e0a0729ebed325fca16ba61a76140427558812431',

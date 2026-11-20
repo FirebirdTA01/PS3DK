@@ -603,13 +603,20 @@ jobs:
           done
           python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer"
           python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-address" --sanitize
-          for mutant in retry-sink refused-data early-account omit-conflict publication-regression; do
+          for mutant in retry-sink refused-data early-account omit-conflict publication-regression ranges-below-rows ranges-decrease; do
             python3 tests/sdk/auto-writer-test.py --out "$RUNNER_TEMP/auto-writer-$mutant" --mutant "$mutant"
           done
-          for case in noinit lease init race ops conflict reset stop stopvisit stopvisitseal frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue windowcallafter windowlate flips present spanning fifofail fifopre fifopost seal preinit preinitthread preinitold preinitfail; do
+          for case in noinit lease init race ops conflict reset stop stopvisit stopvisitseal frames clocks clockcap segments extsegments segcapacity segmetatail segbuild segnested callbracket labels tags rangereasons rangesat windows windowseal windowwhole windownone windowprebuild windowhandoff windowhandoffu windowqueue windowcallafter windowlate flips present spanning fifofail fifopre fifopost seal preinit preinitthread preinitold preinitfail; do
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --out "$RUNNER_TEMP/auto-runtime-$case"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize address --out "$RUNNER_TEMP/auto-runtime-$case-address"
             python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case "$case" --sanitize thread --out "$RUNNER_TEMP/auto-runtime-$case-thread"
+          done
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case rangereasons --reader tools/target/debug/ps3dk-prof --out "$RUNNER_TEMP/auto-runtime-rangereasons-reader"
+          python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case rangesat --reader tools/target/debug/ps3dk-prof --out "$RUNNER_TEMP/auto-runtime-rangesat-reader"
+          # range refusals by reason: two reasons merged, a row count skipped, the STATUS tail not encoded, the totals
+          # not handed to the STATUS
+          for mutant in range-merge-pair-descriptor range-row-uncounted range-status-dropped range-totals-unwritten; do
+            python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case rangereasons --mutant "$mutant" --reader tools/target/debug/ps3dk-prof --out "$RUNNER_TEMP/auto-runtime-$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case stop --mutant reject-late-end --out "$RUNNER_TEMP/auto-runtime-stop-mutant"
           python3 tests/host/ps3dk-prof-runtime/auto-runtime-test.py --case stopvisit --mutant ignore-global-stop --out "$RUNNER_TEMP/auto-runtime-stopvisit-mutant"

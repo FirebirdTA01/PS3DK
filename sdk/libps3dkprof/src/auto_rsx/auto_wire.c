@@ -90,33 +90,44 @@ size_t auto_encode_frame(uint8_t *b, size_t cap, const auto_wire_frame *f)
     le32(b+440,f->ranges_refused);
     le64(b+448,f->flip_wait_at[0][0]); le64(b+456,f->flip_wait_at[0][1]);
     le64(b+464,f->flip_wait_at[1][0]); le64(b+472,f->flip_wait_at[1][1]);
+    for(i=0;i<AUTO_RANGE_REASONS;i++) le32(b+480+4*i,f->range_refused[i]);
     return AUTO_FRAME_BYTES;
 }
 
-size_t auto_encode_status(uint8_t *b, size_t cap, uint32_t instance, uint16_t flags, const uint64_t counters[15])
+size_t auto_encode_status(uint8_t *b, size_t cap, uint32_t instance, uint16_t flags, const uint64_t counters[15],
+                          const uint64_t *ranges)
 {
     unsigned i;
-    if(!b || !counters || cap<AUTO_STATUS_BYTES) return 0;
-    memset(b,0,AUTO_STATUS_BYTES);
+    size_t bytes=ranges ? AUTO_STATUS_BYTES:AUTO_STATUS_REFUSED_BYTES;
+    if(!b || !counters || cap<bytes) return 0;
+    memset(b,0,bytes);
     le16(b,1); le16(b+2,flags); le32(b+4,instance);
     for(i=0;i<15;i++) le64(b+8+i*8,counters[i]);
-    return AUTO_STATUS_BYTES;
+    if(ranges) for(i=0;i<AUTO_RANGE_REASONS;i++) le64(b+128+8*i,ranges[i]);
+    return bytes;
 }
 size_t auto_encode_frame_ring(uint8_t *b,size_t cap,const auto_wire_frame *f)
 {
+    unsigned i;
     if(!b || !f || cap<AUTO_FRAME_RING_BYTES) return 0;
     if(!auto_encode_frame(b,cap,f)) return 0;
-    for(unsigned i=0;i<3;i++) {le64(b+480+8*i,f->ring_full[i]);le64(b+504+8*i,f->ring_state[i]);}
+    memset(b+480,0,AUTO_FRAME_RING_BYTES-480);
+    for(i=0;i<3;i++) {le64(b+480+8*i,f->ring_full[i]);le64(b+504+8*i,f->ring_state[i]);}
+    for(i=0;i<AUTO_RANGE_REASONS;i++) le32(b+528+4*i,f->range_refused[i]);
     return AUTO_FRAME_RING_BYTES;
 }
 size_t auto_encode_status_ring(uint8_t *b,size_t cap,uint32_t instance,uint16_t flags,
-                               const uint64_t counters[15],const uint64_t ring[8],const uint32_t reject[3])
+                               const uint64_t counters[15],const uint64_t ring[8],const uint32_t reject[3],
+                               const uint64_t ranges[AUTO_RANGE_REASONS])
 {
-    if(!b || !counters || !ring || !reject || cap<AUTO_STATUS_RING_BYTES) return 0;
-    if(!auto_encode_status(b,cap,instance,flags,counters)) return 0;
-    for(unsigned i=0;i<8;i++) le64(b+128+8*i,ring[i]);
-    for(unsigned i=0;i<3;i++) le32(b+192+4*i,reject[i]);
+    unsigned i;
+    if(!b || !counters || !ring || !reject || !ranges || cap<AUTO_STATUS_RING_BYTES) return 0;
+    memset(b,0,AUTO_STATUS_RING_BYTES);
+    if(!auto_encode_status(b,cap,instance,flags,counters,NULL)) return 0;
+    for(i=0;i<8;i++) le64(b+128+8*i,ring[i]);
+    for(i=0;i<3;i++) le32(b+192+4*i,reject[i]);
     le32(b+204,0);
+    for(i=0;i<AUTO_RANGE_REASONS;i++) le64(b+208+8*i,ranges[i]);
     return AUTO_STATUS_RING_BYTES;
 }
 

@@ -64,7 +64,7 @@ fn append(recipe:&str)->Run{
     let r=run(&format!("append-{recipe}"));let b=bounded(&r.dir.join("capture.prof"),16<<20);let a=analyse(&b);let o=offsets(&b);
     assert!(a.capture.trailer.is_some());assert_eq!(a.capture.profile.as_ref().unwrap().profile_id,"SCHEMA2-HOST");
     let auto=a.capture.auto.as_ref().unwrap();let cfg=auto.config.as_ref().unwrap().attached().unwrap();
-    assert_eq!(cfg.kind_mask,2047);assert_eq!(cfg.form_mask,11);assert!(auto.final_seen);
+    assert_eq!(cfg.kind_mask,4095);assert_eq!(cfg.form_mask,11);assert!(auto.final_seen);
     let draws:Vec<_>=auto.ops.iter().filter(|x|x.covered()).collect();
     assert_eq!(draws.len(),if recipe=="rotation"{47_020}else{31});assert_eq!(r.meta["draws"],draws.len());
     assert!(draws.iter().all(|x|x.kind==3&&x.raw_valid()&&x.raw_end>x.raw_begin&&x.ring.is_some()));

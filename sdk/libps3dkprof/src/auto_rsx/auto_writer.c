@@ -34,7 +34,7 @@ int auto_writer_begin(auto_writer *w)
         w->config_sent=1;
     }
     if(c->reason) {
-        n=auto_encode_status(w->scratch,w->capacity,c->instance,AUTO_FINAL,zero);
+        n=auto_encode_status(w->scratch,w->capacity,c->instance,AUTO_FINAL,zero,NULL);
         if(send(w,C_AUTO_STATUS,n)) w->closed=1;
         return 0;
     }
@@ -76,6 +76,10 @@ int auto_writer_frame(auto_writer *w, const auto_wire_frame *frame)
                                                 auto_encode_frame(w->scratch,w->capacity,frame);
     if(!send(w,C_AUTO_COVERAGE,n)) return 0;
     w->frames_written++;
+    for(unsigned i=0;i<AUTO_RANGE_REASONS;i++) {
+        uint64_t *v=&w->row_ranges[i];
+        *v=UINT64_MAX-*v<frame->range_refused[i] ? UINT64_MAX:*v+frame->range_refused[i];
+    }
     return 1;
 }
 
@@ -91,24 +95,25 @@ int auto_writer_clock(auto_writer *w, const auto_wire_clock *clock)
 }
 
 static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring,
-                         const uint32_t *reject);
-int auto_writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15])
+                         const uint32_t *reject, const uint64_t *ranges);
+int auto_writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15],
+                       const uint64_t ranges[AUTO_RANGE_REASONS])
 {
-    return writer_status(w,flags,values,NULL,NULL);
+    return writer_status(w,flags,values,NULL,NULL,ranges);
 }
 int auto_writer_status_ring(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t ring[8],
-                            const uint32_t reject[3])
+                            const uint32_t reject[3], const uint64_t ranges[AUTO_RANGE_REASONS])
 {
-    return ring && reject ? writer_status(w,flags,values,ring,reject):0;
+    return ring && reject ? writer_status(w,flags,values,ring,reject,ranges):0;
 }
 static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[15], const uint64_t *ring,
-                         const uint32_t *reject)
+                         const uint32_t *reject, const uint64_t *ranges)
 {
     const auto_wire_config *c;
     uint64_t disposed;
     unsigned i;
     size_t n;
-    if(!auto_writer_begin(w) || !values || (flags&~4095u)) return 0;
+    if(!auto_writer_begin(w) || !values || !ranges || (flags&~4095u)) return 0;
     c=auto_config_read(w->config);
     flags|=(uint16_t)auto_config_flags(w->config);
     flags|=w->sticky;
@@ -119,6 +124,10 @@ static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[1
        values[13]<w->publication_max || values[13]>UINT32_MAX) return 0;
     if(w->status_seen) for(i=0;i<15;i++) {
         if(i!=4 && i!=14 && values[i]<w->prior[i]) return 0;
+    }
+    for(i=0;i<AUTO_RANGE_REASONS;i++) {
+        if(w->status_seen && ranges[i]<w->prior_ranges[i]) return 0;
+        if(!(flags&AUTO_SATURATED) && ranges[i]<w->row_ranges[i]) return 0;
     }
     if(!(flags&AUTO_SATURATED)) {
         if(UINT64_MAX-values[2]<values[3]) return 0;
@@ -138,10 +147,11 @@ static int writer_status(auto_writer *w, uint16_t flags, const uint64_t values[1
         if((flags&AUTO_FINAL) && !(flags&AUTO_LOWER_BOUND) && ring[3]) return 0;
         if(reject[2]>AUTO_STATUS_RING_REJECT_MAX || (!reject[2] && (reject[0] || reject[1]))) return 0;
     }
-    n=ring ? auto_encode_status_ring(w->scratch,w->capacity,c->instance,flags,values,ring,reject):
-             auto_encode_status(w->scratch,w->capacity,c->instance,flags,values);
+    n=ring ? auto_encode_status_ring(w->scratch,w->capacity,c->instance,flags,values,ring,reject,ranges):
+             auto_encode_status(w->scratch,w->capacity,c->instance,flags,values,ranges);
     if(!send(w,C_AUTO_STATUS,n)) return 0;
     memcpy(w->prior,values,sizeof w->prior); w->status_seen=1;
+    memcpy(w->prior_ranges,ranges,sizeof w->prior_ranges);
     w->sticky=flags&(AUTO_SATURATED|AUTO_STATUS_CONFLICT|AUTO_STATUS_RESET|AUTO_STATUS_SEGMENT_QUARANTINE|
                                 AUTO_STATUS_FRAME_MARK_MISSED|AUTO_STATUS_FRAMES_FLIP|AUTO_STATUS_FRAMES_EXPLICIT|
                                 AUTO_STATUS_SEGMENT_REPLAY|AUTO_STATUS_PREINIT_FOREIGN);

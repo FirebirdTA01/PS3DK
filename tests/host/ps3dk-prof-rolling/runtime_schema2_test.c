@@ -199,7 +199,11 @@ int __wrap_ps3dk_prof__fifo_emit_chunk(prof *p,uint32_t ty,const uint8_t *b,size
     s2_late_emit_after(ty,b,rc);
 #endif
     if(!rc&&ty==36){
-        S2(bytes==528,"actual-ring-coverage-width");
+        /* 4095/11: the 528-byte ring row plus the range-refusal tail (u32 x16 at 528; slots 10..15 zero) */
+        S2(bytes==592,"actual-ring-coverage-width");
+        {uint32_t refused=0;for(unsigned slot=0;slot<16;++slot){uint32_t v=s2_r32(b+528+4*slot);
+            if(slot<10)refused+=v;else S2(!v,"actual-ring-reason-reserved");}
+         S2((b[2]&4u)||refused==s2_r32(b+440),"actual-ring-reasons-sum");}
         for(unsigned k=0;k<3;++k){const uint8_t *row=b+64+96*k;
             s2_covered+=s2_r64(row);s2_timed+=s2_r64(row+8);s2_room+=s2_r64(row+16);
             for(unsigned column=3;column<12;++column)s2_other_excluded+=s2_r64(row+8*column);
