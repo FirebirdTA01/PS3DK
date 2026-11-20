@@ -24,7 +24,7 @@ PINS = {
     "tools/ps3dk-prof/src/rolling_combined.rs": '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
     "tools/ps3dk-prof/src/rolling_combined_families.rs": 'c12ee3549813d5d970b45a921bf01aa370754b634c47a8d5761e492793ce10de',
     "tools/ps3dk-prof/src/rolling_combined_checkpoint.rs": '12e6a9c8e2ea81f61754409d5b22513a974bdf598ce5a61317589143ad56c71b',
-    "tools/ps3dk-prof/src/rolling_auto.rs": 'cde2c1bb4dd8ec9fe90925c6f5b911ec42f2bd6664dfc0d344acd22694bec1d0',
+    "tools/ps3dk-prof/src/rolling_auto.rs": 'df46a1d694c2c9a771a2de45d5826b23d9fe44f57d180c2bffeb38d488840df3',
     "tools/ps3dk-prof/src/rolling_fifo.rs": '375c0ce06679b87b19e172f7d8208a0d5976b2bddb5cad13933e91bb519a2be1',
     "tools/ps3dk-prof/src/rolling_family_positions.rs": '4a35d04cc6c5e8bd2491a107ecea0691820273dbc04b5e6d22717b9eba8d76af',
     "tools/ps3dk-prof/tests/rolling_combined_auto.rs": '2f546661875ba3ccaf5c2eea3c0880a32bd769c89ec3b8448cfa27e41e221c99',

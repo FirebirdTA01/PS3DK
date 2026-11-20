@@ -21,14 +21,14 @@ import tomllib
 
 sys.dont_write_bytecode = True
 PINS = {
-    "tools/ps3dk-prof/src/rolling_auto.rs": 'cde2c1bb4dd8ec9fe90925c6f5b911ec42f2bd6664dfc0d344acd22694bec1d0',
-    "tools/ps3dk-prof/src/auto_rsx.rs": 'd8b622344804fcfb6f5b22fc97ae929ab6237b6a2b58bb3160747bddf7dd8380',
+    "tools/ps3dk-prof/src/rolling_auto.rs": 'df46a1d694c2c9a771a2de45d5826b23d9fe44f57d180c2bffeb38d488840df3',
+    "tools/ps3dk-prof/src/auto_rsx.rs": 'ebd2ca4451c6627ee1500e8c2cff75cf966baf913c1fe5422f4406bf56fdb14b',
     "tools/ps3dk-prof/src/rolling_combined.rs": '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
     "tools/ps3dk-prof/src/rolling_combined_families.rs": 'c12ee3549813d5d970b45a921bf01aa370754b634c47a8d5761e492793ce10de',
     "tools/ps3dk-prof/tests/rolling_auto_ring.rs": '849f4dc947766fe7269ae17ab961de78bf6370cf5551820d6535c64f9a014744',
     "tools/ps3dk-prof/tests/common/mod.rs": '017b82c022e5cc48fc28200ef03a715694a6d494326f061e3f2d55b5472f86ce',
     "tools/ps3dk-prof/tests/fifo_support/mod.rs": '85499b092bd730184c938f5bc02d8e7f5f425c3502d048dc2079312fcf7dbed7',
-    "tools/ps3dk-prof/tests/combined_auto_support/mod.rs": 'aeda010c8eca42b020f79c754a0279765f6f90f474b54326c04756016a80d993',
+    "tools/ps3dk-prof/tests/combined_auto_support/mod.rs": '5a90282b0c02dab6be0c1f1c4de3c44867521fdfc8578b045fb0da0f05baa914',
     "tests/host/ps3dk-prof-rolling/run_counter_transfer_mutants.py": '0bd6c258eb6eefd390df4f7931deef820f1ebbc4d74e5ef932fd57c1c4299ece',
 }
 AUTO = "tools/ps3dk-prof/src/rolling_auto.rs"

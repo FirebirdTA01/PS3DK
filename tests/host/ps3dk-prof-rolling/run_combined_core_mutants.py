@@ -21,9 +21,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 SRC = ROOT / 'sdk/libps3dkprof/src/rolling'
 PINS = dict(SHARED_PINS, **{
-    'roll_combined2.c': 'c6b9deb18059bb459d0cc99bae551c9dec05e730872ab0a517ee56174615d454',
+    'roll_combined2.c': 'd690a550814c25cc6d46c4eece72453330ce2777b89fe5fb1ac3aa27da3f69ac',
     'roll_combined2.h': '5cc46860e697320289fd9b864b0dbb33b609711a588db9c8b1a0841a8f05ca8e',
-    'roll_combined2_auto.h': 'e6c09a88a87f994d7afba4ba8d2424085e1f283c0667b0cbbd63aacdbe7a9ec1',
+    'roll_combined2_auto.h': '449e56428ebd86df12d07d7e3b0a9ee727f9b85dbc9223224f540547a9e66374',
     'roll_combined2_fifo.h': '49e2976f7a04f6eb4224825014eeb823da43fc764473c67fc799fecc685a4bb8',
 })
 ORDINAL = 'c_fifo_schema2_interleaved_spu_status_replacement_preserves_original_support_ordinals'
