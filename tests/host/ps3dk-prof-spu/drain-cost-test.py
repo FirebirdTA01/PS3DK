@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 p = argparse.ArgumentParser(description=__doc__)
@@ -36,6 +37,32 @@ r = subprocess.run([str(exe), '--cost-gate'], capture_output=True, text=True, ti
 (out / 'stderr').write_text(r.stderr)
 (out / 'rc').write_text(str(r.returncode) + '\n')
 rows = [json.loads(line) for line in r.stdout.splitlines()]
+
+
+def fault_report(rc):
+    # A signal leaves nothing on stderr: name the faulting site from the same build under gdb (when present) and
+    # under ASan/UBSan, so a fault seen only on one host is diagnosable from the job log alone.
+    lines = [f'drain-cost gate died by signal {-rc} after {len(rows)} of 8 rows']
+    if shutil.which('gdb'):
+        g = subprocess.run(['gdb', '-q', '-batch', '-ex', 'run', '-ex', 'bt 24', '-ex', 'info registers rip',
+                            '--args', str(exe), '--cost-gate'], capture_output=True, text=True, timeout=300)
+        (out / 'gdb.log').write_text(g.stdout + g.stderr)
+        lines += ['gdb:'] + [x for x in (g.stdout + g.stderr).splitlines() if x.startswith(('#', 'Program', 'rip'))][:30]
+    sanexe = out / 'drain-cost-asan-fault'
+    b = subprocess.run([*cmd[:-2], '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
+                        '-fno-omit-frame-pointer', '-o', str(sanexe)], capture_output=True, text=True)
+    if not b.returncode:
+        f = subprocess.run([str(sanexe), '--cost-gate'], capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, ASAN_OPTIONS='detect_leaks=0', UBSAN_OPTIONS='halt_on_error=1'))
+        (out / 'asan-fault.log').write_text(f.stdout + f.stderr)
+        lines += [f'ASan/UBSan build: rc {f.returncode}'] + f.stderr.splitlines()[:40]
+    else:
+        lines += ['ASan/UBSan build failed: ' + b.stderr[-1000:]]
+    return '\n'.join(lines)
+
+
+if r.returncode < 0:
+    raise SystemExit(fault_report(r.returncode))
 if r.returncode or r.stderr or len(rows) != 8:
     raise SystemExit(r.stderr or f'missing work-budget results (rc {r.returncode}, {len(rows)} of 8 rows)')
 # Baseline bec5c964c: exact original chunk types, lengths and payloads. Times and
