@@ -30,16 +30,19 @@ pub struct XConfig {
     pub programs: u32,
     pub labels: u32,
     pub label_bytes: u32,
+    /// 1: draws and programs only; 2: also BASELINE and STATE register records.
+    pub decoder: u32,
 }
 impl Default for XConfig {
     fn default() -> Self {
-        XConfig { schema: 1, availability: 0, block_bytes: 256 << 10, blocks: 2, programs: 512, labels: 256, label_bytes: 63 }
+        XConfig { schema: 1, availability: 0, block_bytes: 256 << 10, blocks: 2, programs: 512, labels: 256, label_bytes: 63,
+            decoder: 1 }
     }
 }
 impl XConfig {
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
-        b.u16(self.schema).u16(0).u32(1).u32(self.availability).u32(self.block_bytes).u32(self.blocks)
+        b.u16(self.schema).u16(0).u32(self.decoder).u32(self.availability).u32(self.block_bytes).u32(self.blocks)
             .u32(self.programs).u32(self.labels).u32(self.label_bytes);
         b.0.extend_from_slice(&[0; 32]);
         chunk(T_CONFIG, b.0)
@@ -186,11 +189,22 @@ pub struct XEnd {
     pub reject: (u32, u32),
     pub lost_events: u32,
     pub untimed: u32,
+    /// BASELINE register pairs and STATE records (offsets 100 and 116).
+    pub baseline: u32,
+    pub states: u32,
+    /// VPCONST, FPCONST and UNIFORM records (offsets 104, 108 and 120).
+    pub vpcs: u32,
+    pub fpcs: u32,
+    pub unis: u32,
+    /// UCODE records (offset 124).
+    pub ucodes: u32,
 }
 impl XEnd {
     pub fn done(id: u32) -> Self {
         XEnd { id, outcome: 1, reason: 0, n: [0, 0, 0, 0, 0, 0, 0, u32::MAX, 0, 0, 0, 0], bytes: (0, 0), tb_end: 9000,
-            decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0 }
+            decoder_words: 1234, reject: (0, 0), lost_events: 0, untimed: 0,
+            baseline: 0, states: 0, vpcs: 0, fpcs: 0, unis: 0,
+            ucodes: 0 }
     }
     pub fn chunk(&self) -> Chunk {
         let mut b = Buf::default();
@@ -199,7 +213,8 @@ impl XEnd {
             b.u32(v);
         }
         b.u64(self.bytes.0).u64(self.bytes.1).u64(self.tb_end).u64(self.decoder_words).u32(self.reject.0)
-            .u32(self.reject.1).u32(self.lost_events).u32(0).u64(0).u32(self.untimed).u32(0).u64(0);
+            .u32(self.reject.1).u32(self.lost_events).u32(self.baseline).u32(self.vpcs).u32(self.fpcs).u32(self.untimed)
+            .u32(self.states).u32(self.unis).u32(self.ucodes);
         chunk(T_END, b.0)
     }
 }
@@ -230,6 +245,31 @@ pub fn with_rsxf(base: &[u8], extra: Vec<Chunk>) -> File {
 
 pub fn tags_fixture() -> Vec<u8> {
     std::fs::read(format!("{}/../ps3dk-prof/tests/fixtures/auto/tags.prof", env!("CARGO_MANIFEST_DIR"))).unwrap()
+}
+
+/// `tags_fixture()` with AUTO op `id` (a CLEAR) turned into an ARRAY op (kind 1, its CLEAR-only argument 6 cleared),
+/// for the class rules of inline and immediate draws: the fixture itself has only CLEAR draw operations.
+pub fn tags_with_array_op(id: u64) -> Vec<u8> {
+    let (flags, mut chunks) = parse_chunks(&tags_fixture());
+    let mut patched = 0;
+    for c in chunks.iter_mut().filter(|c| c.ty == 35) {
+        let count = u32::from_le_bytes(c.payload[8..12].try_into().unwrap()) as usize;
+        let width = u32::from_le_bytes(c.payload[12..16].try_into().unwrap()) as usize;
+        for i in 0..count {
+            let r = 16 + i * width;
+            let op = u64::from_le_bytes(c.payload[r..r + 8].try_into().unwrap());
+            let kind = u16::from_le_bytes(c.payload[r + 12..r + 14].try_into().unwrap());
+            if op == id && kind == 3 {
+                c.payload[r + 12..r + 14].copy_from_slice(&1u16.to_le_bytes());
+                c.payload[r + 64 + 24..r + 64 + 28].copy_from_slice(&0u32.to_le_bytes());
+                patched += 1;
+            }
+        }
+    }
+    assert_eq!(patched, 1, "CLEAR op {id} in tags.prof");
+    let mut f = File::new(chunks);
+    f.flags = flags;
+    f.bytes()
 }
 
 /// The AUTO operations of `base` a sample capture binds to: (owner, frame) and its (id, kind) list of covered draws
@@ -315,7 +355,7 @@ pub fn binding(base: &[u8]) -> Binding {
 /// The sample: capture 1 "sample", live request 7, on the binding frame of tags.prof. Its draws, in order:
 /// every bound AUTO op as a timed hooked draw (labels "terrain/rock" on even ordinals, "water" on odd; VP 1 on all,
 /// FP 2 on all but the first), then one decoded-only INDEX draw, then one hooked draw untimed for report capacity
-/// (reason 3). Two blocks (sequences 0 and 2; block 1 dropped). Programs: 1 VP (stream), 2 FP (container, named
+/// (reason 3). Two blocks (sequences 0 and 1). Programs: 1 VP (stream), 2 FP (container, named
 /// "water.fpo"). END DONE.
 pub fn sample() -> (Vec<u8>, Binding) {
     let base = tags_fixture();
@@ -364,7 +404,7 @@ pub fn sample() -> (Vec<u8>, Binding) {
     let draws = bind.ops.len() as u32 + 2;
     let mut end = XEnd::done(1);
     // blocks, dropped, seen, recorded, hooked, decoded-only, mismatches, truncated_at, programs, labels, refused x2
-    end.n = [2, 1, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
+    end.n = [2, 0, ordinal, draws, draws - 1, 1, 0, u32::MAX, 2, 2, 0, 0];
     end.bytes = ((recs1.0.len() + recs2.0.len()) as u64, 0);
     end.untimed = 2;
     let begin = XBegin::live(1, bind.owner, bind.frame, "sample");
@@ -372,8 +412,63 @@ pub fn sample() -> (Vec<u8>, Binding) {
         XConfig::default().chunk(),
         begin.chunk(),
         draws_chunk(1, 0, n1, &recs1.0),
-        draws_chunk(1, 2, n2, &recs2.0),
+        draws_chunk(1, 1, n2, &recs2.0),
         end.chunk(),
     ];
     (with_rsxf(&base, extra).bytes(), bind)
+}
+
+/// A BASELINE (type 5) or STATE (type 6) record: (register index, value) pairs.
+pub fn regs_rec(b: &mut Buf, ty: u16, ordinal: u32, flags: u16, pairs: &[(u16, u32)]) {
+    b.u16(ty).u16((16 + 8 * pairs.len()) as u16).u32(ordinal).u16(pairs.len() as u16).u16(flags).u32(0);
+    for &(i, v) in pairs {
+        b.u16(i).u16(0).u32(v);
+    }
+}
+
+/// A VPCONST record (type 7): (slot, known mask, words).
+pub fn vpc_rec(b: &mut Buf, ordinal: u32, flags: u16, e: &[(u16, u8, [u32; 4])]) {
+    b.u16(7).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(0);
+    for &(slot, mask, w) in e {
+        b.u16(slot).u8(mask).u8(0).u32(0);
+        for v in w {
+            b.u32(v);
+        }
+    }
+}
+
+/// An FPCONST record (type 8): (ucode offset, provenance, words as in memory).
+pub fn fpc_rec(b: &mut Buf, ordinal: u32, program: u32, flags: u16, e: &[(u32, [u8; 4], [u32; 4])]) {
+    b.u16(8).u16((16 + 24 * e.len()) as u16).u32(ordinal).u16(e.len() as u16).u16(flags).u32(program);
+    for &(off, prov, w) in e {
+        b.u32(off).u8(prov[0]).u8(prov[1]).u8(prov[2]).u8(prov[3]);
+        for v in w {
+            b.u32(v);
+        }
+    }
+}
+
+/// A UNIFORM record (type 9): (resource, count, kind, name).
+pub fn uni_rec(b: &mut Buf, program: u32, flags: u16, e: &[(u32, u16, u8, &str)]) {
+    b.u16(9).u16((16 + 40 * e.len()) as u16).u32(program).u16(e.len() as u16).u16(flags).u32(0);
+    for &(res, count, kind, name) in e {
+        b.u32(res).u16(count).u8(kind).u8(name.len() as u8);
+        let mut n = name.as_bytes().to_vec();
+        n.resize(32, 0);
+        b.0.extend_from_slice(&n);
+    }
+}
+
+/// A UCODE record (type 10): one part of a program's bytes.
+pub fn ucode_rec(b: &mut Buf, profile: u8, last: bool, part: u16, total: u32, hash: u64, offset: u32, data: &[u8]) {
+    let pad = (data.len() + 7) & !7;
+    b.u16(10).u16((32 + pad) as u16).u8(profile).u8(u8::from(last)).u16(part).u32(total).u64(hash).u32(offset)
+        .u32(data.len() as u32).u32(0);
+    b.0.extend_from_slice(data);
+    b.0.resize(b.0.len() + pad - data.len(), 0);
+}
+
+/// A SECOND record (type 11): the first ordinal and the frame of a BOTH capture's isolated frame.
+pub fn second_rec(b: &mut Buf, first: u32, frame: u64) {
+    b.u16(11).u16(16).u32(first).u64(frame);
 }

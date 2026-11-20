@@ -15,6 +15,8 @@ use std::io::{self, Write};
 use serde_json::{json, Value};
 
 use crate::auto_rsx::{self, Op};
+use crate::rsx_state::{self, Registers, VpConstants};
+use std::sync::Arc;
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
 
@@ -25,7 +27,15 @@ pub const CHUNK_DRAWS: u32 = 46;
 pub const CHUNK_PROGRAMS: u32 = 47;
 pub const CHUNK_END: u32 = 48;
 pub const SCHEMA: u16 = 1;
-pub const DECODER: u32 = 1;
+/// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records); 3
+/// also VP constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM).
+pub const DECODER: u32 = 4;
+pub const REC_UCODE: u16 = 10;
+pub const REC_SECOND: u16 = 11;
+/// Request / BEGIN flags.
+pub const REQ_ISOLATED: u16 = 1;
+pub const REQ_FP_BYTES: u16 = 2;
+pub const REQ_BOTH: u16 = 4;
 pub const CONFIG_BYTES: usize = 64;
 pub const BEGIN_FIXED: usize = 56;
 pub const DRAWS_HEADER: usize = 16;
@@ -34,6 +44,87 @@ pub const REC_DRAW: u16 = 1;
 pub const REC_PROGRAM: u16 = 2;
 pub const REC_LABEL: u16 = 3;
 pub const REC_NAME: u16 = 4;
+pub const REC_BASELINE: u16 = 5;
+pub const REC_STATE: u16 = 6;
+/// (register, value) pairs per BASELINE or STATE record, at most.
+pub const REG_PAIRS_MAX: usize = 255;
+pub const STATE_RESET: u16 = 1;
+pub const REC_VPCONST: u16 = 7;
+pub const REC_FPCONST: u16 = 8;
+pub const REC_UNIFORM: u16 = 9;
+pub const VPC_PER_REC: usize = 128;
+/// The smallest staging block (32 KiB): the largest per-draw unit (about 31 KiB) fits one, so a unit never spans blocks.
+pub const STAGING_MIN: u32 = 32 << 10;
+pub const FPC_MAX: usize = 32;
+pub const UNI_MAX: usize = 32;
+pub const UNI_NAME: usize = 32;
+pub const VPC_RESET: u16 = 1;
+pub const VPC_BASELINE: u16 = 2;
+
+/// Where one component of an FP embedded constant comes from. None of them is exact: the capture sees the owner's
+/// command stream, not memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The last inline transfer the decoder saw write this word in the owner's command stream. Not exact: a CPU write
+    /// after it, or a write the decoder could not see, is not reflected.
+    Inline,
+    /// The program container's value: no command-stream write to this word seen since attach, so a CPU write to the
+    /// copy in memory would not be seen; it may differ at GPU time.
+    Container,
+    /// Unknown: the decoder reset or its inline-write map was full since attach, an M2MF copy wrote the word's range,
+    /// or a different program was placed at this address after an inline write there (the container's value is shown).
+    Unknown,
+}
+impl Provenance {
+    pub fn name(self) -> &'static str {
+        match self {
+            Provenance::Inline => "last inline write seen",
+            Provenance::Container => "container (may differ at GPU time)",
+            Provenance::Unknown => "unknown",
+        }
+    }
+}
+
+/// One FP embedded constant at a draw: its ucode byte offset, the provenance of each component and the words as in
+/// memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FpConstant {
+    pub offset: u32,
+    pub provenance: [Provenance; 4],
+    pub words: [u32; 4],
+}
+impl FpConstant {
+    pub fn floats(&self) -> [f32; 4] {
+        self.words.map(rsx_state::fp_word_float)
+    }
+}
+
+/// The FP constants a draw ran with (an FPCONST record; carried to later draws until the next one).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FpConstants {
+    /// The FP PROGRAM index (0: unknown FP).
+    pub program: u32,
+    /// The program has more constant blocks than were captured.
+    pub truncated: bool,
+    pub entries: Vec<FpConstant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UniformKind {
+    /// A VP constant: `resource` is the first slot, `count` the slots of this table entry.
+    VpConstant,
+    /// An FP embedded constant: `resource` is the first ucode offset it is patched at, `count` the offsets.
+    FpEmbedded,
+}
+
+/// One named uniform of a program (UNIFORM record, from the container's parameter table at bind).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uniform {
+    pub name: String,
+    pub kind: UniformKind,
+    pub resource: u32,
+    pub count: u32,
+}
 pub const DRAW_BYTES: usize = 96;
 pub const PROGRAM_BYTES: usize = 48;
 pub const NAME_MAX: usize = 63;
@@ -93,6 +184,8 @@ pub struct Config {
     pub program_capacity: u32,
     pub label_capacity: u32,
     pub label_bytes: u32,
+    /// FP ucode bytes a capture stores at most when they are requested (decoder 4; 0 before).
+    pub fp_bytes_cap: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +200,8 @@ pub struct Begin {
     pub source: Source,
     pub isolated: bool,
     pub program_bytes: bool,
+    /// Two consecutive frames: the first pipelined, the second isolated (a SECOND record marks the second).
+    pub both: bool,
     pub request_id: u32,
     pub owner: u32,
     pub frame: u64,
@@ -148,13 +243,14 @@ impl DrawKind {
             DrawKind::Immediate => "IMMEDIATE",
         }
     }
-    /// The AUTO operation kind that times this draw kind (None: AUTO has no kind for it yet).
+    /// The AUTO operation kind that times this draw kind. Inline-array and immediate draws are timed as operations of
+    /// the ARRAY class and inline-index draws of the INDEX class (the AUTO tables keep three kinds); the capture keeps
+    /// the real kind.
     pub fn auto_kind(self) -> Option<u16> {
         match self {
-            DrawKind::Array => Some(auto_rsx::KIND_ARRAY),
-            DrawKind::Index => Some(auto_rsx::KIND_INDEX),
+            DrawKind::Array | DrawKind::InlineArray | DrawKind::Immediate => Some(auto_rsx::KIND_ARRAY),
+            DrawKind::Index | DrawKind::InlineIndex => Some(auto_rsx::KIND_INDEX),
             DrawKind::Clear => Some(auto_rsx::KIND_CLEAR),
-            _ => None,
         }
     }
 }
@@ -217,6 +313,15 @@ pub struct RawDraw {
     pub caller: u64,
     pub words: u32,
     pub tb: u64,
+    /// The STATE records before this draw: every register unknown first (a decoder reset), then these
+    /// (register index, value) pairs.
+    pub state_reset: bool,
+    pub state: Vec<(u16, u32)>,
+    /// The VPCONST records before this draw: every slot unknown first (a reset), then (slot, known mask, words).
+    pub vpc_reset: bool,
+    pub vpc: Vec<(u16, u8, [u32; 4])>,
+    /// The FPCONST record of this draw, if one was written (else the previous draw's list still applies).
+    pub fpc: Option<FpConstants>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -271,6 +376,9 @@ pub struct Program {
     pub first_draw: u32,
     /// The app-registered name (NAME record), if any.
     pub name: Option<String>,
+    /// Its uniforms (UNIFORM record; decoder 3), and whether the parameter table had more than were kept.
+    pub uniforms: Vec<Uniform>,
+    pub uniforms_truncated: bool,
 }
 impl Program {
     /// `vp:0123456789abcdef` (or `vp:unreadable`).
@@ -315,6 +423,15 @@ pub struct End {
     /// Draw events the decoder could not hand to the capture (0 in this release: every event is recorded at once).
     pub lost_events: u32,
     pub untimed: u32,
+    /// Register pairs in the BASELINE records, and STATE records (decoder 2; both 0 for decoder 1).
+    pub baseline_registers: u32,
+    pub state_records: u32,
+    /// VPCONST, FPCONST and UNIFORM records (decoder 3; 0 before).
+    pub vpconst_records: u32,
+    pub fpconst_records: u32,
+    pub uniform_records: u32,
+    /// UCODE records (decoder 4).
+    pub ucode_records: u32,
 }
 
 /// END reason text.
@@ -344,6 +461,29 @@ pub struct CaptureRecord {
     pub draws_not_retained: u64,
     /// Text fields (name, labels, program names) that were not valid UTF-8 and are shown with U+FFFD replacements.
     pub text_replaced: u32,
+    /// The register file at arming (BASELINE records): (register index, value), increasing.
+    pub baseline: Vec<(u16, u32)>,
+    /// STATE records parsed (also those of draws not retained).
+    pub state_records: u32,
+    /// The VP constants at arming (VPCONST BASELINE records): (slot, known mask, words), increasing.
+    pub vpc_baseline: Vec<(u16, u8, [u32; 4])>,
+    pub vpconst_records: u32,
+    pub fpconst_records: u32,
+    pub uniform_records: u32,
+    /// BOTH: the first ordinal and the frame of the second (isolated) frame (SECOND record).
+    pub second: Option<(u32, u64)>,
+    /// Program bytes (UCODE records), by (profile, hash).
+    pub ucode: BTreeMap<(Profile, u64), UcodeParts>,
+    pub ucode_records: u32,
+}
+
+/// One program's UCODE records so far: its length, the bytes in order, whether the last part was read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UcodeParts {
+    pub total: u32,
+    pub data: Vec<u8>,
+    pub parts: u32,
+    pub complete: bool,
 }
 
 /// The decoded family of one file: present exactly when file_flags bit 10 is.
@@ -363,6 +503,42 @@ pub struct Reader {
     last_ordinal: Option<u32>,
     by_hash: BTreeMap<(Profile, u64, bool), u32>,
     named: Vec<bool>,
+    /// STATE / VPCONST / FPCONST records read for the next DRAW.
+    pending: Option<PendingDraw>,
+    /// Programs that already have their UNIFORM record.
+    uniformed: Vec<bool>,
+    /// A DRAW or STATE record was read in the open capture (a BASELINE must come before both).
+    past_baseline: bool,
+}
+
+/// The per-draw records read so far for the next DRAW.
+#[derive(Debug, Default)]
+struct PendingDraw {
+    ordinal: u32,
+    state_any: bool,
+    state_reset: bool,
+    state: Vec<(u16, u32)>,
+    vpc_any: bool,
+    vpc_reset: bool,
+    vpc: Vec<(u16, u8, [u32; 4])>,
+    fpc: Option<FpConstants>,
+}
+
+/// The pending draw for `ordinal` (a new one when none is open): its records must all name the same next draw.
+fn pending_for<'a>(p: &'a mut Option<PendingDraw>, ordinal: u32, last: Option<u32>, what: &str)
+                   -> Result<&'a mut PendingDraw, Malformed> {
+    if last.is_some_and(|o| ordinal <= o) {
+        return bad(format!("{what} for draw {ordinal} after draw {}", last.unwrap()));
+    }
+    if let Some(d) = p.as_ref() {
+        if d.ordinal != ordinal {
+            return bad(format!("{what} for draw {ordinal} while draw {}'s are open", d.ordinal));
+        }
+    }
+    if p.is_none() {
+        *p = Some(PendingDraw { ordinal, ..PendingDraw::default() });
+    }
+    Ok(p.as_mut().expect("set above"))
 }
 
 fn bad<T>(msg: impl Into<String>) -> Result<T, Malformed> {
@@ -428,17 +604,18 @@ impl Reader {
         let program_capacity = c.u32()?;
         let label_capacity = c.u32()?;
         let label_bytes = c.u32()?;
-        zeros(&mut c, 32, "RSXF_CONFIG")?;
+        let fp_bytes_cap = c.u32()?;
+        zeros(&mut c, 28, "RSXF_CONFIG")?;
         if schema != SCHEMA {
             return bad(format!("RSXF_CONFIG schema {schema}"));
         }
-        if flags != 0 || decoder != DECODER {
+        if flags != 0 || !(1..=DECODER).contains(&decoder) {
             return bad(format!("RSXF_CONFIG flags {flags:#x} decoder {decoder}"));
         }
         let Some(availability) = Availability::of(avail) else {
             return bad(format!("RSXF_CONFIG availability {avail}"));
         };
-        if !(4096..=1 << 20).contains(&block_bytes) || block_bytes % 8 != 0 || !(1..=16).contains(&blocks)
+        if !(STAGING_MIN..=1 << 20).contains(&block_bytes) || block_bytes % 8 != 0 || !(1..=16).contains(&blocks)
             || !(1..=65535).contains(&program_capacity) || !(1..=65535).contains(&label_capacity)
             || !(1..=255).contains(&label_bytes)
         {
@@ -446,6 +623,9 @@ impl Reader {
                 "RSXF_CONFIG limits: block {block_bytes} x {blocks}, programs {program_capacity}, labels \
                  {label_capacity} x {label_bytes}"
             ));
+        }
+        if fp_bytes_cap > 16 << 20 || (decoder < 4 && fp_bytes_cap != 0) {
+            return bad(format!("RSXF_CONFIG FP bytes cap {fp_bytes_cap} with decoder {decoder}"));
         }
         self.result.config = Some(Config {
             decoder,
@@ -455,6 +635,7 @@ impl Reader {
             program_capacity,
             label_capacity,
             label_bytes,
+            fp_bytes_cap,
         });
         Ok(())
     }
@@ -500,7 +681,7 @@ impl Reader {
             2 => Source::App,
             s => return bad(format!("RSXF_BEGIN source {s}")),
         };
-        if flags & !3 != 0 || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
+        if flags & !7 != 0 || (flags & REQ_ISOLATED != 0 && flags & REQ_BOTH != 0) || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
             return bad(format!("RSXF_BEGIN flags {flags:#x} known {known:#x} name length {n}"));
         }
         if (source == Source::Live) != (request_id != 0) {
@@ -518,6 +699,7 @@ impl Reader {
                 source,
                 isolated: flags & 1 != 0,
                 program_bytes: flags & 2 != 0,
+                both: flags & REQ_BOTH != 0,
                 request_id,
                 owner,
                 frame,
@@ -534,11 +716,23 @@ impl Reader {
             end: None,
             draws_not_retained: 0,
             text_replaced: replaced,
+            baseline: Vec::new(),
+            state_records: 0,
+            vpc_baseline: Vec::new(),
+            vpconst_records: 0,
+            fpconst_records: 0,
+            uniform_records: 0,
+            second: None,
+            ucode: BTreeMap::new(),
+            ucode_records: 0,
         });
         self.open = true;
         self.last_ordinal = None;
         self.by_hash.clear();
         self.named.clear();
+        self.pending = None;
+        self.uniformed.clear();
+        self.past_baseline = false;
         Ok(())
     }
 
@@ -547,6 +741,7 @@ impl Reader {
             return bad("RSXF_DRAWS without an open capture");
         }
         let label_bytes = self.result.config.as_ref().expect("checked").label_bytes as usize;
+        let decoder = self.result.config.as_ref().expect("checked").decoder;
         let mut c = Cursor::new(p, "RSXF_DRAWS");
         let id = c.u32()?;
         let seq = c.u32()?;
@@ -556,8 +751,9 @@ impl Reader {
         if id != rec.begin.id {
             return bad(format!("RSXF_DRAWS for capture {id} while capture {} is open", rec.begin.id));
         }
-        if rec.block_seqs.last().is_some_and(|&s| seq <= s) {
-            return bad(format!("RSXF_DRAWS block sequence {seq} after {}", rec.block_seqs.last().unwrap()));
+        let want = rec.block_seqs.last().map_or(0, |&s| s.wrapping_add(1));
+        if seq != want {
+            return bad(format!("RSXF_DRAWS block sequence {seq}, expected {want} (blocks are written in order, none                 skipped)"));
         }
         if bytes != p.len() - DRAWS_HEADER.min(p.len()) || n == 0 {
             return bad(format!("RSXF_DRAWS: {n} records in {bytes} bytes, payload {}", p.len()));
@@ -605,6 +801,20 @@ impl Reader {
                         return bad(format!("draw ordinal {ordinal} after {}", self.last_ordinal.unwrap()));
                     }
                     self.last_ordinal = Some(ordinal);
+                    self.past_baseline = true;
+                    let pd = match self.pending.take() {
+                        Some(pd) if pd.ordinal == ordinal => pd,
+                        Some(pd) => return bad(format!("records for draw {} before draw {ordinal}", pd.ordinal)),
+                        None => PendingDraw::default(),
+                    };
+                    if let Some(f) = &pd.fpc {
+                        match f.program {
+                            0 => {}
+                            i if rec.programs.get(i as usize - 1).is_some_and(|p| p.profile == Profile::Fragment) => {}
+                            i => return bad(format!("draw {ordinal}: FPCONST for program {i}, not a defined FP")),
+                        }
+                    }
+                    let PendingDraw { state_reset, state, vpc_reset, vpc, fpc, .. } = pd;
                     if flags & !15 != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 || r1 != 0 {
                         return bad(format!("draw {ordinal}: flags {flags:#x}"));
                     }
@@ -648,6 +858,7 @@ impl Reader {
                     rec.draws.push(RawDraw {
                         ordinal, kind, flags, untimed, op_id, mode, first, count, index_offset, index_type,
                         index_location, clear_mask, tag, label, vp, fp, fp_address, vp_start, caller, words, tb,
+                        state_reset, state, vpc_reset, vpc, fpc,
                     });
                 }
                 REC_PROGRAM => {
@@ -692,7 +903,8 @@ impl Reader {
                     }
                     rec.programs.push(Program {
                         index, profile, source, unterminated: flags & 1 != 0, unreadable, not_revalidated, instructions, hash,
-                        ucode_bytes, const_blocks, address, first_draw, name: None,
+                        ucode_bytes, const_blocks, address, first_draw, name: None, uniforms: Vec::new(),
+                        uniforms_truncated: false,
                     });
                     self.named.push(false);
                 }
@@ -720,11 +932,241 @@ impl Reader {
                         rec.programs[i - 1].name = Some(s);
                     }
                 }
+                REC_BASELINE | REC_STATE => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 2 {
+                        return bad(format!("record type {ty} with decoder {decoder}"));
+                    }
+                    if len != 16 + 8 * n || n > REG_PAIRS_MAX || r0 != 0 {
+                        return bad(format!("register record type {ty}: length {len} for {n} pairs"));
+                    }
+                    let mut pairs = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let index = c.u16()?;
+                        let r = c.u16()?;
+                        let value = c.u32()?;
+                        if usize::from(index) >= rsx_state::REGS || r != 0 {
+                            return bad(format!("register record type {ty}: register {index}"));
+                        }
+                        pairs.push((index, value));
+                    }
+                    if ty == REC_BASELINE {
+                        if self.past_baseline || ordinal != 0 || flags != 0 || n == 0 {
+                            return bad("BASELINE after a draw, or with an ordinal, flags or no register");
+                        }
+                        let mut last = rec.baseline.last().map(|p| p.0);
+                        for &(i, _) in &pairs {
+                            if last.is_some_and(|l| i <= l) {
+                                return bad(format!("BASELINE register {i} not increasing"));
+                            }
+                            last = Some(i);
+                        }
+                        rec.baseline.extend(pairs);
+                    } else {
+                        self.past_baseline = true;
+                        let reset = flags & STATE_RESET != 0;
+                        if flags & !STATE_RESET != 0 || (n == 0 && !reset)
+                            || self.last_ordinal.is_some_and(|o| ordinal <= o)
+                        {
+                            return bad(format!("STATE for draw {ordinal}: flags {flags:#x}, {n} pairs"));
+                        }
+                        let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "STATE")?;
+                        if reset && pd.state_any {
+                            return bad(format!("STATE for draw {ordinal}: RESET on a later record"));
+                        }
+                        pd.state_any = true;
+                        pd.state_reset |= reset;
+                        for &(i, v) in &pairs {
+                            if pd.state.last().is_some_and(|l| i <= l.0) {
+                                return bad(format!("STATE for draw {ordinal}: register {i} not increasing"));
+                            }
+                            pd.state.push((i, v));
+                        }
+                        rec.state_records += 1;
+                    }
+                }
+                REC_VPCONST => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 3 || len != 16 + 24 * n || n > VPC_PER_REC || r0 != 0 {
+                        return bad(format!("VPCONST: length {len} for {n} slots, decoder {decoder}"));
+                    }
+                    let mut list = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let slot = c.u16()?;
+                        let mask = c.u8()?;
+                        let r = c.u8()?;
+                        let r2 = c.u32()?;
+                        let w = [c.u32()?, c.u32()?, c.u32()?, c.u32()?];
+                        if usize::from(slot) >= rsx_state::VP_CONSTS || mask == 0 || mask > 15 || r != 0 || r2 != 0 {
+                            return bad(format!("VPCONST: slot {slot} mask {mask:#x}"));
+                        }
+                        list.push((slot, mask, w));
+                    }
+                    if flags == VPC_BASELINE {
+                        if self.past_baseline || ordinal != 0 || n == 0 {
+                            return bad("VPCONST BASELINE after a draw, or with an ordinal or no slot");
+                        }
+                        let mut last = rec.vpc_baseline.last().map(|p| p.0);
+                        for e in &list {
+                            if last.is_some_and(|l| e.0 <= l) {
+                                return bad(format!("VPCONST BASELINE slot {} not increasing", e.0));
+                            }
+                            last = Some(e.0);
+                        }
+                        rec.vpc_baseline.extend(list);
+                    } else {
+                        self.past_baseline = true;
+                        let reset = flags & VPC_RESET != 0;
+                        if flags & !VPC_RESET != 0 || (n == 0 && !reset) {
+                            return bad(format!("VPCONST for draw {ordinal}: flags {flags:#x}, {n} slots"));
+                        }
+                        let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "VPCONST")?;
+                        if reset && pd.vpc_any {
+                            return bad(format!("VPCONST for draw {ordinal}: RESET on a later record"));
+                        }
+                        pd.vpc_any = true;
+                        pd.vpc_reset |= reset;
+                        for e in list {
+                            if pd.vpc.last().is_some_and(|l| e.0 <= l.0) {
+                                return bad(format!("VPCONST for draw {ordinal}: slot {} not increasing", e.0));
+                            }
+                            pd.vpc.push(e);
+                        }
+                    }
+                    rec.vpconst_records += 1;
+                }
+                REC_FPCONST => {
+                    let ordinal = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let program = c.u32()?;
+                    if decoder < 3 || len != 16 + 24 * n || n > FPC_MAX || flags & !1 != 0 || (program == 0 && n != 0) {
+                        return bad(format!("FPCONST: length {len} for {n} constants, flags {flags:#x}"));
+                    }
+                    let mut entries: Vec<FpConstant> = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let offset = c.u32()?;
+                        let mut provenance = [Provenance::Unknown; 4];
+                        for p in provenance.iter_mut() {
+                            *p = match c.u8()? {
+                                1 => Provenance::Inline,
+                                2 => Provenance::Container,
+                                3 => Provenance::Unknown,
+                                v => return bad(format!("FPCONST: provenance {v}")),
+                            };
+                        }
+                        let words = [c.u32()?, c.u32()?, c.u32()?, c.u32()?];
+                        if entries.last().is_some_and(|l| offset <= l.offset) {
+                            return bad(format!("FPCONST: offset {offset:#x} not increasing"));
+                        }
+                        entries.push(FpConstant { offset, provenance, words });
+                    }
+                    self.past_baseline = true;
+                    let pd = pending_for(&mut self.pending, ordinal, self.last_ordinal, "FPCONST")?;
+                    if pd.fpc.is_some() {
+                        return bad(format!("a second FPCONST for draw {ordinal}"));
+                    }
+                    pd.fpc = Some(FpConstants { program, truncated: flags & 1 != 0, entries });
+                    rec.fpconst_records += 1;
+                }
+                REC_UNIFORM => {
+                    let program = c.u32()?;
+                    let n = c.u16()? as usize;
+                    let flags = c.u16()?;
+                    let r0 = c.u32()?;
+                    if decoder < 3 || len != 16 + 40 * n || n == 0 || n > UNI_MAX || flags & !1 != 0 || r0 != 0 {
+                        return bad(format!("UNIFORM: length {len} for {n} uniforms, flags {flags:#x}"));
+                    }
+                    let i = program as usize;
+                    if i == 0 || i > rec.programs.len() || self.uniformed.get(i - 1).copied().unwrap_or(false) {
+                        return bad(format!("UNIFORM for program {program}"));
+                    }
+                    let profile = rec.programs[i - 1].profile;
+                    let mut list = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        let resource = c.u32()?;
+                        let count = u32::from(c.u16()?);
+                        let kind = c.u8()?;
+                        let name_len = c.u8()? as usize;
+                        let raw = c.take(UNI_NAME)?;
+                        let kind = match (kind, profile) {
+                            (1, Profile::Vertex) => UniformKind::VpConstant,
+                            (2, Profile::Fragment) => UniformKind::FpEmbedded,
+                            (k, p) => return bad(format!("UNIFORM kind {k} for a {} program", p.short())),
+                        };
+                        if name_len == 0 || name_len > UNI_NAME || raw[name_len..].iter().any(|&b| b != 0) || count == 0
+                            || (kind == UniformKind::VpConstant
+                                && resource as usize + count as usize > rsx_state::VP_CONSTS)
+                        {
+                            return bad(format!("UNIFORM of program {program}: name length {name_len}, resource {resource} x {count}"));
+                        }
+                        let name = text(&raw[..name_len], &mut rec.text_replaced);
+                        list.push(Uniform { name, kind, resource, count });
+                    }
+                    if self.uniformed.len() < rec.programs.len() {
+                        self.uniformed.resize(rec.programs.len(), false);
+                    }
+                    self.uniformed[i - 1] = true;
+                    rec.programs[i - 1].uniforms = list;
+                    rec.programs[i - 1].uniforms_truncated = flags & 1 != 0;
+                    rec.uniform_records += 1;
+                }
+                REC_UCODE => {
+                    let profile = c.u8()?;
+                    let flags = c.u8()?;
+                    let part = u32::from(c.u16()?);
+                    let total = c.u32()?;
+                    let hash = c.u64()?;
+                    let offset = c.u32()?;
+                    let n = c.u32()? as usize;
+                    let r0 = c.u32()?;
+                    if decoder < 4 || len != 32 + pad8(n) || n == 0 || n > 2048 || flags & !1 != 0 || r0 != 0
+                        || total > 16 << 20 || offset as usize + n > total as usize
+                        || (flags & 1 != 0) != (offset as usize + n == total as usize)
+                    {
+                        return bad(format!("UCODE: part {part} of {n} bytes at {offset} of {total}, flags {flags:#x}"));
+                    }
+                    let profile = match profile {
+                        1 => Profile::Vertex,
+                        2 => Profile::Fragment,
+                        v => return bad(format!("UCODE profile {v}")),
+                    };
+                    let data = c.take(n)?.to_vec();
+                    zeros(&mut c, pad8(n) - n, "UCODE")?;
+                    let u = rec.ucode.entry((profile, hash)).or_default();
+                    if u.complete || part != u.parts || offset as usize != u.data.len() || (part > 0 && total != u.total) {
+                        return bad(format!("UCODE {}:{hash:016x}: part {part} at {offset} out of sequence", profile.short()));
+                    }
+                    u.total = total;
+                    u.parts += 1;
+                    u.data.extend_from_slice(&data);
+                    u.complete = flags & 1 != 0;
+                    rec.ucode_records += 1;
+                }
+                REC_SECOND => {
+                    let first = c.u32()?;
+                    let frame = c.u64()?;
+                    if decoder < 4 || len != 16 || !rec.begin.both || rec.second.is_some() || self.pending.is_some()
+                        || self.last_ordinal.is_some_and(|o| first <= o)
+                    {
+                        return bad(format!("SECOND at draw {first}"));
+                    }
+                    rec.second = Some((first, frame));
+                }
                 _ => return bad(format!("record type {ty}")),
             }
         }
         if c.remaining() != 0 {
             return bad("RSXF_DRAWS: bytes after the last record");
+        }
+        if self.pending.is_some() {
+            return bad("RSXF_DRAWS: a STATE, VPCONST or FPCONST record without its DRAW in the same block");
         }
         Ok(())
     }
@@ -751,11 +1193,14 @@ impl Reader {
         let rej_header = c.u32()?;
         let rej_reason = c.u32()?;
         let lost_events = c.u32()?;
-        let r0 = c.u32()?;
-        let r3 = c.u64()?;
+        let baseline_registers = c.u32()?;
+        let vpconst_records = c.u32()?;
+        let fpconst_records = c.u32()?;
         let untimed = c.u32()?;
-        let r1 = c.u32()?;
-        let r2 = c.u64()?;
+        let state_records = c.u32()?;
+        let uniform_records = c.u32()?;
+        let ucode_records = c.u32()?;
+        let (r2, r3) = (0u32, 0u32);
         let rec = self.result.captures.last_mut().expect("open");
         if id != rec.begin.id {
             return bad(format!("RSXF_END for capture {id} while capture {} is open", rec.begin.id));
@@ -766,20 +1211,30 @@ impl Reader {
             3 => Outcome::Abandoned,
             o => return bad(format!("RSXF_END outcome {o}")),
         };
-        if reason > 7 || r0 != 0 || r1 != 0 || r2 != 0 || r3 != 0 || (rej_reason == 0 && rej_header != 0) {
+        if reason > 7 || r2 != 0 || r3 != 0 || (rej_reason == 0 && rej_header != 0) {
             return bad(format!("RSXF_END reason {reason} or reserved fields"));
         }
         let recorded = rec.draws.len() as u64 + rec.draws_not_retained;
         if blocks as usize != rec.block_seqs.len() {
             return bad(format!("RSXF_END: {blocks} blocks emitted, {} seen", rec.block_seqs.len()));
         }
-        if rec.block_seqs.last().is_some_and(|&s| u64::from(s) >= u64::from(blocks) + u64::from(blocks_dropped)) {
-            return bad("RSXF_END: a block sequence beyond emitted + dropped");
+        if blocks_dropped != 0 {
+            return bad(format!("RSXF_END: {blocks_dropped} blocks dropped (reserved 0: blocks are written in order,                 none skipped)"));
         }
         if u64::from(draws_recorded) != recorded || draws_recorded > draws_seen
             || hooked.saturating_add(decoded_only) > draws_seen || untimed > draws_seen
         {
             return bad(format!("RSXF_END draw counts: seen {draws_seen} recorded {draws_recorded} (records {recorded})"));
+        }
+        if vpconst_records != rec.vpconst_records || fpconst_records != rec.fpconst_records
+            || uniform_records != rec.uniform_records || ucode_records != rec.ucode_records
+        {
+            return bad(format!("RSXF_END: {vpconst_records} VPCONST, {fpconst_records} FPCONST and {uniform_records} \
+                UNIFORM records against {}, {} and {}", rec.vpconst_records, rec.fpconst_records, rec.uniform_records));
+        }
+        if baseline_registers as usize != rec.baseline.len() || state_records != rec.state_records {
+            return bad(format!("RSXF_END: {baseline_registers} baseline registers and {state_records} STATE records \
+                against {} and {}", rec.baseline.len(), rec.state_records));
         }
         if programs as usize != rec.programs.len() || labels as usize != rec.labels.len() {
             return bad(format!("RSXF_END: {programs} programs and {labels} labels against the records"));
@@ -796,6 +1251,7 @@ impl Reader {
             truncated_at: truncated.then_some(truncated_at), programs, labels, labels_refused, programs_refused,
             bytes_streamed, bytes_dropped, tb_end, decoder_words,
             decoder_reject: (rej_reason != 0).then_some((rej_header, rej_reason)), lost_events, untimed,
+            baseline_registers, state_records, vpconst_records, fpconst_records, uniform_records, ucode_records,
         });
         self.open = false;
         Ok(())
@@ -972,6 +1428,43 @@ pub struct Draw {
     pub pass: Option<usize>,
     /// The AUTO op kind disagrees with the draw kind (a mismatch the reader found).
     pub op_mismatch: bool,
+    /// The 3D register file at this draw (decoder 2 captures; None for decoder 1), shared with the draws after it
+    /// until a register changes. Interpret it with [`rsx_state::interpret`].
+    pub registers: Option<Arc<Registers>>,
+    /// The registers (byte addresses) this draw's STATE records changed, increasing; every known one after a reset.
+    pub changed: Vec<u32>,
+    /// The VP constant file at this draw (decoder 3), and the slots its VPCONST records changed.
+    pub vp_constants: Option<Arc<VpConstants>>,
+    pub vpc_changed: Vec<u16>,
+    /// The FP embedded constants it ran with (decoder 3; the latest FPCONST up to this draw).
+    pub fp_constants: Option<Arc<FpConstants>>,
+    /// Index into [`FrameView::instance_runs`].
+    pub run: Option<usize>,
+}
+
+/// Consecutive draws identical except for their constants (same kind, primitive, counts, index stream, programs,
+/// label, tag and register state): an instance run, drawn once per set of constants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceRun {
+    /// Indices into [`FrameView::draws`]: the first draw and how many.
+    pub first: usize,
+    pub len: usize,
+    /// VP constant slots and FP constant offsets whose values differ within the run.
+    pub vp_slots: Vec<u16>,
+    pub fp_offsets: Vec<u32>,
+}
+
+/// One uniform's value at a draw.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UniformValue {
+    pub profile: Profile,
+    pub name: String,
+    pub resource: u32,
+    /// One vec4 per slot (VP) or per embedded constant (FP); a component None when unknown (FP: provenance UNKNOWN).
+    /// FP values are never exact: see `provenance`.
+    pub values: Vec<[Option<f32>; 4]>,
+    /// FP: where each component comes from (None for VP: the stream is exact).
+    pub provenance: Option<[Provenance; 4]>,
 }
 impl Draw {
     pub fn hooked(&self) -> bool {
@@ -980,8 +1473,12 @@ impl Draw {
     pub fn decoded(&self) -> bool {
         self.raw.flags & DF_DECODED != 0
     }
+    /// Primitives drawn (None for a clear, an inline array, whose count is data words, and an immediate draw).
     pub fn primitives(&self) -> Option<u64> {
-        if self.raw.kind == DrawKind::Clear { None } else { primitive_count(self.raw.mode, self.raw.count) }
+        match self.raw.kind {
+            DrawKind::Clear | DrawKind::InlineArray | DrawKind::Immediate => None,
+            _ => primitive_count(self.raw.mode, self.raw.count),
+        }
     }
 }
 
@@ -1056,6 +1553,92 @@ pub struct FrameView {
     pub end: Option<End>,
     pub draws_not_retained: u64,
     pub text_replaced: u32,
+    /// The register file at arming (decoder 2 captures).
+    pub baseline: Option<Arc<Registers>>,
+    pub instance_runs: Vec<InstanceRun>,
+    /// Which frame of the capture this view is: the only one, or the pipelined first / isolated second of a BOTH
+    /// capture (each view has one timing mode, [`FrameView::isolated`]).
+    pub half: Half,
+    /// On the second view of a BOTH capture: its draws paired with the first view's ([`pair_draws`]).
+    pub pairs: Vec<DrawPair>,
+    /// Program ucode bytes stored in the capture (UCODE records), by (profile, hash); [`FrameView::bytes_of`].
+    pub program_bytes: BTreeMap<(Profile, u64), Arc<ProgramBytes>>,
+}
+
+/// Which frame of its capture a [`FrameView`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Half {
+    Only,
+    /// BOTH: the first frame, pipelined.
+    First,
+    /// BOTH: the second frame, isolated.
+    Second,
+}
+
+/// A draw of a BOTH capture's first frame and its counterpart in the second (indices into each view's draws; None:
+/// unpaired).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawPair {
+    pub first: Option<usize>,
+    pub second: Option<usize>,
+}
+
+/// One program's ucode bytes (a disassembler's input). VP: the instructions as the command stream uploaded them, 16
+/// bytes each, 32-bit words big-endian, from the start slot through the last instruction. FP: the bytes as they lay in
+/// memory at the bind (each 32-bit word big-endian with its 16-bit halves swapped, constant blocks inline after the
+/// instruction that reads them), through the end instruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramBytes {
+    pub profile: Profile,
+    pub hash: u64,
+    /// The program's length in bytes, and the bytes captured (all of them when `complete`).
+    pub total: u32,
+    pub bytes: Vec<u8>,
+    pub complete: bool,
+}
+
+impl FrameView {
+    /// The stored bytes of program `index` (into [`FrameView::programs`]), if any.
+    pub fn bytes_of(&self, index: usize) -> Option<&ProgramBytes> {
+        let p = self.programs.get(index)?;
+        (!p.unreadable).then(|| self.program_bytes.get(&(p.profile, p.hash)).map(|b| b.as_ref())).flatten()
+    }
+}
+
+/// The pairing key of a draw: kind, label, and the (profile, hash) of its programs.
+fn pair_key(f: &FrameView, d: &Draw) -> (DrawKind, Option<String>, Option<(Profile, u64)>, Option<(Profile, u64)>) {
+    let id = |i: Option<usize>| i.map(|i| (f.programs[i].profile, f.programs[i].hash));
+    (d.raw.kind, d.label.clone(), id(d.vp), id(d.fp))
+}
+
+/// Pairs the draws of a BOTH capture's two frames: in submission order, a draw pairs with the next draw of the other
+/// frame with the same kind, label and program pair (looking up to 16 draws ahead); the rest are unpaired.
+pub fn pair_draws(a: &FrameView, b: &FrameView) -> Vec<DrawPair> {
+    let (ka, kb): (Vec<_>, Vec<_>) = (a.draws.iter().map(|d| pair_key(a, d)).collect(),
+        b.draws.iter().map(|d| pair_key(b, d)).collect());
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while i < ka.len() || j < kb.len() {
+        if i < ka.len() && j < kb.len() && ka[i] == kb[j] {
+            out.push(DrawPair { first: Some(i), second: Some(j) });
+            i += 1;
+            j += 1;
+        } else {
+            let ahead = if i < ka.len() { (j..kb.len().min(j + 16)).find(|&k| kb[k] == ka[i]) } else { None };
+            if let Some(k) = ahead {
+                for s in j..k {
+                    out.push(DrawPair { first: None, second: Some(s) });
+                }
+                j = k;
+            } else if i < ka.len() {
+                out.push(DrawPair { first: Some(i), second: None });
+                i += 1;
+            } else {
+                out.push(DrawPair { first: None, second: Some(j) });
+                j += 1;
+            }
+        }
+    }
+    out
 }
 
 fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
@@ -1075,15 +1658,33 @@ fn op_interval(o: &Op) -> Result<(u64, u64), &'static str> {
 pub fn frames(cap: &Capture) -> Vec<FrameView> {
     let Some(inv) = &cap.rsx_frame else { return Vec::new() };
     let ops: HashMap<u64, &Op> = cap.auto.as_ref().map_or_else(HashMap::new, |a| a.ops.iter().map(|o| (o.id, o)).collect());
-    inv.captures.iter().map(|c| view(cap, c, &ops)).collect()
+    inv.captures.iter().flat_map(|c| {
+        if !c.begin.both {
+            return vec![view(cap, c, &ops, Half::Only)];
+        }
+        let first = view(cap, c, &ops, Half::First);
+        if c.second.is_none() {
+            return vec![first];
+        }
+        let mut second = view(cap, c, &ops, Half::Second);
+        second.pairs = pair_draws(&first, &second);
+        vec![first, second]
+    }).collect()
 }
 
-fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView {
+fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -> FrameView {
     let b = &c.begin;
+    // the frame this view shows and its draw ordinals [lo, hi); a view never mixes timing modes
+    let (frame, lo, hi, isolated) = match (half, c.second) {
+        (Half::First, Some((o, _))) => (b.frame, 0u64, u64::from(o), false),
+        (Half::Second, Some((o, f))) => (f, u64::from(o), u64::MAX, true),
+        (Half::First, None) => (b.frame, 0, u64::MAX, false),
+        _ => (b.frame, 0, u64::MAX, b.isolated),
+    };
     // passes: the frame's AUTO ranges
     let mut passes: Vec<Pass> = cap.auto.as_ref().map_or_else(Vec::new, |a| {
         a.ops.iter()
-            .filter(|o| o.kind == auto_rsx::KIND_RANGE && o.token() == Some((b.owner, b.frame)))
+            .filter(|o| o.kind == auto_rsx::KIND_RANGE && o.token() == Some((b.owner, frame)))
             .filter_map(|o| op_interval(o).ok().map(|(rb, re)| (o, rb, re)))
             .map(|(o, rb, re)| Pass {
                 name: cap.descriptors.get(&o.args[0].wrapping_sub(1))
@@ -1098,9 +1699,60 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
     });
     passes.sort_by_key(|p| (p.raw_begin, p.depth));
     let mut draws = Vec::with_capacity(c.draws.len());
+    // the register file, replayed from the baseline through each draw's STATE records
+    let stateful = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).is_some_and(|k| k.decoder >= 2);
+    let baseline = stateful.then(|| {
+        let mut r = Registers::new();
+        for &(i, v) in &c.baseline {
+            r.set(i, v);
+        }
+        Arc::new(r)
+    });
+    let mut regs = baseline.clone();
+    let constants = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).is_some_and(|k| k.decoder >= 3);
+    let mut vpcs = constants.then(|| {
+        let mut v = VpConstants::new();
+        for &(s, m, w) in &c.vpc_baseline {
+            v.set(s, m, w);
+        }
+        Arc::new(v)
+    });
+    let mut fpcs: Option<Arc<FpConstants>> = None;
     let mut totals = Totals::default();
     let mut last_end: Option<u64> = None;
     for d in &c.draws {
+        let mut changed = Vec::new();
+        if let Some(cur) = regs.as_mut() {
+            if d.state_reset || !d.state.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.state_reset {
+                    next.clear();
+                }
+                for &(i, v) in &d.state {
+                    next.set(i, v);
+                    changed.push(u32::from(i) * 4);
+                }
+            }
+        }
+        let mut vpc_changed = Vec::new();
+        if let Some(cur) = vpcs.as_mut() {
+            if d.vpc_reset || !d.vpc.is_empty() {
+                let next = Arc::make_mut(cur);
+                if d.vpc_reset {
+                    next.clear();
+                }
+                for &(s, m, w) in &d.vpc {
+                    next.set(s, m, w);
+                    vpc_changed.push(s);
+                }
+            }
+        }
+        if let Some(f) = &d.fpc {
+            fpcs = Some(Arc::new(f.clone()));
+        }
+        if !(lo..hi).contains(&u64::from(d.ordinal)) {
+            continue; // the other frame of a BOTH capture (its state is still replayed above)
+        }
         let mut op_mismatch = false;
         let flagged = d.flags & DF_MISMATCH != 0;
         let timing = if d.op_id == 0 {
@@ -1109,7 +1761,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
             match ops.get(&d.op_id) {
                 None => Timing::Missing,
                 Some(o) => {
-                    op_mismatch = d.kind.auto_kind() != Some(o.kind) || o.token() != Some((b.owner, b.frame));
+                    op_mismatch = d.kind.auto_kind() != Some(o.kind) || o.token() != Some((b.owner, frame));
                     if op_mismatch {
                         // the op is not this draw's (another kind or frame): its interval is not the draw's time
                         Timing::Invalid("AUTO operation of another kind or frame")
@@ -1155,7 +1807,9 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         let label = (d.label != 0).then(|| c.labels[d.label as usize - 1].clone());
         let vp = (d.vp != 0).then(|| d.vp as usize - 1);
         let fp = (d.fp != 0).then(|| d.fp as usize - 1);
-        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch };
+        let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed,
+            vp_constants: vpcs.clone(), vpc_changed, fp_constants: if constants { fpcs.clone() } else { None },
+            run: None };
         totals.primitives += item.primitives().unwrap_or(0);
         draws.push(item);
     }
@@ -1168,15 +1822,15 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
             Outcome::Done => FrameStatus::Complete,
         },
     };
-    FrameView {
+    let mut view = FrameView {
         id: b.id,
         name: b.name.clone(),
         source: b.source,
         request_id: b.request_id,
         owner: b.owner,
-        frame: b.frame,
+        frame,
         window: b.window,
-        isolated: b.isolated,
+        isolated,
         status,
         draws,
         programs: c.programs.clone(),
@@ -1185,7 +1839,96 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>) -> FrameView 
         end: c.end.clone(),
         draws_not_retained: c.draws_not_retained,
         text_replaced: c.text_replaced,
+        baseline,
+        instance_runs: Vec::new(),
+        half,
+        pairs: Vec::new(),
+        program_bytes: c.ucode.iter().filter(|(_, u)| !u.data.is_empty()).map(|(&(profile, hash), u)| {
+            ((profile, hash), Arc::new(ProgramBytes { profile, hash, total: u.total, bytes: u.data.clone(),
+                complete: u.complete }))
+        }).collect(),
+    };
+    let runs = instance_runs(&view);
+    for (k, r) in runs.iter().enumerate() {
+        for d in &mut view.draws[r.first..r.first + r.len] {
+            d.run = Some(k);
+        }
     }
+    view.instance_runs = runs;
+    view
+}
+
+/// The two draws differ only in their constants.
+fn same_but_constants(a: &Draw, b: &Draw) -> bool {
+    let (x, y) = (&a.raw, &b.raw);
+    (x.kind, x.mode, x.first, x.count, x.index_offset, x.index_type, x.index_location, x.clear_mask, x.tag)
+        == (y.kind, y.mode, y.first, y.count, y.index_offset, y.index_type, y.index_location, y.clear_mask, y.tag)
+        && (a.vp, a.fp, &a.label) == (b.vp, b.fp, &b.label)
+        && a.vp.is_some()
+        && match (&a.registers, &b.registers) {
+            (Some(p), Some(q)) => Arc::ptr_eq(p, q) || p == q,
+            _ => false,
+        }
+}
+
+/// Every instance run of `f` (two or more draws), in draw order.
+pub fn instance_runs(f: &FrameView) -> Vec<InstanceRun> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < f.draws.len() {
+        let mut j = i + 1;
+        while j < f.draws.len() && same_but_constants(&f.draws[j - 1], &f.draws[j]) {
+            j += 1;
+        }
+        if j - i >= 2 {
+            let mut vp_slots: Vec<u16> = f.draws[i + 1..j].iter().flat_map(|d| d.vpc_changed.iter().copied()).collect();
+            vp_slots.sort_unstable();
+            vp_slots.dedup();
+            let mut fp_offsets = Vec::new();
+            for w in f.draws[i..j].windows(2) {
+                if let (Some(a), Some(b)) = (&w[0].fp_constants, &w[1].fp_constants) {
+                    for e in &b.entries {
+                        if a.entries.iter().find(|x| x.offset == e.offset).map(|x| x.words) != Some(e.words) {
+                            fp_offsets.push(e.offset);
+                        }
+                    }
+                }
+            }
+            fp_offsets.sort_unstable();
+            fp_offsets.dedup();
+            out.push(InstanceRun { first: i, len: j - i, vp_slots, fp_offsets });
+        }
+        i = j;
+    }
+    out
+}
+
+/// The values of the uniforms of a draw's programs (decoder 3 captures; empty otherwise).
+pub fn uniforms(f: &FrameView, d: &Draw) -> Vec<UniformValue> {
+    let mut out = Vec::new();
+    if let (Some(i), Some(v)) = (d.vp, &d.vp_constants) {
+        for u in &f.programs[i].uniforms {
+            let values = (u.resource..u.resource + u.count).map(|s| v.floats(s as usize)).collect();
+            out.push(UniformValue { profile: Profile::Vertex, name: u.name.clone(), resource: u.resource, values,
+                provenance: None });
+        }
+    }
+    if let (Some(i), Some(fc)) = (d.fp, &d.fp_constants) {
+        if fc.program as usize == i + 1 {
+            for u in &f.programs[i].uniforms {
+                let e = fc.entries.iter().find(|e| e.offset == u.resource);
+                out.push(UniformValue { profile: Profile::Fragment, name: u.name.clone(), resource: u.resource,
+                    // an UNKNOWN component is None: the word the record carries for it is only the container's
+                    // fallback, not the value the draw ran with
+                    values: vec![e.map_or([None; 4], |e| {
+                        let f = e.floats();
+                        std::array::from_fn(|k| (e.provenance[k] != Provenance::Unknown).then_some(f[k]))
+                    })],
+                    provenance: Some(e.map_or([Provenance::Unknown; 4], |e| e.provenance)) });
+            }
+        }
+    }
+    out
 }
 
 /// What [`group`] groups by.
@@ -1285,7 +2028,16 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
     for f in frames {
         writeln!(out, "capture {} \"{}\": owner {} frame {} window {} source {} timing {}; {}", f.id, f.name, f.owner,
             f.frame, f.window, if f.source == Source::Live { format!("live request {}", f.request_id) } else { "app".into() },
-            if f.isolated { "ISOLATED" } else { "PIPELINED (reached-marker intervals)" }, f.status.text())?;
+            match (f.half, f.isolated) {
+                (Half::First, _) => "PIPELINED (reached-marker intervals), frame 1 of 2",
+                (Half::Second, _) => "ISOLATED, frame 2 of 2",
+                (_, true) => "ISOLATED",
+                _ => "PIPELINED (reached-marker intervals)",
+            }, f.status.text())?;
+        if f.half == Half::Second {
+            let unpaired = f.pairs.iter().filter(|p| p.first.is_none() || p.second.is_none()).count();
+            writeln!(out, "  paired with frame 1: {} pairs, {unpaired} unpaired", f.pairs.len() - unpaired)?;
+        }
         let t = &f.totals;
         writeln!(out, "  draws {} (timed {}, untimed {}, timing absent {}, op mismatch {}); primitives {}; interval sum {} raw; span {}; gaps {} raw{}{}",
             t.draws, t.timed, t.untimed, t.missing, t.mismatched, t.primitives, t.sum,
@@ -1359,14 +2111,42 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
         d.fp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.fp_address)?;
     writeln!(out, "    seen by: {}{}{}; words {}; caller {:#x}; tb {}", if d.hooked() { "hook " } else { "" },
         if d.decoded() { "stream" } else { "" }, if r.flags & DF_STATE_UNKNOWN != 0 { " (state unknown)" } else { "" },
-        r.words, r.caller, r.tb)
+        r.words, r.caller, r.tb)?;
+    if let Some(regs) = &d.registers {
+        let v = rsx_state::interpret(regs);
+        let known = |fs: &[rsx_state::Field]| fs.iter().filter(|f| f.value != rsx_state::Value::Unknown)
+            .map(|f| format!("{}={}", f.name, f.value.text())).collect::<Vec<_>>().join(" ");
+        writeln!(out, "    state: {} registers known{}", regs.known_count(),
+            if r.state_reset { ", decoder reset before this draw" } else { "" })?;
+        if !d.changed.is_empty() {
+            writeln!(out, "    changed: {}", d.changed.iter().map(|&m| rsx_state::register_name(m))
+                .collect::<Vec<_>>().join(" "))?;
+        }
+        writeln!(out, "    render: {}", known(&v.render))?;
+        writeln!(out, "    surfaces: {}", known(&v.surfaces))?;
+        writeln!(out, "    index: {}", known(&v.index))?;
+        for (i, t) in v.textures.iter().enumerate() {
+            if t.iter().any(|f| f.name == "enable" && f.value == rsx_state::Value::Bool(true)) {
+                writeln!(out, "    texture {i}: {}", known(t))?;
+            }
+        }
+        for (i, a) in v.attributes.iter().enumerate() {
+            if a.iter().any(|f| f.name == "enabled" && f.value == rsx_state::Value::Bool(true)) {
+                writeln!(out, "    attribute {i}: {}", known(a))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn program_json(p: &Program) -> Value {
     json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
         "name": p.name, "source": p.source.name(), "instructions": p.instructions, "ucode_bytes": p.ucode_bytes,
         "const_blocks": p.const_blocks, "address": p.address, "first_draw": p.first_draw,
-        "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated})
+        "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated,
+        "uniforms": p.uniforms.iter().map(|u| json!({"name": u.name, "resource": u.resource, "count": u.count,
+            "kind": if u.kind == UniformKind::VpConstant { "vp_constant" } else { "fp_embedded" }})).collect::<Vec<_>>(),
+        "uniforms_truncated": p.uniforms_truncated})
 }
 
 fn timing_json(t: &Timing) -> Value {
@@ -1406,6 +2186,24 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
     o.insert("caller".into(), json!(r.caller));
     o.insert("words".into(), json!(r.words));
     o.insert("tb".into(), json!(r.tb));
+    if let Some(regs) = &d.registers {
+        o.insert("state".into(), rsx_state::view_json(&rsx_state::interpret(regs)));
+        o.insert("changed".into(), json!(d.changed.iter().map(|&m| rsx_state::register_name(m)).collect::<Vec<_>>()));
+        o.insert("state_reset".into(), json!(r.state_reset));
+    }
+    if d.vp_constants.is_some() {
+        let fl = |v: &[Option<f32>; 4]| json!(v.map(|c| c.map(|x| json!(x)).unwrap_or(Value::Null)));
+        let us = uniforms(f, d);
+        let vp: Vec<Value> = us.iter().filter(|u| u.profile == Profile::Vertex).map(|u| json!({"name": u.name,
+            "slot": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>()})).collect();
+        let fp: Vec<Value> = us.iter().filter(|u| u.profile == Profile::Fragment).map(|u| json!({"name": u.name,
+            "offset": u.resource, "values": u.values.iter().map(fl).collect::<Vec<_>>(),
+            "provenance": u.provenance.map(|p| p.map(Provenance::name))})).collect();
+        let list: Vec<Value> = d.fp_constants.as_ref().map_or_else(Vec::new, |c| c.entries.iter().map(|e| json!({
+            "offset": e.offset, "provenance": e.provenance.map(Provenance::name), "value": e.floats()})).collect());
+        o.insert("constants".into(), json!({"vp": vp, "fp": fp, "vp_changed": d.vpc_changed, "fp_list": list}));
+        o.insert("run".into(), json!(d.run));
+    }
     v
 }
 
@@ -1424,6 +2222,12 @@ fn end_json(e: &End) -> Value {
     o.insert("lost_events".into(), json!(e.lost_events));
     o.insert("decoder_words".into(), json!(e.decoder_words));
     o.insert("untimed".into(), json!(e.untimed));
+    o.insert("baseline_registers".into(), json!(e.baseline_registers));
+    o.insert("state_records".into(), json!(e.state_records));
+    o.insert("vpconst_records".into(), json!(e.vpconst_records));
+    o.insert("fpconst_records".into(), json!(e.fpconst_records));
+    o.insert("uniform_records".into(), json!(e.uniform_records));
+    o.insert("ucode_records".into(), json!(e.ucode_records));
     o.insert("decoder_reject".into(),
         json!(e.decoder_reject.map(|(h, r)| json!({"header": h, "reason": auto_rsx::reject_reason(r)}))));
     v
@@ -1444,6 +2248,21 @@ fn frame_json(f: &FrameView) -> Value {
     o.insert("totals".into(), totals);
     o.insert("draws_not_retained".into(), json!(f.draws_not_retained));
     o.insert("text_replaced".into(), json!(f.text_replaced));
+    o.insert("half".into(), json!(match f.half { Half::Only => "only", Half::First => "first", Half::Second => "second" }));
+    o.insert("pairs".into(), Value::Array(f.pairs.iter().map(|p| json!({"first": p.first, "second": p.second}))
+        .collect()));
+    o.insert("program_bytes".into(), Value::Array(f.programs.iter().enumerate().map(|(i, p)| {
+        let b = f.bytes_of(i);
+        json!({"index": p.index, "bytes": b.map(|b| b.bytes.len()), "total": b.map(|b| b.total),
+            "complete": b.map(|b| b.complete)})
+    }).collect()));
+    o.insert("instance_runs".into(), Value::Array(f.instance_runs.iter().map(|r| {
+        let vp_names: Vec<String> = f.draws[r.first].vp.map_or_else(Vec::new, |i| f.programs[i].uniforms.iter()
+            .filter(|u| r.vp_slots.iter().any(|&s| (u.resource..u.resource + u.count).contains(&u32::from(s))))
+            .map(|u| u.name.clone()).collect());
+        json!({"first": f.draws[r.first].raw.ordinal, "length": r.len, "vp_slots": r.vp_slots,
+            "fp_offsets": r.fp_offsets, "vp_uniforms": vp_names})
+    }).collect()));
     o.insert("programs".into(), Value::Array(f.programs.iter().map(program_json).collect()));
     o.insert("passes".into(), Value::Array(passes));
     o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d)).collect()));
@@ -1458,6 +2277,7 @@ pub fn to_json(cap: &Capture, frames: &[FrameView]) -> Value {
         "schema": 1,
         "capability": cap.rsx_frame.is_some(),
         "availability": cfg.map(|c| c.availability.text()),
+        "decoder": cfg.map(|c| c.decoder),
         "captures": Value::Array(frames.iter().map(frame_json).collect()),
     })
 }

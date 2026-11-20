@@ -15,7 +15,7 @@
  *          at IO 0 (synthetic, the firmware's layout) that rebinds subchannel 1 to M2MF and sets IN/OUT, changed
  *          between two flips: the shadow stays valid, the flush restores the routine's IN/OUT, every draw is timed.
  *   7 segment: the same layout, a CALL into the command buffer (an application segment): refused, admission halts.
- *   8 rsxf: RSX frame capture selected (PS3_PROF_RSX_FRAME, 4 KiB staging blocks): a VP uploaded in the stream and an FP
+ *   8 rsxf: RSX frame capture selected (PS3_PROF_RSX_FRAME, 32 KiB staging blocks: the minimum): a VP uploaded in the stream and an FP
  *          bound through its container, labels in a scope, hooked array draws and clears, raw draws the hooks never
  *          see, refusals (busy, flags), then a second capture with the drainer held that truncates when both staging
  *          blocks are full. auto-runtime-test.py reads the capture back with the reader. */
@@ -33,7 +33,24 @@
 #include "ps3tc_prof_auto.h"
 #if TEST_RING_MODE==8
 #include "rsxf.h"
-PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(4u, 2u));
+PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(32u, 2u));
+/* The words one covered draw wrote, [from, to): every WAIT_FOR_IDLE packet (*wfi) and those directly followed by a
+ * timestamp report packet (the return value: a WAIT_FOR_IDLE before a marker). Packets are walked by their counts. */
+static uint32_t wfi_before_markers(const uint32_t *from, const uint32_t *to, uint32_t *wfi)
+{
+    uint32_t before = 0;
+    *wfi = 0;
+    for (const uint32_t *p = from; p < to;) {
+        uint32_t h = *p, count = (h >> 18) & 2047u;
+        if (h == ((1u << 18) | 0x110u)) {
+            (*wfi)++;
+            if (p + 2 < to && p[2] == ((1u << 18) | 0x1800u))
+                before++;
+        }
+        p += 1u + count; /* a zero (NOP padding) word is one word */
+    }
+    return before;
+}
 #endif
 
 #ifndef TEST_RING_MODE
@@ -524,7 +541,8 @@ int main(void)
         ps3dk_prof__rsxf_fp_bind((void *)&context,fp_ucode,sizeof fp_ucode,0x2000u);
         ps3dk_prof_frame();
         draw();
-        assert(ps3dk_prof_rsx_frame_capture("bad",1u)==PS3DK_PROF_EINVAL);
+        assert(ps3dk_prof_rsx_frame_capture("bad",8u)==PS3DK_PROF_EINVAL);   /* an unknown flag */
+        assert(ps3dk_prof_rsx_frame_capture("bad",5u)==PS3DK_PROF_EINVAL);   /* ISOLATED with BOTH */
         id=ps3dk_prof_rsx_frame_capture("first",0u);
         assert(id>0);
         assert(ps3dk_prof_rsx_frame_capture("again",0u)==PS3DK_PROF_EBUSY);
@@ -559,14 +577,47 @@ int main(void)
         }
         assert(rc==PS3DK_PROF_OK && lid==(uint32_t)id+1u);
         printf("capture %d written\n",id);
-        /* a second capture, live, with the drainer held: both 4 KiB blocks fill and it truncates, never waits */
+        {
+            /* inline-array, inline-index and immediate shapes from a context that is not the owner's (an external
+             * segment writer): refused before any AUTO accounting, so AUTO's segment and CALL state is what it would
+             * be without them: nothing written into the segment, no segment or foreign visit counted */
+            static uint32_t segbuf[64];
+            static gpp_ctx key,port;
+            static const ps3tc_auto_call shapes[3]={{7,4,0,24,0,0,0,0},{8,4,0,6,0,1,0,0},{9,4,0,0,0,0,0,0}};
+            uint64_t sv,fv;
+            uint32_t used;
+            ps3dk_prof__auto_segment_external_open((void *)&key,segbuf,sizeof segbuf);
+            port=(gpp_ctx){segbuf,segbuf+63,segbuf,NULL};
+            sv=a->segment_visits;fv=a->foreign_visits;used=a->segments_used;
+            for(uint32_t k=0;k<3;k++) {
+                assert(ps3dk_prof__auto_begin((void *)&port,&shapes[k],0x99)==0);
+                assert(port.current==segbuf);
+            }
+            ps3dk_prof__auto_end_open((void *)&port);
+            assert(a->segment_visits==sv && a->foreign_visits==fv && a->segments_used==used && port.current==segbuf);
+            ps3dk_prof__auto_segment_external_close((void *)&key);
+            puts("shapes off the owner context: refused before segment accounting");
+        }
+        /* a second capture, live, with the drainer held: both 32 KiB blocks fill and it truncates, never waits (each
+         * draw changes 64 registers first: about 600 bytes of records per draw) */
         park_drainer();
         ops->status(&st);
         assert(st.id==lid && st.request==9u && st.state==5u);
         ps3dk_prof_frame();
         ops->status(&st);
         assert(st.id==lid && st.state==1u && st.frame);
-        for(uint32_t i=0;i<200;i++) draw();
+        for(uint32_t i=0;i<200;i++) {
+            /* a pipelined capture: no WAIT_FOR_IDLE anywhere in a draw's words */
+            uint32_t wfi,*from;
+            w=reserve(65);
+            w[0]=M(0,0x0a00,64);
+            for(uint32_t k=0;k<64;k++) w[1+k]=i*64u+k;
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            (void)wfi_before_markers(from,context.current,&wfi);
+            assert(wfi==0);
+        }
         ps3dk_prof_frame();
         ops->status(&st);
         assert(st.id==lid && st.state==2u && st.reason==RSXF_R_STAGING && st.draws==200u);
@@ -576,9 +627,32 @@ int main(void)
         assert(st.state==3u);
         printf("capture %u: truncated, %u draws seen\n",lid,st.draws);
         /* an app request after it leaves the live link's final state in place (nothing written: never armed) */
-        assert(ps3dk_prof_rsx_frame_capture("third",0u)==(int)lid+1);
+        assert(ps3dk_prof_rsx_frame_capture("third",PS3DK_PROF_RSX_FRAME_ISOLATED)==(int)lid+1);
         ops->status(&st);
         assert(st.id==lid && st.state==3u);
+        /* the ISOLATED capture: armed at the next boundary, each draw's markers behind WAIT_FOR_IDLE (room for the
+         * four extra words kept in the extent like the draw's own) */
+        ps3dk_prof_frame();
+        for(uint32_t i=0;i<10;i++) {
+            uint32_t wfi,*from;
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            /* exactly two WAIT_FOR_IDLE packets, each right before one of the draw's two timestamp reports */
+            assert(wfi_before_markers(from,context.current,&wfi)==2u && wfi==2u);
+        }
+        {
+            /* after the isolated frame closed: a draw gets no WAIT_FOR_IDLE again */
+            uint32_t wfi,*from;
+            ps3dk_prof_frame();
+            if((uint32_t)(context.end-context.current)<22u) {w=reserve(22);memset(w,0,22u*4u);}
+            from=context.current;
+            draw();
+            (void)wfi_before_markers(from,context.current,&wfi);
+            assert(wfi==0);
+        }
+        ps3dk_prof_frame();
+        app_flush(0);app_flush(0);settle_drainer(a);
     }
     puts("RSX frame capture runtime PASS");
 #else

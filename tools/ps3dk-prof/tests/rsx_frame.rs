@@ -91,9 +91,9 @@ fn sample_reads_and_joins_auto_timing() {
             assert!(f.passes[p].raw_begin <= *raw_begin);
         }
     }
-    // the second block was sequence 2: one block dropped, as END says
+    // two blocks, sequences 0 and 1, none dropped
     let e = f.end.as_ref().unwrap();
-    assert_eq!((e.blocks, e.blocks_dropped), (2, 1));
+    assert_eq!((e.blocks, e.blocks_dropped), (2, 0));
 }
 
 #[test]
@@ -329,6 +329,34 @@ fn not_revalidated_program() {
     assert_eq!(rule_of(&f), Rule::RsxFrame);
 }
 
+/// Inline-array and immediate draws are timed by ARRAY-class AUTO operations and inline-index draws by INDEX-class ones;
+/// the draw keeps its own kind and primitive, and an inline index draw timed by an ARRAY op is a mismatch.
+#[test]
+fn inline_and_immediate_draws_timed_by_their_class() {
+    let base = tags_with_array_op(2);
+    let bind = binding(&base);
+    let Some(&(op, _)) = bind.ops.iter().find(|o| o.1 == 1) else { panic!("an ARRAY op in the fixture") };
+    let mut end = XEnd::done(1);
+    end.n = [1, 0, 1, 1, 1, 0, 0, u32::MAX, 0, 0, 0, 0];
+    for (kind, name, timed) in [(7u16, "INLINE_ARRAY", true), (9, "IMMEDIATE", true), (8, "INLINE_INDEX", false)] {
+        let mut d = XDraw::timed(0, kind, op);
+        if kind == 8 {
+            d.index_type = 1;
+        }
+        if kind == 9 {
+            d.count = 0;
+        }
+        let f = with_rsxf(&base, vec![XConfig::default().chunk(), XBegin::live(1, bind.owner, bind.frame, "i").chunk(),
+            one_draw(1, &d), end.clone().chunk()]);
+        let cap = reader::read(&f.bytes()).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let fr = &rf::frames(&cap)[0];
+        assert_eq!(fr.draws[0].raw.kind.name(), name);
+        assert_eq!(matches!(fr.draws[0].timing, Timing::Timed { .. }), timed, "{name}");
+        assert_eq!(fr.draws[0].op_mismatch, !timed, "{name}");
+        assert_eq!(fr.draws[0].primitives().is_none(), kind != 8, "{name}");
+    }
+}
+
 #[test]
 fn flag_rules() {
     let base = tags_fixture();
@@ -379,7 +407,8 @@ fn every_rule_refused_once() {
     case("app with request id", vec![cfg.chunk(), XBegin { source: 2, ..begin() }.chunk()]);
     case("live without request id", vec![cfg.chunk(), XBegin { request: 0, ..begin() }.chunk()]);
     case("undeclared owner", vec![cfg.chunk(), XBegin { owner: 999, ..begin() }.chunk()]);
-    case("begin flags", vec![cfg.chunk(), XBegin { flags: 4, ..begin() }.chunk()]);
+    case("begin flags", vec![cfg.chunk(), XBegin { flags: 8, ..begin() }.chunk()]);
+    case("isolated with both", vec![cfg.chunk(), XBegin { flags: 5, ..begin() }.chunk()]);
     case("name too long", vec![cfg.chunk(), XBegin { name: "n".repeat(64), ..begin() }.chunk()]);
     case("begin padding", { let mut c = begin().chunk(); let l = c.payload.len(); c.payload[l - 1] = 1; vec![cfg.chunk(), c] });
     case("baseline without known", { let mut c = begin().chunk(); c.payload[40] = 1; vec![cfg.chunk(), c] });
@@ -393,7 +422,7 @@ fn every_rule_refused_once() {
     });
     case("record count", { let mut b = Buf::default(); dec().encode(&mut b); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 2, &b.0)] });
     case("empty block", vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 0, &[])]);
-    case("unknown record", { let mut b = Buf::default(); b.u16(9).u16(8).u32(0); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
+    case("unknown record", { let mut b = Buf::default(); b.u16(0xff).u16(8).u32(0); vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
     case("draw length", { let mut b = Buf::default(); dec().encode(&mut b); b.0[2] = 104; b.0.extend_from_slice(&[0; 8]);
         vec![cfg.chunk(), begin().chunk(), draws_chunk(1, 0, 1, &b.0)] });
     case("draw kind", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { kind: 4, ..dec() })]);
@@ -403,7 +432,6 @@ fn every_rule_refused_once() {
     case("op with untimed", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw::timed(0, 1, 5).with_untimed(3))]);
     case("unknown reason", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { untimed: 12, ..dec() })]);
     case("op on a decoded draw", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { op: 5, untimed: 0, ..dec() })]);
-    case("op on an inline draw", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { kind: 7, ..XDraw::timed(0, 1, 5) })]);
     case("index args on array", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { index_type: 1, ..dec() })]);
     case("clear with mode", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { mode: 5, ..XDraw::decoded(0, 3) })]);
     case("mode out of range", vec![cfg.chunk(), begin().chunk(), one_draw(1, &XDraw { mode: 11, ..dec() })]);
@@ -457,10 +485,13 @@ fn every_rule_refused_once() {
     case("truncated without ordinal", { let mut e = end1(); e.outcome = 2; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("ordinal without truncation", { let mut e = end1(); e.n[7] = 5; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("draw at the truncation", { let mut e = end1(); e.outcome = 2; e.n[7] = 0; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
-    case("seq beyond emitted + dropped", vec![cfg.chunk(), begin().chunk(), {
+    case("first seq not 0", vec![cfg.chunk(), begin().chunk(), {
         let mut b = Buf::default(); dec().encode(&mut b); draws_chunk(1, 3, 1, &b.0) }, end1().chunk()]);
+    case("seq gap", vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), {
+        let mut b = Buf::default(); XDraw::decoded(1, 1).encode(&mut b); draws_chunk(1, 2, 1, &b.0) }, end1().chunk()]);
+    case("end blocks dropped", { let mut e = end1(); e.n[1] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
     case("reject header without reason", { let mut e = end1(); e.reject = (5, 0); vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e.chunk()] });
-    case("end reserved", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
+    case("end baseline count", { let mut e = end1().chunk(); e.payload[100] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("end reserved 104", { let mut e = end1().chunk(); e.payload[104] = 1; vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec()), e] });
     case("open at trailer", vec![cfg.chunk(), begin().chunk(), one_draw(1, &dec())]);
 }

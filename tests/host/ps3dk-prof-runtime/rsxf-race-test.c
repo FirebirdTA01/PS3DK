@@ -35,8 +35,8 @@
         }                                                                                                              \
     } while (0)
 
-PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(4, 2));
-enum { BLOCK = 4096, NBLOCKS = 2 };
+PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(32, 2));
+enum { BLOCK = 32768, NBLOCKS = 2 };
 
 /* ---- stubs for the runtime's dependencies ---- */
 static prof g_prof_storage;
@@ -201,7 +201,8 @@ static int check_stream(void)
 {
     size_t at = 0;
     int open = 0, captures = 0, config = 0;
-    uint32_t id = 0, seq = 0, draws = 0, programs = 0, labels = 0, blocks = 0;
+    uint32_t id = 0, seq = 0, draws = 0, programs = 0, labels = 0, blocks = 0, baseline = 0, states = 0, vpcs = 0;
+    uint32_t fpcs = 0, unis = 0, ucodes = 0;
     uint64_t bytes = 0;
     while (at < g_len) {
         uint32_t type = rd32(g_out + at), n = rd32(g_out + at + 4);
@@ -217,7 +218,7 @@ static int check_stream(void)
             if ((p[4] | p[5] << 8) == 1)
                 CHECK((p[52] | p[53] << 8) == 5 && !memcmp(p + 56, "live?", 5));
             open = 1;
-            seq = draws = programs = labels = blocks = 0;
+            seq = draws = programs = labels = blocks = baseline = states = vpcs = fpcs = unis = ucodes = 0;
             bytes = 0;
         } else if (type == RSXF_CHUNK_DRAWS) {
             uint32_t records = rd32(p + 8), rb = rd32(p + 12);
@@ -232,6 +233,13 @@ static int check_stream(void)
                 draws += ty == RSXF_REC_DRAW;
                 programs += ty == RSXF_REC_PROGRAM;
                 labels += ty == RSXF_REC_LABEL;
+                states += ty == RSXF_REC_STATE;
+                vpcs += ty == RSXF_REC_VPCONST;
+                fpcs += ty == RSXF_REC_FPCONST;
+                unis += ty == RSXF_REC_UNIFORM;
+                ucodes += ty == RSXF_REC_UCODE;
+                if (ty == RSXF_REC_BASELINE)
+                    baseline += p[r + 8] | p[r + 9] << 8;
                 r += len;
             }
             CHECK(r == n);
@@ -240,6 +248,8 @@ static int check_stream(void)
             CHECK(rd32(p + 8) == blocks && rd32(p + 20) == draws && rd32(p + 40) == programs &&
                   rd32(p + 44) == labels && rd64(p + 56) == bytes && rd32(p + 16) >= draws);
             CHECK(rd32(p + 96) == 0); /* no lost decoder event */
+            CHECK(rd32(p + 100) == baseline && rd32(p + 116) == states);
+            CHECK(rd32(p + 104) == vpcs && rd32(p + 108) == fpcs && rd32(p + 120) == unis && rd32(p + 124) == ucodes);
             open = 0;
             captures++;
         } else {

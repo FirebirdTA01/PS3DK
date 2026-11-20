@@ -1,0 +1,9 @@
+// rsx-frame sample: fragment program 2, texture unit 0 modulated by the interpolated colour.
+void main(
+    float4 in_color : COLOR,
+    float2 in_uv : TEXCOORD0,
+    uniform sampler2D tex : TEXUNIT0,
+    out float4 out_color : COLOR)
+{
+    out_color = tex2D(tex, in_uv) * in_color;
+}
