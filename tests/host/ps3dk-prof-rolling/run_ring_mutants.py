@@ -134,7 +134,7 @@ def controls(inputs):
     case("r13_apply_ring_state_provenance",provenance,'assert_eq!(get32(&cp,40)&16!=0,invalid',[(AUTO,'self.invalid|=f.invalid_evidence();','self.invalid|='+legacy.replace('ROW','f')+';')])
     case("r14_import_ring_state_provenance",provenance,'assert!(result.is_ok(),"imported ring exclusion classification agrees with original support")',[(AUTO,'s.invalid|=row.invalid_evidence();','s.invalid|='+legacy.replace('ROW','row')+';')])
     case("r15_capacity_is_not_invalid",provenance,'assert_eq!(get32(&cp,40)&16!=0,invalid',[(SHARED,' || self.ring_state[k] != 0)',' || self.ring_state[k] != 0 || self.ring_full[k] != 0)')])
-    case("r16_standalone_status_width",snapshot,saved,[(AUTO,'(if ringed{228}else{148})*u128::from(statuses)','148*u128::from(statuses)')])
+    case("r16_standalone_status_width",snapshot,saved,[(AUTO,'(20+status_width)*u128::from(statuses)','148*u128::from(statuses)')])
     combined='ring_combined_physical_chain_conserves_wider_status_and_operation_bytes'
     case("r17_combined_status_width",combined,'assert!(retired_status.is_ok(),"combined checkpoint charges 228 bytes for one retired ring STATUS")',[(FAMILIES,'(20+u128::from(s.status_width))*u128::from(old)','148*u128::from(old)')])
     case("r18_combined_operation_width",combined,'assert!(accepted.is_ok(),"combined source preflight admits negotiated ring operation width")',[(COMBINED,'!matches!(width,128|144|160|176)','!matches!(width,128|144|160)')])
