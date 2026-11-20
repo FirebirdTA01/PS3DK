@@ -43,6 +43,14 @@ def fault_report(rc):
     # A signal leaves nothing on stderr: name the faulting site from the same build under gdb (when present) and
     # under ASan/UBSan, so a fault seen only on one host is diagnosable from the job log alone.
     lines = [f'drain-cost gate died by signal {-rc} after {len(rows)} of 8 rows']
+    # the gate's own fault trace (drain_cost.c): the faulting address and frames, the binary's offsets resolved
+    trace = [x for x in r.stderr.splitlines() if x.startswith('DRAIN_COST_FAULT') or '(+0x' in x or '[0x' in x]
+    lines += trace[:50]
+    offs = [x.split('(+', 1)[1].split(')', 1)[0] for x in trace if str(exe) in x and '(+0x' in x]
+    if offs and shutil.which('addr2line'):
+        a2l = subprocess.run(['addr2line', '-f', '-C', '-i', '-p', '-e', str(exe), *offs], capture_output=True,
+                             text=True, timeout=60)
+        lines += ['addr2line:'] + a2l.stdout.splitlines()[:60]
     if shutil.which('gdb'):
         g = subprocess.run(['gdb', '-q', '-batch', '-ex', 'run', '-ex', 'bt 24', '-ex', 'info registers rip',
                             '--args', str(exe), '--cost-gate'], capture_output=True, text=True, timeout=300)

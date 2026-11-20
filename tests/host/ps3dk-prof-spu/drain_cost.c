@@ -6,6 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(__linux__) && defined(__GLIBC__)
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+#define DC_FAULT_TRACE 1
+#endif
 
 /* The test driver instruments an otherwise unchanged copy of flush_loss. */
 uint64_t prof_test_empty_loss_flushes;
@@ -81,10 +87,54 @@ static int one(unsigned lanes, unsigned events, int cost_gate)
     return g_failures ? 1 : 0;
 }
 
+#ifdef DC_FAULT_TRACE
+/* A fault seen on one host only: print the faulting address and the frames (the test resolves the binary offsets
+ * with addr2line), then die by the same signal. Diagnostics only; the gate's verdicts are unchanged. */
+static void fault_trace(int sig, siginfo_t *si, void *uc)
+{
+    static const char head[] = "DRAIN_COST_FAULT signal ";
+    char line[64];
+    void *frames[48];
+    int n, len = 0;
+    unsigned long a = (unsigned long)si->si_addr;
+    (void)uc;
+    if (write(2, head, sizeof head - 1) < 0) {}
+    line[len++] = (char)('0' + sig / 10);
+    line[len++] = (char)('0' + sig % 10);
+    memcpy(line + len, " addr 0x", 8);
+    len += 8;
+    for (int k = 60; k >= 0; k -= 4)
+        line[len++] = "0123456789abcdef"[(a >> k) & 15u];
+    line[len++] = '\n';
+    if (write(2, line, (size_t)len) < 0) {}
+    n = backtrace(frames, 48);
+    backtrace_symbols_fd(frames, n, 2);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+static void fault_trace_install(void)
+{
+    struct sigaction sa;
+    void *warm[1];
+    (void)backtrace(warm, 1); /* load the unwinder now, not inside the handler */
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = fault_trace;
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+}
+#endif
+
 int main(int argc, char **argv)
 {
     const unsigned sizes[] = {0, 256, 2048, 4096};
     int cost = argc == 2 && !strcmp(argv[1], "--cost-gate");
+#ifdef DC_FAULT_TRACE
+    fault_trace_install();
+#endif
     for (unsigned lanes = 1; lanes <= 6; lanes += 5)
         for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; ++i)
             (void)one(lanes, sizes[i], cost);
