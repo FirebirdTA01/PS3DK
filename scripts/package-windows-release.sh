@@ -144,13 +144,30 @@ if [[ -d "$PS3DK" && -n "$(ls -A "$PS3DK" 2>/dev/null)" ]]; then
     # in a Windows release zip — Windows host-tool .exe's land here via
     # --tools-zip below.  Strip any ELF that snuck in from the merge.
     if [[ -d "$STAGE_DIR/bin" ]]; then
+        removed_elf=()
         while IFS= read -r f; do
             [[ -n "$f" ]] || continue
             if file -b "$f" 2>/dev/null | grep -q '^ELF '; then
                 say "Removing leaked Linux binary from bin/: ${f#"$STAGE_DIR/"}"
                 rm -f "$f"
+                removed_elf+=("$(basename "$f")")
             fi
         done < <(find "$STAGE_DIR/bin" -maxdepth 1 -type f)
+        # A bin/ symlink to one of those Linux binaries (the cgnv2elf ->
+        # rsxcg2elf compatibility name) now dangles.  Drop exactly those
+        # links: the Windows host-tools zip merged below ships both names as
+        # .exe files.  Any other dangling link still stops the package in
+        # materialize_stage_symlinks.
+        while IFS= read -r -d '' l; do
+            t="$(readlink "$l")"
+            for r in "${removed_elf[@]}"; do
+                if [[ "$t" == "$r" || "$t" == "./$r" ]]; then
+                    say "Removing bin/ link to a removed Linux binary: ${l#"$STAGE_DIR/"} -> $t"
+                    rm -f "$l"
+                    break
+                fi
+            done
+        done < <(find "$STAGE_DIR/bin" -maxdepth 1 -type l -print0)
     fi
 else
     warn "$PS3DK is empty / unbuilt — release will ship without runtime libs (libsysbase, librt, liblv2). Run build-psl1ght.sh + build-portlibs.sh + build-sdk.sh on a native install first."
