@@ -115,7 +115,9 @@ def main():
         receipt['executable_sha256'] = sha(exe)
     (out / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     if rc or not stable:
-        raise RuntimeError('compile/input gate failed; not behavioral RED')
+        tail = (out / 'compile.stderr').read_text(errors='replace')[-4000:]
+        raise RuntimeError(f'compile/input gate failed; not behavioral RED (compile rc {rc}, inputs unchanged '
+                           f'{stable})\n{tail}')
     print(f'PS3DK_PROF_RUNTIME_SPU={exe}', flush=True)
     return 0
 

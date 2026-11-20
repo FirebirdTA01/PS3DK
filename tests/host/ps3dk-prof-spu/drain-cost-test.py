@@ -37,7 +37,7 @@ r = subprocess.run([str(exe), '--cost-gate'], capture_output=True, text=True, ti
 (out / 'rc').write_text(str(r.returncode) + '\n')
 rows = [json.loads(line) for line in r.stdout.splitlines()]
 if r.returncode or r.stderr or len(rows) != 8:
-    raise SystemExit(r.stderr or 'missing work-budget results')
+    raise SystemExit(r.stderr or f'missing work-budget results (rc {r.returncode}, {len(rows)} of 8 rows)')
 # Baseline bec5c964c: exact original chunk types, lengths and payloads. Times and
 # instrumentation counters are deliberately excluded. Independent checks above
 # also check the contents against producer truth (a matching digest is not one).

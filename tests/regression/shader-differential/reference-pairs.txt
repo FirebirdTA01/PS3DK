@@ -33,6 +33,10 @@ samples/toolchain/hello-psgl-blend/shaders/fp_blue_alpha.fcg|0
 samples/toolchain/hello-psgl-msaa/shaders/fpshader.fcg|0
 samples/profiling/heterogeneous-workload/shaders/heavy.fcg|0
 samples/profiling/heterogeneous-workload/shaders/light.fcg|0
+# the RSX frame capture sample: a pass-through colour FP and two TEXUNIT0 sampler FPs (no uniforms)
+samples/profiling/rsx-frame/shaders/fp_color.fcg|0
+samples/profiling/rsx-frame/shaders/fp_tex.fcg|0
+samples/profiling/rsx-frame/shaders/fp_texmod.fcg|0
 #
 # The remaining four measurement divergences (Class B: register allocation +
 # uniform pool offsets; Class C: we emit fewer instructions than the
