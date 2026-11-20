@@ -479,7 +479,9 @@ for rel in sources:
         code=source.read_text();old='    if((s=external_writer(a,ctx))) return segment_begin(a,s,ctx,call,caller);\n';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    (void)external_writer;\n').encode())
     elif a.mutant=='segment-silent' and rel=='auto_rsx/auto_runtime.c':
-        code=source.read_text();old='if(!a) return foreign_begin(ctx,call,caller);';assert code.count(old)==1
+        # the foreign (segment) visit is not recorded: a non-owner context returns 0 for every shape (inline and
+        # immediate shapes already returned 0 before RSX frame capture split the line)
+        code=source.read_text();old='if(!a) return shape ? 0u:foreign_begin(ctx,call,caller);';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_begin;return 0;}').encode())
     elif a.mutant=='clock-put' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='!auto_clock_after(&a->clocks,a->clock_put_frontier)';assert code.count(old)==1
