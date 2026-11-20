@@ -73,11 +73,78 @@ make -C "$PS3_TOOLCHAIN_ROOT/sdk" install
 # ppu/include/ps3dk extension headers, and the SPU lane library
 # spu/lib/libps3dkprof_spu.a with its spu/include/ps3dk headers in place,
 # re-verifying each archive.
+#
+# The opt-in profiler packages are not part of the sublib install: each one is
+# an explicit target of sdk/libps3dkprof (and libgcm_cmd for AUTO), and an app
+# selects it with its own CMake option (docs/profiler-guide.md section 4).
+# They are installed here, for both data models, so that every SDK built by
+# this script -- the release included -- carries them.  Order matters: the
+# function-path archives go in before the extension check below, the AUTO
+# package last, because install-auto-package seals the installed providers
+# and the headers they were built against.
+PROF=(make -C "$PS3_TOOLCHAIN_ROOT/sdk/libps3dkprof" --no-print-directory)
+GCMD=(make -C "$PS3_TOOLCHAIN_ROOT/sdk/libgcm_cmd" --no-print-directory)
+PPU_PREFIX="$PS3DEV/ppu/bin/powerpc64-ps3-elf-"
+
+# The source commit recorded by the observed runtime and the AUTO seal.  A
+# build outside a git checkout (a source tarball) names it explicitly.
+prof_source_commit="${PS3DK_PROF_SOURCE_COMMIT:-}"
+if [[ -z "$prof_source_commit" ]]; then
+    prof_source_commit="$(git -C "$PS3_TOOLCHAIN_ROOT" rev-parse HEAD)" \
+        || die "cannot read the source commit; outside a git checkout set PS3DK_PROF_SOURCE_COMMIT to the full commit the sources come from"
+fi
+[[ "$prof_source_commit" =~ ^[0-9a-f]{40}$ ]] \
+    || die "profiler source commit is not a full commit id: $prof_source_commit"
+
+say "building + installing the profiler function-path packages (ILP32 + LP64)"
+"${PROF[@]}" install-func install-func-ext || die "profiler install-func/install-func-ext failed"
+
 # Check the INSTALLED tree again here, from the installed files alone, so a
 # sublib install that skipped or lost the extension fails the SDK build.
 say "verifying the installed profiler extension (ILP32 + LP64)"
-make -C "$PS3_TOOLCHAIN_ROOT/sdk/libps3dkprof" --no-print-directory verify-install-ext \
+"${PROF[@]}" verify-install-ext \
     || die "installed profiler extension failed verify-install-ext"
+
+# Wait observations (PS3_PROF_WAITS).  The WAIT_* footprints are the measured
+# inputs the archives are checked against (waits.mk has no default on
+# purpose); the observed pthread runtime goes next to them.
+say "building + installing the profiler wait packages and the observed runtime (ILP32 + LP64)"
+"${PROF[@]}" install-waits \
+    WAIT_STACK_ILP32=1024 WAIT_STACK_LP64=1024 WAIT_TLS_ILP32=4 WAIT_TLS_LP64=4 \
+    WAIT_STATIC_ILP32=24 WAIT_STATIC_LP64=24 WAIT_STATIC_EXT_ILP32=16 WAIT_STATIC_EXT_LP64=24 \
+    || die "profiler install-waits failed"
+[[ -n "$PS3_BUILD_ROOT" ]] || die "PS3_BUILD_ROOT is empty"
+wait_runtime_out="$PS3_BUILD_ROOT/sdk/prof-wait-runtime"
+rm -rf "$wait_runtime_out"
+python3 "$PS3_TOOLCHAIN_ROOT/scripts/build-prof-wait-runtime.py" \
+    --compiler "${PPU_PREFIX}gcc" --sdk "$PS3DK" --out "$wait_runtime_out" \
+    --install-prefix "$PS3DK" --source-base "$prof_source_commit" \
+    || die "observed wait runtime build failed"
+
+say "building + installing the profiler counter packages (ILP32 + LP64)"
+"${PROF[@]}" install-counters || die "profiler install-counters failed"
+
+# AUTO RSX observation (PS3_PROF_AUTO): the GCM command provider, then the
+# profiler provider, sealed together in prof-auto.json per ABI.  The seal
+# reinstalls libps3dkprof_ext_live.a; it must be byte-identical to the one the
+# sublib install put there, so keep a copy and compare.
+say "building + installing the AUTO profiler package (ILP32 + LP64)"
+"${GCMD[@]}" install-auto || die "libgcm_cmd install-auto failed"
+ext_live_before="$PS3_BUILD_ROOT/sdk/prof-ext-live-before"
+rm -rf "$ext_live_before"
+install -d "$ext_live_before/ilp32" "$ext_live_before/lp64"
+install -m 0644 "$PS3DK/ppu/lib/libps3dkprof_ext_live.a" "$ext_live_before/ilp32/"
+install -m 0644 "$PS3DK/ppu/lib/lp64/libps3dkprof_ext_live.a" "$ext_live_before/lp64/"
+"${PROF[@]}" install-auto-package AUTO_SOURCE_COMMIT="$prof_source_commit" PPU_READELF="${PPU_PREFIX}readelf" \
+    || die "profiler install-auto-package failed"
+cmp "$ext_live_before/ilp32/libps3dkprof_ext_live.a" "$PS3DK/ppu/lib/libps3dkprof_ext_live.a" \
+    || die "the AUTO package changed the installed ILP32 libps3dkprof_ext_live.a"
+cmp "$ext_live_before/lp64/libps3dkprof_ext_live.a" "$PS3DK/ppu/lib/lp64/libps3dkprof_ext_live.a" \
+    || die "the AUTO package changed the installed LP64 libps3dkprof_ext_live.a"
+for abi in ilp32 lp64; do
+    python3 "$PS3DK/cmake/ps3-prof-auto-check.py" --root "$PS3DK" --abi "$abi" \
+        || die "installed AUTO package failed its $abi check"
+done
 
 # Replace PSL1GHT's default ICON0.PNG with our PS3DK-branded one.
 # Samples that don't override ICON0 in their Makefile pick up whatever
