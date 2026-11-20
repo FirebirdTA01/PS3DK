@@ -409,9 +409,15 @@ void run_free(run *r)
 
 lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
 {
-    lane_h *h = calloc(1, sizeof *h);
+    /* lane_h holds a psp_spu, whose LS lines are 128-aligned, so lane_h needs 128-byte alignment: calloc guarantees
+     * only 16, and the compiler may use aligned vector stores on its fields (a GP fault, SIGSEGV at address 0, on
+     * some hosts).  sizeof is a multiple of the alignment, as aligned_alloc requires. */
+    lane_h *h = aligned_alloc(_Alignof(lane_h), sizeof(lane_h));
     psp_lane *pl;
     int rc;
+    if (!h)
+        return NULL;
+    memset(h, 0, sizeof *h);
     if (psp_lane_create(&r->p, "worker", r->image, 0, 0, 0, &h->idx) != 0) {
         free(h);
         return NULL;
@@ -427,6 +433,11 @@ lane_h *lane_new(run *r, uint32_t ls_cap, int own_dec, int start)
     h->port = (psp_port){&h->pc, p_rd_dec, p_wr_dec, p_blocking, p_rd_mask, p_wr_mask, p_tag_wait, p_getllar,
                          p_putllc, p_putlluc, p_atomic_stat, p_put};
     h->buf = aligned_alloc(16, ((size_t)ls_cap + 2 * PSP_HEAD) * PSP_SLOT);
+    if (!h->buf) {
+        FAIL("lane buffer: aligned_alloc(16, %zu) failed", ((size_t)ls_cap + 2 * PSP_HEAD) * PSP_SLOT);
+        free(h);
+        return NULL; /* the run fails: the created psp lane is left to its fini */
+    }
     r->lanes[r->nl++] = h;
     if (start) {
         rc = psp_spu_init(&h->s, &h->port, pl->ea_ring, r->p.cfg.ring_slots, pl->ea_ctl, 5, h->buf, ls_cap, own_dec);
