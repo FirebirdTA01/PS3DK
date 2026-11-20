@@ -212,7 +212,16 @@ cp "$PS3_TOOLCHAIN_ROOT/sdk/assets/ICON0.PNG" "$STAGE_DIR/sdk/assets/ICON0.PNG"
 #     fails immediately with "could not load cache file ps3-ppu-toolchain.cmake".
 if [[ -d "$PS3_TOOLCHAIN_ROOT/cmake" ]]; then
     say "Copying cmake/ toolchain files + helpers"
-    cp -a "$PS3_TOOLCHAIN_ROOT/cmake" "$STAGE_DIR/cmake"
+    # Merge into the directory, never copy the directory itself: the SDK
+    # install can already have put files in $PS3DK/cmake (the AUTO profiler
+    # package installs its three helpers there, copies of these sources), and
+    # `cp -a src dest` with an existing dest nests the tree as cmake/cmake,
+    # which left the package without a top-level ps3-self.cmake.
+    mkdir -p "$STAGE_DIR/cmake"
+    cp -a "$PS3_TOOLCHAIN_ROOT/cmake/." "$STAGE_DIR/cmake/"
+    [[ -f "$STAGE_DIR/cmake/ps3-ppu-toolchain.cmake" && -f "$STAGE_DIR/cmake/ps3-self.cmake" \
+       && ! -e "$STAGE_DIR/cmake/cmake" ]] \
+        || die "staged cmake/ is not the toolchain directory (missing ps3-ppu-toolchain.cmake or ps3-self.cmake, or a nested cmake/cmake)"
 else
     warn "$PS3_TOOLCHAIN_ROOT/cmake missing — release will ship without CMake toolchain files; samples won't build out of the box."
 fi
