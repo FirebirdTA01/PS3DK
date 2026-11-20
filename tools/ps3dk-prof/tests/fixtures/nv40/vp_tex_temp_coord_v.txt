@@ -1,0 +1,11 @@
+# rsx-cg-compiler v0.27.19 -p sce_vp_rsx: tools/rsx-cg-compiler/tests/shaders/vp_tex_temp_coord_v.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/vp_words.py on the same program's container
+profile vp
+w 00001c6c 00dd380d 8106c083 60619ffc
+w 00001c6c 04400000 00800043 60405ffc
+w 00001c6c 06400009 0086c083 6041fffc
+w 401f9c6c 0040000d 8086c083 6041ff81
+r 0 ADD dst=R0 mask=xy src0=IN8.xyzw src1=IN8.xyzw src2=C467.xyzw
+r 1 SFL dst=R0 mask=z src0=R0.xxxx src1=R0.xxxx src2=IN0.xyzw
+r 2 TXL dst=R0 mask=xyzw src0=R0.xyxz src1=IN0.xyzw src2=IN0.xyzw
+r 3 MOV dst=o0 mask=xyzw src0=R0.xyzw src1=IN0.xyzw src2=IN0.xyzw

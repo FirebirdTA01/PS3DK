@@ -93,6 +93,8 @@ pub struct App {
     /// The RSX frames page selection.
     pub rsx: crate::rsx_ui::RsxState,
     pub rsx_frame: crate::rsx_frame_ui::State,
+    /// The Capture RSX frame menu: timing mode and whether to keep fragment-program bytes.
+    pub rsx_request: crate::live_rsx_frame::RequestOptions,
     pub shader_names: crate::shader_names::Lookup,
     pub waits: crate::waits_ui::WaitState,
     pub auto: crate::auto_ui::AutoState,
@@ -216,6 +218,7 @@ impl App {
             hot: crate::hotpaths_ui::HotState::default(),
             rsx: crate::rsx_ui::RsxState::default(),
             rsx_frame: crate::rsx_frame_ui::State::default(),
+            rsx_request: Default::default(),
             shader_names: crate::shader_names::Lookup::default(),
             waits: crate::waits_ui::WaitState::default(),
             auto: crate::auto_ui::AutoState::default(),
@@ -729,7 +732,8 @@ impl App {
         let Some(doc)=self.doc.clone()else{return};
         let result=(||{
             let a=doc.analysis().ok_or("No readable capture")?;
-            let frame=doc.rsx_frames.get(a).frames.iter().find(|f|f.id==id).cloned().ok_or("This RSX frame capture is no longer retained")?;
+            let frame:Vec<_>=doc.rsx_frames.get(a).frames.iter().filter(|f|f.id==id).cloned().collect();
+            if frame.is_empty(){return Err("This RSX frame capture is no longer retained".into())}
             let len=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
             if let Some(live)=&self.live{
                 if matches!(live.client.view().outcome,Some(Outcome::Incomplete{..})){return Err("The live session failed validation; it cannot be exported".into())}
@@ -1251,6 +1255,7 @@ impl eframe::App for App {
         let mut want_window_save = None;
         let save_busy=self.save_job.is_some();
         let mut want_rsx_capture=false;
+        let mut rsx_request=self.rsx_request;
         let save_doc=self.doc.clone();
         if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() || save_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
@@ -1271,6 +1276,7 @@ impl eframe::App for App {
                         let r=p.add_enabled(blocked.is_none(),egui::Button::new("Capture RSX frame"));
                         if r.clicked(){want_rsx_capture=true;}
                         if let Some(why)=blocked{r.on_disabled_hover_text(why);}
+                        crate::rsx_modes_ui::request_menu(p,&mut rsx_request);
                         if let Some(line)=v.rsx_frame.status_line(){p.label(line);}
                     });
                 }
@@ -1320,7 +1326,8 @@ impl eframe::App for App {
             // A refusal to send is shown by the trigger row itself (the client records it).
             let _ = l.client.send(cmd);
         }
-        if want_rsx_capture {if let Some(l)=&self.live {let _=l.client.request_rsx_frame(String::new());}}
+        self.rsx_request=rsx_request;
+        if want_rsx_capture {if let Some(l)=&self.live {let _=l.client.request_rsx_frame_with(String::new(),self.rsx_request.flags());}}
         if let Some((id,save_as))=want_window_save {self.save_live_window(id,save_as);}
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
         let rolling_open = self.rolling.is_some() || self.rolling_job.is_some();

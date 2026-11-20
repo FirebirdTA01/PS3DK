@@ -1,0 +1,186 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_selpred_output_alias_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 02160100 00021c9c c8000001 c8000001
+w 66663f26 00000000 00000000 00000000
+w 0e140100 00021c9c c8000001 c8000001
+w f5c340c8 00000000 00000000 00000000
+w 02120100 00021c9c c8000001 c8000001
+w 00003f40 00000000 00000000 00000000
+w 0e100100 c8021c9d c8000001 c8000001
+w c28f3df5 47ae3e61 8f5c3ec2 00000000
+w 1e7e7d00 c8001c9d c8000001 c8000001
+w 0e0e0300 c8021c9d c8200003 c8000001
+w d70a3d23 c28f3d75 c28f3df5 00000000
+w 020c0100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 860a0200 c8011c9d 00020000 c8003fe1
+w 00004000 00000000 00000000 00000000
+w 02080200 00141c9c 00020000 c8000001
+w 00004000 00000000 00000000 00000000
+w 02080300 00021c9e 00100000 c8000001
+w 00000000 00000000 00000000 00000000
+w 02060200 00141c9c 00020000 c8000001
+w 00004060 00000000 00000000 00000000
+w 020c0400 c8181c9d 00020000 000c0000
+w 00003fc0 00000000 00000000 00000000
+w 02062200 00181c9c c8000001 c8000001
+w 02042300 00101c9c c8000001 c8000001
+w 02082200 00101c9c c8000001 c8000001
+w 020c2300 00181c9c c8000001 c8000001
+w 02060200 00021c9c 000c0000 c8000001
+w 00004060 00000000 00000000 00000000
+w 02020200 00021c9c 00180000 c8000001
+w 00004000 00000000 00000000 00000000
+w 02020200 00041c9c 00080000 c8000001
+w 02060400 000c1c9c 00100000 00040002
+w 02060200 00021c9c 000c0000 c8000001
+w 3333beb3 00000000 00000000 00000000
+w 02060100 000c1c9c c8000001 c8000001
+w 04060100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+w 08060100 00021c9c c8000001 c8000001
+w 999a3f19 00000000 00000000 00000000
+w 10020500 c80c1c9d c80c0001 c8000001
+w 020c0200 00021c9c 00180000 c8000001
+w 33333eb3 00000000 00000000 00000000
+w 0e020100 c80c1c9d c8000001 c8000001
+w 0e023b00 c8041c9d fe040001 c8000001
+w 020c0400 00181c9c 00100000 00020000
+w 999abe19 00000000 00000000 00000000
+w 02080300 00181c9c aa140002 c8000001
+w 02060300 aa141c9c 00180002 c8000001
+w 02040500 c8041c9d c8020001 c8000001
+w 1e7f3e40 8aff3ee6 79ea3f5f 00000000
+w 02020500 c8041c9d c8020001 c8000001
+w b60f3ea7 40df3f49 2b3f3f06 00000000
+w 02040900 00021c9c 00080000 c8000001
+w 00000000 00000000 00000000 00000000
+w 02041d00 00081c9c c8000001 c8000001
+w 02020900 00021c9c 00040000 c8000001
+w 00000000 00000000 00000000 00000000
+w 02160400 c82c1c9d 00040000 00020000
+w 33333eb3 00000000 00000000 00000000
+w 02060200 000c1c9c 00020000 c8000001
+w aaab3f2a 00000000 00000000 00000000
+w 02040200 c8081c9d 00020000 c8000001
+w 000041c0 00000000 00000000 00000000
+w 02041c00 c8081c9d c8000001 c8000001
+w 02068100 000c1c9c c8000001 c8000001
+w 0e100400 000c1c9c c81c0001 c8200001
+w 02080200 00101c9c 00020000 c8000001
+w 999a3f99 00000000 00000000 00000000
+w 0e040200 80021c9c 00080000 c8000001
+w 00003f80 00000000 00000000 00000000
+w 02088100 00101c9c c8000001 c8000001
+w 0e140400 00101c9c c8280001 48020000
+w 00000000 00004000 00004080 00000000
+w 0e140300 c8281c9d 00020000 c8000001
+w 00000000 00000000 00000000 00000000
+w 02120400 c8241c9d 00100000 00020000
+w 999a3e19 00000000 00000000 00000000
+w 02128100 00241c9c c8000001 c8000001
+w 02080200 00241c9c 00020000 c8000001
+w 000041e0 00000000 00000000 00000000
+w 02081000 00101c9c c8000001 c8000001
+w 02080300 00101c9c 00020002 c8000001
+w 00003f00 00000000 00000000 00000000
+w 020e2200 00281c9c c8000001 c8000001
+w 020a0c00 aa141c9c 00180000 c8000001
+w 02800b00 00021c9c 00100004 c8000001
+w cccd3dcc 00000000 00000000 00000000
+w 1e7e7e00 c8001c9d c8000001 c8000001
+w 02000180 c9001c9d c8000001 c8000001
+w 0e000200 80021c9c 00000000 c8000001
+w 00003f80 00000000 00000000 00000000
+w 040e2200 aa281c9c c8000001 c8000001
+w 080e2200 54281c9d c8000001 c8000001
+w 0e0e0400 00021c9c c81c0001 00020000
+w 00003f00 00000000 00000000 00000000
+w 0e0e0200 c81c1c9d 002c0000 c8000001
+w 0e040400 c8081c9d 00020000 c81c0001
+w 00003f00 00000000 00000000 00000000
+w 0e0e0400 c8001c9d 00020000 c8080001
+w 999a3f19 00000000 00000000 00000000
+w 0e000100 c8201c9d c8000001 c8000001
+w 037e4100 00141c9c c8000001 c8000001
+w 0e000100 c81c0015 c8000001 c8000001
+w 10000100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+w 02100100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+w 037e4100 00141c9c c8000001 c8000001
+w 02100100 00240014 c8000001 c8000001
+w 08030100 00201c9c c8000001 c8000001
+r 0 MOV dst=R11 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 1 MOV dst=R10 mask=xyz prec=0 sat=0 end=0 s0=c0.xxxx
+r 2 MOV dst=R9 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 3 MOV dst=R8 mask=xyz prec=0 sat=0 end=0 s0=c0.xyzw
+r 4 op3D dst=none mask=xyzw(raw) prec=0 sat=0 end=0 srcs=UNKNOWN
+r 5 ADD dst=R7 mask=xyz prec=0 sat=0 end=0 s0=c0.xyzw s1=-R8.xyzw
+r 6 MOV dst=R6 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 7 MUL dst=R5 mask=xy prec=0 sat=0 end=0 s0=TEX0.xyzw s1=c0.xxxx
+r 8 MUL dst=R4 mask=x prec=0 sat=0 end=0 s0=R5.xxxx s1=c0.xxxx
+r 9 ADD dst=R4 mask=x prec=0 sat=0 end=0 s0=-c0.xxxx s1=R4.xxxx
+r 10 MUL dst=R3 mask=x prec=0 sat=0 end=0 s0=R5.xxxx s1=c0.xxxx
+r 11 MAD dst=R6 mask=x prec=0 sat=0 end=0 s0=R6.xyzw s1=c0.xxxx s2=R3.xxxx
+r 12 COS dst=R3 mask=x prec=0 sat=0 end=0 s0=R6.xxxx
+r 13 SIN dst=R2 mask=x prec=0 sat=0 end=0 s0=R4.xxxx
+r 14 COS dst=R4 mask=x prec=0 sat=0 end=0 s0=R4.xxxx
+r 15 SIN dst=R6 mask=x prec=0 sat=0 end=0 s0=R6.xxxx
+r 16 MUL dst=R3 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R3.xxxx
+r 17 MUL dst=R1 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R6.xxxx
+r 18 MUL dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xxxx s1=R2.xxxx
+r 19 MAD dst=R3 mask=x prec=0 sat=0 end=0 s0=R3.xxxx s1=R4.xxxx s2=-R1.xxxx
+r 20 MUL dst=R3 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R3.xxxx
+r 21 MOV dst=R3 mask=x prec=0 sat=0 end=0 s0=R3.xxxx
+r 22 MOV dst=R3 mask=y prec=0 sat=0 end=0 s0=c0.xxxx
+r 23 MOV dst=R3 mask=z prec=0 sat=0 end=0 s0=c0.xxxx
+r 24 DP3 dst=R1 mask=w prec=0 sat=0 end=0 s0=R3.xyzw s1=R3.xyzw
+r 25 MUL dst=R6 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R6.xxxx
+r 26 MOV dst=R1 mask=xyz prec=0 sat=0 end=0 s0=R3.xyzw
+r 27 DIVSQR dst=R1 mask=xyz prec=0 sat=0 end=0 s0=R1.xyzw s1=R1.wwww
+r 28 MAD dst=R6 mask=x prec=0 sat=0 end=0 s0=R6.xxxx s1=R4.xxxx s2=c0.xxxx
+r 29 ADD dst=R4 mask=x prec=0 sat=0 end=0 s0=R6.xxxx s1=-R5.yyyy
+r 30 ADD dst=R3 mask=x prec=0 sat=0 end=0 s0=R5.yyyy s1=-R6.xxxx
+r 31 DP3 dst=R2 mask=x prec=0 sat=0 end=0 s0=R1.xyzw s1=c0.xyzw
+r 32 DP3 dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xyzw s1=c0.xyzw
+r 33 MAX dst=R2 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R2.xxxx
+r 34 LG2 dst=R2 mask=x prec=0 sat=0 end=0 s0=R2.xxxx
+r 35 MAX dst=R1 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=R1.xxxx
+r 36 MAD dst=R11 mask=x prec=0 sat=0 end=0 s0=R11.xyzw s1=R1.xxxx s2=c0.xxxx
+r 37 MUL dst=R3 mask=x prec=0 sat=0 end=0 s0=R3.xxxx s1=c0.xxxx
+r 38 MUL dst=R2 mask=x prec=0 sat=0 end=0 s0=R2.xyzw s1=c0.xxxx
+r 39 EX2 dst=R2 mask=x prec=0 sat=0 end=0 s0=R2.xyzw
+r 40 MOV dst=R3 mask=x prec=0 sat=1 end=0 s0=R3.xxxx
+r 41 MAD dst=R8 mask=xyz prec=0 sat=0 end=0 s0=R3.xxxx s1=R7.xyzw s2=R8.xyzw
+r 42 MUL dst=R4 mask=x prec=0 sat=0 end=0 s0=R4.xxxx s1=c0.xxxx
+r 43 MUL dst=R2 mask=xyz prec=0 sat=0 end=0 s0=c0.xxxy s1=R2.xxxx
+r 44 MOV dst=R4 mask=x prec=0 sat=1 end=0 s0=R4.xxxx
+r 45 MAD dst=R10 mask=xyz prec=0 sat=0 end=0 s0=R4.xxxx s1=R10.xyzw s2=c0.xyzx
+r 46 ADD dst=R10 mask=xyz prec=0 sat=0 end=0 s0=R10.xyzw s1=c0.xxxx
+r 47 MAD dst=R9 mask=x prec=0 sat=0 end=0 s0=R9.xyzw s1=R4.xxxx s2=c0.xxxx
+r 48 MOV dst=R9 mask=x prec=0 sat=1 end=0 s0=R9.xxxx
+r 49 MUL dst=R4 mask=x prec=0 sat=0 end=0 s0=R9.xxxx s1=c0.xxxx
+r 50 FRC dst=R4 mask=x prec=0 sat=0 end=0 s0=R4.xxxx
+r 51 ADD dst=R4 mask=x prec=0 sat=0 end=0 s0=R4.xxxx s1=-c0.xxxx
+r 52 COS dst=R7 mask=x prec=0 sat=0 end=0 s0=R10.xxxx
+r 53 SLE dst=R5 mask=x prec=0 sat=0 end=0 s0=R5.yyyy s1=R6.xxxx
+r 54 SGE dst=H0 mask=x prec=0 sat=0 end=0 s0=c0.xxxx s1=|R4.xxxx|
+r 55 FENCBR dst=none mask=xyzw(raw) prec=0 sat=0 end=0
+r 56 MOV dst=R0 mask=x prec=2 sat=0 end=0 s0=H0.xyzw
+r 57 MUL dst=R0 mask=xyz prec=0 sat=0 end=0 s0=c0.xxxy s1=R0.xxxx
+r 58 COS dst=R7 mask=y prec=0 sat=0 end=0 s0=R10.yyyy
+r 59 COS dst=R7 mask=z prec=0 sat=0 end=0 s0=R10.zzzz
+r 60 MAD dst=R7 mask=xyz prec=0 sat=0 end=0 s0=c0.xxxx s1=R7.xyzw s2=c0.xxxx
+r 61 MUL dst=R7 mask=xyz prec=0 sat=0 end=0 s0=R7.xyzw s1=R11.xxxx
+r 62 MAD dst=R2 mask=xyz prec=0 sat=0 end=0 s0=R2.xyzw s1=c0.xxxx s2=R7.xyzw
+r 63 MAD dst=R7 mask=xyz prec=0 sat=0 end=0 s0=R0.xyzw s1=c0.xxxx s2=R2.xyzw
+r 64 MOV dst=R0 mask=xyz prec=0 sat=0 end=0 s0=R8.xyzw
+r 65 MOV dst=none mask=x(raw) prec=0 sat=0 end=0 s0=R5.xxxx
+r 66 MOV dst=R0 mask=xyz prec=0 sat=0 end=0 s0=R7.xyzw
+r 67 MOV dst=R0 mask=w prec=0 sat=0 end=0 s0=c0.xxxx
+r 68 MOV dst=R8 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 69 MOV dst=none mask=x(raw) prec=0 sat=0 end=0 s0=R5.xxxx
+r 70 MOV dst=R8 mask=x prec=0 sat=0 end=0 s0=R9.xxxx
+r 71 MOV dst=R1 mask=z prec=0 sat=0 end=1 s0=R8.xxxx

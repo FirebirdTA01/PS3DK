@@ -5,8 +5,62 @@ use crate::live::{Hello, LinkState, CAP_RSX_FRAME, T_RSX_FRAME_REQ};
 pub struct RsxFrameRequest {
     pub name: String,
 }
+/// Request flag bits (contract r7): isolated timing, keep fragment-program bytes, both modes in two frames.
+pub const FLAG_ISOLATED: u16 = 1;
+pub const FLAG_FP_BYTES: u16 = 2;
+pub const FLAG_BOTH: u16 = 4;
+
+/// The timing mode a capture is requested with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Reached-marker intervals; draws overlap as the RSX pipelines them.
+    #[default]
+    Pipelined,
+    /// Each draw waits for the previous one: isolated cost, a slower frame.
+    Isolated,
+    /// Two consecutive frames: the first pipelined, the second isolated.
+    Both,
+}
+impl Mode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Pipelined => "Pipelined",
+            Mode::Isolated => "Isolated",
+            Mode::Both => "Both",
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Mode::Pipelined => "Reached-marker intervals: draws overlap, so their sum is not isolated cost.",
+            Mode::Isolated => "The RSX waits for idle around each draw: isolated cost per draw; the captured frame runs slower.",
+            Mode::Both => "Two consecutive frames: the first pipelined, the second isolated, shown side by side and paired per draw.",
+        }
+    }
+}
+/// The menu's choice: a mode and whether to keep fragment-program bytes for the Shader view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RequestOptions {
+    pub mode: Mode,
+    pub fp_bytes: bool,
+}
+impl RequestOptions {
+    pub fn flags(self) -> u16 {
+        (match self.mode {
+            Mode::Pipelined => 0,
+            Mode::Isolated => FLAG_ISOLATED,
+            Mode::Both => FLAG_BOTH,
+        }) | if self.fp_bytes { FLAG_FP_BYTES } else { 0 }
+    }
+}
+
 impl RsxFrameRequest {
     pub fn encode(&self, request: u32) -> Result<Vec<u8>, String> {
+        self.encode_with(request, 0)
+    }
+    pub fn encode_with(&self, request: u32, flags: u16) -> Result<Vec<u8>, String> {
+        if flags & !(FLAG_ISOLATED | FLAG_FP_BYTES | FLAG_BOTH) != 0 || flags & (FLAG_ISOLATED | FLAG_BOTH) == FLAG_ISOLATED | FLAG_BOTH {
+            return Err(refusal(-5));
+        }
         if request == 0 || self.name.len() > 63 || self.name.contains('\0') {
             return Err("RSX capture requires a nonzero request and a name of at most 63 UTF-8 bytes without NUL".into());
         }
@@ -14,7 +68,7 @@ impl RsxFrameRequest {
         b.extend(0u16.to_le_bytes());
         b.extend((12 + self.name.len() as u32).to_le_bytes());
         b.extend(request.to_le_bytes());
-        b.extend(0u16.to_le_bytes());
+        b.extend(flags.to_le_bytes());
         b.extend(1u16.to_le_bytes());
         b.extend((self.name.len() as u16).to_le_bytes());
         b.extend(0u16.to_le_bytes());
@@ -47,7 +101,7 @@ pub enum RsxFrameEvent {
 pub fn refusal(code: i32) -> String {
     match code {
         -2=>"EBUSY: the console still follows an earlier RSX frame capture (its final state has not arrived); request again once it has".into(),
-        -5=>"EINVAL: the capture flags or name were refused".into(),
+        -5=>"EINVAL: the request was refused: isolated and both cannot be combined, the name is invalid, or this agent does not support the selected mode or shader-bytes option".into(),
         -6=>"ENOMEM: capture staging memory could not be allocated".into(),
         -14=>"ENOTINIT: the profiler is not initialized".into(),
         -15=>"ESTOPPED: the profiler is shutting down".into(),
@@ -113,6 +167,9 @@ impl RequestTracker {
         })
     }
     pub fn start(&mut self, name: String) -> Result<(u32, Vec<u8>), String> {
+        self.start_with(name, 0)
+    }
+    pub fn start_with(&mut self, name: String, flags: u16) -> Result<(u32, Vec<u8>), String> {
         if let Some(e) = self.blocked() {
             return Err(e);
         }
@@ -120,7 +177,7 @@ impl RequestTracker {
         let next = id
             .checked_add(1)
             .ok_or("RSX request ids exhausted; reconnect")?;
-        let bytes = RsxFrameRequest { name }.encode(id)?;
+        let bytes = RsxFrameRequest { name }.encode_with(id, flags)?;
         self.next = next;
         self.request = Some(id);
         self.ack = None;
@@ -156,18 +213,16 @@ impl RequestTracker {
         let Some(ack) = self.ack.filter(|a| a.result == 0) else {
             return;
         };
-        if let Some(f) = frames
-            .iter()
-            .find(|f| f.id == ack.capture && f.request_id == ack.request)
-        {
-            use ps3dk_prof::rsx_frame::FrameStatus;
+        use ps3dk_prof::rsx_frame::FrameStatus;
+        let terminal = |f: &&ps3dk_prof::rsx_frame::FrameView| {
+            matches!(f.status, FrameStatus::Complete | FrameStatus::Truncated { .. } | FrameStatus::Abandoned { .. })
+        };
+        // A BOTH capture is two views (pipelined, isolated): Ready only when both are; the counts are the
+        // first unfinished view's own (never summed across timing modes).
+        let views: Vec<_> = frames.iter().filter(|f| f.id == ack.capture && f.request_id == ack.request).collect();
+        if let Some(f) = views.iter().find(|f| !terminal(f)).or(views.last()) {
             self.timing_counts = Some((f.totals.timed, f.totals.draws));
-            self.resolved = matches!(
-                f.status,
-                FrameStatus::Complete
-                    | FrameStatus::Truncated { .. }
-                    | FrameStatus::Abandoned { .. }
-            );
+            self.resolved = views.iter().all(terminal);
         }
     }
     pub fn status_line(&self) -> Option<String> {

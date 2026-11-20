@@ -1,0 +1,25 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_distance4_width_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w be020200 c8011c9d c8020001 c8003fe1
+w 00003f00 00003f20 00003f40 00003f60
+w 1e020100 c8041c9d c8000001 c8000001
+w 1e7e7d00 c8001c9d c8000001 c8000001
+w 9e020300 c8011c9f c8040001 c8003fe1
+w 02020600 c8041c9d c8040001 c8000001
+w 02023b00 c8043c9d c8040001 c8000001
+w 02000100 00041c9c c8000001 c8000001
+w 04000100 00041c9c c8000001 c8000001
+w 08000100 00041c9c c8000001 c8000001
+w 10010100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+r 0 MUL dst=R1 mask=xyzw prec=0 sat=0 end=0 s0=TEX1.xyzw s1=c0.xyzw
+r 1 MOV dst=R1 mask=xyzw prec=0 sat=0 end=0 s0=R1.xyzw
+r 2 op3D dst=none mask=xyzw(raw) prec=0 sat=0 end=0 srcs=UNKNOWN
+r 3 ADD dst=R1 mask=xyzw prec=0 sat=0 end=0 s0=-TEX0.xyzw s1=R1.xyzw
+r 4 DP4 dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xyzw s1=R1.xyzw
+r 5 DIVSQR dst=R1 mask=x prec=0 sat=0 end=0 s0=|R1.xyzw| s1=R1.xyzw
+r 6 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=R1.xxxx
+r 7 MOV dst=R0 mask=y prec=0 sat=0 end=0 s0=R1.xxxx
+r 8 MOV dst=R0 mask=z prec=0 sat=0 end=0 s0=R1.xxxx
+r 9 MOV dst=R0 mask=w prec=0 sat=0 end=1 s0=c0.xxxx

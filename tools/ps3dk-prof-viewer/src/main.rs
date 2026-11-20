@@ -32,7 +32,12 @@ fn main() -> eframe::Result<()> {
         Some((t0.parse::<f64>().ok()?, dt.parse::<f64>().ok()?))
     });
     let explicit_page = args.iter().any(|a| a.starts_with("--page="));
-    let shader_tab = args.iter().any(|a| a == "--rsx-tab=shaders");
+    // Screenshot options for the RSX frames page: --rsx-tab=summary|shaders|state|textures|buffers|constants,
+    // --rsx-view=draws|shaders|pairs, --rsx-capture=ID[:second] and --rsx-draw=ORDINAL.
+    let rsx_tab = args.iter().find_map(|a| a.strip_prefix("--rsx-tab=")).map(str::to_string);
+    let rsx_view = args.iter().find_map(|a| a.strip_prefix("--rsx-view=")).map(str::to_string);
+    let rsx_capture = args.iter().find_map(|a| a.strip_prefix("--rsx-capture=")).map(str::to_string);
+    let rsx_draw = args.iter().find_map(|a| a.strip_prefix("--rsx-draw=")?.parse::<u32>().ok());
     let rsx_link_ended = args.iter().any(|a| a == "--rsx-link-ended");
     let page = if args.iter().any(|a| a == "--page=rolling") {
         Page::Rolling
@@ -112,7 +117,7 @@ fn main() -> eframe::Result<()> {
                 cc.egui_ctx.set_theme(egui::ThemePreference::Dark);
             }
             let mut app = App::new(open);
-            if shader_tab {app.rsx_frame.tab=ps3dk_prof_viewer::rsx_frame_ui::Tab::Shaders;}
+            rsx_preview(&mut app, rsx_capture.as_deref(), rsx_draw, rsx_tab.as_deref(), rsx_view.as_deref());
             if rsx_link_ended {
                 link_ended_preview(&mut app);
             }
@@ -162,4 +167,41 @@ fn link_ended_preview(app: &mut App) {
     t.ack = Some(RsxFrameAck { request: f.request_id, capture: f.id, result: 0 });
     t.ended = true;
     app.follow_rsx_frame(&t, &v);
+}
+
+/// Applies the RSX frames screenshot options (capture and half, draw, tab, view).
+fn rsx_preview(app: &mut App, capture: Option<&str>, draw: Option<u32>, tab: Option<&str>, view: Option<&str>) {
+    use ps3dk_prof::rsx_frame::Half;
+    use ps3dk_prof_viewer::rsx_frame_ui::{Tab, View};
+    if let (Some(c), Some(d)) = (capture, app.doc.clone()) {
+        let (id, second) = c.split_once(':').map_or((c, false), |(i, h)| (i, h == "second"));
+        if let (Ok(id), Some(a)) = (id.parse::<u32>(), d.analysis()) {
+            let v = d.rsx_frames.get(a);
+            let want = |f: &&ps3dk_prof::rsx_frame::FrameView| f.id == id && (f.half == Half::Second) == second;
+            if let Some(f) = v.frames.iter().find(want) {
+                app.rsx_frame.select(f);
+            }
+        }
+    }
+    if let Some(k) = draw {
+        app.rsx_frame.draw = Some(k);
+        app.rsx_frame.focus = true;
+    }
+    if let Some(t) = tab {
+        app.rsx_frame.tab = match t {
+            "shaders" => Tab::Shaders,
+            "state" => Tab::State,
+            "textures" => Tab::Textures,
+            "buffers" => Tab::Buffers,
+            "constants" => Tab::Constants,
+            _ => Tab::Summary,
+        };
+    }
+    if let Some(w) = view {
+        app.rsx_frame.view = match w {
+            "shaders" => View::Shaders,
+            "pairs" => View::Pairs,
+            _ => View::Draws,
+        };
+    }
 }

@@ -265,7 +265,7 @@ impl SaveJob {
     /// a fixed preparation ceiling plus the one accepted-prefix copy (1x) at
     /// admission, then 70x the planned output before it is rendered and reopened.
     /// The document's own analysis is reused, so the session is not parsed again.
-    pub fn rsx_frame(doc:Arc<Document>,len:usize,path:std::path::PathBuf,frame:ps3dk_prof::rsx_frame::FrameView,pool:Arc<crate::capture::Pool>,bytes:impl FnOnce()->Result<Vec<u8>,String>)->Result<Self,String>{
+    pub fn rsx_frame(doc:Arc<Document>,len:usize,path:std::path::PathBuf,frame:Vec<ps3dk_prof::rsx_frame::FrameView>,pool:Arc<crate::capture::Pool>,bytes:impl FnOnce()->Result<Vec<u8>,String>)->Result<Self,String>{
         let ledger=Self::rsx_reservation(len,pool)?;let data=bytes()?;
         if data.len()!=len{return Err("Displayed capture changed before saving".into());}
         Self::spawn(ledger,path,move|path,ledger|{let out=rsx_document_projection(&doc,&data,&frame,ledger)?;ps3dk_prof::export::publish_projection(&out,path).map_err(|e|e.to_string())})
@@ -273,7 +273,7 @@ impl SaveJob {
     /// The same bounded RSX frame Save for an opened file. The file is re-read
     /// once and must still match the identity it was opened with.
     #[allow(clippy::too_many_arguments)]
-    pub fn rsx_file(doc:Arc<Document>,source:std::path::PathBuf,len:usize,sha:[u8;32],accepted:usize,path:std::path::PathBuf,frame:ps3dk_prof::rsx_frame::FrameView,pool:Arc<crate::capture::Pool>)->Result<Self,String>{
+    pub fn rsx_file(doc:Arc<Document>,source:std::path::PathBuf,len:usize,sha:[u8;32],accepted:usize,path:std::path::PathBuf,frame:Vec<ps3dk_prof::rsx_frame::FrameView>,pool:Arc<crate::capture::Pool>)->Result<Self,String>{
         let ledger=Self::rsx_reservation(len,pool)?;
         Self::spawn(ledger,path,move|path,ledger|{
             use std::io::Read;
@@ -443,12 +443,16 @@ impl SaveJob {
 /// Export through the reader, then prove the selected capture is unchanged.
 /// A saved export may be copied by Save as; its existing projection is preserved.
 pub fn rsx_projection(data:&[u8],frame:&ps3dk_prof::rsx_frame::FrameView)->Result<Vec<u8>,String>{
+    rsx_projection_views(data,std::slice::from_ref(frame))
+}
+/// The same for every view of one capture (a Both capture's two frames are saved together).
+pub fn rsx_projection_views(data:&[u8],frame:&[ps3dk_prof::rsx_frame::FrameView])->Result<Vec<u8>,String>{
     let source=ps3dk_prof::reader::read(data).map_err(|e|e.to_string())?;
     project(data,&source,&ps3dk_prof::rsx_frame::frames(&source),frame,&mut |_|Ok(()))
 }
 /// The viewer route: `data` is exactly the accepted bytes `doc` was analysed
 /// from, so its capture and cached frame views are reused (no second parse).
-fn rsx_document_projection(doc:&Document,data:&[u8],frame:&ps3dk_prof::rsx_frame::FrameView,ledger:&mut crate::capture::Ledger)->Result<Vec<u8>,String>{
+fn rsx_document_projection(doc:&Document,data:&[u8],frame:&[ps3dk_prof::rsx_frame::FrameView],ledger:&mut crate::capture::Ledger)->Result<Vec<u8>,String>{
     let a=doc.analysis().ok_or("No readable capture")?;
     let cut=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
     if data.len()!=cut{return Err("Displayed capture changed before saving".into());}
@@ -456,18 +460,21 @@ fn rsx_document_projection(doc:&Document,data:&[u8],frame:&ps3dk_prof::rsx_frame
 }
 /// Prepare the bounded export, reserve its output/reopen workspace, render,
 /// then compare the selected frame value exactly before anything is published.
-fn project(data:&[u8],source:&ps3dk_prof::model::Capture,frames:&[ps3dk_prof::rsx_frame::FrameView],frame:&ps3dk_prof::rsx_frame::FrameView,reserve:&mut dyn FnMut(u64)->Result<(),String>)->Result<Vec<u8>,String>{
+fn project(data:&[u8],source:&ps3dk_prof::model::Capture,frames:&[ps3dk_prof::rsx_frame::FrameView],frame:&[ps3dk_prof::rsx_frame::FrameView],reserve:&mut dyn FnMut(u64)->Result<(),String>)->Result<Vec<u8>,String>{
     use ps3dk_prof::{reader,rsx_frame};
-    if !frames.iter().any(|f|f==frame){return Err("The selected RSX capture no longer matches the accepted source".into());}
+    if frame.is_empty()||!frame.iter().all(|x|frames.iter().any(|f|f==x)){return Err("The selected RSX capture no longer matches the accepted source".into());}
+    // Every frame the capture spans (a Both capture: the pipelined and the isolated frame).
+    let lo=frame.iter().map(|f|f.frame).min().unwrap();let hi=frame.iter().map(|f|f.frame).max().unwrap();
     // Output, reopened parser trees and frame values: the snapshot quote, sized by the output.
     let quote=|n:usize|(n as u64).checked_mul(70).and_then(|n|n.checked_add(4<<20)).ok_or_else(||"Save workspace size overflow".to_string());
     let bytes=if source.export.is_some(){
         reserve(quote(data.len())?)?;data.to_vec()
     }else{
-        let p=ps3dk_prof::export::prepare_export_bytes(data,source,frame.frame..=frame.frame,usize::MAX).map_err(|e|e.to_string())?;
+        let p=ps3dk_prof::export::prepare_export_bytes(data,source,lo..=hi,usize::MAX).map_err(|e|e.to_string())?;
         reserve(quote(p.output_bytes())?)?;p.render().map_err(|e|e.to_string())?
     };
     let reopened=reader::read(&bytes).map_err(|e|e.to_string())?;
-    if !rsx_frame::frames(&reopened).iter().any(|f|f==frame){return Err("RSX frame export changed its timing or partial status; nothing saved".into());}
+    let again=rsx_frame::frames(&reopened);
+    if !frame.iter().all(|x|again.iter().any(|f|f==x)){return Err("RSX frame export changed its timing or partial status; nothing saved".into());}
     Ok(bytes)
 }

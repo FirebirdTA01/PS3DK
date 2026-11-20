@@ -33,6 +33,8 @@ pub struct RsxFrameView {
     pub map: Option<MapState>,
     pub hz: u64,
     pub available: bool,
+    /// The agent's fragment-program byte cap (CONFIG, decoder 4), for the Shader view's explanation.
+    pub fp_bytes_cap: Option<u32>,
 }
 impl RsxFrameView {
     pub fn build(a: &Analysis) -> Self {
@@ -48,6 +50,7 @@ impl RsxFrameView {
                 .map(auto_rsx::qualify),
             hz: a.capture.clock.as_ref().map_or(0, |c| c.freq_hz),
             available: a.capture.rsx_frame.is_some(),
+            fp_bytes_cap: a.capture.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).map(|c| c.fp_bytes_cap),
         }
     }
     pub fn json(&self, a: &Analysis) -> serde_json::Value {

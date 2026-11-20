@@ -1,0 +1,44 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: inline source (below)
+# | float4 main(float4 t : TEXCOORD0) : COLOR { float s = 0; float i; for (i = 0; i < t.x; i++) { s += t.y; if (s > t.z) break; } return float4(s, i, 0, 1); }
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 02060100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 02040100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 00004340 c8001c9d 03fc8008 00440000
+w 837e4a00 00081c9c 00010000 c8003fe1
+w 00004040 00000008 00008000 00000000
+w 82020300 000c1c9c aa010000 c8003fe1
+w 02060100 00041c9c c8000001 c8000001
+w 82020d00 00041c9c 54010001 c8003fe1
+w 02020e00 00041c9c 00020000 c8000001
+w 00000000 00000000 00000000 00000000
+w 037e4100 00041c9c c8000001 c8000001
+w 00004040 00000014 00008000 00000000
+w 02020300 00081c9c 00020000 c8000001
+w 00003f80 00000000 00000000 00000000
+w 02040100 00041c9c c8000001 c8000001
+w 02000100 000c1c9c c8000001 c8000001
+w 04000100 00081c9c c8000001 c8000001
+w 08000100 00021c9c c8000001 c8000001
+w 00000000 00000000 00000000 00000000
+w 10010100 00021c9c c8000001 c8000001
+w 00003f80 00000000 00000000 00000000
+r 0 MOV dst=R3 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 1 MOV dst=R2 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 2 ADD dst=none mask=-(raw) prec=1 sat=0 end=0 s0=R0.xyzw s1=H63.yxxx
+r 3 SLT dst=none mask=x(raw) prec=0 sat=0 end=0 s0=R2.xxxx s1=TEX0.xxxx
+r 4 NOP dst=none mask=-(raw) prec=1 sat=0 end=0
+r 5 ADD dst=R1 mask=x prec=0 sat=0 end=0 s0=R3.xxxx s1=TEX0.yyyy
+r 6 MOV dst=R3 mask=x prec=0 sat=0 end=0 s0=R1.xxxx
+r 7 SGT dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xxxx s1=TEX0.zzzz
+r 8 SNE dst=R1 mask=x prec=0 sat=0 end=0 s0=R1.xxxx s1=c0.xxxx
+r 9 MOV dst=none mask=x(raw) prec=0 sat=0 end=0 s0=R1.xxxx
+r 10 NOP dst=none mask=-(raw) prec=1 sat=0 end=0
+r 11 ADD dst=R1 mask=x prec=0 sat=0 end=0 s0=R2.xxxx s1=c0.xxxx
+r 12 MOV dst=R2 mask=x prec=0 sat=0 end=0 s0=R1.xxxx
+r 13 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=R3.xxxx
+r 14 MOV dst=R0 mask=y prec=0 sat=0 end=0 s0=R2.xxxx
+r 15 MOV dst=R0 mask=z prec=0 sat=0 end=0 s0=c0.xxxx
+r 16 MOV dst=R0 mask=w prec=0 sat=0 end=1 s0=c0.xxxx

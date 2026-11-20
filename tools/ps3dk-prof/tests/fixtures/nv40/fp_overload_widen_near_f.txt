@@ -1,0 +1,11 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_overload_widen_near_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 837e4100 00011c9c c8000001 c8003fe1
+w 82001100 00013c9c c8000001 c8003fe1
+w 02000100 00000006 c8000001 c8000001
+w 1e018100 00001c9c c8000001 c8000001
+r 0 MOV dst=none mask=x(raw) prec=0 sat=0 end=0 s0=TEX0.xxxx
+r 1 FLR dst=R0 mask=x prec=0 sat=0 end=0 s0=|TEX0.xxxx|
+r 2 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=-R0.xxxx
+r 3 MOV dst=R0 mask=xyzw prec=0 sat=1 end=1 s0=R0.xxxx

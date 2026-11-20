@@ -878,10 +878,45 @@ agents are negotiated as protocol 2 then 1 and show why the button is unavailabl
 
 Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
 ordinal, change the sort, or group by program pair, VP, FP, label, tag, pass or kind. Summary and Shaders show the
-reader's arguments, provenance and stable identities. State, Textures, Buffers and Constants explicitly report that
-schema 1 did not record those values. PIPELINED intervals may overlap: their sum is not isolated execution cost.
-Qualified AUTO clocks give millisecond bounds (three decimals), with raw ticks on hover; unqualified clocks retain
-raw ticks and their unavailable-conversion notice. Existing EXT-marker captures remain a separate source selector.
+reader's arguments, provenance and stable identities. Captures with register state (decoder 2) fill **State**
+(render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot: size, format, mips,
+filter, wrap, offset and location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
+the index stream of an indexed draw, and the surfaces). Values this draw changed are highlighted, values that differ
+from the register state when the capture was armed are tinted and labelled **differs from frame start** (not
+"non-default": hardware reset values are not known), and a register not written since the last decoder reset reads
+**unknown**, never a default. Summary and State list the registers changed since the previous draw with their old
+and new values. Group by **Render target** to total draws per colour/zeta surface. Older (decoder 1) captures say
+that no register state was recorded.
+
+**Constants** (decoder 3 captures) lists the draw's vertex-program uniforms, then its fragment-program uniforms, by
+name with their vec4 values; components not written since the last decoder reset show as `?`. Slots and blocks
+without a uniform name (the VP literal pool, unnamed FP constants) follow by slot or offset. Each FP constant has a
+provenance badge per component (one badge when all four agree): **last inline write seen** (the latest inline write
+the decoder saw in the command stream; not a claim about the value at GPU time), **container: may differ at GPU
+time** (the program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset or a
+full write map). Frames timed isolated are labelled **ISOLATED** on the Automatic page. Values
+changed since the previous draw are highlighted. Consecutive draws that differ only in their constants collapse in
+the draw list into one **xN** row with the run's total time and the slots that vary; click it to list its draws.
+Sorted by time, a run is placed by its total time; other sorts keep it where its first draw falls.
+Selecting a draw of a run adds a per-instance table of those slots to Constants.
+
+Beside **Capture RSX frame**, the mode menu chooses **Pipelined** (default), **Isolated** (the RSX waits for idle
+around each draw, so each interval is that draw's own cost and the frame runs slower) or **Both** (two consecutive
+frames, the first pipelined and the second isolated). **Keep fragment shader bytes** asks the agent to store the
+fragment programs' microcode for the Shader view. An agent that cannot honour a choice answers `EINVAL`, shown in
+words. A Both capture appears as two views of one capture, each labelled with its timing mode and with its own
+totals; the two are never added. **Pairs** lists the draws of the two frames side by side (paired by kind, label and
+programs), with unpaired draws marked.
+
+**Shader view** lists every program of the selected view with its name, hash and provenance, the draws using it,
+their total and mean time in that view's mode, and the constants that change across those draws. When the capture
+kept the program's bytes it shows the disassembly; encodings the disassembler does not know are shown as raw words.
+Vertex-program bytes are kept by phase 4 captures; fragment-program bytes only with **Keep fragment shader bytes**,
+for programs bound while the capture was armed and within the agent's byte cap.
+
+PIPELINED intervals may overlap: their sum is not isolated execution cost. Qualified AUTO clocks give millisecond
+bounds (three decimals), with raw ticks on hover; unqualified clocks retain raw ticks and their unavailable-conversion
+notice. Existing EXT-marker captures remain a separate source selector.
 
 **Shader folder…** scans that folder's `.vpo`/`.fpo` files in the background, matching the reader's canonical hash.
 Names supplied by the app take precedence over local filenames, then stable hashes. The folder is session-local;
