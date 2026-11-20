@@ -237,6 +237,8 @@ and `PS3_PROF_AUTO`.
 - **CMake:** `-DPS3_PROF_LIVE_AUTOSTART=ON`. Every executable that links the profiler gets the link request, `net` and
   `sysmodule_stub`; an extension or `PS3_PROF_AUTO` executable also gets `libps3dkprof_ext_live.a`. Optional:
   `PS3_PROF_LIVE_PORT` (default `31750`) and `PS3_PROF_LIVE_NET_POOL_KB` (default `0`, see below).
+  Turning on `PS3_PROF_LIVE_AUTOSTART` together with `PS3_PROF_AUTO` needs CMake 3.29 or newer (two project-include
+  files); older CMake stops at configure.
 - **Without CMake:** compile one unit that includes `<ps3dk/prof.h>` with `-DPS3DK_PROF_LIVE_AUTOSTART=1` (or link with
   `-Wl,-u,__ps3dk_prof_live_autostart_anchor`) and link `-lnet -lsysmodule_stub` after the profiler. A missing library
   is a link error, never a silent off. `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);`, written once at file

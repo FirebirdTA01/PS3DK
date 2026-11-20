@@ -339,6 +339,12 @@ The version stamped into builds is generated from the most recent
 - **GCC 15 host builds of the profiler.** The identity marker and id byte
   fields are declared `nonstring`; the layout is unchanged.
 
+### Known issues
+
+- **Live auto-start with `PS3_PROF_AUTO` needs CMake 3.29.** Turning on
+  `PS3_PROF_LIVE_AUTOSTART` together with `PS3_PROF_AUTO` needs CMake 3.29 or
+  newer (two project-include files); older CMake stops at configure.
+
 ## [v0.27.0] — 2026-10-29
 
 ### Added
