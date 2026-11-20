@@ -63,9 +63,12 @@ retention: retain the installed-library anchor/no-anchor RPCS3 controls in
 The EMP Engine team builds and runs their engine on the candidate and posts
 a PASS record.  The tag waits for it.
 
-1. **Install.**  The candidate zip goes into a scratch PS3DK directory,
-   never the installed one.  EMP's pinned configure (W0/G7) must pass.
-   Its pins are per archive member.
+1. **Install.**  The candidate zip replaces the installed PS3DK, as a
+   clean extract, after EMP has been told and with no EMP build or RPCS3
+   run in flight.  The installed tree is first copied to a rollback
+   directory and that copy is verified (a file inventory with sha256s),
+   so the previous SDK can be restored exactly.  EMP's pinned configure
+   (W0/G7) must pass.  Its pins are per archive member.
 2. **Build** (native Windows).  From the engine's rapid-development head,
    with `PS3DK=PS3DEV=<scratch>` and `EMP_PS3_PORT_DIR=<plugin>/Port`:
 

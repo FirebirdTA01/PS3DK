@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.27.284] — 2026-11-20
+
 ### Added
 
 - **RSX label and report reservations.** `<cell/gcm/ps3tc_gcm_labels.h>`, included
@@ -65,6 +67,140 @@ The version stamped into builds is generated from the most recent
   for when to turn it on, its cost, and the optional `PS3_PROF_LIVE_PORT` and
   `PS3_PROF_LIVE_NET_POOL_KB` settings.
 
+- **Profiler PC viewer and live link.** `ps3dk-prof-viewer` opens a capture
+  file or connects to a running app over TCP and shows the timeline, frames,
+  zones, counters and the pages listed below. RSX time is measured on the RSX
+  clock and mapped to PPU time through clock anchors; SPU zones are timed in
+  decrementer ticks. The extension archives (`libps3dkprof_ext*.a`) are
+  installed for both ABIs, and an LP64 extension build is supported.
+
+- **Wait observation (opt-in).** Linking the observed runtime
+  (`librt_profwait` with the wait profiler archives, `PS3_PROF_WAITS`) records
+  pthread mutex, timed-mutex and condition waits: the waiting thread, the call
+  site, the elapsed ticks and the results. The viewer has a Waits page. Turn it
+  on to find lock contention; leave it off otherwise, since the app then links
+  an observed runtime variant and every recorded wait adds a record.
+  Default archives are unchanged.
+
+- **Automatic function paths (opt-in).** Building your own sources with
+  `-finstrument-functions` and linking `libps3dkprof_func.a` (or
+  `libps3dkprof_ext_func.a`) records a bounded call tree per thread, with call
+  counts and inclusive, self and child time, and no zone macros.
+  `ps3dk-prof paths --functions` and the viewer's Hot paths page show it, named
+  from the linked ELF. Turn it on to find where PPU time goes without marking
+  code; leave it off for timing-sensitive measurements, since every
+  instrumented call pays the hook cost.
+
+- **Automatic RSX profiler (`PS3_PROF_AUTO`).** A CMake option that profiles
+  an app's GCM command stream with no app code: per-draw RSX timing from
+  report pairs, frame marks at flips, and per-frame verdicts (RSX-bound,
+  pacing, PPU-side or UNKNOWN with the reason). It covers draws in CALL
+  segments, times a CALL as one block when its draws cannot all be timed,
+  keeps clock anchors that bracket the RSX timestamp, and gives bounded
+  verdicts when only part of a frame is timed. `ps3dk-prof auto` reads it
+  (`--json`, `--ops`, `--by-tag`). The profiler takes local reports 1024-2047
+  and labels 246-247.
+
+- **Capture windows.** The profiler records zones, counters, waits, function
+  paths, AUTO rows and draw timing only while a window is open (see Changed).
+  `PS3DK_PROF_CAPTURE_WHOLE_RUN()` records the whole run;
+  `PS3DK_PROF_CAPTURE_BEGIN(name)` / `PS3DK_PROF_CAPTURE_END()`,
+  `PS3DK_PROF_CAPTURE_FRAMES(name, n)` and the scoped `PS3DK_PROF_SECTION(name)`
+  open named windows. `ps3dk-prof windows` lists them; `report`, `frames`,
+  `auto` and `export` take `--window <id|name>`. `ps3dk-prof export --frame N`
+  or `--frames A..B` writes a frame range as a standalone capture.
+
+- **AUTO tags and ranges.** `PS3DK_PROF_AUTO_TAG(u32)` labels later AUTO
+  records; `PS3DK_PROF_AUTO_RANGE_BEGIN(name)` / `_END()` time a named range,
+  and `_BEGIN_TIMED` with `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY()` spends per-draw
+  report pairs only inside the ranges that ask for them. `ps3dk-prof auto
+  --by-tag` lists each frame's ranges per occurrence with depth, parent,
+  exclusive time and a nearest-rank p95. A refused range is counted by
+  reason, in the coverage rows, the status record, the reader and the viewer.
+  `PS3DK_PROF_AUTO_OPTIONS_SET` sets the AUTO options before `cellGcmInit`.
+
+- **Label-poll observation.** In a `PS3_PROF_AUTO` build, waits through
+  `cellGcmIsLabelPassed` and `cellGcmIsLabelValuePassed` are recorded and count
+  as polling evidence in the frame verdicts.
+
+- **Unlimited per-draw timing (opt-in report ring).** `-DPS3_PROF_AUTO_RING=ON`
+  (with `PS3_PROF_AUTO_RING_MB`, default 16, and `PS3_PROF_AUTO_RING_RECORDS`,
+  default 16384) times every draw the app writes into its own command buffer,
+  with no per-frame cap, by copying report blocks to main memory. Turn it on
+  when busy frames leave draws untimed ("report capacity") or for per-draw and
+  per-pass RSX cost; leave it off when memory is tight (about 20 MiB at the
+  defaults) or frame verdicts are enough. Off allocates nothing.
+
+- **Rolling capture (opt-in).** `PS3_PROF_AUTO_ROLLING=<MiB>` in a
+  `PS3_PROF_AUTO` build writes a fixed-size `.profr` that keeps the most recent
+  part of the run and drops the oldest. Commits happen when a payload slot is
+  full. `ps3dk-prof rolling --json` and the viewer's Rolling (retained) page
+  read it; every number covers the retained part only. Turn it on for long
+  sessions or a fixed disk budget; leave it off when you need whole-run totals
+  or a verdict for every frame. SPU recording with the automatic profiler is
+  refused in rolling mode.
+
+- **Live capture triggers.** The viewer's live view opens and closes capture
+  windows in the running app (Begin, End, Capture N frames); each request is
+  answered with the window id or a refusal. One window at a time: an app that
+  keeps its own window open refuses triggers as busy.
+
+- **RSX frame capture (opt-in).** With `-DPS3_PROF_AUTO=ON
+  -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_RSX_FRAME=ON`, the viewer's Capture RSX
+  frame button (or `PS3DK_PROF_RSX_FRAME_CAPTURE` in the app) captures one frame:
+  every draw's RSX time, kind and primitive, label, tag and pass; vertex and
+  fragment programs with identities that stay stable across boots and their
+  disassembly when the bytes are kept; render state, textures, vertex
+  attributes, index stream and surfaces; vertex and fragment constants. Timing
+  modes: Pipelined (default), Isolated (each draw's own cost, slower) and Both.
+  Leave it off for shipped builds and memory measurements.
+
+- **Saving from the viewer.** Every "Capture full frame" snapshot and every
+  live window (Capture N frames, Begin/End, or open so far) saves as a
+  standalone `.prof`; Save window and Save range also work during and after a
+  live session. Saving never overwrites an existing file.
+
+- **Viewer pages.** An Automatic page with per-frame verdicts, RSX busy time
+  and exclusions; verdict and RSX busy lanes on the Timeline, with recorded
+  flip-wait intervals and label-poll aggregates; a Passes page with RSX time
+  per tag and per named range; an RSX lane on the Frames page; a window picker
+  (default All frames) that scopes the Passes, Automatic, Frames and Timeline
+  pages; an Overview WINDOWS list.
+
+- **GCM command segments and the SPU command writer.**
+  `<cell/gcm/gcm_segment.h>` builds command segments that the main buffer CALLs
+  and JUMPs to, with the overflow refused; `<cell/gcm/gcm_spu_cmd.h>` lets SPU
+  code write GCM commands into a segment.
+
+- **Profiler counters.** `PS3DK_PROF_COUNTER(name, value)` records named
+  counters, linked from `libps3dkprof_counters.a` or
+  `libps3dkprof_ext_counters.a`; `ps3dk-prof counters --json` reads them.
+
+- **Native cellGcm state calls.** Over 90 `cellGcmSet*` state calls are emitted
+  natively under their cellGcm names in `<cell/gcm/gcm_state_native.h>`; the
+  command words are unchanged.
+
+- **Shader statistics.** `rsx-cg-compiler --stats` prints, per compile, a fragment
+  program's instruction slots, inline constant blocks, uniform patch slots,
+  registers and KIL count, or a vertex program's instruction count, on stderr.
+  Output files are unchanged.
+
+- **Heap capacity query.** `uint64_t __ps3tc_heap_capacity(void)`, declared in
+  `<sys/heap_config.h>`, returns the malloc arena the runtime actually mapped,
+  or 0 before it is ready, so an app can check that its `PS3TC_HEAP_SIZE`
+  request was honoured.
+
+- **Samples.** `samples/gcm/hello-ppu-cellgcm-state-tour` (a self-checking tour
+  of the native state calls), `samples/gcm/hello-ppu-prof-auto-verdicts`
+  (known-answer AUTO verdicts), `samples/profiling/rsx-frame` (a known draw
+  matrix for the RSX frame capture, with a checker), the call-return sample's
+  `-ring` variant, and the A2 label probe in `hello-ppu-gcm-label-reuse`.
+
+- **Documentation.** `docs/profiler-guide.md` (setup, every option with when to
+  turn it on and off, the PC app), `docs/profiler-api.md` (every app-side call
+  with its PC-app equivalent), and tool guides under `docs/tools/`, including
+  `docs/tools/rsx-cg-compiler.md`, with a build guide.
+
 ### Changed
 
 - **libnet coordinates with the profiler's live auto-start.** Nothing
@@ -97,6 +233,31 @@ The version stamped into builds is generated from the most recent
   Linux, a copy of the `.exe` on Windows. Options, exit statuses and output
   bytes are the same under both names, and the archive's ELF note is
   unchanged.
+
+- **The profiler records heavy data only inside a capture window.** Frame
+  marks and clock anchors still run for the whole run, so frame numbers stay
+  run-wide, but an app with no trigger now records no zones, counters, waits,
+  function paths, AUTO rows or draw timing. Add
+  `PS3DK_PROF_CAPTURE_WHOLE_RUN()` after profiler init (early in `main` in a
+  `PS3_PROF_AUTO` build) to keep whole-run recording. Captures with windows
+  need this release's `ps3dk-prof`; older captures read as one implicit window.
+
+- **RSX-bound frame verdicts.** Besides the FIFO-wait rule, a frame reads
+  RSX-bound when RSX busy time is at least half the frame and either polling
+  covers a quarter of it or a blocked flip wait overlaps RSX work. A blocked
+  flip wait counts the owner's RSX work from any frame, so a submit-then-wait
+  loop reads RSX-bound. Frames that meet no rule stay UNKNOWN and print the
+  observed values.
+
+- **AUTO range defaults and results.** The default range reserve is an eighth
+  of the report pool (63 at the defaults). `PS3DK_PROF_AUTO_RANGE_BEGIN`,
+  `_BEGIN_TIMED` and `_END` return 1 when the range is admitted or committed
+  and 0 when refused (always 1 without `PS3_PROF_AUTO`); a refused begin keeps
+  the nesting balanced.
+
+- **Build order from a fresh checkout.** The README lists the release order,
+  and `scripts/build-portlibs.sh` checks for the stub archives before the first
+  recipe; `scripts/build-sdk.sh` installs the host tools before the SDK build.
 
 ### Fixed
 
@@ -147,6 +308,36 @@ The version stamped into builds is generated from the most recent
   wrapping or growing client-array upload storage, and unmap replaced storage
   before freeing it. A completion timeout or unmap failure retains the old
   storage, reports `GL_OUT_OF_MEMORY`, and skips the draw.
+
+- **Early-exit captures.** The capture header is written at init and a
+  `quick_exit` drains once, so an app that exits before the first drain leaves
+  a readable file; a capture with no events reads
+  `INCOMPLETE: no events recorded (ended before the first drain)` and exits 1.
+
+- **Sealed automatic captures.** `PS3DK_PROF_AUTO_SEAL()` on an exit path no
+  longer produces a failure report at shutdown.
+
+- **Live stream end.** The agent ends a stream with FIN and a bounded drain
+  instead of a connection reset, and a viewer disconnect ends promptly under
+  load.
+
+- **Ranges in a window opened mid-frame.** The owner's first draw or range in
+  such a window opens that frame's coverage row instead of being refused; the
+  row closes OPEN and the frame reads UNKNOWN.
+
+- **Unsealed captures.** A capture without a final status names the
+  unrecorded tail and reports capture totals as unavailable (or as lower
+  bounds from the last status); with no status at all the frame delimiter is
+  taken from the frame rows.
+
+- **Overflowing COUNT windows.** The reader refuses a COUNT window whose frame
+  span overflows as malformed instead of panicking.
+
+- **"Capture full frame" on AUTO builds.** The snapshot shows an `rsx.auto`
+  lane instead of NODATA or UNMAPPABLE.
+
+- **GCC 15 host builds of the profiler.** The identity marker and id byte
+  fields are declared `nonstring`; the layout is unchanged.
 
 ## [v0.27.0] — 2026-10-29
 
