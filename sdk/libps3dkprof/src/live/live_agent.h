@@ -51,11 +51,47 @@ typedef struct live_config {
     uint32_t handshake_timeout_us; /* 1000..60000000: CLIENT_HELLO must arrive within this */
     uint32_t stack_bytes;          /* 16 KiB..1 MiB */
     uint64_t cap_bytes;            /* 1..2^40: bytes of capture served at most */
+    uint32_t cmd_timeout_us;       /* 1000..60000000: a capture command no frame mark took within this is refused */
 } live_config;
+
+/* Capture commands (protocol v2), carried out by whoever serves the agent's
+ * source: the runtime (live_api.c) queues them for its frame thread. All
+ * three are called on the agent thread only, one request at a time:
+ * - submit queues a request and returns 0, or refuses it at once with a
+ *   PS3DK_PROF_* code (nothing queued). type is LIVE_T_CAPTURE_*; name is
+ *   name_len bytes (not NUL-terminated; 0 for END); frames is 0 unless
+ *   FRAMES.
+ * - poll returns 1 once the queued request is finished (it fills *result
+ *   and *window_id and the queue is free again), 0 while it waits.
+ * - cancel withdraws a queued request: 1 if it was never applied (the queue
+ *   is free again), 0 if it is being applied right now (poll finishes it).
+ *   The agent cancels at its deadline and when the link of the request ends.
+ * A source without ops (ops NULL) advertises no LIVE_CAP_TRIGGERS and
+ * refuses every command with PS3DK_PROF_ENOTSUP. */
+typedef struct live_cmd_ops {
+    int (*submit)(void *ctx, uint32_t type, const char *name, uint32_t name_len, uint32_t frames);
+    int (*poll)(void *ctx, int32_t *result, uint32_t *window_id);
+    int (*cancel)(void *ctx);
+    void *ctx;
+} live_cmd_ops;
 
 /* Where the capture is and how to know it is finished. finalization returns
  * NULL until the winning shutdown has published its record (the runtime's
  * ps3dk_prof__finalization); the host tests inject one. */
+/* RSX frame capture (protocol v3), served by the runtime when it selected the capture: request returns 0 with *id
+ * or a PS3DK_PROF_* refusal at once; status fills the latest live request's progress (state 0: none; a request from
+ * app code never replaces it); available is 1
+ * when requests can be served (advertised as LIVE_CAP_RSX_FRAME). Called on the agent thread only. */
+typedef struct live_rsxf_status {
+    uint32_t id, request, state, reason, draws;
+    uint64_t frame, bytes;
+} live_rsxf_status;
+typedef struct live_rsxf_ops {
+    int (*request)(uint32_t request_id, uint32_t flags, const char *name, uint32_t name_len, uint32_t *id);
+    void (*status)(live_rsxf_status *out);
+    int (*available)(void);
+} live_rsxf_ops;
+
 typedef struct live_source {
     const char *path;          /* 1..1023 bytes */
     uint64_t session_id;
@@ -65,6 +101,8 @@ typedef struct live_source {
     uint32_t build_id_len;
     const struct ps3dk_prof_finalization *(*finalization)(void *ctx);
     void *ctx;
+    const live_cmd_ops *cmd;   /* optional: capture commands (protocol v2); kept valid like ctx */
+    const live_rsxf_ops *rsxf; /* optional: RSX frame capture (protocol v3) */
 } live_source;
 
 /* Why a viewer connection ended. */
@@ -72,7 +110,7 @@ enum live_drop {
     LIVE_DROP_END = 0,        /* END sent: the stream completed */
     LIVE_DROP_HANDSHAKE_TIMEOUT,
     LIVE_DROP_BAD_HELLO,
-    LIVE_DROP_PROTOCOL,       /* unknown type, nonzero flags, bad or oversize length */
+    LIVE_DROP_PROTOCOL,       /* unknown type, nonzero flags, bad or oversize length, a malformed or overlapping command */
     LIVE_DROP_PING_FLOOD,
     LIVE_DROP_STALLED,        /* no send progress within send_timeout_us */
     LIVE_DROP_PEER_CLOSED,
@@ -91,8 +129,21 @@ typedef struct live_out {
 
 typedef struct live_conn {
     int fd, file_fd, phase;
-    uint8_t in[LIVE_HDR_BYTES + 8]; /* a viewer only sends CLIENT_HELLO (8 bytes) and PING (empty) */
+    uint32_t version;         /* the protocol version CLIENT_HELLO asked for (0 before it) */
+    /* a viewer sends CLIENT_HELLO (8 bytes), PING (empty) and, in v2, commands (at most LIVE_CMD_MAX_BYTES) */
+    uint8_t in[LIVE_HDR_BYTES + LIVE_CMD_MAX_BYTES];
     uint32_t in_len;
+    /* The one outstanding command: its request id and type, queued with the source until cmd_deadline. */
+    int cmd_queued;
+    uint32_t cmd_req, cmd_type;
+    uint64_t cmd_deadline;
+    /* An ACK waiting for the output buffer. */
+    int ack_ready;
+    uint8_t ack[LIVE_ACK_BYTES];
+    /* RSX frame capture (v3): an ACK waiting, the accepted capture this link follows and the last state sent */
+    int rsxf_ack_ready;
+    uint8_t rsxf_ack[LIVE_RSXF_ACK_BYTES];
+    uint32_t rsxf_id, rsxf_sent_state;
     live_out out;
     uint32_t pongs_pending;
     uint64_t sent;            /* DATA bytes queued so far (== next offset) */
@@ -113,6 +164,8 @@ typedef struct live_agent {
     uint64_t session_id;
     const struct ps3dk_prof_finalization *(*finalization)(void *ctx);
     void *ctx;
+    const live_cmd_ops *cmd;
+    const live_rsxf_ops *rsxf;
     int listen_fd;
     uint16_t bound_port;
     live_conn conn;
@@ -126,6 +179,8 @@ typedef struct live_agent {
     /* Counters, read by tests and by stop's caller. bytes_delivered counts
      * DATA payload whose frame the socket fully accepted. */
     atomic_ullong connections, busy_refusals, bytes_delivered, pongs;
+    /* Capture commands: ACKs fully queued for sending, and of them the refusals. */
+    atomic_ullong acks, ack_refusals;
     atomic_ullong drops[LIVE_DROP_COUNT];
 } live_agent;
 

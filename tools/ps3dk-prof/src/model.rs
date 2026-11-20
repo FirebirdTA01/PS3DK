@@ -35,6 +35,9 @@ pub const CHUNK_RETIRED: u32 = 7;
 pub const CHUNK_EXPORT: u32 = 40;
 pub const EXPORT_SCHEMA: u16 = 1;
 pub const EXPORT_FLAG_TO_END: u16 = 1;
+/// The source is a report-ring capture (AUTO 2047/11): a 40-byte ring accounting tail follows the lane entries.
+pub const EXPORT_FLAG_RING: u16 = 2;
+pub const EXPORT_RING_LEN: usize = 40;
 pub const EXPORT_HEADER_LEN: usize = 112;
 pub const EXPORT_LANE_ENTRY_LEN: usize = 40;
 
@@ -46,6 +49,21 @@ pub struct ExportLane {
     pub last_seq: u64,
     pub kept: u64,
     pub dropped_by_export: u64,
+}
+
+/// The ring accounting tail of an EXPORT chunk (EXPORT_FLAG_RING): the RING records the export kept are whole
+/// generations, strictly increasing from `first_generation` to `last_generation` (`generations` of them,
+/// `records_kept` records); `records_dropped` RING records of the source were not kept, and
+/// `source_last_generation` is the source's last RING generation (what an exact source FINAL reconciled with the
+/// STATUS blocks issued, which the export keeps as written). All zero but the source fields when nothing was kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportRing {
+    pub first_generation: u32,
+    pub last_generation: u32,
+    pub generations: u64,
+    pub records_kept: u64,
+    pub records_dropped: u64,
+    pub source_last_generation: u32,
 }
 
 /// A parsed EXPORT chunk (type 40).
@@ -67,6 +85,8 @@ pub struct ExportRecord {
     pub source_fifo_last_attempt_seq: u64,
     pub source_auto_frames: u64,
     pub lanes: BTreeMap<u32, ExportLane>,
+    /// EXPORT_FLAG_RING: the report-ring accounting tail.
+    pub ring: Option<ExportRing>,
 }
 
 pub const CHUNK_WINDOW_BEGIN: u32 = 41;
@@ -123,6 +143,8 @@ pub enum Rule {
     Counters,
     /// Capture windows (file_flags bit 9, chunks 41-42) violate their wire contract.
     Windows,
+    /// RSX frame captures (file_flags bit 10, chunks 44-48) violate their wire contract.
+    RsxFrame,
     /// Function paths (file_flags bit 5, chunk types 28-30; ps3dk-prof-func-paths.md): FUNC_CONFIG.
     FuncConfig,
     /// A FUNC_TREE chunk violates its wire, ordering or definition rules.
@@ -649,6 +671,8 @@ pub struct Capture {
     pub fifo: Option<crate::fifo::Inventory>,
     /// Automatic RSX observation (file_flags bit 7): present exactly when the flag is.
     pub auto: Option<crate::auto_rsx::Inventory>,
+    /// RSX frame captures (file_flags bit 10): present exactly when the flag is.
+    pub rsx_frame: Option<crate::rsx_frame::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
@@ -669,6 +693,8 @@ pub struct Capture {
     pub profile: Option<crate::profile::ProfileRecord>,
     /// Standalone export metadata (chunk 40); Some when exported from another capture.
     pub export: Option<ExportRecord>,
+    /// Host-created bounded frame snapshot (chunk 49); not whole-run evidence.
+    pub snapshot: Option<crate::snapshot_support::Selection>,
 }
 
 impl Capture {

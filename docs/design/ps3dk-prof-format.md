@@ -877,3 +877,387 @@ Verified by:
   - It fails the counter-mutex lock once at each drainer site, ordinary and final, and checks the failed capture,
     the absence of a FINAL after a failed freeze, and that nothing is emitted twice; a mutant whose drain discards
     the emission error must fail.
+
+## 12. RSX frame captures (file flag bit 10, chunk types 44..48)
+
+An opt-in family written by the RSX frame capture runtime (`PS3_PROF_RSX_FRAME`, an AUTO product). It sets
+file_flags bit 10 (value 1024, byte 13 bit 2). Bit 10 requires bit 7 (automatic RSX observation): every timed draw
+names the AUTO_OPS record that times it. Without bit 10, types 44..48 are unknown chunks (MALFORMED); a reader that
+does not know bit 10 refuses the flag. Builds that do not select the feature never set the bit.
+
+A capture is ONE frame of the AUTO owner, requested from the live link or from app code. The runtime streams it as
+it is recorded: one RSXF_BEGIN, then RSXF_DRAWS chunks (one per sealed staging block), then one RSXF_END. Timing is
+not in these chunks: a draw record carries the id of its AUTO operation, and the reader joins the two.
+
+All integers are little-endian. Every reserved field and every padding byte is zero. Every rule in this section is
+MALFORMED (reader rule `RsxFrame`) when broken, with one exception: a text field (the BEGIN name, a LABEL or NAME
+text) whose bytes are not valid UTF-8 or contain a NUL is not MALFORMED. The reader shows that field with U+FFFD
+replacements and counts it (`text_replaced`); its length and padding rules still apply. The runtime writes valid
+UTF-8 only: a name or label byte that is not part of a valid sequence becomes `?`, and a text longer than its limit is
+cut on a character boundary.
+
+### 12.1 RSXF_CONFIG (44), exactly once
+
+Written at attach, before any other type 44..48 chunk; a file with a TRAILER must hold it.
+
+| off | type | field |
+|---|---|---|
+| 0 | u16 | schema = 1 |
+| 2 | u16 | flags = 0 |
+| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); 4 also program bytes and BOTH captures (UCODE, SECOND) and the FP bytes cap below; other values MALFORMED |
+| 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
+| 12 | u32 | staging block bytes: 32768..1048576, a multiple of 8 (a block holds the largest per-draw unit: STATE for all 2048 registers, VPCONST for all 468 slots, two UNIFORM records of 32 entries, a full FPCONST, the definitions and DRAW, 31,712 bytes) |
+| 16 | u32 | staging blocks: 1..16 |
+| 20 | u32 | program table capacity per capture: 1..65535 |
+| 24 | u32 | label table capacity per capture: 1..65535 |
+| 28 | u32 | label byte limit: 1..255 |
+| 32 | 32 bytes | reserved = 0 |
+
+A capture (BEGIN) in a file whose CONFIG availability is nonzero is MALFORMED.
+
+Decoder 4 CONFIG: offset 32 u32 is the FP bytes cap (bytes of FP ucode a capture stores at most when requested, at
+most 16 MiB; 0 for earlier decoders); offsets 36..63 stay reserved.
+
+### 12.2 RSXF_BEGIN (45)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: 1.., strictly greater than every earlier capture id of the file |
+| 4 | u16 | source: 1 live request, 2 app call |
+| 6 | u16 | flags: bit 0 ISOLATED, bit 1 FP_BYTES, bit 2 BOTH; other bits 0 |
+| 8 | u32 | request id (live: the viewer's id, nonzero; app: 0) |
+| 12 | u32 | owner (the AUTO owner incarnation) |
+| 16 | u64 | frame (the owner frame being captured) |
+| 24 | u32 | window id (the capture window recording it; 0 none) |
+| 28 | u32 | reserved = 0 |
+| 32 | u64 | PPU timebase at arming |
+| 40 | u32 | baseline VP start slot |
+| 44 | u32 | baseline FP_ADDRESS register value |
+| 48 | u32 | baseline known: bit 0 VP start, bit 1 FP_ADDRESS; other bits 0 |
+| 52 | u16 | name length n: 0..63, UTF-8 without NUL |
+| 54 | u16 | reserved = 0 |
+| 56 | n bytes | name, then zero padding to a multiple of 8 |
+
+Flags (offset 6): bit 0 ISOLATED (every draw's begin and end markers follow a WAIT_FOR_IDLE: each interval is that
+draw alone), bit 1 FP_BYTES (FP ucode bytes requested), bit 2 BOTH (two consecutive frames, the first pipelined, the
+second isolated, from the SECOND record on); ISOLATED with BOTH is MALFORMED, other bits 0. A reader never sums or
+compares intervals of the two modes as one: a BOTH capture reads as two frames, one per mode.
+
+At most one capture is open (BEGIN without its END) at a time.
+
+### 12.3 RSXF_DRAWS (46)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: the open capture |
+| 4 | u32 | block sequence: 0 for the first block of the capture, then each the previous + 1 (blocks are written in order and never skipped) |
+| 8 | u32 | record count |
+| 12 | u32 | record bytes: exactly the bytes that follow |
+| 16 | records | each {u16 type, u16 length, body}; length is the whole record, a multiple of 8 |
+
+Record types (any other is MALFORMED; a record never spans chunks):
+
+DRAW (type 1, length 96):
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | ordinal: strictly increasing within the capture (gaps are draws not recorded) |
+| 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
+| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); at least one of bits 0..1; other bits 0 |
+| 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
+| 16 | u64 | AUTO operation id: nonzero iff the reason is 0; INLINE_ARRAY and IMMEDIATE draws are timed by ARRAY operations and INLINE_INDEX draws by INDEX operations (the AUTO kinds stay 1..3), ARRAY, INDEX and CLEAR by their own kind |
+| 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
+| 28 | u32 | first vertex / first index |
+| 32 | u32 | count (vertices or indices) |
+| 36 | u32 | index offset (INDEX; else 0) |
+| 40 | u8 | index type: 0 u32, 1 u16 (INDEX, INLINE_INDEX; else 0) |
+| 41 | u8 | index location: 0 local, 1 main (INDEX; else 0) |
+| 42 | u16 | reserved = 0 |
+| 44 | u32 | clear mask (CLEAR; else 0) |
+| 48 | u32 | tag (`PS3DK_PROF_AUTO_TAG`) |
+| 52 | u32 | label index: 0 none, else a LABEL defined earlier in the capture |
+| 56 | u32 | VP program index: 0 unknown, else a VP PROGRAM defined earlier in the capture |
+| 60 | u32 | FP program index: 0 unknown, else an FP PROGRAM defined earlier in the capture |
+| 64 | u32 | FP_ADDRESS register value |
+| 68 | u32 | VP start slot |
+| 72 | u64 | caller PC (HOOKED; else 0) |
+| 80 | u32 | command words of the draw |
+| 84 | u32 | reserved = 0 |
+| 88 | u64 | PPU timebase at the hook (HOOKED) or at decode |
+
+PROGRAM (type 2, length 48), the first time a program identity is seen in the capture:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | index: 1.., dense, in definition order (VP and FP share the numbering) |
+| 8 | u8 | profile: 1 VP, 2 FP |
+| 9 | u8 | source: 1 command stream, 2 program container at bind, 3 RSX memory read, 4 app registration |
+| 10 | u16 | flags: bit 0 UNTERMINATED (no end bit within the bound), bit 1 UNREADABLE (no hash), bit 2 NOT_REVALIDATED (FP container identity from a bind made before the capture was armed; the container may have been rewritten in place since; a bind while armed hashes every instruction byte and never sets it); other bits 0 |
+| 12 | u32 | instruction count |
+| 16 | u64 | canonical hash (12.6); 0 iff UNREADABLE |
+| 24 | u32 | ucode bytes walked (instructions and constant blocks) |
+| 28 | u32 | constant blocks (FP; 0 for VP) |
+| 32 | u32 | address where first seen (FP_ADDRESS or VP start) |
+| 36 | u32 | ordinal of the first draw using it |
+| 40 | u64 | reserved = 0 |
+
+Two PROGRAM records of one capture with the same (profile, nonzero hash, NOT_REVALIDATED bit) are MALFORMED. A
+draw whose flags carry MISMATCH is not timed by its AUTO operation: the reader leaves it out of every timed count
+and sum, as it does for an operation of another kind or frame.
+
+LABEL (type 3) and NAME (type 4), length 16 + n rounded up to 8:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | LABEL: label index 1.., dense; NAME: the PROGRAM index it names (at most one NAME per program) |
+| 8 | u16 | n: 1..CONFIG label byte limit, UTF-8 without NUL |
+| 10 | u16 | reserved = 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n bytes | text, then zero padding |
+
+A label is the full scope path joined with `/` (scopes outermost first, then the label).
+
+BASELINE (type 5) and STATE (type 6), decoder 2 only, length 16 + 8 x n:
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | BASELINE: 0; STATE: the ordinal of the draw it belongs to |
+| 8 | u16 | n: register pairs, 0..255 |
+| 10 | u16 | flags: STATE bit 0 RESET (every register unknown before these pairs); BASELINE 0; other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 8 | pairs {u16 register index (method byte address / 4, 0..2047), u16 reserved = 0, u32 value} |
+
+The register file is the 3D object's methods 0x0000..0x1ffc on subchannel 0 as the decoder last saw them written. Data
+ports are interpreted, never stored: the object bind and the channel words below 0x100, VP instruction upload
+(0x0b80..0x0bfc), VP constant upload (0x1f00..0x1f7c), BEGIN_END, inline vertex and index data, the vertex and index
+batch triggers and CLEAR_BUFFERS. One-shot actions are not stored either: NOP, NOTIFY, WAIT_FOR_IDLE, the vertex cache
+invalidates (0x1710, 0x1714), texture cache control (0x1fd8), report writes (0x1800) and the semaphore releases
+(0x1d70, 0x1d74); nor are the VP constant and instruction upload pointers (0x1efc, 0x1e9c: the decoder interprets them)
+or SEMAPHORE_OFFSET (0x1d6c, which AUTO's own markers rewrite). A register is known from its first write after attach or after a decoder reset
+(any rejected or unfollowed word); its value is then the last one written.
+A reset also forgets every data-port destination cursor (the VP instruction load slot, the VP constant id, the inline
+transfer's destination DMA, offset, start pixel and size, the M2MF copy's destination): an unseen word may have moved
+it, so data words written before their cursor is written again are dropped (never applied at a stale slot or address),
+and an M2MF copy launched in that state makes every remembered inline word UNKNOWN.
+
+- BASELINE: the known registers at arming, before the first DRAW or STATE of the capture; n >= 1; register indices
+  strictly increasing across all BASELINE records of the capture.
+- STATE: what changed since the previous draw (registers written with a different value, or newly known). Each draw's
+  STATE records come right before its definitions and DRAW, in the same DRAWS chunk; their ordinal is that DRAW's and
+  greater than the previous draw's; register indices strictly increasing across the draw's records; RESET only on the
+  first; n = 0 only with RESET. A draw with no STATE record has the register file of the draw before it.
+- The register file at a draw is the BASELINE, then every STATE record up to and including that draw's, in order (a
+  RESET makes every register unknown first). A truncated capture's draws not recorded carry no state.
+
+VPCONST (type 7), decoder 3, length 16 + 24 x n, n 0..128: the VP constant file (468 slots of 4 words) as written by
+VP_UPLOAD_CONST_ID and the constant data port (slot = id + the vec4 the method address selects).
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | BASELINE: 0; else the ordinal of the draw it belongs to |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 RESET (every slot unknown before these), bit 1 BASELINE (exactly 2 on a baseline record); other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 24 | {u16 slot 0..467, u8 known mask 1..15 (bit k: word k known), u8 reserved = 0, u32 reserved = 0, 4 x u32 words} |
+
+Rules as BASELINE and STATE (12.3): baseline records before the first draw's records, slots increasing across them,
+n >= 1; per-draw records right before their DRAW in the same chunk, slots increasing across the draw's records, RESET
+only on the first, n = 0 only with RESET.
+
+FPCONST (type 8), decoder 3, length 16 + 24 x n, n 0..32: the embedded constants of the FP a draw runs with, written
+when they differ from the last FPCONST (a draw without one runs with the latest list).
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | the ordinal of the draw it belongs to |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 TRUNCATED (the program has more constant blocks than were captured); other bits 0 |
+| 12 | u32 | the FP PROGRAM index, defined earlier (0: FP unknown, then n = 0) |
+| 16 | n x 24 | {u32 ucode byte offset of the constant block (increasing); 4 x u8 provenance, one per component (x, y, z, w); 4 x u32 words as in memory (16-bit halves swapped)} |
+
+Provenance, per component, is never an exact claim (the capture reads the owner's command stream, not memory): 1
+INLINE, the last inline transfer the decoder saw write that word (subchannel 5 COLOR data into local memory, the whole
+packet); a CPU write after it, or a write the decoder could not see, is not reflected. 2 CONTAINER, the container's
+value at bind: no command-stream write to the word seen since attach (a CPU write would not be seen, so it may differ at
+GPU time). 3 UNKNOWN, the container's value is given: the decoder reset (any rejected or unfollowed word) or its
+inline-write map was full since attach, an M2MF copy (subchannel 1, launched by BUF_NOTIFY) wrote local memory over the
+word, or a different program was bound at the word's address after an inline write there. An FP in main memory gives
+CONTAINER only while no inline write or copy into main memory and no reset was seen, else UNKNOWN.
+
+At most one FPCONST per draw, right before its DRAW in the same chunk.
+
+UNIFORM (type 9), decoder 3, length 16 + 40 x n, n 1..32: a program's named uniforms from its container's parameter
+table at bind, once per program, after its PROGRAM record.
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | PROGRAM index |
+| 8 | u16 | n |
+| 10 | u16 | flags: bit 0 TRUNCATED (the table had more named uniforms); other bits 0 |
+| 12 | u32 | reserved = 0 |
+| 16 | n x 40 | {u32 resource, u16 count >= 1, u8 kind, u8 name length 1..32, 32 bytes name then zeros}; kind 1 VP constant (VP programs; resource the first slot, resource + count <= 468) or 2 FP embedded constant (FP programs; resource the first ucode offset, count the offsets it is patched at) |
+
+UCODE (type 10), decoder 4, length 32 + n rounded up to 8: one part of a program's bytes, once per (profile, hash)
+in a capture. VP: the instructions from the command stream, 16 bytes each, words big-endian, from the start slot
+through the last instruction (always stored). FP: the bytes as they lay in memory at a bind while the capture was
+armed (words big-endian, 16-bit halves swapped, constant blocks inline), through the end instruction; only with
+FP_BYTES and within the CONFIG cap.
+
+| off | type | field |
+|---|---|---|
+| 4 | u8 | profile: 1 VP, 2 FP |
+| 5 | u8 | flags: bit 0 LAST (offset + n = total); other bits 0 |
+| 6 | u16 | part: 0, 1, ... in order for the program |
+| 8 | u32 | total bytes of the program (at most 16 MiB, the same in every part) |
+| 12 | u64 | the program's canonical hash (12.6) |
+| 20 | u32 | offset: the bytes of the earlier parts |
+| 24 | u32 | n: bytes in this part, 1..2048 |
+| 28 | u32 | reserved = 0 |
+| 32 | n bytes | the bytes, then zero padding |
+
+A program whose parts stop before LAST (a truncated capture) is reported incomplete; a completed program given again is
+MALFORMED.
+
+SECOND (type 11), decoder 4, length 16, only in a BOTH capture, once, between draws: u32 the first ordinal of the
+second (isolated) frame (greater than every earlier draw's), u64 that frame's number.
+
+### 12.4 RSXF_PROGRAMS (47)
+
+Allocated for parameter tables and program bytes (later phases). Schema 1 writers never write it; a schema 1
+reader refuses it.
+
+### 12.5 RSXF_END (48)
+
+| off | type | field |
+|---|---|---|
+| 0 | u32 | capture id: the open capture |
+| 4 | u16 | outcome: 1 DONE, 2 TRUNCATED, 3 ABANDONED |
+| 6 | u16 | reason: 0 none; 1 staging full (drainer behind); 2 program table full; 3 label table full; 4 shutdown; 5 context reset; 6 decoder invalid; 7 cancelled |
+| 8 | u32 | DRAWS chunks emitted (must equal the chunks seen) |
+| 12 | u32 | reserved = 0 (blocks dropped: the writer never drops a block; one it cannot write abandons the capture) |
+| 16 | u32 | draws seen |
+| 20 | u32 | draws recorded (must equal the DRAW records seen; at most draws seen) |
+| 24 | u32 | hooked draws |
+| 28 | u32 | decoded-only draws |
+| 32 | u32 | mismatches |
+| 36 | u32 | truncated at: the first ordinal not recorded, 0xffffffff none; not none iff the outcome is TRUNCATED |
+| 40 | u32 | programs defined (must equal the PROGRAM records) |
+| 44 | u32 | labels defined (must equal the LABEL records) |
+| 48 | u32 | labels refused |
+| 52 | u32 | programs refused |
+| 56 | u64 | record bytes streamed |
+| 64 | u64 | record bytes dropped |
+| 72 | u64 | PPU timebase at close |
+| 80 | u64 | decoder words in the frame |
+| 88 | u32 | decoder first rejected header (0 none) |
+| 92 | u32 | decoder rejection reason (`RING_REJECT_REASONS` numbering; 0 none) |
+| 96 | u32 | decoder draw events lost (0 in this release: each event is recorded as it completes) |
+| 100 | u32 | register pairs in BASELINE records (must equal the pairs seen; 0 for decoder 1) |
+| 104 | u32 | VPCONST records (must equal the records seen; 0 before decoder 3) |
+| 108 | u32 | FPCONST records (likewise) |
+| 112 | u32 | draws not timed |
+| 116 | u32 | STATE records (must equal the records seen; 0 for decoder 1) |
+| 120 | u32 | UNIFORM records (likewise) |
+| 124 | u32 | UCODE records (must equal the records seen; 0 before decoder 4) |
+
+A capture still open at the end of a file with a TRAILER is MALFORMED; without a TRAILER it is reported OPEN.
+
+At shutdown a capture in flight ends ABANDONED (reason 4). When the owner thread has already left the capture, END
+carries its counters; when it has not (it may still be running, or never run again), END carries only what the
+drainer wrote: blocks, draws seen = draws recorded, programs, labels and bytes of the emitted DRAWS chunks, with the
+hooked, decoded-only, mismatch, decoder and untimed counts 0. Either way every count matches the records.
+
+### 12.6 Canonical program hash
+
+FNV-1a 64 (offset basis 0xcbf29ce484222325, prime 0x100000001b3) over a domain string, then the instruction words,
+each 32-bit word fed as its 4 bytes in big-endian order (the byte order of the program container and of RSX memory):
+
+- VP: domain `ps3dk.rsxf.vp1`; 4-word instructions from the start slot through the first one whose word 3 has bit 0
+  (last instruction) set, at most 512.
+- FP: domain `ps3dk.rsxf.fp1`; 4-word instructions in memory order. Each word is stored with its 16-bit halves
+  swapped. On the swapped-back value, bits 0..1 of words 1..3 are the source register type; type 2 (constant) in any
+  of them means the next 4 words are a constant block, which is skipped (not hashed). Bit 0 of the swapped-back word
+  0 ends the program after that instruction and its constant block. At most 65536 instructions.
+
+The hash ignores the load slot, the address and the constant values, so a program keeps its identity across boots,
+allocations and uniform updates. `ps3dk-prof shader-hash <files>` computes it for program containers.
+
+Verified by: `tools/ps3dk-prof/tests/rsx_frame.rs` (every rule above refused once; the hash against hand-built
+containers).
+
+## Saved snapshots (host projection, chunk 49)
+
+A saved frame snapshot is a projection of reader-accepted source bytes. EXPORT
+flag 4 requires exactly one SNAPSHOT_SUPPORT chunk (49), immediately after the
+EXPORT chunk. No other position is valid. A normal EXPORT has no chunk 49 and
+keeps its existing frame-range rules. The host reconstructs timing from retained
+raw records; source-wide diagnostic counts carry original-source provenance and
+are never measurements or bars.
+
+The schema-1 header is 160 bytes, little endian:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u16 | Schema 1 |
+| 2 | u16 | Premise flags: W32=1, show extrapolated=2; other bits zero |
+| 4 | u32 | Selected PPU frame owner |
+| 8 | u64 | Selected frame |
+| 16,24 | u64 | Selected FRAME and next FRAME timebase ticks; next > first |
+| 32 | u64 | Original accepted source-prefix bytes |
+| 40 | 32 bytes | SHA-256 of that original prefix; identity, not authentication |
+| 72 | 32 bytes | SHA-256 of retained support (definition below) |
+| 104,108 | u32 | Lane-manifest and diagnostic-entry counts |
+| 112 | u64 | Bytes of retained clock-input chunks, including their outer framing |
+| 120 | u64 | Exact retained AUTO_COVERAGE row count |
+| 128 | 32 bytes | Canonical frozen-snapshot digest checked by the viewer |
+
+Follow with `lane_count` 32-byte lane manifests, sorted by incarnation: u32
+incarnation, u32 zero, u64 first retained frame, u64 last retained frame, u64
+retained frame count. A lane without frames has all three values zero. Every PPU
+lane has exactly one manifest. First/last/count must equal parsed raw FRAME
+records; frame IDs still obey the writer's sequence rules. The selector must
+name the owner and two consecutive retained FRAME records with exactly the
+stated ticks. This replaces only the ordinary EXPORT's single first/last frame
+range equations. Kept/dropped records, sequence bounds, GAP arithmetic and
+unchanged writer trailer equations remain exact.
+
+Then `diagnostic_count` 32-byte entries sorted by (kind,source kind,source id,key):
+u16 kind, u16 source kind, u32 source id, u64 key, u64 value, u64 auxiliary.
+Source kinds are PPU=1, SPU=2, RSX=3, AUTO=4. The initial kinds are PPU original
+frame-only lane (1, boolean), PPU clock anomaly (2, boolean), source PPU GAP count
+(3), capture-wide AUTO operation-retention loss (4), and original SOURCE_SEAL
+record count (5, source kind 0 and source id 0). Presence of kind 5 means the
+original declared checkpoint proofs; those proofs are not carried. Kind 6 records
+the raw record bytes retained for outside direct children of contributing PPU
+spans (source kind/id zero, a multiple of 32 no greater than the file cap). This
+is a projection-cost count, not a timing measurement. Keys and auxiliary are
+zero for these kinds. PPU kinds require a declared PPU incarnation; AUTO kind
+requires AUTO_CONFIG and source id zero. Unknown kinds, duplicate keys, invalid
+booleans, nonexistent sources and trailing bytes refuse. These facts do not
+make invalid retained evidence valid: negative evidence is retained and original
+GAP counts cannot be less than the parsed source GAP count.
+
+The support digest hashes the 16-byte preamble, then every chunk except49 in
+emission order: LE u32 type, LE u32 payload size, payload bytes. Sequence numbers
+and chunk CRCs are validated normally but are not hashed again. This binds the
+selector/provenance to the retained support. It does not authenticate the source
+SHA or assert that the file is a complete capture. No synthetic trailer is added.
+
+The snapshot writer keeps complete raw timing dependencies (including direct
+children needed for exclusive duration), all original calibration and AUTO
+clock anchors, and raw EXT epoch inputs used for map and ordering validation.
+The latter are a named bounded dependency, not a license to copy the whole
+session. A 64 MiB cap includes the entire saved file; a refusal identifies the
+oversized dependency. Publication requires exact canonical freeze/save/reopen
+identity. On reopen, provenance is shown explicitly and every bar is recomputed
+from retained raw support. Saved diagnostics never supply missing time values.
+An included ancestor or outside child does not recursively include its descendants.
+Lossy lanes keep only the GAP and stack witnesses needed by retained timing; a
+source GAP count is not permission to copy the whole lane. Every retained AUTO
+coverage row must name the selected frame or an execution/build token of a retained
+operation. Matching the declared row count alone is insufficient.
+The unrelated frame membership/close/source proof family (19,20,21,25,26) is
+omitted and file flag 8 is cleared: its original outer chunk-sequence references
+would not survive projection. Kind 5 records the omission and original seal
+count as provenance, never as proof that the projected frame is complete.
+Raw frame tokens and timing/map inputs are unaffected.

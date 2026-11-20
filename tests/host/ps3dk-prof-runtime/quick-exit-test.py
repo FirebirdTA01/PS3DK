@@ -65,7 +65,7 @@ mdir = out / "src"
 mdir.mkdir()
 (mdir / "prof_drain.c").write_text(drain)   # its quoted includes resolve through -I core (../pal, ../auto_rsx)
 (mdir / "prof_core.c").write_text(core)
-sources = [mdir / "prof_core.c", mdir / "prof_drain.c", lib / "core/prof_version.c", lib / "pal/pal_host.c",
+sources = [mdir / "prof_core.c", mdir / "prof_drain.c", lib / "core/prof_version.c", lib / "pal/pal_host.c", lib / "rolling/roll_file.c", lib / "rolling/roll_retention_inspect.c", lib / "rolling/roll_store.c",
            root / "tests/host/ps3dk-prof-runtime/quick_exit_app.c"]
 exe = out / "quick-exit"
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init (a tree with

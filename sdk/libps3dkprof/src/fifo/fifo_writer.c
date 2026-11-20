@@ -72,6 +72,30 @@ static int drain_events(prof *p, fifo_capture *f)
     return 0;
 }
 
+static int drain_accounting(prof *p, fifo_capture *f)
+{
+    fifo_account_storage *a = f->account;
+    uint64_t w = LD_ACQ(&a->write_idx), r = LD_RLX(&a->read_idx);
+    while (r < w) {
+        const fifo_account_row *row = &a->rows[r % FIFO_ACCOUNT_ROWS];
+        uint8_t *b = p_fifo_payload(p);
+        /* WINDOW_BEGIN must reach the sink before its row, including when a
+         * descriptor delayed window draining. The drainer owns winq_r. */
+        uint32_t wr = p->winq_r, ww = LD_ACQ(&p->winq_w);
+        while (wr != ww) {
+            const p_winrec *q = &p->winq[wr % P_WINQ];
+            uint32_t id = (uint32_t)q->b[4] | (uint32_t)q->b[5] << 8 |
+                          (uint32_t)q->b[6] << 16 | (uint32_t)q->b[7] << 24;
+            if (q->type == C_WINDOW_BEGIN && id == row->window) return 0;
+            ++wr;
+        }
+        fifo_account_encode(b, row, f->instance, f->generation, f->domain);
+        if (p_fifo_emit_chunk(p, C_FIFO_ACCOUNTING, b, 80) != 0) return -1;
+        ST_REL(&a->read_idx, ++r);
+    }
+    return 0;
+}
+
 /* One status.  The load order keeps the lower-bound relations true against a running owner: the events were taken
  * first (write_idx); completed before started; dropped before attempted. */
 static int status_chunk(prof *p, fifo_capture *f, uint16_t flags)
@@ -122,6 +146,7 @@ static void close_detached(fifo_capture *f)
     pal_free(f->block); /* the owner removed its observer before DETACHED: nothing else touches the block */
     f->block = NULL;
     f->ring = NULL;
+    f->account = NULL;
 }
 
 /* The seal's claim, first in p_quiesce_freeze_seal, before any sink check: an unattached or still-attaching instance
@@ -186,11 +211,14 @@ void p_fifo_drain(prof *p, int seal)
     }
     if (drain_events(p, f) != 0)
         return;
+    if (drain_accounting(p, f) != 0)
+        return;
     if (seal && st == FS_ATTACHED) {
         exp = FS_ATTACHED;
         if (CAS_ACQREL(&f->state, &exp, (uint32_t)FS_SEALED)) {
             /* the owner never acknowledged: lower bounds, final totals unavailable, the block is quarantined */
             (void)drain_events(p, f);
+            if (!p->snk.failed) (void)drain_accounting(p, f);
             if (!p->snk.failed)
                 (void)status_chunk(p, f, FST_FINAL | FST_LOWER_BOUND | FST_OWNER_UNACK);
             f->d_closed = 1;
@@ -198,6 +226,8 @@ void p_fifo_drain(prof *p, int seal)
         }
         st = exp; /* the owner detached meanwhile */
         if (drain_events(p, f) != 0)
+            return;
+        if (drain_accounting(p, f) != 0)
             return;
     }
     if (st == FS_DETACHED) {

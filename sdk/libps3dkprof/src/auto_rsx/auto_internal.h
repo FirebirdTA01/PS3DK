@@ -7,6 +7,9 @@
 #include "auto_completion.h"
 #include "auto_frames.h"
 #include "auto_clock.h"
+#include "auto_ring.h"
+#include "auto_ring_commands.h"
+#include "auto_ring_layout.h"
 #include "../rsx/gpu_port_gcm.h"
 #include <ps3dk/prof_auto.h>
 
@@ -28,6 +31,8 @@ extern const uint8_t ps3dk_prof__auto_mechanism[32];
 extern const uint8_t ps3dk_prof__auto_build_binding[32];
 extern const char ps3dk_prof__auto_build_id[];
 extern const char ps3dk_prof__auto_app[];
+/* Start-up only, before profiler initialization: the build-option ring defaults (PS3_PROF_AUTO_RING). */
+int ps3dk_prof__auto_build_ring(const ps3dk_prof_auto_ring_options *ring);
 
 /* Up to 32 distinct segments per capture; their built operations share one pool at least as large as the report-
  * pair pool (report_count <= 1024, 16 for clocks: at most 504 pairs), so report pairs, not the pool, bound how many
@@ -80,6 +85,22 @@ typedef struct auto_range {
     uint64_t frame, tb;
 } auto_range;
 
+/* The MAIN ring's page allocation and its IO mapping: sys_memory_allocate with 1 MiB pages and
+ * cellGcmMapMainMemory on LV2 (gpp_ring_memory_gcm), ps3dk_prof_test_hooks.auto_ring_memory in host tests.
+ * Both return 0 on success. Nothing is ever freed or unmapped: a mapping that was attempted, successful or not,
+ * may be GPU visible, and queue emptiness does not prove the RSX quiescent. */
+typedef struct auto_ring_memory {
+    int (*allocate)(uint32_t bytes, uintptr_t *ea);
+    int (*map)(uintptr_t ea, uint32_t bytes, uint32_t *offset);
+} auto_ring_memory;
+/* Why recycling stopped (first reason kept): the owner context's callback is not the native FIFO wrap, its end is
+ * not the exact one the tail reservation set, the flush could not be emitted (unknown M2MF state or no room), a
+ * context reset, or the ring label did not read back zero after its startup reset. A refused or uncertain block is quarantined, never reused.
+ * The first three are found before any flush word is stored: they halt new admission only, and blocks sealed earlier
+ * still drain and retire. A context reset or a label anomaly stops the ring on both sides. */
+enum { AUTO_RING_REFUSED_CALLBACK=1, AUTO_RING_REFUSED_END, AUTO_RING_REFUSED_EMIT, AUTO_RING_REFUSED_RESET,
+       AUTO_RING_REFUSED_LABEL };
+
 /* One allocation before observation; variable queues follow this control block
  * at 128-byte boundaries. Prepared ports make no device writes at attachment. */
 typedef struct auto_capture {
@@ -95,6 +116,8 @@ typedef struct auto_capture {
     auto_frames coverage;
     auto_queue_entry *active; /* owner only, between canonical begin/end */
     uintptr_t expected_end;
+    uint32_t iso_active;     /* RSX frame capture ISOLATED: 4 words of WAIT_FOR_IDLE in the active draw (0 otherwise) */
+    uint32_t open_ended;     /* the active draw is immediate (SetDrawBegin): its words end at SetDrawEnd */
     uint32_t device_initialized, saturated, owner_done;
     /* owner only: open segment contexts (cellGcmSegmentBegin..End) and the
      * covered visits on contexts other than the attached ring */
@@ -116,6 +139,7 @@ typedef struct auto_capture {
     uint32_t tag, fp_ring, timing, timed_open, range_depth, range_excess;
     auto_range ranges[AUTO_RANGE_DEPTH];
     uint64_t ranges_done, ranges_refused;
+    uint64_t range_reasons[AUTO_RANGE_REASONS]; /* ranges_refused by reason (AUTO_RR_* - 1), STATUS range tail */
     /* owner only: frame source. A flip opens frames until an explicit
      * ps3dk_prof_frame is seen; from then on explicit calls drive and flips are
      * ignored (counted). Both kinds are reported in STATUS. */
@@ -143,6 +167,34 @@ typedef struct auto_capture {
     uint32_t clock_put_frontier; /* owner-only snapshot around original PUT */
     uint64_t allocated;
     uint32_t owner_declared, domain_declared, epoch_declared, final_declared;
+    /* REPORT_RING, attached when ring_plan.blocks is nonzero. ring_ea is the page allocation: [0, bytes) IO mapped at
+     * ring_offset (the MAIN extents), then the CPU-only metadata entries and descriptors (ring_plan). */
+    auto_ring_plan ring_plan;
+    auto_ring ring;
+    uintptr_t ring_ea;
+    uint32_t ring_offset, ring_label;
+    gpp_port ring_port;
+    prg_port ring_device;
+    /* owner only: the physical tail reserved while a block fills, the application M2MF shadow and its scan cursor
+     * (the next owner word not yet scanned; profiler-injected flush packets are never scanned) */
+    auto_ring_tail tail;
+    auto_ring_shadow shadow;
+    uintptr_t scan;
+    /* atomic: owner work requested by a foreign closer (the sealing drainer); the owner settles its open block at
+     * its next hook. Foreign closers and the drainer never emit. */
+    uint32_t ring_flush_request;
+    uint32_t ring_refusal;       /* AUTO_RING_REFUSED_*, the first one */
+    uint64_t ring_flushes, ring_quarantined, ring_injected_words;
+    /* The ring's own PUT frontier: the owner commits 2g after a block's complete flush, publish_before snapshots
+     * it before PUT (ring_put_snapshot, owner only) and publish_after releases it; the drainer acquires it. */
+    auto_publication ring_publication;
+    uint32_t ring_put_snapshot;
+    /* owner stores (release), drainer loads: copied bytes, flushes that found the application's M2MF state untouched
+     * or restored it, application words decoded (STATUS ring tail) */
+    uint64_t ring_copied, ring_untouched, ring_restored, ring_decoded;
+    /* owner stores once, drainer loads: the decoder's first rejected header word, its byte offset from the context
+     * begin, then (release) its AUTO_RING_REJECT_* reason (STATUS ring tail u32 at 192..200) */
+    uint32_t ring_reject[3];
 } auto_capture;
 
 void p_auto_init(prof *p); /* before READY/start_gate publication */

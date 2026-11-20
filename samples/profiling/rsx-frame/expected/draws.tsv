@@ -1,0 +1,54 @@
+# rsx-frame sample: what one captured frame must read back as (`ps3dk-prof rsx-frame --json`), field by field.
+# The draw order and values follow source/matrix.h and render_frame() in source/main.c; change them together.
+#
+# "@ key value" lines are capture-level expectations. Draw rows are tab-separated, one per draw in submission order:
+#   ordinal    the draw's number in the frame
+#   kind       ARRAY | INDEX | CLEAR
+#   primitive  the reader's primitive name ("-" for a clear)
+#   count      vertices or indices (0 for a clear)
+#   first      first vertex
+#   index      "-" or <type>/<location> of an indexed draw
+#   label      the label path (scopes joined with /)
+#   vp, fp     the program, named by its shader file stem; the checker maps it to the canonical hash
+#              `ps3dk-prof shader-hash` gives the built .vpo/.fpo ("-": none, for a clear)
+#   tag        PS3DK_PROF_AUTO_TAG value
+#   pass       the innermost AUTO range ("-": none)
+#   timing     the reader's timing state (every covered draw of the captured frame is timed)
+# "@ both" names the BOTH capture: its two views (pipelined, isolated) must each match the draw rows (ordinals of the
+# second view counted from its first draw), every draw must be paired and every program's bytes stored.
+# "@ instance_runs" lists every instance run as first ordinal:length:the VP uniforms that differ (comma-separated).
+# Every draw is also checked hooked and decoded, with no mismatch, no unknown state, and every program exact
+# (readable, terminated, not "bound before capture").
+@ name	matrix
+@ decoder	4
+@ instance_runs	8:8:offset
+@ both	matrix-both
+@ source	app
+@ status	COMPLETE
+@ timing_mode	pipelined
+@ draws	19
+@ programs	5
+@ mismatched	0
+@ untimed	0
+@ missing	0
+@ text_replaced	0
+#ordinal	kind	primitive	count	first	index	label	vp	fp	tag	pass	timing
+0	CLEAR	-	0	0	-	frame/clear	-	-	0x10	-	timed
+1	ARRAY	QUADS	4	0	-	frame/matrix/vp0_fp0	vp_offset	fp_color	0x100	matrix	timed
+2	ARRAY	QUADS	4	0	-	frame/matrix/vp0_fp1	vp_offset	fp_tex	0x101	matrix	timed
+3	ARRAY	QUADS	4	0	-	frame/matrix/vp0_fp2	vp_offset	fp_texmod	0x102	matrix	timed
+4	ARRAY	QUADS	4	0	-	frame/matrix/vp1_fp0	vp_scale	fp_color	0x103	matrix	timed
+5	ARRAY	QUADS	4	0	-	frame/matrix/vp1_fp1	vp_scale	fp_tex	0x104	matrix	timed
+6	ARRAY	QUADS	4	0	-	frame/matrix/vp1_fp2	vp_scale	fp_texmod	0x105	matrix	timed
+7	INDEX	TRIANGLES	6	0	u16/local	frame/indexed/quad	vp_scale	fp_color	0x200	-	timed
+8	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+9	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+10	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+11	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+12	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+13	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+14	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+15	ARRAY	QUADS	4	0	-	frame/instances/run	vp_offset	fp_color	0x300	instances	timed
+16	INLINE_ARRAY	TRIANGLES	24	0	-	frame/special/inline_array	vp_offset	fp_color	0x400	-	timed
+17	INLINE_INDEX	TRIANGLES	6	0	u16/local	frame/special/inline_index	vp_offset	fp_color	0x400	-	timed
+18	IMMEDIATE	TRIANGLES	0	0	-	frame/special/immediate	vp_offset	fp_color	0x400	-	timed

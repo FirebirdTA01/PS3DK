@@ -20,6 +20,9 @@ drain discards the emission error must fail.  --lock-only runs just these cases 
 """
 import argparse, json, os, shutil, struct, subprocess, sys
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
 WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
@@ -38,7 +41,7 @@ def build(out, counters, cc):
         (inc / h).write_bytes((ROOT / "sdk/include/ps3dk" / h).read_bytes())
     flags = ["-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror", "-pthread", "-Wno-prio-ctor-dtor",
              "-DPS3DK_PROF=1", "-DPS3DK_PROF_PAL_HOST", "-I", str(inc.parent), "-I", str(SRC / "core")]
-    files = [SRC / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
+    files = [SRC / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c", "rolling/roll_file.c", "rolling/roll_retention_inspect.c", "rolling/roll_store.c")]
     if counters:
         flags.append("-DPS3DK_PROF_WITH_COUNTERS=1")
         files += sorted((SRC / "counters").glob("*.c"))
@@ -125,7 +128,7 @@ def build_lock(out, cc, src, name):
              "-I", str(inc.parent), "-I", str(src / "core")]
     if os.environ.get("SANITIZE"):
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-ftls-model=local-exec"]
-    files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c")]
+    files = [src / f for f in ("core/prof_core.c", "core/prof_drain.c", "core/prof_version.c", "pal/pal_host.c", "rolling/roll_file.c", "rolling/roll_retention_inspect.c", "rolling/roll_store.c")]
     files += sorted((src / "counters").glob("*.c"))
     cmd = [cc, *flags, *map(str, files), str(Path(__file__).with_name("counters_lock_test.c")), *WHOLE_RUN, "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -192,8 +195,7 @@ def lock_cases(out, cc, src, tag):
 def lock_suite(out, cc):
     """The fixed runtime passes every lock case; a mutant whose drain discards the emission error must fail."""
     ok = not lock_cases(out, cc, SRC, "runtime")
-    mut = out / "mutant-src"
-    shutil.copytree(SRC, mut)
+    mut = copy_runtime(SRC, out / "mutant")
     drain = mut / "core/prof_drain.c"
     text = drain.read_text()
     edited = text.replace("if (p_counter_emit(p, 0) != 0)", "if ((void)p_counter_emit(p, 0), 0)")

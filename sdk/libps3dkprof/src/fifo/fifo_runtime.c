@@ -27,6 +27,148 @@ static void unclaim(fifo_capture *f)
     (void)CAS_ACQREL(&f->state, &exp, (uint32_t)FS_NONE);
 }
 
+static fifo_account_storage *account_owner(void *ctx)
+{
+    fifo_capture *f = &g_fifo;
+    prof *p = g_prof;
+    if (LD_ACQ(&f->state) != FS_ATTACHED || !p || LD_ACQ(&p->stop_latch) || ctx != f->ctx ||
+        g_tls.slot1 != f->owner_slot + 1u || g_tls.incarnation != f->owner_inc || g_tls.acked || g_tls.retired)
+        return NULL;
+    return f->account;
+}
+static void account_suppressed(fifo_account_storage *a)
+{
+    uint64_t n = ps3tc_fifo_observe_suppressed();
+    if (n != a->suppressed) fifo_account_invalidate(&a->core, FIFO_ACCOUNT_BOUNDARY);
+    a->suppressed = n;
+}
+static void account_enqueue(fifo_account_storage *a, fifo_account_row row)
+{
+    uint64_t w, r;
+    if (a->seq >= P_CEIL - 1u) {
+        fifo_account_invalidate(&a->core, FIFO_ACCOUNT_SATURATED);
+        return; /* no sequence reuse; absent/tail rows remain unavailable */
+    }
+    row.seq = ++a->seq;
+    w = LD_RLX(&a->write_idx); r = LD_ACQ(&a->read_idx);
+    if (w - r >= FIFO_ACCOUNT_ROWS) return;
+    a->rows[w % FIFO_ACCOUNT_ROWS] = row;
+    ST_REL(&a->write_idx, w + 1u);
+}
+int ps3dk_prof__fifo_account_start(void *ctx, uint32_t current, uint32_t published)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || a->enabled) return 0;
+    fifo_account_init(&a->core, g_fifo.begin_off, g_fifo.end_off, current, published);
+    a->suppressed = ps3tc_fifo_observe_suppressed();
+    a->enabled = 1;
+    return a->core.reasons == 0;
+}
+void ps3dk_prof__fifo_account_prepare(void *ctx, uint32_t current)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return;
+    account_suppressed(a); fifo_account_prepare(&a->core, current);
+}
+void ps3dk_prof__fifo_account_publish(void *ctx, uint32_t published)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return;
+    account_suppressed(a);
+    /* Native wrap phase callbacks own both PUTs. Ordinary publication hooks
+     * may run between them, but cannot reinterpret begin as a linear PUT. */
+    if (!a->core.phase) fifo_account_publish(&a->core, published);
+}
+void ps3dk_prof__fifo_account_begin(void *ctx, uint32_t owner, uint64_t frame, uint64_t window, uint32_t current)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return;
+    account_suppressed(a);
+    if (owner != g_fifo.owner_inc) { fifo_account_invalidate(&a->core, FIFO_ACCOUNT_TOKEN); return; }
+    fifo_account_begin(&a->core, owner, frame, window, current);
+}
+void ps3dk_prof__fifo_account_end(void *ctx, uint32_t owner, uint64_t frame, uint64_t window, uint32_t current)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return;
+    account_suppressed(a);
+    if (owner != g_fifo.owner_inc) { fifo_account_invalidate(&a->core, FIFO_ACCOUNT_TOKEN); return; }
+    account_enqueue(a, fifo_account_end(&a->core, owner, frame, window, current));
+}
+void ps3dk_prof__fifo_account_unknown(void *ctx)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (a && a->enabled) fifo_account_invalidate(&a->core, FIFO_ACCOUNT_FLOW);
+}
+
+#ifdef PS3DK_PROF_WITH_AUTO
+/* Native activation is deliberately AUTO-only. The legacy FIFO-only provider
+ * retains phase events without claiming ordinary publication coverage. */
+static int account_native_sample(void *ctx, uint32_t *current, uint32_t *put)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return 0;
+    if (ps3tc_fifo_observe_account_snapshot(ctx, current, put) != 0) {
+        fifo_account_invalidate(&a->core, FIFO_ACCOUNT_FLOW); return 0;
+    }
+    account_suppressed(a);
+    return 1;
+}
+void ps3dk_prof__fifo_account_native_start(void *ctx)
+{
+    uint32_t current, put;
+    if (ps3tc_fifo_observe_account_snapshot(ctx, &current, &put) != 0) {
+        (void)ps3dk_prof__fifo_account_start(ctx, UINT32_MAX, 0);
+        ps3dk_prof__fifo_account_unknown(ctx);
+    } else (void)ps3dk_prof__fifo_account_start(ctx, current, put);
+}
+void ps3dk_prof__fifo_account_check_context(void *ctx)
+{
+    uint32_t current, put;
+    (void)account_native_sample(ctx, &current, &put);
+}
+void ps3dk_prof__fifo_account_native_publish(void *ctx, uint32_t offset)
+{
+    uint32_t current, put;
+    if (!account_native_sample(ctx, &current, &put)) return;
+    if (put != offset) { ps3dk_prof__fifo_account_unknown(ctx); return; }
+    ps3dk_prof__fifo_account_prepare(ctx, current);
+    ps3dk_prof__fifo_account_publish(ctx, offset);
+}
+static uint32_t account_native_boundary(void *ctx, fifo_account_storage *a)
+{
+    uint32_t current = a->core.current, put;
+    if (account_native_sample(ctx, &current, &put) && !a->core.reasons && !a->core.phase) {
+        uint64_t known = (uint64_t)a->core.begin + a->core.published - a->core.lap_base;
+        if (known != put) fifo_account_invalidate(&a->core, FIFO_ACCOUNT_FLOW);
+    }
+    return current;
+}
+void ps3dk_prof__fifo_account_native_frame(uint64_t frame, uint64_t previous_window, uint64_t window)
+{
+    if (LD_ACQ(&g_fifo.state) != FS_ATTACHED) return;
+#ifdef PS3DK_PROF_TEST_HOOKS
+    if (ps3dk_prof__fifo_test_hook)
+        ps3dk_prof__fifo_test_hook(5, 0); /* immediately before published metadata access */
+#endif
+    void *ctx = g_fifo.ctx;
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled) return;
+    uint32_t current = account_native_boundary(ctx, a);
+    if (a->core.active)
+        ps3dk_prof__fifo_account_end(ctx, a->core.owner, a->core.frame, previous_window, current);
+    if (window)
+        ps3dk_prof__fifo_account_begin(ctx, g_fifo.owner_inc, frame, window, current);
+}
+void ps3dk_prof__fifo_account_native_end(void *ctx, uint32_t owner, uint64_t frame, uint64_t window)
+{
+    fifo_account_storage *a = account_owner(ctx);
+    if (!a || !a->enabled || !a->core.active || owner != a->core.owner || frame != a->core.frame) return;
+    uint32_t current = account_native_boundary(ctx, a);
+    ps3dk_prof__fifo_account_end(ctx, owner, frame, window, current);
+}
+#endif
+
 /* The owner's wrap boundary.  No lock, no SDK call, no allocation, no sink work; it never changes the protocol. */
 static void fifo_event(void *user, const ps3tc_fifo_boundary *b)
 {
@@ -51,6 +193,10 @@ static void fifo_event(void *user, const ps3tc_fifo_boundary *b)
 #ifdef PS3DK_PROF_WITH_AUTO
     ps3dk_prof__auto_fifo_boundary(f->ctx);
 #endif
+    if (f->account->enabled) {
+        account_suppressed(f->account);
+        fifo_account_wrap(&f->account->core, b->kind, b->begin_off, b->tail_off);
+    }
     seq = LD_RLX(&f->attempted) + 1u;
     if (seq >= P_CEIL) {
         ST_REL(&f->saturated, 1u); /* sticky: no sequence wraps or repeats */
@@ -198,6 +344,7 @@ int ps3dk_prof_fifo_attach(uint32_t gpu, ps3dk_prof_gcm_ctx *ctx, const ps3dk_pr
     f->max_bytes = mb;
     f->allocated = (uint32_t)need;
     f->ctx = ctx;
+    f->account = (fifo_account_storage *)(void *)f->block;
     f->ring = (fifo_rec *)(void *)(f->block + FIFO_CONTROL);
     f->reg.size = (uint32_t)sizeof f->reg;
     f->reg.reserved = 0;
@@ -281,6 +428,11 @@ int ps3dk_prof_fifo_detach(uint32_t instance)
         return PS3DK_PROF_EBUSY; /* from inside the observer callback: the wrap is still running */
     if (st == FS_DETACHED || st == FS_CLOSED)
         return PS3DK_PROF_EALREADY;
+    if (st == FS_ATTACHED && f->account->enabled && f->account->core.active) {
+        fifo_account *a = &f->account->core;
+        fifo_account_invalidate(a, FIFO_ACCOUNT_BOUNDARY);
+        account_enqueue(f->account, fifo_account_end(a, a->owner, a->frame, a->window, a->current));
+    }
     /* the owner removes its own observer: no boundary can run after this on this thread */
     (void)ps3tc_fifo_observe_remove((struct _gcmCtxData *)f->ctx, &f->reg);
     if (st == FS_SEALED)

@@ -5,8 +5,14 @@
  * are its errata 1 and 2; "BC" is the boundary correction (format 5.1, "Counter ceiling (fail-closed)").
  * CODE-REVIEW.md maps every rule to the code. */
 #include "prof_internal.h"
+#include "../../../include/ps3dk/prof_rolling.h"
+#if defined(P_ROLLING_RUNTIME) && defined(PS3DK_PROF_ROLLING_PUBLIC)
+#include "../rolling/roll_public.h"
+#endif
+#include "prof_frame_hook.h"
 #ifdef PS3DK_PROF_WITH_AUTO
 #include "../auto_rsx/auto_internal.h"
+#include "../fifo/fifo_account_runtime.h"
 #endif
 #ifdef PS3DK_PROF_WITH_WAITS
 #include "../waits/wait_internal.h"
@@ -23,6 +29,9 @@
 #include "gpu_internal.h"
 #endif
 
+#ifdef PS3DK_PROF_TEST_HOOKS
+#include "../rolling/roll_runtime_test.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -41,6 +50,11 @@ static struct {
     int kind;                   /* 0 default directory, 1 a set directory, 2 callbacks */
     char dir[256];
     ps3dk_prof_sink_callbacks cb;
+    uint32_t retention_keep;
+#ifdef P_ROLLING_RUNTIME
+    p_roll_options rolling;
+    p_roll_selection rolling_selection;
+#endif
 #ifdef PS3DK_PROF_WITH_ARCS
     struct ps3dk_prof_arc_options arcs;
 #endif
@@ -54,6 +68,9 @@ uint64_t ps3dk_prof_test_stats[128];
 /* The capture record: outside g_storage, so a failed init (which clears g_storage) never touches it.  Filled once by
  * the successful init, then published by a release store of g_capture_state; immutable afterwards, never freed. */
 static ps3dk_prof_capture_record g_capture;
+/* Published by g_capture_state with the immutable capture record. Kept out of
+ * the public record ABI; legacy live offsets are valid only for append files. */
+static uint32_t g_capture_rolling;
 static uint32_t g_capture_state;   /* 0 none, 1 FILE sink (record valid), 2 callback sink */
 
 /* ---- primitives --------------------------------------------------------------------------------------------------- */
@@ -869,6 +886,11 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *h)
 
 /* ---- frames (5.6) -------------------------------------------------------------------------------------------------- */
 
+static void (*g_frame_hook)(void);   /* prof_frame_hook.h */
+/* Weak: linked only with the live auto-start member (prof_frame_hook.h). */
+extern __typeof__(ps3dk_prof__live_autostart_after_init) ps3dk_prof__live_autostart_after_init __attribute__((weak));
+void ps3dk_prof__set_frame_hook(void (*fn)(void)) { __atomic_store_n(&g_frame_hook, fn, __ATOMIC_RELEASE); }
+
 void ps3dk_prof_frame(void)
 {
     tls_state *t = &g_tls;
@@ -906,8 +928,17 @@ void ps3dk_prof_frame(void)
         commit(rg, ws, we + 1);
     }
     ST_REL(&cb->current_frame, fid + 1);   /* after the publish or the drop */
+#ifdef PS3DK_PROF_WITH_AUTO
+    uint64_t fifo_window_before = ps3dk_prof__fifo_owner_window();
+#endif
+    {
+        void (*hook)(void) = __atomic_load_n(&g_frame_hook, __ATOMIC_ACQUIRE);
+        if (hook)
+            hook();   /* live capture triggers (prof_frame_hook.h): before this mark's window step */
+    }
     p_window_frame(p, t->slot1, t->incarnation, fid);   /* a window opens or closes here, before AUTO sees it */
 #ifdef PS3DK_PROF_WITH_AUTO
+    ps3dk_prof__fifo_account_native_frame(fid,fifo_window_before,ps3dk_prof__fifo_owner_window());
     p_auto_frame(fid,tb);
 #endif
 }
@@ -943,6 +974,21 @@ static void win_lock(prof *p)
         z = 0;
 }
 static void win_unlock(prof *p) { __atomic_store_n(&p->window_lock, 0u, __ATOMIC_RELEASE); }
+#ifdef PS3DK_PROF_WITH_AUTO
+/* Copy identity under its existing lock; release before touching GCM. Never
+ * retain the lock across a reserve/callback/PUT or observer call. */
+uint64_t ps3dk_prof__fifo_owner_window(void)
+{
+    prof *p = g_prof;
+    uint64_t id = 0;
+    if (!p || !g_tls.slot1) return 0;
+    win_lock(p);
+    if (p->window_open && p->win.owner_slot1 == g_tls.slot1 && p->win.owner_inc == g_tls.incarnation)
+        id = p->win.id;
+    win_unlock(p);
+    return id;
+}
+#endif
 static void w_le16(uint8_t *b, uint16_t v) { b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8); }
 static void w_le32(uint8_t *b, uint32_t v) { for (unsigned i = 0; i < 4; i++) b[i] = (uint8_t)(v >> (8 * i)); }
 static void w_le64(uint8_t *b, uint64_t v) { for (unsigned i = 0; i < 8; i++) b[i] = (uint8_t)(v >> (8 * i)); }
@@ -1001,7 +1047,9 @@ static void win_open(prof *p, uint64_t first)
     p->win.state = 2;
     p->win.opened++;
     win_begin_record(p);
-    ST_REL(&p->window_open, 1u);
+    /* the gate carries the window's id (>= 1, never reused): an owner that sees END and a reopen only as two
+     * different nonzero values still tells the windows apart (AUTO report-ring blocks) */
+    ST_REL(&p->window_open, p->win.id ? p->win.id : 1u);
 }
 /* The frame in progress on a thread (0 before its first frame). */
 static uint64_t slot_current(prof *p, uint32_t slot1)
@@ -1230,6 +1278,168 @@ int ps3dk_prof__configure_arcs(const struct ps3dk_prof_arc_options *o)
 }
 #endif
 
+int ps3dk_prof_set_capture_retention(uint32_t keep)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc != PS3DK_PROF_OK)
+        return rc;
+    if (keep > 1024)
+        rc = PS3DK_PROF_EINVAL;
+    else
+        g_pending.retention_keep = keep;
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+
+int ps3dk_prof_set_rolling_options(const ps3dk_prof_rolling_options *options)
+{
+    int rc=gate_enter(G_CONFIGURING);unsigned i;
+    if(rc)return rc;
+    if(!options||options->size!=192||options->version!=1)rc=PS3DK_PROF_EINVAL;
+    else {
+        for(i=0;i<10&&!options->reserved[i];++i){}
+        if(i!=10||options->mode>1||options->profile>3)rc=PS3DK_PROF_EINVAL;
+        else {
+#if defined(P_ROLLING_RUNTIME) && defined(PS3DK_PROF_ROLLING_PUBLIC)
+            p_roll_options o;p_roll_selection selection;
+            rc=ps3dk_prof__roll_options_decode(options,&o,&selection);
+            if(!rc){g_pending.rolling=o;g_pending.rolling_selection=selection;}
+#else
+            ps3dk_prof_rolling_options append=PS3DK_PROF_ROLLING_OPTIONS_INIT;
+            rc=options->mode ? PS3DK_PROF_ENOTSUP :
+                memcmp(options,&append,sizeof append) ? PS3DK_PROF_EINVAL : PS3DK_PROF_OK;
+#ifdef P_ROLLING_RUNTIME
+            if(!rc){memset(&g_pending.rolling,0,sizeof g_pending.rolling);
+                memset(&g_pending.rolling_selection,0,sizeof g_pending.rolling_selection);}
+#endif
+#endif
+        }
+    }
+    ST_REL(&g_gate,(uint32_t)G_UNINIT);return rc;
+}
+
+int ps3dk_prof_get_rolling_result(ps3dk_prof_rolling_result *out)
+{
+    if(!out||out->size!=128||out->version!=1)return PS3DK_PROF_EINVAL;
+    if(!p_ready())return PS3DK_PROF_ENOTINIT;
+#ifdef P_ROLLING_RUNTIME
+    if(!g_prof->rolling)return PS3DK_PROF_ENOTSUP;
+    if(!LD_ACQ(&g_prof->finalization_ready))return PS3DK_PROF_EBUSY;
+    {
+        const p_roll_record *r=&g_prof->rolling->record;
+        ps3dk_prof_rolling_result v={0};
+        v.size=sizeof v;v.version=1;v.format=1;
+        switch(g_prof->rolling->selection.kind) {
+        case P_ROLL_PPU:v.profile=PS3DK_PROF_ROLLING_PROFILE_PPU;break;
+        case P_ROLL_COMBINED:v.profile=PS3DK_PROF_ROLLING_PROFILE_SPU;break;
+        case P_ROLL_SCHEMA2:v.profile=PS3DK_PROF_ROLLING_PROFILE_AUTO_FIFO;break;
+        default:return PS3DK_PROF_ENOTSUP;
+        }
+        v.original_flags=r->original_flags;v.state=r->state;v.reason=r->reason;
+        v.accepted_next_chunk=r->accepted_next_chunk;v.accepted_payload_bytes=r->accepted_payload_bytes;
+        v.committed_next_chunk=r->committed_next_chunk;v.committed_payload_bytes=r->committed_payload_bytes;
+        v.revision=r->revision;v.file_bytes=r->file_bytes;v.fixed_state_bytes=r->state_bytes;
+        v.result=r->result;v.io_result=r->io_result ? PS3DK_PROF_ESINKFAIL : 0;
+        v.close_result=r->close_result;v.join_result=r->join_result;
+        *out=v;return 0;
+    }
+#else
+    return PS3DK_PROF_ENOTSUP;
+#endif
+}
+
+#ifdef PS3DK_PROF_TEST_HOOKS
+int ps3dk_prof_test_rolling_set(const ps3dk_prof_test_rolling_options *o)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        p_roll_selection selection = {0};
+        selection.kind = P_ROLL_PPU;
+        rc = p_roll_plan(o, &selection, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            if (!o->enabled) selection.kind = P_ROLL_NONE;
+            g_pending.rolling_selection = selection;
+        }
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_combined_set(const ps3dk_prof_test_rolling_options *o, const pfm_config *m)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1 ||
+        (o->enabled && !m) || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
+        o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        p_roll_selection selection = {0};
+        selection.kind = o->enabled ? P_ROLL_COMBINED : P_ROLL_NONE;
+        if (o->enabled) selection.limits.combined = *m;
+        rc = p_roll_plan(o, &selection, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            g_pending.rolling_selection = selection;
+        }
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_schema2_set(const ps3dk_prof_test_rolling_options *o, const pfm2_config *m)
+{
+    int rc = gate_enter(G_CONFIGURING);
+    if (rc) return rc;
+    if (!o || o->size != sizeof *o || o->version != 1 || o->reserved || o->enabled > 1 ||
+        (o->enabled && !m) || o->ppu.incarnations || o->ppu.descriptors || o->ppu.stack_rows ||
+        o->ppu.frame_identities || o->ppu.metadata_bytes || o->ppu.checkpoint_bytes)
+        rc = PS3DK_PROF_EINVAL;
+    else {
+#ifdef P_ROLLING_RUNTIME
+        size_t bytes;
+        p_roll_selection selection = {0};
+        selection.kind = o->enabled ? P_ROLL_SCHEMA2 : P_ROLL_NONE;
+        if (o->enabled) selection.limits.schema2 = *m;
+        rc = p_roll_plan(o, &selection, &bytes);
+        if (!rc) {
+            g_pending.rolling = *o;
+            g_pending.rolling_selection = selection;
+        }
+#else
+        rc = o->enabled ? PS3DK_PROF_ENOTSUP : 0;
+#endif
+    }
+    ST_REL(&g_gate, (uint32_t)G_UNINIT);
+    return rc;
+}
+int ps3dk_prof_test_rolling_result(ps3dk_prof_test_rolling_record *out)
+{
+    if (!out) return PS3DK_PROF_EINVAL;
+    if (!p_ready()) return PS3DK_PROF_ENOTINIT;
+#ifdef P_ROLLING_RUNTIME
+    if (!g_prof->rolling) return PS3DK_PROF_ENOTSUP;
+    if (!LD_ACQ(&g_prof->finalization_ready)) return PS3DK_PROF_EBUSY;
+    *out = g_prof->rolling->record;
+    return 0;
+#else
+    return PS3DK_PROF_ENOTSUP;
+#endif
+}
+#endif
+
 int ps3dk_prof_set_sink_path(const char *dir)
 {
     int rc = gate_enter(G_CONFIGURING);
@@ -1388,12 +1598,15 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     uint64_t now;
     int rc, err = 0, n;
     const char *dir;
+#ifdef P_ROLLING_RUNTIME
+    size_t roll_bytes = 0, o_roll = 0;
+#endif
 #ifdef PS3DK_PROF_WITH_ARCS
     size_t o_arc_rows = 0, o_arc_index = 0;
 #endif
 #ifdef PS3DK_PROF_WITH_SPU
     ext_cfg x;
-    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0;
+    size_t o_spu = 0, o_scr = 0, o_copy = 0, o_arena = 0, o_lslots = 0, o_acc = 0, ext_start = 0, ext_bytes = 0;
     size_t o_gslots = 0, o_gled = 0, o_gmeta = 0, o_gstage = 0, o_gscr = 0;
 #endif
 
@@ -1469,15 +1682,60 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
                            take(&off, x.gpu_max, PRG_SCRATCH_FOR(x.gpu_slots), &o_gscr))) ||
             off > P_TOTAL_MAX || (uint64_t)(off - ext_start) > x.mem_max)
             return PS3DK_PROF_EINVAL;
+        ext_bytes = off - ext_start;
+    }
+#endif
+#ifdef P_ROLLING_RUNTIME
+    if (g_pending.rolling.enabled) {
+        uint32_t kind = g_pending.rolling_selection.kind;
+        if (g_pending.kind == 2
+#ifdef PS3DK_PROF_WITH_SPU
+            || (kind == P_ROLL_PPU && x.enabled)
+            || (kind == P_ROLL_COMBINED && (!x.spu || x.gpu_max))
+#else
+            || kind != P_ROLL_PPU
+#endif
+#ifdef PS3DK_PROF_WITH_ARCS
+            || p->arc_options.max_arcs_per_thread
+#endif
+#if defined(PS3DK_PROF_WITH_WAITS) || defined(PS3DK_PROF_WITH_FUNC) || defined(PS3DK_PROF_WITH_COUNTERS)
+            || 1
+#endif
+            ) return PS3DK_PROF_ENOTSUP;
+        if (kind == P_ROLL_SCHEMA2) {
+#if defined(P_ROLLING_SCHEMA2) && defined(PS3DK_PROF_WITH_AUTO)
+            uint32_t families = 128;
+#ifdef PS3DK_PROF_WITH_FIFO
+            families |= 64;
+#endif
+            /* Match the actual original header before allocating/opening.
+             * This private runtime profile admits managed AUTO leases only. */
+            if (!x.enabled || !x.gpu_max || g_pending.rolling_selection.limits.schema2.family_flags != families)
+                return PS3DK_PROF_ENOTSUP;
+            if (x.spu && !g_pending.rolling_selection.limits.schema2.shared.spu_lanes)
+                return PS3DK_PROF_ENOTSUP;
+#else
+            return PS3DK_PROF_ENOTSUP;
+#endif
+        }
+        if (p_roll_plan(&g_pending.rolling,
+                        &g_pending.rolling_selection, &roll_bytes) ||
+            take(&off, 1, roll_bytes, &o_roll) || off > P_TOTAL_MAX ||
+            (uint64_t)off > g_pending.rolling.max_state_bytes)
+            return PS3DK_PROF_EINVAL;
     }
 #endif
     p->block = (uint8_t *)pal_alloc(off);
     if (!p->block)
         return PS3DK_PROF_ENOMEM;
+#ifdef P_ROLLING_RUNTIME
+    if (roll_bytes) p_roll_bind(p, p->block + o_roll, &g_pending.rolling,
+                               &g_pending.rolling_selection, off);
+#endif
 #ifdef PS3DK_PROF_WITH_SPU
     p->block_bytes = off;
     if (x.enabled) {
-        p->spu_bytes = off - ext_start;
+        p->spu_bytes = ext_bytes; /* rolling storage is a separate preallocated region */
         p->ext_flags = 1;
 #ifdef PS3DK_PROF_WITH_PROFILE
         {
@@ -1620,24 +1878,50 @@ static int init_impl(const ps3dk_prof_config *cfg_in, const void *ext_in, int *t
     p->tb_at_init = p_tb();
     p->next_incarnation = 1;
 
-    /* Step 6: the sink. */
+    /* Step 6: the sink. Retention requires an owned FILE, never callbacks. */
+    p->retention_keep = g_pending.retention_keep;
+    if (p->retention_keep && g_pending.kind == 2) {
+        rc = PS3DK_PROF_ENOTSUP;
+        goto fail_mutex2;
+    }
     if (g_pending.kind == 2) {
         p->snk.kind = 2;
         p->snk.cb = g_pending.cb;   /* 6b: no callback runs during init */
     } else {
         dir = g_pending.kind == 1 ? g_pending.dir : PAL_DEFAULT_SINK_DIR;
-        n = snprintf(p->snk.path, sizeof p->snk.path, "%s/%s-%016llx.prof", dir, p->app,
-                     (unsigned long long)p->tb_at_init);
+        n = snprintf(p->snk.path, sizeof p->snk.path, "%s/%s-%016llx.%s", dir, p->app,
+                     (unsigned long long)p->tb_at_init,
+#ifdef P_ROLLING_RUNTIME
+                     p->rolling ? "profr" :
+#endif
+                     "prof");
         if (n < 0 || (size_t)n >= sizeof p->snk.path) {
             rc = PS3DK_PROF_EINVAL;   /* Q7: a truncated name is never used */
             goto fail_mutex2;
         }
-        if (pal_open_excl(p->snk.path, &p->snk.fd, &err) != 0) {
+        rc =
+#ifdef P_ROLLING_RUNTIME
+            p->rolling ? pal_open_rw_excl(p->snk.path, &p->snk.fd, &err) :
+#endif
+            pal_open_excl(p->snk.path, &p->snk.fd, &err);
+        if (rc != 0) {
             rc = err == PAL_EEXIST ? PS3DK_PROF_EEXIST : PS3DK_PROF_ESINKFAIL;   /* no file created: retryable */
             goto fail_mutex2;
         }
         p->snk.kind = 1;
     }
+
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        p_drain_prologue(p); /* real HEADER/CLOCKS committed before worker creation */
+        rc = p->rolling->result ? p->rolling->result : p_roll_flush(p);
+        if (rc) {
+            (void)pal_close(p->snk.fd, &err);
+            *terminal = 1;
+            goto fail_mutex2;
+        }
+    }
+#endif
 
     /* Step 7: THREAD mode's drain thread waits on the start gate until the state is published. */
     if (c.mode == PS3DK_PROF_MODE_THREAD) {
@@ -1691,6 +1975,9 @@ static void publish_capture_record(const prof *p)
     g_capture.app_len = p->app_len;
     memcpy(g_capture.build_id, p->build_id, p->build_id_len);
     g_capture.build_id_len = p->build_id_len;
+#ifdef P_ROLLING_RUNTIME
+    g_capture_rolling = p->rolling != NULL;
+#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
     if (ps3dk_prof_test_hooks.before_capture_publish)
         ps3dk_prof_test_hooks.before_capture_publish();
@@ -1710,6 +1997,11 @@ int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out)
         return PS3DK_PROF_ENOTSUP;
     *out = g_capture;
     return PS3DK_PROF_OK;
+}
+
+int ps3dk_prof__capture_rolling(void)
+{
+    return LD_ACQ(&g_capture_state) == 1u && g_capture_rolling != 0;
 }
 
 static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
@@ -1736,6 +2028,8 @@ static int init_gate(const ps3dk_prof_config *cfg, const void *ext)
     /* quick_exit: one last drain (prof_drain.c p_quick_exit_drain).  One capture per process, so this registers once;
      * a registration failure leaves quick_exit as before (whatever the drainer last wrote). */
     (void)at_quick_exit(p_quick_exit_drain);
+    if (ps3dk_prof__live_autostart_after_init)
+        ps3dk_prof__live_autostart_after_init();   /* opt-in live viewer auto-start (prof_frame_hook.h) */
     return PS3DK_PROF_OK;
 }
 

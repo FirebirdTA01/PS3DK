@@ -11,11 +11,33 @@ typedef struct ps3tc_auto_call {
  * covers both markers and every original reservation group before begin. */
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *, const ps3tc_auto_call *, uint64_t caller);
 void ps3dk_prof__auto_end(struct _gcmCtxData *, uint32_t ticket);
+/* Kinds 7 (inline array: count data words), 8 (inline index array: count indices, index_type 1 u16) and 9 (immediate:
+ * SetDrawBegin) are begun only while ps3dk_prof__rsxf_active is non-NULL (one load and a branch otherwise); an
+ * immediate draw ends at SetDrawEnd with ps3dk_prof__auto_end_open. */
+void ps3dk_prof__auto_end_open(struct _gcmCtxData *);
 /* Snapshot committed metadata before PUT, then release the publication
  * frontier after PUT's full barrier. These hooks emit no GPU commands. */
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *);
 void ps3dk_prof__auto_publish_after(struct _gcmCtxData *, uint32_t frontier);
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *);
+/* Exact owner FIFO IO offset; independent of AUTO report publication serials. */
+void ps3dk_prof__fifo_account_native_publish(void *ctx, uint32_t offset);
+/* Report ring (owner contexts only; inert otherwise). prewrap: the native FIFO
+ * wrap, before it computes the tail JUMP from current. preflush: FlushBuffer,
+ * before its barrier and before current becomes PUT. Either may append a
+ * bounded block flush at current inside the tail it reserved by lowering end,
+ * and restores that exact physical end; neither calls a callback, flushes or
+ * waits. Callers re-read current and end afterwards; nothing cached survives. */
+void ps3dk_prof__auto_prewrap(struct _gcmCtxData *);
+void ps3dk_prof__auto_preflush(struct _gcmCtxData *);
+/* FIFO accounting (owner thread): 1 when visible_end is a known end of ctx: equal to the registered physical end, or
+ * exactly the end the report ring's active tail lowered that physical end to on the owner context it attached to.
+ * The same predicate as the runtime's own clean-end check; a physical end is never derived by subtraction. */
+int ps3dk_prof__auto_fifo_end_known(void *ctx, const void *registered_physical_end, const void *visible_end);
+/* Provided by the observed ps3tc_fifo_wrap.o: 1 when the context's callback is
+ * the native two-phase wrap that calls prewrap; any replaced or custom callback
+ * would wrap without it, so recycling refuses. */
+int ps3tc_fifo_wrap_native(const struct _gcmCtxData *);
 /* Public application writes, safe and unsafe forms. kind 1 is a report index,
  * kind 2 a label index. Observation never redirects or suppresses the write. */
 void ps3dk_prof__auto_resource_write(struct _gcmCtxData *, uint32_t kind, uint32_t index);
@@ -36,6 +58,10 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData 
 void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
 /* cellGcmSetFragmentProgram in a PS3TC_PROF_AUTO unit (cell/gcm/gcm_cg_bridge.h): the offset just bound. */
 void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
+/* RSX frame capture: the program container's ucode bound at an FP offset (rsxLoadFragmentProgramLocation), called
+ * only while ps3dk_prof__rsxf_active is non-NULL (the capture selected and attached with the report ring). */
+extern void *ps3dk_prof__rsxf_active;
+void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context, const void *ucode, uint32_t bytes, uint32_t offset);
 void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key, const void *buffer, uint32_t size);
 void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key);
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),

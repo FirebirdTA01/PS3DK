@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 typedef struct ps3dk_prof_auto_options {
-    uint32_t size;              /* sizeof(ps3dk_prof_auto_options) = 36 (32: the earlier struct, without range_pairs) */
+    uint32_t size;              /* sizeof(ps3dk_prof_auto_options) = 52; 36 and 32, the earlier structs (without the
+                                 * ring fields; 32 also without range_pairs), are still accepted */
     uint32_t report_first;      /* local reports, first index 0..2047 */
     uint32_t report_count;      /* even, 18..1024, wholly within 0..2047 */
     uint32_t operation_label;   /* 64 or 69..254; distinct from clock_label */
@@ -23,16 +24,58 @@ typedef struct ps3dk_prof_auto_options {
     uint32_t frame_records;     /* 1..256 coverage snapshots */
     uint32_t max_bytes;         /* actual checked layout must fit; <= 2 MiB */
     uint32_t range_pairs;       /* report pairs kept for AUTO ranges; 0 the default (an eighth of the pool, at most
-                                 * 64: 63 with the default 1024 reports). A range holds its pair until the drainer has
+                                 * 64: 63 with the default 1024 reports; with ring blocks, of the legacy pairs they
+                                 * leave). A range holds its pair until the drainer has
                                  * read it, so size for the ranges outstanding over the RSX and drainer lag (about
                                  * three frames), not for one frame. At most what leaves 64 pairs for draws and FRAME
                                  * marks after the whole-CALL reserve (32, a quarter of a small pool) and this one */
+    /* Report ring, opt-in (owner-buffer draws recycle report blocks through MAIN memory, so their per-draw timing is
+     * not bounded by the local pool). All four 0 (the default) keeps the bounded local report pool and allocates
+     * nothing. ring_blocks nonzero selects the ring; it then allocates, once per process, ring_bytes of MAIN extents
+     * plus its metadata and descriptors in whole 1 MiB pages (20 MiB at the defaults: 16 MiB of extents, 16,384
+     * records). The CMake option PS3_PROF_AUTO_RING=ON sets them with no source change (ps3dk_prof_auto_ring_options
+     * below). Segment draws, frame marks, whole-CALL brackets and ranges keep the local pool.
+     * ON when every owner-buffer draw must be timed: busy frames over the ~504-pair per-frame cap, per-draw or per-pass
+     * RSX cost, per-tag totals without untimed draws. OFF (default) when memory is tight (the ring's pages change the
+     * memory you may be measuring), when frame-level verdicts and ranges are enough, or when draws come mostly from
+     * CALL segments (they keep the local pool). Sizing (docs/profiler-guide.md): extents of 126 draws (4 KiB), records
+     * for the draws outstanding over about three frames; too small shows as untimed draws counted under ring_full or
+     * metadata capacity, and extents still held at seal make the capture FINAL (lower bounds). */
+    uint32_t ring_blocks;       /* 2 or 3 local blocks of 126 pairs (the hardware-tested copy) at the top of the
+                                 * range; the rest stay legacy and must be nonempty, so 3 needs over 378 pairs and 4
+                                 * (504 pairs, the whole 1024-report maximum) is always refused */
+    uint32_t ring_label;        /* 0: 245; otherwise 64 or 69..254, distinct from both labels above */
+    uint32_t ring_bytes;        /* 0: 16 MiB; whole 1 MiB pages up to 256 MiB of MAIN extents */
+    uint32_t ring_records;      /* 0: 16384; 1..65536 operation snapshots, replacing metadata_records */
 } ps3dk_prof_auto_options;
 
 /* Defaults: reports 1024..2047, operation label 247, clock label 246. All are PROFILER-owned in
  * <cell/gcm/ps3tc_gcm_labels.h> (labels 240..247, reports 0..511 and 1024..2047), so they never collide with the
  * application's labels (64, 69..239, 248..254) or reports (512..1023); the attach refuses defaults that would. */
-#define PS3DK_PROF_AUTO_OPTIONS_INIT {36u,1024u,1024u,247u,246u,1024u,256u,2097152u,0u}
+#define PS3DK_PROF_AUTO_OPTIONS_INIT {52u,1024u,1024u,247u,246u,1024u,256u,2097152u,0u,0u,0u,0u,0u}
+
+/* Build-time report ring (CMake PS3_PROF_AUTO_RING=ON, with PS3_PROF_AUTO_RING_MB and PS3_PROF_AUTO_RING_RECORDS):
+ * the selector compiles a generated translation unit into each executable that defines the constant
+ * ps3dk_prof_automatic_ring_options with PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS, and links it with
+ * --require-defined, so a missing definition is a link error. The AUTO start-up reads it through a weak reference
+ * before profiler initialization; absent (the option OFF) nothing changes. Present, it is validated as the attach
+ * validates the ring fields (an invalid one prints a diagnostic and the automatic capture is not initialized) and its
+ * fields replace the ring fields of the defaults: the automatic attach uses them unless pre-init options
+ * (PS3DK_PROF_AUTO_OPTIONS_SET) apply, which always win, and an override with NULL options uses them too. */
+typedef struct ps3dk_prof_auto_ring_options {
+    uint32_t size;              /* sizeof(ps3dk_prof_auto_ring_options) = 16 */
+    uint32_t ring_blocks;       /* 2 or 3, as ps3dk_prof_auto_options.ring_blocks (the generated constant: 2) */
+    uint32_t ring_bytes;        /* MAIN extents: whole 1 MiB pages, 1..256 MiB (0 is refused here) */
+    uint32_t ring_records;      /* 1..65536 operation snapshots (0 is refused here) */
+} ps3dk_prof_auto_ring_options;
+#define PS3DK_PROF_AUTO_RING_OPTIONS_INIT(bytes, records) {16u, 2u, (uint32_t)(bytes), (uint32_t)(records)}
+#ifdef __cplusplus
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS(...) \
+    extern "C" const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options = __VA_ARGS__
+#else
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RING_OPTIONS(...) \
+    const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options = __VA_ARGS__
+#endif
 
 /* Extra command words the automatic profiler writes inside a CALL segment around each covered draw or clear
  * (one 2-word timestamp report before it, one after it), whether the segment is written through
@@ -103,8 +146,71 @@ int ps3dk_prof_shutdown(void);
 #define PS3DK_PROF_AUTO_SEAL() 0
 #endif
 
+/* RSX frame capture (CMake PS3_PROF_RSX_FRAME=ON, docs/profiler-guide.md): one owner frame, every draw with its
+ * AUTO timing, program identities, label and draw counts, streamed into the capture (file_flags bit 10). The selector
+ * compiles a generated unit defining ps3dk_prof_automatic_rsx_frame_options with
+ * PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS; the runtime reads it through a weak symbol. Absent, the capture
+ * code is dormant: no decoder pass, no memory, no file flag, each hook one load and a branch, and the file is the
+ * same as an AUTO build without it. Present, it needs the report ring (PS3_PROF_AUTO_RING): without it the capture
+ * records availability "no report ring", stays dormant (no state, no decoder pass) and refuses every request.
+ * Memory: staging_kb x blocks of MAIN memory allocated when a request is accepted and freed after the capture is
+ * written (2 x 256 KiB by default), plus about 150 KiB of decoder, register, constant and program state from AUTO attach with the ring.
+ * At shutdown the blocks of a capture in flight are freed once both the drainer and the owner thread have left it;
+ * if the owner never runs again they stay allocated until the process exits. */
+typedef struct ps3dk_prof_rsx_frame_options {
+    uint32_t size;          /* sizeof(ps3dk_prof_rsx_frame_options) = 16 */
+    uint32_t staging_kb;    /* each staging block: 32..1024 KiB (256 default; below 32 is raised to 32: one draw's
+                             * records, about 31 KiB at most, never span blocks) */
+    uint32_t blocks;        /* staging blocks: 2..16 (2 default) */
+    uint32_t fp_bytes_kb;   /* FP ucode bytes stored per capture when requested: 0 (the 256 KiB default)..4096 KiB */
+} ps3dk_prof_rsx_frame_options;
+#define PS3DK_PROF_RSX_FRAME_OPTIONS_INIT(kb, blocks) {16u, (uint32_t)(kb), (uint32_t)(blocks), 0u}
+#define PS3DK_PROF_RSX_FRAME_OPTIONS_INIT3(kb, blocks, fp_kb) {16u, (uint32_t)(kb), (uint32_t)(blocks), (uint32_t)(fp_kb)}
+#ifdef __cplusplus
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(...)     extern "C" const ps3dk_prof_rsx_frame_options ps3dk_prof_automatic_rsx_frame_options = __VA_ARGS__
+#else
+#define PS3DK_PROF_DEFINE_AUTOMATIC_RSX_FRAME_OPTIONS(...)     const ps3dk_prof_rsx_frame_options ps3dk_prof_automatic_rsx_frame_options = __VA_ARGS__
+#endif
+
+/* Requesting a capture from app code (any thread): the next owner frame boundary arms it (opening a 2-frame capture
+ * window when none is open, so the frame after that one is captured), the boundary after closes it. Returns the
+ * capture id (> 0), or PS3DK_PROF_EBUSY (one outstanding), PS3DK_PROF_ENOTSUP (not selected, no ring, no AUTO
+ * owner), PS3DK_PROF_EINVAL (an unknown flag or ISOLATED with BOTH, name over 63 bytes), PS3DK_PROF_ENOTINIT (the profiler
+ * is not initialized), PS3DK_PROF_ENOMEM (staging blocks not available), PS3DK_PROF_ESTOPPED (shutdown has begun).
+ * name may be NULL; it is copied as UTF-8 (a byte that is not part of a valid sequence becomes '?'). The PC app's
+ * "Capture RSX frame" is the same request over the live link. */
+int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags);
+/* Capture flags (any combination, except ISOLATED with BOTH):
+ *  ISOLATED  every captured draw runs alone: a WAIT_FOR_IDLE before each of its begin and end markers, so its time is
+ *            its own (the frame runs slower; never mixed with pipelined times);
+ *  FP_BYTES  store each fragment program's ucode bytes once (bound while the capture is armed, up to the per-capture
+ *            cap, PS3_PROF_RSX_FRAME_FP_BYTES_KB); vertex program bytes are always stored (from the command stream);
+ *  BOTH      two consecutive frames: the first pipelined, the second isolated, its draws paired with the first's. */
+#define PS3DK_PROF_RSX_FRAME_ISOLATED 1u
+#define PS3DK_PROF_RSX_FRAME_FP_BYTES 2u
+#define PS3DK_PROF_RSX_FRAME_BOTH 4u
+/* Per-draw labels (owner thread; other threads are ignored): a label applies to later draws until replaced, its
+ * scope ends or the frame ends; scopes nest to depth 8 and a draw's label is "scope/scope/label" (at most 63 bytes,
+ * a longer path is cut on a UTF-8 character boundary; an invalid byte becomes '?'). The strings must stay valid until
+ * then; they are copied only into a capture. Cost outside a capture: one call that stores a pointer. */
+void ps3dk_prof_draw_label(const char *label);
+void ps3dk_prof_draw_scope_begin(const char *name);
+void ps3dk_prof_draw_scope_end(void);
+#if defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO
+#define PS3DK_PROF_RSX_FRAME_CAPTURE(name) ps3dk_prof_rsx_frame_capture((name), 0u)
+#define PS3DK_PROF_DRAW_LABEL(s) ps3dk_prof_draw_label(s)
+#define PS3DK_PROF_DRAW_SCOPE_BEGIN(s) ps3dk_prof_draw_scope_begin(s)
+#define PS3DK_PROF_DRAW_SCOPE_END() ps3dk_prof_draw_scope_end()
+#else
+#define PS3DK_PROF_RSX_FRAME_CAPTURE(name) ((void)sizeof(name), ps3dk_prof__auto_off_ok())
+#define PS3DK_PROF_DRAW_LABEL(s) ((void)sizeof(s))
+#define PS3DK_PROF_DRAW_SCOPE_BEGIN(s) ((void)sizeof(s))
+#define PS3DK_PROF_DRAW_SCOPE_END() ((void)0)
+#endif
+
 /* Options before cellGcmInit: validated and copied now (the caller's struct need not outlive the call; the earlier
- * 32-byte struct is accepted and takes the default range reserve), then used by the intercepted cellGcmInit in place
+ * 32- and 36-byte structs are accepted as attach accepts them, 32 taking the default range reserve; ring fields are
+ * validated as attach validates them), then used by the intercepted cellGcmInit in place
  * of the defaults, so commands written right after init cannot close the window for them. Only an init on the same
  * thread uses them: another thread's init takes the defaults, and the capture then carries the sticky STATUS flag
  * PREINIT_FOREIGN (2048; the reader prints "pre-init options ignored"). The first successful init consumes them; a later call

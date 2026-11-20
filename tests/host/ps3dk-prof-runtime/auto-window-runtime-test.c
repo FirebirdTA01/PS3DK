@@ -149,7 +149,7 @@ static void *opener_thread(void *unused)
     (void)unused;
     assert(g_tls.slot1==0 && PS3DK_PROF_CAPTURE_WHOLE_RUN()==PS3DK_PROF_OK && g_tls.slot1==0);
     go_step(1);
-    wait_step(4); opener_end1=PS3DK_PROF_CAPTURE_END(); go_step(5);
+    wait_step(3); opener_end1=PS3DK_PROF_CAPTURE_END(); go_step(4);
     wait_step(6); reopened=PS3DK_PROF_CAPTURE_WHOLE_RUN(); go_step(7);
     wait_step(8); opener_end2=PS3DK_PROF_CAPTURE_END();
     assert(g_tls.slot1==0);
@@ -288,9 +288,10 @@ int main(void) {
         assert(pthread_create(&x,NULL,stranger,NULL)==0 && pthread_join(x,NULL)==0);
         assert(stranger_end==PS3DK_PROF_EPERM);   /* an unrelated unregistered thread */
         assert(PS3DK_PROF_CAPTURE_END()==PS3DK_PROF_EPERM);   /* the registered main thread: neither owner nor opener */
-        go_step(4);
-        wait_step(5);
+        go_step(3);
+        wait_step(4);
         assert(opener_end1==PS3DK_PROF_OK && state()==0);   /* the opener, while the owner lives */
+        go_step(5);
         wait_step(7);
         assert(reopened==PS3DK_PROF_OK && state()==2);
         assert(pthread_join(t,NULL)==0);   /* the render thread retired without ending the second window */

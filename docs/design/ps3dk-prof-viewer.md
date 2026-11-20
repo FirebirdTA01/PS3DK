@@ -232,6 +232,66 @@ link with a reason.
   TTY and debugger traffic are reserved; reserving them establishes no
   security or scheduling design for those channels.
 
+### Link protocol, version 2: capture triggers
+
+Version 2 adds viewer commands that open and close a capture window in the
+running app. Nothing changes in the capture format: a triggered window is
+recorded exactly as one the app opens (its name is a descriptor, its BEGIN
+and END records are the runtime's own).
+
+| Frame | Direction | Payload |
+|---|---|---|
+| `CAPTURE_BEGIN` (8) | viewer to agent | u32 request id, u16 name length (1..63), u16 0, name: a MANUAL window |
+| `CAPTURE_END` (9) | viewer to agent | u32 request id: ends the window this link opened |
+| `CAPTURE_FRAMES` (10) | viewer to agent | u32 request id, u32 frames (1..1,000,000), u16 name length, u16 0, name: closes itself (reason COUNT) |
+| `CAPTURE_ACK` (11) | agent to viewer | u32 request id, i32 result (0 or a `PS3DK_PROF_*` refusal), u32 window id (0 when refused), u16 command type, u16 0 |
+
+- **Versions:** `CLIENT_HELLO` names the version the viewer wants; an agent
+  serves 1 and 2 and answers `HELLO` in that version. A v2 `HELLO` carries
+  capability bits in the field that is reserved in v1 (`LIVE_CAP_TRIGGERS`:
+  the agent serves a runtime that applies commands). A v1 agent closes a v2
+  hello without a reply (bad hello); the viewer then reconnects once asking
+  for v1 and disables the trigger buttons with the reason. No v2 frame is
+  sent on a v1 session, in either direction.
+- **One at a time:** at most one command is outstanding. A second one before
+  the ACK, a request id of 0, a nonzero reserved field, a length outside the
+  layout or its bounds, or a command on a v1 session closes the link (a
+  protocol drop, as in v1). A name that is not UTF-8 without NUL is refused
+  `EINVAL` in its ACK.
+- **Where it runs:** the capture-window API belongs to the thread that marks
+  frames, so the agent thread never calls it. It queues the command in a
+  one-entry mailbox; the frame thread takes it inside `ps3dk_prof_frame`,
+  right after the frame record and before that mark's window step, so BEGIN
+  opens the window at that very frame and END closes it after the frame that
+  just ended (what app code calling begin or end at the end of the previous
+  frame would give). The result goes back through the mailbox to the agent,
+  which sends the ACK.
+- **Names:** the agent owns the name storage: a fixed table of 32 names per
+  run, each a descriptor the runtime keeps for the process lifetime. The same
+  name reuses its entry; a 33rd distinct name is refused `EFULL`.
+- **Refusals are answered, never silent:** `EBUSY` (a window is open or
+  about to open), `EFULL` (no queue room, or the name table is full),
+  `EPERM` (END while the open window is the app's), `EINVAL` (END with no
+  window open, or a bad name), `ESTOPPED` (shutdown began; a queued command
+  is withdrawn and refused before `END`), `ETIMEDOUT` (no frame mark took
+  the command within the agent's 5 s deadline; it is withdrawn, nothing
+  changed), `ENOTSUP` (an agent without a runtime). `END` is never followed
+  by an ACK; a command still pending then is shown as unanswered.
+- **One window at a time:** an app that keeps its own window open (for
+  example `PS3DK_PROF_CAPTURE_WHOLE_RUN()` right after init) refuses every
+  viewer `BEGIN` and `CAPTURE_FRAMES` with `EBUSY` for as long as that window
+  is open. Use triggers in an app that opens no window of its own, or after
+  its window closed.
+- **Which thread applies a command:** the first thread to mark a frame after
+  the command arrives applies it. In `PS3DK_PROF_MODE_THREAD` with several
+  frame-marking threads there is no affinity to a chosen render thread, so a
+  window may open on another thread than expected, and an `END` taken by a
+  thread that does not own the open window is refused `EPERM`.
+- **No origin in the capture:** a triggered window is recorded exactly like
+  one the app opens. Reading a capture offline, nothing tells a viewer
+  window from an app window; the ACKs in the live session are the only
+  record of which windows the viewer opened.
+
 ### Viewer
 
 - **States kept separate:** link state (connecting, streaming, ended,
@@ -422,6 +482,62 @@ hardware package.
 **Not in this design:** USB or other devices, several viewers, TTY or
 debugger channels, resume, the automatic lifecycle, and any change to the
 capture format.
+
+### Live agent auto-start (opt-in, 2026-11-18)
+
+The design above needs app code: the app initializes networking and calls
+`ps3dk_prof_live_start`. An outside team could not connect the viewer to
+their game for that reason. Auto-start removes the app code. It is an
+option for every build that links the profiler, **off by default**
+(director, 2026-11-18). User documentation, including when to turn it on
+and when to leave it off: `docs/profiler-guide.md`, "Live viewer
+auto-start (opt-in)".
+
+- **Selection.** The member `live_autostart.o` is in every archive that
+  carries the live link. That now includes the automatic `libps3prof.a`,
+  the wait/function/counter variants, and `libps3dkprof_ext_live.a`. The
+  member is extracted only by a reference to
+  `__ps3dk_prof_live_autostart_anchor`. The reference comes from CMake
+  `PS3_PROF_LIVE_AUTOSTART=ON`, from the header define
+  `PS3DK_PROF_LIVE_AUTOSTART`, or from `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS`.
+  The core reaches the member only through weak references, so a program
+  without it links no live object, exactly as before.
+- **Start.** After every successful init, the core calls the member's
+  hook. The hook creates one start-up thread and returns at once; in the
+  automatic lifecycles the hook runs inside constructor(100). Under the
+  live lock, the start-up thread checks that the capture can be served,
+  takes the profiler's network hold, and starts the agent through the
+  same path as `ps3dk_prof_live_start`. Every failure prints one TTY line,
+  and profiling continues unchanged.
+- **Network.** libnet's holders (`sdk/libnet/src/net_hold.h`): while
+  the profiler holds nothing, every app front end makes exactly its old
+  calls. While it holds the network, the network stays its creator's.
+  The profiler joins an app's network and is evicted (agent stopped,
+  hold dropped, no further network call) before the app's teardown
+  reaches the system. When the profiler brought the network up,
+  `netInitialize` joins and a Cell initialize with the app's own pool
+  makes the profiler step aside first. The profiler never finalizes a
+  network the app or the ps3dk-run hook brought up.
+- **Stop.** The core calls the member's shutdown hook after
+  `ps3dk_prof_shutdown` has published its finalization. The hook stops
+  the agent, so a connected viewer gets `END`. Only after the stop
+  returns `OK` does it release the network hold. A manual-lifecycle
+  program that exits without shutdown is covered by destructor(101),
+  which stops the agent without `END`.
+- **Compatibility.** An explicit `ps3dk_prof_live_start` while the
+  auto-started agent runs returns `OK` when every field it sets matches
+  the running agent; otherwise it returns `EALREADY`. If auto-start
+  failed, the explicit start behaves exactly as before.
+- **Measured (2026-11-18, HEN console and RPCS3,
+  `tests/hardware/net-init-probe`).** A second
+  `sys_net_initialize_network_ex` while the network is up returns 0: the
+  firmware does not refuse it. So libnet never infers ownership from an
+  initialize's result. Ownership comes from its own records only. With
+  the NET module already loaded but no libnet record, one socket created
+  and closed asks whether a network is up: up means foreign (joined, never
+  finalized, nothing unloaded); `ENETDOWN` means none (the profiler brings
+  one up without loading the module); any other error turns auto-start
+  off.
 
 ## Phase 3: PPU, SPU and RSX on one timeline (planned)
 

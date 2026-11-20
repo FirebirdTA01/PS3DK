@@ -434,6 +434,34 @@ static int leave(prof *p, int rc)
     return ext_unlock(p) == 0 ? rc : PS3DK_PROF_ESTOPPED;
 }
 
+/* Unlike drain/end, observation never waits for the extension mutex or calls a
+ * sink. The same lock pins lane memory against retirement and reuse. */
+int p_ext_poll_calibrations(prof *p)
+{
+    int rc = PS3DK_PROF_OK;
+    if (!p->spu)
+        return PS3DK_PROF_ENOTSUP;
+    if (LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->ext_fault))
+        return PS3DK_PROF_ESTOPPED;
+    if (pal_mutex_trylock(&p->spu_mutex) != 0)
+        return PS3DK_PROF_EBUSY;
+    if (LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->ext_fault) || p->ext_sealed)
+        rc = PS3DK_PROF_ESTOPPED;
+    else
+        psp_poll_calibrations(p->spu);
+    return leave(p, rc);
+}
+
+int ps3dk_prof_spu_poll_calibrations(void)
+{
+    prof *p = p_ready() ? g_prof : NULL;
+    if (!p)
+        return PS3DK_PROF_ENOTINIT;
+    if (g_tls.in_drain || g_tls.in_gpu)
+        return PS3DK_PROF_EBUSY;
+    return p_ext_poll_calibrations(p);
+}
+
 /* the admission decision (delta r2 section 3): holding spu_mutex, ext_fault, sealed and the shutdown claim are clear;
  * the mutex stays held through the mutation */
 static int admitted(prof *p)
@@ -633,6 +661,15 @@ static void inline_drain(prof *p)
     uint32_t z = 0;
     if (p->cfg.mode != PS3DK_PROF_MODE_APP || !pal_owner_is_self(&p->owner))
         return;
+#ifdef P_ROLLING_RUNTIME
+    if (p->rolling) {
+        /* The lane-end request has released spu_mutex. Use the APP consumer
+         * boundary, including tail commit and deferred resource stopping;
+         * neither action is safe from an encoder or extension callback. */
+        (void)ps3dk_prof_drain();
+        return;
+    }
+#endif
     if (!CAS_ACQREL(&p->drain_busy, &z, 1u))
         return;
     if (!LD_ACQ(&p->stop_latch)) {

@@ -1,0 +1,14 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_deriv_float2_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 86040200 c8011c9d 48020001 c8003fe1
+w 00003f00 00003e80 00000000 00000000
+w 06021600 c8081c9d c8000001 c8000001
+w 06041500 c8081c9d c8000001 c8000001
+w 06000100 08083c9c c8000001 c8000001
+w 18010100 80043c9c c8000001 c8000001
+r 0 MUL dst=R2 mask=xy prec=0 sat=0 end=0 s0=TEX0.xyzw s1=c0.xyzz
+r 1 DDY dst=R1 mask=xy prec=0 sat=0 end=0 s0=R2.xyzw
+r 2 DDX dst=R2 mask=xy prec=0 sat=0 end=0 s0=R2.xyzw
+r 3 MOV dst=R0 mask=xy prec=0 sat=0 end=0 s0=|R2.xyxx|
+r 4 MOV dst=R0 mask=zw prec=0 sat=0 end=1 s0=|R1.xxxy|

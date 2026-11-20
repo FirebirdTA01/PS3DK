@@ -2,6 +2,9 @@
  * The selector forces the anchor and supplies pinned pre-link identities. */
 #include "auto_internal.h"
 #include "prof_spu.h"
+#include "../../../include/ps3dk/prof_rolling.h"
+
+extern const ps3dk_prof_rolling_options ps3dk_prof_automatic_rolling_options __attribute__((weak));
 
 static uint32_t active;
 void __ps3dk_prof_auto_startup_anchor(void) {}
@@ -16,10 +19,29 @@ static void diagnostic(const char *text, unsigned long size)
     }
 }
 
+/* PS3_PROF_AUTO_RING=ON: the executable's generated constant (cmake/ps3-prof-auto.cmake, prof_auto.h). Absent,
+ * nothing changes; present but refused, the automatic capture is not initialized (never a run without the ring). */
+extern const ps3dk_prof_auto_ring_options ps3dk_prof_automatic_ring_options __attribute__((weak));
+static int automatic_ring(void)
+{
+    static const char message[]="ps3prof: PS3_PROF_AUTO_RING options refused (blocks 2..3, 1..256 whole MiB, "
+                                "1..65536 records); automatic capture not initialized\n";
+    if(!&ps3dk_prof_automatic_ring_options ||
+       ps3dk_prof__auto_build_ring(&ps3dk_prof_automatic_ring_options)==PS3DK_PROF_OK) return 1;
+    diagnostic(message,sizeof message-1);
+    return 0;
+}
+
 __attribute__((constructor(100))) static void automatic_start(void)
 {
     ps3dk_prof_config cfg;
     ps3dk_prof_ext_config ext={0};
+    if(&ps3dk_prof_automatic_rolling_options &&
+       ps3dk_prof_set_rolling_options(&ps3dk_prof_automatic_rolling_options)!=PS3DK_PROF_OK) {
+        static const char message[]="ps3prof: rolling configuration refused; automatic capture not initialized\n";
+        diagnostic(message,sizeof message-1);
+        return;
+    }
     ps3dk_prof_config_defaults(&cfg);
     cfg.mode=PS3DK_PROF_MODE_THREAD;
     cfg.auto_register=1;
@@ -29,6 +51,7 @@ __attribute__((constructor(100))) static void automatic_start(void)
     ext.size=PS3DK_PROF_EXT_CONFIG_SIZE;
     ext.gpu_domains_max=1;
     ext.gpu_report_slots_max=1024;
+    if(!automatic_ring()) return;
     if(ps3dk_prof_init_ex(&cfg,&ext)==PS3DK_PROF_OK) {
         ST_REL(&active,1u);
         (void)ps3dk_prof_thread_begin("automatic-init");

@@ -2,7 +2,7 @@
 //! exclusions, steady-range medians and mix, computed strictly from the reader's
 //! `ps3dk_prof::auto_rsx::analyze`.
 
-use ps3dk_prof::auto_rsx::{self, FrameView, Report, Verdict, EXCLUSIONS, KINDS};
+use ps3dk_prof::auto_rsx::{self, Config, FrameView, Report, Verdict, EXCLUSIONS, KINDS};
 use ps3dk_prof::model::Capture;
 
 /// The Automatic page view model, holding the analyzed AUTO report and capture clock properties.
@@ -12,6 +12,16 @@ pub struct AutoView {
     pub tb_freq: u64,
     /// Absolute intervals mapped and merged by the reader, cached with this report.
     pub busy: auto_rsx::BusyTimeline,
+}
+
+/// The capture's AUTO range refusals from its last STATUS (3071/11 and 4095/11 writers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RangesRefused {
+    pub total: u64,
+    /// In `auto_rsx::RANGE_REASONS` order.
+    pub by_reason: [u64; 10],
+    /// The STATUS is not FINAL or is a lower bound: the capture total is at least this.
+    pub at_least: bool,
 }
 
 /// The Passes page view model: the reader's by-tag and per-range inventory and
@@ -28,6 +38,15 @@ pub struct PassesView {
     pub map: Option<auto_rsx::MapState>,
     /// PPU timebase frequency from the capture's clock record; None when absent.
     pub tb_freq: Option<u64>,
+    /// The capture's refused AUTO ranges by reason (last STATUS); None when the writer records no capture total.
+    pub ranges_refused: Option<RangesRefused>,
+}
+
+/// The last STATUS refusal totals of a capture, straight from the reader.
+fn status_refusals(cap: &Capture) -> Option<RangesRefused> {
+    let s = cap.auto.as_ref()?.last_status.as_ref()?;
+    let by_reason = s.range_refused?;
+    Some(RangesRefused { total: s.ranges_refused().unwrap_or(0), by_reason, at_least: !s.is_final() || s.lower_bound() })
 }
 
 /// Builds the Passes page view from a capture via the reader only.
@@ -37,7 +56,7 @@ pub fn passes_build(cap: &Capture) -> PassesView {
     let ranges = auto_rsx::range_summary(&by);
     let map = cap.auto.as_ref().map(auto_rsx::qualify);
     let tb_freq = cap.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0);
-    PassesView { by, tags, ranges, map, tb_freq }
+    PassesView { by, tags, ranges, map, tb_freq, ranges_refused: status_refusals(cap) }
 }
 
 /// Builds the Passes page view scoped to a capture window's frames.  Uses the
@@ -49,7 +68,7 @@ pub fn passes_build_window(cap: &Capture, w: &ps3dk_prof::CaptureWindow) -> Pass
     let ranges = auto_rsx::range_summary(&by);
     let map = cap.auto.as_ref().map(auto_rsx::qualify);
     let tb_freq = cap.clock.as_ref().map(|c| c.freq_hz).filter(|&f| f > 0);
-    PassesView { by, tags, ranges, map, tb_freq }
+    PassesView { by, tags, ranges, map, tb_freq, ranges_refused: status_refusals(cap) }
 }
 
 impl PassesView {
@@ -136,6 +155,21 @@ impl AutoView {
         }
     }
 
+    /// The capture's refused AUTO ranges as the reader recorded them: `None` when the writer records no capture total
+    /// (no tag capability, or a 1023/11 / 2047/11 writer whose STATUS has none) or no STATUS was recorded; otherwise
+    /// the last STATUS total by reason, with `at_least` true unless that STATUS is FINAL and exact.
+    pub fn ranges_refused(&self) -> Option<RangesRefused> {
+        let s = self.report.status.as_ref()?;
+        let by_reason = s.range_refused?;
+        Some(RangesRefused { total: s.ranges_refused().unwrap_or(0), by_reason,
+            at_least: !s.is_final() || s.lower_bound() })
+    }
+
+    /// Whether this capture's writer can record AUTO ranges at all (CONFIG tag capability).
+    pub fn records_ranges(&self) -> bool {
+        self.report.tagged
+    }
+
     /// The reader's unsealed-capture facts (no FINAL STATUS): the unrecorded tail and the capture totals.
     pub fn unsealed(&self) -> Option<&auto_rsx::Unsealed> {
         self.report.unsealed.as_ref()
@@ -144,6 +178,12 @@ impl AutoView {
     /// Operations dropped past the retention ceiling.
     pub fn ops_dropped(&self) -> u64 {
         self.report.ops_dropped
+    }
+
+    /// The CONFIG's metadata record budget (present on an ATTACHED config) — the reader's
+    /// "metadata {} ... records" value.
+    pub fn metadata_records(&self) -> Option<u32> {
+        self.report.config.as_ref().and_then(Config::attached).map(|a| a.metadata)
     }
 
     /// Converts PPU ticks to milliseconds with 3 decimals.
@@ -443,6 +483,22 @@ pub fn exclusions_breakdown(f: &FrameView) -> Vec<(&'static str, &'static str, u
             let count = f.exclusions[k_idx][c_idx];
             if count > 0 {
                 out.push((*kind, *reason, count));
+            }
+        }
+    }
+    out
+}
+
+/// Report-ring exclusion rows of one frame (2047/11): per kind, the covered visits left untimed
+/// because no MAIN extent was free (`ring_full`) and those whose report-ring state was unknown or
+/// whose recycling was refused (`ring_state`).  Disjoint from the ten `exclusions` columns;
+/// all zero in older captures.
+pub fn ring_exclusions_breakdown(f: &FrameView) -> Vec<(&'static str, &'static str, u64)> {
+    let mut out = Vec::new();
+    for (k_idx, kind) in KINDS.iter().enumerate() {
+        for (reason, count) in [("ring full", f.ring_full[k_idx]), ("unknown ring state", f.ring_state[k_idx])] {
+            if count > 0 {
+                out.push((*kind, reason, count));
             }
         }
     }

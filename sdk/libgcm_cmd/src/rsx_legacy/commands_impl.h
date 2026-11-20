@@ -619,6 +619,15 @@ void RSX_FUNC(LoadFragmentProgramLocation)(gcmContextData *context,const rsxFrag
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_FP_ADDRESS,1);
 	RSX_CONTEXT_CURRENTP[1] = ((location + 1) | (offset&0x1fffffff));
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED)) {
+		/* RSX frame capture: the program bound at this offset (identity only; one load and a branch unless active) */
+		void *ucode = NULL;
+		u32 size = 0;
+		rsxFragmentProgramGetUCode(program,&ucode,&size);
+		ps3dk_prof__rsxf_fp_bind(context,ucode,size,offset);
+	}
+#endif
 
 	texcoords = program->texcoords;
 	texcoord2D = program->texcoord2D;
@@ -907,6 +916,13 @@ void RSX_FUNC(SetFragmentProgramGammaEnable)(gcmContextData *context,u32 enable)
 
 void RSX_FUNC(DrawVertexBegin)(gcmContextData *context,u32 type)
 {
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	/* RSX frame capture: an immediate draw opens here and ends at DrawVertexEnd (one load and a branch otherwise) */
+	if(__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED)) {
+		const ps3tc_auto_call prof_call = {9u,type,0u,0u,0u,0u,0u,0u};
+		(void)ps3dk_prof__auto_begin(context,&prof_call,(uint64_t)(uintptr_t)__builtin_return_address(0));
+	}
+#endif
 	RSX_CONTEXT_CURRENT_BEGIN(2);
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BEGIN_END,1);
 	RSX_CONTEXT_CURRENTP[1] = type;
@@ -919,6 +935,10 @@ void RSX_FUNC(DrawVertexEnd)(gcmContextData *context)
 	RSX_CONTEXT_CURRENTP[0] = RSX_METHOD(NV40TCL_BEGIN_END,1);
 	RSX_CONTEXT_CURRENTP[1] = NV40TCL_BEGIN_END_STOP;
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED))
+		ps3dk_prof__auto_end_open(context);
+#endif
 }
 
 void RSX_FUNC(DrawVertex1f)(gcmContextData *context,u8 idx,f32 v)
@@ -1280,6 +1300,12 @@ void RSX_FUNC(DrawInlineVertexArray)(gcmContextData *context,u8 type,u32 count,c
 	u32 i,j,loop,rest;
 	u32 *value = (u32*)data;
 	
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	/* RSX frame capture: timed as its own draw kind (one load and a branch unless the capture is active) */
+	const int prof_on = __atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED) != (void *)0;
+	const ps3tc_auto_call prof_call = {7u,type,0u,count,0u,0u,0u,0u};
+	const uint32_t prof_ticket = prof_on ? ps3dk_prof__auto_begin(context,&prof_call,(uint64_t)(uintptr_t)__builtin_return_address(0)) : 0u;
+#endif
 	loop = count/RSX_MAX_METHOD_COUNT;
 	rest = count%RSX_MAX_METHOD_COUNT;
 	
@@ -1327,6 +1353,9 @@ void RSX_FUNC(DrawInlineVertexArray)(gcmContextData *context,u8 type,u32 count,c
 	RSX_CONTEXT_CURRENTP[1] = NV40TCL_BEGIN_END_STOP;
 
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(prof_on) ps3dk_prof__auto_end(context,prof_ticket);
+#endif
 }
 
 static inline __attribute__((always_inline)) void RSX_FUNC_INTERNAL(DrawIndexArray)(gcmContextData *context,u8 type,u32 offset,u32 count,u8 data_type,u8 location)
@@ -1425,6 +1454,12 @@ void RSX_FUNC(DrawInlineIndexArray16)(gcmContextData *context,u8 type,u32 start,
 {
 	u32 odd,lcount;
 	u32 loop,rest,i,j;
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	/* RSX frame capture: timed as its own draw kind (one load and a branch unless the capture is active) */
+	const int prof_on = __atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED) != (void *)0;
+	const ps3tc_auto_call prof_call = {8u,type,start,count,0u,1u,0u,0u};
+	const uint32_t prof_ticket = prof_on ? ps3dk_prof__auto_begin(context,&prof_call,(uint64_t)(uintptr_t)__builtin_return_address(0)) : 0u;
+#endif
 	
 	if(count&1) {
 		odd = 1;
@@ -1488,12 +1523,21 @@ void RSX_FUNC(DrawInlineIndexArray16)(gcmContextData *context,u8 type,u32 start,
 	RSX_CONTEXT_CURRENTP[1] = NV40TCL_BEGIN_END_STOP;
 	
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(prof_on) ps3dk_prof__auto_end(context,prof_ticket);
+#endif
 }
 
 void RSX_FUNC(DrawInlineIndexArray32)(gcmContextData *context,u8 type,u32 start,u32 count,const u32 *data)
 {
 	u32 i,j;
 	u32 loop,rest;
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	/* RSX frame capture: timed as its own draw kind (one load and a branch unless the capture is active) */
+	const int prof_on = __atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_RELAXED) != (void *)0;
+	const ps3tc_auto_call prof_call = {8u,type,start,count,0u,0u,0u,0u};
+	const uint32_t prof_ticket = prof_on ? ps3dk_prof__auto_begin(context,&prof_call,(uint64_t)(uintptr_t)__builtin_return_address(0)) : 0u;
+#endif
 	
 	data = data + start;
 	loop = count/RSX_MAX_METHOD_COUNT;
@@ -1543,6 +1587,9 @@ void RSX_FUNC(DrawInlineIndexArray32)(gcmContextData *context,u8 type,u32 start,
 	RSX_CONTEXT_CURRENTP[1] = NV40TCL_BEGIN_END_STOP;
 
 	RSX_CONTEXT_CURRENT_END(2);
+#if defined(PS3TC_PROF_AUTO) && !RSX_UNSAFE
+	if(prof_on) ps3dk_prof__auto_end(context,prof_ticket);
+#endif
 }
 
 void RSX_FUNC(SetRestartIndexEnable)(gcmContextData *context,u32 enable)

@@ -1,0 +1,7 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_pack_2ushort_return_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 82002900 c8011c9d c8000001 c8003fe1
+w 1e010100 00001c9c c8000001 c8000001
+r 0 PK2US dst=R0 mask=x prec=0 sat=0 end=0 s0=TEX0.xyzw
+r 1 MOV dst=R0 mask=xyzw prec=0 sat=0 end=1 s0=R0.xxxx

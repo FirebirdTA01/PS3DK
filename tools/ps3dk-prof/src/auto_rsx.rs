@@ -6,6 +6,9 @@
 //! map this capture qualified itself (its own CLOCK anchors, an exact affine feasible set and both H-SPLIT hold-out
 //! parities); there is no nominal rate.  A frame verdict needs complete covered population, raw-valid operations, a
 //! qualified map and wait evidence; anything missing is UNKNOWN with the missing input named.
+#[path = "rolling_auto.rs"]
+pub mod rolling;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
@@ -91,6 +94,118 @@ pub const MASKS_CALL: (u32, u32) = (255, 11);
 pub const MASKS_LABEL: (u32, u32) = (511, 11);
 /// The tag writer: kind mask bit 512 TAG on top of 511/11 (OPS kind 6 RANGE, 160-byte OPS records, 448-byte rows).
 pub const MASKS_TAG: (u32, u32) = (1023, 11);
+/// The report-ring writer (2047/11): kind mask bit 1024 REPORT_RING on top of 1023/11. Owner-buffer ARRAY/INDEX/CLEAR
+/// draws are timed through recycled local report blocks copied to MAIN extents. CONFIG is 216 bytes (u32 at 176..208:
+/// ring bytes, blocks, pairs per block, first ring report, ring label, extent stride, extents, metadata stride, legacy
+/// pairs; u32@212 = 1: owner-buffer draws only); OPS 176 bytes (flag 128 RING; tail u32@160 block generation,
+/// u32@164 MAIN extent, u16@168 ordinal, u16@170 local block, u32@172 M2MF state 0 untouched / 1 restored /
+/// 2 uncertain); COVERAGE 528 bytes (u64 x3 ring_full at 480, u64 x3 ring_state at 504, disjoint from the ten
+/// exclusions); STATUS 208 bytes (u64 x8 at 128, RING_STATUS_FIELDS; u32@192 the M2MF decoder's first rejected header
+/// word, u32@196 its byte offset from the context begin, u32@200 the reason, RING_REJECT_REASONS, 0 none; u32@204 0).
+pub const MASKS_RING: (u32, u32) = (2047, 11);
+pub const CONFIG_BYTES_RING: usize = 216;
+pub const OP_BYTES_RING: u32 = 176;
+pub const FRAME_BYTES_RING: usize = 528;
+pub const STATUS_BYTES_RING: usize = 208;
+/// OPS flag of a report-ring record (2047/11 only).
+pub const OP_RING: u16 = 128;
+/// The range-reason writer: kind mask bit 2048 RANGE_REASONS on top of 1023/11 (3071/11) or of the report ring
+/// 2047/11 (4095/11). COVERAGE rows gain a tail of u32 x16 (480 -> 544; ring 528 -> 592): slot r-1 counts the AUTO
+/// ranges refused in the frame for reason r (RANGE_REASONS), slots 10..15 zero, and unless the row is SATURATED their
+/// sum is u32@440. STATUS gains u64 x16 (128 -> 256; ring 208 -> 336): the capture totals by reason, never decreasing,
+/// each at least that reason's sum over the rows. Readers that know only the older pairs refuse them at CONFIG.
+pub const MASKS_REASONS: (u32, u32) = (3071, 11);
+pub const MASKS_RING_REASONS: (u32, u32) = (4095, 11);
+pub const FRAME_BYTES_REASONS: usize = 544;
+pub const FRAME_BYTES_RING_REASONS: usize = 592;
+pub const STATUS_BYTES_REASONS: usize = 256;
+pub const STATUS_BYTES_RING_REASONS: usize = 336;
+/// Wire slots of the range-reason tails (RANGE_REASONS uses the first ten).
+pub const RANGE_SLOTS: usize = 16;
+/// Why an AUTO range was refused, in wire order (slot r-1 = reason r; stable, never renumbered). DEPTH: BEGIN nested
+/// deeper than 4; SEGMENT_BUILD: BEGIN while a segment build was open; STATE: the capture admitted nothing (CONFIG
+/// refused or invalidated, inside a draw bracket, stopping, admission closed, device not initialized); NO_FRAME: no
+/// coverage frame was open (counted in STATUS only); RING: the ring was not clean or had no room; NO_DESCRIPTOR: a
+/// full site table; NO_PAIR: no range-reserve report pair free; OTHER_FRAME: END in another frame than its BEGIN;
+/// NO_METADATA: END could not claim its pair's metadata entry; UNMATCHED_END: END with no BEGIN open.
+pub const RANGE_REASONS: [&str; 10] = [
+    "depth",
+    "segment_build",
+    "state",
+    "no_frame",
+    "ring",
+    "no_descriptor",
+    "no_pair",
+    "other_frame",
+    "no_metadata",
+    "unmatched_end",
+];
+
+/// "N (reason a, reason b)" naming only the nonzero reasons; "0" when none.
+pub fn reasons_text<T: Copy + Into<u64>>(by: &[T; 10]) -> String {
+    let total = by.iter().fold(0u64, |a, &b| a.saturating_add(b.into()));
+    let named: Vec<String> = RANGE_REASONS.iter().zip(by.iter()).filter(|(_, v)| (**v).into() != 0)
+        .map(|(n, &v)| format!("{n} {}", v.into())).collect();
+    if named.is_empty() { total.to_string() } else { format!("{total} ({})", named.join(", ")) }
+}
+
+/// "N (reason a, ...)" for one row: N is the row's own count (u32@440), the reasons its nonzero slots.
+pub fn row_reasons_text(total: u32, by: &[u32; 10]) -> String {
+    let named: Vec<String> = RANGE_REASONS.iter().zip(by.iter()).filter(|&(_, &v)| v != 0)
+        .map(|(n, v)| format!("{n} {v}")).collect();
+    if named.is_empty() { total.to_string() } else { format!("{total} ({})", named.join(", ")) }
+}
+
+/// Every reason by name, in wire order (JSON objects keep the reasons even when zero).
+pub fn reasons_json<T: Copy + Into<u64>>(by: &[T; 10]) -> serde_json::Value {
+    serde_json::Value::Object(RANGE_REASONS.iter().zip(by.iter())
+        .map(|(n, &v)| ((*n).to_string(), serde_json::json!(v.into()))).collect())
+}
+/// The ring geometry this reader accepts: 126-pair blocks in 4096-byte extents, 2..4 blocks, whole 1 MiB pages up to
+/// 256 MiB, at most 65,536 metadata records.
+pub const RING_PAIRS: u32 = 126;
+pub const RING_STRIDE: u32 = 4096;
+pub const RING_BYTES_MAX: u32 = 256 << 20;
+pub const RING_METADATA_MAX: u32 = 65536;
+pub const RING_GENERATION_MAX: u32 = u32::MAX / 2 - 1;
+pub const RING_STATUS_FIELDS: [&str; 8] = [
+    "blocks_issued",
+    "blocks_retired",
+    "published_ring_label",
+    "held_extents",
+    "copied_bytes",
+    "flushes_untouched",
+    "flushes_restored",
+    "decoded_words",
+];
+/// STATUS u32@200 of a 2047/11 capture: why the owner-side M2MF decoder stopped accepting the owner's command words
+/// (index 1..=16; 0 none). The decoder never guesses: from then on the ring admits no new block. It follows a CALL
+/// only into the firmware-reserved prefix of the cellGcmInit host buffer (IO 0 up to the context start), one level;
+/// 11..16 name what it refused there. CALL (2) without an init record.
+pub const RING_REJECT_REASONS: [&str; 16] = [
+    "JUMP",
+    "CALL",
+    "RETURN",
+    "reserved header bits",
+    "zero count on a nonzero header",
+    "packet longer than the words written",
+    "method range past 0x1ffc",
+    "object binding (method 0) on the M2MF subchannel",
+    "scan cursor outside the context",
+    "decoder word count overflow",
+    "CALL at or past the context start (an application segment)",
+    "CALL inside the reserved-prefix routine",
+    "JUMP inside the reserved-prefix routine",
+    "reserved-prefix routine packet crossing the context start",
+    "no RET in the reserved-prefix routine before the context start",
+    "reserved-prefix routine binds the M2MF subchannel to another object",
+];
+/// RING_REJECT_REASONS text of a nonzero STATUS reason (validated by the reader).
+pub fn reject_reason(why: u32) -> &'static str {
+    RING_REJECT_REASONS.get((why as usize).wrapping_sub(1)).copied().unwrap_or("unknown")
+}
+/// A frame with ring_state draws: the report ring's state was unknown or recycling was refused (invalid evidence).
+pub const RING_STATE_UNKNOWN: &str = "covered operation(s) excluded: report-ring state unknown or recycling refused";
 /// An AUTO-owned range (TAG): its own report pair from PS3DK_PROF_AUTO_RANGE_BEGIN to _END in the ring.  TOKEN is
 /// the frame of both ends; args[0] the name descriptor index + 1, args[1] 1 for a timed range; depth 1..4.
 pub const KIND_RANGE: u16 = 6;
@@ -104,6 +219,13 @@ pub const OP_READ_REFUSED: u16 = 16;
 pub const OP_PUBLICATION_UNKNOWN: u16 = 32;
 /// D1: built inside a CALL segment; u32@92 segment ordinal, u32@116 call ordinal.  Only when CONFIG covers CALL.
 pub const OP_SEGMENT: u16 = 64;
+/// Ringed CONFIGs: the RSX frame capture's ISOLATED timing wrote a WAIT_FOR_IDLE before each of this draw's markers.
+/// Its interval is not comparable with pipelined ones: a frame holding such operations is labelled ISOLATED and kept
+/// out of the cross-frame tag and range summaries.
+pub const OP_ISOLATED: u16 = 256;
+/// The label of a frame whose draws the RSX frame capture timed isolated.
+pub const ISOLATED_FRAME: &str = "ISOLATED: timed by the RSX frame capture with WAIT_FOR_IDLE around each draw's \
+markers; its span and busy time are not comparable with pipelined frames and stay out of the tag and range summaries";
 pub const FR_TOKEN: u16 = 1;
 pub const FR_FINAL: u16 = 2;
 pub const FR_SATURATED: u16 = 4;
@@ -229,6 +351,33 @@ pub struct Attached {
     pub binding: [u8; 32],
     /// 1023/11: report pairs kept for whole-CALL brackets and for AUTO ranges.
     pub reserves: Option<(u32, u32)>,
+    /// 2047/11: the report ring's partition and budgets.
+    pub ring: Option<Ring>,
+}
+
+/// CONFIG's report ring (2047/11): MAIN bytes and extents (raw ring budget), the metadata budget (CONFIG metadata), the
+/// local blocks at the top of the report range and the legacy pairs left below them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ring {
+    pub bytes: u32,
+    pub blocks: u32,
+    pub pairs: u32,
+    pub first: u32,
+    pub label: u32,
+    pub stride: u32,
+    pub slots: u32,
+    pub metadata_stride: u32,
+    pub legacy_pairs: u32,
+}
+
+/// The ring tail of a 2047/11 OPS record (RING records only; zero on every other record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RingTail {
+    pub generation: u32,
+    pub slot: u32,
+    pub ordinal: u16,
+    pub local: u16,
+    pub state: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,9 +415,30 @@ impl Attached {
     pub fn tagged(&self) -> bool {
         self.kind_mask & 512 != 0
     }
+    /// The report ring (CONFIG 2047/11).
+    pub fn ringed(&self) -> bool {
+        self.kind_mask & 1024 != 0
+    }
+    /// AUTO range refusals by reason in COVERAGE rows and STATUS (CONFIG 3071/11 or 4095/11).
+    pub fn range_reasons(&self) -> bool {
+        self.kind_mask & 2048 != 0
+    }
+    /// The COVERAGE row width this CONFIG negotiated.
+    pub fn frame_width(&self) -> usize {
+        let base = if self.ringed() { FRAME_BYTES_RING } else if self.tagged() { FRAME_BYTES_TAG }
+            else if self.label_polls() { FRAME_BYTES_LABEL }
+            else if self.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        if self.range_reasons() { base + 4 * RANGE_SLOTS } else { base }
+    }
+    /// The STATUS width this CONFIG negotiated.
+    pub fn status_width(&self) -> usize {
+        let base = if self.ringed() { STATUS_BYTES_RING } else { STATUS_BYTES };
+        if self.range_reasons() { base + 8 * RANGE_SLOTS } else { base }
+    }
     /// The OPS record width this CONFIG negotiated.
     pub fn op_width(&self) -> u32 {
-        if self.tagged() { OP_BYTES_TAG } else if self.build_frames() { OP_BYTES_BUILD } else { OP_BYTES }
+        if self.ringed() { OP_BYTES_RING } else if self.tagged() { OP_BYTES_TAG }
+        else if self.build_frames() { OP_BYTES_BUILD } else { OP_BYTES }
     }
 }
 impl Config {
@@ -322,6 +492,8 @@ pub struct Op {
     pub fp_offset: Option<u32>,
     /// RANGE only: nesting depth 1..4 (0 otherwise).
     pub depth: u32,
+    /// 2047/11 RING records: their block generation, MAIN extent, ordinal, local block and M2MF state.
+    pub ring: Option<RingTail>,
 }
 impl Op {
     pub fn raw_valid(&self) -> bool {
@@ -368,6 +540,13 @@ pub struct Coverage {
     pub ranges_refused: u32,
     /// 1023/11 rows: the owner PPU ticks [begin, end] of the first two flip-wait scopes (of `flip_waits`).
     pub flip_wait_at: Option<Vec<(u64, u64)>>,
+    /// 2047/11 rows: covered owner visits left untimed because no MAIN extent was free (ring_full: an untimed-only
+    /// capacity reason) and those whose report-ring state was unknown or whose recycling was refused (ring_state:
+    /// invalid evidence). Disjoint from the ten exclusions; zero for older captures.
+    pub ring_full: [u64; 3],
+    pub ring_state: [u64; 3],
+    /// 3071/11 and 4095/11 rows: the AUTO ranges refused in this frame by reason (RANGE_REASONS order); None before.
+    pub range_refused: Option<[u32; 10]>,
 }
 
 /// Polling cadence of one frame: runs of consecutive pending flip-status polls with every gap within 1 ms.  It shows
@@ -380,14 +559,21 @@ pub struct Cadence {
     pub ticks: u64,
 }
 impl Coverage {
-    /// The kind's ten exclusions for display, saturating; verdicts use `excluded_checked`.
+    /// The kind's exclusions for display, saturating; verdicts use `excluded_checked`. The ten columns, plus the two
+    /// report-ring columns of 2047/11 rows (zero otherwise).
     pub fn excluded(&self, kind: usize) -> u64 {
         self.rows[kind][2..].iter().fold(0u64, |a, &b| a.saturating_add(b))
+            .saturating_add(self.ring_full[kind]).saturating_add(self.ring_state[kind])
     }
-    /// The kind's ten exclusions, or None when their sum does not fit in u64 (possible only in a SATURATED row,
+    /// The kind's exclusions, or None when their sum does not fit in u64 (possible only in a SATURATED row,
     /// whose accounting the wire does not reconcile).
     pub fn excluded_checked(&self, kind: usize) -> Option<u64> {
         self.rows[kind][2..].iter().try_fold(0u64, |a, &b| a.checked_add(b))
+            .and_then(|a| a.checked_add(self.ring_full[kind])).and_then(|a| a.checked_add(self.ring_state[kind]))
+    }
+    /// Evidence that cannot be trusted: an exclusion outside the untimed-only columns, or a ring_state visit.
+    pub fn invalid_evidence(&self) -> bool {
+        (0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && self.rows[k][2 + c] != 0) || self.ring_state[k] != 0)
     }
 }
 
@@ -395,8 +581,19 @@ impl Coverage {
 pub struct Status {
     pub flags: u16,
     pub counters: [u64; 15],
+    /// 2047/11: RING_STATUS_FIELDS.
+    pub ring: Option<[u64; 8]>,
+    /// 2047/11: the decoder's first rejected header word, its byte offset from the context begin and its reason
+    /// (RING_REJECT_REASONS index + 1), all zero when it rejected nothing.
+    pub ring_reject: Option<[u32; 3]>,
+    /// 3071/11 and 4095/11: the capture's AUTO ranges refused by reason (RANGE_REASONS order); None before.
+    pub range_refused: Option<[u64; 10]>,
 }
 impl Status {
+    /// The capture's AUTO ranges refused (the saturating sum of the reasons), when this STATUS records them.
+    pub fn ranges_refused(&self) -> Option<u64> {
+        self.range_refused.map(|r| r.iter().fold(0u64, |a, &b| a.saturating_add(b)))
+    }
     pub fn is_final(&self) -> bool {
         self.flags & ST_FINAL != 0
     }
@@ -455,6 +652,22 @@ pub struct Inventory {
     pub refusal: Option<&'static str>,
     /// The largest publication snapshot of any parsed OPS record.
     pub max_snapshot: u64,
+    /// 2047/11: the largest ring label value of any parsed RING record, and the last RING generation.
+    pub max_ring_published: u64,
+    /// 2047/11: the RING records parsed (an export's EXPORT ring accounting is checked against it).
+    pub ring_seen: RingSeen,
+}
+
+/// The RING records of a 2047/11 capture: the first and last generation (0 none), how many generations and records,
+/// and the generations with RAW_VALID records whose flush left the application M2MF state untouched (state 0) or
+/// restored (state 1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RingSeen {
+    pub first: u32,
+    pub last: u32,
+    pub generations: u64,
+    pub records: u64,
+    pub valid_state: [u64; 2],
 }
 impl Inventory {
     pub fn state(&self) -> String {
@@ -480,6 +693,26 @@ pub struct Reader {
     finals: BTreeSet<(u32, u64)>,
     last_lost: u64,
     last_anchor: u32,
+    /// 2047/11: the last RING record's generation, ordinal and frame token.
+    last_ring: Option<(u32, u32, (u16, u32, u64))>,
+    /// 2047/11: the M2MF state of the current generation's RAW_VALID records (one flush, one state).
+    ring_valid_state: Option<u32>,
+    /// 2047/11 exported capture: the EXPORT ring accounting (kept generations need not start at 1 or be adjacent).
+    export_ring: Option<crate::model::ExportRing>,
+    /// 3071/11 and 4095/11: the per-reason sums of the AUTO ranges refused over the rows parsed (saturating). A
+    /// STATUS total is at least its reason's sum (rows a rolling restart did not parse only lower it).
+    row_reasons: [u64; 10],
+}
+
+/// Private continuation state for an ordinary (non-EXPORT) ring source. The
+/// rolling importer validates the counted prefix before installing this state;
+/// no operation or coverage record is synthesized by this seam.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RingRestart {
+    pub published: u64,
+    pub seen: RingSeen,
+    pub last: Option<(u32, u32, (u16, u32, u64))>,
+    pub valid_state: Option<u32>,
 }
 
 fn bad<T>(rule: Rule, detail: impl Into<String>) -> Result<T, Malformed> {
@@ -491,6 +724,16 @@ fn label_valid(n: u32) -> bool {
 }
 
 impl Reader {
+    pub(crate) fn ring_restart(&self) -> RingRestart {
+        RingRestart { published:self.result.max_ring_published, seen:self.result.ring_seen,
+            last:self.last_ring, valid_state:self.ring_valid_state }
+    }
+    pub(crate) fn install_ring_restart(&mut self, cursor: RingRestart) -> bool {
+        if self.export_ring.is_some() || (!self.result.config.as_ref().and_then(Config::attached)
+            .is_some_and(Attached::ringed) && cursor != RingRestart::default()) { return false; }
+        self.result.max_ring_published=cursor.published;self.result.ring_seen=cursor.seen;
+        self.last_ring=cursor.last;self.ring_valid_state=cursor.valid_state;true
+    }
     pub fn new(budgets: Budgets) -> Self {
         Self {
             result: Inventory::default(),
@@ -500,6 +743,10 @@ impl Reader {
             finals: BTreeSet::new(),
             last_lost: 0,
             last_anchor: 0,
+            last_ring: None,
+            ring_valid_state: None,
+            export_ring: None,
+            row_reasons: [0; 10],
         }
     }
 
@@ -525,7 +772,7 @@ impl Reader {
             CHUNK_AUTO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_AUTO_OPS => self.ops(payload),
             CHUNK_AUTO_COVERAGE => self.coverage(payload),
-            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref()),
+            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref(), cap.snapshot.as_ref()),
             CHUNK_AUTO_CLOCK => self.clock(payload),
             _ => unreachable!("AUTO chunk type {ty}"),
         }
@@ -541,8 +788,9 @@ impl Reader {
         if self.result.config.is_some() {
             return bad(r, "a second AUTO_CONFIG (one instance per capture)");
         }
-        if payload.len() != CONFIG_BYTES && payload.len() != CONFIG_BYTES_TAG {
-            return bad(r, format!("AUTO_CONFIG is {} bytes, not {CONFIG_BYTES} or {CONFIG_BYTES_TAG}", payload.len()));
+        if payload.len() != CONFIG_BYTES && payload.len() != CONFIG_BYTES_TAG && payload.len() != CONFIG_BYTES_RING {
+            return bad(r, format!("AUTO_CONFIG is {} bytes, not {CONFIG_BYTES}, {CONFIG_BYTES_TAG} or {CONFIG_BYTES_RING}",
+                payload.len()));
         }
         let mut c = Cursor::new(payload, "AUTO_CONFIG");
         let schema = c.u16()?;
@@ -561,8 +809,15 @@ impl Reader {
         mechanism.copy_from_slice(c.take(32)?);
         let mut binding = [0u8; 32];
         binding.copy_from_slice(c.take(32)?);
-        let wide = payload.len() == CONFIG_BYTES_TAG;
+        let ringed = payload.len() == CONFIG_BYTES_RING;
+        let wide = payload.len() == CONFIG_BYTES_TAG || ringed;
         let (call_pairs, range_pairs, r6) = if wide { (c.u32()?, c.u32()?, c.u64()?) } else { (0, 0, 0) };
+        let mut rw = [0u32; 10];
+        if ringed {
+            for v in rw.iter_mut() {
+                *v = c.u32()?;
+            }
+        }
         c.done()?;
         if schema != 1 {
             return bad(r, format!("AUTO_CONFIG schema {schema}"));
@@ -585,7 +840,7 @@ impl Reader {
                     || w[6..].iter().any(|&x| x != 0)
                     || allocated | ceiling != 0
                     || premise | lease != 0
-                    || call_pairs | range_pairs != 0 || r6 != 0
+                    || call_pairs | range_pairs != 0 || r6 != 0 || ringed
                 {
                     return bad(r, "REFUSED AUTO_CONFIG carries a field other than reason, return code, frequency and digests");
                 }
@@ -605,7 +860,8 @@ impl Reader {
                 }
                 if (kinds, forms) != MASKS_V1 && (kinds, forms) != MASKS_SEGMENTS && (kinds, forms) != MASKS_PRESENT
                     && (kinds, forms) != MASKS_BUILD && (kinds, forms) != MASKS_BRACKET && (kinds, forms) != MASKS_CALL
-                    && (kinds, forms) != MASKS_LABEL && (kinds, forms) != MASKS_TAG
+                    && (kinds, forms) != MASKS_LABEL && (kinds, forms) != MASKS_TAG && (kinds, forms) != MASKS_RING
+                    && (kinds, forms) != MASKS_REASONS && (kinds, forms) != MASKS_RING_REASONS
                 {
                     return bad(r, format!("AUTO_CONFIG kind mask {kinds:#x} / unsupported-form mask {forms:#x}"));
                 }
@@ -618,26 +874,58 @@ impl Reader {
                 if !label_valid(op_label) || !label_valid(clock_label) || op_label == clock_label {
                     return bad(r, format!("AUTO_CONFIG labels {op_label}/{clock_label}"));
                 }
-                if !(1..=1024).contains(&metadata) || !(1..=256).contains(&frame_capacity) {
+                // the range-reason bit adds only the refusal tails: every other rule is its base pair's
+                let base_masks = if kinds & 2048 != 0 { (kinds & !2048, forms) } else { (kinds, forms) };
+                let metadata_max = if base_masks == MASKS_RING { RING_METADATA_MAX } else { 1024 };
+                if !(1..=metadata_max).contains(&metadata) || !(1..=256).contains(&frame_capacity) {
                     return bad(r, format!("AUTO_CONFIG capacities metadata {metadata} frames {frame_capacity}"));
                 }
                 // the record width is negotiated with the masks: 144 with 63/11 and only there
-                let negotiated = if (kinds, forms) == MASKS_BUILD || (kinds, forms) == MASKS_BRACKET
-                    || (kinds, forms) == MASKS_CALL || (kinds, forms) == MASKS_LABEL { OP_BYTES_BUILD }
-                    else if (kinds, forms) == MASKS_TAG { OP_BYTES_TAG } else { OP_BYTES };
+                let negotiated = if base_masks == MASKS_BUILD || base_masks == MASKS_BRACKET
+                    || base_masks == MASKS_CALL || base_masks == MASKS_LABEL { OP_BYTES_BUILD }
+                    else if base_masks == MASKS_TAG { OP_BYTES_TAG }
+                    else if base_masks == MASKS_RING { OP_BYTES_RING } else { OP_BYTES };
                 if width != negotiated {
                     return bad(r, format!("AUTO_CONFIG record width {width} with masks {kinds}/{forms}"));
                 }
                 // 1023/11 names its two report-pair reserves: the whole-CALL one is fixed by the pool, the range one
                 // is the default (an eighth of the pool, at most 64; 16 at most before the reserve was resized, which
                 // the option bound below still admits) or an option that leaves 64 pairs for draws
-                if wide != ((kinds, forms) == MASKS_TAG) {
+                if (wide && !ringed) != (base_masks == MASKS_TAG) || ringed != (base_masks == MASKS_RING) {
                     return bad(r, format!("AUTO_CONFIG of {} bytes with masks {kinds}/{forms}", payload.len()));
                 }
+                // an export of a report-ring capture carries the EXPORT ring accounting, and only such an export does
+                if let Some(exp) = &cap.export {
+                    if ringed != exp.ring.is_some() {
+                        return bad(r, format!("AUTO_CONFIG report ring {ringed} in an export with ring accounting {}",
+                            exp.ring.is_some()));
+                    }
+                    self.export_ring = exp.ring;
+                }
+                // 2047/11: the ring partition. Blocks of 126 pairs end the report range; the legacy pool (clock reports
+                // excluded) is the rest and is never empty; budgets are whole 1 MiB pages and 4096-byte extents.
+                let ring = if ringed {
+                    let [bytes, blocks, rpairs, rfirst, rlabel, stride, slots, mstride, legacy, owner_only] = rw;
+                    let ring_reports = 2 * u64::from(blocks) * u64::from(rpairs);
+                    if owner_only != 1 || !(2..=4).contains(&blocks) || rpairs != RING_PAIRS || stride != RING_STRIDE
+                        || bytes == 0 || bytes > RING_BYTES_MAX || bytes % (1 << 20) != 0 || slots != bytes / stride
+                        || mstride == 0 || u64::from(legacy) + u64::from(blocks) * u64::from(rpairs) != u64::from(pairs)
+                        || legacy == 0 || u64::from(rfirst) + ring_reports != u64::from(first) + u64::from(count)
+                        || !label_valid(rlabel) || rlabel == op_label || rlabel == clock_label
+                    {
+                        return bad(r, format!("AUTO_CONFIG report ring {rw:?} for reports {first}+{count}, {pairs} pairs"));
+                    }
+                    Some(Ring { bytes, blocks, pairs: rpairs, first: rfirst, label: rlabel, stride, slots,
+                        metadata_stride: mstride, legacy_pairs: legacy })
+                } else {
+                    None
+                };
                 if wide {
-                    let call = if pairs >= 128 { 32 } else { pairs / 4 };
-                    let default = (pairs / 8).min(64);
-                    let max = pairs.saturating_sub(call + 64);
+                    // the reserves come from the legacy pool (all pairs without a ring)
+                    let pool = ring.map_or(pairs, |g| g.legacy_pairs);
+                    let call = if pool >= 128 { 32 } else { pool / 4 };
+                    let default = (pool / 8).min(64);
+                    let max = pool.saturating_sub(call + 64);
                     if r6 != 0 || call_pairs != call || (range_pairs != default && range_pairs > max) {
                         return bad(r, format!("AUTO_CONFIG reserves CALL {call_pairs} ranges {range_pairs} for {pairs} pairs"));
                     }
@@ -675,6 +963,7 @@ impl Reader {
                     mechanism,
                     binding,
                     reserves: wide.then_some((call_pairs, range_pairs)),
+                    ring,
                 })));
                 Ok(())
             }
@@ -732,18 +1021,34 @@ impl Reader {
             } else {
                 (0, 0, 0, 0)
             };
-            let (tag, fp_offset, depth, r4) = if stride == OP_BYTES_TAG {
+            let (tag, fp_offset, depth, r4) = if stride >= OP_BYTES_TAG {
                 (c.u32()?, c.u32()?, c.u32()?, c.u32()?)
             } else {
                 (0, 0, 0, 0)
+            };
+            let tail = if stride == OP_BYTES_RING {
+                RingTail { generation: c.u32()?, slot: c.u32()?, ordinal: c.u16()?, local: c.u16()?, state: c.u32()? }
+            } else {
+                RingTail { generation: 0, slot: 0, ordinal: 0, local: 0, state: 0 }
             };
             let at = format!("AUTO operation {id}");
             if id <= self.last_op {
                 return bad(r, format!("{at}: id not above {}", self.last_op));
             }
-            let known = if cfg.segments_covered() { 127 } else { 63 };
+            let known = if cfg.ringed() { 255 | OP_ISOLATED } else if cfg.segments_covered() { 127 } else { 63 };
             if flags & !known != 0 {
                 return bad(r, format!("{at}: unknown flags {flags:#x}"));
+            }
+            let ring_op = flags & OP_RING != 0;
+            let mut legacy_end = op_end;
+            if let Some(g) = cfg.ring {
+                legacy_end = op_first + 2 * g.legacy_pairs;
+                if ring_op {
+                    self.ring_record(&at, g, &tail, kind, flags, frame_owner, frame, report_begin, report_end,
+                        serial_begin, serial_end)?;
+                } else if tail != (RingTail { generation: 0, slot: 0, ordinal: 0, local: 0, state: 0 }) {
+                    return bad(r, format!("{at}: ring tail {tail:?} on a record that is not RING"));
+                }
             }
             let segment_op = flags & OP_SEGMENT != 0;
             if segment_op {
@@ -840,8 +1145,8 @@ impl Reader {
             if (1..7).any(|j| !used.contains(&j) && args[j] != 0) {
                 return bad(r, format!("{at}: argument unused by kind {kind} nonzero"));
             }
-            if !(op_first..op_end).contains(&report_begin) || !(op_first..op_end).contains(&report_end)
-                || report_begin == report_end
+            if !ring_op && (!(op_first..legacy_end).contains(&report_begin) || !(op_first..legacy_end).contains(&report_end)
+                || report_begin == report_end)
             {
                 return bad(r, format!("{at}: reports {report_begin}/{report_end} outside the operation range"));
             }
@@ -860,7 +1165,12 @@ impl Reader {
             }
             self.last_op = id;
             self.result.ops_parsed += 1;
-            self.result.max_snapshot = self.result.max_snapshot.max(published);
+            if ring_op {
+                // a ring record's snapshot is the RING label it was read at, never the operation label
+                self.result.max_ring_published = self.result.max_ring_published.max(published);
+            } else {
+                self.result.max_snapshot = self.result.max_snapshot.max(published);
+            }
             if self.result.ops.len() as u64 >= self.budgets.max_ops {
                 self.result.ops_dropped += 1;
                 if flags & OP_TOKEN != 0 { self.result.dropped_frames.insert((frame_owner, frame)); }
@@ -891,16 +1201,102 @@ impl Reader {
                 tag: cfg.tagged().then_some(tag),
                 fp_offset: cfg.tagged().then_some(fp_offset),
                 depth,
+                ring: ring_op.then_some(tail),
             });
         }
         c.done()
     }
 
+    /// A 2047/11 RING record: an owner ARRAY/INDEX/CLEAR, never SEGMENT, CALL, RANGE or FRAME; its generation names its
+    /// MAIN extent and local block; its reports are its ordinal's pair in that block; its serials are the block's
+    /// shared 2g-1/2g on the ring label; ordinals of a generation are consecutive from 0 and every record of a block
+    /// carries the same frame token (a block never spans a frame or window); a new block is the next generation.
+    #[allow(clippy::too_many_arguments)]
+    fn ring_record(&mut self, at: &str, g: Ring, t: &RingTail, kind: u16, flags: u16, owner: u32, frame: u64,
+        report_begin: u32, report_end: u32, serial_begin: u32, serial_end: u32) -> Result<(), Malformed> {
+        let r = Rule::AutoOps;
+        if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) || flags & OP_SEGMENT != 0 {
+            return bad(r, format!("{at}: RING record of kind {kind} or SEGMENT (owner ARRAY/INDEX/CLEAR only)"));
+        }
+        if t.generation == 0 || t.generation > RING_GENERATION_MAX || t.slot != (t.generation - 1) % g.slots
+            || u32::from(t.local) != (t.generation - 1) % g.blocks || u32::from(t.ordinal) >= g.pairs || t.state > 2
+        {
+            return bad(r, format!("{at}: ring tail {t:?} does not name its extent and block"));
+        }
+        // state 2 (uncertain M2MF state) is never timing evidence: the writer reads only blocks sealed with a known
+        // flush (untouched 0 or restored 1); an uncertain block is quarantined and its records stay INCOMPLETE
+        let valid = flags & OP_RAW_VALID != 0;
+        if valid && t.state == 2 {
+            return bad(r, format!("{at}: RAW_VALID ring record with uncertain M2MF state 2"));
+        }
+        let base = g.first + 2 * g.pairs * u32::from(t.local) + 2 * u32::from(t.ordinal);
+        if report_begin != base || report_end != base + 1 {
+            return bad(r, format!("{at}: ring reports {report_begin}/{report_end}, not {base}/{}", base + 1));
+        }
+        if serial_begin != 2 * t.generation - 1 || serial_end != 2 * t.generation {
+            return bad(r, format!("{at}: ring serials {serial_begin}/{serial_end} for generation {}", t.generation));
+        }
+        let token = (flags & OP_TOKEN, owner, frame);
+        match self.last_ring {
+            Some((gen, ord, tok)) if gen == t.generation => {
+                if u32::from(t.ordinal) != ord + 1 {
+                    return bad(r, format!("{at}: ring ordinal {} after {ord} in generation {gen}", t.ordinal));
+                }
+                if tok != token {
+                    return bad(r, format!("{at}: generation {gen} spans frame tokens {tok:?} and {token:?}"));
+                }
+            }
+            last => {
+                // an ordinary capture: generations 1, 2, ... in order. An export keeps whole generations of the
+                // frames it selected: the first is the one its EXPORT accounting names, later ones only increase
+                // (the generations of frames or tokenless draws it dropped are omitted, never reordered)
+                let (ok, next) = match (self.export_ring, last) {
+                    (None, _) => {
+                        let next = last.map_or(1, |(gen, _, _)| gen + 1);
+                        (t.generation == next, next.to_string())
+                    }
+                    (Some(e), None) => (t.generation == e.first_generation, e.first_generation.to_string()),
+                    // a generation is skipped only where the frame token changes: the blocks of one token are
+                    // consecutive, so an export never drops a block between two blocks of a frame it keeps
+                    (Some(_), Some((gen, _, tok))) => (t.generation == gen + 1 || (t.generation > gen && tok != token),
+                        format!("{} (or above it with a new frame token)", gen + 1)),
+                };
+                if !ok || t.ordinal != 0 {
+                    return bad(r, format!("{at}: ring generation {} ordinal {}, expected generation {next} ordinal 0",
+                        t.generation, t.ordinal));
+                }
+                let seen = &mut self.result.ring_seen;
+                if seen.generations == 0 {
+                    seen.first = t.generation;
+                }
+                seen.last = t.generation;
+                seen.generations += 1;
+                self.ring_valid_state = None;
+            }
+        }
+        // the records of one block were read after one flush: its RAW_VALID records carry one M2MF state
+        if valid {
+            match self.ring_valid_state {
+                Some(s) if s != t.state => {
+                    return bad(r, format!("{at}: ring generation {} RAW_VALID M2MF state {} after {s}",
+                        t.generation, t.state));
+                }
+                Some(_) => {}
+                None => {
+                    self.ring_valid_state = Some(t.state);
+                    self.result.ring_seen.valid_state[t.state as usize] += 1;
+                }
+            }
+        }
+        self.result.ring_seen.records += 1;
+        self.last_ring = Some((t.generation, u32::from(t.ordinal), token));
+        Ok(())
+    }
+
     fn coverage(&mut self, payload: &[u8]) -> Result<(), Malformed> {
         let r = Rule::AutoCoverage;
         let cfg = self.attached().clone();
-        let width = if cfg.tagged() { FRAME_BYTES_TAG } else if cfg.label_polls() { FRAME_BYTES_LABEL }
-            else if cfg.presentation_scopes() { FRAME_BYTES_PRESENT } else { FRAME_BYTES };
+        let width = cfg.frame_width();
         if payload.len() != width {
             return bad(r, format!("AUTO_COVERAGE is {} bytes, not {width}", payload.len()));
         }
@@ -955,6 +1351,21 @@ impl Reader {
         if cfg.tagged() {
             for v in scope_at.iter_mut() {
                 *v = (c.u64()?, c.u64()?);
+            }
+        }
+        let (mut ring_full, mut ring_state) = ([0u64; 3], [0u64; 3]);
+        if cfg.ringed() {
+            for v in ring_full.iter_mut() {
+                *v = c.u64()?;
+            }
+            for v in ring_state.iter_mut() {
+                *v = c.u64()?;
+            }
+        }
+        let mut slots = [0u32; RANGE_SLOTS];
+        if cfg.range_reasons() {
+            for v in slots.iter_mut() {
+                *v = c.u32()?;
             }
         }
         c.done()?;
@@ -1030,10 +1441,26 @@ impl Reader {
         }
         if flags & FR_SATURATED == 0 {
             for (k, row) in rows.iter().enumerate() {
-                let sum = row[1..].iter().try_fold(outside[k], |a, &b| a.checked_add(b));
+                let sum = row[1..].iter().try_fold(outside[k], |a, &b| a.checked_add(b))
+                    .and_then(|a| a.checked_add(ring_full[k])).and_then(|a| a.checked_add(ring_state[k]));
                 if sum != Some(row[0]) {
                     return bad(r, format!("{at}: {} visited {} is not observed plus exclusions", KINDS[k], row[0]));
                 }
+            }
+        }
+        // the range-reason tail: ten reasons, the rest zero; unless SATURATED their sum is the row's u32@440
+        let reasons: [u32; 10] = slots[..10].try_into().expect("ten slots");
+        if cfg.range_reasons() {
+            let sum = reasons.iter().fold(0u64, |a, &b| a + u64::from(b));
+            if slots[10..].iter().any(|&x| x != 0) {
+                return bad(r, format!("{at}: reserved range-refusal slot {:?}", &slots[10..]));
+            }
+            if flags & FR_SATURATED == 0 && sum != u64::from(ranges_refused) {
+                return bad(r, format!("{at}: ranges refused by reason {reasons:?} do not sum to {ranges_refused}"));
+            }
+            for (k, &v) in reasons.iter().enumerate() {
+                let t = &mut self.row_reasons[k];
+                *t = t.saturating_add(u64::from(v));
             }
         }
         self.last_frame = Some((owner, frame));
@@ -1051,14 +1478,19 @@ impl Reader {
             segment_unrepresented: if cfg.build_frames() { r2 } else { 0 },
             label_polls: cfg.label_polls().then_some((label, label_index, one)),
             outside_timed: outside, ranges_refused,
-            flip_wait_at: cfg.tagged().then(|| scope_at[..recorded].to_vec()) });
+            flip_wait_at: cfg.tagged().then(|| scope_at[..recorded].to_vec()), ring_full, ring_state,
+            range_refused: cfg.range_reasons().then_some(reasons) });
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>, snapshot: Option<&crate::snapshot_support::Selection>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
-        if payload.len() != STATUS_BYTES {
-            return bad(r, format!("AUTO_STATUS is {} bytes, not {STATUS_BYTES}", payload.len()));
+        let att = self.result.config.as_ref().and_then(Config::attached);
+        let ringed = att.is_some_and(Attached::ringed);
+        let reasoned = att.is_some_and(Attached::range_reasons);
+        let width = att.map_or(STATUS_BYTES, Attached::status_width);
+        if payload.len() != width {
+            return bad(r, format!("AUTO_STATUS is {} bytes, not {width}", payload.len()));
         }
         let mut c = Cursor::new(payload, "AUTO_STATUS");
         let schema = c.u16()?;
@@ -1068,7 +1500,26 @@ impl Reader {
         for v in n.iter_mut() {
             *v = c.u64()?;
         }
+        let mut ring = [0u64; 8];
+        let mut reject = [0u32; 3];
+        let mut reserved = 0;
+        if ringed {
+            for v in ring.iter_mut() {
+                *v = c.u64()?;
+            }
+            for v in reject.iter_mut() {
+                *v = c.u32()?;
+            }
+            reserved = c.u32()?;
+        }
+        let mut slots = [0u64; RANGE_SLOTS];
+        if reasoned {
+            for v in slots.iter_mut() {
+                *v = c.u64()?;
+            }
+        }
         c.done()?;
+        let range_refused: Option<[u64; 10]> = reasoned.then(|| slots[..10].try_into().expect("ten slots"));
         let cfg = self.result.config.clone().expect("checked by chunk()");
         let known = match cfg.attached() {
             Some(a) if a.tagged() => 4095,
@@ -1086,7 +1537,8 @@ impl Reader {
             }
             self.result.statuses += 1;
             self.result.final_seen = true;
-            self.result.last_status = Some(Status { flags, counters: n });
+            self.result.last_status = Some(Status { flags, counters: n, ring: None, ring_reject: None,
+                range_refused: None });
             return Ok(());
         };
         if let Some(p) = &self.result.last_status {
@@ -1100,6 +1552,21 @@ impl Reader {
                 if p.flags & sticky != 0 && flags & sticky == 0 {
                     return bad(r, format!("AUTO_STATUS sticky flag {sticky} cleared"));
                 }
+            }
+        }
+        if let Some(totals) = range_refused {
+            let was = self.result.last_status.as_ref().and_then(|s| s.range_refused);
+            for (k, &v) in totals.iter().enumerate() {
+                if was.is_some_and(|w| v < w[k]) {
+                    return bad(r, format!("AUTO_STATUS ranges refused ({}) decreased", RANGE_REASONS[k]));
+                }
+                if flags & ST_SATURATED == 0 && v < self.row_reasons[k] {
+                    return bad(r, format!("AUTO_STATUS ranges refused ({}) {v} below the rows' {}", RANGE_REASONS[k],
+                        self.row_reasons[k]));
+                }
+            }
+            if slots[10..].iter().any(|&x| x != 0) {
+                return bad(r, format!("AUTO_STATUS reserved range-refusal slot {:?}", &slots[10..]));
             }
         }
         let lower = flags & ST_LOWER_BOUND != 0;
@@ -1122,6 +1589,48 @@ impl Reader {
         if n[10] > n[9] {
             return bad(r, "AUTO_STATUS more clock anchors written than attempted");
         }
+        if let Some(g) = a.ring {
+            // issued >= retired, held = the difference, an even published label within the issued blocks and at least
+            // every RING record's, at least the last RING generation issued, copies within the issued extents
+            let [issued, retired, published, held, copied, untouched, restored, _decoded] = ring;
+            let last_gen = self.last_ring.map_or(0, |(gen, _, _)| u64::from(gen));
+            if retired > issued || held != issued - retired || published % 2 != 0 || published > 2 * issued
+                || published < self.result.max_ring_published || issued < last_gen
+                || issued > u64::from(RING_GENERATION_MAX) || copied > issued * 32 * u64::from(g.pairs)
+                || untouched.checked_add(restored).map_or(true, |x| x > issued)
+            {
+                return bad(r, format!("AUTO_STATUS report-ring tail {ring:?} against the RING records"));
+            }
+            if let Some(p) = self.result.last_status.as_ref().and_then(|s| s.ring) {
+                if ring.iter().zip(p.iter()).enumerate().any(|(j, (&now, &was))| j != 3 && now < was) {
+                    return bad(r, "AUTO_STATUS report-ring counter decreased");
+                }
+            }
+            // the decoder's first rejection: a known reason, nothing without one, the reserved word zero, never changed
+            // once named
+            let [header, at, why] = reject;
+            if reserved != 0 || why as usize > RING_REJECT_REASONS.len() || (why == 0 && (header != 0 || at != 0)) {
+                return bad(r, format!("AUTO_STATUS ring decoder rejection {reject:?} reserved {reserved}"));
+            }
+            if let Some(p) = self.result.last_status.as_ref().and_then(|s| s.ring_reject) {
+                if p[2] != 0 && p != reject {
+                    return bad(r, "AUTO_STATUS ring decoder rejection changed");
+                }
+            }
+            // exact FINAL: every issued block was read and its extent retired, and every issued block had records
+            // (in an export: up to the source's last generation, at or after the last one it kept)
+            let source_last = self.export_ring.map_or(last_gen, |e| u64::from(e.source_last_generation));
+            if fin && !lower && (held != 0 || issued != source_last) {
+                return bad(r, format!("exact FINAL AUTO_STATUS with {held} held extent(s), {issued} blocks for {}",
+                    format_args!("generation {source_last}")));
+            }
+            // every block with timed records was flushed once, untouched or restored, and counted as such
+            let [v0, v1] = self.result.ring_seen.valid_state;
+            if fin && (v0 > untouched || v1 > restored) {
+                return bad(r, format!("FINAL AUTO_STATUS flushes untouched {untouched} / restored {restored} {}",
+                    format_args!("below the RAW_VALID blocks of state 0 / 1 ({v0} / {v1})")));
+            }
+        }
         if fin {
             let ops_ok = if let Some(exp) = export {
                 self.result.ops_parsed as u64 == exp.ops_kept && n[2] == exp.ops_kept + exp.ops_dropped
@@ -1129,7 +1638,7 @@ impl Reader {
                 n[2] == self.result.ops_parsed as u64
             };
             let frames_ok = if let Some(exp) = export {
-                self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+                self.result.frames_parsed == snapshot.map_or(exp.frame_last - exp.frame_first + 1, |s|s.auto_rows)
                     && n[5] == exp.source_auto_frames
             } else {
                 n[5] == self.result.frames_parsed
@@ -1144,7 +1653,8 @@ impl Reader {
             self.result.final_seen = true;
         }
         self.result.statuses += 1;
-        self.result.last_status = Some(Status { flags, counters: n });
+        self.result.last_status = Some(Status { flags, counters: n, ring: a.ring.map(|_| ring),
+            ring_reject: a.ring.map(|_| reject), range_refused });
         Ok(())
     }
 
@@ -1272,11 +1782,30 @@ pub enum MapState {
 /// feasible bounded positive slope, and in each H-SPLIT parity at least one DECISIVE held-out anchor with zero
 /// contradictions.  No extrapolation: conversions are allowed only inside [fmin, fmax].
 pub fn qualify(inv: &Inventory) -> MapState {
+    let n = inv.clocks.iter().filter(|a| a.flags == CK_VALID).count() as u64;
+    let mut m = Meter::new(
+        clockmap::solve_budget(n).saturating_add(split_budget(n).saturating_mul(2)),
+        Limit::Capture,
+    );
+    qualify_with_meter(inv, &mut m)
+}
+
+pub(crate) fn qualify_with_meter(inv: &Inventory, m: &mut Meter) -> MapState {
+    qualify_clock_support(inv,m,false,false)
+}
+/// A projected rolling checkpoint explicitly owns this subset and its fixed
+/// predecessor halo. Lifetime counters remain lifetime counters. All map
+/// qualification and interpolation rules below are otherwise unchanged.
+pub(crate) fn qualify_retained_support_with_meter(inv:&Inventory,sticky:bool,m:&mut Meter)->MapState{
+    qualify_clock_support(inv,m,true,sticky)
+}
+fn qualify_clock_support(inv:&Inventory,m:&mut Meter,retained:bool,sticky:bool)->MapState{
     let un = |s: String| MapState::Unqualified(s);
     if inv.config.as_ref().and_then(Config::attached).is_none() {
         return un("no attached AUTO configuration".into());
     }
-    if inv.refusal.is_some() || inv.clocks_parsed != inv.clocks.len() as u64 {
+    if sticky{return un("retired clock support carries a sticky refusal".into());}
+    if inv.refusal.is_some() || (!retained&&inv.clocks_parsed != inv.clocks.len() as u64) {
         return un("clock anchors not all retained".into());
     }
     // Bracketed writers (127/11) qualify from their VALID anchors: a failed or lost anchor carries no timestamp, so it
@@ -1307,11 +1836,7 @@ pub fn qualify(inv: &Inventory) -> MapState {
         return un(format!("{} distinct anchor coordinate(s), fewer than 4", distinct.len()));
     }
     let n = obs.len() as u64;
-    let mut m = Meter::new(
-        clockmap::solve_budget(n).saturating_add(split_budget(n).saturating_mul(2)),
-        Limit::Capture,
-    );
-    let model = match clockmap::solve(&mut m, &obs) {
+    let model = match clockmap::solve(m, &obs) {
         Ok(Solved::Compatible(model)) => model,
         Ok(Solved::Inconsistent) => return un("anchors inconsistent with one affine map".into()),
         Ok(Solved::NoObservations) => return un("no anchors".into()),
@@ -1323,7 +1848,7 @@ pub fn qualify(inv: &Inventory) -> MapState {
     }
     let mut decisive = [0u64; 2];
     for (k, even) in [false, true].into_iter().enumerate() {
-        match split_holdout(&mut m, &obs, even) {
+        match split_holdout(m, &obs, even) {
             Ok(SplitOutcome::Checked { held, .. }) => {
                 if let Some(h) = held.iter().find(|h| h.contradicted) {
                     return un(format!("H-SPLIT {} hold-out anchor ordinal {} contradicted",
@@ -1550,6 +2075,8 @@ pub struct FrameView {
     pub rsx_busy_bounds: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
+    /// Covered operations of this frame the RSX frame capture timed isolated (OP_ISOLATED); nonzero labels the frame.
+    pub isolated_ops: u64,
     /// 63/11 only (else zero): `records` is then the frame's BUILD population (records not built in a segment
     /// recorded here, plus segment records built here wherever recorded), reconciled with `observed`; `recorded` is
     /// the EXECUTION population (covered records recorded here, which timing uses); `segment_imports` the segment
@@ -1575,6 +2102,11 @@ pub struct FrameView {
     /// 1023/11: visits left untimed outside timed ranges (ARRAY, INDEX, CLEAR) and AUTO ranges refused in the frame.
     pub outside_timed: [u64; 3],
     pub ranges_refused: u32,
+    /// 3071/11 and 4095/11: `ranges_refused` by reason (RANGE_REASONS order); None for older writers.
+    pub range_refused: Option<[u32; 10]>,
+    /// 2047/11: visits untimed for want of a MAIN extent (ring_full) and with unknown ring state (ring_state).
+    pub ring_full: [u64; 3],
+    pub ring_state: [u64; 3],
     pub verdict: Verdict,
     pub reason: String,
 }
@@ -1603,6 +2135,8 @@ pub struct Report {
     pub busy_rule: bool,
     /// 1023/11: tags, ranges and timed-range limits are recorded.
     pub tagged: bool,
+    /// 2047/11: the report ring's partition and budgets.
+    pub ring: Option<Ring>,
     /// The capture's CONFIG is 255/11 (whole-CALL brackets timed as blocks).
     pub call_bracket: bool,
     pub state: String,
@@ -1649,6 +2183,8 @@ pub struct CaptureTotal {
     pub note: String,
     /// ranges_refused only: the AUTO ranges refused counted in retained rows (COVERAGE u32@440).
     pub retained_rows: Option<u64>,
+    /// ranges_refused only, 3071/11 and 4095/11: the last STATUS totals by reason (RANGE_REASONS order).
+    pub by_reason: Option<[u64; 10]>,
 }
 
 impl Unsealed {
@@ -1684,14 +2220,20 @@ fn unsealed_facts(inv: &Inventory, tagged: bool) -> Unsealed {
         value: status.map(|s| s.counters[i]),
         note: (if status.is_some() { TOTAL_LAST_STATUS } else { TOTAL_NO_STATUS }).to_string(),
         retained_rows: None,
+        by_reason: None,
     }).collect();
     if tagged {
         let sum = inv.frames.iter().fold(0u64, |a, f| a.saturating_add(u64::from(f.ranges_refused)));
+        // 3071/11 and 4095/11 record the capture total by reason in STATUS; older writers record none
+        let reasoned = matches!(&inv.config, Some(Config::Attached(a)) if a.range_reasons());
+        let by_reason = status.and_then(|s| s.range_refused);
         totals.push(CaptureTotal {
             name: "ranges_refused",
-            value: None,
-            note: RANGES_REFUSED_UNRECORDED.to_string(),
+            value: status.and_then(Status::ranges_refused),
+            note: (if by_reason.is_some() { TOTAL_LAST_STATUS } else if reasoned { TOTAL_NO_STATUS }
+                else { RANGES_REFUSED_UNRECORDED }).to_string(),
             retained_rows: Some(sum),
+            by_reason,
         });
     }
     Unsealed {
@@ -1710,6 +2252,9 @@ fn totals_text(u: &Unsealed) -> String {
             Some(v) => format!("{} >= {v} ({})", t.name, t.note),
             None => format!("{} UNAVAILABLE ({})", t.name, t.note),
         };
+        if let Some(by) = &t.by_reason {
+            s.push_str(&format!(", by reason {}", reasons_text(by)));
+        }
         if let Some(n) = t.retained_rows {
             s.push_str(&format!(", {n} in retained rows (partial)"));
         }
@@ -1782,7 +2327,7 @@ fn build_clean(f: &Coverage, built: &BTreeMap<(u32, u64), [u64; 3]>, untimed_ok:
     match (0..3).try_fold(0u64, |a, k| a.checked_add(f.excluded_checked(k)?)) {
         None => return Err(TOTALS_OVERFLOW.into()),
         Some(0) => {}
-        Some(_) if untimed_ok && !(0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0)) => {}
+        Some(_) if untimed_ok && !f.invalid_evidence() => {}
         Some(n) => return Err(format!("{n} covered operation(s) excluded")),
     }
     if f.unsupported != 0 {
@@ -1869,11 +2414,47 @@ fn overlap_merged(merged: &[(u64, u64)], scopes: &[(u64, u64)]) -> u64 {
     })
 }
 
+pub(crate) struct AnalysisSupport<'a> {
+    pub built: &'a BTreeMap<(u32, u64), [u64; 3]>,
+    pub abandoned: &'a BTreeMap<(u32, u64), u64>,
+    pub call_built: &'a BTreeMap<(u32, u64), u64>,
+    pub rows: &'a BTreeMap<(u32, u64), &'a Coverage>,
+    pub provenance_clean: bool,
+    pub last_frame: Option<(u32, u64)>,
+    pub fifo_wait: &'a dyn Fn(u32, u64) -> Result<u64, String>,
+}
+
 pub fn analyze(cap: &Capture) -> Report {
     let Some(inv) = cap.auto.as_ref() else {
         return Report { state: "UNSUPPORTED".into(), ..Report::default() };
     };
-    let mut rep = Report {
+    if inv.config.as_ref().and_then(Config::attached).is_none() {
+        return base_report(inv, cap.export.as_ref());
+    }
+    let build = inv.config.as_ref().and_then(Config::attached).is_some_and(Attached::build_frames);
+    let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
+    let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
+    let map = qualify(inv);
+    let fifo = crate::fifo::analyze(cap);
+    let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
+    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
+        && inv.frames.iter().all(|f| !f.invalid_evidence());
+    let mut call_built: BTreeMap<(u32, u64), u64> = BTreeMap::new();
+    for o in inv.ops.iter().filter(|o| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0) {
+        if let Some(b) = o.build {
+            let e = call_built.entry(b).or_default();
+            *e = e.saturating_add(u64::from(o.args[4]));
+        }
+    }
+    let wait = |owner, frame| fifo_wait(cap, &fifo, owner, frame);
+    analyze_inventory(inv, cap.export.as_ref(), AnalysisSupport {
+        built: &built, abandoned: &abandoned, call_built: &call_built, rows: &rows,
+        provenance_clean, last_frame: inv.frames.last().map(|f| (f.owner, f.frame)), fifo_wait: &wait,
+    }, map)
+}
+
+fn base_report(inv: &Inventory, export: Option<&crate::model::ExportRecord>) -> Report {
+    Report {
         capability: true,
         state: inv.state(),
         config: inv.config.clone(),
@@ -1883,9 +2464,14 @@ pub fn analyze(cap: &Capture) -> Report {
         ops_dropped: inv.ops_dropped,
         clocks: inv.clocks.clone(),
         refusal: inv.refusal,
-        export: cap.export.clone(),
+        export: export.cloned(),
         ..Report::default()
-    };
+    }
+}
+
+pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::ExportRecord>,
+    support: AnalysisSupport<'_>, map: MapState) -> Report {
+    let mut rep = base_report(inv, export);
     let Some(Config::Attached(attached)) = &inv.config else { return rep };
     if !inv.final_seen {
         rep.unsealed = Some(unsealed_facts(inv, attached.tagged()));
@@ -1899,29 +2485,18 @@ pub fn analyze(cap: &Capture) -> Report {
     let busy_rule = attached.call_bracket();
     rep.busy_rule = busy_rule;
     rep.tagged = attached.tagged();
+    rep.ring = attached.ring;
     rep.call_bracket = attached.call_bracket();
-    let (built, abandoned) = if build { build_populations(inv) } else { Default::default() };
-    let rows: BTreeMap<(u32, u64), &Coverage> = inv.frames.iter().map(|f| ((f.owner, f.frame), f)).collect();
-    let map = qualify(inv);
-    let fifo = crate::fifo::analyze(cap);
+    let AnalysisSupport { built, abandoned, call_built, rows, provenance_clean, last_frame, fifo_wait } = support;
     let status_ok = inv.final_seen && inv.refusal.is_none();
     let status_flags = inv.last_status.as_ref().map_or(0, |s| s.flags);
     // A segment build none of whose draws were timed leaves no record naming its build frame, so a CALL of it
     // cannot be traced back to that frame's evidence. Treat such unrepresented draws as merely untimed only when
     // the capture shows no invalid-evidence exclusion anywhere and no segment quarantine; otherwise they refuse.
-    let provenance_clean = status_flags & ST_SEGMENT_QUARANTINE == 0
-        && inv.frames.iter().all(|f| (0..3).all(|k| (0..10).all(|c| UNTIMED_ONLY[c] || f.rows[k][2 + c] == 0)));
     // 255/11: whole-CALL brackets with valid timestamps.  Each one times every draw its CALL executed, so the draws it
     // names as without a record of their own are not untimed in the calling frame, and those refused while building
     // are not untimed in their build frame (they ran inside the bracket, not there).
     let bracket_ok = |o: &Op| o.kind == KIND_CALL && o.raw_valid() && o.flags & OP_CLOCK_INVALID == 0;
-    let mut call_built: BTreeMap<(u32, u64), u64> = BTreeMap::new();
-    for o in inv.ops.iter().filter(|o| bracket_ok(o)) {
-        if let Some(b) = o.build {
-            let e = call_built.entry(b).or_default();
-            *e = e.saturating_add(u64::from(o.args[4]));
-        }
-    }
     // 1023/11 flip-wait evidence: every owner's certain RSX busy time on the PPU clock, from all its timed records
     // and whole-CALL brackets with valid clocks. A frame's work is submitted at its end and the RSX may run it one or
     // more frames later, so a flip wait blocks on whatever work of its owner the RSX is running, not only its own.
@@ -1973,6 +2548,7 @@ pub fn analyze(cap: &Capture) -> Report {
             rsx_frame_ppu: None,
             rsx_busy_bounds: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
+            isolated_ops: ops.iter().filter(|o| o.flags & OP_ISOLATED != 0).count() as u64,
             recorded: if build { ops.len() as u64 } else { 0 },
             segment_imports: if build {
                 ops.iter().filter(|o| o.flags & OP_SEGMENT != 0 && o.build != Some((f.owner, f.frame))).count() as u64
@@ -1987,6 +2563,9 @@ pub fn analyze(cap: &Capture) -> Report {
             flip_wait_at: f.flip_wait_at.clone(),
             outside_timed: f.outside_timed,
             ranges_refused: f.ranges_refused,
+            range_refused: f.range_refused,
+            ring_full: f.ring_full,
+            ring_state: f.ring_state,
             presentation: (f.flags & FR_PRESENT != 0).then(|| Presentation {
                 flip_wait: f.legacy_polls.is_none().then_some((f.flip_wait, f.flip_waits)),
                 flip_wait_timeouts: f.flip_wait_timeouts,
@@ -2033,10 +2612,10 @@ pub fn analyze(cap: &Capture) -> Report {
                 v.rsx_frame_ppu = Some((sat(&floor_mul(e - b, &m.slope_lo)), sat(&ceil_mul(e - b, &m.slope_hi))));
             }
         }
-        let wait = fifo_wait(cap, &fifo, f.owner, f.frame);
+        let wait = fifo_wait(f.owner, f.frame);
         v.fifo_wait = wait.as_ref().ok().copied();
         let d = f.tb_end.saturating_sub(f.tb_begin);
-        let last = inv.frames.last().is_some_and(|l| std::ptr::eq(l, f));
+        let last = last_frame == Some((f.owner, f.frame));
         let present = v.presentation.clone();
         let busy_lo = v.rsx_busy_ppu.map(|b| b.0);
         // 1023/11: blocked flip-wait time that certainly overlaps its owner's RSX busy time, from any frame of that
@@ -2080,8 +2659,10 @@ pub fn analyze(cap: &Capture) -> Report {
             // Untimed draws whose evidence is still valid do not block a verdict by themselves: it is decided on RSX
             // busy bounds below (timed span .. frame marks). Any other exclusion keeps the frame UNKNOWN.
             let mut untimed = if excluded != 0 {
-                let invalid = (0..3).any(|k| (0..10).any(|c| !UNTIMED_ONLY[c] && f.rows[k][2 + c] != 0));
-                if invalid || !bounded_rule {
+                if f.ring_state.iter().any(|&n| n != 0) {
+                    return Err(RING_STATE_UNKNOWN.into());
+                }
+                if f.invalid_evidence() || !bounded_rule {
                     return Err(format!("{excluded} covered operation(s) excluded"));
                 }
                 excluded
@@ -2332,6 +2913,11 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if exp.clipped_zones > 0 {
             writeln!(out, "{} zone(s) clipped at window edges", exp.clipped_zones)?;
         }
+        if let Some(g) = exp.ring {
+            writeln!(out, "report ring kept generations {}..{} ({} blocks, {} records; {} records dropped) of source {}",
+                g.first_generation, g.last_generation, g.generations, g.records_kept, g.records_dropped,
+                format_args!("generations 1..{}", g.source_last_generation))?;
+        }
     }
     writeln!(out, "{SCOPE}")?;
     if r.ops_dropped != 0 {
@@ -2360,10 +2946,27 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if let Some((call, ranges)) = a.reserves {
             writeln!(out, "report-pair reserves: {call} for whole-CALL brackets, {ranges} for AUTO ranges")?;
         }
+        if let Some(g) = a.ring {
+            // phase 1: only owner-buffer draws recycle; segment draws stay bounded by the legacy pairs
+            writeln!(out, "report ring: {} blocks of {} pairs from report {}, label {}; budgets {} MAIN bytes in {} \
+                extents and {} metadata records; {} legacy pairs (owner-buffer draws only)", g.blocks, g.pairs, g.first,
+                g.label, g.bytes, g.slots, a.metadata, g.legacy_pairs)?;
+        }
     }
     if let Some(s) = &r.status {
         let fields: Vec<String> = STATUS_FIELDS.iter().zip(s.counters.iter()).map(|(n, v)| format!("{n} {v}")).collect();
         writeln!(out, "status flags {:#x}: {}", s.flags, fields.join(", "))?;
+        if let Some(t) = s.ring {
+            let fields: Vec<String> = RING_STATUS_FIELDS.iter().zip(t.iter()).map(|(n, v)| format!("{n} {v}")).collect();
+            writeln!(out, "report ring: {}", fields.join(", "))?;
+        }
+        if let Some([header, at, why]) = s.ring_reject.filter(|x| x[2] != 0) {
+            writeln!(out, "ring decoder rejected header {header:#010x} at +{at:#x}: {}", reject_reason(why))?;
+        }
+        if let Some(by) = &s.range_refused {
+            writeln!(out, "AUTO ranges refused: {}{}", reasons_text(by),
+                if s.is_final() { "" } else { " (last STATUS, not FINAL: at least this)" })?;
+        }
     }
     if r.status.as_ref().is_some_and(|s| s.flags & ST_FRAME_MARK_MISSED != 0) {
         writeln!(out, "FRAME marks missed: a frame without both marks has no RSX frame duration (UNKNOWN, not zero)")?;
@@ -2406,6 +3009,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if r.unsealed.is_some() && f.flags & FR_OPEN != 0 {
             writeln!(out, "  row OPEN in the file: the writer implied its closure; its end was not observed")?;
         }
+        if f.isolated_ops != 0 {
+            writeln!(out, "  {ISOLATED_FRAME} ({} operation(s))", f.isolated_ops)?;
+        }
         if r.build_frames {
             if r.call_bracket {
                 writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
@@ -2417,6 +3023,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         }
         if f.call_brackets != 0 {
             writeln!(out, "  whole-CALL brackets: {} (in the RSX span)", f.call_brackets)?;
+        }
+        if let Some(by) = f.range_refused.as_ref().filter(|_| f.ranges_refused != 0) {
+            writeln!(out, "  AUTO ranges refused: {}", row_reasons_text(f.ranges_refused, by))?;
         }
         if let Some((c, l, one)) = f.label_polls {
             writeln!(out, "  label polling: {} run(s) ({} ticks of bounded gaps, largest one label {}), {} broken, {} across a frame boundary, label {}", c.runs, c.ticks, one, c.broken, c.spanning,
@@ -2498,6 +3107,22 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         for (n, v) in STATUS_FIELDS.iter().zip(s.counters.iter()) {
             o.insert((*n).into(), json!(v));
         }
+        if let Some(t) = s.ring {
+            let mut ring: serde_json::Map<String, serde_json::Value> = RING_STATUS_FIELDS.iter().zip(t.iter())
+                .map(|(n, v)| ((*n).to_string(), json!(v))).collect();
+            // the decoder's first rejection, null when it rejected nothing
+            ring.insert("decoder_rejected".into(), match s.ring_reject.filter(|x| x[2] != 0) {
+                Some([header, at, why]) => json!({"header": header, "offset": at, "reason": why,
+                    "reason_text": reject_reason(why)}),
+                None => serde_json::Value::Null,
+            });
+            o.insert("ring".into(), serde_json::Value::Object(ring));
+        }
+        if let Some(by) = &s.range_refused {
+            // 3071/11 and 4095/11 only, so older captures keep their exact JSON
+            o.insert("ranges_refused".into(), json!(s.ranges_refused()));
+            o.insert("ranges_refused_by_reason".into(), reasons_json(by));
+        }
         serde_json::Value::Object(o)
     });
     let map = match &r.map {
@@ -2520,6 +3145,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
         "presentation":f.presentation.as_ref().map(presentation_json),
         "verdict":f.verdict.key(),"reason":f.reason}))).map(|(f, mut v)| {
+        if f.isolated_ops != 0 {
+            // only frames the RSX frame capture timed isolated: other captures keep their exact JSON
+            v["isolated_ops"] = json!(f.isolated_ops);
+        }
         if r.build_frames {
             // 63/11: the build count (observed, reconciled with `records`) and the execution count are distinct
             let built: u64 = f.observed.iter().fold(0u64, |a, &b| a.saturating_add(b));
@@ -2545,6 +3174,14 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             // the exclusion reason "outside timed range", per kind, and the refused AUTO ranges
             v["outside_timed_range"] = json!({"array":f.outside_timed[0],"index":f.outside_timed[1],"clear":f.outside_timed[2]});
             v["ranges_refused"] = json!(f.ranges_refused);
+            if let Some(by) = &f.range_refused {
+                v["ranges_refused_by_reason"] = reasons_json(by);
+            }
+        }
+        if r.ring.is_some() {
+            // 2047/11: untimed for want of a MAIN extent (capacity) and with unknown ring state (invalid evidence)
+            v["ring_full"] = json!({"array":f.ring_full[0],"index":f.ring_full[1],"clear":f.ring_full[2]});
+            v["ring_state"] = json!({"array":f.ring_state[0],"index":f.ring_state[1],"clear":f.ring_state[2]});
         }
         if r.busy_rule {
             // 255/11 and later: polling shares of the frame interval (complete runs only), as observed numbers
@@ -2605,6 +3242,17 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
             "source_fifo_last_attempt_seq": exp.source_fifo_last_attempt_seq,
             "source_auto_frames": exp.source_auto_frames,
         });
+        // report-ring exports only: older exports keep their exact JSON
+        if let Some(g) = exp.ring {
+            v["export"]["ring"] = json!({
+                "first_generation": g.first_generation,
+                "last_generation": g.last_generation,
+                "generations": g.generations,
+                "records_kept": g.records_kept,
+                "records_dropped": g.records_dropped,
+                "source_last_generation": g.source_last_generation,
+            });
+        }
     }
     if r.build_frames {
         // 63/11 only: older captures keep their exact JSON
@@ -2633,6 +3281,9 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
                 Some(n) => json!({"value": n, "at_least": true, "source": t.note}),
                 None => json!({"value": null, "reason": t.note}),
             };
+            if let Some(by) = &t.by_reason {
+                o["by_reason"] = reasons_json(by);
+            }
             if let Some(n) = t.retained_rows {
                 o["retained_rows"] = json!(n);
                 o["retained_rows_note"] = json!("refusals counted in retained rows only: partial, not a capture total");
@@ -2698,9 +3349,9 @@ fn op_kind_name(kind: u16) -> &'static str {
 }
 
 fn op_flag_names(flags: u16) -> String {
-    const NAMES: [(u16, &str); 7] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
+    const NAMES: [(u16, &str); 8] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
         (OP_CLOCK_INVALID, "CLOCK_INVALID"), (OP_READ_REFUSED, "READ_REFUSED"),
-        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT")];
+        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT"), (OP_ISOLATED, "ISOLATED")];
     let v: Vec<&str> = NAMES.iter().filter(|(b, _)| flags & b != 0).map(|(_, n)| *n).collect();
     if v.is_empty() { "-".into() } else { v.join("|") }
 }
@@ -2833,6 +3484,11 @@ pub struct TagFrame {
     pub outside_timed_range: [u64; 3],
     /// Number of AUTO ranges refused in this frame (from the coverage row; not attributed to any tag).
     pub ranges_refused: u32,
+    /// 3071/11 and 4095/11: `ranges_refused` by reason (RANGE_REASONS order); None for older writers.
+    pub range_refused: Option<[u32; 10]>,
+    /// Covered operations the RSX frame capture timed isolated (OP_ISOLATED): such a frame is shown but kept out of
+    /// the summaries.
+    pub isolated_ops: u64,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
@@ -2899,7 +3555,8 @@ fn by_tag_impl(cap: &Capture) -> ByTag {
     for f in &inv.frames {
         let key = (f.owner, f.frame);
         let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
-        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, ..TagFrame::default() };
+        let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, range_refused: f.range_refused, ..TagFrame::default() };
+        tf.isolated_ops = mine.iter().filter(|o| o.covered() && o.flags & OP_ISOLATED != 0).count() as u64;
         let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
         tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
         tf.unrepresented = f.segment_unrepresented;
@@ -3033,10 +3690,20 @@ fn p95(mut v: Vec<u64>) -> u64 {
     v[rank as usize - 1]
 }
 
+/// The frames the summaries cover: every frame but those the RSX frame capture timed isolated.
+fn summarized(b: &ByTag) -> impl Iterator<Item = &TagFrame> {
+    b.frames.iter().filter(|f| f.isolated_ops == 0)
+}
+
+/// Frames kept out of the summaries because the RSX frame capture timed them isolated.
+pub fn isolated_frames(b: &ByTag) -> u64 {
+    b.frames.iter().filter(|f| f.isolated_ops != 0).count() as u64
+}
+
 /// Whole-window summary per tag: (frames seen, op sum, busy sum, busy median per frame, busy p95 per frame) over the frames it appears in.
 pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<u32, Vec<&TagRow>> = BTreeMap::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for (t, r) in &f.tags { per.entry(*t).or_default().push(r); }
     }
     per.into_iter().map(|(t, rows)| {
@@ -3049,7 +3716,7 @@ pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64, u64)> {
 /// Whole-window summary per range name: (frames seen, ranges, raw sum, raw median per frame, raw p95 per frame).
 pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<String, Vec<&RangeRow>> = BTreeMap::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for (n, r) in &f.ranges { per.entry(n.clone()).or_default().push(r); }
     }
     per.into_iter().map(|(n, rows)| {
@@ -3066,7 +3733,7 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
 pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<String, (u64, u64, u64, u64, u64)> = BTreeMap::new();
     let mut seen: std::collections::BTreeSet<(String, u32, u64)> = std::collections::BTreeSet::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for r in &f.range_occurrences {
             let entry = per.entry(r.name.clone()).or_default();
             if seen.insert((r.name.clone(), f.owner, f.frame)) { entry.0 += 1; }
@@ -3092,7 +3759,11 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         writeln!(out, "{t}; the summary covers the retained rows only")?;
     }
     for f in &b.frames {
-        writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
+        writeln!(out, "frame {}/{}: untimed {}, unrepresented {}{}", f.owner, f.frame, f.untimed, f.unrepresented,
+            if f.isolated_ops != 0 { "; ISOLATED (RSX frame capture), not in the summary" } else { "" })?;
+        if let Some(by) = f.range_refused.as_ref().filter(|_| f.ranges_refused != 0) {
+            writeln!(out, "  AUTO ranges refused: {}", row_reasons_text(f.ranges_refused, by))?;
+        }
         for (t, r) in &f.tags {
             writeln!(out, "  tag {t:#x}: ops {} busy {} untimed in CALL brackets {}", r.ops, r.busy_raw, r.untimed_in_calls)?;
         }
@@ -3109,6 +3780,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         }
     }
     writeln!(out, "summary")?;
+    if isolated_frames(b) != 0 {
+        writeln!(out, "  {} frame(s) timed isolated by the RSX frame capture are not in the summary", isolated_frames(b))?;
+    }
     for (t, (n, ops, busy, med, hi)) in tag_summary(b) {
         writeln!(out, "  tag {t:#x}: {n} frame(s), ops {ops}, busy sum {busy}, median per frame {med}, p95 per frame {hi}")?;
     }
@@ -3123,7 +3797,7 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
 
 pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::Result<()> {
     use serde_json::json;
-    let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| json!({
+    let frames: Vec<serde_json::Value> = b.frames.iter().map(|f| (f, json!({
         "owner": f.owner, "frame": f.frame, "untimed": f.untimed, "unrepresented": f.unrepresented,
         "outside_timed_range": {"array": f.outside_timed_range[0], "index": f.outside_timed_range[1], "clear": f.outside_timed_range[2]},
         "ranges_refused": f.ranges_refused,
@@ -3135,7 +3809,13 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
             "inclusive_raw": r.inclusive_raw, "parent": r.parent,
             "exclusive_raw": r.exclusive_raw, "reason": r.reason,
         })).collect::<Vec<_>>(),
-    })).collect();
+    }))).map(|(f, mut v)| {
+        if let Some(by) = &f.range_refused {
+            // 3071/11 and 4095/11 only, so older captures keep their exact JSON
+            v["ranges_refused_by_reason"] = reasons_json(by);
+        }
+        v
+    }).collect();
     let tags: Vec<serde_json::Value> = tag_summary(b).into_iter().map(|(t, (n, ops, busy, med, hi))| json!({
         "tag": t, "frames": n, "ops": ops, "busy_raw_sum": busy, "busy_raw_median": med, "busy_raw_p95": hi})).collect();
     let ranges: Vec<serde_json::Value> = range_summary(b).into_iter().map(|(name, (n, count, raw, med, hi))| json!({
@@ -3147,6 +3827,15 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
     if let Some(t) = &b.tail {
         // unsealed captures only, so sealed captures keep their exact JSON
         v["tail"] = json!(t);
+    }
+    if isolated_frames(b) != 0 {
+        // only with frames the RSX frame capture timed isolated: other captures keep their exact JSON
+        v["summary"]["isolated_frames_excluded"] = json!(isolated_frames(b));
+        for (f, j) in b.frames.iter().zip(v["frames"].as_array_mut().into_iter().flatten()) {
+            if f.isolated_ops != 0 {
+                j["isolated_ops"] = json!(f.isolated_ops);
+            }
+        }
     }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
@@ -3160,6 +3849,29 @@ mod tests {
         let mut tags = BTreeMap::new();
         tags.insert(tag, TagRow { ops: 1, busy_raw, untimed_in_calls: 0 });
         TagFrame { owner: 1, frame: 0, tags, ..TagFrame::default() }
+    }
+
+    #[test]
+    fn isolated_frames_stay_out_of_the_summaries() {
+        // a pipelined frame and the RSX frame capture's isolated one: the summary keeps only the pipelined frame
+        let mut iso = one(0xa, 900);
+        iso.frame = 1;
+        iso.isolated_ops = 1;
+        iso.ranges.insert("pass".into(), RangeRow { count: 1, raw: 900 });
+        let b = ByTag { tagged: true, frames: vec![one(0xa, 40), iso], tail: None };
+        assert_eq!(*tag_summary(&b).get(&0xa).unwrap(), (1, 1, 40, 40, 40));
+        assert!(range_summary(&b).is_empty());
+        assert_eq!(isolated_frames(&b), 1);
+        let mut text = Vec::new();
+        write_by_tag_text(&mut text, &b).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("frame 1/1: untimed 0, unrepresented 0; ISOLATED (RSX frame capture), not in the summary"));
+        assert!(text.contains("1 frame(s) timed isolated by the RSX frame capture are not in the summary"));
+        let mut json = Vec::new();
+        write_by_tag_json(&mut json, &b).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!((v["summary"]["isolated_frames_excluded"].as_u64(), v["frames"][1]["isolated_ops"].as_u64(),
+            v["frames"][0].get("isolated_ops")), (Some(1), Some(1), None));
     }
 
     #[test]

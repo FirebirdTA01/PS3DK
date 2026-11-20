@@ -136,6 +136,7 @@ fn the_default_folder_never_falls_back_to_the_launch_directory() {
 
 fn view(outcome: Outcome) -> LiveView {
     LiveView {
+        rsx_frame: Default::default(),
         link: LinkState::Handshake,
         hello: None,
         received: 0,
@@ -146,6 +147,8 @@ fn view(outcome: Outcome) -> LiveView {
         local_error: None,
         outcome: Some(outcome),
         snapshot_buffers_estimate: 0,
+        triggers: Default::default(),
+        v1_fallback: false,
     }
 }
 

@@ -38,7 +38,7 @@ def run(name,argv):
     return r
 flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-pthread','-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-DPS3DK_PROF_TEST_HOOKS','-I',inc.parent,'-I',src/'core','-I',src/'waits']
 flags+=['-Wno-prio-ctor-dtor']
-files=[src/s for s in ['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c']]
+files=[src/s for s in ['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c']]
 if not a.baseline:
     flags+=['-DPS3DK_PROF_WITH_WAITS=1'];files+=sorted((src/'waits').glob('*.c'))
 if a.sanitize:flags+=['-fsanitize='+('address,undefined' if a.sanitize=='address' else 'thread'),'-fno-omit-frame-pointer','-ftls-model=local-exec']

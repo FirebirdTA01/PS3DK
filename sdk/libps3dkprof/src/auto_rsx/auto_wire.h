@@ -8,10 +8,19 @@
 #define auto_encode_frame ps3dk_prof__auto_encode_frame
 #define auto_encode_status ps3dk_prof__auto_encode_status
 #define auto_encode_clock ps3dk_prof__auto_encode_clock
+#define auto_encode_ops_ring ps3dk_prof__auto_encode_ops_ring
+#define auto_encode_frame_ring ps3dk_prof__auto_encode_frame_ring
+#define auto_encode_status_ring ps3dk_prof__auto_encode_status_ring
 
 enum { C_AUTO_CONFIG=34, C_AUTO_OPS=35, C_AUTO_COVERAGE=36, C_AUTO_STATUS=37, C_AUTO_CLOCK=38 };
-enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=480,
-       AUTO_STATUS_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
+/* RANGE_REASONS (3071/11, ring 4095/11): COVERAGE rows and STATUS carry AUTO range refusals by reason in a tail of
+ * AUTO_RANGE_SLOTS slots (u32 per row, u64 in STATUS); slot r-1 holds reason r, slots past AUTO_RANGE_REASONS are
+ * zero. Rows: 480+64 (ring 528+64); STATUS: 128+128 (ring 208+128). The STATUS after a REFUSED CONFIG stays 128. */
+enum { AUTO_REFUSED=1, AUTO_CONFIG_BYTES=176, AUTO_OP_BYTES=160, AUTO_FRAME_BYTES=544,
+       AUTO_STATUS_BYTES=256, AUTO_STATUS_REFUSED_BYTES=128, AUTO_CLOCK_BYTES=96, AUTO_CHUNK_MAX=1048576 };
+enum { AUTO_CONFIG_RING_BYTES=216, AUTO_OP_RING_BYTES=176, AUTO_FRAME_RING_BYTES=592,
+       AUTO_STATUS_RING_BYTES=336, AUTO_KIND_RING_MASK=4095, AUTO_OP_RING=128,
+       AUTO_STATUS_RING_REJECT_MAX=16 /* the decoder's rejection reasons 1..16 (AUTO_RING_REJECT_*) */ };
 enum { AUTO_GCM_INIT_FAILED=1, AUTO_NO_INDEPENDENT_DRAIN, AUTO_LEASE_UNVERIFIED,
        AUTO_PRIOR_WRITES_UNKNOWN, AUTO_RESOURCE_CONFLICT, AUTO_NO_OWNER,
        AUTO_ALLOCATION_FAILED, AUTO_UNSUPPORTED_CONTEXT, AUTO_STOPPED, AUTO_NO_GCM_INIT };
@@ -48,13 +57,38 @@ enum { AUTO_FRAME_ROW_FLIP=32,
  * depth, u32@156 zero; OPS kind 6 RANGE; 480-byte COVERAGE rows with the
  * timed-range block at 416 and the flip-wait scope block at 448). A reader that knows only 7/15, 15/11, 31/11,
  * 63/11, 127/11, 255/11 or 511/11 refuses 1023/11 at CONFIG. */
-enum { AUTO_KIND_MASK=1023, AUTO_FORM_MASK=11 };
+/* RANGE_REASONS=2048: the range-refusal tails above. A reader that knows only the older pairs refuses 3071/11 and
+ * 4095/11 at CONFIG. */
+enum { AUTO_KIND_MASK=3071, AUTO_FORM_MASK=11 };
+/* Why an AUTO range was refused (stable: never renumbered or reused). Checked in this order:
+ * DEPTH        BEGIN nested deeper than 4
+ * SEGMENT      BEGIN while a segment build is open
+ * STATE        BEGIN/END while the capture admits nothing (CONFIG refused or invalidated, inside a draw bracket or a
+ *              segment emitter, stopping, admission closed, device not initialized)
+ * NO_FRAME     BEGIN/END with no coverage frame open (counted in STATUS only: there is no row)
+ * RING         BEGIN/END: the attached ring is not clean, misaligned or has no room
+ * DESCRIPTOR   BEGIN without a name descriptor (a full site table)
+ * NO_PAIR      BEGIN: no range-reserve report pair free
+ * OTHER_FRAME  END in another frame than its BEGIN
+ * METADATA     END: the held pair's metadata entry could not be claimed
+ * UNMATCHED    END with no BEGIN open
+ * A BEGIN outside a window is not a refusal, and the END of a depth refusal is not counted again. */
+enum { AUTO_RR_DEPTH=1, AUTO_RR_SEGMENT, AUTO_RR_STATE, AUTO_RR_NO_FRAME, AUTO_RR_RING, AUTO_RR_DESCRIPTOR,
+       AUTO_RR_NO_PAIR, AUTO_RR_OTHER_FRAME, AUTO_RR_METADATA, AUTO_RR_UNMATCHED,
+       AUTO_RANGE_REASONS=10, AUTO_RANGE_SLOTS=16 };
 /* Polling-cadence gap bound: 1 ms in PPU ticks (see auto_runtime.c). */
 enum { AUTO_CADENCE_BOUND_US=1000 };
 /* OPS: kind 4 FRAME marks a frame boundary (args[0] 1 begin, 2 end); flag 64
  * SEGMENT marks an operation built inside a CALL segment (u32@92 segment
  * ordinal, u32@116 call ordinal, both nonzero). */
 enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=64 };
+/* REPORT_RING (2047/11): OPS flag 128 (AUTO_OP_RING) marks an owner ARRAY/INDEX/CLEAR timed through a recycled local
+ * block and read from its MAIN copy; its serials are 2g-1/2g on CONFIG ring_label and u64@120 (published) is the ring
+ * label value observed when it was read. Never SEGMENT, never kinds 4..6. */
+/* OPS flag 256 (AUTO_OP_ISOLATED, ringed CONFIGs only): the RSX frame capture's ISOLATED timing wrote a WAIT_FOR_IDLE
+ * before each of this draw's markers, so its interval is not comparable with pipelined ones (the reader keeps such
+ * operations out of its frame rows and summaries and reports them apart). */
+enum { AUTO_OP_ISOLATED=256 };
 /* OPS kind 5 CALL (CALL_BRACKET): the begin report precedes a CALL in the ring,
  * the end report follows its retirement label, and the operation-label release
  * of that CALL completes it with the build's records. TOKEN is the calling
@@ -89,6 +123,11 @@ typedef struct auto_wire_config {
     int32_t application_rc;
     uint8_t mechanism[32], binding[32];
     uint32_t call_pairs, range_pairs; /* TAG: u32@160 whole-CALL reserve, u32@164 range reserve; u64@168 zero */
+    /* REPORT_RING (2047/11), u32 fields at 176..208, u32@212=1 (owner draws only).
+     * pairs still names the entire local pool; legacy_pairs excludes the ring
+     * blocks. Metadata and raw-ring storage are independently bounded. */
+    uint32_t ring_bytes,ring_blocks,ring_pairs,ring_first,ring_label;
+    uint32_t ring_stride,ring_slots,metadata_stride,legacy_pairs;
 } auto_wire_config;
 
 typedef struct auto_wire_op {
@@ -106,6 +145,13 @@ typedef struct auto_wire_op {
     uint32_t tag;           /* TAG: the tag current at the claim (a segment draw: at its build) */
     uint32_t fp_offset;     /* TAG: the last cellGcmSetFragmentProgram offset on the record's context, 0 if none */
     uint32_t depth;         /* RANGE only: nesting depth 1..4 */
+    /* REPORT_RING tail at 160: zero for legacy local records. The serials of
+     * a ring record are 2*generation-1 / 2*generation on CONFIG's ring_label;
+     * report indices name its reusable local block, raw values its MAIN copy.
+     * state: 0 untouched app M2MF, 1 restored app state, 2 uncertain. */
+    uint32_t ring_generation,ring_slot;
+    uint16_t ring_ordinal,ring_local;
+    uint32_t ring_state;
 } auto_wire_op;
 
 typedef struct auto_wire_frame {
@@ -146,6 +192,10 @@ typedef struct auto_wire_frame {
      * reader cannot place the others and does not use the block. */
     uint64_t flip_wait_at[2][2];
     uint64_t counts[3][12]; /* visited, observed, ten disjoint exclusions */
+    uint64_t ring_full[3],ring_state[3]; /* REPORT_RING: at 480 and 504, disjoint extra exclusions */
+    /* RANGE_REASONS tail (480, ring 528): u32 per slot, reason r at slot r-1; their sum is u32@440 unless the row is
+     * SATURATED */
+    uint32_t range_refused[AUTO_RANGE_REASONS];
 } auto_wire_frame;
 
 typedef struct auto_wire_clock {
@@ -163,6 +213,14 @@ typedef struct auto_wire_clock {
 size_t auto_encode_config(uint8_t *, size_t, const auto_wire_config *);
 size_t auto_encode_ops(uint8_t *, size_t, uint32_t, const auto_wire_op *, uint32_t);
 size_t auto_encode_frame(uint8_t *, size_t, const auto_wire_frame *);
-size_t auto_encode_status(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15]);
+/* ranges NULL: the 128-byte STATUS of a REFUSED CONFIG; otherwise 256 bytes with the range tail at 128. */
+size_t auto_encode_status(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15], const uint64_t *ranges);
 size_t auto_encode_clock(uint8_t *, size_t, const auto_wire_clock *);
+size_t auto_encode_ops_ring(uint8_t *, size_t, uint32_t, const auto_wire_op *, uint32_t);
+size_t auto_encode_frame_ring(uint8_t *, size_t, const auto_wire_frame *);
+/* Tail u64[8] at 128 (then the range tail u64[16] at 208): issued blocks, retired blocks, published label, held extents,
+ * copied bytes, untouched-state copies, restored-state copies, decoded words; then u32[3] at 192: the decoder's first
+ * rejected header word, its byte offset from the context begin and its reason (all zero: none); u32@204 zero. */
+size_t auto_encode_status_ring(uint8_t *, size_t, uint32_t, uint16_t, const uint64_t [15], const uint64_t [8],
+                               const uint32_t [3], const uint64_t [AUTO_RANGE_REASONS]);
 #endif

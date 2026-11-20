@@ -18,7 +18,7 @@ static unsigned char b[1024], before[1024];
 static int put(size_t n) { return fwrite(b,1,n,stdout)==n ? 0:1; }
 int main(void) {
     auto_wire_config c={0}; auto_wire_op op={0}; auto_wire_frame f={0};
-    auto_wire_clock a={0}; uint64_t counts[15]; unsigned i,j; size_t n;
+    auto_wire_clock a={0}; uint64_t counts[15],ranges[10]; unsigned i,j; size_t n;
     c.instance=1; c.domain=1026; c.epoch=1; c.owner=7; c.generation=1;
     c.report_first=1024; c.report_count=1024; c.op_label=239; c.clock_label=238;
     c.pairs=504; c.metadata=1024; c.frames=256;
@@ -53,13 +53,17 @@ int main(void) {
     f.outside_timed[0]=19; f.outside_timed[1]=20; f.outside_timed[2]=21; f.ranges_refused=22;
     f.flip_wait_at[0][0]=23; f.flip_wait_at[0][1]=24; f.flip_wait_at[1][0]=25; f.flip_wait_at[1][1]=26;
     for(i=0;i<3;i++) for(j=0;j<12;j++) f.counts[i][j]=1000+i*100+j;
+    for(i=0;i<10;i++) f.range_refused[i]=30+i;
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if(auto_encode_frame(b,479,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
-    n=auto_encode_frame(b,sizeof b,&f); if(n!=480 || put(n)) return 10;
+    if(auto_encode_frame(b,543,&f)!=0 || memcmp(b,before,sizeof b)) return 9;
+    n=auto_encode_frame(b,sizeof b,&f); if(n!=544 || put(n)) return 10;
     for(i=0;i<15;i++) counts[i]=UINT64_C(0x1020304050607080)+i;
+    for(i=0;i<10;i++) ranges[i]=UINT64_C(0x0102030405060708)*(i+1);
     memset(b,0xa5,sizeof b); memcpy(before,b,sizeof b);
-    if(auto_encode_status(b,127,1,49,counts)!=0 || memcmp(b,before,sizeof b)) return 11;
-    n=auto_encode_status(b,sizeof b,1,49,counts); if(n!=128 || put(n)) return 12;
+    if(auto_encode_status(b,255,1,49,counts,ranges)!=0 || memcmp(b,before,sizeof b)) return 11;
+    n=auto_encode_status(b,sizeof b,1,49,counts,ranges); if(n!=256 || put(n)) return 12;
+    if(auto_encode_status(b,127,1,1,counts,NULL)!=0) return 16;
+    n=auto_encode_status(b,sizeof b,1,1,counts,NULL); if(n!=128 || put(n)) return 17;
     a.flags=1; a.instance=1; a.epoch=1; a.id=3; a.role=0; a.slot=1026; a.serial=3; a.polls=5;
     a.tb_before=6; a.tb_after=7; a.raw=8; a.repeated=8; a.label_first=3; a.label_second=3;
     a.frame=16; a.owner=7; a.elapsed=9;
@@ -87,7 +91,7 @@ def main():
     mutations={
         'little-endian': ('b[i]=(uint8_t)(v>>(8*i));', 'b[3-i]=(uint8_t)(v>>(8*i));'),
         'refused-owner': ('if(c->reason) {', 'if(c->reason) { le32(b+16,c->owner);'),
-        'short-config': ('cap < AUTO_CONFIG_BYTES', 'cap < AUTO_CONFIG_BYTES-1'),
+        'short-config': ('cap < bytes', 'cap < bytes-1'),
         'publication-offset': ('le64(q+120,o->published);', 'le64(q+116,o->published);'),
     }
     if a.mutant:
@@ -114,7 +118,7 @@ def main():
     assert run.returncode == 0, ('writer/short-buffer control', run.returncode)
     chunks = []
     c = bytearray(176)
-    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,1023,11,1024,1024,239,238,504,1024,256,160,
+    struct.pack_into('<HH15I3Q2I', c, 0, 1, 0, 1,1026,1,7,1,3071,11,1024,1024,239,238,504,1024,256,160,
                      79800000,262144,2097152,3,1)
     c[96:128]=bytes(range(32)); c[128:160]=bytes(255-i for i in range(32)); struct.pack_into('<II',c,160,32,16)
     chunks.append(bytes(c))
@@ -128,18 +132,23 @@ def main():
     struct.pack_into('<5I',op,112,1040,1041,1,2,1); struct.pack_into('<Q',op,136,2)
     struct.pack_into('<I',op,108,0x31); struct.pack_into('<I',op,132,0x32)
     struct.pack_into('<QIHH',op,144,0x1112131415161718,7,1,0); struct.pack_into('<3I',op,160,0x41,0x42,3); chunks.append(bytes(op))
-    f=bytearray(480); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
+    f=bytearray(544); struct.pack_into('<HHIII6Q',f,0,1,3,1,7,5,0,100,200,3,4,6)
     struct.pack_into('<4IQII',f,352,7,8,9,10,11,12,13)
     struct.pack_into('<4IQ',f,384,14,15,16,17,18); struct.pack_into('<3QI',f,416,19,20,21,22); struct.pack_into('<4Q',f,448,23,24,25,26)
-    struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12))); chunks.append(bytes(f))
-    chunks.append(struct.pack('<HHI15Q',1,49,1,*(0x1020304050607080+i for i in range(15))))
+    struct.pack_into('<36Q',f,64,*(1000+i*100+j for i in range(3) for j in range(12)))
+    struct.pack_into('<10I',f,480,*range(30,40)); chunks.append(bytes(f))
+    # STATUS: the 15 counters, then the range totals by reason at 128 (ten, six zero slots)
+    chunks.append(struct.pack('<HHI15Q10Q6Q',1,49,1,*(0x1020304050607080+i for i in range(15)),
+                              *(0x0102030405060708*(i+1) for i in range(10)),*([0]*6)))
+    # the STATUS of a REFUSED CONFIG: 128 bytes, no range tail
+    chunks.append(struct.pack('<HHI15Q',1,1,1,*(0x1020304050607080+i for i in range(15))))
     chunks.append(struct.pack('<HH7I4Q2IQIIQ',1,1,1,1,3,0,1026,3,5,6,7,8,8,3,3,16,7,0,9))
     expected=b''.join(chunks); (a.out / 'expected.bin').write_bytes(expected)
     if a.mutant:
         assert len(run.stdout)==len(expected) and run.stdout != expected, 'MUTANT_SURVIVED_OR_WRONG_LENGTH'
         print(a.mutant,'KILLED: AUTO_WIRE_EXACT_BYTES'); return
     assert run.stdout == expected, 'AUTO_WIRE_EXACT_BYTES'
-    print('AUTO wire: 15 fixtures exact; short-buffer/zero/overflow controls pass; no device claims')
+    print('AUTO wire: 17 fixtures exact; short-buffer/zero/overflow controls pass; no device claims')
 
 
 if __name__ == '__main__':

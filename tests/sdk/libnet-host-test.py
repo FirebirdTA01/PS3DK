@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='ps3dk-net-') as temp:
                     '-I' + str(inc), '-include', str(inc / 'weak-diagnostics.h'),
                     *['-D' + s + '=ps3test_' + s for s in ('gethostbyname', 'gethostbyaddr', 'getservbyport', 'getservbyname', 'sys_net_initialize_network_ex')],
                     str(ROOT / 'tests/sdk/libnet-resolver-test.c'),
-                    *[str(f) for f in (resolver, init, ROOT / 'sdk/libnet/src/legacy.c', ROOT / 'sdk/libnet/src/diagnostics.c') if f.exists()],
+                    *[str(f) for f in (resolver, init, ROOT / 'sdk/libnet/src/legacy.c', ROOT / 'sdk/libnet/src/diagnostics.c', ROOT / 'sdk/libnet/src/net_hold.c', ROOT / 'sdk/libnet/src/net_pool.c') if f.exists()],
                     '-o', str(work / 'resolver')]
     # Before netdb grows the SDK declarations, use host equivalents for the
     # missing service structure only, allowing a clean missing-implementation red.

@@ -2,14 +2,17 @@
 //!
 //! Design: docs/design/ps3dk-prof-viewer.md. Every value comes from the
 //! production reader (`ps3dk_prof::load`); this crate only arranges it.
+//! A rolling `.profr` file opens through [`rolling_doc`] (retained window only).
 //! [`model`] and [`timeline`] hold the view logic and are tested without a
 //! window; [`timeline_ui`] draws the timeline with egui and is driven by
 //! synthetic input in its tests.
 
 pub mod app;
 pub mod auto;
+pub mod auto_lane;
 pub mod auto_ui;
 pub mod capture;
+pub mod capture_save;
 pub mod capture_ctl;
 pub mod capture_ui;
 pub mod foreign;
@@ -23,10 +26,22 @@ pub mod hotpaths;
 pub mod hotpaths_ui;
 pub mod live;
 pub mod live_client;
+pub mod live_rsx_frame;
+pub mod live_triggers;
+pub mod live_triggers_ui;
 pub mod model;
 pub mod passes_ui;
+pub mod rolling_doc;
+pub mod rolling_ui;
 pub mod rsx;
 pub mod rsx_ui;
+pub mod rsx_frame_view;
+pub mod rsx_frame_ui;
+pub mod rsx_state_ui;
+pub mod rsx_constants_ui;
+pub mod rsx_modes_ui;
+pub mod rsx_shader_ui;
+pub mod shader_names;
 pub mod sha256;
 pub mod timeline;
 pub mod timeline_auto;

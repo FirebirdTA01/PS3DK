@@ -5,7 +5,8 @@ from pathlib import Path
 
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
-# The second PR's base: the default (non-AUTO) make plans must be unchanged from it.
+# The second PR's base, narrowly amended below with the three subsequently
+# required cold-retention dependencies. All other default commands stay exact.
 ap.add_argument('--base',default='1218c61d2a1c20770e6ee477c038530ab38d9156')
 ap.add_argument('--git',default='git',help='Git executable compatible with this worktree metadata')
 a=ap.parse_args();root=Path(__file__).resolve().parents[3]
@@ -21,12 +22,42 @@ for name in set(files.decode().split('\0'))- {''}:
     if src.is_file():
         dst=current/name;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dst)
 records=[]
-def plan(tree,component,goal):
+
+# This is an explicit dependency amendment to the historical input, not output
+# normalization: only these source members/rules are permitted to differ. The
+# default-plan equality assertion below still compares every emitted command.
+retention_members=('roll_file','roll_retention_inspect','roll_store')
+libbase=base/'sdk/libps3dkprof'
+mk=libbase/'Makefile';text=mk.read_text()
+def replace_once(text,before,after):
+    assert text.count(before)==1,('historical dependency anchor changed',before)
+    return text.replace(before,after,1)
+text=replace_once(text,'CORE := prof_core prof_drain prof_version pal_lv2\n',
+                 'CORE := prof_core prof_drain prof_version pal_lv2 '+' '.join(retention_members)+'\n')
+text=replace_once(text,'vpath %.c src/core src/pal src/auto src/live\n',
+                 'vpath %.c src/core src/pal src/auto src/live src/rolling\n')
+for directory,flags in [('EXT_DIR','EXT_FLAGS_ilp32'),('EXT64_DIR','EXT_FLAGS_lp64'),
+                        ('EXTP_DIR','EXTP_FLAGS'),('EXTP64_DIR','EXTP64_FLAGS')]:
+    rule=(f'$({directory})/%.o: src/pal/%.c $(CONFIG) Makefile ext-members.mk\n'
+          '\t@mkdir -p "$(@D)"\n'
+          f'\t$(PPU_CC) $({flags}) -include "$(CONFIG)" -MMD -MP -c "$<" -o "$@"\n')
+    text=replace_once(text,rule,rule+rule.replace('src/pal/%.c','src/rolling/%.c'))
+mk.write_text(text)
+members=libbase/'ext-members.mk';text=members.read_text()
+text=replace_once(text,'prof_version pal_lv2 ext_runtime',
+                 'prof_version pal_lv2 '+' '.join(retention_members)+' ext_runtime')
+members.write_text(text)
+for member in retention_members:
+    for suffix in ['.c','.h']:
+        rel=Path('sdk/libps3dkprof/src/rolling')/(member+suffix)
+        destination=base/rel;destination.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(current/rel,destination)
+def plan(tree,component,goal,label=''):
     argv=['make','--no-print-directory','-Bn',goal,'PS3DEV=/sdk','PS3DK=/sdk',
           'PS3_BUILD_ROOT=/build','OBJ_DIR=/build/gcm','SDK_VERSION=0.0.0',
           'FIFO_SOURCE_COMMIT='+'1'*40,'AUTO_SOURCE_COMMIT='+'1'*40]
     r=subprocess.run(argv,cwd=tree/component,capture_output=True,timeout=60)
-    name=tree.name+'-'+Path(component).name+'-'+goal
+    name=tree.name+'-'+Path(component).name+'-'+goal+label
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     records.append(dict(name=name,argv=argv,rc=r.returncode))
     (out/'commands.json').write_bytes((json.dumps(records,indent=2)+'\n').encode())
@@ -37,6 +68,16 @@ for component in trees:
     before=plan(base,component,'all');after=plan(current,component,'all')
     assert before==after,component+' default plan changed'
     print(component+': default make plan byte-identical')
+
+# A fourth unreviewed member must still change the exact plan. Apply only to
+# the private historical copy, then restore before checking explicit recipes.
+saved=mk.read_text()
+mk.write_text(replace_once(saved,'CORE := prof_core ', 'CORE := startup prof_core '))
+try:
+    assert plan(base,trees[1],'all','-extra-member')!=plan(current,trees[1],'all','-extra-control'),'unexpected extra member escaped plan comparison'
+finally:
+    mk.write_text(saved)
+print('Default-plan sensitivity: unexpected extra member detected')
 
 gcm=plan(current,trees[0],'auto')
 compile_lines=[line for line in gcm.splitlines() if ' -c ' in line and '-DPS3TC_PROF_AUTO=1' in line]
@@ -49,12 +90,17 @@ assert 'libgcm_cmd_prof_auto.a' in gcm
 prof=plan(current,trees[1],'auto-rsx')
 compile_lines=[line for line in prof.splitlines() if ' -c ' in line]
 required={'auto_runtime','auto_startup','auto_config','auto_wire','auto_writer','auto_queue',
-          'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer'}
+          'auto_commands','auto_completion','auto_frames','auto_clock','fifo_runtime','fifo_writer',
+          'auto_ring','auto_ring_commands','auto_ring_layout','rsxf_runtime','rsxf_wire','rsxf_decode',
+          'roll_runtime','roll_public','roll_output','roll_ppu','roll_combined','roll_combined2'}
 for member in required:
     lines=[line for line in compile_lines if '/'+member+'.c' in line]
     assert len(lines)==2 and sum('-mlp64' in line for line in lines)==1,member
 assert all('-DPS3DK_PROF_WITH_AUTO=1' in line and '-DPS3DK_PROF_WITH_FIFO=1' in line
+           and '-DPS3DK_PROF_ROLLING=1' in line and '-DPS3DK_PROF_ROLLING_PUBLIC=1' in line
            and '-fno-instrument-functions' in line for line in compile_lines)
+# the shipped AUTO archives carry the report ring (dormant unless PS3_PROF_AUTO_RING or ring options select it)
+assert all('-DPS3DK_PROF_AUTO_RING=1' in line for line in compile_lines if '/auto-rsx/' in line)
 assert prof.count('archive_digest.py verify')==2
 assert 'libps3dkprof_auto.a' in prof and '--id "AUTO-RSX"' in prof
 gcm_install=plan(current,trees[0],'install-auto')
@@ -62,7 +108,7 @@ prof_install=plan(current,trees[1],'install-auto-package')
 for text in (gcm_install,prof_install):
     writes=[line for line in text.splitlines() if line.startswith('install -m')]
     assert not any('/libgcm_cmd.a' in line or '/libps3dkprof.a' in line or '/libps3prof.a' in line for line in writes)
-for item in ('prof_auto.h','prof_fifo.h','prof.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py',
+for item in ('prof_auto.h','prof_fifo.h','prof.h','prof_rolling.h','ps3-prof-auto.cmake','ps3-prof-auto-check.py',
              'ps3-prof-auto-identity.py'):
     assert item in prof_install,item
 assert '--seal' in prof_install and '--source-commit' in prof_install

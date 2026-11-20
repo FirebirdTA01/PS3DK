@@ -23,6 +23,23 @@ uint64_t auto_command_words(const ps3tc_auto_call *c)
     return 10+odd*2+loops*2048+(rest+255)/256;
 }
 
+uint64_t auto_shape_words(const ps3tc_auto_call *c, uint32_t shape)
+{
+    uint64_t count, groups;
+    if(!c || c->mode<1 || c->mode>10) return 0;
+    if(shape==9) return 2;                                   /* BEGIN_END(mode); the vertex data follows openly */
+    count=c->count;
+    if(!count || count>UINT32_C(0xffffff)) return 0;
+    if(shape==8 && c->index_type) {                          /* u16: an odd first index as one U32 element */
+        uint64_t odd=count&1u,pairs=(count-odd)/2u;
+        groups=(pairs/2047u)*2048u+(pairs%2047u ? 1u+pairs%2047u:0u);
+        return 6u+odd*2u+groups+2u;
+    }
+    if(shape!=7 && shape!=8) return 0;
+    groups=(count/2047u)*2048u+(count%2047u ? 1u+count%2047u:0u);
+    return 6u+groups+2u;                                     /* cache invalidate + BEGIN_END, data, BEGIN_END(0) */
+}
+
 int auto_command_room(uintptr_t begin, uintptr_t current, uintptr_t end, uint64_t words)
 {
     if(!begin || ((begin|current|end)&3u) || current<begin || end<current ||

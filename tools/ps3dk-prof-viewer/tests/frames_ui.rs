@@ -28,6 +28,7 @@ struct Harness {
     time: f64,
     graph: Option<Rect>,
     drawn: Drawn,
+    auto: Option<ps3dk_prof_viewer::auto::AutoView>,
 }
 
 impl Harness {
@@ -38,8 +39,17 @@ impl Harness {
         let tl = TimelineState::new(&a);
         let ctx = egui::Context::default();
         ps3dk_ui::install(&ctx); // the app's text styles (page headers, captions)
-        let mut h = Harness { ctx, a, ix, st, tl, time: 0.0, graph: None, drawn: Drawn::default() };
+        let mut h = Harness {
+            ctx, a, ix, st, tl, time: 0.0, graph: None, drawn: Drawn::default(),
+            auto: None,
+        };
         h.frame(vec![]);
+        h
+    }
+    fn new_auto(a: Analysis) -> Harness {
+        let av = ps3dk_prof_viewer::auto::AutoView::build(&a.capture);
+        let mut h = Harness::new(a);
+        h.auto = Some(av);
         h
     }
 
@@ -53,9 +63,10 @@ impl Harness {
             ..Default::default()
         };
         let (a, ix, st, tl) = (&self.a, &self.ix, &mut self.st, &mut self.tl);
+        let auto = self.auto.as_ref();
         let mut drawn = Drawn::default();
         let _ = self.ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |p| drawn = draw(p, a, ix, st, Some(tl), None));
+            egui::CentralPanel::default().show(ctx, |p| drawn = draw(p, a, ix, st, Some(tl), None, auto));
         });
         self.graph = drawn.graph;
         self.drawn = drawn;
@@ -282,3 +293,48 @@ fn the_mode_survives_a_new_capture_like_the_budget() {
     h.st.reset(Some(&ix));
     assert_eq!((h.st.mode, h.st.smoothing), (GraphMode::Distribution, Smoothing::W5));
 }
+
+/// The Frames page's RSX lane carries exactly the per-frame facts the reader already computed (the same
+/// report the Automatic page and `auto --json` print): a mapped frame shows the reader's `rsx_busy_ppu.lo`;
+/// an unavailable frame is `Unavailable` with the reader's own reason (never 0 ms, never omitted); a frame
+/// with no AUTO coverage row is absent from the lane.
+#[test]
+fn frames_rsx_lane_drawn_values_equal_the_reader_verdicts() {
+    use ps3dk_prof::auto_rsx::analyze;
+    use ps3dk_prof_viewer::auto_lane::AutoFrame;
+    let path = std::path::PathBuf::from(format!(
+        "{}/../ps3dk-prof/tests/fixtures/auto/frames-rsx-lane.prof",
+        env!("CARGO_MANIFEST_DIR")
+    ));
+    let bytes = std::fs::read(&path).expect("fixture frames-rsx-lane.prof");
+    let a = analysed(&bytes);
+    let expected: Vec<(u64, Option<u64>)> =
+        analyze(&a.capture).frames.iter().map(|f| (f.frame, f.rsx_busy_ppu.map(|(lo, _)| lo))).collect();
+    assert!(expected.iter().any(|(_, v)| v.is_some()), "the fixture carries a mapped frame");
+    assert!(expected.iter().any(|(_, v)| v.is_none()), "the fixture carries an unavailable frame");
+
+    let mut h = Harness::new_auto(a);
+    h.st.mode = GraphMode::Bars;
+    h.frame(vec![]);
+    let lane = h.drawn.auto_lane.as_ref().expect("the RSX lane was drawn (automatic observation present)");
+    let ix = FramesIndex::build(&h.a);
+    let owner = ix.owners.iter().next().expect("an owner");
+    for (frame, bound) in expected {
+        let (i, _) = owner.slot_of(frame).expect("an owner slot for the frame");
+        match bound {
+            Some(lo) => {
+                let AutoFrame::Busy(dl) = lane.slots[i].as_ref().expect("a mapped frame carries a bound in the lane") else {
+                    panic!("frame {frame}: expected Busy({lo}), got none");
+                };
+                assert_eq!(*dl, lo, "frame {frame}: drawn {dl} != reader rsx_busy_ppu.lo {lo}");
+            }
+            None => {
+                let AutoFrame::Unavailable(reason) = lane.slots[i].as_ref().expect("an unavailable frame is marked, never 0 or omitted") else {
+                    panic!("frame {frame}: expected Unavailable, got none");
+                };
+                assert!(!reason.is_empty(), "frame {frame}: the reader's reason carries");
+            }
+        }
+    }
+}
+

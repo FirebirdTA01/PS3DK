@@ -148,6 +148,7 @@ static pthread_mutex_t sink_m = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sink_c = PTHREAD_COND_INITIALIZER;
 static FILE *sink_f;
 static int block_events, blocked_now, short_events, short_pending, fail_final, writes_after_fail, failed_once;
+static int short_accounting;
 static uint32_t seen_kinds[64]; /* per wrap id (< 64): bit k for kind k in an accepted FIFO_EVENTS chunk */
 static atomic_uint seen_any;
 static unsigned seen_wraps(uint64_t wrap, uint32_t kinds)
@@ -194,6 +195,9 @@ static long s_write(void *ctx, const void *buf, unsigned long n)
         failed_once = 1;
         rc = -1;
     }
+    if (type == C_FIFO_ACCOUNTING && n >= 16 + 80 && short_accounting) {
+        short_accounting = 0; short_pending = 1; rc = (long)n - 1;
+    }
     if (rc == (long)n) {
         if (type == C_FIFO_EVENTS && n > 32 && memcmp(b, "PS3DKPRF", 8) != 0) {
             uint32_t cnt = le32(b + 16 + 8), i;
@@ -221,6 +225,7 @@ static void sink_release(void)
     pthread_mutex_unlock(&sink_m);
 }
 static int sink_blocked(void) { int r; pthread_mutex_lock(&sink_m); r = blocked_now; pthread_mutex_unlock(&sink_m); return r; }
+static int sink_failed(void) { int r; pthread_mutex_lock(&sink_m); r = failed_once; pthread_mutex_unlock(&sink_m); return r; }
 
 /* ---- profiler setup ------------------------------------------------------------------------------------------- */
 static int start(uint32_t mode, uint32_t gpus)
@@ -293,7 +298,50 @@ static void *owner_main(void *arg)
     int i, n = 0;
     (void)arg;
     owner_attach();
-    if (!strcmp(mode, "basic") || !strcmp(mode, "incb") || !strcmp(mode, "recursion") || !strcmp(mode, "lostfinal")) {
+    if (!strcmp(mode, "accountqueue")) {
+        CHECK(ps3dk_prof__fifo_account_start(&CTX, off_of(CTX.current), PUT) == 1);
+        lap(16, 0);
+        WAIT_FOR(sink_blocked(), 10000);
+        for (i = 0; i < 20; ++i) {
+            ps3dk_prof_frame();
+            ps3dk_prof_token token = ps3dk_prof_frame_token();
+            ps3dk_prof__fifo_account_begin(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+            *CTX.current++ = 0x00040000;
+            ps3dk_prof__fifo_account_end(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+        }
+        CHECK(g_fifo.account->seq == 20 && LD_ACQ(&g_fifo.account->write_idx) == 16);
+        atomic_store(&owner_phase, 2);
+        WAIT_FOR(atomic_load(&go_on), 10000);
+        WAIT_FOR(LD_ACQ(&g_fifo.account->read_idx) == 16, 10000);
+        ps3dk_prof_frame();
+        ps3dk_prof_token token = ps3dk_prof_frame_token();
+        ps3dk_prof__fifo_account_begin(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+        *CTX.current++ = 0x00040000;
+        ps3dk_prof__fifo_account_end(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+        owner_finish(0);
+    } else if (!strcmp(mode, "accounting") || !strcmp(mode, "accountshort")) {
+#ifdef PS3DK_PROF_FIFO_ACCOUNT_RUNTIME_H
+        CHECK(ps3dk_prof__fifo_account_start(&CTX, off_of(CTX.current), PUT) == 1);
+        ps3dk_prof_frame();
+        ps3dk_prof_token token = ps3dk_prof_frame_token();
+        ps3dk_prof__fifo_account_begin(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+        lap(16, 0);
+        lap(8, 0);
+        for (i = 0; i < 4; ++i) *CTX.current++ = 0x00040000u;
+        ps3dk_prof__fifo_account_prepare(&CTX, off_of(CTX.current));
+        ps3dk_prof__fifo_account_publish(&CTX, off_of(CTX.begin + 2));
+        ps3dk_prof__fifo_account_publish(&CTX, off_of(CTX.begin + 2));
+        ps3dk_prof__fifo_account_end(&CTX, token.owner, token.frame, 1, off_of(CTX.current));
+        if (!strcmp(mode, "accountshort")) {
+            WAIT_FOR(sink_failed(), 10000);
+            CHECK(LD_ACQ(&g_fifo.account->read_idx) == 0);
+            puts("accounting_read_idx=0");
+        }
+#else
+        CHECK(0 && "owner FIFO accounting runtime is unavailable");
+#endif
+        owner_finish(0);
+    } else if (!strcmp(mode, "basic") || !strcmp(mode, "incb") || !strcmp(mode, "recursion") || !strcmp(mode, "lostfinal")) {
         for (i = 0; i < 20; i++) {
             if (i % 4 == 0)
                 ps3dk_prof_frame();
@@ -471,6 +519,8 @@ int main(int argc, char **argv)
         seed = (UINT64_C(1) << 63) - 4u;
     if (!strcmp(mode, "blocked"))
         block_events = 1;
+    if (!strcmp(mode, "accountqueue")) block_events = 1;
+    if (!strcmp(mode, "accountshort")) { short_accounting = 1; want = PS3DK_PROF_ESINKFAIL; }
     if (!strcmp(mode, "shortwrite"))
         short_events = 1;
     if (!strcmp(mode, "lostfinal"))
@@ -514,7 +564,7 @@ int main(int argc, char **argv)
         atomic_store(&g_hold, 0);
         CHECK(pthread_join(t, NULL) == 0);
         goto done;
-    } else if (!strcmp(mode, "blocked")) {
+    } else if (!strcmp(mode, "blocked") || !strcmp(mode, "accountqueue")) {
         WAIT_FOR(sink_blocked(), 10000);
         /* the drain thread is stuck in the sink; the owner must still finish every wrap */
         WAIT_FOR(atomic_load(&owner_phase) == 2, 20000);

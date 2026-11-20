@@ -552,6 +552,7 @@ static void refund_bracket(psp_ppu *p, psp_lane *l, int tell_spu)
     l->res_bracket = 0;
     p->brackets_file--;
     l->out_id = 0;
+    l->cal_seen_id = 0;
 }
 
 /* retire the lane from encoding; final_written only when the sink accepted the FINAL */
@@ -694,7 +695,9 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 corrupt(p);
                 return;
             }
-            if (flush_loss(p, l, &w) != 0) {
+            /* Most runs contain no LOSS. Avoid entering its encoder/ledger
+             * path once for every ordinary event when there is nothing to emit. */
+            if (w.pl_count && flush_loss(p, l, &w) != 0) {
                 overflow_finish(p, l, &w);
                 return;
             }
@@ -778,6 +781,14 @@ static void walk_slots(psp_ppu *p, psp_lane *l, const uint8_t *s, uint64_t n)
                 w.br_dec = psp_rd32(s);
                 w.br_tb0 = l->out_tb0;
                 w.br_tb1 = l->tb1;
+                /* An answer seen in line B bounds only the CAL in that exact
+                 * published prefix. The later drain still owns DRAIN_TB and
+                 * every slot acknowledgement. Requests never reuse an id. */
+                if (l->cal_seen_id == id && l->cal_seen_epoch == l->epoch &&
+                    l->cal_seen_gen <= l->good.gen && l->cal_seen_w <= l->w_snap &&
+                    l->r + i < l->cal_seen_w && l->cal_seen_tb > w.br_tb0 &&
+                    l->cal_seen_tb <= l->tb1)
+                    w.br_tb1 = l->cal_seen_tb;
                 /* the CAL follows every slot of its publication: open events or a pending LOSS(tail), at most one of
                  * the two nonzero (an event slot flushes the loss first, a LOSS slot closes the events first) */
                 w.br_before = p->test_order_mutant == PSP_OM_EVENTS_BEFORE_CURSOR
@@ -855,6 +866,50 @@ static void parse_line(const uint8_t *b, psp_snap *s)
     s->flags = psp_rd32(b + PSP_B_FLAGS - PSP_B);
     s->cal_answered = psp_rd16(b + PSP_B_CAL_ANSWERED - PSP_B);
     s->epochs_written = psp_rd32(b + PSP_B_EPOCHS_WRITTEN - PSP_B);
+}
+
+void psp_poll_calibrations(psp_ppu *p)
+{
+    const psp_mem *m = p->mem;
+    uint32_t i;
+    if (p->sealed || p->sink_failed)
+        return;
+    p->cs++;
+    for (i = 0; i < p->cfg.lanes_max; ++i) {
+        psp_lane *l = &p->lanes[i];
+        uint8_t line[128];
+        psp_snap s;
+        uint64_t first, last, again, tb;
+        if (l->state < PSP_L_DECLARED || l->state == PSP_L_FINAL || l->released ||
+            l->dphase || !l->res_bracket || !l->out_id || l->out_epoch != l->epoch ||
+            l->cal_seen_id == l->out_id)
+            continue;
+        first = m->ld64(m->ctx, l->ea_ctl + PSP_B_GEN);
+        m->lwsync(m->ctx);
+        m->ld_line(m->ctx, l->ea_ctl + PSP_B, line);
+        m->lwsync(m->ctx);
+        last = m->ld64(m->ctx, l->ea_ctl + PSP_B_GEN_END);
+        m->lwsync(m->ctx);
+        again = m->ld64(m->ctx, l->ea_ctl + PSP_B_GEN);
+        parse_line(line, &s);
+        if (first != last || first != again || first != s.gen ||
+            first != psp_rd64(line + PSP_B_GEN_END - PSP_B) ||
+            !snap_valid(p, l, &s, line) || s.cal_answered != l->out_id || s.w <= l->r)
+            continue;
+        /* The upper bound follows the accepting publication recheck, not an
+         * earlier speculative read. No ring data is touched by this pass. */
+        m->sync(m->ctx);
+        m->isync(m->ctx);
+        tb = m->mftb(m->ctx);
+        if (tb <= l->out_tb0)
+            continue;
+        l->cal_seen_id = l->out_id;
+        l->cal_seen_epoch = l->out_epoch;
+        l->cal_seen_gen = s.gen;
+        l->cal_seen_w = s.w;
+        l->cal_seen_tb = tb;
+    }
+    p->cs--;
 }
 
 static int step(psp_ppu *p, uint32_t i)
@@ -976,6 +1031,7 @@ static int step(psp_ppu *p, uint32_t i)
             l->out_tb0 = tb0;
             l->out_epoch = l->epoch;
             l->out_waits = 0;
+            l->cal_seen_id = 0;
             l->res_bracket = 1;
             p->brackets_file++;
         }

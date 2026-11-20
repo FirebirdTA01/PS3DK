@@ -421,7 +421,7 @@ def front_rows():
     return rows
 
 
-MK_GOOD = ('# comment\nEXT_MEMBERS := prof_core prof_drain prof_version pal_lv2 ext_runtime psp_ppu psp_elf gpu_runtime prg '
+MK_GOOD = ('# comment\nEXT_MEMBERS := prof_core prof_drain prof_version pal_lv2 roll_file roll_retention_inspect roll_store ext_runtime psp_ppu psp_elf gpu_runtime prg '
            'gpu_port_gcm rsxcap\n')
 AR_GOOD = '\n'.join(A.MEMBERS) + '\n'
 HDR = ''.join(f"File: x.a({n})\nELF Header:\n  Magic:   7f 45 4c 46\n  Class:  ELF64\n"
@@ -496,8 +496,18 @@ def arch_rows():
                                                            'unexpected import puts')),
         ('imports LP64 contract with one import absent', has(imp_errs(NM64.replace('U strcpy\n', ''), 'LP64'),
                                                             'expected import absent strcpy')),
+        ('imports LP64 requires quick-exit registration',
+         has(imp_errs(NM64.replace('U at_quick_exit\n', ''), 'LP64'), 'expected import absent at_quick_exit')),
+        ('imports LP64 requires quick-exit trylock',
+         has(imp_errs(NM64.replace('U pthread_mutex_trylock\n', ''), 'LP64'),
+             'expected import absent pthread_mutex_trylock')),
         ('imports unknown data model refused', has(imp_errs(NM_GOOD, 'ILP16'), 'unknown data model')),
         ('imports good', not A.judge_imports(NM_GOOD)[0]),
+        ('imports ILP32 requires quick-exit registration',
+         has(imp_errs(NM_GOOD.replace('U at_quick_exit\n', ''), 'ILP32'), 'expected import absent at_quick_exit')),
+        ('imports ILP32 requires quick-exit trylock',
+         has(imp_errs(NM_GOOD.replace('U pthread_mutex_trylock\n', ''), 'ILP32'),
+             'expected import absent pthread_mutex_trylock')),
         ('d unexpected import puts', has(A.judge_imports(NM_GOOD + '                 U puts\n')[0],
                                          'unexpected import puts')),
         ('review repro: local definition does not discharge U puts',
@@ -521,7 +531,7 @@ def arch_rows():
     ]
 
 
-LV_AR = 'live_agent.o\nlive_os_lv2.o\nlive_api.o\n'
+LV_AR = 'live_agent.o\nlive_os_lv2.o\nlive_api.o\nlive_autostart.o\n'
 LV_ATTR = ''.join(f'\nFile: y.a({n})\nAttribute Section: gnu\nFile Attributes\n  Tag_GNU_Power_CellOS_Data_Model: LP64\n'
                   for n in LV.LIVE_MEMBERS)
 LV_NM = ''.join(f'\n{n}:\n                 U ps3dk_prof__lock\n0000000000000000 T live_{n[:-2]}\n'

@@ -124,6 +124,8 @@ struct Reader {
     auto: Option<crate::auto_rsx::Reader>,
     /// file_flags bit 9: capture windows (chunk types 41-42).
     windows: Option<crate::windows::Reader>,
+    /// file_flags bit 10: RSX frame captures (chunk types 44-48).
+    rsxf: Option<crate::rsx_frame::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -135,6 +137,135 @@ struct Reader {
     ext: Option<crate::ext::ExtReader>,
     checkpoints: Option<crate::checkpoints::Reader>,
     source_checkpoints: Option<crate::source_checkpoints::Reader>,
+    /// Only the typed rolling importer populates these; legacy readers start empty.
+    rolling_prefix: BTreeMap<u32, PrefixCounts>,
+    rolling_span_max: Option<BTreeMap<u32, u64>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PrefixCounts {
+    pub written: u64,
+    pub gaps: u64,
+    pub regerr: u64,
+}
+
+/// Restricted unfinished-state adapter. It shares the core validators without
+/// changing the legacy multi-family dispatch or fabricating a prefix stream.
+pub(crate) struct PpuState {
+    reader: Reader,
+    minor: u16,
+}
+
+impl PpuState {
+    pub(crate) fn new(header: &[u8; 16]) -> Result<Self, Malformed> {
+        // This is the actual original file header. There are no event/metadata
+        // chunks to finalize, so no active parser state is lost here.
+        let mut cap = read(header)?;
+        cap.incomplete.clear();
+        let windows = cap.windows_flag.then(crate::windows::Reader::new);
+        Ok(Self { minor: u16::from_le_bytes([header[10], header[11]]), reader: Reader {
+            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows, rsxf: None,
+            declared: BTreeSet::new(), live_slots: BTreeMap::new(), descriptor_ids: BTreeMap::new(),
+            trailer_seen: false, ext: None, checkpoints: None, source_checkpoints: None,
+            rolling_prefix: BTreeMap::new(), rolling_span_max: Some(BTreeMap::new()),
+        } })
+    }
+    pub(crate) fn capture(&self) -> &Capture { &self.reader.cap }
+    pub(crate) fn v1_refs(&self) -> crate::ext::V1Refs<'_> {
+        crate::ext::V1Refs { descriptors: &self.reader.cap.descriptors,
+            declared_incarnations: &self.reader.declared }
+    }
+    pub(crate) fn accept_profile(&mut self, index: u64, payload: &[u8]) -> Result<(), Malformed> {
+        if !self.reader.cap.profile_flag || index != 2 || self.reader.cap.profile.is_some() {
+            return malformed(Rule::ProfilePlacement, "PROFILE outside original position 2");
+        }
+        let freq = self.reader.cap.clock.as_ref().ok_or_else(|| Malformed {
+            rule: Rule::ProfilePlacement, detail: "PROFILE before CLOCKS".into() })?.freq_hz;
+        self.reader.cap.profile = Some(crate::profile::parse(payload, freq)?);
+        Ok(())
+    }
+    pub(crate) fn window_boundary(&self) -> (BTreeSet<u32>, Option<u32>) {
+        self.reader.windows.as_ref().map_or_else(|| (BTreeSet::new(), None), |w|
+            (w.windows.iter().map(|x| x.id).collect(), w.open.as_ref().map(|x| x.id)))
+    }
+    pub(crate) fn windows(&self)->Option<&crate::windows::Reader>{self.reader.windows.as_ref()}
+    /// Rolling-only removal of actual closed declarations. Cursor bounds stay
+    /// known, but no evicted window is synthesized for later associations.
+    pub(crate) fn project_windows(&mut self,id:u32,last:Option<u64>)->Result<(),Malformed>{
+        let Some(w)=self.reader.windows.as_mut() else {
+            return if id==0 {Ok(())} else {malformed(Rule::Windows,"retired window without capability")};
+        };
+        if w.open.as_ref().is_some_and(|v|v.id<=id){return malformed(Rule::Windows,"retired open window");}
+        w.windows.retain(|v|v.id>id);
+        if id>w.last_id{w.last_id=id;w.prev_last_frame=last;}
+        Ok(())
+    }
+    pub(crate) fn max_span(&self, inc: u32) -> u64 {
+        self.reader.rolling_span_max.as_ref().and_then(|m| m.get(&inc)).copied().unwrap_or(0)
+    }
+    pub(crate) fn accept(&mut self, index: u64, ty: u32, payload: &[u8]) -> Result<(), Malformed> {
+        let r = &mut self.reader;
+        if r.trailer_seen {
+            return malformed(if ty == CHUNK_TRAILER { Rule::SecondTrailer } else { Rule::TrailingBytesAfterTrailer },
+                "chunk after TRAILER");
+        }
+        if index == 0 && ty != CHUNK_HEADER { return malformed(Rule::HeaderNotChunk0, "chunk zero is not HEADER"); }
+        if index == 1 && ty != CHUNK_CLOCKS { return malformed(Rule::ClocksNotChunk1, "chunk one is not CLOCKS"); }
+        if index >= 2 && matches!(ty, CHUNK_HEADER | CHUNK_CLOCKS) {
+            return malformed(Rule::DuplicateHeaderOrClocks, "repeated HEADER/CLOCKS");
+        }
+        match ty {
+            CHUNK_HEADER => r.header(payload, self.minor),
+            CHUNK_CLOCKS => r.clocks(payload),
+            CHUNK_DESCRIPTORS => r.descriptors(payload),
+            CHUNK_THREADS => r.threads(payload),
+            CHUNK_RECORDS => r.records(payload, index),
+            CHUNK_RETIRED => r.retired(payload),
+            CHUNK_TRAILER => r.trailer(payload),
+            CHUNK_WINDOW_BEGIN | CHUNK_WINDOW_END if r.windows.is_some() =>
+                r.windows.as_mut().unwrap().chunk(ty, payload, &r.cap),
+            _ => malformed(Rule::UnknownChunkType, format!("PPU restart does not accept type {ty}")),
+        }
+    }
+    pub(crate) fn install_lane(&mut self, inc: u32, mut lane: Lane, spans: Vec<Span>, prefix: PrefixCounts, max: u64)
+        -> Result<(), Malformed> {
+        let Some(declared) = self.reader.cap.lanes.get(&inc) else {
+            return malformed(Rule::UndeclaredIncarnation, "checkpoint lane has no declaration");
+        };
+        lane.info = declared.info.clone();
+        lane.final_entry = declared.final_entry.clone();
+        lane.retired = declared.retired;
+        for span in spans {
+            lane.stack.push(self.reader.cap.spans.len());
+            lane.spans.push(self.reader.cap.spans.len());
+            lane.span_ids.insert(span.span_id);
+            self.reader.cap.spans.push(span);
+        }
+        self.reader.cap.lanes.insert(inc, lane);
+        self.reader.rolling_prefix.insert(inc, prefix);
+        self.reader.rolling_span_max.as_mut().unwrap().insert(inc, max);
+        Ok(())
+    }
+    pub(crate) fn check_span_fields(&self, begin: &RawRecord, parent: &RawRecord) -> Result<(), Malformed> {
+        for r in [begin, parent] {
+            check_fields(r, &self.reader.cap.descriptors, &self.reader.declared, None)
+                .map_err(|rule| Malformed { rule, detail: "checkpoint active span fields".into() })?;
+        }
+        Ok(())
+    }
+    pub(crate) fn finish(mut self, torn: bool) -> Result<Capture, Malformed> {
+        let marks: Vec<u64> = self.reader.cap.lanes.values().flat_map(|l| l.frames.iter().map(|f| f.id)).collect();
+        if let Some(w) = self.reader.windows.take() {
+            self.reader.cap.windows = w.finish(&marks);
+        } else {
+            self.reader.cap.windows = vec![CaptureWindow {
+                id: 1, name: "default".into(), name_desc: 0, first_frame: marks.iter().copied().min().unwrap_or(0),
+                last_frame: marks.iter().copied().max(), source: WindowSource::App, kind: WindowKind::Manual,
+                reason: WindowReason::End, is_open: false, incomplete: false,
+            }];
+        }
+        self.reader.finish(torn)
+    }
 }
 
 /// The STRUCTURAL pass: sections 1-6.  `Err` is a MALFORMED verdict; `Ok` may still be INCOMPLETE.
@@ -222,6 +353,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         fifo: None,
         auto: None,
         windows: None,
+        rsxf: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -229,6 +361,8 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         ext: None,
         checkpoints: None,
         source_checkpoints: None,
+        rolling_prefix: BTreeMap::new(),
+        rolling_span_max: None,
     };
     if bytes.len() < FILE_HEADER_LEN {
         // A file cut inside its 16-byte header is torn only if EVERY constrained byte present is right: the magic,
@@ -251,7 +385,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let known = (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
             && (v & 64 == 0 || v & 1 != 0) && (v & 128 == 0 || v & 1 != 0);
         // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte) or bit 9 (WINDOWS, value 2 in that byte); bytes 14..15 must be 0
-        let high_ok = !(n > 13 && bytes[13] & !3 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
+        // byte 13 bit 2 (bit 10, RSX frame captures) needs bit 7 (byte 12 value 128)
+        let high_ok = !(n > 13 && bytes[13] & !7 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0))
+            && !(n > 13 && bytes[13] & 4 != 0 && v & 128 == 0);
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
             let allowed = if bytes[12] & 128 != 0 {
@@ -284,6 +420,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         if n > 12 && u32::from(bytes[12]) & crate::auto_rsx::FLAG_AUTO != 0 {
             r.cap.auto = Some(crate::auto_rsx::Inventory::default());
         }
+        if n > 13 && bytes[13] & 4 != 0 {
+            r.cap.rsx_frame = Some(crate::rsx_frame::Inventory::default());
+        }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
         return Ok(r.cap);
@@ -306,14 +445,18 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let fifo_flag = crate::fifo::FLAG_FIFO;
     let auto_flag = crate::auto_rsx::FLAG_AUTO;
     let windows_flag = crate::model::FLAG_WINDOWS;
+    let rsxf_flag = crate::rsx_frame::FLAG_RSX_FRAME;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag | fifo_flag | auto_flag | windows_flag) != 0
+        | counters_flag | fifo_flag | auto_flag | windows_flag | rsxf_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
     }
     if file_flags & auto_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 7 without bit 0"));
+    }
+    if file_flags & rsxf_flag != 0 && file_flags & auto_flag == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 10 without bit 7"));
     }
     if file_flags & fifo_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 6 without bit 0"));
@@ -345,6 +488,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & windows_flag != 0 {
         r.windows = Some(crate::windows::Reader::new());
+    }
+    if file_flags & rsxf_flag != 0 {
+        r.rsxf = Some(crate::rsx_frame::Reader::new());
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -413,12 +559,16 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let auto_ty = r.auto.is_some()
             && (crate::auto_rsx::CHUNK_AUTO_CONFIG..=crate::auto_rsx::CHUNK_AUTO_CLOCK).contains(&ty);
         let fifo_ty = r.fifo.is_some()
-            && (crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty);
+            && ((crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty)
+                || ty == crate::fifo::accounting::CHUNK);
         let export_ty = ty == crate::model::CHUNK_EXPORT;
+        let snapshot_ty = ty == crate::snapshot_support::CHUNK;
         let windows_ty = r.windows.is_some()
             && (ty == crate::model::CHUNK_WINDOW_BEGIN || ty == crate::model::CHUNK_WINDOW_END);
+        let rsxf_ty = r.rsxf.is_some()
+            && (crate::rsx_frame::CHUNK_CONFIG..=crate::rsx_frame::CHUNK_END).contains(&ty);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty && !snapshot_ty && !rsxf_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -432,6 +582,20 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             return malformed(Rule::DuplicateHeaderOrClocks, format!("chunk {index} is a second HEADER or CLOCKS"));
         }
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
+        let snapshot_expected = r.cap.export.as_ref().is_some_and(|e| e.flags & crate::snapshot_support::EXPORT_FLAG != 0);
+        let snapshot_index = if r.cap.profile_flag { 4 } else { 3 };
+        if snapshot_ty || (snapshot_expected && index == snapshot_index) {
+            if !snapshot_ty || !snapshot_expected || index != snapshot_index || r.cap.snapshot.is_some() {
+                return malformed(Rule::Export, "SNAPSHOT_SUPPORT placement/flag/duplicate");
+            }
+            r.cap.snapshot = Some(crate::snapshot_support::Selection::parse(payload)?);
+            if file_flags & checkpoint_flag != 0 {
+                return malformed(Rule::Export, "SNAPSHOT_SUPPORT must omit source checkpoint proofs");
+            }
+            pos += total;
+            index += 1;
+            continue;
+        }
         if export_ty {
             let expected_idx = if r.cap.profile_flag { 3 } else { 2 };
             if index != expected_idx {
@@ -447,6 +611,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if wait_ty {
             r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if rsxf_ty {
+            r.rsxf.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
             pos += total;
             index += 1;
             continue;
@@ -480,13 +650,20 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
                 x.declarations().domains.values().filter(|d| d.kind == crate::ext::KIND_RSX_TIMESTAMP)
                     .map(|d| d.id).collect()
             });
-            r.fifo.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared)?;
+            r.fifo.as_mut().unwrap().chunk(ty, payload, &r.cap, &rsx, &r.declared, r.windows.as_ref())?;
             pos += total;
             index += 1;
             continue;
         }
         if windows_ty {
             r.windows.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            if ty == crate::model::CHUNK_WINDOW_END {
+                if let Some(fifo) = r.fifo.as_ref() {
+                    if let Some(window) = r.windows.as_ref().unwrap().windows.last() {
+                        fifo.result.accounting.window_closed(window)?;
+                    }
+                }
+            }
             pos += total;
             index += 1;
             continue;
@@ -536,6 +713,22 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
+    if let Some(x) = r.rsxf.take() {
+        r.cap.rsx_frame = Some(x.finish(r.trailer_seen)?);
+    }
+    // an exported report-ring capture: the RING records parsed are exactly the ones its EXPORT accounting kept
+    if let Some(exp) = r.cap.export.as_ref().and_then(|e| e.ring) {
+        let seen = r.cap.auto.as_ref().filter(|a| a.config.as_ref().and_then(|c| c.attached())
+            .is_some_and(|a| a.ringed())).map(|a| a.ring_seen);
+        let Some(seen) = seen else {
+            return malformed(Rule::Export, "EXPORT ring accounting without a report-ring AUTO_CONFIG");
+        };
+        if (seen.first, seen.last, seen.generations, seen.records)
+            != (exp.first_generation, exp.last_generation, exp.generations, exp.records_kept)
+        {
+            return malformed(Rule::Export, format!("EXPORT ring accounting {exp:?} against the RING records {seen:?}"));
+        }
+    }
     let mut frame_marks: Vec<u64> = r.cap.lanes.values().flat_map(|l| l.frames.iter()).map(|f| f.id).collect();
     if let Some(auto) = &r.cap.auto {
         for cov in &auto.frames {
@@ -561,6 +754,18 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }];
     }
     let mut cap = r.finish(torn)?;
+    if cap.export.as_ref().is_some_and(|e| e.flags & crate::snapshot_support::EXPORT_FLAG != 0) {
+        let s = cap.snapshot.as_ref().ok_or_else(|| Malformed {rule:Rule::Export,detail:"missing SNAPSHOT_SUPPORT".into()})?;
+        let (digest,clock_bytes)=crate::snapshot_support::support_digest(bytes)?;
+        if digest!=s.support_sha || clock_bytes!=s.clock_bytes {
+            return malformed(Rule::Export,"SNAPSHOT_SUPPORT digest/clock-input bytes mismatch");
+        }
+        s.validate(&cap)?;
+        // Original negative evidence remains negative even if its triggering record was outside the selection.
+        for (&id,lane) in &mut cap.lanes {
+            if s.diagnostic(2,id)==Some(1) { lane.clock_anomaly=true; }
+        }
+    }
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);
     if let Some(x) = ext {
@@ -810,7 +1015,7 @@ impl Reader {
         let mut c = Cursor::new(payload, "EXPORT");
         let schema = c.u16()?;
         let flags = c.u16()?;
-        if schema != EXPORT_SCHEMA || (flags & !EXPORT_FLAG_TO_END != 0) {
+        if schema != EXPORT_SCHEMA || (flags & !(EXPORT_FLAG_TO_END | EXPORT_FLAG_RING | crate::snapshot_support::EXPORT_FLAG) != 0) {
             return malformed(r, format!("EXPORT schema {schema} flags {flags:#x}"));
         }
         let source_crc = c.u32()?;
@@ -834,7 +1039,8 @@ impl Reader {
         if reserved != 0 {
             return malformed(r, format!("EXPORT reserved {reserved}"));
         }
-        let expected_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+        let ringed = flags & EXPORT_FLAG_RING != 0;
+        let expected_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN + if ringed { EXPORT_RING_LEN } else { 0 };
         if payload.len() != expected_len {
             return malformed(
                 r,
@@ -881,6 +1087,37 @@ impl Reader {
                 },
             );
         }
+        // the report-ring tail: kept generations are whole and strictly increasing within the source's issued
+        // generations; nothing kept names no generation
+        let ring = if ringed {
+            let first_generation = c.u32()?;
+            let last_generation = c.u32()?;
+            let generations = c.u64()?;
+            let records_kept = c.u64()?;
+            let records_dropped = c.u64()?;
+            let source_last_generation = c.u32()?;
+            let reserved = c.u32()?;
+            let span = u64::from(last_generation.saturating_sub(first_generation)) + 1;
+            let ok = reserved == 0 && source_last_generation <= crate::auto_rsx::RING_GENERATION_MAX
+                && records_kept.checked_add(records_dropped).is_some()
+                && if records_kept == 0 {
+                    first_generation == 0 && last_generation == 0 && generations == 0
+                } else {
+                    first_generation >= 1 && first_generation <= last_generation
+                        && last_generation <= source_last_generation && generations >= 1 && generations <= span
+                        && generations <= records_kept
+                        && records_kept <= generations * u64::from(crate::auto_rsx::RING_PAIRS)
+                };
+            if !ok {
+                return malformed(r, format!("EXPORT ring generations {first_generation}..{last_generation} ({generations} kept, {} {}",
+                    format_args!("{records_kept} records kept, {records_dropped} dropped)"),
+                    format_args!("of source {source_last_generation}, reserved {reserved}")));
+            }
+            Some(ExportRing { first_generation, last_generation, generations, records_kept, records_dropped,
+                source_last_generation })
+        } else {
+            None
+        };
         c.done()?;
         if sum_kept != records_kept || sum_dropped != records_dropped {
             return malformed(
@@ -908,6 +1145,7 @@ impl Reader {
             source_fifo_last_attempt_seq,
             source_auto_frames,
             lanes,
+            ring,
         });
         Ok(())
     }
@@ -933,10 +1171,20 @@ impl Reader {
             return malformed(Rule::RecordsAfterRetired, format!("RECORDS of {inc} after its RETIRED entry"));
         }
         let recs: Vec<RawRecord> = payload[8..].chunks_exact(RECORD_LEN).map(RawRecord::decode).collect();
+        if let Some(maxima) = self.rolling_span_max.as_mut() {
+            let max = maxima.entry(inc).or_default();
+            for rec in recs.iter().filter(|r| r.kind == KIND_BEGIN && r.c != 0) {
+                if rec.c <= *max {
+                    return malformed(Rule::SpanIdDuplicate, "rolling BEGIN span ID did not exceed its prior maximum");
+                }
+                if rec.c >= SEQ_LIMIT { return malformed(Rule::SeqRange, "rolling span ID exceeds its runtime limit"); }
+                *max = rec.c;
+            }
+        }
         let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
             crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
             || recs.iter().filter(|r| r.kind == KIND_END).count()));
-        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.as_ref())?;
+        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.as_ref(), self.cap.snapshot.as_ref())?;
         // No identity is published until the entire legacy chunk has succeeded,
         // including the final pending-BEGIN / pending-GAP checks.
         if let Some(source) = self.source_checkpoints.as_mut() { source.observe(batch.as_ref(), chunk_seq)?; }
@@ -968,6 +1216,7 @@ impl Reader {
         }
         for (&inc, lane) in &self.cap.lanes {
             let Some(e) = &lane.final_entry else { continue };
+            let prefix = self.rolling_prefix.get(&inc).copied().unwrap_or_default();
             if let Some(exp) = &self.cap.export {
                 let exp_lane = exp.lanes.get(&inc).ok_or_else(|| {
                     Malformed {
@@ -991,7 +1240,7 @@ impl Reader {
                     );
                 }
             } else {
-                if e.written_count != lane.written {
+                if u128::from(e.written_count) != u128::from(prefix.written) + u128::from(lane.written) {
                     return malformed(
                         Rule::WrittenCountMismatch,
                         format!("incarnation {inc}: written_count {} but {} records", e.written_count, lane.written),
@@ -1107,7 +1356,7 @@ impl Reader {
             } else {
                 let next = lane.last_seq.map_or(0u128, |s| u128::from(s) + 1);
                 let produced = u128::from(e.produced_count);
-                if produced < next || u128::from(e.dropped_count) != lane.gap_sum + (produced - next) {
+                if produced < next || u128::from(e.dropped_count) != u128::from(prefix.gaps) + lane.gap_sum + (produced - next) {
                     return malformed(
                         Rule::DroppedCountArithmetic,
                         format!(
@@ -1119,7 +1368,7 @@ impl Reader {
             }
             // Section 5.3: regerr_count is incremented unconditionally and the REGERR record is best effort, so the
             // counter covers every REGERR record written.
-            if e.regerr_count < lane.regerr_records {
+            if u128::from(e.regerr_count) < u128::from(prefix.regerr) + u128::from(lane.regerr_records) {
                 return malformed(
                     Rule::RegerrCountBelowRecords,
                     format!(
@@ -1132,6 +1381,7 @@ impl Reader {
 
         if let Some(exp) = &self.cap.export {
             for lane in self.cap.lanes.values() {
+                if self.cap.snapshot.is_some() { continue; } // exact per-lane manifests checked after finish
                 if lane.is_frame_owner() {
                     if let Some(first) = lane.frames.first() {
                         if first.id != exp.frame_first {
@@ -1214,6 +1464,7 @@ fn process_records(
     recs: &[RawRecord],
     mut evidence: Option<&mut crate::dependencies::Batch>,
     export: Option<&ExportRecord>,
+    snapshot: Option<&crate::snapshot_support::Selection>,
 ) -> Result<(), Malformed> {
     for (i, r) in recs.iter().enumerate() {
         let at = || format!("incarnation {inc}, record {i} (seq {})", r.seq);
@@ -1336,7 +1587,8 @@ fn process_records(
                 let id = r.c;
                 if let Some(exp) = export {
                     if lane.frames.is_empty() {
-                        if id != exp.frame_first {
+                        let expected_first = snapshot.and_then(|s|s.lanes.get(&inc)).map_or(exp.frame_first,|f|f.first);
+                        if id != expected_first {
                             return malformed(
                                 Rule::Export,
                                 format!("{}: frame id {id} != declared frame_first {}", at(), exp.frame_first),

@@ -1,12 +1,13 @@
 //! Standalone capture frame export: one frame or a frame range saved as an independent .prof capture.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::borrow::Cow;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
 use crate::auto_rsx::{
     CHUNK_AUTO_COVERAGE, CHUNK_AUTO_OPS, CHUNK_AUTO_STATUS,
-    OP_BYTES, OP_BYTES_BUILD, OP_BUILD_KNOWN, OP_TOKEN,
+    OP_BYTES, OP_BYTES_BUILD, OP_BUILD_KNOWN, OP_RING, OP_TOKEN,
 };
 use crate::fifo::{CHUNK_FIFO_EVENTS, CHUNK_FIFO_STATUS, EV_TOKEN_PRESENT};
 use crate::hash::crc32;
@@ -38,12 +39,13 @@ impl std::fmt::Display for ExportError {
 
 impl std::error::Error for ExportError {}
 
+#[derive(Clone)]
 struct RawChunk<'a> {
     ty: u32,
     payload: &'a [u8],
 }
 
-fn encode_record(r: &RawRecord) -> [u8; 32] {
+pub(crate) fn encode_record(r: &RawRecord) -> [u8; 32] {
     let mut buf = [0u8; 32];
     buf[0] = r.kind;
     buf[1] = r.depth;
@@ -55,7 +57,7 @@ fn encode_record(r: &RawRecord) -> [u8; 32] {
     buf
 }
 
-fn encode_gap(start_seq: u64, end_seq: u64, is_export: bool) -> [u8; 32] {
+pub(crate) fn encode_gap(start_seq: u64, end_seq: u64, is_export: bool) -> [u8; 32] {
     let mut buf = [0u8; 32];
     buf[0] = KIND_GAP;
     if is_export {
@@ -83,20 +85,37 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     // 1. Structural parse of the source capture using the reader.
     let cap = crate::reader::read(bytes).map_err(|_| ExportError::Malformed("source capture malformed".into()))?;
 
+    // The ordinary export keeps its historical behaviour: no preparation or output cap.
+    prepare(bytes, &cap, range, usize::MAX, usize::MAX)?.render()
+}
+
+/// Bounded frame-export preparation from an already accepted immutable source.
+/// `cap` must be the reader result for exactly `bytes`. This entry point avoids
+/// reparsing an entire live session. The raw CRC walk still checks every chunk.
+/// The caller must reserve output/reparse workspace before calling `render`.
+/// Preparation is capped at [`EXPORT_PREPARATION_BYTES`] (conservative accounting, not RSS); the
+/// output at `limit` bytes. Unchanged chunks are borrowed from `bytes`, never copied.
+pub fn prepare_export_bytes<'a>(bytes: &'a [u8], cap: &Capture, range: RangeInclusive<u64>, limit: usize) -> Result<PreparedExport<'a>, ExportError> {
+    prepare(bytes, cap, range, limit, EXPORT_PREPARATION_BYTES)
+}
+
+fn prepare<'a>(bytes: &'a [u8], cap: &Capture, range: RangeInclusive<u64>, limit: usize, prep_limit: usize) -> Result<PreparedExport<'a>, ExportError> {
+    let mut prep = Preparation { used: 0, limit: prep_limit };
     if cap.export.is_some() {
         return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));
     }
 
     // 2. Collect all present frames and verify the requested range.
+    // Only the requested frame numbers need membership storage.
     let mut present_frames = BTreeSet::new();
     if let Some(auto) = &cap.auto {
         for cov in &auto.frames {
-            present_frames.insert(cov.frame);
+            if range.contains(&cov.frame) { prep.charge(128)?; present_frames.insert(cov.frame); }
         }
     }
     for lane in cap.lanes.values() {
         for fr in &lane.frames {
-            present_frames.insert(fr.id);
+            if range.contains(&fr.id) { prep.charge(128)?; present_frames.insert(fr.id); }
         }
     }
 
@@ -107,12 +126,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     }
 
     // 3. Negotiated op width from AUTO_CONFIG if present.
-    let op_width = cap
-        .auto
-        .as_ref()
-        .and_then(|a| a.config.as_ref())
-        .and_then(|c| c.attached())
-        .map_or(OP_BYTES, |att| att.op_width()) as usize;
+    let attached = cap.auto.as_ref().and_then(|a| a.config.as_ref()).and_then(|c| c.attached());
+    let op_width = attached.map_or(OP_BYTES, |att| att.op_width()) as usize;
+    // a report-ring source (2047/11): the export accounts for the RING generations it keeps
+    let ringed = attached.is_some_and(|att| att.ringed());
 
     // 4. Determine frame owner lane and time bounds.
     let (&owner_inc, owner_lane) = cap
@@ -165,6 +182,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             (left, right)
         };
         if crosses_left || crosses_right {
+            prep.charge(128)?;
             clipped_span_ids.insert((span.incarnation, span.span_id));
         }
     }
@@ -176,6 +194,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         for span in &cap.spans {
             if !clipped_span_ids.contains(&(span.incarnation, span.span_id)) {
                 if clipped_span_ids.contains(&(span.incarnation, span.parent)) {
+                    prep.charge(128)?;
                     clipped_span_ids.insert((span.incarnation, span.span_id));
                     changed = true;
                 }
@@ -188,6 +207,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     let mut clipped_record_seqs: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
     for span in &cap.spans {
         if clipped_span_ids.contains(&(span.incarnation, span.span_id)) {
+            prep.charge(512)?;
             let set = clipped_record_seqs.entry(span.incarnation).or_default();
             set.insert(span.begin_seq);
             set.insert(span.begin_seq + 1);
@@ -197,49 +217,11 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         }
     }
 
-    // 6. Linear walk to parse raw chunks from bytes.
-    let mut raw_chunks = Vec::new();
-    let mut pos = 16;
-    while pos < bytes.len() {
-        if bytes.len() - pos < 20 {
-            return Err(ExportError::Malformed("truncated chunk header".into()));
-        }
-        let ty = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
-        if ty == CHUNK_EXPORT {
-            return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));
-        }
-        let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
-        if bytes.len() - pos < 16 + len + 4 {
-            return Err(ExportError::Malformed("truncated chunk payload".into()));
-        }
-        let payload = &bytes[pos + 16..pos + 16 + len];
-        let file_crc =
-            u32::from_le_bytes(bytes[pos + 16 + len..pos + 20 + len].try_into().unwrap());
-        let computed_crc = crc32(&bytes[pos..pos + 16 + len]);
-        if file_crc != computed_crc {
-            return Err(ExportError::Malformed("chunk CRC mismatch".into()));
-        }
-        raw_chunks.push(RawChunk { ty, payload });
-        pos += 20 + len;
-    }
-
-    // Collect all raw records per lane from CHUNK_RECORDS
-    let mut raw_lane_records: BTreeMap<u32, Vec<RawRecord>> = BTreeMap::new();
-    for chunk in &raw_chunks {
-        if chunk.ty == CHUNK_RECORDS && chunk.payload.len() >= 8 {
-            let inc = u32::from_le_bytes(chunk.payload[0..4].try_into().unwrap());
-            let n = u32::from_le_bytes(chunk.payload[4..8].try_into().unwrap()) as usize;
-            for i in 0..n {
-                let off = 8 + i * RECORD_LEN;
-                if off + RECORD_LEN <= chunk.payload.len() {
-                    let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
-                    raw_lane_records.entry(inc).or_default().push(rec);
-                }
-            }
-        }
-    }
+    // Structural/CRC validation without allocating one entry per source chunk.
+    let raw_chunks = RawChunks::checked(bytes)?;
 
     // Filter records per lane and build per-lane export table
+    prep.charge(cap.lanes.len().saturating_mul(512))?;
     let mut export_lanes: BTreeMap<u32, ExportLane> = BTreeMap::new();
     let mut kept_record_keys: BTreeSet<(u32, u64)> = BTreeSet::new();
     let mut records_kept_total = 0u64;
@@ -247,14 +229,19 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
 
     for (&inc, lane) in &cap.lanes {
         let is_owner = lane.is_frame_owner();
-        let all_recs = raw_lane_records.get(&inc).map(|v| v.as_slice()).unwrap_or(&[]);
+        let all_recs = raw_chunks.clone().filter(move |c| c.ty == CHUNK_RECORDS && c.payload.len() >= 8 && u32::from_le_bytes(c.payload[..4].try_into().unwrap()) == inc)
+            .flat_map(|c| {
+                // Exactly the declared count, as far as it fits (the former per-lane vector rule).
+                let n = u32::from_le_bytes(c.payload[4..8].try_into().unwrap()) as usize;
+                c.payload[8..].chunks_exact(RECORD_LEN).take(n).map(RawRecord::decode)
+            });
 
         let mut worker_window_seq_range: Option<(u64, u64)> = None;
         if !is_owner {
             let mut w_last_tb = None;
             let mut min_seq = None;
             let mut max_seq = None;
-            for rec in all_recs {
+            for rec in all_recs.clone() {
                 let tb = match rec.kind {
                     KIND_BEGIN => {
                         w_last_tb = Some(rec.b);
@@ -282,7 +269,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         let mut kept_records = Vec::new();
         let mut last_begin_tb: Option<u64> = None;
 
-        for rec in all_recs {
+        for rec in all_recs.clone() {
             let rec_tb = match rec.kind {
                 KIND_BEGIN => {
                     last_begin_tb = Some(rec.b);
@@ -329,7 +316,8 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                 .map_or(false, |set| set.contains(&rec.seq));
 
             if in_window && !is_clipped {
-                kept_records.push(*rec);
+                prep.charge(192)?;
+                kept_records.push(rec);
                 kept_record_keys.insert((inc, rec.seq));
             }
         }
@@ -391,8 +379,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
     let mut ops_dropped = 0u64;
     let mut events_kept = 0u64;
     let mut events_dropped = 0u64;
+    let mut ring = ExportRing { first_generation: 0, last_generation: 0, generations: 0, records_kept: 0,
+        records_dropped: 0, source_last_generation: 0 };
 
-    for chunk in &raw_chunks {
+    for chunk in raw_chunks.clone() {
         match chunk.ty {
             CHUNK_AUTO_OPS if chunk.payload.len() >= 16 => {
                 let count = u32::from_le_bytes(chunk.payload[8..12].try_into().unwrap()) as usize;
@@ -427,6 +417,24 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                             ops_kept += 1;
                         } else {
                             ops_dropped += 1;
+                        }
+                        // RING records: a block shares one frame token, so a generation is kept or dropped whole
+                        if ringed && flags & OP_RING != 0 && actual_width == op_width {
+                            let generation =
+                                u32::from_le_bytes(chunk.payload[off + 160..off + 164].try_into().unwrap());
+                            ring.source_last_generation = ring.source_last_generation.max(generation);
+                            if has_token || has_build {
+                                if ring.records_kept == 0 {
+                                    ring.first_generation = generation;
+                                }
+                                if ring.records_kept == 0 || generation != ring.last_generation {
+                                    ring.generations += 1;
+                                }
+                                ring.last_generation = generation;
+                                ring.records_kept += 1;
+                            } else {
+                                ring.records_dropped += 1;
+                            }
                         }
                     }
                 }
@@ -467,10 +475,10 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
 
     // Build the 112-byte EXPORT header + per-lane 40-byte entries
     let lane_count = export_lanes.len();
-    let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN;
+    let total_export_len = EXPORT_HEADER_LEN + lane_count * EXPORT_LANE_ENTRY_LEN + if ringed { EXPORT_RING_LEN } else { 0 };
     let mut export_payload = Vec::with_capacity(total_export_len);
 
-    let flags = if to_end_of_run { EXPORT_FLAG_TO_END } else { 0 };
+    let flags = if to_end_of_run { EXPORT_FLAG_TO_END } else { 0 } | if ringed { EXPORT_FLAG_RING } else { 0 };
     export_payload.extend_from_slice(&EXPORT_SCHEMA.to_le_bytes()); // schema: u16
     export_payload.extend_from_slice(&flags.to_le_bytes());         // flags: u16
     export_payload.extend_from_slice(&crc32(bytes).to_le_bytes()); // source_crc: u32
@@ -497,27 +505,53 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
         export_payload.extend_from_slice(&el.kept.to_le_bytes());
         export_payload.extend_from_slice(&el.dropped_by_export.to_le_bytes());
     }
+    if ringed {
+        export_payload.extend_from_slice(&ring.first_generation.to_le_bytes());
+        export_payload.extend_from_slice(&ring.last_generation.to_le_bytes());
+        export_payload.extend_from_slice(&ring.generations.to_le_bytes());
+        export_payload.extend_from_slice(&ring.records_kept.to_le_bytes());
+        export_payload.extend_from_slice(&ring.records_dropped.to_le_bytes());
+        export_payload.extend_from_slice(&ring.source_last_generation.to_le_bytes());
+        export_payload.extend_from_slice(&0u32.to_le_bytes()); // reserved: u32
+    }
 
     // 7. Pass 2: Filter and serialize chunks.
     // Placement rule: EXPORT is emitted strictly right after HEADER/CLOCKS (and PROFILE if present).
-    let mut emitted_chunks: Vec<(u32, Vec<u8>)> = Vec::new();
+    let mut emitted_chunks = Pieces::new(limit, prep);
     let mut prev_emitted_seq: BTreeMap<u32, u64> = BTreeMap::new();
+    // RSX frame captures (bit 10): CONFIG always; a capture's BEGIN, DRAWS and END only when its frame is exported
+    let mut rsxf_keep = false;
 
-    for chunk in &raw_chunks {
+    for chunk in raw_chunks.clone() {
         match chunk.ty {
+            crate::rsx_frame::CHUNK_BEGIN if chunk.payload.len() >= 24 => {
+                let frame = u64::from_le_bytes(chunk.payload[16..24].try_into().unwrap());
+                rsxf_keep = range.contains(&frame);
+                if rsxf_keep {
+                    emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
+                }
+            }
+            crate::rsx_frame::CHUNK_DRAWS | crate::rsx_frame::CHUNK_END => {
+                if rsxf_keep {
+                    emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
+                }
+                if chunk.ty == crate::rsx_frame::CHUNK_END {
+                    rsxf_keep = false;
+                }
+            }
             CHUNK_HEADER => {
-                emitted_chunks.push((CHUNK_HEADER, chunk.payload.to_vec()));
+                emitted_chunks.push((CHUNK_HEADER, Cow::Borrowed(chunk.payload)))?;
             }
             CHUNK_CLOCKS => {
-                emitted_chunks.push((CHUNK_CLOCKS, chunk.payload.to_vec()));
+                emitted_chunks.push((CHUNK_CLOCKS, Cow::Borrowed(chunk.payload)))?;
                 if !cap.profile_flag {
-                    emitted_chunks.push((CHUNK_EXPORT, export_payload.clone()));
+                    emitted_chunks.push((CHUNK_EXPORT, Cow::Owned(export_payload.clone())))?;
                 }
             }
             crate::profile::CHUNK_PROFILE => {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
                 if cap.profile_flag {
-                    emitted_chunks.push((CHUNK_EXPORT, export_payload.clone()));
+                    emitted_chunks.push((CHUNK_EXPORT, Cow::Owned(export_payload.clone())))?;
                 }
             }
 
@@ -526,20 +560,20 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
             | crate::func_paths::CHUNK_FUNC_CONFIG | crate::counters::CHUNK_COUNTERS
             | crate::source_checkpoints::CHUNK_ADMISSION | crate::source_checkpoints::CHUNK_SOURCE_SEAL
             | crate::fifo::CHUNK_FIFO_CONFIG | crate::auto_rsx::CHUNK_AUTO_CONFIG | crate::auto_rsx::CHUNK_AUTO_CLOCK => {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
             }
 
             // Domain extension declarations (types 8..=18)
             t if (crate::ext::CHUNK_DOMAIN..=crate::ext::CHUNK_DOMAIN_FINAL).contains(&t)
                 || t == crate::ext::CHUNK_SPU_ORDER =>
             {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
             }
 
             CHUNK_AUTO_COVERAGE if chunk.payload.len() >= 24 => {
                 let frame = u64::from_le_bytes(chunk.payload[16..24].try_into().unwrap());
                 if range.contains(&frame) {
-                    emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                    emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
                 }
             }
 
@@ -575,6 +609,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                         };
 
                         if has_token || has_build {
+                            emitted_chunks.charge(actual_width)?;
                             kept_ops.extend_from_slice(&chunk.payload[off..off + actual_width]);
                         }
                     }
@@ -589,20 +624,20 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     new_payload.extend_from_slice(&new_count.to_le_bytes());
                     new_payload.extend_from_slice(&(actual_width as u32).to_le_bytes());
                     new_payload.extend_from_slice(&kept_ops);
-                    emitted_chunks.push((CHUNK_AUTO_OPS, new_payload));
+                    emitted_chunks.push((CHUNK_AUTO_OPS, Cow::Owned(new_payload)))?;
                 }
             }
 
             // Keep STATUS chunks as written! (Evidence preservation)
             CHUNK_AUTO_STATUS => {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
             }
 
             CHUNK_FIFO_STATUS => {
                 if chunk.payload.len() >= 4 {
                     let flags = u16::from_le_bytes(chunk.payload[2..4].try_into().unwrap());
                     if flags & crate::fifo::ST_FINAL != 0 {
-                        emitted_chunks.push((CHUNK_FIFO_STATUS, chunk.payload.to_vec()));
+                        emitted_chunks.push((CHUNK_FIFO_STATUS, Cow::Borrowed(chunk.payload)))?;
                     }
                 }
             }
@@ -623,6 +658,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                         let frame_id =
                             u64::from_le_bytes(chunk.payload[off + 48..off + 56].try_into().unwrap());
                         if flags & EV_TOKEN_PRESENT != 0 && range.contains(&frame_id) {
+                            emitted_chunks.charge(actual_stride)?;
                             kept_events.extend_from_slice(&chunk.payload[off..off + actual_stride]);
                         }
                     }
@@ -637,7 +673,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     new_payload.extend_from_slice(&new_count.to_le_bytes());
                     new_payload.extend_from_slice(&0u32.to_le_bytes()); // z1 (reserved)
                     new_payload.extend_from_slice(&kept_events);
-                    emitted_chunks.push((CHUNK_FIFO_EVENTS, new_payload));
+                    emitted_chunks.push((CHUNK_FIFO_EVENTS, Cow::Owned(new_payload)))?;
                 }
             }
 
@@ -650,6 +686,7 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     if off + RECORD_LEN <= chunk.payload.len() {
                         let rec = RawRecord::decode(&chunk.payload[off..off + RECORD_LEN]);
                         if kept_record_keys.contains(&(inc, rec.seq)) {
+                            emitted_chunks.charge(2 * RECORD_LEN)?;
                             let mut rec_to_emit = rec;
                             if let Some(&prev) = prev_emitted_seq.get(&inc) {
                                 if rec.seq > prev + 1 {
@@ -679,45 +716,91 @@ pub fn export_bytes(bytes: &[u8], range: RangeInclusive<u64>) -> Result<Vec<u8>,
                     payload.extend_from_slice(&inc.to_le_bytes());
                     payload.extend_from_slice(&new_count.to_le_bytes());
                     payload.extend_from_slice(&chunk_out);
-                    emitted_chunks.push((CHUNK_RECORDS, payload));
+                    emitted_chunks.push((CHUNK_RECORDS, Cow::Owned(payload)))?;
                 }
             }
 
             // Keep RETIRED and TRAILER as written by the original writer!
             CHUNK_RETIRED | CHUNK_TRAILER => {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
             }
 
             _ => {
-                emitted_chunks.push((chunk.ty, chunk.payload.to_vec()));
+                emitted_chunks.push((chunk.ty, Cow::Borrowed(chunk.payload)))?;
             }
         }
     }
 
-    // 8. Re-sequence chunks and serialize with CRCs.
-    let mut out = Vec::new();
-    out.extend_from_slice(&bytes[0..16]); // Header preamble (magic, versions, flags)
+    Ok(PreparedExport { preamble: &bytes[..16], pieces: emitted_chunks })
+}
 
-    for (seq, (ty, payload)) in emitted_chunks.iter().enumerate() {
-        let chunk_seq = seq as u64;
-        let len = payload.len() as u32;
-        let mut chunk_bytes = Vec::with_capacity(16 + payload.len() + 4);
-        chunk_bytes.extend_from_slice(&ty.to_le_bytes());
-        chunk_bytes.extend_from_slice(&len.to_le_bytes());
-        chunk_bytes.extend_from_slice(&chunk_seq.to_le_bytes());
-        chunk_bytes.extend_from_slice(payload);
-
-        let crc = crc32(&chunk_bytes);
-        chunk_bytes.extend_from_slice(&crc.to_le_bytes());
-
-        out.extend_from_slice(&chunk_bytes);
+/// A bounded selection recipe, borrowing unchanged chunks from the source.
+pub struct PreparedExport<'a> { preamble: &'a [u8], pieces: Pieces<'a> }
+impl PreparedExport<'_> {
+    pub fn output_bytes(&self) -> usize { self.pieces.bytes }
+    pub fn render(&self) -> Result<Vec<u8>, ExportError> {
+        let mut out = Vec::with_capacity(self.output_bytes());
+        out.extend_from_slice(self.preamble);
+        for (seq, (ty, payload)) in self.pieces.chunks.iter().enumerate() {
+            let begin = out.len();
+            out.extend_from_slice(&ty.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(seq as u64).to_le_bytes());
+            out.extend_from_slice(payload);
+            let crc = crc32(&out[begin..]);
+            out.extend_from_slice(&crc.to_le_bytes());
+        }
+        crate::reader::read(&out).map_err(|e| ExportError::Malformed(format!("exported capture failed integrity check: {e}")))?;
+        Ok(out)
     }
-
-    // 9. Integrity self-validation before reporting success.
-    crate::reader::read(&out)
-        .map_err(|e| ExportError::Malformed(format!("exported capture failed integrity check: {e}")))?;
-
-    Ok(out)
+}
+/// Bounded preparation (separate from the caller's output/reopen budget).
+pub const EXPORT_PREPARATION_BYTES: usize = 64 << 20;
+struct Preparation { used: usize, limit: usize }
+impl Preparation {
+    fn charge(&mut self, bytes: usize) -> Result<(), ExportError> {
+        self.used = self.used.checked_add(bytes).ok_or(ExportError::Refused("export preparation overflow"))?;
+        if self.used > self.limit { return Err(ExportError::Refused("frame dependencies exceed export preparation budget")); }
+        Ok(())
+    }
+}
+struct Pieces<'a> { chunks: Vec<(u32, Cow<'a, [u8]>)>, bytes: usize, limit: usize, prep: Preparation }
+impl<'a> Pieces<'a> {
+    fn new(limit: usize, prep: Preparation) -> Self { Self { chunks:Vec::new(), bytes:16, limit, prep } }
+    fn charge(&mut self, n: usize) -> Result<(), ExportError> { self.prep.charge(n) }
+    fn push(&mut self, c:(u32,Cow<'a,[u8]>)) -> Result<(),ExportError> {
+        let n=c.1.len().checked_add(20).and_then(|n|n.checked_add(self.bytes)).ok_or(ExportError::Refused("export byte size overflow"))?;
+        if n>self.limit {return Err(ExportError::Refused("selected frame support exceeds output byte cap"));}
+        self.charge(128 + if matches!(&c.1,Cow::Owned(_)){c.1.len()}else{0})?;
+        self.bytes=n; self.chunks.push(c); Ok(())
+    }
+}
+#[derive(Clone)]
+struct RawChunks<'a> { bytes: &'a [u8], pos: usize }
+impl<'a> RawChunks<'a> {
+    fn checked(bytes: &'a [u8]) -> Result<Self,ExportError> {
+        if bytes.len()<16 {return Err(ExportError::Malformed("truncated preamble".into()));}
+        let mut pos=16usize;
+        while pos<bytes.len() {
+            if bytes.len()-pos<20 {return Err(ExportError::Malformed("truncated chunk header".into()));}
+            let ty=u32::from_le_bytes(bytes[pos..pos+4].try_into().unwrap());
+            if ty==CHUNK_EXPORT {return Err(ExportError::Refused("re-exporting an already-exported capture is not supported"));}
+            let n=u32::from_le_bytes(bytes[pos+4..pos+8].try_into().unwrap()) as usize;
+            if n>bytes.len()-pos-20 {return Err(ExportError::Malformed("truncated chunk payload".into()));}
+            if crc32(&bytes[pos..pos+16+n])!=u32::from_le_bytes(bytes[pos+16+n..pos+20+n].try_into().unwrap()) {return Err(ExportError::Malformed("chunk CRC mismatch".into()));}
+            pos+=20+n;
+        }
+        Ok(Self {bytes,pos:16})
+    }
+}
+impl<'a> Iterator for RawChunks<'a> {
+    type Item=RawChunk<'a>;
+    fn next(&mut self)->Option<Self::Item> {
+        if self.pos==self.bytes.len(){return None;}
+        let p=self.pos; let n=u32::from_le_bytes(self.bytes[p+4..p+8].try_into().unwrap()) as usize;
+        self.pos+=20+n;
+        Some(RawChunk {ty:u32::from_le_bytes(self.bytes[p..p+4].try_into().unwrap()),payload:&self.bytes[p+16..p+16+n]})
+    }
 }
 
 /// Export one frame or a range of frames from an input capture file to an output capture file.
@@ -760,7 +843,18 @@ pub fn export_capture_no_clobber<P: AsRef<Path>, Q: AsRef<Path>>(
     range: RangeInclusive<u64>,
 ) -> Result<(), ExportError> {
     let bytes = std::fs::read(in_path.as_ref()).map_err(ExportError::Io)?;
-    let exported = export_bytes(&bytes, range)?;
+    export_bytes_no_clobber(&bytes, out_path, range)
+}
+
+/// Export an immutable capture snapshot without replacing an existing destination.
+/// Live consumers pass exactly the reader-accepted prefix, not later received bytes.
+/// Validation finishes before any output file is created.
+pub fn export_bytes_no_clobber<Q: AsRef<Path>>(
+    bytes: &[u8],
+    out_path: Q,
+    range: RangeInclusive<u64>,
+) -> Result<(), ExportError> {
+    let exported = export_bytes(bytes, range)?;
     publish_no_clobber(&exported, out_path.as_ref(), || {})
 }
 
@@ -769,6 +863,13 @@ fn already_exists(out: &Path) -> ExportError {
         std::io::ErrorKind::AlreadyExists,
         format!("{} already exists; nothing was written", out.display()),
     ))
+}
+
+/// Publish a structurally valid prebuilt projection, without replacing a destination.
+/// Snapshot callers additionally check their semantic freeze/reopen identity before this call.
+pub fn publish_projection(bytes: &[u8], out: &Path) -> Result<(), ExportError> {
+    crate::reader::read(bytes).map_err(|e|ExportError::Malformed(e.to_string()))?;
+    publish_no_clobber(bytes,out,||{})
 }
 
 /// Writes `bytes` to `out` without ever replacing an existing file.  `before_publish` runs after the temporary is

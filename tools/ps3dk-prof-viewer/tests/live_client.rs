@@ -73,6 +73,7 @@ fn capture(zones: u64) -> Vec<u8> {
 enum Step {
     Send(Vec<u8>),
     Sleep(u64),
+    Wait(std::sync::mpsc::Receiver<()>),
     /// Keep the connection open this long, then close.
     Hold(u64),
     /// Close with a TCP reset instead of a clean FIN.
@@ -139,6 +140,7 @@ fn mock(script: Vec<Step>) -> (u16, Arc<AtomicU64>) {
                     }
                 }
                 Step::Sleep(ms) => std::thread::sleep(Duration::from_millis(ms)),
+                Step::Wait(go) => { if go.recv_timeout(Duration::from_secs(15)).is_err() { return; } }
                 Step::Hold(ms) => std::thread::sleep(Duration::from_millis(ms)),
                 #[cfg(target_os = "linux")]
                 Step::Reset => {
@@ -923,4 +925,165 @@ fn every_failed_step_of_an_early_publish_keeps_the_session_incomplete_and_strict
         assert!(complete_files(&dir).is_empty(), "{step:?}: {:?}", files(&dir));
         assert_eq!(v.doc.unwrap().verdict().tone, VerdictTone::Incomplete, "{step:?}: strict document");
     }
+}
+
+// Save actions must read the live document, not its display path or mutable disk copy.
+fn export_app(port: u16, dir: &Path) -> ps3dk_prof_viewer::app::App {
+    use ps3dk_prof_viewer::app::{App, ConnectForm};
+    let mut app = App::new(None);
+    app.start_live(&ConnectForm {
+        host: "127.0.0.1".into(), port: port.to_string(),
+        dir: dir.display().to_string(), error: None,
+    }).unwrap();
+    app
+}
+
+fn poll_app_until(app: &mut ps3dk_prof_viewer::app::App, ready: impl Fn(&ps3dk_prof_viewer::app::App) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        app.poll();
+        if ready(app) { return; }
+        assert!(Instant::now() < deadline, "live app did not reach the requested state");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn window_capture() -> Vec<u8> {
+    include_bytes!("../../ps3dk-prof/tests/fixtures/auto/windows.prof").to_vec()
+}
+
+fn exported_path(base: &Path, suffix: &str) -> PathBuf {
+    base.with_file_name(format!("{}.{suffix}.prof", base.file_stem().unwrap().to_str().unwrap()))
+}
+
+#[test]
+fn live_save_uses_received_data_after_the_published_file_is_removed() {
+    let bytes = window_capture();
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&bytes, 65536).into_iter().map(Step::Send));
+    script.push(Step::Send(end_frame(bytes.len() as u64)));
+    let (port, _) = mock(script);
+    let dir = out_dir("save-live-finished");
+    let mut app = export_app(port, &dir);
+    poll_app_until(&mut app, |a| a.live.as_ref().unwrap().client.finished());
+    let view = app.live.as_ref().unwrap().client.view();
+    let Some(Outcome::Published(published)) = view.outcome else { panic!("{:?}", view.outcome); };
+    assert_eq!(app.doc.as_ref().unwrap().path, PathBuf::from("live capture"));
+    std::fs::remove_file(&published.path).unwrap();
+    app.save_frame_range(3, 5);
+    assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+    let range = exported_path(&published.path, "3..5");
+    let saved = std::fs::read(&range).unwrap();
+    let cap = ps3dk_prof::reader::read(&saved).unwrap();
+    let export = cap.export.as_ref().unwrap();
+    assert_eq!((export.frame_first, export.frame_last, export.source_size), (3, 5, bytes.len() as u64));
+    assert_eq!(saved, ps3dk_prof::export_bytes(&bytes, 3..=5).unwrap());
+    // Replacing the disk source must not replace the document being exported.
+    std::fs::write(&published.path, b"not the live capture").unwrap();
+    app.save_window(2);
+    assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+    let window = exported_path(&published.path, "window_2");
+    let saved_window = std::fs::read(&window).unwrap();
+    assert!(ps3dk_prof::reader::read(&saved_window).is_ok());
+    app.save_window(2);
+    assert!(matches!(&app.save_result, Some((true, s)) if s.contains("already exists")));
+    assert_eq!(std::fs::read(&window).unwrap(), saved_window);
+    assert_eq!(std::fs::read(&published.path).unwrap(), b"not the live capture");
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn live_save_cuts_the_displayed_prefix_and_survives_disconnect() {
+    let bytes = window_capture();
+    let torn = &bytes[..bytes.len() - 3];
+    let accepted = ps3dk_prof::load_prefix(torn).unwrap().prefix.unwrap().cut;
+    assert!(accepted < torn.len(), "fixture has a torn final chunk");
+    let (go, gate) = std::sync::mpsc::channel();
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(torn, 65536).into_iter().map(Step::Send));
+    script.push(Step::Wait(gate));
+    let mut rest = (torn.len() as u64).to_le_bytes().to_vec();
+    // One more byte still leaves the final chunk torn, so Disconnect must publish the accepted prefix.
+    rest.extend_from_slice(&bytes[torn.len()..torn.len() + 1]);
+    script.push(Step::Send(wire(T_DATA, &rest)));
+    script.push(Step::Hold(500));
+    let (port, _) = mock(script);
+    let dir = out_dir("save-live-prefix");
+    let mut app = export_app(port, &dir);
+    poll_app_until(&mut app, |a| a.doc.as_ref().is_some_and(|d| d.size == torn.len()));
+    let hello = app.live.as_ref().unwrap().client.view().hello.unwrap();
+    let base = dir.join(format!("{}.prof", local_stem(&hello)));
+    app.save_frame_range(3, 5);
+    assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+    let saved = std::fs::read(exported_path(&base, "3..5")).unwrap();
+    let cap = ps3dk_prof::reader::read(&saved).unwrap();
+    assert_eq!(cap.export.unwrap().source_size, accepted as u64);
+    assert_eq!(saved, ps3dk_prof::export_bytes(&torn[..accepted], 3..=5).unwrap());
+    let window = exported_path(&base, "window_2");
+    app.save_live_window_to(2, window.clone());
+    // The receiver continues after Save. Without polling the App its document stays at the old prefix.
+    go.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.live.as_ref().unwrap().client.view().received != (torn.len() + 1) as u64 {
+        assert!(Instant::now() < deadline, "Save blocked the receiver");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.wait_save();
+    assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+    let cap = ps3dk_prof::reader::read(&std::fs::read(&window).unwrap()).unwrap();
+    assert_eq!(cap.export.unwrap().source_size, accepted as u64, "not the newer received bytes");
+    std::fs::remove_file(&window).unwrap();
+    app.live.as_ref().unwrap().client.disconnect();
+    poll_app_until(&mut app, |a| a.live.as_ref().unwrap().client.finished());
+    app.save_live_window_to(2, window.clone());
+    app.wait_save();
+    assert!(matches!(&app.save_result, Some((false, _))), "{:?}", app.save_result);
+    assert!(ps3dk_prof::reader::read(&std::fs::read(&window).unwrap()).is_ok());
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn live_save_refuses_a_failed_session_without_creating_an_export() {
+    let bytes = window_capture();
+    let mut script = vec![Step::Send(hello_frame())];
+    script.extend(data_frames(&bytes, 65536).into_iter().map(Step::Send));
+    // A complete-looking file with a rejected END must not be laundered by export.
+    script.push(Step::Send(end_frame(bytes.len() as u64 + 1)));
+    let (port, _) = mock(script);
+    let dir = out_dir("save-live-rejected");
+    let mut app = export_app(port, &dir);
+    poll_app_until(&mut app, |a| a.live.as_ref().unwrap().client.finished());
+    assert!(matches!(app.live.as_ref().unwrap().client.view().outcome, Some(Outcome::Incomplete { .. })));
+    let before = files(&dir);
+    app.save_frame_range(3, 5);
+    assert!(matches!(&app.save_result, Some((true, s)) if s.contains("live session failed validation")), "{:?}", app.save_result);
+    app.save_window(2);
+    assert!(matches!(&app.save_result, Some((true, s)) if s.contains("live session failed validation")), "{:?}", app.save_result);
+    assert_eq!(files(&dir), before, "a rejected session creates no export");
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn rsx_save_is_stable_while_receiving_and_after_disconnect_and_never_clobbers(){
+    let bytes=include_bytes!("../../ps3dk-prof/tests/fixtures/rsx_frame/sample.prof");
+    let torn=&bytes[..bytes.len()-3];let accepted=ps3dk_prof::load_prefix(torn).unwrap().prefix.unwrap().cut;
+    let(go,gate)=std::sync::mpsc::channel();let mut script=vec![Step::Send(hello_frame())];
+    script.extend(data_frames(torn,65536).into_iter().map(Step::Send));script.push(Step::Wait(gate));
+    let mut rest=(torn.len()as u64).to_le_bytes().to_vec();rest.extend_from_slice(&bytes[torn.len()..torn.len()+1]);script.push(Step::Send(wire(T_DATA,&rest)));script.push(Step::Hold(500));
+    let(port,_)=mock(script);let dir=out_dir("rsxf-live-save");let mut app=export_app(port,&dir);
+    poll_app_until(&mut app,|a|a.doc.as_ref().is_some_and(|d|d.size==torn.len()));
+    let f=ps3dk_prof::rsx_frame::frames(&app.doc.as_ref().unwrap().analysis().unwrap().capture).remove(0);
+    let path=dir.join("frame.prof");app.save_rsx_frame_to(f.id,path.clone());go.send(()).unwrap();
+    let deadline=Instant::now()+Duration::from_secs(5);while app.live.as_ref().unwrap().client.view().received!=(torn.len()+1)as u64{assert!(Instant::now()<deadline,"receiver blocked by Save");std::thread::sleep(Duration::from_millis(5));}
+    app.wait_save();assert!(matches!(&app.save_result,Some((false,_))),"{:?}",app.save_result);
+    let saved=std::fs::read(&path).unwrap();let cap=ps3dk_prof::reader::read(&saved).unwrap();assert_eq!(cap.export.unwrap().source_size,accepted as u64);
+    assert_eq!(ps3dk_prof::rsx_frame::frames(&ps3dk_prof::reader::read(&saved).unwrap())[0],f);
+    app.save_rsx_frame_to(f.id,path.clone());assert!(matches!(&app.save_result,Some((false,s))if s.contains("already saved")));
+    let other=dir.join("existing.prof");std::fs::write(&other,b"untouched").unwrap();app.save_rsx_frame_to(f.id,other.clone());app.wait_save();assert!(matches!(&app.save_result,Some((true,_))));assert_eq!(std::fs::read(other).unwrap(),b"untouched");
+    app.live.as_ref().unwrap().client.disconnect();poll_app_until(&mut app,|a|a.live.as_ref().unwrap().client.finished());
+    app.save_rsx_frame_to(f.id,dir.join("disconnected.prof"));app.wait_save();assert!(matches!(&app.save_result,Some((false,_))),"{:?}",app.save_result);
+    drop(app);std::fs::remove_dir_all(dir).unwrap();
 }

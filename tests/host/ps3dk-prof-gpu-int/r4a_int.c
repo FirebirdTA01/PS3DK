@@ -754,8 +754,19 @@ static int c_finish_pending(void)
           "its report and label are not written yet");
     atomic_store(&g_xgo, 1);
     wait_exec_idle();
-    CHECK(exec_quiesced() && DM_LD32(&BK[0].lab[64]) == 1 && DM_LD64(&BK[0].rep[0].timer) != PRG_POISON,
-          "after completion: quiescent, report and label written");
+    CHECK(exec_quiesced() && DM_LD32(&BK[0].lab[64]) == 1, "after completion: quiescent, label written");
+    {
+        /* the report: from the executor's own log (exec_pair writes the report, then the label, then logs). The
+         * device word itself is not evidence once the label has passed: in THREAD mode the profiler's drain thread
+         * collects a completed slot (reads its timer, emits the event) and writes the poison back for reuse, so
+         * reading rep[0] here races with that legitimate collection. The capture's single event checks the value. */
+        pthread_mutex_lock(&g_lm);
+        uint32_t nx = g_nxl[0];
+        xlog x0 = g_xl[0][0];
+        pthread_mutex_unlock(&g_lm);
+        CHECK(nx == 1 && x0.value == 1 && x0.clock != 0 && x0.clock != PRG_POISON,
+              "after completion: the executor wrote the report then the label (%u pairs, value %u)", nx, x0.value);
+    }
     CHECK(ps3dk_prof_gpu_detach(h, CTXP(0), 3000000) == 0 && ps3dk_prof_gpu_release(h, NULL) == 0,
           "detach + release only after the Finish completed");
     exec_finish();

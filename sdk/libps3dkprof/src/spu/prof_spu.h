@@ -66,7 +66,8 @@ typedef struct ps3dk_prof_spu_lane_stats {
     /* FROZEN_AT_FINAL: what the file states (counts of ACCEPTED chunks; final_written only for an accepted FINAL) */
     uint32_t final_written, fin_state;
     uint64_t next_seq, events, lost;
-    /* NOT_IN_FILE: the producer's line-B counters read after a successful join, only from lane_end */
+    /* NOT_IN_FILE: producer line-B counters read after the lane_end quiescence
+     * precondition below. The post_join names also cover completed job producers. */
     uint32_t have_post_join, post_state;
     uint64_t post_next_seq, post_older_lost, post_refused;
     uint64_t stale, cancelled, unstable;
@@ -89,11 +90,24 @@ int ps3dk_prof_spu_image_register_table(const uint8_t *build_id, uint32_t build_
 int ps3dk_prof_spu_image_register_elf(const void *elf, uint64_t size, uint32_t *image);
 /* owner_self: 1 = the calling thread's live incarnation (EINVAL if it has none), 0 = NONE.  EFULL: lane limits. */
 int ps3dk_prof_spu_lane_create(const char *name, uint32_t image, int owner_self, ps3dk_prof_spu_lane *out);
-/* After a SUCCESSFUL join of the SPU thread group that ran the lane.  timeout_us is a polling deadline only: it does
+/* The caller must establish that this producer can never touch its lane again:
+ * either SUCCESSFUL join of its SPU thread group, or (for a fresh job lane)
+ * successful writer fini, then a lane-bound post-fini completion receipt
+ * observed after job-queue completion. Failed fini or a missing/mismatched
+ * receipt does NOT permit retirement. Queue/finalize success alone is not a
+ * substitute. Never reuse one lane for another job invocation. The API trusts
+ * this precondition; it does not join a scheduler or validate an app's receipt.
+ * timeout_us is a polling deadline only: it does
  * not bound the mutex, a sink callback or an inline drain.  0 = one poll, no sleep.  OK or ESTOPPED (sealed) once
  * the slot is released; ETIMEDOUT keeps it charged (call again); ECLOCK: no monotonic clock; EINVAL: a stale handle. */
 int ps3dk_prof_spu_lane_end(uint32_t handle, uint64_t timeout_us, ps3dk_prof_spu_lane_stats *final_or_null);
 int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st);
+/* Observe published calibration answers without draining events or releasing
+ * slots. APP-mode programs may call this from a helper/poll point between frame
+ * drains. One bounded pass, no allocation or sink callback; EBUSY on contention
+ * or callback reentry, ESTOPPED after shutdown/fault. A missed observation keeps
+ * the normal drain-time upper bound; cadence is not a timing guarantee. */
+int ps3dk_prof_spu_poll_calibrations(void);
 
 #define PS3DK_PROF_INIT_EX(cfg, ext) ps3dk_prof_init_ex((cfg), (ext))
 #define PS3DK_PROF_SPU_IMAGE_REGISTER_TABLE(b, l, d, n, out) ps3dk_prof_spu_image_register_table((b), (l), (d), (n), (out))
@@ -101,6 +115,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
 #define PS3DK_PROF_SPU_LANE_CREATE(name, image, self, out) ps3dk_prof_spu_lane_create((name), (image), (self), (out))
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ps3dk_prof_spu_lane_end((h), (t), (out))
 #define PS3DK_PROF_SPU_LANE_STATS(h, st) ps3dk_prof_spu_lane_get_stats((h), (st))
+#define PS3DK_PROF_SPU_POLL_CALIBRATIONS() ps3dk_prof_spu_poll_calibrations()
 
 #else /* off build: nothing runs and no argument is evaluated */
 
@@ -112,6 +127,7 @@ int ps3dk_prof_spu_lane_get_stats(uint32_t handle, ps3dk_prof_spu_lane_stats *st
     ((void)sizeof(name), (void)sizeof(image), (void)sizeof(self), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_END(h, t, out) ((void)sizeof(h), (void)sizeof(t), (void)sizeof(out), PS3DK_PROF_ENOTSUP)
 #define PS3DK_PROF_SPU_LANE_STATS(h, st) ((void)sizeof(h), (void)sizeof(st), PS3DK_PROF_ENOTSUP)
+#define PS3DK_PROF_SPU_POLL_CALIBRATIONS() (PS3DK_PROF_ENOTSUP)
 
 #endif
 

@@ -75,8 +75,12 @@ FRAME marks and is always OPEN, so its ranges and draws are recorded but the fra
 observed before the window opened is attributed to it). Before the owner's first frame there is no frame at all:
 ranges there are refused and counted only in the run total.
 
-`ranges_refused` is a per-frame count. No capture-wide count is recorded: STATUS has none, and a range refused while
-no frame is open is counted in no frame. For a capture without a FINAL status (unsealed), `auto` prints a
+`ranges_refused` is a per-frame count. Captures from writers with the range-reason tails (CONFIG 3071/11, or 4095/11
+with the report ring) also record why: `ranges_refused_by_reason` names depth, segment_build, state, no_frame, ring,
+no_descriptor, no_pair, other_frame, no_metadata and unmatched_end per frame, and STATUS carries the capture totals by
+reason (`status.ranges_refused`, `status.ranges_refused_by_reason`; `auto` prints `AUTO ranges refused: ...`). A range
+refused while no frame is open counts in no frame, only under no_frame in the capture total. Older captures record no
+capture-wide count: STATUS has none, and their `capture_totals.ranges_refused` stays UNAVAILABLE. For a capture without a FINAL status (unsealed), `auto` prints a
 `tail not recorded` line and a `capture totals` line. In `auto --json` such a capture also carries `sealed: false`,
 `tail` and `capture_totals`, and every frame object carries `row_state`. Each capture total is `{"value": null,
 "reason": ...}` unless a STATUS was recorded. In that case `value` is the last STATUS counter and `at_least` is true.
@@ -107,8 +111,8 @@ PS3DK_PROF_AUTO_OPTIONS_SET(&o);     /* before cellGcmInit, on the thread that c
 cellGcmInit(command_size, io_size, io_address);
 ```
 
-The options are validated and copied at the call (EINVAL for options the attach would refuse; the earlier 32-byte
-struct is accepted and takes the default range reserve) and used by the intercepted `cellGcmInit` in place of the
+The options are validated and copied at the call (EINVAL for options the attach would refuse; the earlier 32- and
+36-byte structs are accepted, the 32-byte one taking the default range reserve) and used by the intercepted `cellGcmInit` in place of the
 defaults. Only an init on the same thread uses them; the first successful init consumes them, and a later call is EBUSY.
 When the init runs on another thread the defaults are used and the capture says so: `auto` prints "pre-init options
 ignored: set on a different thread than cellGcmInit" (STATUS flag 2048, `preinit_options_ignored` in `auto --json`).

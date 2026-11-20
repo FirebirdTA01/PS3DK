@@ -7,13 +7,26 @@
 
 use std::fmt;
 use std::sync::Arc;
+pub use crate::live_rsx_frame::{RsxFrameRequest,RsxFrameAck,RsxFrameState,RsxFrameEvent};
 
 pub const HDR_BYTES: usize = 8;
 pub const MAX_PAYLOAD: u32 = 65536;
 pub const T_CLIENT_HELLO: u16 = 1;
 pub const MAGIC: u32 = 0x564c_3350;
-pub const VERSION: u16 = 1;
+/// The oldest protocol version an agent serves (and the one a v1 agent speaks).
+pub const VERSION_MIN: u16 = 1;
+/// RSX frame requests. Older agents close newer hellos, so the client tries 3 -> 2 -> 1.
+pub const VERSION: u16 = 3;
 pub const T_HELLO: u16 = 2;
+/// HELLO capability bit (version 2): the agent applies capture commands.
+pub const CAP_TRIGGERS: u32 = 1;
+/// HELLO capability bit (version 3): the agent serves RSX_FRAME_REQ (sdk/libps3dkprof/src/live/live_proto.h).
+pub const CAP_RSX_FRAME: u32 = 2;
+pub const T_RSX_FRAME_REQ: u16 = 12;
+pub const T_RSX_FRAME_ACK: u16 = 13;
+pub const T_RSX_FRAME_STATE: u16 = 14;
+pub const RSXF_ACK_BYTES: u32 = 16;
+pub const RSXF_STATE_BYTES: u32 = 32;
 pub const MAX_APP: usize = 32;
 pub const MAX_BUILD_ID: usize = 512;
 pub const MAX_NAME: usize = 255;
@@ -24,17 +37,133 @@ pub const END_BYTES: u32 = 24;
 pub const T_PING: u16 = 5;
 pub const T_PONG: u16 = 6;
 pub const T_BUSY: u16 = 7;
+pub const T_CAPTURE_BEGIN: u16 = 8;
+pub const T_CAPTURE_END: u16 = 9;
+pub const T_CAPTURE_FRAMES: u16 = 10;
+pub const T_CAPTURE_ACK: u16 = 11;
+pub const MAX_WINDOW_NAME: usize = 63;
+pub const MAX_WINDOW_FRAMES: u32 = 1_000_000;
+pub const ACK_BYTES: u32 = 16;
 
 /// Bytes accumulated per session before the link is closed and labelled.
 pub const MAX_SESSION_BYTES: u64 = 256 << 20;
 
-/// The CLIENT_HELLO frame a viewer sends first.
+/// The CLIENT_HELLO frame a viewer sends first, asking for the newest version.
 pub fn client_hello() -> Vec<u8> {
+    client_hello_version(VERSION)
+}
+
+/// A CLIENT_HELLO asking for `version` (a v2 viewer asks for 1 only after a v1 agent closed its v2 hello).
+pub fn client_hello_version(version: u16) -> Vec<u8> {
     let mut f = frame_header(T_CLIENT_HELLO, 8);
     f.extend_from_slice(&MAGIC.to_le_bytes());
-    f.extend_from_slice(&VERSION.to_le_bytes());
+    f.extend_from_slice(&version.to_le_bytes());
     f.extend_from_slice(&0u16.to_le_bytes());
     f
+}
+
+/// A capture command (protocol version 2): what the viewer asks the running app to do with its capture window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// A MANUAL window named `name`, from the next frame mark until End.
+    Begin { name: String },
+    /// Ends the window this viewer opened.
+    End,
+    /// A FRAMES window of `frames` frames named `name`; it closes itself (reason COUNT).
+    Frames { name: String, frames: u32 },
+}
+
+impl Command {
+    pub fn frame_type(&self) -> u16 {
+        match self {
+            Command::Begin { .. } => T_CAPTURE_BEGIN,
+            Command::End => T_CAPTURE_END,
+            Command::Frames { .. } => T_CAPTURE_FRAMES,
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Command::Begin { name } => format!("Begin '{name}'"),
+            Command::End => "End".to_string(),
+            Command::Frames { name, frames } => format!("Capture {frames} frames '{name}'"),
+        }
+    }
+
+    /// The bounds the agent enforces (it closes the link on a violation), checked before anything is sent.
+    pub fn check(&self) -> Result<(), String> {
+        let name = match self {
+            Command::End => return Ok(()),
+            Command::Begin { name } => name,
+            Command::Frames { name, frames } => {
+                if *frames < 1 || *frames > MAX_WINDOW_FRAMES {
+                    return Err(format!("the frame count must be 1..{MAX_WINDOW_FRAMES}"));
+                }
+                name
+            }
+        };
+        if name.is_empty() || name.len() > MAX_WINDOW_NAME {
+            return Err(format!("the window name must be 1..{MAX_WINDOW_NAME} bytes"));
+        }
+        if name.contains('\0') {
+            return Err("the window name must not contain NUL".into());
+        }
+        Ok(())
+    }
+
+    /// The command frame with request id `request` (never 0).
+    pub fn encode(&self, request: u32) -> Result<Vec<u8>, String> {
+        self.check()?;
+        if request == 0 {
+            return Err("request id 0".into());
+        }
+        let mut p = request.to_le_bytes().to_vec();
+        match self {
+            Command::End => {}
+            Command::Begin { name } => {
+                p.extend_from_slice(&(name.len() as u16).to_le_bytes());
+                p.extend_from_slice(&0u16.to_le_bytes());
+                p.extend_from_slice(name.as_bytes());
+            }
+            Command::Frames { name, frames } => {
+                p.extend_from_slice(&frames.to_le_bytes());
+                p.extend_from_slice(&(name.len() as u16).to_le_bytes());
+                p.extend_from_slice(&0u16.to_le_bytes());
+                p.extend_from_slice(name.as_bytes());
+            }
+        }
+        let mut f = frame_header(self.frame_type(), p.len() as u32);
+        f.extend_from_slice(&p);
+        Ok(f)
+    }
+}
+
+/// A CAPTURE_ACK: the answer to one command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ack {
+    pub request: u32,
+    /// 0, or the `PS3DK_PROF_*` refusal (prof.h).
+    pub result: i32,
+    /// The window opened or closed; 0 when refused.
+    pub window_id: u32,
+    pub command: u16,
+}
+
+/// What a `PS3DK_PROF_*` result means for a capture command (prof.h codes; the agent and runtime choose which).
+pub fn result_text(code: i32) -> String {
+    match code {
+        0 => "done".into(),
+        -1 => "EPERM: the open window was opened by the app, not by this viewer".into(),
+        -2 => "EBUSY: a capture window is already open or about to open (one at a time)".into(),
+        -5 => "EINVAL: no window to end, or the name is not valid UTF-8".into(),
+        -12 => "ETHREAD: the frame thread is not registered with the profiler".into(),
+        -14 => "ENOTINIT: the profiler is not initialized".into(),
+        -15 => "ESTOPPED: the capture is shutting down".into(),
+        -16 => "EFULL: no room (the drainer is behind, or this run's table of viewer window names is full)".into(),
+        -17 => "ENOTSUP: this agent does not apply capture triggers".into(),
+        -19 => "ETIMEDOUT: no frame was marked within the agent's deadline; nothing changed".into(),
+        c => format!("refused with code {c}"),
+    }
 }
 
 /// A PING frame.
@@ -50,9 +179,13 @@ fn frame_header(t: u16, len: u32) -> Vec<u8> {
     f
 }
 
-/// The agent's identity, from HELLO. For display; version 1 has no resume.
+/// The agent's identity, from HELLO. For display; there is no resume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hello {
+    /// The protocol version of this session (the one CLIENT_HELLO asked for).
+    pub protocol: u16,
+    /// Version 2: LIVE_CAP_* bits (0 in version 1).
+    pub capabilities: u32,
     pub agent_version: u16,
     pub session_id: u64,
     pub app: String,
@@ -197,6 +330,15 @@ pub struct Session {
     pub received: Received,
     pub pongs: u64,
     cap: u64,
+    /// The version CLIENT_HELLO asked for: HELLO must name it.
+    asked: u16,
+    /// The one command sent and not yet answered: (request id, command type).
+    outstanding: Option<(u32, u16)>,
+    /// ACKs received and not yet taken (`take_acks`); at most one per command sent.
+    acks: Vec<Ack>,
+    rsx_outstanding: Option<u32>,
+    rsx_active: Option<(u32,u32,u8)>,
+    rsx_events: Vec<RsxFrameEvent>,
 }
 
 impl Default for Session {
@@ -212,6 +354,11 @@ impl Session {
 
     /// A session that accepts at most `cap` capture bytes.
     pub fn with_cap(cap: u64) -> Session {
+        Session::asking(cap, VERSION)
+    }
+
+    /// A session whose CLIENT_HELLO asked for `version`.
+    pub fn asking(cap: u64, version: u16) -> Session {
         Session {
             pending: Vec::new(),
             state: LinkState::Handshake,
@@ -219,8 +366,62 @@ impl Session {
             received: Received::default(),
             pongs: 0,
             cap,
+            asked: version,
+            outstanding: None,
+            acks: Vec::new(),
+            rsx_outstanding: None,
+            rsx_active: None,
+            rsx_events: Vec::new(),
         }
     }
+
+    /// The version CLIENT_HELLO asked for.
+    pub fn asked(&self) -> u16 {
+        self.asked
+    }
+
+    /// The session's protocol version once HELLO arrived.
+    pub fn protocol(&self) -> Option<u16> {
+        self.hello.as_ref().map(|h| h.protocol)
+    }
+
+    /// Records that a command frame is about to be sent; refused (nothing may be sent) unless the session is a
+    /// streaming version-2 session whose agent applies triggers and no command is outstanding.
+    pub fn expect_ack(&mut self, request: u32, command: u16) -> Result<(), String> {
+        if !matches!(self.state, LinkState::Streaming) {
+            return Err("the link is not streaming".into());
+        }
+        match &self.hello {
+            Some(h) if h.protocol >= 2 && h.capabilities & CAP_TRIGGERS != 0 => {}
+            Some(h) if h.protocol < 2 => return Err("the agent speaks live protocol 1 (no capture triggers)".into()),
+            _ => return Err("the agent does not apply capture triggers".into()),
+        }
+        if self.outstanding.is_some() {
+            return Err("a command is still waiting for its answer".into());
+        }
+        if request == 0 {
+            return Err("request id 0".into());
+        }
+        self.outstanding = Some((request, command));
+        Ok(())
+    }
+
+    /// The command sent and not yet answered.
+    pub fn outstanding(&self) -> Option<(u32, u16)> {
+        self.outstanding
+    }
+
+    /// Takes the ACKs received so far.
+    pub fn take_acks(&mut self) -> Vec<Ack> {
+        std::mem::take(&mut self.acks)
+    }
+
+    pub fn expect_rsx_frame(&mut self,request:u32)->Result<(),String>{
+        if !matches!(self.state,LinkState::Streaming)||!self.hello.as_ref().is_some_and(|h|h.protocol>=3&&h.capabilities&CAP_RSX_FRAME!=0){return Err("RSX capture unavailable on this link".into())}
+        if request==0||self.rsx_outstanding.is_some()||self.rsx_active.is_some_and(|(_,_,s)|s<3){return Err("RSX request invalid or outstanding".into())}
+        self.rsx_outstanding=Some(request);Ok(())
+    }
+    pub fn take_rsx_events(&mut self)->Vec<RsxFrameEvent>{std::mem::take(&mut self.rsx_events)}
 
     pub fn failed(&self) -> bool {
         matches!(self.state, LinkState::Failed(_))
@@ -299,7 +500,7 @@ impl Session {
                 Err(LinkError::Busy(u32::from_le_bytes(p.try_into().unwrap())))
             }
             (T_HELLO, LinkState::Handshake) => {
-                self.hello = Some(parse_hello(p)?);
+                self.hello = Some(parse_hello(p, self.asked)?);
                 self.state = LinkState::Streaming;
                 Ok(())
             }
@@ -350,6 +551,46 @@ impl Session {
                 self.pongs += 1;
                 Ok(())
             }
+            (T_CAPTURE_ACK, LinkState::Streaming) if self.protocol().is_some_and(|v| v >= 2) => {
+                if p.len() != ACK_BYTES as usize || p[14..16] != [0, 0] {
+                    return Err(LinkError::BadFrame("ACK layout".into()));
+                }
+                let ack = Ack {
+                    request: u32::from_le_bytes(p[0..4].try_into().unwrap()),
+                    result: i32::from_le_bytes(p[4..8].try_into().unwrap()),
+                    window_id: u32::from_le_bytes(p[8..12].try_into().unwrap()),
+                    command: u16::from_le_bytes([p[12], p[13]]),
+                };
+                if self.outstanding != Some((ack.request, ack.command)) {
+                    return Err(LinkError::BadFrame(format!(
+                        "ACK for request {} (type {}) that is not outstanding",
+                        ack.request, ack.command
+                    )));
+                }
+                if ack.result != 0 && ack.window_id != 0 {
+                    return Err(LinkError::BadFrame("a refusal ACK names a window".into()));
+                }
+                self.outstanding = None;
+                self.acks.push(ack);
+                Ok(())
+            }
+            (T_RSX_FRAME_ACK,LinkState::Streaming) if self.hello.as_ref().is_some_and(|h|h.protocol>=3&&h.capabilities&CAP_RSX_FRAME!=0)=>{
+                let bad=||LinkError::BadFrame("RSX_FRAME_ACK layout/identity".into());
+                if p.len()!=16||p[12..16]!=[0;4]{return Err(bad())}
+                let a=RsxFrameAck{request:u32::from_le_bytes(p[..4].try_into().unwrap()),result:i32::from_le_bytes(p[4..8].try_into().unwrap()),capture:u32::from_le_bytes(p[8..12].try_into().unwrap())};
+                if self.rsx_outstanding!=Some(a.request)||a.result>0||(a.result==0)!=(a.capture!=0){return Err(bad())}
+                self.rsx_outstanding=None;
+                if a.result==0{self.rsx_active=Some((a.request,a.capture,0));}
+                self.rsx_events.push(RsxFrameEvent::Ack(a));Ok(())
+            }
+            (T_RSX_FRAME_STATE,LinkState::Streaming) if self.protocol().is_some_and(|v|v>=3)=>{
+                let bad=||LinkError::BadFrame("RSX_FRAME_STATE layout/order/identity".into());
+                if p.len()!=32||p[6..8]!=[0;2]||!(1..=4).contains(&p[4])||p[5]>7{return Err(bad())}
+                let s=RsxFrameState{capture:u32::from_le_bytes(p[..4].try_into().unwrap()),state:p[4],reason:p[5],draws:u32::from_le_bytes(p[8..12].try_into().unwrap()),request:u32::from_le_bytes(p[12..16].try_into().unwrap()),frame:u64::from_le_bytes(p[16..24].try_into().unwrap()),bytes:u64::from_le_bytes(p[24..32].try_into().unwrap())};
+                let Some((request,capture,old))=self.rsx_active else{return Err(bad())};
+                if request!=s.request||capture!=s.capture||old>=3||s.state<=old{return Err(bad())}
+                self.rsx_active=Some((request,capture,s.state));self.rsx_events.push(RsxFrameEvent::State(s));Ok(())
+            }
             (t, _) => Err(LinkError::BadFrame(format!("unexpected type {t}"))),
         }
     }
@@ -367,17 +608,19 @@ fn check_header(h: &[u8]) -> Result<(), LinkError> {
     Ok(())
 }
 
-fn parse_hello(p: &[u8]) -> Result<Hello, LinkError> {
+fn parse_hello(p: &[u8], asked: u16) -> Result<Hello, LinkError> {
     let bad = |s: &str| LinkError::BadFrame(format!("HELLO {s}"));
     if p.len() < 16 {
         return Err(bad("too short"));
     }
     let version = u16::from_le_bytes([p[0], p[1]]);
-    if version != VERSION {
+    // The agent answers in the version asked for; a lower one is accepted (a version this viewer also speaks).
+    if !(VERSION_MIN..=asked).contains(&version) {
         return Err(bad(&format!("protocol version {version}")));
     }
     let agent_version = u16::from_le_bytes([p[2], p[3]]);
-    if p[4..8] != [0, 0, 0, 0] {
+    let capabilities = u32::from_le_bytes(p[4..8].try_into().unwrap());
+    if version == 1 && capabilities != 0 {
         return Err(bad("reserved field is not 0"));
     }
     let session_id = u64::from_le_bytes(p[8..16].try_into().unwrap());
@@ -404,6 +647,8 @@ fn parse_hello(p: &[u8]) -> Result<Hello, LinkError> {
         return Err(bad("file name with '/'"));
     }
     Ok(Hello {
+        protocol: version,
+        capabilities,
         agent_version,
         session_id,
         app: String::from_utf8_lossy(&app).into_owned(),

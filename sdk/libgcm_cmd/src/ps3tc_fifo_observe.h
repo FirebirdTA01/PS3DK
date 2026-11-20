@@ -146,4 +146,7 @@ int ps3tc_fifo_observe_install(struct _gcmCtxData *ctx, const ps3tc_fifo_observe
 int ps3tc_fifo_observe_remove(struct _gcmCtxData *ctx, const ps3tc_fifo_observer *obs);
 uint64_t ps3tc_fifo_observe_suppressed(void);
 
+/* Owner-only scalar snapshot. 0 only for the installed native callback and
+ * unchanged registered ring; no SDK call, lock or mutation. */
+int ps3tc_fifo_observe_account_snapshot(struct _gcmCtxData *ctx, uint32_t *current, uint32_t *put);
 #endif /* PS3TC_FIFO_OBSERVE_H */

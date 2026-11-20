@@ -497,12 +497,20 @@ static int auto_lease_conflict(const auto_resource_lease *a, void *ctx,
                                uint32_t first, uint32_t count, uint32_t label)
 {
     return a->ctx && (a->ctx==ctx || label==a->operation_label || label==a->clock_label ||
+                     (a->ring_label && label==a->ring_label) ||
                      (first<a->first+a->count && a->first<first+count));
 }
 
 int p_auto_lease_claim(prof *p, void *ctx, uint32_t first, uint32_t count,
                       uint32_t operation_label, uint32_t clock_label,
                       uint32_t *domain, uint32_t *ticket)
+{
+    return p_auto_lease_claim_ring(p,ctx,first,count,operation_label,clock_label,0,domain,ticket);
+}
+
+int p_auto_lease_claim_ring(prof *p, void *ctx, uint32_t first, uint32_t count,
+                           uint32_t operation_label, uint32_t clock_label, uint32_t ring_label,
+                           uint32_t *domain, uint32_t *ticket)
 {
     auto_resource_lease *a=&p->auto_lease;
     pal_owner owner;
@@ -511,7 +519,8 @@ int p_auto_lease_claim(prof *p, void *ctx, uint32_t first, uint32_t count,
     if(ticket) *ticket=0;
     if(!domain || !ticket || !ctx || count<18 || count>1024 || (count&1) ||
        first>GPU_REPORTS-count || !auto_label_valid(operation_label) ||
-       !auto_label_valid(clock_label) || operation_label==clock_label)
+       !auto_label_valid(clock_label) || operation_label==clock_label ||
+       (ring_label && (!auto_label_valid(ring_label) || ring_label==operation_label || ring_label==clock_label)))
         return PS3DK_PROF_EINVAL;
     if(LD_ACQ(&p->shutdown_once) || LD_ACQ(&p->stop_latch) || LD_ACQ(&p->ext_fault) || p->ext_sealed)
         return PS3DK_PROF_ESTOPPED;
@@ -521,6 +530,7 @@ int p_auto_lease_claim(prof *p, void *ctx, uint32_t first, uint32_t count,
         const gpu_slot *g=&p->gpu[i];
         if(LD_ACQ(&g->state)==GPU_S_FREE) continue;
         if(g->ctx==ctx || g->label==operation_label || g->label==clock_label ||
+           (ring_label && g->label==ring_label) ||
            (first<g->report_first+g->report_count && g->report_first<first+count))
             return PS3DK_PROF_EINVAL;
     }
@@ -533,7 +543,7 @@ int p_auto_lease_claim(prof *p, void *ctx, uint32_t first, uint32_t count,
         return PS3DK_PROF_EPERM;
     id=a->ctx ? a->domain : GPU_ID_BASE+p->gpu_lifetime++;
     a->ctx=ctx; a->domain=id; a->first=first; a->count=count;
-    a->operation_label=operation_label; a->clock_label=clock_label;
+    a->operation_label=operation_label; a->clock_label=clock_label; a->ring_label=ring_label;
     a->ticket=++a->next_ticket;
     a->owner=owner;a->owner_incarnation=g_tls.incarnation;a->owner_generation=g_tls.generation;
     *domain=id; *ticket=a->ticket;
@@ -597,6 +607,12 @@ int ps3dk_prof_gpu_attach(ps3dk_prof_gcm_ctx *ctx, uint32_t report_first, uint32
         return PS3DK_PROF_ENOTINIT;
     if (!p->gpu_max)
         return PS3DK_PROF_ENOTSUP;
+#ifdef P_ROLLING_RUNTIME
+    /* The private rolling profile retains managed AUTO operations, not the
+     * manual GPU zone/calibration protocol. Refuse before claiming resources. */
+    if (p->rolling)
+        return PS3DK_PROF_ENOTSUP;
+#endif
 #ifdef PS3DK_PROF_TEST_HOOKS
     dev = (const prg_port *)ps3dk_prof_test_hooks.gpu_port;
     gdev = (const gpp_dev *)ps3dk_prof_test_hooks.gpu_gpp_dev;

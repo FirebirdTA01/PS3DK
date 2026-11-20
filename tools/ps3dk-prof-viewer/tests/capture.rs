@@ -130,7 +130,7 @@ fn origin() -> Origin {
 }
 
 fn plan_caps(d: &Document, ft: &ForeignTimeline, declared: &[SourceKey], frame: u64, caps: Caps) -> Result<Plan, String> {
-    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64 };
+    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64, auto: d.auto.as_ref().map(|v| &v.report) };
     plan(&src, ft, declared, 1, frame, P, &origin(), caps, &mut meter(caps))
 }
 
@@ -466,7 +466,7 @@ fn recorded_statuses_are_charged_as_supplied() {
     let fx = fixture();
     let d = doc(&fx.full);
     let (ft, declared) = ft_of(vec![]);
-    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64 };
+    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64, auto: d.auto.as_ref().map(|v| &v.report) };
     let recorded: Box<[(LaneId, Status)]> = (0..256).map(|i| (LaneId::Spu(i), Status::Observed)).collect();
     let o = Origin::Reresolved { file: "f.prof".into(), mark: 1, snap_bytes: 1, recorded };
     let p = plan(&src, &ft, &declared, 1, 1, P, &o, Caps::default(), &mut meter(Caps::default())).unwrap();
@@ -892,8 +892,11 @@ fn two_writes(d: &Path, budget: u64) -> (Captures, Result<(), String>, Vec<u8>, 
 #[test]
 fn a_metadata_refusal_preserves_disk_marks_ids_and_ledger_exact_and_one_short() {
     let d = dir("meta-big");
-    let (big, r, _, _) = two_writes(&d, RETAIN_BUDGET);
+    // Isolate bookmark accounting from optional Save recipes: a small pool
+    // omits those recipes in all three schedules while retaining both views.
+    let (big, r, _, _) = two_writes(&d, 1 << 20);
     r.unwrap();
+    assert!(big.list.iter().all(|s| s.save.is_none()));
     let need = big.ledger.used;
     drop(big);
     let d = dir("meta-exact");
@@ -992,7 +995,7 @@ fn a_long_label_is_refused_before_it_is_copied() {
     let e = plan_caps(&d, &ft, &declared, 1, Caps { transient: need - 1, ..Caps::default() }).err().unwrap();
     assert!(e.contains("would allocate more than"), "{e}");
     let mut w = meter(Caps { transient: 200, ..Caps::default() });
-    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64 };
+    let src = Source { a: d.analysis().unwrap(), ix: d.frames.as_ref().unwrap(), len: d.size as u64, auto: d.auto.as_ref().map(|v| &v.report) };
     let e = plan(&src, &ft, &declared, 1, 1, P, &origin(), Caps::default(), &mut w).err().unwrap();
     assert!(e.contains("would allocate more than"), "{e}");
     assert_eq!(w.transient, 0, "refused at the first label's charge, before any copy");

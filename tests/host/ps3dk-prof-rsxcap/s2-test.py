@@ -26,6 +26,9 @@ import argparse
 import hashlib
 import os
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 import re
 import shutil
 import struct
@@ -78,7 +81,7 @@ def run(cmd, log, timeout=600, env=None, cwd=None):
 SAN = {'plain': [], 'asan': ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'],
        'tsan': ['-fsanitize=thread']}
 SAN_TEXT = ('runtime error', 'AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer')
-RT_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/psp_ppu.c', 'spu/psp_spu.c',
+RT_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c', 'spu/psp_ppu.c', 'spu/psp_spu.c',
            'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c', 'rsx/gpu_runtime.c', 'rsx/prg.c',
            'rsx/gpu_port_gcm.c', 'rsx/rsxcap.c')
 
@@ -475,8 +478,8 @@ MUT = [
 if want('mut'):
     for name, f, edits, rall, kind, case, judge in MUT:
         md = out / f'mut-{name}'
-        shutil.copytree(lib, md / 'src')
-        p = md / 'src' / f
+        mut_src = copy_runtime(lib, md / 'runtime')
+        p = mut_src / f
         s = p.read_text()
         okedit = True
         for old, new in edits:
@@ -489,7 +492,7 @@ if want('mut'):
         if not okedit:
             continue
         p.write_text(s)
-        e = build(md / 'b', kind, 'plain', src=md / 'src')
+        e = build(md / 'b', kind, 'plain', src=mut_src)
         if not e:
             row('mut', name, False, 'build failed', status='INVALID')
             continue
@@ -568,7 +571,7 @@ if want('reg'):
     (inc / 'ps3dk').mkdir(parents=True)
     shutil.copy(root / 'sdk/include/ps3dk/prof.h', inc / 'ps3dk/prof.h')
     objs, okb = [], True
-    ARCH_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'spu/ext_runtime.c', 'spu/psp_ppu.c',
+    ARCH_SRCS = ('core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c', 'spu/ext_runtime.c', 'spu/psp_ppu.c',
                  'spu/psp_elf.c', 'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c', 'rsx/rsxcap.c')
     for s in ARCH_SRCS:
         o = d / (Path(s).stem + '.o')

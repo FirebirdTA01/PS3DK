@@ -1,0 +1,32 @@
+# rsx-cg-compiler v0.27.19 -p sce_fp_rsx: tools/rsx-cg-compiler/tests/shaders/fp_static_const_infinity_f.cg
+# w: the compiler's ucode word dump; r: tests/shader-compiler/fp_sources.py on the same program's container
+profile fp
+w 02000100 00021c9c c8000001 c8000001
+w 20003a83 00000000 00000000 00000000
+w 828c0140 54011c9d c8000001 c8003fe1
+w 82880140 aa011c9c c8000001 c8003fe1
+w 02020940 01101c9c 01180000 c8000001
+w 828c0140 00011c9c c8000001 c8003fe1
+w 02020940 01181c9c 00040000 c8000001
+w 02020140 00041c9c c8000001 c8000001
+w 1e7e7d00 c8001c9d c8000001 c8000001
+w 02020840 00021c9c c8040001 c8000001
+w 0000437f 00000000 00000000 00000000
+w 02020940 c8001c9d c8040001 c8000001
+w 02020140 00041c9c c8000001 c8000001
+w 9e023a00 c8011c9d 00040000 c8003fe1
+w 1e010200 c8041c9d 00020000 c8000001
+w 00004000 00000000 00000000 00000000
+r 0 MOV dst=R0 mask=x prec=0 sat=0 end=0 s0=c0.xxxx
+r 1 MOV dst=H6 mask=x prec=1 sat=0 end=0 s0=TEX0.zzzz
+r 2 MOV dst=H4 mask=x prec=1 sat=0 end=0 s0=TEX0.yyyy
+r 3 MAX dst=R1 mask=x prec=1 sat=0 end=0 s0=H4.xxxx s1=H6.xxxx
+r 4 MOV dst=H6 mask=x prec=1 sat=0 end=0 s0=TEX0.xxxx
+r 5 MAX dst=R1 mask=x prec=1 sat=0 end=0 s0=H6.xxxx s1=R1.xxxx
+r 6 MOV dst=R1 mask=x prec=1 sat=0 end=0 s0=R1.xxxx
+r 7 op3D dst=none mask=xyzw(raw) prec=0 sat=0 end=0 srcs=UNKNOWN
+r 8 MIN dst=R1 mask=x prec=1 sat=0 end=0 s0=c0.xxxx s1=R1.xyzw
+r 9 MAX dst=R1 mask=x prec=1 sat=0 end=0 s0=R0.xyzw s1=R1.xyzw
+r 10 MOV dst=R1 mask=x prec=1 sat=0 end=0 s0=R1.xxxx
+r 11 DIV dst=R1 mask=xyzw prec=0 sat=0 end=0 s0=TEX0.xyzw s1=R1.xxxx
+r 12 MUL dst=R0 mask=xyzw prec=0 sat=0 end=1 s0=R1.xyzw s1=c0.xxxx

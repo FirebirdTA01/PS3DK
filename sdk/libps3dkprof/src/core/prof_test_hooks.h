@@ -104,8 +104,14 @@ typedef struct ps3dk_prof_test_hooks_t {
     void (*before_capture_publish)(void);
     /* Called by shutdown right after it wins its claim, before it locks anything or sets the stop latch. */
     void (*after_shutdown_claim)(void);
+    /* Private rolling lifecycle: after stop-owner CAS, before locks or Ft.
+     * owner=1 public shutdown, owner=2 automatic consumer-boundary stop. */
+    void (*rolling_stop_claimed)(uint32_t owner);
     int live_ephemeral_port;           /* ps3dk_prof_live_start binds port 0 (an ephemeral port), for host tests */
     uint16_t live_listen_port;         /* nonzero: ps3dk_prof_live_start binds 127.0.0.1 on this port (wins) */
+    /* Live auto-start (live_autostart.c, host): the network hold it takes and releases; NULL: always 0. */
+    int (*live_net_acquire)(void *pool, uint32_t pool_bytes, void (*evict)(void));
+    int (*live_net_release)(void);
     unsigned join_calls;               /* host PAL: pal_thread_join calls, counted (controlling thread only) */
     /* Capture RSX frame S2 (host test builds only) */
     void (*rsxcap_step)(int point);    /* the runtime's step points (rsxcap.h RT_* / HK_* / AG_* / DT_*) */
@@ -117,6 +123,8 @@ typedef struct ps3dk_prof_test_hooks_t {
     /* Named counters: the drainer's counter-mutex lock fails once at this site (1 the drain snapshot, 2 the final
      * freeze, 3 an emit before the sink, 4 an emit after the sink accepted the chunk), after `skip` locks there. */
     uint32_t counter_lock_fail_site, counter_lock_fail_skip;
+    /* AUTO report ring: an auto_ring_memory (auto_internal.h), the MAIN page allocation and IO mapping */
+    const void *auto_ring_memory;
 } ps3dk_prof_test_hooks_t;
 
 extern ps3dk_prof_test_hooks_t ps3dk_prof_test_hooks;

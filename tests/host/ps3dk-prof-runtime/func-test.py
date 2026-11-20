@@ -5,6 +5,9 @@ instrumentation, the workload with -finstrument-functions, run every control, an
 import argparse, json, os, shutil, struct, subprocess, zlib
 from collections import defaultdict
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
 WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
@@ -25,8 +28,7 @@ out.mkdir(parents=True, exist_ok=False)
 src = root / 'sdk/libps3dkprof/src'
 if a.mutant:
     assert a.sanitize == 'thread', 'mutants are TSan controls'
-    shutil.copytree(src, out / 'source')
-    src = out / 'source'
+    src = copy_runtime(src, out / 'mutant')
     old, new, rel = {'relaxed-pub': ('ST_REL(&a->pub, e);', 'ST_RLX(&a->pub, e);', 'func/func_hooks.c'),
                      'relaxed-ack': ('ST_REL(&a->ack, pub);', 'ST_RLX(&a->ack, pub);', 'func/func_runtime.c'),
                      'ignore-ack': ('if (LD_ACQ(&a->ack) != a->last_pub) {', 'if (0) {', 'func/func_hooks.c')}[a.mutant]
@@ -61,7 +63,7 @@ base = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-prio-ctor-
 if a.sanitize:
     base += ['-fsanitize=' + ('address,undefined' if a.sanitize == 'address' else 'thread'),
              '-fno-sanitize-recover=all', '-ftls-model=local-exec']
-lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c',
+lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c',
                          'func/func_runtime.c', 'func/func_hooks.c']]
 if a.ext:
     base += ['-DPS3DK_PROF_WITH_SPU', '-DPS3DK_PROF_WITH_PROFILE', '-I', src / 'pal', '-I', src / 'spu', '-I', src / 'rsx']

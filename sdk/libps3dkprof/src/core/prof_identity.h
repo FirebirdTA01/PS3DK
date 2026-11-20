@@ -11,13 +11,21 @@
 
 #define PS3DK_PROF_IDENTITY_MARKER "ps3dkprof.ident1" /* exactly 16 bytes, no NUL stored */
 
+/* marker and id are fixed-width byte fields, never NUL-terminated strings: GCC 15 (-Wextra) otherwise refuses an
+ * initializer that fills them exactly (-Wunterminated-string-initialization). */
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 8
+#define PS3DK_PROF_NONSTRING __attribute__((__nonstring__))
+#else
+#define PS3DK_PROF_NONSTRING
+#endif
+
 typedef struct ps3dk_prof__identity_t {
-    char marker[16];
+    char marker[16] PS3DK_PROF_NONSTRING;
     uint8_t digest[32];    /* ARCHIVE-DIGEST-V1 of the archive's other members */
     uint32_t premise_bits; /* spec 3.2 */
     uint32_t kinds;        /* bit 0 RSX, bit 1 SPU */
     uint8_t id_len;        /* 1..32 */
-    char id[32];           /* A-Z 0-9 -, first byte a letter; not NUL-terminated when 32 long */
+    char id[32] PS3DK_PROF_NONSTRING; /* A-Z 0-9 -, first byte a letter; not NUL-terminated when 32 long */
 } ps3dk_prof__identity_t;
 
 extern const ps3dk_prof__identity_t ps3dk_prof__identity;

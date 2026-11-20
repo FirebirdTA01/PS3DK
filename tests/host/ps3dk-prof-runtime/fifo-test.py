@@ -14,6 +14,9 @@ persist the open phase's boundaries; `gpuzone` does the same with the wrap insid
 pinned in a GPU call), the realistic held state: the owner holds no profiler mutex across any GCM reserve."""
 import argparse, json, os, shutil, struct, subprocess, zlib
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ps3dk-prof-common"))
+from source_tree import copy_runtime
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
 WHOLE_RUN = [str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'ps3dk-prof-common' / 'prof_whole_run.c'),
@@ -24,7 +27,7 @@ ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--sanitize', choices=['address', 'thread'])
 ap.add_argument('--case', action='append', help='run only these cases (repeatable)')
 ap.add_argument('--reader', type=Path, help='a built ps3dk-prof; each capture is also checked by it')
-ap.add_argument('--mutant', choices=['relaxed-pub', 'early-reuse', 'ack-early', 'owner-drain'])
+ap.add_argument('--mutant', choices=['relaxed-pub', 'early-reuse', 'ack-early', 'owner-drain', 'account-ack-early'])
 a = ap.parse_args()
 root = Path(__file__).resolve().parents[3]
 here = Path(__file__).resolve().parent
@@ -32,6 +35,10 @@ out = a.out.resolve()
 out.mkdir(parents=True, exist_ok=False)
 src = root / 'sdk/libps3dkprof/src'
 MUTANTS = {
+    'account-ack-early': ('fifo/fifo_writer.c', [
+        ('        if (p_fifo_emit_chunk(p, C_FIFO_ACCOUNTING, b, 80) != 0) return -1;',
+         '        ST_REL(&a->read_idx, r + 1u);\n        if (p_fifo_emit_chunk(p, C_FIFO_ACCOUNTING, b, 80) != 0) return -1;')],
+        'accountshort', None),
     'relaxed-pub': ('fifo/fifo_runtime.c', [('ST_REL(&f->write_idx, w + 1u);', 'ST_RLX(&f->write_idx, w + 1u);')],
                     'pace', 'thread'),
     'early-reuse': ('fifo/fifo_writer.c', [('    while (f->d_read < w) {', '    ST_REL(&f->read_idx, w);\n    while (f->d_read < w) {'),
@@ -47,8 +54,7 @@ MUTANTS = {
 if a.mutant:
     rel, edits, want_mode, want_san = MUTANTS[a.mutant]
     assert want_san is None or a.sanitize == want_san, f'mutant {a.mutant} is a {want_san} control'
-    shutil.copytree(src, out / 'source')
-    src = out / 'source'
+    src = copy_runtime(src, out / 'mutant')
     text = (src / rel).read_text()
     for old, new in edits:
         assert text.count(old) == 1, (a.mutant, old)
@@ -85,7 +91,11 @@ base = ['-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-prio-ctor-
 if a.sanitize:
     base += ['-fsanitize=' + ('address,undefined' if a.sanitize == 'address' else 'thread'),
              '-fno-sanitize-recover=all', '-ftls-model=local-exec']
-lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c',
+for name, argv in [('account-core-build', [cc, *base, here / 'fifo-accounting-test.c', '-o', out / 'fifo-account-core']),
+                   ('account-core-run', [out / 'fifo-account-core'])]:
+    result = run(name, argv)
+    assert result.returncode == 0, (name, result.stdout.decode() + result.stderr.decode())
+lib = [src / s for s in ['core/prof_core.c', 'core/prof_drain.c', 'core/prof_version.c', 'pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c',
                          'spu/psp_ppu.c', 'spu/psp_spu.c', 'spu/ext_runtime.c', 'spu/psp_elf.c', 'spu/psp_host_emul.c',
                          'rsx/gpu_runtime.c', 'rsx/prg.c', 'rsx/gpu_port_gcm.c', 'rsx/rsxcap.c',
                          'fifo/fifo_runtime.c', 'fifo/fifo_writer.c']]
@@ -259,6 +269,51 @@ def t_basic():
                                       for x in v['wraps'])) or (_ for _ in ()).throw(AssertionError(v)))
 
 
+def account_rows(capf):
+    raw = capf.read_bytes()
+    pos = 16
+    rows = []
+    while pos + 20 <= len(raw):
+        typ, size = struct.unpack_from('<II', raw, pos)
+        if pos + 20 + size > len(raw):
+            break
+        if typ == 43:
+            assert size == 80
+            rows.append(struct.unpack_from('<HHIIIII7Q', raw, pos + 16))
+        pos += 20 + size
+    return rows
+
+
+def t_accounting():
+    capf, _ = go('accounting')
+    rows = account_rows(capf)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row[:5] == (1, 3, 1, 1, 1026) and row[6] == 0, row
+    assert row[9:12] == (120, 112, 2), row
+    c = decode(capf)
+    assert final(c)['written'] == final(c)['attempted'] == 12
+    reader_check(capf, lambda v: (v['owner_accounting']['frames'][0]['prepared_bytes'] == 120 and
+                                  v['owner_accounting']['frames'][0]['published_bytes'] == 112) or
+                                 (_ for _ in ()).throw(AssertionError(v)))
+
+
+def t_accountqueue():
+    capf, _ = go('accountqueue')
+    rows = account_rows(capf)
+    assert len(rows) == 17 and [r[12] for r in rows] == list(range(1, 17)) + [21], rows
+    assert all(r[9:12] == (4, 0, 0) and r[6] == 0 for r in rows), rows
+    reader_check(capf, lambda v: (v['owner_accounting']['known_missing_rows'] == 4 and
+                                  v['owner_accounting']['coverage'] == 'PARTIAL_ROWS') or
+                                 (_ for _ in ()).throw(AssertionError(v)))
+
+
+def t_accountshort():
+    capf, so = go('accountshort')
+    assert kv(so, 'accounting_read_idx') == '0' and kv(so, 'writes_after_fail') == '0', so
+    assert decode(capf)['torn'] and not account_rows(capf)
+
+
 def t_parked(mode):
     capf, so = go(mode)
     assert 'seen=1' in so, so
@@ -387,7 +442,8 @@ if a.mutant:
     raise SystemExit(0 if hit else 1)
 
 results = []
-cases = [('basic', t_basic), ('parked1', lambda: t_parked('parked1')), ('parked2', lambda: t_parked('parked2')),
+cases = [('basic', t_basic), ('accounting', t_accounting), ('accountqueue', t_accountqueue),
+         ('accountshort', t_accountshort), ('parked1', lambda: t_parked('parked1')), ('parked2', lambda: t_parked('parked2')),
          ('gpuzone', lambda: t_parked('gpuzone')), ('stop1', lambda: t_stop('stop1')),
          ('stop2', lambda: t_stop('stop2')), ('blocked', t_blocked), ('shortwrite', t_shortwrite),
          ('lostfinal', t_lostfinal), ('refusals', t_refusals), ('app', t_app), ('nogpu', t_nogpu), ('incb', t_incb),

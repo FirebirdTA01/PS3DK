@@ -15,13 +15,28 @@ are different namespaces.
 | bit 5 (32) | Function paths | 28 FUNC_CONFIG, 29 FUNC_TREE, 30 FUNC_STATUS |
 | bit 6 (64) | FIFO phase observation | 31 FIFO_CONFIG, 32 FIFO_EVENTS, 33 FIFO_STATUS |
 | bit 7 (128) | Automatic RSX observation, reserved | 34 AUTO_CONFIG, 35 AUTO_OPS, 36 AUTO_COVERAGE, 37 AUTO_STATUS, 38 AUTO_CLOCK |
+| bit 10 (1024) | RSX frame captures (format section 12) | 44 RSXF_CONFIG, 45 RSXF_BEGIN, 46 RSXF_DRAWS, 47 RSXF_PROGRAMS, 48 RSXF_END |
 
 Chunk 27 remains reserved for the scope declaration under the existing frame
-evidence capability. It must not be reused. Chunk 39 onward and flag bit 8 onward
-are not allocated by this document.
+evidence capability. It must not be reused.
+
+Later allocations (2026-11-18):
+
+| File flag | Family | Chunk types |
+|---|---|---|
+| bit 8 | Named counters | 39 COUNTERS |
+| none | Export projection | 40 EXPORT |
+| bit 9 | Capture windows | 41 WINDOW_BEGIN, 42 WINDOW_END |
+| FIFO capability | Per-frame FIFO accounting | 43 FIFO_ACCOUNTING |
+| bit 10 | RSX frame captures | 44..48 (in the table above; format section 12) |
+| EXPORT flag 4 | Saved frame snapshot | 49 SNAPSHOT_SUPPORT |
+
+Chunk 49 is a host-generated selector and provenance record, immediately after
+EXPORT. It does not contain authoritative bars or measured durations. Its exact
+layout and projection rules are in `ps3dk-prof-format.md`, "Saved snapshots".
 
 Flag prerequisites: bit 1 requires bit 0; bit 2 requires bit 1; bit 6 requires
-bit 0; bit 7 requires bit 0. There is no wire prerequisite from bit 7 to bit 6.
+bit 0; bit 7 requires bit 0; bit 10 requires bit 7. There is no wire prerequisite from bit 7 to bit 6.
 The automatic product may select both, but the families are independently
 identifiable. Partial-header checks and full-header checks must agree.
 

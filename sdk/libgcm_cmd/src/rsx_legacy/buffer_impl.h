@@ -22,6 +22,10 @@ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
 	u32 offset = 0;
 	gcmControlRegister volatile *ctrl = gcmGetControlRegister();
 
+#ifdef PS3TC_PROF_AUTO
+	/* may append a report-ring flush at current: before the barrier and PUT */
+	ps3dk_prof__auto_preflush(context);
+#endif
 	__sync();
 	gcmAddressToOffset(context->current,&offset);
 #ifdef PS3TC_PROF_AUTO
@@ -31,6 +35,7 @@ void RSX_FUNC(FlushBuffer)(gcmContextData *context)
 #ifdef PS3TC_PROF_AUTO
 	__sync();
 	ps3dk_prof__auto_publish_after(context,frontier);
+	ps3dk_prof__fifo_account_native_publish(context,offset);
 #endif
 }
 

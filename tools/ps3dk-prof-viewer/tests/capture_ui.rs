@@ -88,6 +88,20 @@ fn click_button(ui: &mut Ui, app: &mut App) -> bool {
     clicked
 }
 
+#[test]
+fn snapshot_page_has_per_capture_save_and_save_as() {
+    let path=write_capture("save-controls");
+    let mut app=App::new(Some(path));app.capture_frame();
+    let s=app.shown.clone().unwrap();let mut ui=Ui::new();
+    for save_as in [false,true] {
+        let got=ui.click(|p,at|{
+            let mut d=Drawn::default();let a=capture_ui::page(p,&s,&mut d);
+            *at=if save_as{d.save_as}else{d.save};a
+        });
+        assert_eq!(got,Some(Action::Save(s.id,save_as)));
+    }
+}
+
 fn page_click(ui: &mut Ui, app: &mut App, which: fn(&Drawn) -> Option<Rect>) -> Option<Action> {
     let s = app.shown.clone().expect("a snapshot is shown");
     let act = ui.click(|p, at| {

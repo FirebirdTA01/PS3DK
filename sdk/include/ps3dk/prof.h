@@ -46,6 +46,9 @@ extern "C" {
 #define PS3DK_PROF_ENOTSUP        (-17)  /* not supported here: a callback sink, a device not yet measured, an off build */
 #define PS3DK_PROF_ENET           (-18)  /* live: the listener could not be created */
 #define PS3DK_PROF_ETIMEDOUT      (-19)  /* live stop: the agent did not finish in time; call stop again */
+/* File policy errors use a separate block from the SPU lane's -20..-23. */
+#define PS3DK_PROF_ERETENTION     (-32)  /* capture closed, but completed-file bookkeeping/cleanup failed */
+#define PS3DK_PROF_ERESOURCE      (-33)  /* rolling stopped at a whole-chunk boundary: a configured bound was reached */
 
 /* Capture windows: the profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO RSX timing, draw report
  * pairs, AUTO ranges) unless a window is open. Frame marks and clock anchors run all the time, so a window keeps the
@@ -151,6 +154,23 @@ typedef struct ps3dk_prof_live_config {
     uint64_t cap_bytes;            /* 1..2^40: the most capture bytes served to one viewer; default the agent's cap */
 } ps3dk_prof_live_config;
 
+/* Live viewer auto-start (opt-in, docs/profiler-guide.md "Live viewer auto-start").  Off unless the program is linked
+ * with it: CMake PS3_PROF_LIVE_AUTOSTART=ON, or -DPS3DK_PROF_LIVE_AUTOSTART=1 on one translation unit that includes
+ * this header (plus -lnet -lsysmodule_stub on the link line).  When on, the runtime starts the live agent after
+ * every successful init, brings up the network it needs (joining one the app or another library already holds),
+ * stops the agent after the shutdown's finalization, and releases only the network hold it took.
+ * Optional settings, defined once per program with PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib): port 0 is
+ * 31750; pool_kib 0 shares libnet's 128 KiB netInitialize pool, otherwise a pool of that many KiB is reserved for a
+ * network the profiler brings up first. */
+typedef struct ps3dk_prof_live_autostart_options {
+    uint32_t size;           /* sizeof(ps3dk_prof_live_autostart_options) */
+    uint16_t port;           /* 0: 31750 */
+    uint16_t reserved;       /* 0 */
+    void *net_pool;          /* NULL: libnet's default pool */
+    uint32_t net_pool_bytes; /* with net_pool */
+    uint32_t reserved2;      /* 0 */
+} ps3dk_prof_live_autostart_options;
+
 /* The live agent's final counters (EXPERIMENTAL, like the rest of the live API), copied out by
  * ps3dk_prof_live_get_stats after a successful stop.  Every count covers the whole run, all viewers together.
  * Each ADMITTED connection (counted in connections) that has finished is counted in exactly one drop_* field: the
@@ -197,6 +217,13 @@ void ps3dk_prof_config_defaults(ps3dk_prof_config *cfg);
  * shutdown, wait for it. */
 int ps3dk_prof_set_sink_path(const char *path);
 int ps3dk_prof_set_sink_callbacks(const ps3dk_prof_sink_callbacks *cb);
+/* Before init, FILE sinks only. 0 (default) disables retention; 1..1024 keeps
+ * that many opt-in completed captures for this exact app, in completion order.
+ * Untracked, active and incomplete files are untouched. Cleanup runs after
+ * successful close and, in THREAD mode, a successful join. It may read old
+ * captures and adds shutdown IO. A failed
+ * cleanup returns ERETENTION without deleting the current capture. */
+int ps3dk_prof_set_capture_retention(uint32_t keep_completed);
 int ps3dk_prof_init(const ps3dk_prof_config *cfg);
 int ps3dk_prof_shutdown(void);
 int ps3dk_prof_drain(void);
@@ -222,9 +249,15 @@ void ps3dk_prof_zone_end(ps3dk_prof_zone *zone);
  * or terminal, publishes nothing); ENOTSUP with a callback sink (no file).  On any error out is left untouched. */
 int ps3dk_prof_get_capture_record(ps3dk_prof_capture_record *out);
 /* Live link (docs/design/ps3dk-prof-viewer.md, Phase 2): one agent thread serves this run's FILE-sink capture to
- * one PC viewer over TCP while it grows, reading the file only (the writer never waits for a viewer).  Manual
- * lifecycle only (libps3dkprof); the network must be initialized first (netInitialize).  Calls are caller-serialized:
- * init, live_start, shutdown and live_stop are never concurrent.
+ * one PC viewer over TCP while it grows, reading the file only (the writer never waits for a viewer).  The network
+ * must be initialized first (netInitialize), or the build turns on the opt-in auto-start (see
+ * ps3dk_prof_live_autostart_options), which starts and stops the agent with no app code.  The app's calls are
+ * caller-serialized: init, live_start, shutdown and live_stop are never concurrent (the auto-start runtime is serialized with them internally).  While
+ * the auto-started agent runs, live_start is OK (a no-op) when every nonzero field of cfg matches it, else EALREADY.
+ * The viewer can also open and close capture windows (live protocol 2, the viewer's Begin / End / Capture N
+ * frames): the thread that marks frames applies each request inside ps3dk_prof_frame, exactly like a
+ * capture_begin or capture_end at the end of the previous frame, so a window opens or closes at a frame boundary
+ * and is recorded like one the app opens.  The app adds no code for it; one window at a time still holds.
  * live_start, after a successful init: OK; ENOTINIT before one; ESTOPPED once shutdown has begun; ENOTSUP with a
  * callback sink or a capture outside /dev_hdd0/ (the only device measured); EALREADY after a start (once per run);
  * EINVAL for a bad config; ENET if the listener cannot be created; ETHREAD if the thread cannot be.
@@ -244,6 +277,8 @@ int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us);
  * EBUSY while the agent runs or is still stopping (before a successful stop, including after ETIMEDOUT or ECLOCK);
  * ETHREAD after a failed join (the counters are not final).  On any error out is left untouched. */
 int ps3dk_prof_live_get_stats(ps3dk_prof_live_stats *out);
+/* Defined by PS3DK_PROF_LIVE_AUTOSTART_OPTIONS (below), read by the auto-start runtime when present. */
+extern const ps3dk_prof_live_autostart_options ps3dk_prof_live_autostart_settings;
 
 #define PS3DK_PROF__DESC(var, nm) \
     static ps3dk_prof_desc var = {(nm), "", __FILE__, (uint32_t)__LINE__, 1u, 0u, 0u}
@@ -394,5 +429,31 @@ private:
     ::ps3dk_prof::section_guard PS3DK_PROF__CAT(ps3dk_prof__sg, __LINE__)(&PS3DK_PROF__CAT(ps3dk_prof__sd, __LINE__))
 #endif
 #endif /* __cplusplus */
+
+/* ---- live viewer auto-start: link request and options (see ps3dk_prof_live_autostart_options) ------------------- */
+#if ((defined(PS3DK_PROF) && PS3DK_PROF) || (defined(PS3TC_PROF_AUTO) && PS3TC_PROF_AUTO)) && !defined(__SPU__)
+/* An undefined global reference to the auto-start member: the linker extracts it from the profiler archive.  Any
+ * number of units may carry it. */
+#define PS3DK_PROF__LIVE_AUTOSTART_REQUEST __asm__(".globl __ps3dk_prof_live_autostart_anchor")
+#if defined(PS3DK_PROF_LIVE_AUTOSTART) && PS3DK_PROF_LIVE_AUTOSTART
+PS3DK_PROF__LIVE_AUTOSTART_REQUEST;
+#endif
+#ifdef __cplusplus
+#define PS3DK_PROF__LIVE_EXTERN_C extern "C"
+#else
+#define PS3DK_PROF__LIVE_EXTERN_C
+#endif
+/* Once per program, at file scope: PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);  It also requests auto-start. */
+#define PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port_, pool_kib_)                                                   \
+    PS3DK_PROF__LIVE_AUTOSTART_REQUEST;                                                                        \
+    static unsigned char ps3dk_prof__live_autostart_pool[(pool_kib_) ? (unsigned)(pool_kib_) * 1024u : 1u]    \
+        __attribute__((aligned(128)));                                                                         \
+    PS3DK_PROF__LIVE_EXTERN_C const ps3dk_prof_live_autostart_options ps3dk_prof_live_autostart_settings = { \
+        (uint32_t)sizeof(ps3dk_prof_live_autostart_options), (uint16_t)(port_), 0u,                            \
+        (pool_kib_) ? (void *)ps3dk_prof__live_autostart_pool : (void *)0, (uint32_t)(pool_kib_) * 1024u, 0u}
+#else
+#define PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port_, pool_kib_) \
+    extern const int ps3dk_prof__live_autostart_off[sizeof(port_) + sizeof(pool_kib_)]
+#endif
 
 #endif /* PS3DK_PROF_H */

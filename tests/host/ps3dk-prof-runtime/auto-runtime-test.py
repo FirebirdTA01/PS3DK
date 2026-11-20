@@ -13,11 +13,116 @@ import struct
 import subprocess
 import zlib
 
+# Report-ring mutants: (case, source, old, new, the assertion that must reject it)
+RING_MUTANTS={
+    'range-by-sizeof':('init','auto_rsx/auto_runtime.c','if(o->size<AUTO_OPTIONS_V36 || !o->range_pairs)',
+                       'if(o->size<sizeof *o || !o->range_pairs)',b'reserves[0]==32 && reserves[1]==32'),
+    'ring-unleased':('ring','rsx/gpu_runtime.c','(a->ring_label && label==a->ring_label) ||','0 ||',
+                     b'ps3dk_prof_gpu_attach((void *)&third,32,16,245,&manual)==PS3DK_PROF_EINVAL'),
+    'ring-label-unwatched':('ring','auto_rsx/auto_runtime.c','(a->ring_port.ready && index==a->ring_port.label)','0',
+                            b'a->conflicts==1'),
+    'no-label-readback':('ring','auto_rsx/auto_runtime.c',
+                         'a->ring_device.read_label(a->ring_device.ctx,a->ring_label)!=0','0',
+                         b'!ticket && labels[247]==0 && labels[246]==0 && labels[245]==0x5a5a5a5au'),
+    'map-failure-reused':('ring','auto_rsx/auto_runtime.c','            ring_retained+=plan->total;return AUTO_ALLOCATION_FAILED;',
+                          '            ring_memory.ea=ea;ring_memory.total=plan->total;ring_memory.bytes=plan->bytes;return AUTO_ALLOCATION_FAILED;',
+                          b'ps3dk_prof__auto_test_ring_retained()=='),
+    'legacy-whole-pool':('ring','auto_rsx/auto_runtime.c','plan->legacy_pairs)) return AUTO_UNSUPPORTED_CONTEXT;',
+                         'plan->legacy_pairs+plan->blocks*plan->pairs)) return AUTO_UNSUPPORTED_CONTEXT;',
+                         b'a->operations.capacity==16384 && a->operations.pairs==252'),
+    'cached-current':('ringwrap','ps3tc_fifo_wrap.c',
+                      '    ps3dk_prof__auto_prewrap(ctx);\n#endif\n    volatile uint32_t *const tail = (volatile uint32_t *)ctx->current;',
+                      '    volatile uint32_t *const tail = (volatile uint32_t *)ctx->current;\n    ps3dk_prof__auto_prewrap(ctx);\n#endif',
+                      b'visible[0]==M(0,0x1d6c,1)'),
+    'no-prewrap':('ringwrap','ps3tc_fifo_wrap.c','    ps3dk_prof__auto_prewrap(ctx);\n#endif\n    volatile','#endif\n    volatile',
+                  b'context.current==fifo+4 && context.end==fifo+PHYS && !a->tail.active'),
+    'cached-end':('ringwrap','auto_rsx/auto_runtime.c','n=auto_ring_flush_packet((uint32_t *)(void *)cur,(end-cur)/4u,',
+                  'n=auto_ring_flush_packet((uint32_t *)(void *)cur,(a->tail.visible-cur)/4u,',b'visible[0]==M(0,0x1d6c,1)'),
+    'scan-injected':('ringwrap','auto_rsx/auto_runtime.c',
+                     '    a->scan=(uintptr_t)(void *)ctx->current; /* the injected packet is never application state */','',
+                     b'ps3dk_prof__auto_test_capture()->shadow.known==0xffu'),
+    'no-wrap-scan-reset':('ringwrap','auto_rsx/auto_runtime.c',
+                          '    a->scan=(uintptr_t)(void *)ctx->begin; /* the wrap resumes at begin; its JUMP is not application state */','',
+                          b'a->scan==(uintptr_t)fifo'),
+    'custom-callback':('ringwrap','auto_rsx/auto_runtime.c','(LD_ACQ(&a->ring_flush_request) || !ring_native(ctx))','(LD_ACQ(&a->ring_flush_request))',
+                       b'a->ring.halted && a->ring_refusal==AUTO_RING_REFUSED_CALLBACK'),
+    'end-arbitrary':('ringwrap','auto_rsx/auto_runtime.c','a->tail.physical==physical && end==a->tail.visible',
+                     'a->tail.physical==physical && end<=physical',
+                     b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+PHYS,visible-1)'),
+}
+RING_MUTANTS.update({
+    # range refusals by reason (rangereasons): two reasons merged, a row count skipped, the STATUS tail not encoded,
+    # the runtime's totals not handed to the STATUS
+    'range-merge-pair-descriptor':('rangereasons','auto_rsx/auto_runtime.c','why=AUTO_RR_NO_PAIR;',
+                                   'why=AUTO_RR_DESCRIPTOR;',b'total[i]==was_total[i]+(i+1==r)'),
+    'range-row-uncounted':('rangereasons','auto_rsx/auto_runtime.c',
+                           'if(f->range_refused[reason-1u]!=UINT32_MAX) f->range_refused[reason-1u]++;','(void)0;',
+                           b'row[i]==was_row[i]+(in_row && i+1==r)'),
+    'range-status-dropped':('rangereasons','auto_rsx/auto_wire.c',
+                            'if(ranges) for(i=0;i<AUTO_RANGE_REASONS;i++) le64(b+128+8*i,ranges[i]);','(void)0;',b''),
+    'range-totals-unwritten':('rangereasons','auto_rsx/auto_runtime.c',
+                              'ranges[i]=LD_ACQ(&capture->range_reasons[i]);','ranges[i]=0;',b''),
+    # the shadow is not brought up to date before a flush: the split Mode/Format is lost, the app transfer misfires
+    'flush-no-scan':('ringrun','auto_rsx/auto_runtime.c','    ring_scan(a,ctx);\n    ST_REL(&a->ring_flush_request,0u);',
+                     '    ST_REL(&a->ring_flush_request,0u);',b"dst>=MAIN_IO && dst-MAIN_IO+len<=main_bytes"),
+    # the window id ignored: an END and reopen share one block
+    'window-aba':('ringrun','auto_rsx/auto_runtime.c','const uint32_t window=p_window_id(g_prof);','const uint32_t window=1;',
+                  b'a->ring.active==g+1u && a->ring_flushes==flushes+1u'),
+    # no settle at a frame boundary: the open block spans into the next frame
+    'no-frame-settle':('ringrun','auto_rsx/auto_runtime.c',
+                       "        ring_settle(a); /* the previous frame's block, before its END mark */\n",'',
+                       b'!a->tail.active && !a->ring.active'),
+    # the ring ordinal acknowledged before whole sink acceptance
+    'ring-ack-early':('ringshort','auto_rsx/auto_runtime.c',
+                      '    if(!auto_writer_ops(&writer,batch,n)) return 0;\n    /* whole sink acceptance',
+                      '    for(i=0;i<n;i++) if(batch_ring[i]) (void)auto_ring_ack(&a->ring,batch[i].ring_generation,'
+                      'batch[i].ring_ordinal,1);\n    if(!auto_writer_ops(&writer,batch,n)) return 0;\n    /* whole sink acceptance',
+                      b'RETIRED(a)==retired'),
+    # metadata exhaustion latching the rest of the frame (the legacy frame-tail rule)
+    'ring-meta-latch':('ringmeta','auto_rsx/auto_runtime.c',
+                       "                        a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;\n"
+                       "        (void)auto_frames_count(&a->coverage,call->kind,column);return 0;",
+                       "                        a->operations.refusal==AUTO_QUEUE_STOPPED ? 9:11;\n"
+                       "        if(column==4) a->pool_tail_column=4;\n"
+                       "        (void)auto_frames_count(&a->coverage,call->kind,column);return 0;",
+                       b'a->coverage.live.counts[2][1]==timed+10u'),
+    # a full block not flushed after its last pair (it would wait for the next draw)
+    'no-full-flush':('ringrun','auto_rsx/auto_runtime.c','    if(a->ring.slots[slot].count==a->ring.pairs) ring_flush(a,ctx);\n    else if',
+                     '    if(a->ring.slots[slot].count>a->ring.pairs) ring_flush(a,ctx);\n    else if',b'a->ring.slots[(a->ring.active-1u)%256u].count<126u'),
+    # the public end-known query without its registered-end and owner-TLS identity checks
+    'end-known-registered':('ringwrap','auto_rsx/auto_runtime.c','    if((uintptr_t)registered_physical_end!=clean_end) return 0;\n','',
+                            b'!ps3dk_prof__auto_fifo_end_known(&context,fifo+100,fifo+100)'),
+    'end-known-foreign':('ringwrap','auto_rsx/auto_runtime.c',
+                         '    if(!g_tls.slot1 || g_tls.acked || g_tls.retired ||\n'
+                         '       a->owner_incarnation!=g_tls.incarnation || a->owner_generation!=g_tls.generation) return 0;\n',
+                         '',b'known==0'),
+    # a refusal found before any flush word was stored stops the ring on both sides: the sealed blocks never retire
+    'halt-as-stop':('ringstop','auto_rsx/auto_runtime.c',
+                    '    if(!a->ring_refusal) a->ring_refusal=reason;\n    auto_ring_halt(&a->ring);',
+                    '    if(!a->ring_refusal) a->ring_refusal=reason;\n    auto_ring_stop(&a->ring);',b'RETIRED(a)==4'),
+    # a held extent at seal not made a lower bound: FINAL claims completeness (checked on the capture)
+    'seal-ignores-held':('ringlabel','auto_rsx/auto_runtime.c','            if(ring[3]) flags|=AUTO_LOWER_BOUND;\n','',None),
+    # the init's io_address not recorded: the flip's CALL into the reserved prefix is refused
+    'flip-unrecorded':('ringflip','auto_rsx/auto_runtime.c','    if(initial) init_record(gc,io_address,io_bytes,&io,&start);\n',
+                       '    if(initial && 0) init_record(gc,io_address,io_bytes,&io,&start);\n',
+                       b'!a->shadow.invalid && !a->ring_reject[2]'),
+})
+# checked on the capture after a clean run, not by an assertion of the application
+CAPTURE_MUTANTS=('seal-ignores-held','range-status-dropped','range-totals-unwritten')
+RING_RUNTIME={'ringrun':0,'ringmeta':1,'ringshort':2,'ringfixture':3,'ringstop':4,'ringlabel':5,'ringflip':6,
+              'ringsegment':7,'ringrsxf':8,'ringfixturetoday':3}
+RING_WRAP=('ringwrap',*RING_RUNTIME)
+# The build-option ring constant (PS3_PROF_AUTO_RING): auto-ring-option-test.c modes. ringofftoday is ringoptoff
+# built without the ring compiled in (the archive before the ring shipped), whose CONFIG ringoptoff must match.
+RING_OPTION={'ringopt':0,'ringopt2':1,'ringoptset':2,'ringoptsetring':3,'ringoptbad':4,'ringoptoff':5,'ringofftoday':5}
 ap=argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--sanitize',choices=['address','thread'])
-ap.add_argument('--case',choices=['noinit','lease','init','race','ops','conflict','reset','stop','stopvisit','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail'],default='noinit')
-ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-frame-boundary','clock-put',
+ap.add_argument('--case',choices=['noinit','fifoaccount','lease','init','race','ops','conflict','reset','stop','stopvisit','stopvisitseal','frames','clocks','clockcap','segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','rangereasons','rangesat','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning','fifofail','fifopre','fifopost','seal','preinit','preinitthread','preinitold','preinitfail','ring','ringwrap','ringrun','ringmeta','ringshort','ringfixture','ringstop','ringlabel','ringflip',
+                                  'ringsegment','ringrsxf','ringfixturetoday',*RING_OPTION],default='noinit')
+ap.add_argument('--fixture',type=Path,help='ringfixture, ringstop: copy the capture here')
+ap.add_argument('--reader',type=Path,help='ring cases with a capture: the ps3dk-prof binary that must read it (exit 0)')
+ap.add_argument('--mutant',choices=['fifo-frame-acquire','reject-late-end','ignore-global-stop','foreign-config-claim','sealed-config-claim','no-frame-boundary','clock-put',
                                   'fifo-publish','fifo-cancel','fifo-owner','fifo-freeze','retired-owner',
                                   'segment-silent','no-flip-frames','one-record-chunks','no-present-wait',
                                   'poll-wait','poll-scope-cadence','boundary-cadence','boundary-scope','external-silent','writer-on-segment',
@@ -25,10 +130,14 @@ ap.add_argument('--mutant',choices=['reject-late-end','ignore-global-stop','no-f
                                   'owner-is-opener','queue-unreserved','opener-token-off','call-outside-gate',
                                   'late-range-off','late-draw-off','late-exact','late-marks',
                                   'preinit-ignored','preinit-after-init','preinit-any-thread','preinit-no-validate',
-                                  'preinit-consume-on-fail','preinit-foreign-silent'])
+                                  'preinit-consume-on-fail','preinit-foreign-silent',*RING_MUTANTS])
 a=ap.parse_args()
+if a.reader:
+    # Capture checks run from the capture directory, not the caller's cwd.
+    a.reader=a.reader.resolve(strict=True)
 operations=a.case in ('ops','conflict','reset','frames')
-if a.mutant:assert a.case=={'reject-late-end':'stop','ignore-global-stop':'stopvisit','no-frame-boundary':'frames','clock-put':'clocks',
+if a.mutant in RING_MUTANTS:assert a.case==RING_MUTANTS[a.mutant][0] and not a.sanitize
+elif a.mutant:assert a.case=={'fifo-frame-acquire':'fifoaccount','reject-late-end':'stop','ignore-global-stop':'stopvisit','foreign-config-claim':'stopvisit','sealed-config-claim':'stopvisitseal','no-frame-boundary':'frames','clock-put':'clocks',
                           'fifo-publish':'fifopost','fifo-cancel':'fifopre','fifo-owner':'init',
                           'fifo-freeze':'init','retired-owner':'init','segment-silent':'segments','external-silent':'extsegments','writer-on-segment':'extsegments',
                           'no-flip-frames':'flips','one-record-chunks':'segments','no-present-wait':'flips',
@@ -59,13 +168,18 @@ for name,rel in [('prof_gpu.h','rsx/prof_gpu.h'),('prof_spu.h','spu/prof_spu.h')
 commands=[]
 def run(name,cmd,cwd=out):
     cmd=list(map(str,cmd))
-    r=subprocess.run(cmd,capture_output=True,cwd=cwd,timeout=90,
+    r=subprocess.run(cmd,capture_output=True,cwd=cwd,timeout=900 if a.case in RING_RUNTIME else 90,
                      env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1:exitcode=66'))
     (out/(name+'.stdout')).write_bytes(r.stdout);(out/(name+'.stderr')).write_bytes(r.stderr)
     commands.append(dict(name=name,argv=cmd,rc=r.returncode,cwd=str(cwd)))
     (out/'commands.json').write_bytes((json.dumps(commands,indent=2)+'\n').encode())
-    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks','preinit-foreign-silent'):
-        expected={'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
+    if name=='run' and a.mutant=='fifo-frame-acquire':
+        assert r.returncode==-6 and b'FIFO frame metadata requires attached publication' in r.stderr,(r.returncode,r.stderr.decode())
+        print('fifo-frame-acquire rejected by pre-publication metadata assertion')
+        raise SystemExit(0)
+    if name=='run' and a.mutant and a.mutant not in ('clock-put','retired-owner','foreign-config-claim','sealed-config-claim','one-record-chunks','tag-silent','tag-at-call','late-exact','late-marks','preinit-foreign-silent',
+                                                     *CAPTURE_MUTANTS):
+        expected=RING_MUTANTS[a.mutant][4] if a.mutant in RING_MUTANTS else {'reject-late-end':b'!g_tls.in_gpu && g_tls.acked',
                   'ignore-global-stop':b'g_tls.acked && !g_tls.in_gpu',
                   'no-frame-boundary':b'context.current==words+24',
                   'fifo-publish':b'g_fifo.state==FS_SEALED',
@@ -106,7 +220,7 @@ def run(name,cmd,cwd=out):
                   'frames-off-by-one':b'state()==0 && !zone() && !clear()',
                   'label-stride-4':b'l[0]==1 && l[3]==91 && l[5]==l[4]',
                   'label-sum':b'l[5]<l[4]',
-                  'label-unknown-run':b'l[0]==1 && l[1]==1 && l[3]==91'}[a.mutant]
+                  'label-unknown-run':b'l[0]==1 && l[1]==1 && l[3]==91'}.get(a.mutant)
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
         print(a.mutant+' rejected by '+expected.decode())
         raise SystemExit(0)
@@ -117,14 +231,16 @@ flags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-Wno-prio-ctor-dtor','
        '-DPS3DK_PROF=1','-DPS3DK_PROF_PAL_HOST','-DPS3DK_PROF_WITH_SPU',
        '-DPS3DK_PROF_WITH_PROFILE','-DPS3DK_PROF_WITH_FIFO','-DPS3DK_PROF_WITH_AUTO',
        '-I'+str(inc.parent),'-I'+str(root/'sdk/libgcm_cmd/src')]
-for directory in ('core','pal','spu','rsx','fifo','auto_rsx'):flags+=['-I'+str(src/directory)]
+for directory in ('core','pal','spu','rsx','fifo','auto_rsx','rsx_frame'):flags+=['-I'+str(src/directory)]
 if a.case!='noinit':flags+=['-DPS3DK_PROF_TEST_HOOKS']
-if operations or a.case in ('stop','stopvisit'):
-    flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'frames':0}[a.case])]
+if operations or a.case in ('stop','stopvisit','stopvisitseal'):
+    flags+=['-DGPP_HOST_DEVMEM','-DTEST_INVALIDATE='+str({'ops':0,'conflict':1,'reset':2,'stop':0,'stopvisit':0,'stopvisitseal':0,'frames':0}[a.case])]
 if a.case=='frames':flags+=['-DTEST_FRAMES=1']
+if a.case=='fifoaccount':flags+=['-DGPP_HOST_DEVMEM']
 if a.case in ('clocks','clockcap'):flags+=['-DGPP_HOST_DEVMEM','-DTEST_CLOCK_FRAMES='+('256' if a.case=='clockcap' else '64')]
-if a.case=='stopvisit':flags+=['-DTEST_STOP_VISIT=1']
-if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
+if a.case in ('stopvisit','stopvisitseal'):flags+=['-DTEST_STOP_VISIT=1']
+if a.case=='stopvisitseal':flags+=['-DTEST_STOP_SEAL=1']
+if a.case in ('segments','extsegments','segcapacity','segmetatail','segbuild','segnested','callbracket','labels','tags','rangereasons','rangesat','windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate','flips','present','spanning'):flags+=['-DGPP_HOST_DEVMEM']
 if a.case=='flips':
     # only the flip entry-point header: the SDK's own libc/pthread headers must not shadow the host ones
     (inc.parent/'cell/gcm').mkdir(parents=True)
@@ -135,7 +251,8 @@ if a.case=='flips':
     (inc.parent/'gcm_flip_aliases.h').write_text(sys_h[start:end],encoding='utf-8')
     flags+=['-DPS3TC_PROF_AUTO=1']
 # the published per-draw segment room is the AUTO build's value only when the build defines PS3TC_PROF_AUTO
-if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','windowlate','preinit','preinitthread','preinitold','preinitfail'):flags+=['-DPS3TC_PROF_AUTO=1']
+if a.case=='rangesat':flags+=['-DTEST_RANGE_SATURATE=1']
+if a.case in ('seal','extsegments','segbuild','segnested','callbracket','tags','rangereasons','rangesat','windowlate','preinit','preinitthread','preinitold','preinitfail'):flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate'):
     flags+=['-DTEST_WINDOW_MODE='+str({'windows':0,'windowseal':1,'windowwhole':2,'windownone':4,'windowprebuild':5,
                                        'windowhandoff':6,'windowhandoffu':7,'windowqueue':8,'windowcallafter':9,'windowlate':10}[a.case])]
@@ -155,6 +272,14 @@ if a.case=='labels':
         hp.write_text(code.replace(old,'at < base + 4u * CELL_GCM_LABEL_COUNT && !((at - base) & 3u) ?\n                     (uint32_t)((at - base) / 4u)'))
     flags+=['-DPS3TC_PROF_AUTO=1']
 if a.case=='spanning':flags+=['-DTEST_SPANNING=1']
+if a.case in ('ring',*RING_WRAP):flags+=['-DGPP_HOST_DEVMEM','-DPS3DK_PROF_AUTO_RING=1']
+if a.case in RING_OPTION:
+    flags+=['-DGPP_HOST_DEVMEM','-DTEST_RINGOPT_MODE='+str(RING_OPTION[a.case])]
+    if a.case!='ringofftoday':flags+=['-DPS3DK_PROF_AUTO_RING=1']
+if a.case in RING_RUNTIME:
+    flags+=['-DTEST_RING_MODE='+str(RING_RUNTIME[a.case])]
+    # the application's host stand-in for PUT's barrier is a seq_cst fence, which GCC warns about under TSan
+    if a.sanitize=='thread':flags+=['-Wno-tsan']
 if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     flags+=['-DGPP_HOST_DEVMEM','-DTEST_PREINIT_MODE='+str({'preinit':0,'preinitthread':1,'preinitold':2,'preinitfail':3}[a.case])]
 if a.case in ('fifofail','fifopre','fifopost'):flags+=['-DTEST_FIFO_POINT='+str({'fifofail':0,'fifopre':3,'fifopost':4}[a.case])]
@@ -166,17 +291,24 @@ if a.sanitize=='address':
     # sanitizer checks enabled, including null checks.
     flags+=['-ftls-model=local-exec','-fno-omit-frame-pointer']
 cc=os.environ.get('CC','cc')
-sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c',
+sources=['core/prof_core.c','core/prof_drain.c','core/prof_version.c','pal/pal_host.c', 'rolling/roll_file.c', 'rolling/roll_retention_inspect.c', 'rolling/roll_store.c',
          'spu/psp_ppu.c','spu/psp_spu.c','spu/ext_runtime.c','spu/psp_elf.c','spu/psp_host_emul.c',
          'rsx/gpu_runtime.c','rsx/prg.c','rsx/gpu_port_gcm.c','rsx/rsxcap.c',
          'fifo/fifo_runtime.c','fifo/fifo_writer.c',
          'auto_rsx/auto_runtime.c','auto_rsx/auto_startup.c','auto_rsx/auto_config.c',
          'auto_rsx/auto_wire.c','auto_rsx/auto_writer.c','auto_rsx/auto_queue.c',
-         'auto_rsx/auto_commands.c','auto_rsx/auto_completion.c','auto_rsx/auto_frames.c','auto_rsx/auto_clock.c']
+         'auto_rsx/auto_commands.c','auto_rsx/auto_completion.c','auto_rsx/auto_frames.c','auto_rsx/auto_clock.c',
+         'auto_rsx/auto_ring.c','auto_rsx/auto_ring_commands.c','auto_rsx/auto_ring_layout.c',
+         'rsx_frame/rsxf_runtime.c','rsx_frame/rsxf_wire.c','rsx_frame/rsxf_decode.c']
 objects=[]
 for rel in sources:
     source=src/rel;obj=out/(source.stem+'.o')
-    if a.mutant in ('fifo-publish','fifo-cancel','fifo-freeze') and rel=='fifo/fifo_runtime.c':
+    if a.mutant=='fifo-frame-acquire' and rel=='fifo/fifo_runtime.c':
+        code=source.read_text()
+        old='    if (LD_ACQ(&g_fifo.state) != FS_ATTACHED) return;\n'
+        assert code.count(old)==1
+        source=out/'fifo_runtime.c';source.write_bytes(code.replace(old,'').encode())
+    elif a.mutant in ('fifo-publish','fifo-cancel','fifo-freeze') and rel=='fifo/fifo_runtime.c':
         code=source.read_text()
         if a.mutant=='fifo-publish':
             old='if(CAS_ACQREL(&g_fifo.state,&expected,(uint32_t)FS_ATTACHED))'
@@ -195,6 +327,17 @@ for rel in sources:
                 !pal_owner_is_self(&a->owner))'''
         assert code.count(old)==1
         source=out/'gpu_runtime.c';source.write_bytes(code.replace(old,'else if(0)').encode())
+    elif a.case=='ringfixturetoday' and rel in ('auto_rsx/auto_runtime.c','core/prof_drain.c'):
+        # the runtime before RSX frame capture: no capture hook runs, no file flag (the dormant build must match it)
+        code=source.read_text()
+        if rel=='core/prof_drain.c':
+            old='        if (ps3dk_prof__rsxf_selected())\n            head[13] |= 4;'
+            new='        (void)0;'
+        else:
+            old='#define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)'
+            new='#define RSXF_ON() 0'
+        assert code.count(old)==1,rel
+        source=out/source.name;source.write_bytes(code.replace(old,new).encode())
     elif a.mutant=='retired-owner' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='if(!capture->owner_declared) {';assert code.count(old)==1
         source=out/'auto_runtime.c'
@@ -279,8 +422,8 @@ for rel in sources:
         old,new={'preinit-ignored':('    (void)attach(context,have ? &o:NULL,','    have=0;(void)attach(context,have ? &o:NULL,'),
                  'preinit-after-init':('    if(claim!=1u) {','    if(0) {'),
                  'preinit-any-thread':('have=pal_owner_is_self(&preinit_owner);','have=1;'),
-                 'preinit-no-validate':('    if(!layout(&copy,&records,&frames,&bytes)) return PS3DK_PROF_EINVAL;\n',
-                                        '    (void)records;(void)frames;(void)bytes;\n'),
+                 'preinit-no-validate':('    if(!layout(&copy,&ring,&ring_label,&records,&frames,&bytes)) return PS3DK_PROF_EINVAL;\n',
+                                        '    (void)ring;(void)ring_label;(void)records;(void)frames;(void)bytes;\n'),
                  'preinit-consume-on-fail':('            if(!rc) {\n                preinit_state=2u;','            {\n                preinit_state=2u;'),
                  'preinit-foreign-silent':('if(!have) ST_REL(&preinit_foreign,1u);','(void)have;')}[a.mutant]
         code=source.read_text();assert code.count(old)==1,a.mutant
@@ -336,11 +479,23 @@ for rel in sources:
         code=source.read_text();old='    if((s=external_writer(a,ctx))) return segment_begin(a,s,ctx,call,caller);\n';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'    (void)external_writer;\n').encode())
     elif a.mutant=='segment-silent' and rel=='auto_rsx/auto_runtime.c':
-        code=source.read_text();old='if(!a) return foreign_begin(ctx,call,caller);';assert code.count(old)==1
+        # the foreign (segment) visit is not recorded: a non-owner context returns 0 for every shape (inline and
+        # immediate shapes already returned 0 before RSX frame capture split the line)
+        code=source.read_text();old='if(!a) return shape ? 0u:foreign_begin(ctx,call,caller);';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'if(!a) {(void)foreign_begin;return 0;}').encode())
     elif a.mutant=='clock-put' and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text();old='!auto_clock_after(&a->clocks,a->clock_put_frontier)';assert code.count(old)==1
         source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'0').encode())
+    elif a.mutant=='sealed-config-claim' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text()
+        old='        claim=auto_config_begin(&configuration);\n        if(claim) {'
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'        claim=auto_config_begin(&configuration);\n        if(!claim) return NULL;\n        if(claim) {').encode())
+    elif a.mutant=='foreign-config-claim' and rel=='auto_rsx/auto_runtime.c':
+        code=source.read_text()
+        old='        if(LD_ACQ(&candidate_owner_incarnation)!=g_tls.incarnation) return NULL;\n'
+        assert code.count(old)==1
+        source=out/'auto_runtime.c';source.write_bytes(code.replace(old,'').encode())
     elif a.mutant in ('reject-late-end','ignore-global-stop') and rel=='auto_rsx/auto_runtime.c':
         code=source.read_text()
         old='if(!ticket) return;' if a.mutant=='reject-late-end' else 'if(LD_ACQ(&g_prof->stop_latch) || !auto_config_can_admit(&configuration))'
@@ -353,6 +508,20 @@ for rel in sources:
             assert code.count(gate)==1
             code=code.replace(gate,'        if(0) p_observe_stop(g_prof);\n')   # the line stays: an else may follow it
         source=out/'auto_runtime.c';source.write_bytes(code.encode())
+    if a.mutant in RING_MUTANTS and rel==RING_MUTANTS[a.mutant][1]:
+        code=source.read_text();old,new=RING_MUTANTS[a.mutant][2:4];assert code.count(old)==1,a.mutant
+        code=code.replace(old,new)
+        if a.mutant=='end-known-foreign':
+            # FIFO integration added an earlier identity gate. Break the whole
+            # foreign-thread admission boundary, not just its redundant check.
+            guard='''    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED ||
+        g_tls.slot1 != g_fifo.owner_slot + 1u || g_tls.incarnation != g_fifo.owner_inc ||
+        g_tls.generation != g_fifo.owner_gen || g_tls.acked || g_tls.retired || g_tls.in_drain)
+        return 0;
+'''
+            assert code.count(guard)==1
+            code=code.replace(guard,'    if (!ctx || LD_ACQ(&g_fifo.state) != FS_ATTACHED) return 0;\n')
+        source=out/source.name;source.write_bytes(code.encode())
     run('compile-'+source.stem,[cc,*flags,'-c',source,'-o',obj]);objects.append(obj)
 run('archive-members',['ar','rcsD',out/'members.a',*objects])
 digest=root/'sdk/libps3dkprof/tools/archive_digest.py'
@@ -363,8 +532,11 @@ run('archive',['ar','rcsD',out/'libauto.a',*objects,out/'prof_identity.o'])
 # Owner-only fake observer registry. It measures installation and removal, not
 # target command-buffer admission, device progress or timestamp correctness.
 (out/'bridge.c').write_text('''#include "ps3tc_fifo_observe.h"
+#include "gpu_port_gcm.h"
 unsigned auto_test_fifo_installs,auto_test_fifo_removes;
-int auto_test_fifo_fail;
+int auto_test_fifo_fail,auto_test_fifo_native;
+volatile uint32_t auto_test_fifo_put=4096;
+uint64_t ps3tc_fifo_observe_suppressed(void) {return 0;}
 static struct _gcmCtxData *context;
 const ps3tc_fifo_observer *auto_test_fifo_observer;
 int ps3tc_fifo_observe_install(struct _gcmCtxData *c,const ps3tc_fifo_observer *o,uint32_t *b,uint32_t *e) {
@@ -374,6 +546,11 @@ int ps3tc_fifo_observe_install(struct _gcmCtxData *c,const ps3tc_fifo_observer *
 int ps3tc_fifo_observe_remove(struct _gcmCtxData *c,const ps3tc_fifo_observer *o) {
  if(c!=context || o!=auto_test_fifo_observer)return -1;
  context=0;auto_test_fifo_observer=0;++auto_test_fifo_removes;return 0;
+}
+int ps3tc_fifo_observe_account_snapshot(struct _gcmCtxData *c,uint32_t *current,uint32_t *put) {
+ if(c!=context || !auto_test_fifo_native)return -1;
+ gpp_ctx *gc=(gpp_ctx *)(void *)c;
+ *current=4096+(uint32_t)(gc->current-gc->begin)*4;*put=auto_test_fifo_put;return 0;
 }
 const unsigned char ps3dk_prof__auto_mechanism[32]={42};
 const unsigned char ps3dk_prof__auto_build_binding[32]={99};
@@ -391,13 +568,14 @@ unsigned test_fw_status(void) {++auto_test_fw_polls;if(auto_test_fw_pending>0) {
 ''',encoding='utf-8')
 application='#include <stdio.h>\nint main(void) { puts("application complete"); return 0; }\n'
 assert 'prof' not in application
+if a.case=='fifoaccount':application=Path(__file__).with_name('auto-fifo-accounting-test.c').read_text()
 if a.case=='lease':application=Path(__file__).with_name('auto-lease-test.c').read_text()
 if a.case=='init':application=Path(__file__).with_name('auto-attach-test.c').read_text()
 if a.case=='race':application=Path(__file__).with_name('auto-attach-race-test.c').read_text()
 if a.case in ('fifofail','fifopre','fifopost'):application=Path(__file__).with_name('auto-fifo-test.c').read_text()
 if operations:application=Path(__file__).with_name('auto-operations-test.c').read_text()
 if a.case in ('clocks','clockcap'):application=Path(__file__).with_name('auto-clock-runtime-test.c').read_text()
-if a.case in ('stop','stopvisit'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
+if a.case in ('stop','stopvisit','stopvisitseal'):application=Path(__file__).with_name('auto-operations-stop-test.c').read_text()
 if a.case=='segments':application=Path(__file__).with_name('auto-segment-runtime-test.c').read_text()
 if a.case=='extsegments':application=Path(__file__).with_name('auto-external-segment-test.c').read_text()
 if a.case=='segcapacity':application=Path(__file__).with_name('auto-segment-capacity-test.c').read_text()
@@ -406,17 +584,52 @@ if a.case=='segbuild':application=Path(__file__).with_name('auto-segment-build-f
 if a.case=='segnested':application=Path(__file__).with_name('auto-segment-call-in-bracket-test.c').read_text()
 if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate'):application=Path(__file__).with_name('auto-window-runtime-test.c').read_text()
 if a.case=='tags':application=Path(__file__).with_name('auto-tag-runtime-test.c').read_text()
+if a.case in ('rangereasons','rangesat'):application=Path(__file__).with_name('auto-range-reasons-test.c').read_text()
 if a.case=='labels':application=Path(__file__).with_name('auto-label-poll-runtime-test.c').read_text()
 if a.case=='callbracket':application=Path(__file__).with_name('auto-segment-call-bracket-test.c').read_text()
 if a.case=='flips':application=Path(__file__).with_name('auto-flip-runtime-test.c').read_text()
 if a.case in ('present','spanning'):application=Path(__file__).with_name('auto-present-runtime-test.c').read_text()
 if a.case=='seal':application=Path(__file__).with_name('auto-seal-test.c').read_text()
+if a.case=='ring':application=Path(__file__).with_name('auto-ring-attach-test.c').read_text()
+if a.case=='ringwrap':application=Path(__file__).with_name('auto-ring-wrap-test.c').read_text()
+if a.case in RING_RUNTIME:application=Path(__file__).with_name('auto-ring-runtime-test.c').read_text()
 if a.case in ('preinit','preinitthread','preinitold','preinitfail'):application=Path(__file__).with_name('auto-preinit-test.c').read_text()
+if a.case in RING_OPTION:application=Path(__file__).with_name('auto-ring-option-test.c').read_text()
 (out/'main.c').write_text(application,encoding='utf-8')
+extra=[]
+if a.case in RING_WRAP:
+    stub=out/'stub'
+    for rel,text in {
+        'rsx/gcm_sys.h':'#pragma once\n#include <stdint.h>\ntypedef uint32_t u32;\nstruct _gcmCtxData;\n'
+            'typedef int32_t (*gcmContextCallback)(struct _gcmCtxData *,uint32_t);\n'
+            'typedef struct _gcmCtxData { u32 *begin,*end,*current; gcmContextCallback callback; } gcmContextData;\n'
+            'typedef struct { volatile u32 put,get,ref; } gcmControlRegister;\n'
+            'void *gcmGetControlRegister(void);\nint32_t gcmAddressToOffset(void *,u32 *);\n',
+        'sys/timer.h':'#pragma once\nint sys_timer_usleep(unsigned long);\n',
+        'sys/systime.h':'#pragma once\n#include <stdint.h>\nuint64_t sysGetTimebaseFrequency(void);\n',
+        'sys/lv2_types.h':'#pragma once\n',
+        'ppu-asm.h':'#pragma once\n#include <stdint.h>\n#define lv2_fn_to_callback_ea(f) ((uintptr_t)(f))\n',
+        'ppu_host.h':'#pragma once\n#include <stdint.h>\nuint64_t auto_test_timebase(void);\n'
+            '#define __builtin_ppc_get_timebase() auto_test_timebase()\n'}.items():
+        (stub/rel).parent.mkdir(parents=True,exist_ok=True);(stub/rel).write_text(text,encoding='utf-8')
+    code=(root/'sdk/libgcm_cmd/src/ps3tc_fifo_wrap.c').read_text()
+    old='__asm__ __volatile__ ("sync" ::: "memory");';assert code.count(old)==1
+    code=code.replace(old,'__atomic_thread_fence(__ATOMIC_SEQ_CST);')
+    if a.mutant in RING_MUTANTS and RING_MUTANTS[a.mutant][1]=='ps3tc_fifo_wrap.c':
+        old,new=RING_MUTANTS[a.mutant][2:4];assert code.count(old)==1,a.mutant;code=code.replace(old,new)
+    (out/'ps3tc_fifo_wrap.c').write_text(code,encoding='utf-8')
+    wflags=['-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-DPS3TC_PROF_AUTO=1','-include',stub/'ppu_host.h',
+            '-I'+str(stub),'-I'+str(root/'sdk/libgcm_cmd/include'),'-I'+str(root/'sdk/libgcm_cmd/src')]
+    wflags+=[f for f in flags if f.startswith('-fsanitize') or f.startswith('-fno-') or f.startswith('-ftls')]
+    # the host stand-in for the PPU sync is a seq_cst fence (owner thread only), which GCC warns about under TSan
+    if a.sanitize=='thread':wflags+=['-Wno-tsan']
+    run('compile-ps3tc_fifo_wrap',[cc,*wflags,'-c',out/'ps3tc_fifo_wrap.c','-o',out/'ps3tc_fifo_wrap.o'])
+    extra=[out/'ps3tc_fifo_wrap.o']
 # every case but the window API ones records through a whole-run window opened right after init (the shared helper)
 whole_run=[] if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild','windowhandoff','windowhandoffu','windowqueue','windowcallafter','windowlate') else [
     root/'tests/host/ps3dk-prof-common/prof_whole_run.c','-Wl,--wrap=ps3dk_prof_init','-Wl,--wrap=ps3dk_prof_init_ex']
-run('link',[cc,*flags,out/'main.c',out/'bridge.c',*whole_run,'-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
+stop_wrap=['-Wl,--wrap=ps3dk_prof__auto_config_begin'] if a.case in ('stopvisit','stopvisitseal') else []
+run('link',[cc,*flags,out/'main.c',out/'bridge.c',*extra,*whole_run,*stop_wrap,'-Wl,-u,__ps3dk_prof_auto_startup_anchor',out/'libauto.a','-o',out/'app'])
 capture_dir=out/'capture';capture_dir.mkdir()
 cmd=[out/'app']
 if a.sanitize=='thread':cmd=['setarch','x86_64','-R',*cmd]
@@ -426,6 +639,156 @@ if a.case in ('noinit','seal'):
 if a.case=='lease':
     assert result.stdout==b'AUTO/manual shared reservation PASS\n',result.stdout
     print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case in RING_RUNTIME:
+    passed={'ringrun':b'PASS','ringmeta':b'AUTO ring metadata-full without a frame-tail latch PASS',
+            'ringshort':b'AUTO ring short sink retires nothing PASS','ringfixture':b'AUTO ring fixture PASS',
+            'ringstop':b'AUTO ring producer-only stop drains the sealed blocks PASS',
+            'ringlabel':b'AUTO ring stopped with held extents PASS',
+            'ringflip':b'AUTO ring flip CALL into the reserved prefix PASS',
+            'ringsegment':b'AUTO ring CALL into an application segment refused PASS',
+            'ringrsxf':b'RSX frame capture runtime PASS','ringfixturetoday':b'AUTO ring fixture PASS'}[a.case]
+    assert result.stdout.endswith(passed+bytes([10])),result.stdout
+    print(result.stdout.decode(),end='')
+    if a.case in ('ringrun','ringfixture','ringfixturetoday','ringstop','ringlabel','ringflip'):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
+        check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
+        files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
+        data=files[0].read_bytes()
+        try:
+            if a.case=='ringstop':
+                # blocks 1-4 timed and retired, block 5's ten records incomplete and its extent held (LOWER_BOUND); the
+                # decoder's first rejection: the binding header at the offset the application wrote it
+                summary=check.verify(data,pending_tail=10,held_extents=1)
+                at=int(result.stdout.split(b'header written at +')[1].split()[0],16)
+                assert summary['rejected']==(0x00042000,at,8) and summary['blocks_retired']==4,summary
+            elif a.case=='ringlabel':
+                # nothing read: every ring record incomplete, both extents held (LOWER_BOUND), no decoder rejection
+                count=sum(1 for o in check.ops(data) if o['flags']&128)
+                summary=check.verify(data,pending_tail=count,held_extents=2)
+                assert summary['blocks_retired']==0 and summary['rejected']==(0,0,0),summary
+            elif a.case=='ringflip':
+                # every draw timed across both flips, every extent retired, nothing rejected: an exact FINAL
+                summary=check.verify(data)
+                assert summary['rejected']==(0,0,0) and summary['held']==0 and summary['ring_records']==280,summary
+                assert not summary['status_flags']&2 and summary['blocks_retired']==4,summary
+            else:
+                summary=check.verify(data,pending_tail=5 if a.case=='ringrun' else 0)
+        except AssertionError as e:
+            if a.mutant not in CAPTURE_MUTANTS:raise
+            print(a.mutant+' rejected by the capture check: '+str(e));raise SystemExit(0)
+        assert a.mutant not in CAPTURE_MUTANTS,a.mutant+' survived the capture check'
+        print(json.dumps(summary,sort_keys=True))
+        if a.reader:
+            # the branch reader reads it (exit 0, not MALFORMED); a stopped ring reads as a lower bound
+            r=run('reader',[a.reader,'auto',files[0]],capture_dir)
+            text=r.stdout.decode()
+            if a.case in ('ringstop','ringlabel'):assert 'FINAL (lower bounds)' in text,text
+            if a.case=='ringflip':assert 'FINAL' in text and 'lower bound' not in text,text
+            if a.case=='ringstop':
+                assert 'ring decoder rejected header 0x00042000 at +%#x: ' % at in text,text
+            print('reader exit 0: '+next(l for l in text.splitlines() if 'FINAL' in l))
+        if a.case in ('ringfixture','ringstop') and a.fixture:shutil.copyfile(files[0],a.fixture)
+        if a.case in ('ringfixture','ringfixturetoday'):
+            # not selected: no file flag bit 10 and no chunk 44..48 (the capture code is dormant)
+            assert not (int.from_bytes(data[12:16],'little')&1024),'bit 10 set without PS3_PROF_RSX_FRAME'
+            assert not [k for k,_ in check.chunks(data) if 44<=k<=48],'RSXF chunks without PS3_PROF_RSX_FRAME'
+            (out/'capture.prof').write_bytes(data)
+        if a.case=='ringfixture' and not a.mutant:
+            # Byte-level: the same program built with the capture hooks compiled out (the runtime before them), run
+            # twice. Its two runs must match outside the masked run-dependent fields (auto_capture_bytes.py lists
+            # them; the mask is honest when the two runs of ONE build differ only there), and this dormant capture
+            # must match it the same way.
+            spec=importlib.util.spec_from_file_location('capture_bytes',Path(__file__).with_name('auto_capture_bytes.py'))
+            cmp=importlib.util.module_from_spec(spec);spec.loader.exec_module(cmp)
+            runs=[]
+            for k in (1,2):
+                today=out/('today%d'%k)
+                argv=['python3',__file__,'--case','ringfixturetoday','--out',today]+(['--sanitize',a.sanitize] if a.sanitize else [])
+                run('ringfixturetoday%d'%k,argv)
+                runs.append((today/'capture.prof').read_bytes())
+            problems,masked=cmp.compare(runs[0],runs[1])
+            assert not problems and masked>0,('two runs of the build without the hooks',problems,masked)
+            print('two runs of the build without the capture hooks: equal outside the mask (%d masked bytes differ)' % masked)
+            problems,masked=cmp.compare(runs[0],data)
+            assert not problems,('dormant capture against the build without the hooks',problems)
+            print('dormant capture equals the build without the capture hooks outside the mask (%d masked bytes differ)' % masked)
+    if a.case=='ringrsxf':
+        files=list(capture_dir.glob('*.prof'));assert len(files)==1,files
+        data=files[0].read_bytes()
+        assert int.from_bytes(data[12:16],'little')&1024,'bit 10 not set'
+        assert a.reader,'ringrsxf needs --reader'
+        r=run('reader-rsxf',[a.reader,'rsx-frame','--json',files[0]],capture_dir)
+        v=json.loads(r.stdout)
+        caps=v['captures'];assert v['availability']=='available' and len(caps)==3,v
+        c=caps[2]
+        assert (c['name'],c['source'],c['timing_mode'],c['status'])==('third','app','isolated','COMPLETE'),c['status']
+        assert len(c['draws'])==10 and all(x['timing']['state']=='timed' for x in c['draws']),c['draws'][:2]
+        def fnv(b):
+            h=0xcbf29ce484222325
+            for x in b:h=((h^x)*0x100000001b3)&0xffffffffffffffff
+            return h
+        vp=b'ps3dk.rsxf.vp1'+b''.join((0x10000000+(i<<8)|(1 if i==11 else 0)).to_bytes(4,'big') for i in range(12))
+        fp=b'ps3dk.rsxf.fp1'+bytes([0x3e,0x80,0,0,0xc8,2,0,0,0xc8,0,0,0,0xc8,0,0,0,0x3e,0x81,0,0,0xc8,0,0,0,0xc8,0,0,0,0xc8,0,0,0])
+        c=caps[0]
+        assert (c['name'],c['source'],c['status'])==('first','app','COMPLETE'),c['status']
+        progs={p['profile']:p for p in c['programs']}
+        assert progs['vp']['hash']=='%016x'%fnv(vp) and progs['vp']['instructions']==3,progs
+        assert progs['fp']['hash']=='%016x'%fnv(fp) and progs['fp']['const_blocks']==1 and progs['fp']['source']=='program container at bind',progs
+        d=c['draws'];assert len(d)==22,len(d)
+        for k in range(10):
+            x=d[k]
+            assert (x['kind'],x['primitive'],x['count'],x['label'],x['hooked'],x['decoded'],x['mismatch'])==('ARRAY','TRIANGLES',36,'terrain/rock',True,True,False),x
+            assert x['timing']['state']=='timed' and x['vp']==progs['vp']['index'] and x['fp']==progs['fp']['index'] and x['caller']==0x1234,x
+        for k in range(10,20):
+            x=d[k];assert (x['kind'],x['label'],x['hooked'],x['decoded'],x['timing']['state'])==('CLEAR','terrain/water',True,True,'timed'),x
+        for k in (20,21):
+            x=d[k];assert (x['kind'],x['primitive'],x['count'],x['first'],x['hooked'],x['decoded'])==('ARRAY','LINE_STRIP',6,7,False,True),x
+            assert x['timing']['state']=='untimed' and x['timing']['reason'].startswith('not hooked'),x
+        c=caps[1]
+        assert (c['name'],c['source'],c['request_id'])==('second','live',9),c
+        assert c['status'].startswith('TRUNCATED') and c['end']['draws_seen']==200 and 0<c['end']['draws_recorded']<200,c['end']
+        assert all(x['timing']['state']=='timed' for x in c['draws']),'every recorded draw of the truncated capture is timed'
+        print('reader: capture 1 %d draws COMPLETE; capture 2 %s, %d of 200 recorded' % (len(d),c['status'],c['end']['draws_recorded']))
+        # AUTO: the isolated capture's ten draws are ISOLATED operations; their frame row is labelled, no other is
+        r=run('reader-auto',[a.reader,'auto','--json',files[0]],capture_dir)
+        av=json.loads(r.stdout)
+        reports=av['windows'] if 'windows' in av else [av]      # one report per capture window, or the whole file
+        iso=sorted({(f['frame'],f['isolated_ops']) for w in reports for f in w['frames'] if 'isolated_ops' in f})
+        assert len(iso)==1 and iso[0][1]==10,iso
+        r=run('reader-auto-text',[a.reader,'auto',files[0]],capture_dir)
+        assert r.stdout.count(b'ISOLATED: timed by the RSX frame capture')==1,r.stdout[-2000:]
+        print('AUTO: frame %d labelled ISOLATED (%d operations)' % iso[0])
+    raise SystemExit(0)
+if a.case in ('ring','ringwrap'):
+    assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else
+                                   b'AUTO ring physical tail and native pre-wrap flush PASS')+bytes([10])),result.stdout
+    print(result.stdout.decode(),end='')
+    raise SystemExit(0)
+if a.case in RING_OPTION:
+    assert result.stdout.endswith(b'AUTO build-option ring PASS'+bytes([10])),result.stdout
+    print(result.stdout.decode(),end='')
+    files=list(capture_dir.glob('*.prof'))
+    if a.case=='ringoptbad':
+        # refused loudly at start-up: the diagnostic, no initialization, no capture
+        assert b'ps3prof: PS3_PROF_AUTO_RING options refused' in result.stderr and not files,(result.stderr,files)
+        print(result.stderr.decode(),end='')
+        raise SystemExit(0)
+    assert len(files)==1,files
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('ring_capture',Path(__file__).with_name('auto_ring_capture.py'))
+    check=importlib.util.module_from_spec(spec);spec.loader.exec_module(check)
+    configs=[b for k,b in check.chunks(files[0].read_bytes()) if k==34]
+    assert len(configs)==1,len(configs)
+    (out/'config.bin').write_bytes(configs[0])
+    if a.case=='ringoptoff':
+        # the same program without the ring compiled in: CONFIG byte-identical (no ring partition, no ring budget)
+        today=out/'today'
+        argv=['python3',__file__,'--case','ringofftoday','--out',today]+(['--sanitize',a.sanitize] if a.sanitize else [])
+        r=run('ringofftoday',argv)
+        assert (today/'config.bin').read_bytes()==configs[0],'CONFIG differs from the build without the ring'
+        print('CONFIG (%d bytes) identical to the build without the ring compiled in' % len(configs[0]))
     raise SystemExit(0)
 if a.case=='segmetatail':
     assert result.returncode==0 and result.stdout==b'AUTO metadata exhaustion latches the frame tail PASS\n',result.stdout
@@ -438,9 +801,10 @@ if a.case=='segcapacity':
     print(result.stdout.decode(),end='')
     raise SystemExit(0)
 assert result.stdout==(b'AUTO initial attach and override without device writes PASS\n' if a.case=='init'
+                       else b'AUTO native FIFO accounting PASS\n' if a.case=='fifoaccount'
                        else b'AUTO actual marker producer and cumulative completion PASS\n' if operations
                        else b'AUTO in-flight owner seal retains claim and lower bound PASS\n' if a.case=='stop'
-                       else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case=='stopvisit'
+                       else b'AUTO stopped owner visit acknowledges without marker PASS\n' if a.case in ('stopvisit','stopvisitseal')
                        else b'AUTO actual bounded scheduled clock capture PASS\n' if a.case in ('clocks','clockcap')
                        else b'AUTO segment timing and frame marks PASS\n' if a.case=='segments'
                        else b'AUTO external segment timing PASS\n' if a.case=='extsegments'
@@ -448,6 +812,7 @@ assert result.stdout==(b'AUTO initial attach and override without device writes 
                        else b'AUTO segment CALL inside a draw bracket PASS\n' if a.case=='segnested'
                        else b'AUTO whole-CALL brackets: 407 timed draws, 32 brackets from the reserve, the 33rd refused PASS\n' if a.case=='callbracket'
                        else b'AUTO tags, fragment programs, ranges and timed ranges PASS\n' if a.case=='tags'
+                       else b'AUTO range refusals by reason PASS\n' if a.case in ('rangereasons','rangesat')
                        else b'AUTO capture windows PASS\n' if a.case in ('windows','windowseal')
                        else b'AUTO whole-run window PASS\n' if a.case=='windowwhole'
                        else b'AUTO no window PASS\n' if a.case=='windownone'
@@ -487,6 +852,14 @@ if a.case in ('race','fifopre'):
     assert not any(31<=k<=33 for k,b in chunks),'no unpublished FIFO state'
     print('real capture attach/seal race: incomplete file, no resurrected reservation PASS')
     raise SystemExit(0)
+if a.case=='fifoaccount':
+    rows=[struct.unpack('<HHIIIII7Q',b) for k,b in chunks if k==43]
+    assert len(rows)==3,rows
+    assert rows[0][9:12]==(216,208,2) and rows[0][6]==0,rows
+    assert rows[1][9:12]==(144,104,0) and rows[1][6]==0,rows
+    assert rows[2][9:12]==(0,0,0) and rows[2][6]&1,rows
+    print('AUTO native FIFO accounting wire PASS')
+    raise SystemExit(0)
 auto=[(k,b) for k,b in chunks if 34<=k<=38]
 OP=160 # OPS record width of this writer (CONFIG 63/11): 128 bytes plus the build tail
 def build_tail(q):
@@ -502,7 +875,7 @@ if a.case=='fifopost':
     raise SystemExit(0)
 if a.case=='segbuild':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and struct.unpack_from('<I',config,60)[0]==OP
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP
     owner=struct.unpack_from('<I',config,16)[0]
     records=[]
     for k,b in auto:
@@ -520,7 +893,7 @@ if a.case=='segbuild':
     assert seg==[(67,1,1,1,(0,owner,1,0)),(67,1,6,2,(0,owner,1,0)),(67,1,6,2,(1,owner,1,0)),
                  (64|4|16,0,7,0,(2,owner,1,0))],seg
     assert all(r['tail']==(0,0,0,0) for r in records if not r['flags']&64)
-    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==480 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==3 and all(len(b)==544 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep==[0,3,0xffffffff],unrep
     rflags=[struct.unpack_from('<H',b,2)[0] for b in rows]
@@ -532,8 +905,8 @@ if a.case=='segbuild':
     raise SystemExit(0)
 if a.case=='segnested':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
-    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==480 for b in rows)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
+    rows=[b for k,b in auto if k==36];assert rows and all(len(b)==544 for b in rows)
     unrep=[struct.unpack_from('<I',b,380)[0] for b in rows]
     assert unrep[0]==3,unrep # first CALL inside a draw, a later replay, a replay inside a draw: one visit each
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
@@ -542,7 +915,7 @@ if a.case=='segnested':
     raise SystemExit(0)
 if a.case=='callbracket':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     owner=struct.unpack_from('<I',config,16)[0]
     calls=[]
     for k,b in auto:
@@ -666,7 +1039,7 @@ if a.case in ('windows','windowseal','windowwhole','windownone','windowprebuild'
     raise SystemExit(0)
 if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     config=[b for k,b in auto if k==34][-1]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and len(config)==176,len(config)
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and len(config)==176,len(config)
     want={'preinit':100,'preinitthread':63,'preinitold':31,'preinitfail':100}[a.case]
     assert struct.unpack_from('<2I',config,160)==(32,want),struct.unpack_from('<2I',config,160)
     status=struct.unpack_from('<H',[b for k,b in auto if k==37][-1],2)[0]
@@ -682,7 +1055,7 @@ if a.case in ('preinit','preinitthread','preinitold','preinitfail'):
     raise SystemExit(0)
 if a.case=='tags':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11) and struct.unpack_from('<I',config,60)[0]==OP==160
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP==160
     recs=[]
     for k,b in auto:
         if k!=35:continue
@@ -715,7 +1088,7 @@ if a.case=='tags':
     # tag 0xd
     assert [x[:3] for x in rng]==[(0,2,0),(0,1,0),(0,4,0),(0,3,0),(0,2,0),(0,1,0),(0,1,0)]+[(1,1,0)]*55,rng
     assert all(x[3]==0xd for x in rng),rng
-    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==480 for b in rows)
+    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==544 for b in rows)
     tail=[struct.unpack_from('<3QII',b,416) for b in rows]
     assert tail[0]==(0,0,0,3,0),tail[0]
     # the boundary range, eight ranges past the reserve, the timed and inner ranges once it is spent, and the 257
@@ -723,11 +1096,71 @@ if a.case=='tags':
     assert tail[1]==(0,0,3,11+257,0),tail[1]
     print('real capture: tags, fragment programs, ranges and the outside-timed reason PASS')
     raise SystemExit(0)
+def range_wire_check(auto,sat):
+    """rangereasons/rangesat: the COVERAGE tails and STATUS totals on the wire, then through the reader."""
+    # CONFIG 3071/11: 544-byte rows with the reason tail at 480, 256-byte STATUS with the totals at 128
+    REASONS=['depth','segment_build','state','no_frame','ring','no_descriptor','no_pair','other_frame','no_metadata',
+             'unmatched_end']
+    config=[b for k,b in auto if k==34][0]
+    assert struct.unpack_from('<2I',config,24)==(3071,11) and struct.unpack_from('<I',config,60)[0]==OP==160
+    assert struct.unpack_from('<I',config,164)[0]==4,'the range reserve option'
+    rows=[b for k,b in auto if k==36];assert len(rows)==2 and all(len(b)==544 for b in rows),[len(b) for b in rows]
+    tails=[struct.unpack_from('<16I',b,480) for b in rows]
+    totals=[struct.unpack_from('<I',b,440)[0] for b in rows]
+    assert all(t[10:]==(0,)*6 for t in tails),tails
+    want0=[0xffffffff if sat else 1,1,1,0,1,9 if sat else 5,0,0,0,1]
+    assert list(tails[0][:10])==want0,tails[0]
+    assert list(tails[1][:10])==[0,0,0,0,0,0,1,1,3,0],tails[1]
+    assert totals[1]==5 and sum(tails[1][:10])==5,totals
+    flags0=struct.unpack_from('<H',rows[0],2)[0]
+    if sat:
+        # the preset DEPTH count and row total reached UINT32_MAX and stick there: the row is SATURATED
+        assert totals[0]==0xffffffff and flags0&4,(totals[0],hex(flags0))
+    else:
+        assert totals[0]==10 and sum(tails[0][:10])==10 and not flags0&4,(totals[0],hex(flags0))
+    status=[b for k,b in auto if k==37]
+    assert len(status)==1 and len(status[0])==256,[len(b) for b in status]
+    st=status[0];sflags=struct.unpack_from('<H',st,2)[0]
+    capture_total=struct.unpack_from('<16Q',st,128)
+    # the capture totals: every refusal, NO_FRAME included (it counts in no row)
+    assert list(capture_total[:10])==[2 if sat else 1,1,1,1,1,9 if sat else 5,1,1,3,1] and capture_total[10:]==(0,)*6,capture_total
+    assert bool(sflags&4)==sat and sflags&1,hex(sflags)
+    if a.reader:
+        rd=run('reader-json',[a.reader,'auto','--json',files[0]])
+        assert rd.returncode==0,rd.stderr.decode()
+        doc=json.loads(rd.stdout)
+        doc=doc['windows'][0] if 'windows' in doc else doc   # every capture has a whole-run window
+        by=doc['status']['ranges_refused_by_reason']
+        assert [by[n] for n in REASONS]==list(capture_total[:10]),by
+        assert doc['status']['ranges_refused']==sum(capture_total[:10])
+        fr=[f['ranges_refused_by_reason'] for f in doc['frames']]
+        assert [fr[0][n] for n in REASONS]==want0 and [fr[1][n] for n in REASONS]==list(tails[1][:10]),fr
+        tag=run('reader-by-tag',[a.reader,'auto','--by-tag','--json',files[0]])
+        assert tag.returncode==0,tag.stderr.decode()
+        tf=json.loads(tag.stdout)['frames']
+        assert [tf[1]['ranges_refused_by_reason'][n] for n in REASONS]==list(tails[1][:10]),tf
+        text=run('reader-text',[a.reader,'auto',files[0]])
+        assert text.returncode==0 and b'AUTO ranges refused: ' in text.stdout,text.stdout.decode()
+        line=next(l for l in text.stdout.decode().splitlines() if l.startswith('AUTO ranges refused: '))
+        rows_text=[l.strip() for l in text.stdout.decode().splitlines() if l.startswith('  AUTO ranges refused: ')]
+        assert rows_text[-1]=='AUTO ranges refused: 5 (no_pair 1, other_frame 1, no_metadata 3)',rows_text
+        assert line.startswith('AUTO ranges refused: %d ('%sum(capture_total[:10])) and 'no_frame 1' in line,line
+        print('reader: '+line)
+if a.case in ('rangereasons','rangesat'):
+    sat=a.case=='rangesat'
+    try:
+        range_wire_check(auto,sat)
+    except AssertionError as e:
+        if a.mutant not in CAPTURE_MUTANTS:raise
+        print(a.mutant+' rejected by the capture check: '+str(e)[:200]);raise SystemExit(0)
+    assert a.mutant not in CAPTURE_MUTANTS,a.mutant+' survived the capture check'
+    print('real capture: AUTO range refusals by reason in rows and STATUS%s PASS'%(' (saturated row)' if sat else ''))
+    raise SystemExit(0)
 if a.case=='labels':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36]
-    assert len(rows)>=3 and all(len(b)==480 for b in rows),[len(b) for b in rows]
+    assert len(rows)>=3 and all(len(b)==544 for b in rows),[len(b) for b in rows]
     block=[struct.unpack_from('<4IQQ',b,384) for b in rows[:3]]
     # frame 0: two complete runs (labels 70 and 80: several), two broken, the one-label total (u64@408) below the
     # sum; frame 1: one complete run (label 90 through the address form), two broken (the 90 -> 91 switch and an
@@ -766,7 +1199,7 @@ if a.case=='extsegments':
     raise SystemExit(0)
 if a.case=='segments':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11),'CONFIG kind/form masks of the build-frame writer'
+    assert struct.unpack_from('<2I',config,24)==(3071,11),'CONFIG kind/form masks of the build-frame writer'
     assert struct.unpack_from('<I',config,60)[0]==OP,'CONFIG record width'
     records=[]
     for k,b in auto:
@@ -800,7 +1233,7 @@ if a.case=='segments':
     assert records[4]['raw']==(0,0) and records[4]['published']==16
     coverage=[b for k,b in auto if k==36];assert len(coverage)==2
     for b,(frame,unsupported,rows_expected) in zip(coverage,[(0,1,[(1,1),(1,1),(2,2)]),(1,0,[(1,1),(0,0),(0,0)])]):
-        assert len(b)==480 and struct.unpack_from('<H',b,2)[0]==3|64
+        assert len(b)==544 and struct.unpack_from('<H',b,2)[0]==3|64
         assert struct.unpack_from('<Q',b,16)[0]==frame
         assert struct.unpack_from('<Q',b,40)[0]==unsupported,('unsupported_form_visits',frame,b[40:48])
         rows=[struct.unpack_from('<12Q',b,64+96*k) for k in range(3)]
@@ -813,9 +1246,9 @@ if a.case=='segments':
     raise SystemExit(0)
 if a.case=='flips':
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36];assert len(rows)==22,len(rows)
-    assert all(len(b)==480 for b in rows)
+    assert all(len(b)==544 for b in rows)
     flags=[struct.unpack_from('<H',b,2)[0] for b in rows]
     assert flags==[1|2|32|64]*19+[1|2|16|32|64,1|2|16|64,1|2|64],flags # flip rows; flip 19 closed OPEN by the explicit call
     # hand-written polls are polling cadence, never flip-wait scopes: one complete run per flip frame
@@ -844,10 +1277,10 @@ if a.case=='flips':
     raise SystemExit(0)
 if a.case in ('present','spanning'):
     config=[b for k,b in auto if k==34][0]
-    assert struct.unpack_from('<2I',config,24)==(1023,11)
+    assert struct.unpack_from('<2I',config,24)==(3071,11)
     rows=[b for k,b in auto if k==36]
     n=3 if a.case=='present' else 5
-    assert len(rows)==n and all(len(b)==480 for b in rows),[len(b) for b in rows]
+    assert len(rows)==n and all(len(b)==544 for b in rows),[len(b) for b in rows]
     assert [struct.unpack_from('<Q',b,16)[0] for b in rows]==list(range(n))
     MS=1000000
     def present(b):
@@ -917,10 +1350,14 @@ if a.case in ('clocks','clockcap'):
     assert chunks[-1][0]==6
     print('real capture: '+str(len(rows))+' CLOCK facts, '+str(frames)+' closed frames, '+str(len(schedule)-len(rows))+' lost anchors and FINAL accounting PASS')
     raise SystemExit(0)
-if a.case in ('stop','stopvisit'):
+if a.case in ('stop','stopvisit','stopvisitseal'):
     assert [k for k,b in auto]==[34,37]
     fields=struct.unpack_from('<HHI15Q',auto[-1][1])
     active=int(a.case=='stop')
+    if a.mutant in ('foreign-config-claim','sealed-config-claim'):
+        assert fields[:3]==(1,11,1) and fields[3:]==(0,)*15,fields
+        print(a.mutant+' KILLED: core owner ack left AUTO_OWNER_UNACK')
+        raise SystemExit(0)
     assert fields[:3]==(1,11 if active else 1,1),fields
     # capture windows: the stopped visit comes after shutdown closed the whole-run window, so it is not counted (no
     # unassociated visit); the in-flight draw of 'stop' was admitted inside the window
@@ -956,7 +1393,7 @@ if operations:
     if a.case=='frames':
         rows=[b for k,b in auto if k==36];assert len(rows)==3
         for i,b in enumerate(rows):
-            assert len(b)==480 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
+            assert len(b)==544 and struct.unpack_from('<HHI',b)==(1,(19 if i==1 else 3)|64,1)
             assert struct.unpack_from('<Q',b,16)[0]==i
             assert struct.unpack_from('<Q',b,24)[0]<=struct.unpack_from('<Q',b,32)[0]
             assert not any(struct.unpack_from('<24Q',b,64))
@@ -979,11 +1416,12 @@ if operations:
     raise SystemExit(0)
 assert [k for k,b in auto]==[34,37], 'AUTO_NO_INIT_CONFIG_STATUS'
 config,status=auto[0][1],auto[1][1]
-assert len(config)==176 and len(status)==128
+# the STATUS after an ATTACHED CONFIG carries the range-refusal totals (3071/11); after a REFUSED one it does not
+assert len(config)==176 and len(status)==(128 if struct.unpack_from('<H',config,2)[0]==1 else 256)
 assert struct.unpack_from('<IIQ',config,160)[2]==0
 if a.case=='init':
     assert struct.unpack_from('<HHI',config)==(1,0,1)
-    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,1023,11)
+    assert struct.unpack_from('<IIIIII',config,8)==(1026,1,1,1,3071,11)
     assert struct.unpack_from('<I',config,60)[0]==OP
     assert struct.unpack_from('<IIIIIII',config,32)==(64,32,247,246,8,4,2)
     assert 0<struct.unpack_from('<Q',config,72)[0]<=2097152
@@ -1022,7 +1460,8 @@ else:
     assert config[160:]==bytes(16)
 clocks=[b for k,b in chunks if k==2];assert len(clocks)==1
 assert struct.unpack_from('<Q',config,64)[0]==struct.unpack_from('<Q',clocks[0],12)[0]>0
-assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(120)
+# a zero FINAL STATUS: 128 bytes after a REFUSED CONFIG, 256 (with the zero range-refusal totals) after an attached one
+assert struct.unpack_from('<HHI',status)==(1,1,1) and status[8:]==bytes(len(status)-8)
 assert chunks[-1][0]==6, 'complete capture trailer'
 if a.case=='seal':
     err_src=out/'main_err.c'

@@ -3,7 +3,7 @@
  * after a write still refuses (PRIOR_WRITES_UNKNOWN). The driver checks the capture's CONFIG reserves.
  *
  * TEST_PREINIT_MODE 0 (preinit): invalid options refused (NULL, bad size, a range reserve that leaves fewer than 64
- *   pairs), a valid set replaced by a later one, the caller's struct changed after the call without effect; the init
+ *   pairs, a ring field in a build without the ring), the 36-byte struct accepted (an exact allocation), a valid set replaced by a later one, the caller's struct changed after the call without effect; the init
  *   uses range_pairs 100; a set after init is EBUSY; a raw write then the override is refused and changes nothing; 100
  *   ranges in frame 0 admitted, the 101st refused.
  * TEST_PREINIT_MODE 1 (preinitthread): options set on another thread; the init on this thread takes the defaults.
@@ -66,6 +66,17 @@ int main(void) {
     assert(ps3dk_prof_auto_options_set(NULL)==PS3DK_PROF_EINVAL);
     o.size=20;assert(ps3dk_prof_auto_options_set(&o)==PS3DK_PROF_EINVAL);o.size=sizeof o;
     o.range_pairs=504-32-64+1;assert(ps3dk_prof_auto_options_set(&o)==PS3DK_PROF_EINVAL);
+    /* ring fields are validated as the attach validates them: reserved (refused) in this build */
+    o.range_pairs=0;o.ring_blocks=2;assert(ps3dk_prof_auto_options_set(&o)==PS3DK_PROF_EINVAL);o.ring_blocks=0;
+    {
+        void *v36=malloc(36);                                                   /* the 36-byte struct: nothing past it is read */
+        assert(v36);
+        o.size=36;o.range_pairs=150;
+        memcpy(v36,&o,36);
+        assert(ps3dk_prof_auto_options_set((const ps3dk_prof_auto_options *)v36)==PS3DK_PROF_OK);
+        free(v36);
+        o.size=sizeof o;
+    }
     o.range_pairs=200;assert(ps3dk_prof_auto_options_set(&o)==PS3DK_PROF_OK);
     o.range_pairs=100;assert(ps3dk_prof_auto_options_set(&o)==PS3DK_PROF_OK);   /* replaces the earlier set */
     o.range_pairs=7;                                                            /* the copy was taken at the call */

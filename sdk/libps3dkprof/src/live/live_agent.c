@@ -3,6 +3,7 @@
  * (live_os.h); this file holds only the protocol and the state machine. */
 #include "live_agent.h"
 #include "live_os.h"
+#include <ps3dk/prof.h> /* the PS3DK_PROF_* codes a CAPTURE_ACK carries */
 #include <string.h>
 
 #ifdef PS3DK_PROF_TEST_HOOKS
@@ -46,6 +47,7 @@ void live_config_defaults(live_config *cfg)
         .handshake_timeout_us = 2000000,
         .stack_bytes = 64 * 1024,
         .cap_bytes = LIVE_DEFAULT_CAP_BYTES,
+        .cmd_timeout_us = 5000000,
     };
 }
 
@@ -77,6 +79,10 @@ static void queue_frame(live_out *o, uint32_t type, const uint8_t *payload, uint
 
 static void drop(live_agent *a, live_conn *c, enum live_drop why)
 {
+    /* A command of this link that no frame mark took yet is withdrawn; one
+     * being applied finishes in the source, which discards its result. */
+    if (c->cmd_queued)
+        (void)a->cmd->cancel(a->cmd->ctx);
     /* Count first: a peer that sees the close may read the counters. */
     /* END was already counted before the write half-close. Draining its
      * remaining input does not end a second stream. */
@@ -118,9 +124,10 @@ static void queue_hello(live_agent *a, live_conn *c)
 {
     uint8_t p[16 + 2 + LIVE_MAX_APP + 2 + LIVE_MAX_BUILD_ID + 2 + LIVE_MAX_NAME];
     uint32_t n;
-    live_put16(p, LIVE_VERSION);
+    live_put16(p, c->version); /* the version the viewer asked for */
     live_put16(p + 2, LIVE_AGENT_VERSION);
-    live_put32(p + 4, 0);
+    live_put32(p + 4, (c->version >= 2 && a->cmd ? LIVE_CAP_TRIGGERS : 0u) |
+                      (c->version >= 3 && a->rsxf && a->rsxf->available() ? LIVE_CAP_RSX_FRAME : 0u)); /* v1: 0 */
     live_put64(p + 8, a->session_id);
     n = 16;
     live_put16(p + n, a->app_len);
@@ -182,6 +189,146 @@ static int queue_next(live_agent *a, live_conn *c)
     return 0;
 }
 
+/* After HELLO: a PING (empty) or, in v2, a command within its layout's bounds. */
+static int stream_len_ok(const live_conn *c, uint32_t type, uint32_t len)
+{
+    if (type == LIVE_T_PING)
+        return len == 0;
+    if (c->version < 2)
+        return 0;
+    switch (type) {
+    case LIVE_T_CAPTURE_BEGIN:
+        return len >= 8u + 1u && len <= 8u + LIVE_MAX_WINDOW_NAME;
+    case LIVE_T_CAPTURE_END:
+        return len == 4u;
+    case LIVE_T_CAPTURE_FRAMES:
+        return len >= 12u + 1u && len <= 12u + LIVE_MAX_WINDOW_NAME;
+    case LIVE_T_RSX_FRAME_REQ:
+        return c->version >= 3 && len >= 12u && len <= 12u + LIVE_MAX_WINDOW_NAME;
+    default:
+        return 0;
+    }
+}
+
+static void stage_ack(live_conn *c, int32_t result, uint32_t window_id)
+{
+    live_put32(c->ack, c->cmd_req);
+    live_put32(c->ack + 4, (uint32_t)result);
+    live_put32(c->ack + 8, result == 0 ? window_id : 0u);
+    live_put16(c->ack + 12, c->cmd_type);
+    live_put16(c->ack + 14, 0);
+    c->ack_ready = 1;
+    c->cmd_queued = 0;
+}
+
+/* RSX_FRAME_REQ (v3): answered at once; the accepted capture's progress follows as STATE. */
+static int on_rsx_frame(live_agent *a, live_conn *c)
+{
+    const uint8_t *p = c->in + LIVE_HDR_BYTES;
+    uint32_t len = live_get32(c->in + 4), req = live_get32(p), flags = live_get16(p + 4);
+    uint32_t frames = live_get16(p + 6), name_len = live_get16(p + 8), id = 0;
+    int rc;
+    if (req == 0 || frames != 1 || live_get16(p + 10) != 0 || len != 12u + name_len || c->rsxf_ack_ready)
+        return -1;
+    if (c->end_queued)
+        return 0;
+    /* one followed capture per link: a request before the previous capture's final STATE is sent would lose it */
+    rc = c->rsxf_id ? PS3DK_PROF_EBUSY
+         : a->rsxf && a->rsxf->available() ? a->rsxf->request(req, flags, (const char *)p + 12, name_len, &id)
+                                           : PS3DK_PROF_ENOTSUP;
+    live_put32(c->rsxf_ack, req);
+    live_put32(c->rsxf_ack + 4, (uint32_t)rc);
+    live_put32(c->rsxf_ack + 8, rc == 0 ? id : 0u);
+    live_put32(c->rsxf_ack + 12, 0);
+    c->rsxf_ack_ready = 1;
+    if (rc == 0) {
+        c->rsxf_id = id;
+        c->rsxf_sent_state = 0;
+    }
+    return 0;
+}
+
+/* The followed capture's state, when it changed since the last STATE: 1 with the frame staged in out. */
+static int rsxf_state_frame(live_agent *a, live_conn *c, uint8_t out[LIVE_RSXF_STATE_BYTES])
+{
+    live_rsxf_status s;
+    if (!c->rsxf_id || !a->rsxf || c->end_queued)
+        return 0;
+    a->rsxf->status(&s);
+    if (s.id != c->rsxf_id || s.state < 1 || s.state > 4 || s.state == c->rsxf_sent_state)
+        return 0;
+    memset(out, 0, LIVE_RSXF_STATE_BYTES);
+    live_put32(out, s.id);
+    out[4] = (uint8_t)s.state;
+    out[5] = (uint8_t)s.reason;
+    live_put32(out + 8, s.draws);
+    live_put32(out + 12, s.request);
+    live_put64(out + 16, s.frame);
+    live_put64(out + 24, s.bytes);
+    c->rsxf_sent_state = s.state;
+    if (s.state >= 3)
+        c->rsxf_id = 0; /* final */
+    return 1;
+}
+
+/* A complete command frame in c->in (its length already bounded by
+ * stream_len_ok). Returns -1 for a protocol violation. */
+static int on_command(live_agent *a, live_conn *c, uint64_t now)
+{
+    const uint8_t *p = c->in + LIVE_HDR_BYTES;
+    uint32_t type = live_get16(c->in), len = live_get32(c->in + 4);
+    uint32_t req = live_get32(p), frames = 0, name_len = 0;
+    const char *name = NULL;
+    if (type == LIVE_T_RSX_FRAME_REQ)
+        return on_rsx_frame(a, c);
+    if (type == LIVE_T_CAPTURE_BEGIN) {
+        name_len = live_get16(p + 4);
+        if (live_get16(p + 6) != 0 || len != 8u + name_len)
+            return -1;
+        name = (const char *)p + 8;
+    } else if (type == LIVE_T_CAPTURE_FRAMES) {
+        frames = live_get32(p + 4);
+        name_len = live_get16(p + 8);
+        if (live_get16(p + 10) != 0 || len != 12u + name_len || frames < 1 || frames > LIVE_MAX_WINDOW_FRAMES)
+            return -1;
+        name = (const char *)p + 12;
+    }
+    /* one command at a time: the next only after the ACK of the last */
+    if (req == 0 || c->cmd_queued || c->ack_ready)
+        return -1;
+    if (c->end_queued)
+        return 0; /* END is final: no ACK may follow it; the viewer sees the stream end instead */
+    c->cmd_req = req;
+    c->cmd_type = type;
+    if (!a->cmd) {
+        stage_ack(c, PS3DK_PROF_ENOTSUP, 0);
+        return 0;
+    }
+    int rc = a->cmd->submit(a->cmd->ctx, type, name, name_len, frames);
+    if (rc != 0) {
+        stage_ack(c, rc, 0);
+        return 0;
+    }
+    c->cmd_queued = 1;
+    c->cmd_deadline = now + a->cfg.cmd_timeout_us;
+    return 0;
+}
+
+/* The outstanding command: finished, withdrawn at its deadline, or still waiting. */
+static void service_command(live_agent *a, live_conn *c, uint64_t now)
+{
+    int32_t result;
+    uint32_t id;
+    if (!c->cmd_queued)
+        return;
+    if (a->cmd->poll(a->cmd->ctx, &result, &id)) {
+        stage_ack(c, result, id);
+        return;
+    }
+    if (now >= c->cmd_deadline && a->cmd->cancel(a->cmd->ctx))
+        stage_ack(c, PS3DK_PROF_ETIMEDOUT, 0); /* no frame mark took it: nothing was applied */
+}
+
 /* Reads and handles what the viewer sent. Returns a drop reason, or -1 to keep going. */
 static int read_in(live_agent *a, live_conn *c, uint64_t now)
 {
@@ -191,8 +338,7 @@ static int read_in(live_agent *a, live_conn *c, uint64_t now)
             uint32_t type = live_get16(c->in), flags = live_get16(c->in + 2), len = live_get32(c->in + 4);
             if (flags)
                 return LIVE_DROP_PROTOCOL;
-            if (c->phase == C_HANDSHAKE ? type != LIVE_T_CLIENT_HELLO || len != 8
-                                        : type != LIVE_T_PING || len != 0)
+            if (c->phase == C_HANDSHAKE ? type != LIVE_T_CLIENT_HELLO || len != 8 : !stream_len_ok(c, type, len))
                 return c->phase == C_HANDSHAKE ? LIVE_DROP_BAD_HELLO : LIVE_DROP_PROTOCOL;
         }
         if (c->in_len >= LIVE_HDR_BYTES && c->in_len == need) {
@@ -201,8 +347,11 @@ static int read_in(live_agent *a, live_conn *c, uint64_t now)
                 /* A hello that completes after the deadline is still late. */
                 if (now >= c->handshake_deadline)
                     return LIVE_DROP_HANDSHAKE_TIMEOUT;
-                if (live_get32(p) != LIVE_MAGIC || live_get16(p + 4) != LIVE_VERSION || live_get16(p + 6) != 0)
+                uint32_t version = live_get16(p + 4);
+                if (live_get32(p) != LIVE_MAGIC || version < LIVE_VERSION_MIN || version > LIVE_VERSION ||
+                    live_get16(p + 6) != 0)
                     return LIVE_DROP_BAD_HELLO;
+                c->version = version;
                 c->file_fd = live_os_file_open(a->path);
                 if (c->file_fd < 0)
                     return LIVE_DROP_IO;
@@ -217,6 +366,9 @@ static int read_in(live_agent *a, live_conn *c, uint64_t now)
                 c->last_progress = after;
                 c->ping_window_start = after;
                 queue_hello(a, c);
+            } else if (live_get16(c->in) != LIVE_T_PING) {
+                if (on_command(a, c, now) != 0)
+                    return LIVE_DROP_PROTOCOL;
             } else {
                 if (now - c->ping_window_start >= 1000000) {
                     c->ping_window_start = now;
@@ -370,6 +522,30 @@ static void *agent_main(void *arg)
                 atomic_fetch_add(&a->pongs, 1);
                 continue;
             }
+            if (c->rsxf_ack_ready) {
+                c->rsxf_ack_ready = 0;
+                queue_frame(&c->out, LIVE_T_RSX_FRAME_ACK, c->rsxf_ack, LIVE_RSXF_ACK_BYTES);
+                if (live_get32(c->rsxf_ack + 4) != 0)
+                    atomic_fetch_add(&a->ack_refusals, 1);
+                atomic_fetch_add(&a->acks, 1);
+                continue;
+            }
+            {
+                uint8_t st[LIVE_RSXF_STATE_BYTES];
+                if (rsxf_state_frame(a, c, st)) {
+                    queue_frame(&c->out, LIVE_T_RSX_FRAME_STATE, st, LIVE_RSXF_STATE_BYTES);
+                    continue;
+                }
+            }
+            service_command(a, c, now);
+            if (c->ack_ready) {
+                c->ack_ready = 0;
+                queue_frame(&c->out, LIVE_T_CAPTURE_ACK, c->ack, LIVE_ACK_BYTES);
+                if (live_get32(c->ack + 4) != 0)
+                    atomic_fetch_add(&a->ack_refusals, 1);
+                atomic_fetch_add(&a->acks, 1); /* before the frame the peer observes */
+                continue;
+            }
             c->out.len = c->out.done = c->out.data_bytes = 0;
             if (queue_next(a, c) < 0) {
                 drop(a, c, LIVE_DROP_IO);
@@ -399,12 +575,15 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     if (cfg->poll_us < 1000 || cfg->poll_us > 1000000 || cfg->send_timeout_us < 1000 ||
         cfg->send_timeout_us > 60000000 || cfg->handshake_timeout_us < 1000 ||
         cfg->handshake_timeout_us > 60000000 || cfg->stack_bytes < 16 * 1024 ||
-        cfg->stack_bytes > 1024 * 1024 || cfg->cap_bytes == 0 || cfg->cap_bytes > (1ull << 40))
+        cfg->stack_bytes > 1024 * 1024 || cfg->cap_bytes == 0 || cfg->cap_bytes > (1ull << 40) ||
+        cfg->cmd_timeout_us < 1000 || cfg->cmd_timeout_us > 60000000)
         return LIVE_EINVAL;
     size_t plen = src->path ? bounded_len(src->path, sizeof a->path) : 0;
     if (plen == 0 || plen >= sizeof a->path || !src->finalization || !src->app || src->app_len == 0 ||
         src->app_len > LIVE_MAX_APP || src->build_id_len > LIVE_MAX_BUILD_ID ||
-        (src->build_id_len && !src->build_id))
+        (src->build_id_len && !src->build_id) ||
+        (src->cmd && (!src->cmd->submit || !src->cmd->poll || !src->cmd->cancel)) ||
+        (src->rsxf && (!src->rsxf->request || !src->rsxf->status || !src->rsxf->available)))
         return LIVE_EINVAL;
     const char *base = strrchr(src->path, '/');
     base = base ? base + 1 : src->path;
@@ -424,6 +603,8 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     a->session_id = src->session_id;
     a->finalization = src->finalization;
     a->ctx = src->ctx;
+    a->cmd = src->cmd;
+    a->rsxf = src->rsxf;
     memset(&a->conn, 0, sizeof a->conn);
     a->conn.fd = a->conn.file_fd = -1;
     a->conn.phase = C_NONE;
@@ -433,6 +614,8 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     atomic_store(&a->busy_refusals, 0);
     atomic_store(&a->bytes_delivered, 0);
     atomic_store(&a->pongs, 0);
+    atomic_store(&a->acks, 0);
+    atomic_store(&a->ack_refusals, 0);
     for (int i = 0; i < LIVE_DROP_COUNT; ++i)
         atomic_store(&a->drops[i], 0);
 
