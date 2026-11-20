@@ -119,7 +119,8 @@ static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t
     const uint8_t *c=s->config;uint16_t kind=r16(p+12),flags=r16(p+14);uint64_t id=r64(p),frame=r64(p+16),published=r64(p+120);
     uint32_t owner=r32(p+8),first=r32(c+32)+16,end=r32(c+32)+r32(c+36),build_owner=0,build_flags=0,depth=0,j,mask=au_mask(s);
     uint64_t build_frame=0;int ring=au_ringed(s),segment=(flags&64)!=0,valid=(flags&2)!=0,rc;au_build *entry;
-    if(id<=s->last_op||(flags&~(ring?255u:mask!=7?127u:63u))||kind<1
+    /* ring CONFIGs: flags 1..128 and 256 ISOLATED (the RSX frame capture's isolated timing) */
+    if(id<=s->last_op||(flags&~(ring?511u:mask!=7?127u:63u))||kind<1
        ||(kind>3&&!(kind==4&&(mask&8))&&!(kind==5&&(mask&128))&&!(kind==6&&(mask&512))))return PFR_INVALID;
     if(au_width(s)>=144){build_frame=r64(p+128);build_owner=r32(p+136);build_flags=r16(p+140);
         if((build_flags&~1u)||r16(p+142))return PFR_INVALID;
