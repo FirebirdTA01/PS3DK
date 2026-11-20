@@ -22,7 +22,7 @@ import tomllib
 sys.dont_write_bytecode = True
 PINS = {
     "tools/ps3dk-prof/src/rolling_auto.rs": 'df46a1d694c2c9a771a2de45d5826b23d9fe44f57d180c2bffeb38d488840df3',
-    "tools/ps3dk-prof/src/auto_rsx.rs": 'ebd2ca4451c6627ee1500e8c2cff75cf966baf913c1fe5422f4406bf56fdb14b',
+    "tools/ps3dk-prof/src/auto_rsx.rs": '563cedd2352fd8d79d552ac61e9d8dc4a451db417dcbc813ca0004154f818b2e',
     "tools/ps3dk-prof/src/rolling_combined.rs": '2106ccf1ed86bca0c35357be7ac1f6c3ee941d91fd7957d7883ae922e67fae20',
     "tools/ps3dk-prof/src/rolling_combined_families.rs": 'c12ee3549813d5d970b45a921bf01aa370754b634c47a8d5761e492793ce10de',
     "tools/ps3dk-prof/tests/rolling_auto_ring.rs": '849f4dc947766fe7269ae17ab961de78bf6370cf5551820d6535c64f9a014744',
