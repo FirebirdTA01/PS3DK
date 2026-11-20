@@ -1229,6 +1229,10 @@ jobs:
         run: bash tests/host/release-tree-build-outputs-test.sh
       - name: Test profiler release artifact and archive membership gates
         run: bash tests/host/release-tree-profiler-test.sh
+      # The package's cmake/ is the repository's cmake/, merged into what the
+      # SDK install put there, never nested as cmake/cmake.
+      - name: Test the packaged cmake/ layout and its release-tree check
+        run: bash tests/host/release-tree-cmake-layout-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
       # libgcc the lock-free FDE registry in both multilibs.

@@ -145,6 +145,19 @@ else
     ok "$present/$checked manifest-required artifacts present"
 fi
 
+# The CMake entry points samples and users configure with sit directly in
+# cmake/.  A packaging copy into an existing cmake/ once nested the tree as
+# cmake/cmake, and the manifest rows (archives and headers) could not see it.
+echo "-- cmake/ entry points at the top level --"
+for f in ps3-ppu-toolchain.cmake ps3-ppu-toolchain-lp64.cmake ps3-spu-toolchain.cmake ps3-self.cmake; do
+    if [[ -f "$ROOT/cmake/$f" ]]; then ok "cmake/$f"; else bad "cmake/$f missing"; fi
+done
+if [[ -e "$ROOT/cmake/cmake" ]]; then
+    bad "cmake/cmake exists -- the toolchain directory was copied into itself"
+else
+    ok "no nested cmake/cmake"
+fi
+
 # ---------------------------------------------------------------------------
 # 2. Absence.  The point of the v0.11.0 packaging work is that these are GONE;
 #    a presence-only gate cannot express that.

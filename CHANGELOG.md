@@ -16,7 +16,7 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.27.286] — 2026-11-20
+## [v0.27.287] — 2026-11-20
 
 ### Added
 
