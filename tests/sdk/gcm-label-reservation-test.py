@@ -70,6 +70,10 @@ SITES = [
 EXCEPTIONS = {
     ("samples/profiling/ext-probe/source/main.c", "label", 64):
         "E1 probe predates the rule; label 64 is an application label, not SDK-reserved, and the probe links no PSGL",
+    ("samples/profiling/rsx-frame/source/main.c", "label", 200):
+        "the sample is the application the RSX frame capture observes: its frame fence (LABEL_FENCE, reset and read "
+        "back at start) is the application's own label in the application range; the PROFILER block holds AUTO's "
+        "own operation and clock labels, which an application fence must never write",
 }
 APP_SAMPLES = ["samples/gcm/hello-ppu-gcm-label-reuse", "samples/gcm/hello-ppu-gcm-main-arena"]
 
