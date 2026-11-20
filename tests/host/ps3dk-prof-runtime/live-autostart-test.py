@@ -143,7 +143,8 @@ for s in [*runtime, autostart, net / 'net_hold.c', net / 'net_pool.c']:
     subprocess.run([cc, *base, '-c', str(s), '-o', str(o)], check=True)
     objs.append(str(o))
 subprocess.run(['ar', 'rcs', str(link / 'libprof.a'), *objs], check=True)
-(link / 'app.c').write_text(r'''#include <ps3dk/prof.h>
+(link / 'app.c').write_text(r'''#define _DEFAULT_SOURCE /* usleep under -std=c11 (GCC 14+: an implicit declaration is an error) */
+#include <ps3dk/prof.h>
 #include <stdio.h>
 #include <unistd.h>
 int main(int argc, char **argv)

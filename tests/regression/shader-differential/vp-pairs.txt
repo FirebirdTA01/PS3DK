@@ -29,6 +29,9 @@ tools/rsx-cg-compiler/tests/shaders/vp_array_uniform_dyn_rig_v.cg|auto|general
 # bar): every vpshader.vcg under samples/ plus the SDK's libdbgfont VP.  None
 # had ever been compared against the established compiler by any list.  auto|general:
 # uniforms synthesised, judged on the shipping path.
+# the RSX frame capture sample (samples/profiling/rsx-frame): its two VPs, one auto uniform each
+samples/profiling/rsx-frame/shaders/vp_offset.vcg|auto|general
+samples/profiling/rsx-frame/shaders/vp_scale.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-alpha-mask/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-blend/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-cellgcm-chain/shaders/vpshader.vcg|auto|general
