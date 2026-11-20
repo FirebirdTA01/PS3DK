@@ -124,6 +124,8 @@ struct Reader {
     auto: Option<crate::auto_rsx::Reader>,
     /// file_flags bit 9: capture windows (chunk types 41-42).
     windows: Option<crate::windows::Reader>,
+    /// file_flags bit 10: RSX frame captures (chunk types 44-48).
+    rsxf: Option<crate::rsx_frame::Reader>,
     declared: BTreeSet<u32>,
     /// Live incarnations by slot.  Invariant (the reader's reading of sections 3 and 5.4, which reuse a slot only
     /// after its retired incarnation is drained): at most ONE live incarnation per slot.  An incarnation is live from
@@ -162,7 +164,7 @@ impl PpuState {
         cap.incomplete.clear();
         let windows = cap.windows_flag.then(crate::windows::Reader::new);
         Ok(Self { minor: u16::from_le_bytes([header[10], header[11]]), reader: Reader {
-            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows,
+            cap, waits: None, func: None, counters: None, fifo: None, auto: None, windows, rsxf: None,
             declared: BTreeSet::new(), live_slots: BTreeMap::new(), descriptor_ids: BTreeMap::new(),
             trailer_seen: false, ext: None, checkpoints: None, source_checkpoints: None,
             rolling_prefix: BTreeMap::new(), rolling_span_max: Some(BTreeMap::new()),
@@ -351,6 +353,7 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         fifo: None,
         auto: None,
         windows: None,
+        rsxf: None,
         declared: BTreeSet::new(),
         live_slots: BTreeMap::new(),
         descriptor_ids: BTreeMap::new(),
@@ -382,7 +385,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         let known = (v & 2 == 0 || v & 1 != 0) && (v & 4 == 0 || v & 2 != 0)
             && (v & 64 == 0 || v & 1 != 0) && (v & 128 == 0 || v & 1 != 0);
         // byte 13 may carry bit 8 (COUNTERS, value 1 in that byte) or bit 9 (WINDOWS, value 2 in that byte); bytes 14..15 must be 0
-        let high_ok = !(n > 13 && bytes[13] & !3 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0));
+        // byte 13 bit 2 (bit 10, RSX frame captures) needs bit 7 (byte 12 value 128)
+        let high_ok = !(n > 13 && bytes[13] & !7 != 0) && !(n > 14 && bytes[14..n].iter().any(|&b| b != 0))
+            && !(n > 13 && bytes[13] & 4 != 0 && v & 128 == 0);
         if n > 12 && (!known || !high_ok) {
             // Keep each existing family's diagnostic when the other capability is absent.
             let allowed = if bytes[12] & 128 != 0 {
@@ -415,6 +420,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         if n > 12 && u32::from(bytes[12]) & crate::auto_rsx::FLAG_AUTO != 0 {
             r.cap.auto = Some(crate::auto_rsx::Inventory::default());
         }
+        if n > 13 && bytes[13] & 4 != 0 {
+            r.cap.rsx_frame = Some(crate::rsx_frame::Inventory::default());
+        }
         r.cap.incomplete.push(Incomplete::TornTail);
         r.cap.incomplete.push(Incomplete::NoTrailer);
         return Ok(r.cap);
@@ -437,14 +445,18 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     let fifo_flag = crate::fifo::FLAG_FIFO;
     let auto_flag = crate::auto_rsx::FLAG_AUTO;
     let windows_flag = crate::model::FLAG_WINDOWS;
+    let rsxf_flag = crate::rsx_frame::FLAG_RSX_FRAME;
     if file_flags & !(FLAG_DOMAIN_EXTENSIONS | profile_flag | order_flag | checkpoint_flag | crate::waits::FLAG_WAITS | func_flag
-        | counters_flag | fifo_flag | auto_flag | windows_flag) != 0
+        | counters_flag | fifo_flag | auto_flag | windows_flag | rsxf_flag) != 0
         || (file_flags & order_flag != 0 && file_flags & profile_flag == 0)
     {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}"));
     }
     if file_flags & auto_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 7 without bit 0"));
+    }
+    if file_flags & rsxf_flag != 0 && file_flags & auto_flag == 0 {
+        return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 10 without bit 7"));
     }
     if file_flags & fifo_flag != 0 && file_flags & FLAG_DOMAIN_EXTENSIONS == 0 {
         return malformed(Rule::FileFlagsNonzero, format!("file_flags {file_flags:#x}: bit 6 without bit 0"));
@@ -476,6 +488,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     if file_flags & windows_flag != 0 {
         r.windows = Some(crate::windows::Reader::new());
+    }
+    if file_flags & rsxf_flag != 0 {
+        r.rsxf = Some(crate::rsx_frame::Reader::new());
     }
     if file_flags & FLAG_DOMAIN_EXTENSIONS != 0 {
         r.ext = Some(if file_flags & order_flag != 0 {
@@ -547,10 +562,13 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             && ((crate::fifo::CHUNK_FIFO_CONFIG..=crate::fifo::CHUNK_FIFO_STATUS).contains(&ty)
                 || ty == crate::fifo::accounting::CHUNK);
         let export_ty = ty == crate::model::CHUNK_EXPORT;
+        let snapshot_ty = ty == crate::snapshot_support::CHUNK;
         let windows_ty = r.windows.is_some()
             && (ty == crate::model::CHUNK_WINDOW_BEGIN || ty == crate::model::CHUNK_WINDOW_END);
+        let rsxf_ty = r.rsxf.is_some()
+            && (crate::rsx_frame::CHUNK_CONFIG..=crate::rsx_frame::CHUNK_END).contains(&ty);
         if !(CHUNK_HEADER..=CHUNK_RETIRED).contains(&ty) && !ext_ty && !profile_ty && !checkpoint_ty && !source_ty && !wait_ty
-            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty
+            && !func_ty && !counters_ty && !fifo_ty && !auto_ty && !export_ty && !windows_ty && !snapshot_ty && !rsxf_ty
         {
             return malformed(Rule::UnknownChunkType, format!("chunk {index}: type {ty}"));
         }
@@ -564,6 +582,20 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
             return malformed(Rule::DuplicateHeaderOrClocks, format!("chunk {index} is a second HEADER or CLOCKS"));
         }
         let payload = &bytes[pos + CHUNK_HEADER_LEN..body_end];
+        let snapshot_expected = r.cap.export.as_ref().is_some_and(|e| e.flags & crate::snapshot_support::EXPORT_FLAG != 0);
+        let snapshot_index = if r.cap.profile_flag { 4 } else { 3 };
+        if snapshot_ty || (snapshot_expected && index == snapshot_index) {
+            if !snapshot_ty || !snapshot_expected || index != snapshot_index || r.cap.snapshot.is_some() {
+                return malformed(Rule::Export, "SNAPSHOT_SUPPORT placement/flag/duplicate");
+            }
+            r.cap.snapshot = Some(crate::snapshot_support::Selection::parse(payload)?);
+            if file_flags & checkpoint_flag != 0 {
+                return malformed(Rule::Export, "SNAPSHOT_SUPPORT must omit source checkpoint proofs");
+            }
+            pos += total;
+            index += 1;
+            continue;
+        }
         if export_ty {
             let expected_idx = if r.cap.profile_flag { 3 } else { 2 };
             if index != expected_idx {
@@ -579,6 +611,12 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }
         if wait_ty {
             r.waits.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
+            pos += total;
+            index += 1;
+            continue;
+        }
+        if rsxf_ty {
+            r.rsxf.as_mut().unwrap().chunk(ty, payload, &r.cap)?;
             pos += total;
             index += 1;
             continue;
@@ -675,6 +713,9 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
     }
     r.cap.fifo = r.fifo.take().map(|x| x.result);
     r.cap.auto = r.auto.take().map(|x| x.result);
+    if let Some(x) = r.rsxf.take() {
+        r.cap.rsx_frame = Some(x.finish(r.trailer_seen)?);
+    }
     // an exported report-ring capture: the RING records parsed are exactly the ones its EXPORT accounting kept
     if let Some(exp) = r.cap.export.as_ref().and_then(|e| e.ring) {
         let seen = r.cap.auto.as_ref().filter(|a| a.config.as_ref().and_then(|c| c.attached())
@@ -713,6 +754,18 @@ fn read_all(bytes: &[u8], budgets: crate::checkpoints::Budgets,
         }];
     }
     let mut cap = r.finish(torn)?;
+    if cap.export.as_ref().is_some_and(|e| e.flags & crate::snapshot_support::EXPORT_FLAG != 0) {
+        let s = cap.snapshot.as_ref().ok_or_else(|| Malformed {rule:Rule::Export,detail:"missing SNAPSHOT_SUPPORT".into()})?;
+        let (digest,clock_bytes)=crate::snapshot_support::support_digest(bytes)?;
+        if digest!=s.support_sha || clock_bytes!=s.clock_bytes {
+            return malformed(Rule::Export,"SNAPSHOT_SUPPORT digest/clock-input bytes mismatch");
+        }
+        s.validate(&cap)?;
+        // Original negative evidence remains negative even if its triggering record was outside the selection.
+        for (&id,lane) in &mut cap.lanes {
+            if s.diagnostic(2,id)==Some(1) { lane.clock_anomaly=true; }
+        }
+    }
     cap.source_checkpoints = source_checkpoints.map(|x| x.finish(checkpoints.as_ref(), &cap, index));
     cap.checkpoints = checkpoints.map(|x| x.result);
     if let Some(x) = ext {
@@ -962,7 +1015,7 @@ impl Reader {
         let mut c = Cursor::new(payload, "EXPORT");
         let schema = c.u16()?;
         let flags = c.u16()?;
-        if schema != EXPORT_SCHEMA || (flags & !(EXPORT_FLAG_TO_END | EXPORT_FLAG_RING) != 0) {
+        if schema != EXPORT_SCHEMA || (flags & !(EXPORT_FLAG_TO_END | EXPORT_FLAG_RING | crate::snapshot_support::EXPORT_FLAG) != 0) {
             return malformed(r, format!("EXPORT schema {schema} flags {flags:#x}"));
         }
         let source_crc = c.u32()?;
@@ -1131,7 +1184,7 @@ impl Reader {
         let mut batch = self.cap.dependencies.as_mut().and_then(|index| index.begin_counted(
             crate::checkpoints::Source { kind: 1, id: inc, domain: 0 }, chunk_seq, n as usize,
             || recs.iter().filter(|r| r.kind == KIND_END).count()));
-        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.as_ref())?;
+        process_records(lane, &mut self.cap.spans, &self.cap.descriptors, &self.declared, inc, &recs, batch.as_mut(), self.cap.export.as_ref(), self.cap.snapshot.as_ref())?;
         // No identity is published until the entire legacy chunk has succeeded,
         // including the final pending-BEGIN / pending-GAP checks.
         if let Some(source) = self.source_checkpoints.as_mut() { source.observe(batch.as_ref(), chunk_seq)?; }
@@ -1328,6 +1381,7 @@ impl Reader {
 
         if let Some(exp) = &self.cap.export {
             for lane in self.cap.lanes.values() {
+                if self.cap.snapshot.is_some() { continue; } // exact per-lane manifests checked after finish
                 if lane.is_frame_owner() {
                     if let Some(first) = lane.frames.first() {
                         if first.id != exp.frame_first {
@@ -1410,6 +1464,7 @@ fn process_records(
     recs: &[RawRecord],
     mut evidence: Option<&mut crate::dependencies::Batch>,
     export: Option<&ExportRecord>,
+    snapshot: Option<&crate::snapshot_support::Selection>,
 ) -> Result<(), Malformed> {
     for (i, r) in recs.iter().enumerate() {
         let at = || format!("incarnation {inc}, record {i} (seq {})", r.seq);
@@ -1532,7 +1587,8 @@ fn process_records(
                 let id = r.c;
                 if let Some(exp) = export {
                     if lane.frames.is_empty() {
-                        if id != exp.frame_first {
+                        let expected_first = snapshot.and_then(|s|s.lanes.get(&inc)).map_or(exp.frame_first,|f|f.first);
+                        if id != expected_first {
                             return malformed(
                                 Rule::Export,
                                 format!("{}: frame id {id} != declared frame_first {}", at(), exp.frame_first),

@@ -143,6 +143,8 @@ pub enum Rule {
     Counters,
     /// Capture windows (file_flags bit 9, chunks 41-42) violate their wire contract.
     Windows,
+    /// RSX frame captures (file_flags bit 10, chunks 44-48) violate their wire contract.
+    RsxFrame,
     /// Function paths (file_flags bit 5, chunk types 28-30; ps3dk-prof-func-paths.md): FUNC_CONFIG.
     FuncConfig,
     /// A FUNC_TREE chunk violates its wire, ordering or definition rules.
@@ -669,6 +671,8 @@ pub struct Capture {
     pub fifo: Option<crate::fifo::Inventory>,
     /// Automatic RSX observation (file_flags bit 7): present exactly when the flag is.
     pub auto: Option<crate::auto_rsx::Inventory>,
+    /// RSX frame captures (file_flags bit 10): present exactly when the flag is.
+    pub rsx_frame: Option<crate::rsx_frame::Inventory>,
     pub header: Option<Header>,
     pub clock: Option<Clock>,
     /// minor > 0: readable, with a warning (section 2).
@@ -689,6 +693,8 @@ pub struct Capture {
     pub profile: Option<crate::profile::ProfileRecord>,
     /// Standalone export metadata (chunk 40); Some when exported from another capture.
     pub export: Option<ExportRecord>,
+    /// Host-created bounded frame snapshot (chunk 49); not whole-run evidence.
+    pub snapshot: Option<crate::snapshot_support::Selection>,
 }
 
 impl Capture {

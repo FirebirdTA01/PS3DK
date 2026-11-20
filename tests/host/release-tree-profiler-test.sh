@@ -9,7 +9,7 @@ trap 'rm -rf "$work"' EXIT
 passed=0 failed=0
 ar_tool=$(command -v ar)
 mkdir -p "$work/tree/ppu/lib/lp64" "$work/objects"
-for member in prof_core prof_drain prof_version pal_lv2 prof_arcs_writer startup live_agent live_os_lv2 live_api \
+for member in prof_core prof_drain prof_version pal_lv2 prof_arcs_writer startup live_agent live_os_lv2 live_api live_autostart \
               roll_file roll_retention_inspect roll_store \
               ext_runtime psp_ppu psp_elf gpu_runtime prg gpu_port_gcm rsxcap prof_identity extra; do
     printf 'membership fixture: %s\n' "$member" > "$work/objects/$member.o"
@@ -62,11 +62,11 @@ for abi in '' lp64/; do
         archive="$work/tree/$rel"
         # An independent copy of the release contract, not read from the gate.
         case $lib in
-            ps3dkprof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o live_agent.o live_os_lv2.o live_api.o) ;;
-            ps3prof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o prof_arcs_writer.o startup.o) ;;
+            ps3dkprof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o live_agent.o live_os_lv2.o live_api.o live_autostart.o) ;;
+            ps3prof) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o prof_arcs_writer.o startup.o live_agent.o live_os_lv2.o live_api.o live_autostart.o) ;;
             ps3dkprof_ext) members=(prof_core.o prof_drain.o prof_version.o pal_lv2.o roll_file.o roll_retention_inspect.o roll_store.o ext_runtime.o psp_ppu.o psp_elf.o
                                     gpu_runtime.o prg.o gpu_port_gcm.o rsxcap.o prof_identity.o) ;;
-            ps3dkprof_ext_live) members=(live_agent.o live_os_lv2.o live_api.o) ;;
+            ps3dkprof_ext_live) members=(live_agent.o live_os_lv2.o live_api.o live_autostart.o) ;;
         esac
         restore() {
             rm -f "$archive"

@@ -52,6 +52,12 @@ pub struct RollingJob {
     rx: std::sync::mpsc::Receiver<Result<crate::rolling_doc::RollingDoc, String>>,
 }
 
+struct PendingSave {
+    session: String,
+    key: (u8,u32), // snapshot=0, live window=1
+    job: crate::capture_save::SaveJob,
+}
+
 /// The Connect dialog's fields.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectForm {
@@ -86,6 +92,10 @@ pub struct App {
     pub hot: crate::hotpaths_ui::HotState,
     /// The RSX frames page selection.
     pub rsx: crate::rsx_ui::RsxState,
+    pub rsx_frame: crate::rsx_frame_ui::State,
+    /// The Capture RSX frame menu: timing mode and whether to keep fragment-program bytes.
+    pub rsx_request: crate::live_rsx_frame::RequestOptions,
+    pub shader_names: crate::shader_names::Lookup,
     pub waits: crate::waits_ui::WaitState,
     pub auto: crate::auto_ui::AutoState,
     pub live: Option<Live>,
@@ -123,6 +133,8 @@ pub struct App {
     pub save_range_modal: bool,
     /// A save-window / save-range result line, shown in the status bar.
     pub save_result: Option<(bool, String)>,
+    save_job: Option<PendingSave>,
+    saved_paths: std::collections::BTreeMap<(u8,u32),PathBuf>,
     /// The open rolling capture (retained window only); exclusive with `doc`.
     pub rolling: Option<Arc<crate::rolling_doc::RollingDoc>>,
     /// A rolling open still running on its background thread.
@@ -205,6 +217,9 @@ impl App {
             frames: frames_ui::FramesState::default(),
             hot: crate::hotpaths_ui::HotState::default(),
             rsx: crate::rsx_ui::RsxState::default(),
+            rsx_frame: crate::rsx_frame_ui::State::default(),
+            rsx_request: Default::default(),
+            shader_names: crate::shader_names::Lookup::default(),
             waits: crate::waits_ui::WaitState::default(),
             auto: crate::auto_ui::AutoState::default(),
             live: None,
@@ -226,6 +241,8 @@ impl App {
             save_range_to: 0,
             save_range_modal: false,
             save_result: None,
+            save_job: None,
+            saved_paths: Default::default(),
             rolling: None,
             rolling_job: None,
             rolling_limits: crate::rolling_doc::OpenLimits::desktop(),
@@ -263,7 +280,14 @@ impl App {
                     self.pool.clone(),
                 );
                 self.captures.bind_source(&bytes);
-                self.captures.load_marks(&path, &bytes);
+                if let Some(doc)=self.doc.as_ref().filter(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+                    match self.captures.restore_saved(doc,&bytes) {
+                        Ok(s)=>{self.shown=Some(s);self.page=Page::Snapshot;}
+                        Err(e)=>{self.error=Some(e);self.page=Page::Overview;}
+                    }
+                } else {
+                    self.captures.load_marks(&path, &bytes);
+                }
             }
             Err(e) => self.error = Some(format!("{}: {e}", path.display())),
         }
@@ -333,6 +357,7 @@ impl App {
         self.frames.reset(None);
         self.hot = crate::hotpaths_ui::HotState::default();
         self.rsx = crate::rsx_ui::RsxState::default();
+        self.rsx_frame = crate::rsx_frame_ui::State::default();
         self.waits = crate::waits_ui::WaitState::default();
         self.auto = crate::auto_ui::AutoState::default();
         self.zone_rows.clear();
@@ -368,6 +393,8 @@ impl App {
             self.hot = crate::hotpaths_ui::HotState::default();
             // RSX frames: a newer snapshot keeps the selected cap (the page shows nothing if it is gone).
             self.rsx = crate::rsx_ui::RsxState::default();
+            self.rsx_frame = crate::rsx_frame_ui::State::default();
+            if let Some(a)=doc.analysis(){let v=doc.rsx_frames.get(a);if v.frames.len()==1{self.rsx_frame.select(&v.frames[0]);}}
             self.waits = crate::waits_ui::WaitState::default();
             self.auto = crate::auto_ui::AutoState::default();
             self.auto.reset(doc.auto.as_ref());
@@ -380,8 +407,7 @@ impl App {
             self.auto_window = None;
             self.frames_window = None;
         }
-        self.save_result = None;
-        self.save_range_modal = false;
+        if fresh {self.save_result = None;self.save_range_modal = false;}
         if let (Some(id), Some(a)) = (self.window, doc.analysis()) {
             if let Some(w) = a.capture.windows.iter().find(|w| w.id == id) {
                 let w = w.clone();
@@ -449,6 +475,7 @@ impl App {
     /// One poll of the live session and of every retiring one (no egui): installs a newer snapshot, and once an
     /// outcome is known bookmarks that session's snapshots.  True while something is still running.
     pub fn poll(&mut self) -> bool {
+        self.shader_names.poll();
         let mut running = false;
         let mut i = 0;
         while i < self.retiring.len() {
@@ -478,6 +505,7 @@ impl App {
                 self.install(doc, first);
             }
         }
+        if let Some(d)=self.doc.clone(){if let Some(a)=d.analysis(){self.follow_rsx_frame(&v.rsx_frame,&d.rsx_frames.get(a));}}
         if let Some(st) = self.timeline.as_mut() {
             st.live = streaming;
             if !streaming {
@@ -500,6 +528,7 @@ impl App {
     /// Ends the current session's snapshots (a new session or file).  A live session whose outcome is not known yet
     /// keeps its snapshots: it is disconnected and retired until its file is published, then bookmarked.
     fn end_captures(&mut self) {
+        self.saved_paths.clear();
         self.shown = None;
         if self.page == Page::Snapshot {
             self.page = Page::Overview;
@@ -518,12 +547,16 @@ impl App {
 
     /// Why "Capture full frame" is unavailable, or None.
     pub fn capture_blocked(&self) -> Option<String> {
+        if self.doc.as_ref().is_some_and(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+            return Some("This file contains one saved snapshot. Re-resolve that snapshot, or open the original capture to capture another frame.".into());
+        }
         self.captures.blocked(self.doc.as_deref())
     }
 
     /// The "Capture full frame" click: the Frames selection when a frame is selected, else the newest frame
     /// (`capture::choose_frame`), under the Timeline's current premise.
     pub fn capture_frame(&mut self) {
+        if let Some(why)=self.capture_blocked(){self.captures.message=Some((true,why));return;}
         let Some(doc) = self.doc.clone() else { return };
         let (owner, frame) = (self.frames.sel.owner, self.frames.sel.frame);
         let premise = self
@@ -570,6 +603,7 @@ impl App {
                 self.captures.delete(id);
                 self.captures.sweep();
             }
+            capture_ui::Action::Save(id,save_as) => self.save_snapshot(id,save_as),
             capture_ui::Action::Reresolve(premise) => {
                 if let Some(cur) = self.shown.clone() {
                     if let Ok(s) = self.captures.reresolve(&cur, premise) {
@@ -593,6 +627,149 @@ impl App {
         {
             self.open(p);
         }
+    }
+
+    fn save_available(&mut self)->bool {
+        if self.save_job.is_some(){self.save_result=Some((true,"A capture save is already running".into()));false}else{true}
+    }
+
+    fn start_save(&mut self,key:(u8,u32),result:Result<crate::capture_save::SaveJob,String>){
+        match result {
+            Ok(job)=>{self.save_job=Some(PendingSave{session:self.captures.session.clone(),key,job});
+                self.save_result=Some((false,"Saving capture in the background…".into()));}
+            Err(e)=>self.save_result=Some((true,format!("Save refused: {e}"))),
+        }
+    }
+
+    pub fn poll_save(&mut self)->bool {
+        let Some(pending)=self.save_job.as_mut() else{return false};
+        let Some(result)=pending.job.poll() else{return true};
+        self.finish_save(result);false
+    }
+    pub fn wait_save(&mut self){
+        let Some(pending)=self.save_job.as_mut() else{return};
+        let result=pending.job.wait();self.finish_save(result);
+    }
+    fn finish_save(&mut self,result:Result<PathBuf,String>){
+        let Some(pending)=self.save_job.take()else{return};
+        self.save_result=Some(match result{
+            Ok(path)=>{
+                if pending.session==self.captures.session {
+                    if self.saved_paths.len()==128 {self.saved_paths.pop_first();}
+                    self.saved_paths.insert(pending.key,path.clone());
+                }
+                (false,match pending.job.direct_child_bytes {
+                    Some(n)=>format!("Saved {} ({n} bytes of direct-child timing support)",path.display()),
+                    None=>format!("Saved {}",path.display()),
+                })
+            }
+            Err(e)=>(true,format!("Save failed: {e}")),
+        });
+    }
+
+    pub fn save_snapshot_to(&mut self,id:u32,path:PathBuf){
+        if !self.save_available(){return;}
+        if self.saved_paths.get(&(0,id)) == Some(&path) {
+            self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+        }
+        let Some(s)=self.captures.list.iter().find(|s|s.id==id).cloned()else{
+            self.save_result=Some((true,"This snapshot is no longer retained".into()));return;
+        };
+        let job=crate::capture_save::SaveJob::snapshot(s,path,self.pool.clone());self.start_save((0,id),job);
+    }
+
+    fn save_snapshot(&mut self,id:u32,save_as:bool){
+        if !self.save_available(){return;}
+        if !save_as {
+            if let Some(path)=self.saved_paths.get(&(0,id)) {
+                self.save_result=Some((false,format!("Snapshot already saved as {}",path.display())));return;
+            }
+        }
+        let Some(s)=self.captures.list.iter().find(|s|s.id==id)else{return};
+        let filename=format!("snapshot_{}_{}_{}.prof",s.owner,s.frame,id);
+        let suggested=self.saved_paths.get(&(0,id)).cloned().unwrap_or_else(||match &self.captures.home{
+            Home::File(p)=>sibling_path(p,filename.clone()),
+            _=>self.live.as_ref().map_or_else(||PathBuf::from(&filename),|l|l.out_dir.join(&filename)),
+        });
+        let path=if save_as||!suggested.is_absolute(){
+            let mut dialog=rfd::FileDialog::new().add_filter("PS3DK frame snapshot",&["prof"])
+                .set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(parent)=suggested.parent().filter(|p|p.is_absolute()){dialog=dialog.set_directory(parent);}
+            let Some(path)=dialog.save_file()else{return};path
+        }else{suggested};
+        self.save_snapshot_to(id,path);
+    }
+
+    pub fn save_live_window_to(&mut self,id:u32,path:PathBuf){
+        if !self.save_available(){return;}
+        let Some(doc)=self.doc.clone()else{return};
+        let result=(||{
+            let range=crate::capture_save::window_range(&doc,id)?;
+            let a=doc.analysis().ok_or("No readable capture")?;
+            let len=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
+            if let Some(live)=&self.live {
+                if matches!(live.client.view().outcome,Some(Outcome::Incomplete{..})) {
+                    return Err("The live session failed validation; it cannot be exported".into());
+                }
+                crate::capture_save::SaveJob::window(len,path,range,self.pool.clone(),||{
+                    live.client.received_prefix(len as u64).ok_or_else(||"Displayed live prefix is no longer available".into())
+                })
+            }else{
+                let (source_len,sha)=self.captures.source.ok_or("Source identity is unavailable")?;
+                crate::capture_save::SaveJob::window_file(doc.path.clone(),source_len as usize,sha,len,path,range,self.pool.clone())
+            }
+        })();
+        self.start_save((1,id),result);
+    }
+
+    pub fn follow_rsx_frame(&mut self,t:&crate::live_rsx_frame::RequestTracker,v:&crate::rsx_frame_view::RsxFrameView)->bool{
+        if self.rsx_frame.follow(t,v){self.page=Page::RsxFrames;true}else{false}
+    }
+
+    pub fn save_rsx_frame_to(&mut self,id:u32,path:PathBuf){
+        if !self.save_available(){return}
+        if self.saved_paths.get(&(2,id))==Some(&path){self.save_result=Some((false,format!("RSX frame already saved as {}",path.display())));return}
+        let Some(doc)=self.doc.clone()else{return};
+        let result=(||{
+            let a=doc.analysis().ok_or("No readable capture")?;
+            let frame:Vec<_>=doc.rsx_frames.get(a).frames.iter().filter(|f|f.id==id).cloned().collect();
+            if frame.is_empty(){return Err("This RSX frame capture is no longer retained".into())}
+            let len=a.prefix.as_ref().map_or(doc.size,|p|p.cut);
+            if let Some(live)=&self.live{
+                if matches!(live.client.view().outcome,Some(Outcome::Incomplete{..})){return Err("The live session failed validation; it cannot be exported".into())}
+                crate::capture_save::SaveJob::rsx_frame(doc.clone(),len,path,frame,self.pool.clone(),||live.client.received_prefix(len as u64).ok_or_else(||"Displayed live prefix is no longer available".into()))
+            }else{
+                let(source_len,sha)=self.captures.source.ok_or("Source identity is unavailable")?;
+                crate::capture_save::SaveJob::rsx_file(doc.clone(),doc.path.clone(),source_len as usize,sha,len,path,frame,self.pool.clone())
+            }
+        })();self.start_save((2,id),result);
+    }
+    fn save_rsx_frame(&mut self,id:u32,save_as:bool){
+        if !self.save_available(){return}
+        if !save_as {if let Some(p)=self.saved_paths.get(&(2,id)){self.save_result=Some((false,format!("RSX frame already saved as {}",p.display())));return}}
+        let Some(d)=self.doc.clone()else{return};
+        let suggested=match self.saved_paths.get(&(2,id)).cloned().map(Ok).unwrap_or_else(||self.export_path(&d,format!("rsx_frame_{id}.prof"))){Ok(p)=>p,Err(e)=>{self.save_result=Some((true,e.to_string()));return}};
+        let path=if save_as||!suggested.is_absolute(){
+            let mut dialog=rfd::FileDialog::new().add_filter("PS3DK RSX frame",&["prof"]).set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(p)=suggested.parent().filter(|p|p.is_absolute()){dialog=dialog.set_directory(p);}
+            let Some(p)=dialog.save_file()else{return};p
+        }else{suggested};self.save_rsx_frame_to(id,path);
+    }
+
+    fn save_live_window(&mut self,id:u32,save_as:bool){
+        if !self.save_available(){return;}
+        let Some(doc)=self.doc.clone()else{return};
+        let suggested=match self.saved_paths.get(&(1,id)).cloned().map(Ok)
+            .unwrap_or_else(||self.export_path(&doc,format!("window_{id}.prof"))){
+            Ok(p)=>p,Err(e)=>{self.save_result=Some((true,e.to_string()));return;}
+        };
+        let path=if save_as {
+            let mut dialog=rfd::FileDialog::new().add_filter("PS3DK capture",&["prof"])
+                .set_file_name(suggested.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(p)=suggested.parent(){dialog=dialog.set_directory(p);}
+            let Some(p)=dialog.save_file()else{return};p
+        }else{suggested};
+        self.save_live_window_to(id,path);
     }
 
     fn export_path(&self, doc: &Document, suffix: String) -> Result<PathBuf, ps3dk_prof::ExportError> {
@@ -892,6 +1069,7 @@ impl eframe::App for App {
         if self.poll_rolling() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
+        if self.poll_save() {ctx.request_repaint_after(Duration::from_millis(100));}
         if let Some(path) = self.screenshot.clone() {
             // A screenshot shows the finished open, not its progress.
             if self.rolling_job.is_none() {
@@ -1074,6 +1252,11 @@ impl eframe::App for App {
         let snap_msg = self.captures.message.clone();
         let save_msg = self.save_result.clone();
         let mut want_trigger = None;
+        let mut want_window_save = None;
+        let save_busy=self.save_job.is_some();
+        let mut want_rsx_capture=false;
+        let mut rsx_request=self.rsx_request;
+        let save_doc=self.doc.clone();
         if self.doc.is_some() || link_line.is_some() || snap_msg.is_some() || save_msg.is_some() {
             let verdict = self.doc.as_ref().map(|d| shown_verdict(d, live_view.as_ref()));
             let form = &mut self.trigger_form;
@@ -1086,6 +1269,45 @@ impl eframe::App for App {
                 // Capture triggers while the live session runs (disabled, with the reason, on a v1 agent).
                 if let Some(v) = live_view.as_ref().filter(|v| v.outcome.is_none()) {
                     want_trigger = crate::live_triggers_ui::row(strip, &v.triggers, form);
+                }
+                if let Some(v) = live_view.as_ref() {
+                    strip.horizontal_wrapped(|p|{
+                        let blocked=v.rsx_frame.blocked();
+                        let r=p.add_enabled(blocked.is_none(),egui::Button::new("Capture RSX frame"));
+                        if r.clicked(){want_rsx_capture=true;}
+                        if let Some(why)=blocked{r.on_disabled_hover_text(why);}
+                        crate::rsx_modes_ui::request_menu(p,&mut rsx_request);
+                        if let Some(line)=v.rsx_frame.status_line(){p.label(line);}
+                    });
+                }
+                if let Some(v)=live_view.as_ref().filter(|v|!v.triggers.windows.is_empty()) {
+                    egui::CollapsingHeader::new(format!("Viewer captures ({})",v.triggers.windows.len())).show(strip,|p|{
+                        egui::ScrollArea::vertical().max_height(180.0).show(p,|p|{
+                            for w in v.triggers.windows.iter().rev(){
+                                let ready=if save_busy{Err("A save is already running".to_string())}
+                                    else{save_doc.as_ref().ok_or_else(||"No received document yet".to_string())
+                                        .and_then(|d|crate::capture_save::window_range(d,w.id).map(|_|()))};
+                                p.push_id(w.id,|p|p.horizontal(|p|{
+                                    p.label(format!("{} · window {}",w.name,w.id));
+                                    for (label,as_new) in [("Save",false),("Save as…",true)] {
+                                        let r=p.add_enabled(ready.is_ok(),egui::Button::new(label).frame(false));
+                                        if r.clicked(){want_window_save=Some((w.id,as_new));}
+                                        if let Err(why)=&ready {r.on_disabled_hover_text(why);}
+                                    }
+                                    if let Err(why)=&ready {p.label(egui::RichText::new(why).small());}
+                                    if save_doc.as_ref().and_then(|d|d.analysis()).is_some_and(|a|a.capture.windows.iter().any(|x|x.id==w.id&&x.is_open)) {
+                                        p.label("OPEN: saves the frames observed so far");
+                                    }
+                                }));
+                            }
+                        });
+                    });
+                }
+                if save_doc.as_ref().is_some_and(|d|d.analysis().is_some_and(|a|a.capture.snapshot.is_some())) {
+                    ui::field_message(strip,ui::Tone::Warning,"Saved snapshot support only: this is not the complete session. Source-wide diagnostics are carried from the original capture; timing comes from retained records.");
+                    if let Some(n)=save_doc.as_ref().and_then(|d|d.analysis()).and_then(|a|a.capture.snapshot.as_ref()).and_then(|s|s.diagnostic(5,0)) {
+                        ui::field_message(strip,ui::Tone::Neutral,&format!("Source seal proofs not carried: {n} SOURCE_SEAL records in the original capture. This is provenance, not completion evidence for this snapshot."));
+                    }
                 }
                 if let Some((t, _, text)) = &verdict {
                     ui::field_message(strip, *t, text);
@@ -1104,6 +1326,9 @@ impl eframe::App for App {
             // A refusal to send is shown by the trigger row itself (the client records it).
             let _ = l.client.send(cmd);
         }
+        self.rsx_request=rsx_request;
+        if want_rsx_capture {if let Some(l)=&self.live {let _=l.client.request_rsx_frame_with(String::new(),self.rsx_request.flags());}}
+        if let Some((id,save_as))=want_window_save {self.save_live_window(id,save_as);}
         let has_analysis = self.doc.as_ref().and_then(|d| d.analysis()).is_some();
         let rolling_open = self.rolling.is_some() || self.rolling_job.is_some();
         let rsx_count = self.rsx_count();
@@ -1276,6 +1501,9 @@ impl eframe::App for App {
         let timeline = &mut self.timeline;
         let hot = &mut self.hot;
         let rsx = &mut self.rsx;
+        let rsx_frame = &mut self.rsx_frame;
+        let shader_names = &mut self.shader_names;
+        let mut rsxf_actions=crate::rsx_frame_ui::Drawn::default();
         let waits = &mut self.waits;
         let auto = &mut self.auto;
         let mut nav: Option<(u32, u64)> = None;
@@ -1320,7 +1548,16 @@ impl eframe::App for App {
                         None => ui::field_message(p, ui::Tone::Neutral, "No hot paths for this document."),
                     },
                     Page::RsxFrames => {
-                        crate::rsx_ui::page(p, a, &d.rsx.get(a), rsx, &mut crate::rsx_ui::Drawn::default())
+                        let v=d.rsx_frames.get(a);let old=d.rsx.get(a);
+                        if v.available&&(!old.caps.captures.is_empty()||!old.caps.anomalies.is_empty()){
+                            p.horizontal(|p|{p.selectable_value(&mut rsx_frame.legacy,false,"AUTO draw captures");p.selectable_value(&mut rsx_frame.legacy,true,"EXT marker captures");});
+                        }
+                        if v.available&&!rsx_frame.legacy{
+                            crate::rsx_frame_ui::page(p,&v,&shader_names.result.names,shader_names.generation,rsx_frame,&mut rsxf_actions);
+                            if shader_names.busy(){p.label("Scanning shader folder…");}
+                            if let Some(folder)=&shader_names.folder{p.label(format!("Shader folder: {} · {} files · {} invalid",folder.display(),shader_names.result.files,shader_names.result.invalid));}
+                            if let Some(why)=&shader_names.result.limit{ui::field_message(p,ui::Tone::Warning,why);}
+                        }else{crate::rsx_ui::page(p,a,&old,rsx,&mut crate::rsx_ui::Drawn::default());}
                     }
                     Page::Waits => match &d.waits {
                         Some(v) => crate::waits_ui::page(p, v, waits, &mut crate::waits_ui::Drawn::default()),
@@ -1358,6 +1595,11 @@ impl eframe::App for App {
         if let Some(np) = auto_nav {
             self.page = np;
         }
+        if let Some((id,save_as))=rsxf_actions.save{self.save_rsx_frame(id,save_as);}
+        if rsxf_actions.shader_folder&&!self.shader_names.busy(){
+            if let Some(path)=rfd::FileDialog::new().pick_folder(){if let Err(e)=self.shader_names.start(path){self.error=Some(e);}}
+        }
+        if self.shader_names.busy(){ctx.request_repaint_after(Duration::from_millis(100));}
         // A frame link on the Hot paths page opens that (owner, frame) on the Frames page,
         // against the window-scoped index when a window is selected.
         if let (Some((owner, frame)), Some(d)) = (nav, self.doc.clone()) {
@@ -1378,7 +1620,8 @@ impl App {
     pub fn rsx_count(&self) -> Option<usize> {
         let d = self.doc.as_ref()?;
         let v = d.rsx.get(d.analysis()?);
-        v.has_gpu.then(|| v.caps.captures.len() + v.caps.not_analysed.len() + v.caps.not_analysed_omitted as usize)
+        let new=d.rsx_frames.get(d.analysis()?);
+        (v.has_gpu||new.available).then(|| new.frames.len()+v.caps.captures.len() + v.caps.not_analysed.len() + v.caps.not_analysed_omitted as usize)
     }
 
     fn connect_dialog(&mut self, ctx: &egui::Context) {

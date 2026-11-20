@@ -85,6 +85,10 @@ enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=
 /* REPORT_RING (2047/11): OPS flag 128 (AUTO_OP_RING) marks an owner ARRAY/INDEX/CLEAR timed through a recycled local
  * block and read from its MAIN copy; its serials are 2g-1/2g on CONFIG ring_label and u64@120 (published) is the ring
  * label value observed when it was read. Never SEGMENT, never kinds 4..6. */
+/* OPS flag 256 (AUTO_OP_ISOLATED, ringed CONFIGs only): the RSX frame capture's ISOLATED timing wrote a WAIT_FOR_IDLE
+ * before each of this draw's markers, so its interval is not comparable with pipelined ones (the reader keeps such
+ * operations out of its frame rows and summaries and reports them apart). */
+enum { AUTO_OP_ISOLATED=256 };
 /* OPS kind 5 CALL (CALL_BRACKET): the begin report precedes a CALL in the ring,
  * the end report follows its retirement label, and the operation-label release
  * of that CALL completes it with the build's records. TOKEN is the calling

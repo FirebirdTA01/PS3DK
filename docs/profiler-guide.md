@@ -1,655 +1,1116 @@
 # Profiler user guide
 
-The PS3DK profiler (`libps3dkprof`) records a PPU zone capture into a `.prof` file, and can optionally add SPU-lane and RSX-domain zones. On the PC side, `ps3dk-prof check` and `ps3dk-prof report` read a capture from the command line, and the `ps3dk-prof-viewer` GUI displays one.
+This guide covers the PS3DK profiler from the console side (the libraries an application links and the API it calls)
+and the PC side (the `ps3dk-prof-viewer` app and the `ps3dk-prof` command line). Every option, default and limit here
+is taken from the code in this tree; the design documents under `docs/design/` hold the formats and the full contracts.
+The complete app-side API (every function, macro, type and result code, with its PC app equivalent) is in the
+[profiler API reference](profiler-api.md).
 
-The `PS3DK_PROF` interface in `<ps3dk/prof.h>` is PPU-only: an SPU translation unit that has `PS3DK_PROF` set fails to build.  SPU-lane and RSX-domain zones come from a separate, EXPERIMENTAL extension (section 2.8).
+Status: beta. The live API and the SPU/RSX extension are marked EXPERIMENTAL in their headers.
 
 ---
 
-## 1. What the profiler is
+## 1. What the profiler is and what it measures
+
+The console runtime (`libps3dkprof` and its variants) records into one capture file per run, `<app>-<16 hex digits>.prof`,
+by default under `/dev_hdd0/tmp`. The PC tools read that file: from disk, or while it grows over a live TCP link.
+
+| Source | What is recorded | How it gets into a capture |
+|---|---|---|
+| PPU zones | Named begin/end spans per PPU thread, on the PPU timebase | `PS3DK_PROF_ZONE*` in app code |
+| Frames | One mark per frame on the frame thread | `PS3DK_PROF_FRAME()` in app code, or the app's flips in an AUTO build |
+| SPU lanes | SPU zones on each SPU worker, in SPU decrementer ticks | extension archive + SPU lane writer + app code |
+| RSX domains | GPU zones between command-buffer reports | extension archive + `ps3dk_prof_gpu_*` calls |
+| AUTO (automatic RSX observation) | Per-draw and per-frame RSX reached-marker timing, CALL segments, ranges, per-frame verdicts | `PS3_PROF_AUTO=ON` at configure time |
+| FIFO wrap waits | PPU wall time spent in command-buffer wrap phases | FIFO archive pair + `ps3dk_prof_fifo_attach` |
+| Counters | Named per-frame integer samples | counters archive + `PS3DK_PROF_COUNTER` |
+| Function paths | Automatic PPU call trees from `-finstrument-functions` | func archive + instrumented sources |
+| Waits | Elapsed time around pthread mutex and condition waits | `PS3_PROF_WAITS` + observed archives |
+| Live | The capture streamed to the PC app while it is written | `ps3dk_prof_live_start` in app code |
+
+**Capture windows.** The profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO draw timing, ranges)
+unless a capture window is open. Frame marks and clock anchors run all the time, so frame numbers stay run-wide. A run
+with no window produces a valid capture with no heavy data. A window is opened by app code (section 5.4) or by the PC
+app over a live link (section 6.5). No build opens one automatically.
+
+Pieces:
 
 | Piece | Role |
 |---|---|
-| `libps3dkprof.a` | PPU capture runtime; writes the `.prof` file (format v1); optional SPU-lane / RSX-domain extension. |
-| `ps3dk-prof` | Command-line checker (`check`) and reporter (`report`) for a captured file. |
-| `ps3dk-prof-viewer` | GUI viewer: overview, timeline, frames, zones, hot paths, live sessions, and full-frame snapshots. |
-
-A run produces one capture. A capture is read back, validated, and displayed. The viewer's "Capture full frame" feature takes a snapshot of one frame of the capture. "Capture RSX frame" is PLANNED (section 6).
+| `libps3dkprof.a` | Manual-lifecycle PPU runtime (the app calls init/shutdown). Contains the live agent. |
+| `libps3prof.a` | Automatic-lifecycle PPU runtime: initializes in a constructor before `main`, shuts down after it. No live agent. |
+| `libps3dkprof_ext.a`, `libps3dkprof_ext_live.a`, `libps3dkprof_spu.a` | SPU-lane and RSX-domain extension, its live agent, and the SPU lane writer. |
+| Feature variants | Counters, function paths, waits, FIFO and AUTO archives (section 4). |
+| `ps3dk-prof-viewer` | The PC app (section 6). |
+| `ps3dk-prof` | The command-line checker and reporter (section 7). |
 
 ---
 
-## 2. PS3 side, step by step
+## 2. Requirements
 
-### 2.1 Include the header and enable it
+**Retail and HEN (non-DEX) consoles: the application must link the profiler.** There is no system-side profiler on
+these consoles, so every capture comes from profiler code linked into the application itself. Without a profiler
+archive in the link there is nothing to capture and nothing for the PC app to connect to.
 
-In every C / C++ translation unit that contains zones:
+Support for DEX consoles without linking the profiler is planned. It is not available in this release.
+
+**Which archive to link.** Pick one row. Each archive is installed for both PPU ABIs: ILP32 in `$PS3DK/ppu/lib`,
+LP64 in `$PS3DK/ppu/lib/lp64`. Link the one that matches the app's ABI.
+
+| You want | Link (in place of nothing or of the row above it) | Installed by `make -C sdk install`? |
+|---|---|---|
+| PPU zones, frames, windows, live | `-lps3dkprof` | yes |
+| Same, without writing init/shutdown | `libps3prof.a` with `-Wl,-u,__ps3dk_prof_startup_anchor` (no live) | yes |
+| + SPU lanes and RSX domains | `libps3dkprof_ext.a` instead of `libps3dkprof.a`; for live also `libps3dkprof_ext_live.a`, before it; SPU side `libps3dkprof_spu.a` | yes |
+| + counters | `libps3dkprof_counters.a` instead of `libps3dkprof.a`, or `libps3dkprof_ext_counters.a` instead of `libps3dkprof_ext.a` | no: `make -C sdk/libps3dkprof install-counters` |
+| + function paths | `libps3dkprof_func.a` instead of `libps3dkprof.a`, or `libps3dkprof_ext_func.a` instead of `libps3dkprof_ext.a` | no: `install-func` / `install-func-ext` |
+| + waits | chosen by `PS3_PROF_WAITS` (section 4.6) | no: `make ... waits` with measured inputs |
+| + FIFO wrap waits | chosen by `ps3_target_prof_fifo` (section 4.7) | no: `install-fifo-package` |
+| AUTO RSX observation | chosen by `PS3_PROF_AUTO=ON` (section 4.8) | no: `install-auto-package` |
+
+The manual-lifecycle variants of counters, function paths and waits already contain the live agent; their extension
+forms need `libps3dkprof_ext_live.a` for live, like `libps3dkprof_ext.a`.
+
+**For the live link** also link `net` (the sample links `net netctl_stub`; `netctl` is used only to show the console's
+IP address) and call `netInitialize()` before `ps3dk_prof_live_start`, or turn on live auto-start (section 4.3), which
+needs no app code.
+
+**CMake.** There is no helper for the manual and extension archives: name them in `target_link_libraries`. Example
+for an ILP32 app with the live link:
+
+```cmake
+target_compile_definitions(my-app PRIVATE PS3DK_PROF=1)
+target_link_libraries(my-app PRIVATE ps3dkprof net netctl_stub
+                      gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m)
+```
+
+AUTO, FIFO and waits have CMake selectors that substitute the archives for you (sections 4.6 to 4.8). They need CMake
+3.21 or newer and the Ninja or Makefiles generator.
+
+**Make / manual link lines.**
+
+```
+ILP32 : powerpc64-ps3-elf-gcc ... -DPS3DK_PROF=1 ... -L$PS3DK/ppu/lib       -lps3dkprof -lnet -lrt -llv2 -lm
+LP64  : powerpc64-ps3-elf-gcc ... -DPS3DK_PROF=1 ... -L$PS3DK/ppu/lib/lp64  -lps3dkprof -lnet -lrt -llv2 -lm
+```
+
+The extension archives carry a data-model tag; `samples/profiling/prof-ext-abi.cmake` checks at configure time that
+the archive matches the app's ABI. An app can reuse that check.
+
+---
+
+## 3. Quick start
+
+The shortest path from source to a capture in the PC app, with a plain `libps3dkprof.a` build.
+
+**1. Add the profiler to the app.**
 
 ```c
 #include <ps3dk/prof.h>
+#include <net/net.h>
+
+int main(void)
+{
+    ps3dk_prof_config cfg;
+    ps3dk_prof_config_defaults(&cfg);
+    cfg.app = "my-app";                         /* names the capture file */
+    int prof = ps3dk_prof_init(&cfg) == PS3DK_PROF_OK;
+    PS3DK_PROF_THREAD_BEGIN("main");            /* zones from unregistered threads are ignored */
+
+    int live = 0;                               /* optional: the PC app can connect */
+    if (prof && netInitialize() == 0) {
+        if (ps3dk_prof_live_start(NULL) == PS3DK_PROF_OK) live = 1;
+        else netDeinitialize();
+    }
+
+    PS3DK_PROF_CAPTURE_WHOLE_RUN();             /* record from here to shutdown; omit it to start
+                                                   recording from the PC app instead (section 6.5) */
+    while (running) {
+        PS3DK_PROF_ZONE("update");              /* ends at the end of this block */
+        update();
+        render();
+        PS3DK_PROF_FRAME();
+        PS3DK_PROF_DRAIN();                     /* APP mode: drain once per frame */
+    }
+
+    ps3dk_prof_shutdown();                      /* before live_stop: the viewer needs its END */
+    if (live) {
+        int rc;
+        do rc = ps3dk_prof_live_stop(2000000, 1000000);
+        while (rc == PS3DK_PROF_ETIMEDOUT || rc == PS3DK_PROF_ECLOCK);
+        if (rc == PS3DK_PROF_OK) netDeinitialize();
+    }
+    return 0;
+}
 ```
 
-Compile that translation unit with `-DPS3DK_PROF=1`. Without the flag (or with it 0), every `PS3DK_PROF_*` macro is inert: its arguments are not evaluated, no `libps3dkprof` function is referenced, and a zone guard returns a typed no-op handle. The public types and result codes are declared in both builds, so source can keep its zone calls regardless of the flag.
+Build with `-DPS3DK_PROF=1` and link `ps3dkprof net` (section 2).
 
-### 2.2 Link the profiler
+**2. Run it** on the console (HEN or RPCS3 for the file path; the live link has been run on a HEN console).
 
-The profiler archive is installed for both ABIs:
+**3. Look at it on the PC.** Either:
 
+- live: start `ps3dk-prof-viewer`, press **Connect…**, enter the console's IP address and port `31750`, and a folder
+  for the saved copy; or
+- from the file: copy `/dev_hdd0/tmp/my-app-<16 hex>.prof` off the console (FTP), then
+  `ps3dk-prof check my-app-....prof` and `ps3dk-prof-viewer my-app-....prof`.
+
+A complete example with SPU and RSX work is `samples/profiling/heterogeneous-workload` (options `SAMPLE_PROFILING`,
+`SAMPLE_LIVE`, `SAMPLE_PROF_EXT`, `SAMPLE_FUNC_PATHS`, `SAMPLE_FIFO_EVENTS`; see its README). An AUTO example is
+`samples/gcm/hello-ppu-prof-auto-verdicts`.
+
+---
+
+## 4. Opting in to features with build options
+
+Every feature below is off unless selected. Each one says what it costs and when to turn it on.
+
+### 4.1 `PS3DK_PROF` (compile define)
+
+`-DPS3DK_PROF=1` on every translation unit that uses `<ps3dk/prof.h>`. With it undefined or `0`, every `PS3DK_PROF_*`
+macro is inert: arguments are not evaluated, no profiler function is referenced, `PS3DK_PROF_ZONE_BEGIN` yields an
+INERT handle, and `PS3DK_PROF_LIVE_START` returns `PS3DK_PROF_ENOTSUP`. Types and result codes are declared in both
+builds, so zone calls can stay in the source. The profiler is PPU-only through this header: an SPU translation unit
+with `PS3DK_PROF` set fails to build.
+
+- Turn it on when: you build a profiled configuration of the app.
+- Leave it off when: you ship, or measure the app without any profiler code.
+
+The capture-window macros (section 5.4) are also live in an AUTO build (`PS3TC_PROF_AUTO=1`, set by the AUTO
+selector) without `PS3DK_PROF`.
+
+### 4.2 Runtime configuration (`ps3dk_prof_config`)
+
+Start from `ps3dk_prof_config_defaults(&cfg)` and change fields before `ps3dk_prof_init`.
+
+| Field | Default | Range | Notes |
+|---|---|---|---|
+| `mode` | `PS3DK_PROF_MODE_APP` (1) | APP or `PS3DK_PROF_MODE_THREAD` (2) | APP: the app calls `PS3DK_PROF_DRAIN`. THREAD: an internal thread drains. |
+| `max_threads` | 64 | 1..1024 | thread slots |
+| `max_descriptors` | 1024 | 1..65536 | one per zone site |
+| `ring_records` | 4096 | power of two, 512..1048576 | per-thread record ring |
+| `drain_interval_us` | 10000 | 1000..1000000 | THREAD mode only |
+| `drain_stack_bytes` | 65536 | 16 KiB..1 MiB | THREAD mode only |
+| `quiesce_timeout_us` | 1000000 | 0..60000000 | how long shutdown waits for recording threads |
+| `auto_register` | 0 | 0 or 1 | 1: a thread is registered on its first zone |
+| `app` | `"app"` | 1..32 of `[A-Za-z0-9_-]` | names the capture file |
+| `build_id`, `flags`, `workload_tag` | NULL | strings | recorded in the capture |
+
+THREAD mode:
+
+- Turn it on when: the app has no single place to drain each frame, or the drain must stay off the render thread;
+  FIFO observation requires it.
+- Leave it off when: you want the drain cost at a known point in the frame (APP mode drains where you call it).
+
+`auto_register`:
+
+- Turn it on when: zones run on threads you do not create yourself (library worker threads).
+- Leave it off when: you register threads with `ps3dk_prof_thread_begin`; with 0, zones from unregistered threads
+  are ignored.
+
+Measured cost (console, heterogeneous-workload sample, ILP32): one PPU zone pair about 0.5 us; PPU profiling 10 to 50
+us per frame; with SPU and RSX zones 60 to 90 us per frame; the per-frame drain about 0.2 ms, up to 1.6 ms in phases
+with heavy SPU zone traffic.
+
+### 4.3 Live link
+
+Linked with `libps3dkprof.a` (or `libps3dkprof_ext_live.a` in extension builds) and started by app code (section 5.6),
+or with no app code by the opt-in auto-start below.
+
+- Cost: one agent thread (64 KiB stack by default), a listening socket, and file reads while a viewer is connected.
+  The writer never waits for the viewer. Overhead on the console has not been measured.
+- Turn it on when: you want to watch a run while it happens, or start and stop capture windows from the PC.
+- Leave it off when: the app has no network, the capture uses a callback sink, the capture is not on `/dev_hdd0/`,
+  or it uses rolling output (all refused with `ENOTSUP`).
+
+#### Live viewer auto-start (`PS3_PROF_LIVE_AUTOSTART`, opt-in)
+
+With auto-start, the PC app can connect to an app that has no live or network code. **It is off by default.** Every
+profiler build can turn it on: plain `PS3DK_PROF` builds (`libps3dkprof.a`), the classic automatic lifecycle
+(`libps3prof.a`), the extension and its FIFO/function/counter forms (with `libps3dkprof_ext_live.a`), `PS3_PROF_WAITS`
+and `PS3_PROF_AUTO`.
+
+- **CMake:** `-DPS3_PROF_LIVE_AUTOSTART=ON`. Every executable that links the profiler gets the link request, `net` and
+  `sysmodule_stub`; an extension or `PS3_PROF_AUTO` executable also gets `libps3dkprof_ext_live.a`. Optional:
+  `PS3_PROF_LIVE_PORT` (default `31750`) and `PS3_PROF_LIVE_NET_POOL_KB` (default `0`, see below).
+- **Without CMake:** compile one unit that includes `<ps3dk/prof.h>` with `-DPS3DK_PROF_LIVE_AUTOSTART=1` (or link with
+  `-Wl,-u,__ps3dk_prof_live_autostart_anchor`) and link `-lnet -lsysmodule_stub` after the profiler. A missing library
+  is a link error, never a silent off. `PS3DK_PROF_LIVE_AUTOSTART_OPTIONS(port, pool_kib);`, written once at file
+  scope, sets the port and pool and also requests auto-start.
+
+What the runtime does:
+
+1. After every successful `ps3dk_prof_init` it creates one short-lived start-up thread (64 KiB stack). In the automatic
+   lifecycles init runs in a constructor; the thread keeps the network work out of it.
+2. The thread checks that the capture can be served (a FILE sink under `/dev_hdd0/`, no rolling), takes the profiler's
+   network hold and starts the agent as `ps3dk_prof_live_start(NULL)` would. The TTY shows
+   `ps3prof: live viewer: connect to this console on port 31750`.
+3. Any failure prints one `ps3prof: live auto-start off: ...` line with the reason (no servable capture, network
+   bring-up failed, port taken, thread not created) and profiling continues unchanged.
+4. After `ps3dk_prof_shutdown` has written the finalization, the runtime stops the agent, so a connected viewer gets
+   `END` (up to 2 s for the viewer, 1 s for the thread, then 2 s more if needed). It releases its network hold only
+   after the stop succeeded; an agent that does not stop keeps it until the process exits, with one line saying so.
+5. A manual-lifecycle program that returns from `main` without `ps3dk_prof_shutdown` is covered by a late destructor:
+   the agent is cancelled (no `END`; nothing was finalized) and the hold released.
+
+**The app's network stays the app's.** With auto-start off, or while the profiler holds no network, every
+`netInitialize`, `netDeinitialize`, `sys_net_initialize_network_ex` and `sys_net_finalize_network` call behaves exactly as
+before. While the profiler holds the network, libnet applies these rules:
+
+- The network belongs to whoever brought it up, and so does its memory pool.
+- If the app brought it up first, the profiler joins without a call of its own. When the app tears it down
+  (`netDeinitialize`, `sys_net_finalize_network`), the profiler is told first: the agent stops at once (a connected
+  viewer sees a disconnect, not `END`), the profiler drops its hold and never touches the network again, and the app's
+  call then reaches the system exactly as before. Live viewing ends there, with one `ps3prof: live auto-start stopped`
+  line. The stop holds the app's call for at most about 3 s (1 s, then 2 s more, for the agent thread). If the agent
+  still has not stopped (for example, it is inside a file read), the app's call goes ahead anyway with one
+  `... the agent did not stop ...` line, and the agent's sockets can stay open for a while after the app's finalize,
+  until that thread leaves its loop; its socket calls then fail rather than reach a live network.
+- A `sys_net_finalize_network` from an app that never called `sys_net_initialize_network_ex` goes straight to the
+  system with its old result, and the profiler keeps its hold (if that call tears down the network the profiler is
+  using, the agent's connection simply fails).
+- If the profiler brought it up first (with its own static pool, by default the 128 KiB `netInitialize` pool), a later
+  `netInitialize` joins it and the matching `netDeinitialize` leaves it up for the profiler. A later
+  `sys_net_initialize_network_ex` brings the app's own pool: the profiler steps aside first (agent stopped, its network
+  finalized, the NET module left loaded, one TTY line from libnet) and the app's call goes straight to the system. If
+  a `netInitialize` had joined first, the profiler instead hands the network to it (agent stopped, network left up),
+  so that call and the later `netDeinitialize` give the results the same sequence gives without the profiler.
+- The profiler never finalizes a network an app front end or the ps3dk-run hook brought up, and never unloads a module
+  it did not load.
+- If the NET module is already loaded but no libnet front end brought the network up (an app that loads NET early, a
+  library or a hook outside this libnet), the profiler first asks whether a network is up without touching it: it
+  creates and closes one socket. If that works, the network is someone else's: the profiler joins without
+  initializing, and never finalizes it or unloads anything. If the system reports no network (`ENETDOWN`), the profiler
+  brings one up as its owner without loading the module again, so at shutdown it finalizes its own network and never
+  unloads the module someone else loaded. Any other error turns auto-start off with one line. The firmware answers a
+  second initialize with 0 (measured on HEN and in RPCS3), so that answer is never used to decide who owns the network.
+  Which error the console's socket call reports with no network up has not been measured yet; RPCS3 always answers
+  that a network is up.
+
+**Existing `ps3dk_prof_live_start` calls keep working.** While the auto-started agent runs, the call returns `OK` and
+does nothing when every non-zero field of its config matches, `EALREADY` otherwise. Before the auto-started agent is
+up (its start-up thread is still bringing the network up) or after auto-start failed, the app's own start behaves as
+always, and the auto-start then backs off. The app may also stop the auto-started agent; the runtime then only
+releases its hold. Shutdown waits at most 5 s for the start-up thread; one still inside the network bring-up is left
+to finish on its own (one TTY line) and gives its hold back when it does.
+
+- Cost (on top of the live link above): the start-up thread at init; the libnet pool (by default the 128 KiB
+  `netInitialize` pool, shared with an app that also uses `netInitialize`) and the NET module; a listening socket on
+  every interface for the whole run; a wake-up every 10 ms; and, only while a viewer is still downloading, up to about
+  3 s (5 s at worst) added to shutdown.
+- Turn it on when: you want to watch or control a development or test build from the PC, especially an app whose
+  source you cannot or do not want to change; RPCS3 or HEN sessions with the viewer.
+- Leave it off when: the build ships; overhead and benchmark runs (the wake-ups and file reads perturb timing); the
+  network is not trusted (the listener is unauthenticated: anyone who reaches the port can read the capture); the app
+  needs a larger libnet pool and you have not set the pool option; or the capture cannot be served (callback sink,
+  rolling, outside `/dev_hdd0/`; it only prints why).
+
+### 4.4 SPU lanes and RSX domains (extension, EXPERIMENTAL)
+
+Link `libps3dkprof_ext.a` instead of `libps3dkprof.a` (and `libps3dkprof_ext_live.a` first for live). The extension
+headers `prof_spu.h`, `psp_desc.h` and `prof_gpu.h` are installed in `ppu/include/ps3dk`. The app initializes with
+`ps3dk_prof_init_ex`, registers SPU images, creates SPU lanes (`ps3dk_prof_spu_lane_create`) and links the SPU side
+with `libps3dkprof_spu.a`; RSX zones come from `ps3dk_prof_gpu_attach` and `PS3DK_PROF_GPU_ZONE_BEGIN/END`. The
+heterogeneous-workload sample (`SAMPLE_PROF_EXT=ON`) is the reference for this lifecycle.
+
+- Cost: one SPU zone pair costs about 21 SPU decrementer ticks; SPU traffic raises the drain cost (section 4.2).
+- Turn it on when: you need SPU job timing or app-defined GPU zones beside the PPU timeline.
+- Leave it off when: PPU zones are enough, or you want RSX timing without app code (use AUTO instead).
+
+SPU zone durations are SPU decrementer ticks, never wall time. Placement on the PPU timeline uses causal bounds and the
+RMAX1 rate premise; see the Timeline notes in section 6.3. SPU zones inside SPURS jobs have not been tested.
+
+### 4.5 Counters and function paths
+
+**Counters.** Build with `make -C sdk/libps3dkprof install-counters`; link `libps3dkprof_counters.a` (or
+`libps3dkprof_ext_counters.a`). `PS3DK_PROF_COUNTER(name, value)` records one sample per call; at most 64 names, 4096
+samples held between drains. Each call takes one mutex.
+
+- Turn it on when: you want per-frame values (draw counts, memory, queue depth) next to the timing.
+- Leave it off when: you do not emit counters; the default archives never set the counters flag.
+
+**Function paths.** Build with `install-func` (or `install-func-ext`); link `libps3dkprof_func.a` (or
+`libps3dkprof_ext_func.a`) and compile the sources you want traced with `-finstrument-functions`. Optional limits:
+`ps3dk_prof_func_configure` before init (`<ps3dk/prof_func.h>`).
+
+- Cost: about 0.43 us of added elapsed time per instrumented entry in one ILP32 console comparison (a workload
+  comparison, not an isolated hook cost).
+- Turn it on when: you need call trees without writing zones.
+- Leave it off when: tight leaf functions dominate; exclude them with `-finstrument-functions-exclude-file-list` or
+  `__attribute__((no_instrument_function))`, and keep the same selection when comparing captures.
+
+Start the profiler before entering the functions you need: a function that enters before init and exits after it
+counts as an orphan and adds no path.
+
+### 4.6 `PS3_PROF_WAITS` (CMake)
+
+Values `OFF` (default), `MANUAL` (`libps3dkprof_wait.a`), `AUTO` (`libps3prof_wait.a`, the automatic-lifecycle form)
+or `EXT` (`libps3dkprof_ext_wait.a`). `PS3_PROF_WAITS_ROOT` (default `$PS3DK`) names the prefix holding them and the
+observed runtime redirect `ppu/lib[/lp64]/prof-waits/librt.a`. These are not part of the normal install: they are
+built by `make -C sdk/libps3dkprof waits` with measured `WAIT_*` inputs and `scripts/build-prof-wait-runtime.py`.
+Records elapsed time around pthread mutex lock, timed mutex lock and condition wait/timedwait.
+
+- Turn it on when: you suspect lock or condition-variable waits.
+- Leave it off when: building with `PS3_PROF_AUTO` or the FIFO selector (both refuse the combination).
+
+Timed mutex calls are recorded only after their initial trylock reports busy; immediate successes are not covered.
+See `docs/design/ps3dk-prof-waits.md`.
+
+### 4.7 FIFO wrap waits (`ps3_target_prof_fifo`)
+
+Install with `make -C sdk/libgcm_cmd install-fifo` then `make -C sdk/libps3dkprof install-fifo-package`. In CMake,
+after `project()` and after adding the target's libraries:
+
+```cmake
+include(${PS3DK}/cmake/ps3-prof-fifo.cmake)
+ps3_target_prof_fifo(my-app ROOT ${PS3DK})
 ```
-ILP32 : -L${PS3DK}/ppu/lib       -lps3dkprof
-LP64  : -L${PS3DK}/ppu/lib/lp64  -lps3dkprof
+
+It replaces `gcm_cmd` with `libgcm_cmd_prof_fifo.a` and `ps3dkprof_ext` with `libps3dkprof_ext_fifo.a`. The app runs
+in THREAD mode and calls `ps3dk_prof_fifo_attach(gpu, ctx, NULL, &instance)` on the GCM context owner after attaching
+the GPU domain. Default ring: 1024 events of 96 bytes, ceiling 1 MiB.
+
+- Turn it on when: frames stall in command-buffer wraps.
+- Leave it off when: you use AUTO (it already contains FIFO observation) or waits (refused together).
+
+Events are PPU wall time between wrap-protocol boundaries, never GPU busy or idle time. See
+`docs/design/ps3dk-prof-fifo.md`.
+
+### 4.8 `PS3_PROF_AUTO` (CMake, beta)
+
+Automatic RSX observation. Install the providers once, against the same headers and toolchain as the SDK:
+
+```sh
+make -C sdk/libgcm_cmd install-auto
+make -C sdk/libps3dkprof install-auto-package
 ```
 
-Link the ordinary PS3DK runtime libraries your app already uses alongside it (the sample links `dbgfont gcm_cmd gcm_sys io sysutil sysmodule rt lv2 m`).
+Then configure with the SDK's PPU toolchain file and `-DPS3_PROF_AUTO=ON`. `PS3_PROF_AUTO_ROOT` (default `$PS3DK`)
+names a different prefix that holds the providers. The option:
 
-### 2.3 Choose a mode
+- defines `PS3TC_PROF_AUTO=1` for every C/C++ unit of the project;
+- for every executable, replaces `gcm_cmd` with `libgcm_cmd_prof_auto.a` and `ps3dkprof_ext` with
+  `libps3dkprof_auto.a`, adding them when the target does not link them, through static libraries it links;
+- keeps `ps3dkprof_ext_live` when the app links it (it is never added automatically);
+- checks the providers against the sealed `prof-auto.json`, writes a link map and an identity record
+  (`<map>.identity.json`), and refuses the configure or link when anything does not match.
 
-`ps3dk_prof_config.mode` is `PS3DK_PROF_MODE_APP` (`1`) or `PS3DK_PROF_MODE_THREAD` (`2`).
+Refused: any other profiler or GCM archive in the link (`ps3dkprof`, `ps3prof`, a default `gcm_cmd` named inside a
+generator expression), a non-GLOBAL imported target holding one, `PS3_PROF_WAITS`, a target already selected for FIFO,
+and a target that already has a link launcher.
 
-| | APP | THREAD |
-|---|---|---|
-| Who may record zones | Any PPU thread registered with `ps3dk_prof_thread_begin`. With `auto_register` set, a thread is registered on its first zone; otherwise zones from unregistered threads are ignored. | Same. |
-| Background drain | None: the app calls `PS3DK_PROF_DRAIN` itself. | An internal thread drains every `drain_interval_us`. |
-| Who may drain | Only the designated drain thread; from any other thread a drain returns `PS3DK_PROF_EPERM`. | The internal drain thread. |
+At run time the profiler initializes itself (THREAD mode) before `main`, attaches at the app's `cellGcmInit`, takes
+frames from the app's flips and writes `/dev_hdd0/tmp/<executable>-<timebase>.prof`. **It still needs a capture
+window**: add `PS3DK_PROF_CAPTURE_WHOLE_RUN();` (or another window, section 5.4) to the app, or nothing heavy is
+recorded. Call `PS3DK_PROF_AUTO_SEAL()` before any exit path that skips `atexit` handlers.
 
-`ps3dk_prof_config` fields and their ranges (see `<ps3dk/prof.h>` for the complete list and error codes): `mode`, `max_threads` (1..1024), `max_descriptors` (1..65536, one per zone site), `ring_records` (power of two, 512..1048576), `drain_interval_us` (1000..1000000, THREAD mode), `drain_stack_bytes` (16 KiB..1 MiB, THREAD mode), `quiesce_timeout_us` (0..60000000), `auto_register` (`0` default / `1`), `app` (1..32 characters of `[A-Za-z0-9_-]`, names the default capture file), `build_id`, `flags`, `workload_tag`, and a `reserved` that must stay `0`.
+It uses local reports 1024..2047 and labels 246 and 247 (`docs/gcm-labels.md`); the app keeps labels 64, 69..239 and
+248..254 and reports 512..1023. ILP32 has run on hardware; LP64 archives are built and sealed but not run on hardware.
 
-`ps3dk_prof_config_defaults(&cfg)` starts `cfg` from a valid default start (see `<ps3dk/prof.h>` for the exact values). Set `cfg.mode` and `cfg.app` explicitly before calling `ps3dk_prof_init`.
+- Turn it on when: you want RSX timing and per-frame verdicts without writing GPU zones.
+- Leave it off when: the app uses waits, links its own profiler archive, or writes command buffers through raw
+  writers the profiler cannot observe (those are outside coverage).
 
-### 2.3a Capture windows
+Optional build-time hooks can be disabled per unit with `PS3TC_PROF_AUTO_NO_FLIP_HOOK`, `PS3TC_PROF_AUTO_NO_FP_HOOK`
+and `PS3TC_PROF_AUTO_NO_LABEL_HOOK`. Design: `docs/design/ps3dk-prof-auto-rsx.md`; tags and ranges:
+[profiler-auto-tags.md](profiler-auto-tags.md).
 
-The profiler records nothing heavy until the application opens a capture window. An application with no trigger
-produces a capture with no windows and no heavy data; one line after init (`PS3DK_PROF_CAPTURE_WHOLE_RUN();`) records
-the whole run. See section 5.
+### 4.9 `PS3_PROF_AUTO_RING`, `PS3_PROF_AUTO_RING_MB`, `PS3_PROF_AUTO_RING_RECORDS`
 
-### 2.4 Init, read the capture record, drain, shutdown
+With `PS3_PROF_AUTO=ON`. Default OFF. `_MB`: MAIN extent size, 1..256, default 16. `_RECORDS`: operation records,
+1..65536, default 16384. The selector compiles `<target>-auto-ring.c` into each executable and requires its symbol at
+link time.
 
-Before `ps3dk_prof_init` you may name the sink location or supply a callback sink:
+Without the ring, timed draws per frame are bounded by the local report pool (504 pairs, less the whole-CALL and range
+reserves); later draws of the frame are counted as untimed ("report capacity"). The ring copies owner-buffer draw
+reports in blocks of 126 pairs to MAIN memory and recycles them.
 
-- `ps3dk_prof_set_sink_path(dir)` — a DIRECTORY (1..255 bytes). The file is `<dir>/<app>-<16 hex digits of the init timebase>.prof`, created exclusively; an existing file is `PS3DK_PROF_EEXIST`.
-- `ps3dk_prof_set_sink_callbacks(&cbs)` — a caller-supplied `{ write, flush, close, ctx }` instead of the file sink. `ps3dk_prof_get_capture_record` and the live view are `ENOTSUP` with a callback sink.
+- Cost: allocated once per process in whole 1 MiB pages: 20 MiB at the defaults (16 MiB extents plus metadata), 3 MiB
+  with `_MB=2` and 4096 records.
+- Turn it on when: busy frames exceed about 504 timed draws, you need per-draw or per-pass RSX cost, or per-tag
+  totals without untimed draws.
+- Leave it off when: memory is tight or you are measuring memory, frame-level verdicts are enough, or draws come
+  mostly from CALL segments (they keep the local pool either way).
+
+Sizing: one MiB holds 256 blocks (32,256 draws). Size records and extents for the owner-buffer draws outstanding over
+about three frames; the defaults cover about 5,000 such draws per frame. Too small shows as draws counted under
+`ring_full` or "metadata capacity", or a capture reading `FINAL (lower bounds)`: raise the matching option.
+`PS3DK_PROF_AUTO_OPTIONS_SET` before `cellGcmInit` overrides these values.
+
+Recommended ring when you only need the RSX frame capture (4.12): `_MB=1` with `_RECORDS=4096`, about 2 MiB of pages
+(1 MiB of extents, 4096 records of 184 bytes, 256 extent descriptors), enough for about 1,300 draws a frame across
+three frames of RSX lag. The record count, not the extent size, sets most of the ring's memory: 16,384 records alone
+take 2.9 MiB.
+
+### 4.10 `PS3_PROF_AUTO_ROLLING` (CMake)
+
+With `PS3_PROF_AUTO=ON`. Empty (default) keeps an append capture. A value is the file ceiling in MiB, 24..4096
+(`-DPS3_PROF_AUTO_ROLLING=64`). The selector generates `<target>-auto-rolling.c` with the finite preset
+(`PS3DK_PROF_ROLLING_AUTO_FIFO_INIT`); the capture is then a fixed-size rolling file that keeps the most recent
+segments.
+
+- Cost: the preset keeps six segments plus a spare, uses about 21 MiB of file space and about 16 MB of pre-allocated
+  writer memory, and rewrites one segment slot per commit with two sync operations. A commit clears only the
+  overwritten prefix of the slot and extends the used-data CRC over the known-zero padding without rescanning it (the
+  stored bytes and the two-sync publication order are unchanged; readers still check the padding). Target commit
+  timings after that change are pending: measure drainer time, lag and dropped records on the target before using
+  rolling for a heavy workload. Core/extension/writer state has a separate 64 MiB ceiling.
+- Turn it on when: long sessions could fill the HDD, soak tests or playtests where only the recent past matters, or a
+  capture must stay within a fixed disk budget.
+- Leave it off when: you want whole-run totals or every frame, you record SPU lanes (refused), you need the live link
+  (refused with `ENOTSUP`), or the extra memory and writes are unwanted.
+
+Raising the ceiling alone does not enlarge the preset's segments. A fixed byte budget does not promise a fixed number of
+seconds. A hard hang can lose the pending segment (up to about 1 MiB). Reaching a semantic or metadata budget stops the
+capture at a whole chunk with `PS3DK_PROF_ERESOURCE`. Custom budgets: leave the option empty and define
+`ps3dk_prof_automatic_rolling_options` with `PS3DK_PROF_DEFINE_AUTOMATIC_ROLLING_OPTIONS` in an executable source (not
+in a static archive). Rolling output is available only in AUTO builds; other archives return `ENOTSUP` for an enabled
+rolling request. Contract and measurements: `docs/design/ps3dk-prof-rolling-runtime.md`.
+
+### 4.11 Completed-file retention
+
+`ps3dk_prof_set_capture_retention(N)` before init keeps the newest `N` (1..1024) completed captures of this app in the
+capture directory; 0 (default) disables it. FILE sinks only.
+
+- Cost: extra shutdown IO (reads and checks old files before deleting) and a bounded 25 KiB index buffer.
+- Turn it on when: repeated runs would otherwise accumulate captures.
+- Leave it off when: you keep captures by hand, or the app is an AUTO build (the setter runs after AUTO's
+  pre-`main` init, so it is too late there).
+
+Untracked, active and incomplete files are never touched. `PS3DK_PROF_ERETENTION` means the capture closed but cleanup
+failed. A crash can leave `.ps3dk-retain-<app>.lock`; cleanup then refuses until it is removed by hand (only when no
+process uses the directory).
+
+---
+
+### 4.12 `PS3_PROF_RSX_FRAME`, `PS3_PROF_RSX_FRAME_STAGING_KB` (CMake, beta)
+
+With `PS3_PROF_AUTO=ON` and `PS3_PROF_AUTO_RING=ON` (refused without the ring). Default OFF.
+`_STAGING_KB`: each of the two staging blocks, 32..1024, default 256 (a block must hold the largest per-draw unit,
+about 31 KiB: every register changed, every VP constant changed and two programs defined at one draw; a value below 32
+set directly in the options macro is raised to 32). The selector compiles
+`<target>-auto-rsx-frame.c` into each executable and requires its symbol at link time.
+
+One requested frame of the AUTO owner: every draw and clear of its command buffer in submission order, with its RSX
+time (the AUTO operation that timed it), kind, primitive, vertex or index counts, the vertex and fragment program it
+used (named by a canonical hash of their instructions, stable across boots, load addresses and uniform values), its
+tag, an app label (5.7), the AUTO range it ran in (inline-array, inline-index and immediate draws through the SDK's
+safe writers are timed too while the capture is selected, as AUTO operations of the ARRAY kind (inline array,
+immediate) or the INDEX kind (inline index): with the capture selected, AUTO's per-kind counts, coverage rows and
+`ps3dk-prof auto` totals include them; the capture shows their own kind; draws written by `Unsafe` or raw writers are
+listed with the reason they are untimed), and the render state, texture slots, vertex attributes, index
+stream and surfaces it ran with (the 3D registers as the RSX received them, interpreted by the reader), its VP
+constants and FP embedded constants by uniform name, and the instance runs (consecutive draws identical except their
+constants). The captured frame times every covered draw, whatever `PS3DK_PROF_AUTO_TIMED_RANGES_ONLY` says. This
+release does not record buffer contents.
+
+```cmake
+-DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON -DPS3_PROF_AUTO_RING_MB=1 -DPS3_PROF_AUTO_RING_RECORDS=4096 -DPS3_PROF_RSX_FRAME=ON
+```
+
+- Cost: the ring (2 MiB at the sizes above); about 150 KiB of decoder, register, constant and program state from AUTO attach
+  (none without the ring); while a capture is being written, the two staging blocks (512 KiB at the default), freed when it
+  is written; one pass of the profiler over the owner's command words, at each covered draw and at wraps and flushes;
+  at each fragment-program bind on the owner, a hash of the program the first time it is bound and a table lookup
+  after that (host-measured for a 35 KiB program: about 30 us once, under 10 ns per rebind; not yet measured on the
+  console). The captured frame itself runs slower by its per-draw records.
+- Turn it on when: you need to know which draws, programs or labelled entities take a frame's RSX time, beyond the
+  pass totals AUTO ranges give.
+- Leave it off when: you are measuring memory, or pass and frame totals are enough. Off, nothing is generated or
+  linked, no memory is reserved, each AUTO hook costs one load and a branch, and the capture file is the same as an
+  AUTO build without the option (tested byte for byte outside its run-dependent fields).
+
+Files with a capture set file_flags bit 10; a reader older than this release refuses them.
+
+## 5. Hard-coding features in app code
+
+This section shows the common calls. Every entry, with its parameters, results, threading rules and PC app
+equivalent, is in the [profiler API reference](profiler-api.md).
+
+### 5.1 Init and shutdown
 
 ```c
 ps3dk_prof_config cfg;
 ps3dk_prof_config_defaults(&cfg);
-cfg.mode = PS3DK_PROF_MODE_APP;      /* or _THREAD */
-cfg.app  = "my-app";                 /* 1..32 [A-Za-z0-9_-] */
-if (ps3dk_prof_init(&cfg) == PS3DK_PROF_OK) {
-    ps3dk_prof_capture_record cap;
-    if (ps3dk_prof_get_capture_record(&cap) == PS3DK_PROF_OK) {
-        /* cap.path, cap.session_id, cap.app, cap.build_id (build_id_len bytes) */
-    }
-} else {
-    /* the app runs without a capture; every zone call stays harmless */
+cfg.mode = PS3DK_PROF_MODE_THREAD;     /* or keep APP and call PS3DK_PROF_DRAIN() */
+cfg.app  = "my-app";
+ps3dk_prof_set_sink_path("/dev_hdd0/tmp/captures");   /* optional: a DIRECTORY, before init */
+if (ps3dk_prof_init(&cfg) != PS3DK_PROF_OK) {
+    /* the app runs without a capture; zone calls stay harmless */
 }
+...
+int rc = ps3dk_prof_shutdown();        /* waits up to quiesce_timeout_us, drains, writes the trailer */
 ```
 
-`ps3dk_prof_get_capture_record` is `OK` after a successful init, `ENOTINIT` before one (or after a failed init), and `ENOTSUP` with a callback sink (no file). The record is published once and immutable for the runtime's lifetime.
+Before init, `ps3dk_prof_set_sink_path(dir)` names the directory (file `<dir>/<app>-<16 hex>.prof`, created
+exclusively, `EEXIST` if present) and `ps3dk_prof_set_sink_callbacks(&cbs)` replaces the file with `{write, flush,
+close, ctx}` callbacks (no capture record, no live link). `ps3dk_prof_get_capture_record(&rec)` returns the file path,
+session id, app and build id after a successful init.
 
-In APP mode, call `PS3DK_PROF_DRAIN` regularly (for example once per frame) from the designated drain thread; the sample drains after each frame. In THREAD mode an internal thread drains for you.
+`ps3dk_prof_init`, `ps3dk_prof_live_start`, `ps3dk_prof_shutdown` and `ps3dk_prof_live_stop` are caller-serialized:
+never call two of them at the same time. The automatic-lifecycle archive `libps3prof.a` and AUTO builds do init and
+shutdown for you.
 
-At the end, `ps3dk_prof_shutdown` waits up to `quiesce_timeout_us` for the threads still recording to quiesce, drains what remains, writes the trailer (its flags record a run that did not quiesce), then calls `flush` and `close`, and returns the run's result. The meaningful codes are `PS3DK_PROF_OK` (clean final), `ENOTQUIESCED`, `ESEQLIMIT`, `ESINKRECOVERED`, `ESINKFAIL`, `ECLOSE` (a `close()` failure after the trailer: the run FAILS), `ECLOCK`, and `ETHREAD`; see `<ps3dk/prof.h>` for the full set.
-
-### 2.5 Zones
-
-Each zone site declares a function-local `static` descriptor. Begin / end:
+### 5.2 Zones
 
 ```c
 ps3dk_prof_zone h = PS3DK_PROF_ZONE_BEGIN("compute");
-/* ... work ... */
+compute();
 PS3DK_PROF_ZONE_END(h);
-```
 
-A scoped guard ends automatically at scope exit (C uses `__attribute__((cleanup(...)))`; C++ uses the RAII `ps3dk_prof::zone_guard`, which is neither copyable nor movable):
-
-```c
-PS3DK_PROF_ZONE("compute");
-```
-
-The `_FOR` variants tie a zone to an explicit frame token:
-
-```c
-ps3dk_prof_token tok = PS3DK_PROF_FRAME_TOKEN();
-ps3dk_prof_zone h = PS3DK_PROF_ZONE_BEGIN_FOR("frame-work", tok);
-/* ... */
-PS3DK_PROF_ZONE_END(h);
-```
-
-A zone handle `kind` is `0 INERT`, `1 PUSHED`, `2 REFUSED`, or `3 SPENT`; a zero-initialised zone is `INERT`. A descriptor `scope` is `1 cpu` or `2 gpu-complete`.
-
-### 2.6 Frames and threads
-
-- `PS3DK_PROF_FRAME()` advances to the next frame on the calling thread.
-- `PS3DK_PROF_FRAME_TOKEN()` returns the current frame token (`{owner, reserved, frame}`); `PS3DK_PROF_TOKEN_NONE` is `{0,0,0}` (owner `NONE`). Tie a zone to a frame with `_FOR`.
-- Register each PPU thread that records zones with `ps3dk_prof_thread_begin(name)` before its first zone (or set `auto_register`); `ps3dk_prof_thread_end` releases it. The opt-in wait-observation variants also register the caller of successful profiler initialization as `init`; registering that thread again returns the expected `PS3DK_PROF_EALREADY`. Default archives do not add that automatic registration. For an existing worker that explicitly registers after initialization, establish that its runtime start hook has finished before initialization; creating the thread alone does not establish that ordering.
-- The initial wait-observation adapter records timed mutex calls only after their initial trylock reports busy and the deadline is validated. Immediate-success timed locks and validation refusals are uncovered; absence of a timed-wait row is not a count of those calls or evidence of a dropped record.
-
-`ps3dk_prof_init`, `ps3dk_prof_live_start`, `ps3dk_prof_shutdown` and `ps3dk_prof_live_stop` are caller-serialized: the app must never call two of them at the same time (and `ps3dk_prof_live_get_stats` is serialized with `live_start` and `live_stop`).
-
-### 2.7 Where the file goes and the live view
-
-The default sink writes `<dir>/<app>-<session_id>.prof`, where `session_id` is the timebase value at init. The sample writes under `/dev_hdd0/tmp/<app>-<session>.prof`. The live view (below) serves only captures on `/dev_hdd0/`.
-
-**Completed-file retention (candidate).** Before init, call
-`ps3dk_prof_set_capture_retention(N)` to keep the newest `N` successfully closed,
-opt-in captures for this exact `app` in that directory. `N` is 1..1024; zero
-(the default) disables cleanup. Completion order comes from a per-app index,
-independent of filenames, modification times, or the timebase resetting after
-a reboot. Existing untracked captures, active files, incomplete captures, and
-other applications' files remain untouched. Callback sinks refuse this option.
-This setter currently serves explicitly initialized captures. Managed AUTO
-initializes in constructor 100, before `main`; calling the setter from `main`
-is too late. `PS3_PROF_AUTO_ROLLING` configures the size of one file, not the
-completed-file retention policy. It does not automatically prune older AUTO
-files.
-
-Cleanup runs during successful shutdown after the current file closes and, in
-THREAD mode, the drainer joins successfully. A failed join leaves the index and
-older files untouched; the failed run remains untracked. Cleanup reads
-and checks candidate files before deleting them, so its IO cost is additional
-shutdown work. `PS3DK_PROF_ERETENTION` means the capture closed but index update
-or cleanup failed; the current capture is kept. An exclusive per-app lock
-prevents concurrent cleaners. A crash may leave `.ps3dk-retain-<app>.lock`;
-cleanup then refuses. Remove that lock only after confirming no process is
-using the directory. A corrupt index or an old file that changed also causes
-refusal, rather than guessing which files belong to the application. Retention
-does not retry a lost lock or enroll that run later, so a concurrent loser can
-leave a successfully closed but unindexed file. An indexed rolling file also
-cannot be pruned by a later append-only run, or by a run whose inspection
-limits are smaller than that file. Cleanup stops at that oldest entry and
-retained file counts can exceed `N`; it resumes only when a later run can
-inspect that entry. An init failure after exclusive creation can leave an
-OPEN, unindexed `.profr`. These files are preserved for inspection and manual
-management; they are not discovered or deleted by a directory sweep.
-Retention
-checks regular files and their complete recorded bytes; host cleanup also
-rejects symbolic links. LV2 exposes `stat`/`fstat`, without an `lstat` interface,
-so do not replace or edit managed paths while cleanup runs. It unlinks only
-indexed app/session paths and never traverses or deletes a directory tree.
-Retention
-syncs the current file and replacement index before eviction; target filesystem
-power-loss durability, including directory updates, still needs measurement.
-It uses a bounded index buffer of about 25 KiB during shutdown. Retention
-does not cap a running file's size. For managed AUTO/FIFO builds, the separate
-`-DPS3_PROF_AUTO_ROLLING=64` CMake option requests rolling output with a 64 MiB
-file ceiling (alongside `-DPS3_PROF_AUTO=ON`). It generates constant pre-init
-options; no application calls are required. Empty keeps append output.
-Turn rolling output **ON** for long sessions that could fill the HDD with an
-append capture, soak tests or playtests where only the recent past matters,
-or when one capture must stay within a fixed disk budget. Leave it **OFF**
-(the default) for short captures, whole-run totals, analysis of every frame,
-SPU recording together with AUTO, or when the extra pre-allocated writer
-memory (about 16 MB with the preset) and repeated file writes are undesirable. The managed rolling profile
-refuses active SPU recording; it does not silently omit those lanes.
-
-**Retained-only** means the reader and viewer analyze the original records
-still present in the saved segments. Evicted history is not reconstructed;
-whole-capture totals are unavailable, and missing build or clock evidence can
-make a retained frame UNKNOWN. A fixed byte budget does not promise a fixed
-number of seconds: frame density determines how much recent history fits.
-Choose a file ceiling that admits the preset, then measure the retained frame
-span on a representative run. Use custom constant options to change segment
-or support capacities; raising only the ceiling does not enlarge the file.
-The finite preset retains six segments plus a spare and uses about 21 MiB of
-file space. Increasing the ceiling alone does not enlarge the preset's pools.
-Formatting writes that bounded file once. Later commits write the used slot
-prefix (clearing any longer previous record), its footer and one root page,
-with two sync operations. Reopening requires a full clear on each slot's first
-reuse. In the default-cap host schedule with 600 draws per frame, byte rotation
-occurred every 9–10 frames: about 1.05 MB written per commit, or 6.53 MB/s and
-12.4 syncs/s when normalized to 60 fps. The six retained segments held 52 frames
-at the end of that schedule. These are adapter byte counts, not PS3 HDD timings;
-the writer now clears only the overwritten prefix and extends the used-data
-CRC mathematically over known-zero padding. The stored bytes and two-sync
-publication order are unchanged; readers still check the actual padding.
-Measure drainer time, lag and dropped records on the target before choosing
-rolling for a heavy workload.
-Before this clear/CRC optimization, on the measured PS3 HDD (2000 frames,
-600 clears per frame), 206 commits took
-about 205 ms median / 472 ms p95 elapsed time, with two syncs per commit.
-Subtracting positioned-write and sync elapsed time left about 46 ms per commit
-as a non-I/O upper bound, not a CPU-time measurement. The observed mean and
-median commit times imply a rough service-rate estimate of 4–5 commits/s,
-about 4–5 MB/s of these capture records. This is not a measured sustained
-throughput limit: that GPU-bound run produced only 0.38 commits/s (0.40 MB/s).
-It had no ring-full, metadata-full, lost-frame or dropped-operation counts;
-112 draws were untimed for command-buffer room. If production outruns drain
-service long enough to fill the bounded buffers, later draws/records can be
-excluded or lost. Their capacity-exclusion, lost-record and GAP evidence is
-counted and reported; the reader does not silently treat it as full coverage.
-An output failure instead leaves a failed or incomplete capture. In this run,
-frame-mark-to-RAM-acceptance lag was 23 ms median / 189 ms p95 / 643 ms maximum;
-RAM acceptance is not a disk commit. Target timings after the clear/CRC
-optimization are pending; the measured 46 ms includes other non-I/O work too
-and is not an estimate of the time this optimization saves.
-Commits are driven by segment size, not elapsed time. A hard hang can lose the
-pending segment (up to about 1 MiB with this preset), even after its chunks were
-accepted into RAM. For sparse activity that can represent minutes of recent
-history; successful acceptance alone does not mean a disk commit or durability.
-Core/extension/rolling writer state has a separate 64 MiB ceiling; AUTO report
-ring and other attach allocations are bounded separately, so this is not a
-total-memory cap. Active SPU lanes and legacy live transport are not supported
-by this first public rolling profile. Metadata or semantic support exhaustion
-stops capture at a whole-chunk boundary with `PS3DK_PROF_ERESOURCE`; it does not
-silently discard an unrepresentable record. See the
-[runtime contract](design/ps3dk-prof-rolling-runtime.md) for custom constant
-options, the post-shutdown result API and the distinction between a committed
-file and target filesystem durability.
-
-**Live view.** The live agent serves this run's FILE-sink capture to one PC viewer at a time over TCP while it grows; it only reads the file, so the writer never waits for a viewer. The network must be initialised first.
-
-Link `net` and `netctl_stub` in addition to the profiler. After a successful `ps3dk_prof_init`:
-
-```c
-int live = 0;
-if (netInitialize() == 0) {
-    if (ps3dk_prof_live_start(NULL) == PS3DK_PROF_OK)   /* NULL config: every default */
-        live = 1;
-    else
-        netDeinitialize();                             /* no agent thread exists */
+{
+    PS3DK_PROF_ZONE("compute");        /* C: cleanup attribute; C++: ps3dk_prof::zone_guard */
+    compute();
 }
 ```
 
-`ps3dk_prof_live_config` documented defaults (see `<ps3dk/prof.h>`): `port` `31750`, `poll_us` `10000`, `send_timeout_us` `2000000`, `handshake_timeout_us` `2000000`, `stack_bytes` `64 KiB`, `cap_bytes` up to `2^40`. A zero field takes its default; a NULL config takes every default; out-of-range values or a non-zero `reserved` field is `EINVAL`.
+Names are string literals (one static descriptor per site). `_FOR` variants (`PS3DK_PROF_ZONE_BEGIN_FOR(name, tok)`,
+`PS3DK_PROF_ZONE_FOR`) tie a zone to a frame token from `PS3DK_PROF_FRAME_TOKEN()`. A zone begun outside a capture
+window returns an INERT handle and records nothing.
 
-`ps3dk_prof_live_start` returns `OK` on success, or `ENOTINIT` (before init), `ENOTSUP` (a callback sink, or a capture not on `/dev_hdd0/` — the only device measured), `EALREADY` (a start already succeeded this run), `EINVAL`, `ENET` (listener could not be created), `ETHREAD` (agent thread could not be created), or `ESTOPPED` (shutdown already began).
+### 5.3 Threads and frames
 
-**Shutdown-then-stop order.** `ps3dk_prof_shutdown` must complete before `ps3dk_prof_live_stop`, because the connected viewer needs the `END` finalization that the shutdown produces. The sample's `source/live.c` does it in this order:
+- `ps3dk_prof_thread_begin("name")` before a thread's first zone, `ps3dk_prof_thread_end()` before it exits (or set
+  `auto_register`).
+- `PS3DK_PROF_FRAME()` once per frame on the frame thread. The Frames page, frame budgets, `CAPTURE_FRAMES` windows
+  and live triggers all depend on it. AUTO builds mark frames from the app's flips; an explicit call takes
+  precedence.
+- APP mode: the thread that called `ps3dk_prof_init` is the drain thread. Call `PS3DK_PROF_DRAIN()` and
+  `ps3dk_prof_shutdown()` from it (from any other thread they return `EPERM`). To keep the drain off the render
+  thread, initialize the profiler on a separate PPU thread and drain from there. In THREAD mode
+  `PS3DK_PROF_DRAIN()` returns `EBUSY`: the internal thread is the only drainer.
 
-1. After `ps3dk_prof_init`: `netInitialize`. If it fails, skip the live view.
-2. `ps3dk_prof_live_start` (a zeroed config takes the defaults). If it fails, keep running and call `netDeinitialize` at once — no agent thread exists.
-3. At the end: `ps3dk_prof_shutdown` first, so a connected viewer can get `END`.
-4. `ps3dk_prof_live_stop(graceful_us, join_us)`. On `ETIMEDOUT` or `ECLOCK` call it again. Only after it returns `OK`, call `netDeinitialize`; after `ETHREAD`, or a stop that never returns `OK`, leave the network initialized.
+### 5.4 Capture windows
 
-`ps3dk_prof_live_stop` returns `OK` (stopped), `ETIMEDOUT` / `ECLOCK` (still stopping: call stop again, keep the network initialized), `ETHREAD` (the join failed: terminal, never retried, and the network must NOT be torn down), `EALREADY`, or `ENOTINIT`. A `graceful_us` of 0 cancels at once. The deadlines do NOT bound an LV2 file call already in progress, nor the final ordinary join once the thread has left its loop (no API bounds that wait).
+One window is open at a time. A window belongs to the thread that marks frames; one begun before any frame mark is
+adopted by the first thread that marks one.
 
-`ps3dk_prof_live_get_stats(&stats)` (EXPERIMENTAL) copies the agent's final counters once a `live_stop` has succeeded; each admitted, finished connection ends in exactly one `drop_*` field.
+```c
+PS3DK_PROF_CAPTURE_WHOLE_RUN();            /* from here to shutdown: the simplest choice */
 
-Only captures on the internal HDD (`/dev_hdd0/`) are served. The live view has been run on a HEN console with the heterogeneous-workload sample, and the viewer's saved copy matched the console's file byte for byte; its overhead has not been measured, and the agent still uses CPU, memory and I/O while it serves.
+PS3DK_PROF_CAPTURE_BEGIN("level-2");       /* opens at the next frame boundary */
+...
+PS3DK_PROF_CAPTURE_END();                  /* closes after the current frame */
 
-### 2.8 SPU lanes and RSX domains (EXPERIMENTAL)
+PS3DK_PROF_CAPTURE_FRAMES("boss", 120);    /* closes itself after 120 frames (reason COUNT) */
 
-This records:
+{
+    PS3DK_PROF_SECTION("load");            /* begins here, ends with the block */
+    load_level();
+}
 
-- each SPU worker's jobs as `spu.work` zones on its own SPU lane, and
-- the RSX scene's command blocks as `rsx.setup` and `rsx.draw` zones on an RSX domain,
+ps3dk_prof_capture_info info;
+PS3DK_PROF_CAPTURE_STATE(&info);           /* state, id, kind, name, frames, refused, queue_full */
+```
 
-so the viewer's Timeline shows PPU, SPU and RSX rows.
+Results: `EBUSY` while a window is open or about to open (counted); `EFULL` when the drainer is too far behind to record
+the window's begin and end (nothing opens); `EINVAL` for `FRAMES(0)` or `END` with no window; `EPERM` for `END` from a
+thread that neither owns nor began the window. At shutdown an open window closes with reason SHUTDOWN, or SEAL through
+`ps3dk_prof_capture_seal()` / `PS3DK_PROF_AUTO_SEAL()`. An app window blocks the PC app's Begin and Capture N frames
+(they are refused `EBUSY`) for as long as it is open. SPU lane records and function paths are not gated by windows.
 
-**Link the installed extension archives.** The SDK installs `libps3dkprof_ext.a` and `libps3dkprof_ext_live.a` for each PPU ABI, in `ppu/lib` (ILP32) and `ppu/lib/lp64` (LP64). The extension headers `prof_spu.h`, `psp_desc.h` and `prof_gpu.h` are installed under `ppu/include/ps3dk`. The normal SDK build and install include these artifacts; the extension remains EXPERIMENTAL.
+### 5.5 AUTO tags, ranges and options
 
-For `samples/profiling/heterogeneous-workload`, set `SAMPLE_PROFILING=ON` and `SAMPLE_PROF_EXT=ON`; add `SAMPLE_LIVE=ON` for live viewing. Use the toolchain file matching `SAMPLE_ABI`. By default, the sample selects the installed extension archive and, when live viewing is enabled, its matching live archive. `SAMPLE_PROF_SDK` selects an alternative SDK root with the same layout.
+In an AUTO build, on the owner thread (`<ps3dk/prof_auto.h>`; all inert without `PS3_PROF_AUTO`):
 
-For development against build-tree archives, explicitly set `SAMPLE_EXT_ARCHIVE` and, with live viewing enabled, `SAMPLE_EXT_LIVE_ARCHIVE`. Do not mix an explicit extension archive with an implicitly selected live archive. `make -C sdk/libps3dkprof ext-release` builds the profile-enabled extension and live archives for both ABIs; the normal install places them in the SDK.
+```c
+PS3DK_PROF_AUTO_TAG(2);                         /* later operations carry tag 2 (Passes page) */
+if (PS3DK_PROF_AUTO_RANGE_BEGIN("shadows")) {}  /* RSX time between BEGIN and END */
+draw_shadows();
+PS3DK_PROF_AUTO_RANGE_END();                    /* always issue END, whatever BEGIN returned */
+PS3DK_PROF_AUTO_TIMED_RANGES_ONLY();            /* per-draw timing only inside ..._BEGIN_TIMED ranges */
+PS3DK_PROF_AUTO_SEAL();                         /* before _exit or a quit-guard deadline */
+```
 
-The sample still compiles the SPU writer from `SAMPLE_PROF_SRC`, which defaults to this repository's `sdk/libps3dkprof/src`. Installed PPU archives alone do not replace that source dependency. See the sample's README, CMakeLists.txt and `source/prof_ext.h` for the build and lifecycle example.
+Ranges nest to depth 4 and use a reserve of report pairs (default 63). `PS3DK_PROF_AUTO_OPTIONS_SET(&opts)` before
+`cellGcmInit` (same thread) replaces the default report range, labels and ring fields; start from
+`PS3DK_PROF_AUTO_OPTIONS_INIT`. Details: [profiler-auto-tags.md](profiler-auto-tags.md).
 
-The sample checks every archive member's data-model tag at configure time. Its SPU program receives some PPU addresses as 32-bit values in both data models; the PPU side checks each address and refuses to pack a value above 4 GiB. On refusal the worker runs unprofiled, SPU profiling is reported off, and `w32_eligible` is cleared. With extensions enabled, link the extension archive and its optional live archive instead of `libps3dkprof.a`. An app that does not opt in is unchanged.
+### 5.6 Live start and stop
 
-**Legacy captures and W32.** For captures without SPU order records, W32 ("assume no decrementer wrap") is an application-supplied premise that no worker's decrementer wrapped within an epoch. The legacy sample supports that premise with first-job, due-reset and reset-only words, acknowledgements and deadlines. Its 20 s dispatch threshold and service bound under 22 s are checked, and a failed step permanently clears eligibility. Use W32 only with the matching complete `.ext-end.txt` receipt reporting `w32_eligible=1` and successful lifecycle checks. W32 alone does not guarantee placement or overcome resource refusals.
+```c
+if (netInitialize() == 0) {
+    ps3dk_prof_live_config lc = {0};
+    lc.port = 31750;                            /* zero fields take the defaults */
+    if (ps3dk_prof_live_start(&lc) != PS3DK_PROF_OK)
+        netDeinitialize();                      /* no agent thread exists */
+}
+...
+ps3dk_prof_shutdown();                          /* first: a connected viewer needs END */
+int rc;
+do rc = ps3dk_prof_live_stop(2000000, 1000000); /* graceful_us, join_us */
+while (rc == PS3DK_PROF_ETIMEDOUT || rc == PS3DK_PROF_ECLOCK);
+if (rc == PS3DK_PROF_OK) netDeinitialize();     /* after ETHREAD leave the network up */
+```
 
-Captures with SPU order records use the tick and causal-placement analysis described below. The W32 toggle does not establish the additional RMAX1 premise or turn SPU decrementer ticks into wall time.
+`ps3dk_prof_live_config` (defaults when a field is 0 or the pointer is NULL):
 
-GPU-side, the sample uses reports 32..63 and label 241 for the domain, and label 242 for the application fence. These values are part of the sample's build, not a public contract; they may change before release.
+| Field | Default | Range |
+|---|---|---|
+| `port` | 31750 | any TCP port |
+| `poll_us` | 10000 | 1000..1000000 |
+| `send_timeout_us` | 2000000 | 1000..60000000 |
+| `handshake_timeout_us` | 2000000 | 1000..60000000 |
+| `stack_bytes` | 64 KiB | 16 KiB..1 MiB |
+| `cap_bytes` | 1 GiB | 1..2^40 bytes served to one viewer |
 
-#### Cost and the drain
+`ps3dk_prof_live_start`: `OK`; `ENOTINIT` before init; `ESTOPPED` after shutdown began; `ENOTSUP` for a callback sink,
+a rolling capture, or a capture outside `/dev_hdd0/`; `EALREADY` (once per run); `EINVAL`; `ENET` (no listener);
+`ETHREAD`. In an extension build link `libps3dkprof_ext_live.a`. In an AUTO build the app must link
+`ps3dkprof_ext_live` and call live start itself (with `PS3DK_PROF=1` so the call is declared); this combination has
+not been tested.
 
-Measured on a console with the heterogeneous-workload sample (ILP32): one PPU zone pair costs about 0.5 us; PPU profiling adds about 10 to 50 us per frame, and PPU plus SPU and RSX about 60 to 90 us.  One SPU zone pair costs about 21 decrementer ticks on the SPU.  The per-frame drain is the largest cost: about 0.2 ms per frame, and up to 1.6 ms per frame in phases with heavy SPU zone traffic.  The extension runs in APP mode, so the drain runs on the designated drain thread; to keep it off your render thread, make a separate PPU thread the designated drain thread and call `PS3DK_PROF_DRAIN` from it.
+`ps3dk_prof_live_stop`: `OK`; `ETIMEDOUT` / `ECLOCK` (still stopping: call again, keep the network up); `ETHREAD`
+(terminal; never tear down the network); `EALREADY`; `ENOTINIT`. `ps3dk_prof_live_get_stats(&s)` (EXPERIMENTAL)
+copies the agent's final counters after a successful stop.
 
-#### SPU zone timing (decrementer ticks, not wall time)
+---
 
-SPU zone durations are shown as **SPU decrementer ticks**, never as wall time. The viewer does not convert them to microseconds or seconds.
+### 5.7 RSX frame capture and draw labels
 
-For captures with SPU order records, the reader first bounds each recorded observation using identity-bound PPU evidence: lane creation, ordered calibration or ping brackets, and drain timestamps. The causal-only bounds remain available for inspection.
+With `PS3_PROF_RSX_FRAME` (4.12), `<ps3dk/prof_auto.h>`:
 
-Finalized placement can tighten those bounds using **RMAX1**, an additional rate-ceiling assumption. Its default assumes the decrementer advances no faster than one decrementer tick per PPU timebase tick. The observed isolation rate does not establish this as an exact universal hardware ceiling. Placement and any solid core using the tightened endpoints are conditional on RMAX1 and the other declared premises; a contradiction leaves the affected endpoints unplaced.
+```c
+int id = PS3DK_PROF_RSX_FRAME_CAPTURE("after-camera-cut");  /* any thread: > 0 the capture id */
+PS3DK_PROF_DRAW_SCOPE_BEGIN("terrain");                      /* owner thread */
+PS3DK_PROF_DRAW_LABEL("rock_large/lod1");                    /* later draws read terrain/rock_large/lod1 */
+draw_rocks();
+PS3DK_PROF_DRAW_SCOPE_END();
+```
 
-Without `ORDER_FINAL`, supported prefix placement is **PROVISIONAL** and uses causal bounds alone. It contributes neither final tick counts nor final placement coverage. More frequent usable drains and brackets may tighten causal bounds, but cannot guarantee placement when identity, order or coverage is missing.
+Flags (the macro requests none; call `ps3dk_prof_rsx_frame_capture(name, flags)` or set them in the PC app):
 
-With SPU lanes enabled, THREAD mode checks for published calibration answers between full drains,
-in sleep slices of at most 1 ms. The full-drain interval remains configurable. APP mode can call
-`PS3DK_PROF_SPU_POLL_CALIBRATIONS()` from a helper thread or another polling point between its drains.
-This call uses a try-lock and returns `EBUSY` on contention or callback reentry. It neither writes
-to the sink nor acknowledges SPU ring slots. A coherent observation of the exact outstanding
-answer supplies an earlier PPU upper bound when the corresponding CAL record is later drained;
-the drain timestamp still describes the later ring read. Missed, stale or inconsistent observations
-retain the ordinary bound. Polling cadence does not guarantee bracket width or placement, and
-target overhead and width improvement require a matched console measurement.
+- `PS3DK_PROF_RSX_FRAME_ISOLATED`: every captured draw runs alone (a WAIT_FOR_IDLE before each of its two markers),
+  so its interval is its own cost. Turn it on to rank draws by cost; leave it off to see the frame as it really runs
+  (the isolated frame is slower and its overlap is gone). It costs 4 command words per draw in the captured frame.
+  AUTO marks the operations of an isolated frame ISOLATED: `ps3dk-prof auto` labels that frame row ISOLATED and keeps
+  it out of the `--by-tag` tag and range summaries (its numbers are not comparable with pipelined frames).
+- `PS3DK_PROF_RSX_FRAME_BOTH`: two consecutive frames, the first pipelined, the second isolated, read as two frames
+  with their draws paired (kind, label, programs). Costs as ISOLATED for the second frame; the staging must hold two
+  frames of records.
+- `PS3DK_PROF_RSX_FRAME_FP_BYTES`: store each fragment program's bytes once (for the disassembly), up to
+  `PS3_PROF_RSX_FRAME_FP_BYTES_KB` (CMake, default 256 KiB) per capture, streamed through the staging blocks; only
+  programs bound while the capture is armed. Turn it on to read the shaders; leave it off to keep the capture small.
+  Vertex program bytes are always stored (at most 8 KiB each, from the command stream).
 
-No single affine clock fit per epoch is used for this SPU placement. The measured workload captures contradicted that wall-clock model. The decrementer's behavior under descheduling remains an interpretation question: a tick count does not prove CPU execution time or the cause of a stall.
+A request is armed at the AUTO owner's next frame boundary when a capture window is open (an app's
+`PS3DK_PROF_CAPTURE_WHOLE_RUN()` counts); otherwise the capture opens a two-frame window named `rsx-frame` and arms at
+the boundary after. The frame from the arming boundary to the next one is captured. A request that finds no window
+after three boundaries is abandoned and nothing is written. Results: the capture id, `PS3DK_PROF_EBUSY` (one
+outstanding), `PS3DK_PROF_ENOTSUP` (not selected, no ring, no AUTO owner), `PS3DK_PROF_EINVAL`, `PS3DK_PROF_ENOTINIT`
+(the profiler is not initialized), `PS3DK_PROF_ENOMEM` (no staging memory), `PS3DK_PROF_ESTOPPED` (shutdown has
+begun); 0 without `PS3_PROF_AUTO`.
 
-#### RSX zone states
+Labels are owner-thread only. A label applies until replaced, its scope ends or the frame ends; scopes nest to depth
+8; a path is cut at 63 bytes on a UTF-8 character boundary. Names and labels are written as UTF-8: a byte that is not
+part of a valid sequence becomes `?`. The strings must stay valid until then; they are copied only into a capture.
+Outside a capture each call stores one pointer.
 
-RSX timing is judged per RSX unit (one GPU domain and epoch). A unit is `MEASURED`, `CONDITIONAL` or `UNMEASURED`; its state and reasons are distinct from the capture's coverage result.
+At shutdown a capture in flight ends ABANDONED: the file keeps what was written. Its staging blocks are freed once
+both the drainer and the owner thread have left the capture; if the owner thread never runs again, they stay allocated
+until the process exits.
 
-| State | Meaning |
+## 6. The PC app (`ps3dk-prof-viewer`)
+
+### 6.1 Install and launch
+
+`ps3dk-prof-viewer` (and `ps3dk-prof`) ship with the host tools: `$PS3DEV/bin` on Linux, the `.exe` files in the
+Windows SDK zip. From source: `cargo build --release -p ps3dk-prof-viewer` in `tools/`.
+
+```
+ps3dk-prof-viewer [capture.prof | capture.profr]
+    [--page=timeline|frames|zones|paths|waits|fifo|auto|rolling]   default: Overview (a .profr opens on Rolling)
+    [--view=START:LEN]                 Timeline window, in ticks from the capture start
+    [--graph=bars|lines|distribution|map]   Frames graph mode (default bars)
+    [--connect=IP:PORT]                start a live session at launch
+    [--capture-dir=DIR]                save folder for --connect
+    [--light | --dark | --theme=light|dark]
+    [--min-size | --width=N --height=N]
+    [-v | --version]
+```
+
+### 6.2 Opening captures
+
+**Open…** (or drag a file onto the window) accepts `.prof` and `.profr`; the type is decided by the file's content.
+A file named `*.incomplete.prof` is read strictly: it is never promoted to a complete capture. The app bar shows the
+reader's verdict (`COMPLETE`, `INCOMPLETE`, `MALFORMED`; section 8.2).
+
+### 6.3 Pages
+
+Pages appear in the sidebar when the capture has the data for them.
+
+| Page | Shows | Needs |
+|---|---|---|
+| **Overview** | Identity, clock, lanes, verdict, WINDOWS list (id, name, kind, frames, end reason); EXTENSION SOURCES and COUNTERS when present | any capture |
+| **Timeline** | PPU threads, SPU lanes, RSX domains and AUTO lanes on one axis. Wheel: zoom at the pointer; drag: pan; Shift+drag: zoom to a box; double-click: fit; click a span: highlight its zone. Follow newest data while live. | zones inside a window |
+| **Frames** | Per-frame bars against a 30/60 FPS budget (or none); graph modes Bars, Lines (with Raw/Mean 5/15/30 smoothing and Fit p99/Max scale), Distribution, Verdict map; per-lane tables | `PS3DK_PROF_FRAME` or AUTO flips |
+| **Zones** | Named PPU zone statistics: instances, completed, censored, total, mean, p50/p90/p99 (refused below 20 samples), max | zones inside a window on MEASUREMENT VALID lanes |
+| **Hot paths** | Call paths with the most measured time; with function paths, a **Source: Zones / Functions (automatic)** selector, the per-thread call tree and **Load ELF symbols…** | zones; function paths for the Functions view |
+| **Waits** | Wait observations per actor | a waits build; otherwise "UNSUPPORTED" |
+| **FIFO wrap waits** | Per-wrap phase bounds on the PPU clock | FIFO or AUTO build |
+| **Automatic** | AUTO coverage per frame, reached-marker intervals, clock map, per-frame verdict; **View in Timeline** | AUTO build |
+| **Passes** | RSX time per tag and per range | AUTO build with tags or ranges |
+| **RSX frames** | RSX frame captures already present in the file | a capture with a GPU source |
+| **Snapshot** | A frozen frame (section 6.6) | Capture full frame |
+| **Rolling (retained)** | Store state, retained segments, PPU zones, AUTO and FIFO data of a `.profr` | a rolling file |
+
+Times are milliseconds with three decimals; hover for raw ticks. Without a usable clock the app shows ticks rather
+than inventing a conversion. Empty pages name the missing records or capability rather than showing zero work. SPU
+durations are SPU decrementer ticks; SPU placement with order records uses causal bounds and the RMAX1 premise
+(PROVISIONAL until the order is final); legacy captures use the W32/R64 premise toggles on Timeline, Frames and Hot
+paths. RSX units read `MEASURED`, `CONDITIONAL` or `UNMEASURED`, each with reasons; reached-marker intervals include
+queued work and are not isolated draw cost.
+
+With a rolling file open, the other pages show "Needs a complete capture": they analyze only complete captures.
+
+### 6.4 Connecting live
+
+What the app needs: the profiler linked (section 2), and either live auto-start turned on (section 4.3, no app code) or
+`netInitialize` and `ps3dk_prof_live_start` in its code (section 5.6); a FILE sink on `/dev_hdd0/`, and no rolling
+output.
+
+Press **Connect…**: console IP address (a literal IP), port (default `31750`), and the folder for the saved copy
+(default `Documents/PS3DK Captures` in your home folder). While data arrives the app bar shows `LIVE · PROVISIONAL`;
+**Disconnect** ends the session. The viewer accepts at most 256 MiB per session.
+
+When the session ends:
+
+- the console sent END and every check passed: saved as `<session>-<name>.prof`, verdict `COMPLETE`;
+- no trailer (Disconnect, a dropped link, the app quit from the XMB) but a valid prefix with at least one event chunk:
+  saved as a normal `.prof`, `COMPLETE` with the note "ended without a trailer";
+- a protocol, integrity or local write failure: kept as `<name>.incomplete.prof` with the reason, or nothing saved.
+
+### 6.5 Live capture triggers
+
+While a live session runs, a strip under the app bar has a window name field (default `viewer`), **Begin**, **End**,
+a frame count (1..1,000,000, default 60) and **Capture N frames**. They open and close capture windows in the running
+app without app code: the request is applied in the app's next `ps3dk_prof_frame` and recorded like a window the app
+opened. One command is outstanding at a time; each gets an answer:
+
+| Answer | Meaning |
 |---|---|
-| `MEASURED` | The unit meets the reader's profile, raw-validity, clock-map, chronological-order, observation and hold-out checks. Its bounds remain conditional on the declared timing and producer premises. |
-| `CONDITIONAL` | A measurement qualification is missing; inspect the listed reasons, such as a profile that is not reviewed or no decisive hold-out. Any displayed bounds retain their stated assumptions. |
-| `UNMEASURED` | A required unit check failed, for example raw validity or a consistent bounded clock map. Inspect the reason and any separate placement output; this label alone is not a claim that every possible placement is unavailable. |
+| OK | window opened or closed (its id is shown) |
+| `EBUSY` | a window is already open or opening, for example the app's own `CAPTURE_WHOLE_RUN` |
+| `EPERM` | End while the open window is the app's |
+| `EINVAL` | End with no window, or a bad name (1..63 bytes, no NUL) |
+| `EFULL` | no queue room, or 32 distinct names already used this run |
+| `ETIMEDOUT` | no frame mark took the command within 5 s (the app is not calling `PS3DK_PROF_FRAME`) |
+| `ESTOPPED` | the app's profiler is shutting down |
 
-The reviewed RSX-R1 entry is scoped to its recorded runtime digests and configuration. This candidate requires `LOADER_HOOK=1`, `LIVE_LINKED=1` and the measured extension configuration. Hardware-model and system-software fields that the runtime cannot read remain explicitly unchecked; this is not evidence across other hardware or firmware.
+The buttons are disabled with a reason against an older agent (protocol 1). To drive capture from the PC, build the
+app without its own window, or close the app's window first.
 
-The held-out bracket check, **H-SPLIT**, uses separate odd and even interior-bracket passes. In each pass, the kept brackets define a feasible affine map set. A held-out observation passes the compatibility check when its interval intersects the prediction, not only when the prediction contains the whole observation. A decisive check must be capable of rejecting an observation allowed by the surrounding evidence. These tests examine brackets; they do not independently establish event timing between them. Available identity-bound causal constraints are also checked separately against the bracket-only map. Qualification requires at least one decisive hold-out and no contradicted hold-out, alongside the other unit checks.
+### 6.6 Capture full frame, snapshots and bookmarks
 
-The **99 percent coverage policy is capture-wide**. Its denominator is retained eligible GPU pairs across the RSX units; its numerator is pairs in `MEASURED` units with both endpoints between that unit's first and last bracket coordinates. The policy requires a nonempty denominator, and omissions or unknown inventory are reported separately. Passing this policy does not confer `MEASURED` on any unit or prove that omitted work was absent.
+**Capture full frame** freezes the frame selected on the Frames page (or the newest measured frame) as a SNAPSHOT of
+the data observed so far, on a file or a live session. The Snapshot page draws one row per PPU thread, SPU lane and RSX
+domain with solid cores, whiskers for timing uncertainty, possible and extrapolated spans, and a per-lane coverage list
+(`OBSERVED`, `PARTIAL`, `NO DATA`, `UNMAPPABLE`). **Re-resolve with W32/R64**, **Delete snapshot** and **Back** are on
+the page. Bookmarks are written next to the saved capture as `<name>.frames.txt`. Limits: 64 snapshots per session,
+1 GiB accounted memory across sessions.
 
-Use the reported interval width for the particular capture and pair. A placement or zone duration bounds timestamped command intervals under the premises; it is not a direct measurement of shader cost, RSX busy time or utilization.
+**Save snapshot** writes an independent `.prof`; **Save as…** chooses its destination. Existing files are never
+replaced. Reopening this file selects the frozen frame and its W32/R64 and extrapolation premises, without needing
+the original session, console or bookmark file. Saving during live reception uses the frozen bytes; later network
+data does not change the saved result. One background save runs at a time.
+Save on an already-saved snapshot reports its existing path immediately; Save as
+can publish another independent copy without replacing a file.
 
-#### 32-bit and 64-bit builds
+A saved snapshot contains its raw timing dependencies, including cross-edge zones and children needed for exact
+exclusive time, overlapping AUTO operations, and the original clock-map inputs. It also carries the original
+source's diagnostic aggregates, explicitly marked as source-wide provenance on reopen. Those counts never create
+timing bars. Before publishing, the viewer reopens the projection and compares the resolved snapshot exactly.
+Source seal proofs are not carried: their chunk references belong to the original file. When present in the
+original, their count is shown as provenance, not as completion proof for the saved snapshot.
+The support-file limit is 64 MiB; an oversized dependency is named in the refusal, and the viewer never falls back
+to copying the whole session. The default 1 GiB shared budget imposes a lower practical save limit of about
+14 MiB of selected support: workspace is charged at 70 times the output size plus 4 MiB, and retained snapshots
+reduce the available budget further. Larger saves are refused for workspace even below the 64 MiB file cap.
+Only contributors' direct children are needed for
+exclusive time, not all grandchildren below a run-long root. The save result
+reports the direct-child record bytes. A large direct-child dependency is named
+when it exceeds the allowance.
 
-The SPU-lane and RSX-domain extension builds for **both ILP32 and LP64 PPU apps**. Each data model has its own `libps3dkprof_ext.a` and `libps3dkprof_ext_live.a`; select the pair matching the app ABI.
+Freezing retains bounded closure inputs from the already-parsed document. The
+first Save prepares raw support in its worker and parses only that support,
+without reanalysing the whole session. Frozen-input retention has
+an 8 MiB per-snapshot allowance and counts against the shared viewer budget. If
+preparation cannot fit, the snapshot remains viewable and only Save is unavailable,
+with its reason shown. Save preparation reserves at most 64 MiB of scratch; after projection, parsing
+and output work is charged from the actual selected support size. Neither
+reservation grows with the original session length.
 
-The heterogeneous-workload sample checks at configure time that the archive's data model matches the app's (samples/profiling/prof-ext-abi.cmake); an app can reuse that check. A mismatch is a configure-time error, not a link-time or runtime surprise.
+In the Mossbrook beta 4.10 example, frames 1112 and 1134 save as 101,049 and 101,565 bytes from a 2,157,057-byte
+capture, including 19,472 bytes of clock support each. Clock anchors are capture-wide and grow with run length;
+a sufficiently long capture can exceed the support limit from clock inputs alone. Raw EXT epoch/event inputs
+needed to validate an SPU or explicit RSX map are also kept and charged to this limit.
+An EXT-heavy test with 4,096 SPU pairs saves 67,062 bytes, including 65,976 bytes of raw EXT support.
 
-**Status:** EXPERIMENTAL.  Console runs of the heterogeneous-workload sample, one ILP32 and one LP64, placed every SPU zone pair and every GPU pair; RSX units read `MEASURED` under the reviewed RSX-R1 profile; SPU lanes are valid and placed but read `TICKS-CONDITIONAL` until an SPU profile is reviewed.  SPU zones inside SPURS jobs have not been tested.
----
+The live strip keeps the latest 64 successfully requested windows, including after Disconnect. Each has Save and
+Save as controls. An ACK does not prove that its records have arrived: the viewer explains when the window is
+absent or has no observed frames in the displayed accepted prefix. An open window saves the frames observed so
+far and remains open in the saved file; Save as creates a later revision without overwriting the earlier one.
+Window files use the ordinary window exporter described
+below; their timing is reconstructed from the records retained in that export.
 
-## 3. PC side
+In AUTO builds the snapshot also has an `rsx.auto` row with the retained draw, CALL and range records, placed through
+the reader's qualified AUTO clock map within its interpolation support. Their execution-frame tokens select the frame,
+including CALL-segment draws built in an earlier frame. A ranges-only capture shows recorded ranges, not individual
+draw bars. Untimed draws and records with unavailable timing stay counts, with reasons; replayed segments or invalid
+clock evidence are never drawn. The AUTO-declared RSX domain with no extension events says **timed by AUTO records**,
+pointing to `rsx.auto` for clock validity, and a PPU lane holding only frame marks says **no zones in this build**.
+These labels do not claim complete coverage or per-draw state.
 
-### 3.1 Command line
+**Capture RSX frame** in an app built with `PS3_PROF_RSX_FRAME` (4.12): the live link (protocol 3) carries the request
+and its progress. Press the button in the live strip: once the reader has the capture and its timing, the viewer
+opens **RSX frames**, selects the new capture, and focuses its slowest timed draw. Written progress alone does not
+mean Ready: missing AUTO records show **Pending timing** and the strip reads `Waiting for RSX (timed/total)`. Once
+the agent reports the capture written, a new request is allowed; the earlier capture stays listed as pending. A
+capture still being received shows **Open**. A truncated or abandoned capture opens as **Partial** with its reason.
+A request without a new frame boundary stays waiting. Disconnect keeps the received evidence: an Open or Pending
+timing capture is then opened once, with the reason that the live link ended before its timing completed. A link
+follows one capture at a time: until the previous capture's final state (written or abandoned) arrives the button
+stays disabled, and an agent that still answers `EBUSY` shows that refusal and allows a new request. The status a
+link follows is the live request's own; a capture requested from app code never replaces it. The header counts
+**mismatched** draws (their AUTO operation belongs to another draw kind or frame: in no timed count or sum) and
+reports lost draw events and **Text replaced** (fields that were not valid UTF-8, shown with U+FFFD). Older
+agents are negotiated as protocol 2 then 1 and show why the button is unavailable; requests are never retried.
 
-```
-ps3dk-prof check  capture.prof    # validate; report the verdict
-ps3dk-prof report capture.prof    # print a human-readable report
-ps3dk-prof paths --functions [--elf app.elf] [--thread NAME] [--interval N | --all] [--top K] [--json] capture.prof
-                                  # automatic function paths (captures from libps3dkprof_func.a)
-```
+Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
+ordinal, change the sort, or group by program pair, VP, FP, label, tag, pass or kind. Summary and Shaders show the
+reader's arguments, provenance and stable identities. Captures with register state (decoder 2) fill **State**
+(render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot: size, format, mips,
+filter, wrap, offset and location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
+the index stream of an indexed draw, and the surfaces). Values this draw changed are highlighted, values that differ
+from the register state when the capture was armed are tinted and labelled **differs from frame start** (not
+"non-default": hardware reset values are not known), and a register not written since the last decoder reset reads
+**unknown**, never a default. Summary and State list the registers changed since the previous draw with their old
+and new values. Group by **Render target** to total draws per colour/zeta surface. Older (decoder 1) captures say
+that no register state was recorded.
 
-Run these before interpreting a capture.
+**Constants** (decoder 3 captures) lists the draw's vertex-program uniforms, then its fragment-program uniforms, by
+name with their vec4 values; components not written since the last decoder reset show as `?`. Slots and blocks
+without a uniform name (the VP literal pool, unnamed FP constants) follow by slot or offset. Each FP constant has a
+provenance badge per component (one badge when all four agree): **last inline write seen** (the latest inline write
+the decoder saw in the command stream; not a claim about the value at GPU time), **container: may differ at GPU
+time** (the program's value in memory; a CPU write to it would not be seen) or **unknown** (after a decoder reset or a
+full write map). Frames timed isolated are labelled **ISOLATED** on the Automatic page. Values
+changed since the previous draw are highlighted. Consecutive draws that differ only in their constants collapse in
+the draw list into one **xN** row with the run's total time and the slots that vary; click it to list its draws.
+Sorted by time, a run is placed by its total time; other sorts keep it where its first draw falls.
+Selecting a draw of a run adds a per-instance table of those slots to Constants.
 
-Instrument selectively with `-finstrument-functions`: omit tiny hot leaf files
-with `-finstrument-functions-exclude-file-list`, or mark individual functions
-`__attribute__((no_instrument_function))`. A fixed ILP32 console sample measured
-about 0.43 microseconds of added elapsed time per instrumented entry in one
-OFF/ON/OFF sequence. This is a descriptive workload comparison, not an isolated
-hook-cost estimate; both self and inclusive times include hook cost. Keep the
-same selection when comparing captures.
+Beside **Capture RSX frame**, the mode menu chooses **Pipelined** (default), **Isolated** (the RSX waits for idle
+around each draw, so each interval is that draw's own cost and the frame runs slower) or **Both** (two consecutive
+frames, the first pipelined and the second isolated). **Keep fragment shader bytes** asks the agent to store the
+fragment programs' microcode for the Shader view. An agent that cannot honour a choice answers `EINVAL`, shown in
+words. A Both capture appears as two views of one capture, each labelled with its timing mode and with its own
+totals; the two are never added. **Pairs** lists the draws of the two frames side by side (paired by kind, label and
+programs), with unpaired draws marked.
 
-Start observation before entering the functions whose paths you need. If an
-instrumented function enters before profiler initialization and exits after
-registration, its unmatched exit increments the orphan counter without adding
-a call path or elapsed time. An absent path does not mean the function took
-zero wall time. The heterogeneous-workload sample offers a separate registration
-probe for this case; it is outside that sample's exact call-tree check.
+**Shader view** lists every program of the selected view with its name, hash and provenance, the draws using it,
+their total and mean time in that view's mode, and the constants that change across those draws. When the capture
+kept the program's bytes it shows the disassembly; encodings the disassembler does not know are shown as raw words.
+Vertex-program bytes are kept by phase 4 captures; fragment-program bytes only with **Keep fragment shader bytes**,
+for programs bound while the capture was armed and within the agent's byte cap.
 
-`paths --functions` prints, per thread, each caller chain with its calls, inclusive and self elapsed time and their share of the thread's interval, then the thread's counters (depth_limit, lost, unbalanced, orphan, deferred, reentry, clock) and statuses. Elapsed is wall time between the thread's hook events (waits, preemption and hook cost included), not CPU time. The default is the whole capture; `--interval N` shows one of the thread's own intervals and `--all` every chunk in order. A drain the thread did not answer (LAGGING) and an unacknowledged tail (INCOMPLETE_TAIL) are printed as UNKNOWN, never as zero. The LOST row (lost parent attribution: the node table was full or the probe was refused) is listed on its own, never under a caller. `--elf` names functions by reading each `.opd` descriptor's entry word and the FUNC symbol of `.symtab` that contains it (C++ names demangled); without it, or for an address that does not resolve, the raw `fn` value is printed in hex and counted. When both the ELF's `.note.gnu.build-id` and the capture's build id are present they are compared: a mismatch prints a WARNING (names are still shown); otherwise the names are labelled "ELF match unverified".
+PIPELINED intervals may overlap: their sum is not isolated execution cost. Qualified AUTO clocks give millisecond
+bounds (three decimals), with raw ticks on hover; unqualified clocks retain raw ticks and their unavailable-conversion
+notice. Existing EXT-marker captures remain a separate source selector.
 
-Pass `--elf` the unstripped linked ELF, not the packaged one. The packaging step strips the `.elf` it places beside the SELF, so that file has no function symbols, and `--elf` given a stripped ELF refuses to symbolize and keeps the raw rows. In a CMake project the unstripped file is the link target's own output (for the heterogeneous-workload sample, `heterogeneous-workload` in the build directory, with no `.elf` suffix); keep it together with the SELF you run, because it must come from the same link.
+**Shader folder…** scans that folder's `.vpo`/`.fpo` files in the background, matching the reader's canonical hash.
+Names supplied by the app take precedence over local filenames, then stable hashes. The folder is session-local;
+the scan visits at most 4096 directory entries and reads at most 64 MiB, reporting invalid files or a reached limit.
 
-Exit status: `0` COMPLETE, `1` INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean.  A capture that ends without a trailer (the app quit from the XMB, the link ended, a copy cut short) is COMPLETE and exits `0`; its output has the extra line `ending: NO-TRAILER` (a file with a trailer has no `ending:` line), so a script that must tell the two apart greps for that line.
+Each RSX capture has **Save** and **Save as…**. These use the accepted file/live prefix and the frame exporter, then
+reopen the result and require identical capture data, timing and partial status before publishing. Existing paths
+are never overwritten; repeat Save reports the saved path. Saves work after Disconnect when the prefix was accepted.
+Other captures from the same frame can be included and remain selectable on reopen. One save worker uses the shared
+viewer budget, sized by the selected frame rather than the session: a fixed 64 MiB preparation allowance and one
+copy of the accepted source, then about 70 times the exported frame's bytes plus 4 MiB before it is written and
+reopened. The session is not parsed again. Insufficient workspace refuses visibly. A sole capture
+is selected automatically on reopen. The original session file is untouched.
 
-### 3.2 The viewer
+### 6.7 Windows: picker, Save window, Save range
 
-Time displays use milliseconds with three decimal places; hover time cells and
-bars for the underlying tick values. Without a usable clock or a qualified
-mapping, the viewer labels raw ticks instead of inventing a time conversion.
-Exact bound diagnostics retain their rational values. Automatic verdict badges
-and strip cells explain the reader's classification on hover; the per-frame
-reason still describes the evidence for that particular frame. Empty pages name
-the missing records or capability, rather than treating missing data as zero work.
+With a capture open, the app bar has a window picker (**All frames** or `window N — name`). A window scopes the
+Passes, Automatic, Frames and Timeline pages to its frames. **Save window…** writes `<name>.window_<id>.prof` and
+**Save range…** writes `<name>.<first>..<last>.prof` next to the open file, with the same exporter as
+`ps3dk-prof export`. Neither overwrites an existing file: the status line names the file written, or the existing
+file that made the save refuse.
 
+In a live session the saves go into the folder chosen in **Connect…** and use the received bytes behind the displayed
+document, even if the session's saved file was moved or changed. Only the reader-accepted prefix is exported: a torn
+trailing chunk and bytes received after that snapshot are left out. Saving still works after **Disconnect** when an
+early prefix was accepted; a session that failed validation refuses the export with a reason.
 
-The GUI viewer is started with an optional capture and flags (from the viewer's `main.rs`):
+### 6.8 Rolling captures
 
-```
-ps3dk-prof-viewer [capture.prof]
-    [--page=overview|timeline|frames|zones|paths]   # default overview
-    [--view=START:LEN]                              # timeline window (ticks from capture start)
-    [--graph=bars|lines|distribution|map]           # frames page graph mode (default bars)
-    [--connect=IP:PORT]                             # start a live session immediately
-    [--capture-dir=DIR]                             # default save folder for live sessions
-    [--min-size]                                    # window 860x540 (default 1240x780)
-    [-v|--version]
-```
+Open a `.profr` like any capture (limit 64 MiB). The Rolling page lists the store, retained segments and the data
+still present in them. Evicted history is not reconstructed: whole-capture totals are unavailable, and a retained
+frame can read UNKNOWN when its build or clock evidence was evicted. `ps3dk-prof rolling` prints the same listing.
 
-Open a capture either by passing the file on the command line, or from inside the app with **Open**. For a live session, use the **Connect** form and enter the PS3's IP and port (default `31750`) plus a save folder.
+### 6.9 Making every feature available to any profiler-linked app
 
-### 3.3 Pages
+Today several PC app features depend on app code or a specific build:
 
-- **Overview** — identity, clock, lanes, verdict; lists the extension sources when the capture carries SPU lanes or RSX domains.
-- **Timeline** — PPU threads, SPU lanes and RSX domains as separate rows. SPU captures with order records use the causal-placement and RMAX1 qualifications in section 2.8; unfinished order evidence is shown as PROVISIONAL. Legacy SPU analysis uses the selected W32 or R64 premise. Bars whose timing was extrapolated are flagged. On SPU lanes and RSX domain tracks, shaded stretches labelled **no placed pairs** mark intervals where no placed completed pair's outer extent (earliest begin to latest end) meets that timeframe. This does *not* mean the SPU or RSX was idle: work that was not placed (such as unplaced pairs, censored spans, unpaired events, open spans, loss records, or epochs without an inventory whose events are unknown) may still fall in those stretches.
-- **Frames** — per-frame bars measured against a 30 / 60 FPS budget, over-budget frames in red; per-lane tables. The **Graph** selector offers four display modes (also selectable with `--graph`):
-  - **Bars** (default): PPU frame duration graph with budget threshold line, and SPU/RSX foreign lane strips below sharing the same slot columns and horizontal scroll.
-  - **Lines**: Plots all series (PPU and lanes) on one shared tick axis, with frame k at the same horizontal position for every series. The PPU point is the exact elapsed time. A lane point is drawn at the upper bound (hi) of its conservative included-work bound, with lo..hi rendered as a translucent band (an infinite hi has no line point; its band runs to the top with an open-arrow cap). The line breaks at any slot without a value (unknown, refused, nothing placed, no interval); gaps are never bridged and never drawn as 0. Dots on the baseline mark measured frames with nothing included on that lane.
-    - **Smoothing**: Segmented control (**Raw**, **Mean 5**, **Mean 15**, **Mean 30**) applying a trailing moving average (capped at 64 frames) within unbroken runs (fewer frames at run starts, never across gaps); raw lines remain visible faintly.
-    - **Scale**: Shared with Distribution (**Fit p99** [default] or **Max**). **Fit p99** sets the top of the axis to 1.1 times the largest of the PPU p99, each lane's p99 upper bound and the budget; a series with fewer than 20 usable frames contributes its maximum instead of a p99. Larger values, +inf upper bounds and bounds not representable as finite values are drawn at the top edge with an upward arrow. If a lane's distribution was refused, only the Fit p99 axis uses that lane's finite maximum instead, with a warning note; the refused distribution itself stays shown as unavailable. **Max** scales so every finite representable value fits; +inf upper bounds and non-representable finite bounds are drawn at the edge with an arrow.
-  - **Distribution**: Shows the distribution over measured frames per series (excluded frames are counted, never binned). PPU series shows an exact integer histogram and percentiles (p50, p90, p99; ZoneStats rank rule, refused below 20 measured frames). A lane series gives, per percentile, the enclosing interval [p-th smallest lo, p-th smallest hi] across frames that have a bar (order statistics are monotone). This bounds only retained DEFINITE start-attributed top-level included work on frames with a bar (ambiguous, extrapolated, exclusive-unavailable pairs, and frames with nothing included are omitted; bounds only included work, not total lane activity; refused below 20 frames with a bar).
-  - **Verdict map**: Dense matrix with one row per series and one cell per frame, colored by budget verdict or slot state: `OVER`, `WITHIN`, `UNDETERMINED` (striped), `no verdict` (no budget or clock), `verdict unavailable` (exact comparison refused), `nothing included` (dot), `unknown` (outline), `refused` (crossed), or `no interval` (empty cell; no measured interval on lane).
-  - **Stated limits**: Series are never summed: lanes run concurrently with the PPU and with each other, and lane values represent start-attributed, unclipped included work, not occupancy (neither stacked totals nor per-frame utilization ratios are established by the reader). Percentiles cover only frames with bars. Edge arrows mark +inf, non-representable or out-of-scale values. A refused lane distribution is shown as unavailable; only the Fit p99 axis falls back to that lane's finite maximum, with a warning.
-- **Zones** — named-zone statistics for PPU zones only, from PPU lanes that are MEASUREMENT VALID (`ps3dk-prof report` prints each lane's validity; spans on other lanes are excluded); SPU and RSX zones are not listed. Columns: Zone (name and tag), Instances, Completed, Censored, Total, Mean, p50, p90, p99 and Max (all durations inclusive), and Qualification. Percentiles use the usable completed duration samples and are refused when there are fewer than 20 of them. Unknown values sort last.
-- **Hot paths** — the call paths that account for the most measured time, for PPU threads and (when present) SPU lanes and RSX domains. For a capture with automatic function paths, a **Source** selector switches between **Zones** and **Functions (automatic)**; the latter shows one thread's indented call tree (calls, inclusive, self, % of the selection's wall elapsed, row statuses) for the whole capture or one interval, with the counters and statuses above it, the LOST row apart from the tree, and **Load ELF symbols...** for names.
+| Feature | Plain `libps3dkprof.a` | Extension builds | AUTO |
+|---|---|---|---|
+| Open file, Overview, Capture full frame, picker, Save | yes | yes | yes |
+| Timeline, Zones, Hot paths | need zones and a window | same | window; zones optional |
+| Frames | needs `PS3DK_PROF_FRAME` | same | from flips |
+| Live connect and triggers | `PS3_PROF_LIVE_AUTOSTART=ON`, or `netInitialize` + `ps3dk_prof_live_start` | same + `libps3dkprof_ext_live.a` (added by the option) | `PS3_PROF_LIVE_AUTOSTART=ON`; untested on AUTO |
+| SPU/RSX rows | no | needs SPU lane / GPU attach code | RSX automatic |
+| Functions view | no | `_func` variants | no |
+| Waits | no | `PS3_PROF_WAITS` | no (refused) |
+| FIFO page | no | FIFO selector | yes |
+| Automatic, Passes | no | no | yes (Passes needs tags or ranges) |
+| Rolling | no | no | `PS3_PROF_AUTO_ROLLING`, not live |
+| Capture RSX frame | no | no | `PS3_PROF_RSX_FRAME` + ring; live request (protocol 3) or app call |
 
-AUTO captures also add collapsible Timeline sections below the PPU threads:
-frame verdicts, mapped RSX busy intervals, recorded flip-wait scopes, and presentation aggregates. Busy
-intervals are the reader's union of retained draw/CALL intervals within each
-execution frame. They include RSX waits, so they are not shader execution time.
-Their solid cores lie inside the qualified clock map's endpoint bounds;
-whiskers show the outer bounds. Unqualified maps and invalidated timing have no
-busy bars, and intervals outside the map's support are not extrapolated.
-Captures with recorded flip-wait positions (1023/11) show their first two completed
-scopes per frame at the recorded PPU timestamps, independently of RSX clock-map
-qualification. These scopes include scheduling and polling. The annotation names
-how many scopes have positions when the count exceeds two; no bars are invented
-for later or frame-spanning scopes. Older formats keep aggregate-only flip-wait
-annotations with a positions-unavailable notice. Flip-status and label-poll cadence
-remain per-frame observations, with run/broken/spanning counts and the largest
-one-label total; their positions are not recorded. Durations use ms with three
-decimals and raw ticks on hover. The reader's `auto --json` exposes the recorded
-positions as `flip_wait_intervals` (`tb_begin`/`tb_end`) for 1023/11 captures only.
-The lanes share Timeline zoom and pan. A notice identifies any visible bars or
-aggregate rows beyond the paint limit; zooming narrows the displayed population.
+Work in progress to close these gaps: a default capture window (t_7adaacd4); per-capture timing choices
+(t_6dd7fb83); SPU, zone and function switches (t_2873fe00); until-marker windows (t_3ea33a77); finishing a capture
+from the PC (t_dd5b7ce1); startup settings (t_9d1f2c10); rolling captures in the viewer (t_149a6545, t_914a084f); and
+RSX frame capture requested from the PC app (t_1eec0d29). The [API reference](profiler-api.md#16-parallels-app-api-and-pc-app)
+lists each app call next to its PC app equivalent.
 
-### 3.4 Live sessions
+### 6.10 Troubleshooting
 
-While data is streaming, the app bar shows a `LIVE · PROVISIONAL` badge and the progress strip reports `PROVISIONAL: still receiving (<bytes> so far); <coverage>`; the verdict is provisional until the session ends. The live link is served by the profiler's own agent thread. The agent drops the viewer as stalled when it has output pending and a send makes no progress for longer than `send_timeout_us` (default 2 s); this is not a deadline from the moment the viewer stops reading, because buffers may keep accepting bytes, and a link with nothing to send is never stalled. A closed peer or a failed send is recorded when the agent detects it. The console's capture file is written independently of the link, subject to its own writer succeeding; after the live link is stopped the app can read the drop counters with `ps3dk_prof_live_get_stats`.
-
-When the link ends (the app's profiler shuts down, the link disconnects, or you press **Disconnect**), the outcome is classified as follows:
-
-- if the console sent `END` and every check passed, the capture is saved as a normal `.prof` with the verdict `COMPLETE`;
-- if the session ended without a trailer (for example **Disconnect**, a dropped link, or the app quit from the XMB so the console's `END` says no trailer was written) and what arrived is a valid prefix with at least one event chunk, the viewer saves that prefix as a normal `.prof` (a torn last chunk is cut) and shows `COMPLETE` with the note `ended without a trailer (app quit or the link ended)`. `ps3dk-prof check` reads the same file the same way;
-- otherwise, including a protocol, integrity or local-publication failure even after some valid data arrived, the session is a failure: the viewer keeps what it could as `<name>.incomplete.prof` with the reasons, or reports that nothing could be saved. A `.incomplete.prof` file is never promoted to a complete capture when it is reopened.
-
----
-
-## 4. Capture full frame (available now)
-
-The **Capture full frame** button on the app bar:
-
-1. Freezes the frame selected on the Frames page; if none is selected, the newest measured frame is used, preferring one whose SPU and RSX data has already arrived.
-2. The result is a **SNAPSHOT** of the data observed so far, not a complete frame; later data can add to it.
-3. The Snapshot page has one row per PPU thread, SPU lane and RSX domain:
-   - solid core — surely ran, under the capture's timing premise (for SPU and RSX zones the bounds are conditional on the clock-mapping premises, and extrapolated bounds are predictions, not guarantees);
-   - whiskers — timing uncertainty;
-   - solid claimed spans;
-   - faint outlined "possible" spans (unclaimed, may overlap);
-   - hatched extrapolated spans.
-4. A per-lane coverage list shows `OBSERVED`, `PARTIAL`, `NO DATA`, or `UNMAPPABLE` with reasons.
-5. **Re-resolve with W32/R64** makes a new snapshot under the other SPU premise; **Delete snapshot** drops it; **Back** returns to the Frames page.
-6. Bookmarks are written next to the saved capture as `<name>.frames.txt` (a live session: when the session's file is saved; an opened file: at once). Reopening a bookmark re-reads the whole saved file; a refused or changed file is reported, never used silently.
-7. Limits: 64 snapshots held at a time per session, and an accounted memory budget of 1 GiB shared by all sessions (an accounting limit, not a guarantee about the viewer's process memory).
-
----
-
-## 5. Capture windows
-
-### 5.1 Why windows
-
-The profiler records nothing heavy (zones, counters, waits, GPU zones, AUTO draw timing, CALL brackets and AUTO
-ranges) unless a capture window is open. Frame marks and clock anchors keep running outside windows, so frame numbers
-stay run-wide. An app with no trigger produces a capture with no windows and no heavy data.
-
-Apps built on this SDK need their own trigger. A sample built through the console run hook still runs its own trigger
-in its `main`.
-
-### 5.2 Opening and closing windows
-
-One window is open at a time: a BEGIN while a window is open, or about to open at the next frame boundary, returns
-`PS3DK_PROF_EBUSY` and is counted. Windows never share a frame, so a `PS3DK_PROF_SECTION` or
-`PS3DK_PROF_CAPTURE_WHOLE_RUN()` in the frame the previous window ended in is refused the same way. A window belongs to
-the thread that marks frames (`ps3dk_prof_frame`, or the flips AUTO observes), whichever thread begins it: a window
-begun before any frame mark (for example `PS3DK_PROF_CAPTURE_WHOLE_RUN()` right after init, on the initialization
-thread) is adopted by the first thread that marks a frame, and its frames are that thread's. END is accepted from the
-owning frame thread or from the thread that began the window, `PS3DK_PROF_EPERM` from any other. If the frame thread
-exits with a window open, the window keeps that thread's last frame until another thread marks one. Window records
-wait in a small queue for the drainer; when the drainer is so far behind that a new window's begin and end records
-would not fit, BEGIN returns `PS3DK_PROF_EFULL`, nothing opens, and `ps3dk_prof_capture_state` counts it in
-`queue_full`. A CALL segment built while no window was open is never taken as a build without draws: its draws are
-counted as untimed, so a CALL of it inside a window is timed as a whole CALL or reported with unrepresented draws. A CALL made after its window closed (a `PS3DK_PROF_SECTION` or `PS3DK_PROF_CAPTURE_WHOLE_RUN()` ended earlier in the frame) records nothing and counts its draws as unrepresented; calling that build again later is a replay and is never timed.
-At shutdown an open window
-is closed with reason SHUTDOWN, or SEAL when the capture ends through `PS3DK_PROF_AUTO_SEAL()` or
-`ps3dk_prof_capture_seal()`. The calls are inert when profiling is off; they are live in a `PS3DK_PROF` build and in a
-`PS3_PROF_AUTO` build.
-
-- `PS3DK_PROF_CAPTURE_BEGIN(name)` / `PS3DK_PROF_CAPTURE_END()` open a window at the next frame boundary and close it
-  after the current frame. `PS3DK_PROF_CAPTURE_END()` on a window that has not opened yet cancels it; without a window
-  it returns `PS3DK_PROF_EINVAL`.
-
-  ```c
-  PS3DK_PROF_CAPTURE_BEGIN("level-2");
-  /* ...the frames in between are recorded... */
-  PS3DK_PROF_CAPTURE_END();
-  ```
-
-- `PS3DK_PROF_CAPTURE_FRAMES(name, n)` opens a window at the next frame boundary that closes itself after n frames (end
-  reason COUNT); n = 0 is refused with `PS3DK_PROF_EINVAL`.
-
-  ```c
-  PS3DK_PROF_CAPTURE_FRAMES("level-2", 120);
-  ```
-
-- `PS3DK_PROF_SECTION(name)` is scoped (a C cleanup attribute, a C++ guard): it begins where it is declared and ends
-  where its enclosing block ends.
-
-  ```c
-  {
-      PS3DK_PROF_SECTION("boss-fight");
-      /* ...the work to record... */
-  }   /* the section ends here */
-  ```
-
-- `PS3DK_PROF_CAPTURE_WHOLE_RUN()` opens one window from the call to shutdown: the whole-run behaviour of earlier SDKs
-  in one line after init. The window is unnamed (listed as "whole run") and uses none of the app's descriptors.
-
-  ```c
-  PS3DK_PROF_CAPTURE_WHOLE_RUN();
-  ```
-
-- `ps3dk_prof_capture_state(&info)` (or `PS3DK_PROF_CAPTURE_STATE(&info)`) copies the window slot: state (none, opening
-  at the next boundary, open, closing after this frame), id, kind, name, first frame, frames so far, windows opened and
-  BEGINs refused.
-
-### 5.3 Reading windows
-
-One `.prof` per run holds every window. `ps3dk-prof windows <file>` lists them (id, name, source, kind, frames, end
-reason). `report`, `frames`, `auto` and `export` take `--window <id|name>` and by default report each window
-separately; `ps3dk-prof export --window <id|name>` writes one window as its own file. A window still open at the end of
-a capture is reported as open at end of capture.
-
-#### In the viewer
-
-The same window controls are available in the GUI. With a capture open, the app bar offers:
-
-- **Window picker.** A menu of the capture's windows (id and name). The default is **All frames**, which shows the
-  whole run. Choosing a window scopes the **Passes**, **Automatic**, **Frames** and **Timeline** pages to that window —
-  the reader's own window rule, the same one the command-line `--window` views use. Every page shown while a window is
-  selected keeps only that window's data: the Automatic page shows the report and the RSX busy bars for the window's
-  frames; the Frames page recomputes each owner's counts, sum and percentiles from the window's slots only, and keeps
-  only the work its frames claim; the Timeline limits its bars and frame markers to the window. Selecting **All frames**
-  restores the unscoped views. Choosing a window refits the Timeline; during a live session, new data keeps the selected
-  window, follow mode and zoom.
-
-- **Save window… / Save range….** Both write a standalone capture next to the open file, using the same exporter as
-  `ps3dk-prof export`, and never touch the source capture. **Save window…** writes the selected window as
-  `<name>.window_<id>.prof`; **Save range…** writes the chosen frame range as `<name>.<first>..<last>.prof` (its
-  dialog is prefilled with the selected window's frames, or the whole capture when no window is selected). Neither ever
-  replaces an existing file: the status line names the file a save wrote, or the existing file that made it refuse. To
-  save again under the same name, rename or remove the earlier file first.
-  For a live session, saves go into the folder chosen in Connect and use the received bytes that produced the
-  displayed document, even if its saved file was moved or changed. Only the reader-accepted prefix is exported;
-  a torn trailing chunk and bytes received after that snapshot are excluded. Saving also works after Disconnect
-  when the client accepted an early prefix. A session that failed validation refuses export with a reason.
-
-- **Overview.** The **WINDOWS** section lists each window — id, name, kind, frames, and its end reason, flagged when it
-  is still open or the reader marks it incomplete.
-
-### 5.4 Limits
-
-- SPU lane records and function paths are not gated by windows.
-- A `PS3DK_PROF_SECTION` that opens mid-frame records its draws but has no AUTO row or verdict for that frame.
+- **Live never connects.** The PC can open a TCP connection to the console's IP on `31750` (or the configured port);
+  the app called `ps3dk_prof_live_start` and it returned `OK` (log its result), or, with auto-start, the TTY shows
+  `ps3prof: live viewer: ...` and not `ps3prof: live auto-start off: ...`; the capture is on `/dev_hdd0/`, not a
+  callback sink, not rolling. The connect dialog says "The app must be running with the live agent enabled."
+- **The capture is empty** (no zones, Zones page "No zones recorded"). No capture window was open: add a window in
+  code or press Begin in a live session.
+- **Frames page "No FRAME records".** The app does not call `PS3DK_PROF_FRAME()` (non-AUTO builds).
+- **Triggers answer `ETIMEDOUT`.** No thread marks frames. **`EBUSY`**: the app keeps its own window open.
+- **Waits page "UNSUPPORTED"**, no Automatic or FIFO page: the capture comes from a build without that feature.
+- **SPU rows UNMAPPABLE.** Check whether the capture has SPU order records; for legacy captures use W32 only with
+  evidence of no decrementer wrap within each epoch.
 
 ---
 
-## 6. Capture RSX frame (PLANNED)
+## 7. The `ps3dk-prof` command line
 
-A **Capture RSX frame** button next to **Capture full frame** is planned: it will time the supported draw calls of one frame on an RSX domain (safe-form array, index and inline draws and surface clears, from PSL1GHT `rsx*` and cell-style GCM callers), each only when it can be timed safely.  Other calls (the `Unsafe` forms, immediate mode, calls that do not fit the current command-buffer segment or are refused) are counted, not timed, and leave the capture PARTIAL, as can a per-frame draw cap or lost data.  It is a supported-draw timing, not a full frame acquisition.  It is planned to be opted into at build time by linking a hooked `librsx_prof.a` (with the extension archive) instead of `librsx.a`; that archive is not shipped by the normal SDK build described here.
+Run `check` before interpreting a capture.
 
-**Status: partial implementation, follow-up feature.** The reader and RSX frames page can inspect supported capture markers already present in a file, and runtime support exists. The live request/button integration and draw-hook packaging are not an available end-to-end capture workflow in this SDK tree. Names, flags and libraries may change before release.
-
-### 6.1 Automatic RSX observation (`PS3_PROF_AUTO`, beta)
-
-AUTO data (coverage rows, frame marks, draw timing, CALL brackets and ranges) is recorded only inside a capture window (section 5): an AUTO build needs its own trigger, such as `PS3DK_PROF_CAPTURE_WHOLE_RUN();` at the start of `main`.
-
-A separate, opt-in build mode that needs no profiler code in the application: configure with the SDK's PPU CMake toolchain file and `-DPS3_PROF_AUTO=ON`. It needs an SDK prefix that also holds the separately built and sealed AUTO providers: a normal SDK install does not create them. Build them with `make -C sdk/libgcm_cmd install-auto` and then `make -C sdk/libps3dkprof install-auto-package`, against the same headers and toolchain as the rest of the prefix; `PS3_PROF_AUTO_ROOT` names a different prefix that holds them. That one option then selects the automatic providers for every executable in the project (`libgcm_cmd_prof_auto.a` and `libps3dkprof_auto.a`, replacing `gcm_cmd` and `ps3dkprof_ext` where the project links them and added where it does not, both ABIs; `libps3dkprof_ext_live.a` only when the application itself links `ps3dkprof_ext_live`, never added automatically), checks them against the sealed `prof-auto.json` in `ppu/lib` (or `ppu/lib/lp64`), writes a link map and a pre-link identity object (`cmake/ps3-prof-auto-identity.py`), and refuses the configure or link when anything does not match. The identity's build binding covers every file the linker opens for that link (objects, `-l` archives, the driver's startup files and default libraries, linker scripts), found by running the driver's final linker command once with `--verbose` before the real link, together with that final command. A linker response file anywhere in it, or a specs file that `%include`s another, is refused. It does not cover the linker's internal default script, toolchain contents beyond the files the linker opens, or files an LTO plugin reads itself. After the link, `<map>.identity.json` records the ELF's sha256 next to the binding (`packaged=false`); the signed SELF is not bound automatically. It needs CMake 3.21 or newer with Ninja or Makefiles, and it cannot be combined with `PS3_PROF_WAITS`.
-
-Selection either substitutes or refuses; it does not promise to substitute every library target. The substitution covers each library target the configure-time walk can see, not only the executable's own `target_link_libraries`: every such target it links, recursively through `LINK_LIBRARIES` and `INTERFACE_LINK_LIBRARIES` (ALIAS targets resolved, a static library's private `$<LINK_ONLY:...>` dependencies included), gets `gcm_cmd` replaced by `libgcm_cmd_prof_auto.a` and `ps3dkprof_ext` by `libps3dkprof_auto.a`. So an engine static library that links `gcm_cmd` needs no change. A GCM or profiler library named inside any other generator expression (for example `$<$<CONFIG:Debug>:gcm_cmd>`) cannot be resolved at configure time: the configure stops with a message naming the target that pulls it in, instead of the link map check later refusing a default or mixed provider. Name the library plainly in that target. A non-GLOBAL imported target declared in a subdirectory, or a namespaced ALIAS of one, is not visible to the walk and is refused at configure (declare it `IMPORTED GLOBAL`). Anything else that still brings a default or foreign GCM or profiler archive into the link, such as a plain-name ALIAS of such a target, is refused by the link map check, even when no member of that archive is used.
-
-At run time the profiler starts itself, attaches at the application's `cellGcmInit` and writes `/dev_hdd0/tmp/<executable>-<timebase>.prof`. Frames come from the application's flips (`cellGcmSetFlip` / `cellGcmSetPrepareFlip` on the attached context); an explicit `ps3dk_prof_frame` takes precedence. Covered draws and clears (array, index, clear; including draws inside CALL segments, whether built through `cellGcmSegmentBegin`'s context or, after `cellGcmSegmentBeginExternal`, through the application's own context while its cursor lies in the claimed buffer) get reached-marker timestamps, each frame gets RSX begin/end marks, and the capture carries its own RSX clock anchors. Each covered draw in a segment takes `PS3DK_PROF_AUTO_SEGMENT_DRAW_WORDS` (4) more words inside the segment; the profiler checks that room against the context's end and never calls the context's callback, so a draw without it is left untimed and counted as excluded. The profiler tracks the first 32 distinct segments of a capture (draws in later ones are counted, untimed). Segment draws share the report-pair pool with the ring's draws: each timed draw holds a pair until its segment is called and completes, and the default pool has 504 pairs. Once the pairs (or the metadata records) run out in a frame, including when a segment's CALL or rebuild cannot record a build for lack of metadata, no later covered draw of that frame is timed: later visits are counted under that capacity column unless a check that runs earlier rejects them first (shutdown and observer-disabled on every path; reentry and epoch-invalid on the ring). A frame starts admitting again. Draws before that point can also be untimed for other counted reasons (room, for example), and the coverage row gives counts per reason, not the position of each untimed draw. Segments an SPU writes are not observed. It uses local reports 1024..2047 and labels 246 and 247, which `docs/gcm-labels.md` reserves for the profiler; applications keep labels 64, 69..239 and 248..254 and reports 512..1023.
-
-#### Unlimited per-draw timing (opt-in)
-
-By default the timed draws of a frame are bounded by the local report pool (504 pairs, less the whole-CALL and range reserves). The report ring removes that bound for draws and clears written into the application's own command buffer: their reports are copied in blocks of 126 pairs to MAIN memory and recycled, so every such draw of every frame can be timed. It costs memory, so it is off by default; with it off nothing is allocated and the capture is the same as before. Turn it on at configure time, with no source change:
-
+```sh
+ps3dk-prof check capture.prof                       # verdict
+ps3dk-prof report [--window <id|name>] capture.prof  # verdict and full report
+ps3dk-prof windows capture.prof                     # capture windows: id, name, source, kind, frames, end reason
+ps3dk-prof frames [--window <id|name>] capture.prof # frame elapsed intervals
+ps3dk-prof paths capture.prof                       # PPU hot paths
+ps3dk-prof paths --functions [--elf app] [--thread NAME] [--interval N | --all] [--top K] [--json] capture.prof
+ps3dk-prof counters [--json] capture.prof           # named per-frame counters
+ps3dk-prof waits [--json] capture.prof              # wait observations
+ps3dk-prof fifo [--json] capture.prof               # FIFO wrap phases
+ps3dk-prof auto [--window <id|name>] [--json] capture.prof   # AUTO coverage, clock map, per-frame verdicts
+ps3dk-prof auto --ops [--frame N] [--json] capture.prof      # every AUTO operation record
+ps3dk-prof auto --by-tag [--json] capture.prof      # per frame and tag; range time per name
+ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--json] capture.prof
+ps3dk-prof shader-hash [--json] file.vpo file.fpo   # canonical program hashes, as captures name programs
+ps3dk-prof export --window W | --frame N | --frames A..B in.prof out.prof   # standalone sub-capture
+ps3dk-prof rolling [--json] [--max-bytes N] [--max-analysis-bytes N] [--max-analysis-work N] capture.profr
+ps3dk-prof clockmap [--premise spu-nowrap] capture.prof
+ps3dk-prof measured [--xrsx-submit NAME --xrsx-wait NAME] capture.prof
+ps3dk-prof spu-ticks [--pairs] [--observations] [--spu-isolation-scale] [--premise spu-nowrap] [--capture-ops N] capture.prof
+ps3dk-prof check-arcs file.arcs | arcs-json file.arcs | check-pair file.arcs file.prof
 ```
-cmake ... -DPS3_PROF_AUTO=ON -DPS3_PROF_AUTO_RING=ON [-DPS3_PROF_AUTO_RING_MB=16] [-DPS3_PROF_AUTO_RING_RECORDS=16384]
-```
 
-Turn it ON when you need every owner-buffer draw timed:
+Exit status: `0` COMPLETE (also a file without a trailer; its output then has the line `ending: NO-TRAILER`), `1`
+INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean (only files
+with SPU/RSX extensions). `auto`, `fifo` exit `1` when the evidence is absent or refused.
 
-- busy frames whose draws exceed the per-frame cap of about 504 pairs, so later draws of the frame come out untimed ("report capacity");
-- the RSX cost of each draw or of each pass, not only frame-level marks;
-- totals per tag (`PS3DK_PROF_AUTO_TAG`) without untimed draws missing from them.
-
-Leave it OFF (the default) when:
-
-- the build is memory-tight: the ring takes about 16 MiB of MAIN extents plus metadata at the defaults (20 MiB of pages in all), and it changes the memory numbers you may be measuring;
-- frame-level verdicts, frame marks and ranges are enough;
-- the draws come mostly from CALL segments, which keep using the shared local pool with or without the ring.
-
-`PS3_PROF_AUTO_RING_MB` is the MAIN extent size in whole MiB (1..256, default 16) and `PS3_PROF_AUTO_RING_RECORDS` the number of operation records (1..65536, default 16384). The ring allocates once per process, in whole 1 MiB pages, the extents plus its metadata and descriptors: 20 MiB at the defaults (3 MiB with `PS3_PROF_AUTO_RING_MB=2` and 4096 records). A size outside these ranges stops the configure.
-
-Sizing: one 4096-byte extent holds one block of 126 draws, so each MiB holds 256 blocks (32,256 draws). Extents are freed once the drainer has written their draws. Records are held from a draw until it is written, too. Size both for the draws outstanding across the RSX's and the drainer's lag (about three frames): records at least three frames' owner-buffer draws, and extents at least that many draws divided by 126. The defaults cover about 5,000 such draws per frame. A ring that is too small does not fail the run. When no extent is free, the draw is untimed and counted under `ring_full`. When no record is free, it is counted under "metadata capacity". Both counts are per frame in the coverage row, and admission resumes as soon as the drainer frees space. Extents still held when the capture is sealed (draws not yet written) leave those records incomplete, and the capture then reads `FINAL (lower bounds)`. If you see `ring_full`, metadata-capacity counts or a lower-bound FINAL, raise `PS3_PROF_AUTO_RING_MB` or `PS3_PROF_AUTO_RING_RECORDS`. Each executable gets a small generated source (`<target>-auto-ring.c`, or `.cpp` in a C++-only project) holding these values, and its link requires that definition, so it cannot be dropped silently. Options set with `PS3DK_PROF_AUTO_OPTIONS_SET` before `cellGcmInit` still win (zero ring fields there mean no ring). Draws inside CALL segments, frame marks, whole-CALL brackets and ranges keep using the local pool. When the ring has no free extent, a draw is left untimed and counted under `ring_full`. A ring that cannot be used (unknown M2MF state, a context reset) leaves later draws untimed and counted under `ring_state`. Both are listed in the coverage row. Design: the report ring section of `docs/design/ps3dk-prof-auto-rsx.md`.
-
-To attribute RSX time to passes and programs (tags, the fragment-program offset, exact named ranges and timed-ranges-only timing), see [profiler-auto-tags.md](profiler-auto-tags.md).
-
-Read the capture with `ps3dk-prof auto [--json] capture.prof`: coverage per frame, reached-marker intervals (they include queued work; they are not isolated draw cost), the capture's own clock map and a per-frame verdict. A frame is PACING when the RSX is not limiting and the frame spent at least a quarter of its interval inside `cellGcmWaitFlipComplete` (flip-wait scope elapsed time, including scheduling and polling); a hand-written `cellGcmGetFlipStatus` loop is recorded only as polling cadence and reads UNKNOWN ("presentation polling observed; waiting not established"). A frame is UNKNOWN, with the missing input named, when the evidence is not there. A frame where the RSX is not limiting and no presentation wait was seen reads UNKNOWN ("PPU work vs presentation pacing not distinguished"): PPU-bound is never reported without busy evidence, which this mode does not collect yet. The final frame is closed at shutdown without an end mark and reads UNKNOWN. Frames that call CALL segments get verdicts too. A segment's draws are counted in the frame that built them and recorded under the frame that called them, and each record names the frame that built it, so the reader checks both sides: a frame's own coverage must match what it built (wherever those draws were called), and every segment draw it executed must come from a frame whose coverage is clean and matches its records. Its timing uses the draws it executed. A frame stays UNKNOWN, with the reason named, when a draw built in it was dropped without a call, when it executed segment draws that have no record (a CALL of a segment the profiler does not track, a second CALL of a build, a refused CALL, or draws the build could not time), or when a segment it called was built in a frame with excluded or missing draws. Calling a segment a second time without rebuilding it replays its timestamp writes, which can overwrite other draws' timestamps, so a capture where that happens reads UNKNOWN for every frame; build each segment again before each CALL (double-buffered parts do). Captures written by an older profiler keep the old rule: a frame that calls a segment reads UNKNOWN. Timings (reached-marker intervals, RSX frame marks) are reported either way.
-
-To see which draws take a frame's time, list the operation records with `ps3dk-prof auto --ops [--frame N] [--json] capture.prof`: one line per covered draw, clear or frame mark in emission order, with its kind, flags, draw arguments (words, start, count, offset, index type, mode, clear mask), segment and call ordinals, caller, the reached-marker interval and the gap since the latest end marker of an earlier record (draw, clear or frame mark) of the same frame in execution order. Values are raw RSX timestamp ticks (nanoseconds on the console; no clock map is applied), and with `--frame` the per-kind sums follow. It is a listing, not a verdict: an interval includes RSX-side waits between its two markers.
-
-Status: beta. The runtime, the reader and CLI, the identity binding, provider selection and the packaging have been reviewed on source and host tests; this section's wording is under review. ILP32 has run on hardware; LP64 archives are built and sealed but have not been run on hardware. Design and wire format: `docs/design/ps3dk-prof-auto-rsx.md`.
+For `paths --functions --elf`, pass the unstripped linked ELF (in CMake, the link target's own output with no `.elf`
+suffix), not the stripped `.elf` placed beside the SELF. A build-id mismatch prints a WARNING.
 
 ---
 
-## 7. Troubleshooting
+## 8. Reference
 
-### Verdict words
+### 8.1 File formats
+
+- **`.prof` (format v1).** A 16-byte file header, then checksummed chunks: HEADER, CLOCKS, optional PROFILE, event
+  chunks, extension chunks selected by file flags, and a TRAILER. One file holds every capture window of a run.
+  [ps3dk-prof-format.md](design/ps3dk-prof-format.md), allocations in
+  [ps3dk-prof-format-allocations.md](design/ps3dk-prof-format-allocations.md).
+- **`.profr` (rolling).** A fixed-size store of retained segments and checkpoints written by AUTO rolling output.
+  [ps3dk-prof-rolling-runtime.md](design/ps3dk-prof-rolling-runtime.md),
+  [ps3dk-prof-rolling-store.md](design/ps3dk-prof-rolling-store.md).
+- **Live protocol (v1, v2 with capture triggers, v3 with the RSX frame request).** [ps3dk-prof-viewer.md](design/ps3dk-prof-viewer.md); schema in
+  `sdk/libps3dkprof/src/live/live_proto.h`.
+- **AUTO records.** [ps3dk-prof-auto-rsx.md](design/ps3dk-prof-auto-rsx.md),
+  [ps3dk-prof-auto-lifecycle.md](design/ps3dk-prof-auto-lifecycle.md).
+- **Function paths, waits, FIFO.** [ps3dk-prof-func-paths.md](design/ps3dk-prof-func-paths.md),
+  [ps3dk-prof-waits.md](design/ps3dk-prof-waits.md), [ps3dk-prof-fifo.md](design/ps3dk-prof-fifo.md).
+- **Arc companion (`.arcs`).** [ps3dk-prof-arcs.md](design/ps3dk-prof-arcs.md).
+- **Bookmarks (`<name>.frames.txt`).** Written by the PC app beside a saved capture; reopening one re-reads the whole
+  capture and reports a changed or refused file.
+- **RSX frame captures (file_flags bit 10, chunks 44..48).** Format section 12 of
+  [ps3dk-prof-format.md](design/ps3dk-prof-format.md).
+
+### 8.2 Verdicts
 
 | Verdict | Meaning |
 |---|---|
-| `COMPLETE` | The reader found the file structurally complete (header to trailer, every chunk valid).  Whether the run itself finalized cleanly, including the file's close, is not in the bytes: it is the result of `ps3dk_prof_shutdown` on the console (and, for a live session, the agent's END status). |
-| `COMPLETE (ended without a trailer ...)` | Valid chunks, no trailer, at least one event chunk: the app quit, the link ended or the copy was cut short.  Reported by `ps3dk-prof` and the viewer alike (exit `0`, extra line `ending: NO-TRAILER`).  Analysis stops at the last whole chunk; a torn last chunk is dropped and its byte count is named in the note. Loss not yet reported at the cut cannot be seen. File acceptance does not establish source validity, clock-mapping qualification or complete-frame evidence. Each source keeps its own loss, open-span, final-record and mapping reasons. SPU order evidence without `ORDER_FINAL` uses the supported PROVISIONAL causal-placement path, without final tick counts or final coverage credit; trailer absence alone does not establish whether `ORDER_FINAL` is present. |
-| `INCOMPLETE` | The trailer says the run did not finish cleanly (`NOT_QUIESCED`, `SEQ_LIMIT`, a sink error), or the file has no event chunk at all (a header with nothing captured).  A file with no trailer and no event chunk reads `INCOMPLETE: no events recorded (ended before the first drain)` (exit `1`): the process ended (`_exit`, a crash) before the first drain wrote an event chunk; the file holds its header and clocks when the init thread's write of them succeeded.  A live session that failed a check (a protocol, integrity or local-copy failure) keeps its copy as `<name>.incomplete.prof`; a missing trailer alone never does. |
-| `MALFORMED` | The capture broke a rule: a bad checksum, an out-of-range length, bad structure or inconsistent counts inside the bytes that are there.  Only the missing ending is forgiven; corruption in the prefix is not. |
+| `COMPLETE` | Structurally complete, header to trailer. Whether the run finalized cleanly is the result of `ps3dk_prof_shutdown` on the console. |
+| `COMPLETE (ended without a trailer)` | Valid chunks and at least one event chunk, no trailer (app quit, link ended, copy cut short). Exit `0`, line `ending: NO-TRAILER`. A torn last chunk is dropped. |
+| `INCOMPLETE` | The trailer reports an unclean run (`NOT_QUIESCED`, `SEQ_LIMIT`, sink errors), or there is no event chunk ("no events recorded (ended before the first drain)"). |
+| `MALFORMED` | A bad checksum, length, structure or count in the bytes present. |
 
-### A capture that quit from the XMB
+### 8.3 Result codes (`<ps3dk/prof.h>`)
 
-An abrupt exit may leave a file without a trailer. The init thread writes the file sink's file header, `HEADER` and `CLOCKS` before init returns, so the file holds them whenever that write succeeded (a failed write does not fail init; the next drain or shutdown reports it). If the retained bytes satisfy the accepted-prefix checks and contain at least one event chunk, `ps3dk-prof check` reports `COMPLETE` with the no-trailer ending note and exits `0`; the viewer applies the same file policy. With no event chunk it reports `INCOMPLETE: no events recorded (ended before the first drain)` and exits `1`. `quick_exit` makes one best-effort last drain of a file sink (no trailer): it writes the PPU zone and frame records published before it, not extension data (counters, SPU, GPU, FIFO, AUTO, waits, function paths), and never calls a callback sink. It gives up, leaving the file as it is, when a lock it needs is held past its bound (lock waits are bounded; file writes are not) or when a drain or shutdown is already under way. Missing ending bytes alone cannot identify why recording stopped or prove clean shutdown. Extension-source reasons are reported independently: a missing trailer does not imply a missing `DOMAIN_FINAL`. A source with its final record may report only the trailer reason; a source missing both reports both. These facts do not prove that all work in an earlier frame has been recorded. Protocol, integrity and publication failures remain failures, and reopening a kept `.incomplete.prof` does not promote it.
+| Code | Value | Meaning |
+|---|---|---|
+| `PS3DK_PROF_OK` | 0 | |
+| `EPERM` | -1 | not the drain (init) thread in APP mode; not the window's thread |
+| `EBUSY` | -2 | inside a drain, a drain running, init or a setter running; a window open |
+| `EALREADY` | -3 | init, shutdown, thread begin or live start already done |
+| `EEXIST` | -4 | the capture file exists |
+| `EINVAL` | -5 | a configuration or argument out of range |
+| `ENOMEM` | -6 | |
+| `ENOTQUIESCED` | -7 | shutdown: recording threads did not quiesce |
+| `ESEQLIMIT` | -8 | a sequence or counter ceiling was reached |
+| `ESINKRECOVERED` | -9 | sink errors were recovered |
+| `ESINKFAIL` | -10 | the sink failed; no trailer |
+| `ECLOSE` | -11 | close failed after the trailer: the run fails |
+| `ETHREAD` | -12 | thread identity, creation or join failed |
+| `ECLOCK` | -13 | timebase or monotonic clock unavailable |
+| `ENOTINIT` | -14 | not initialized |
+| `ESTOPPED` | -15 | shutdown has begun |
+| `EFULL` | -16 | no thread slot; window queue or name table full |
+| `ENOTSUP` | -17 | callback sink, unmeasured device, rolling with live, off build |
+| `ENET` | -18 | live listener could not be created |
+| `ETIMEDOUT` | -19 | live stop not finished; call again |
+| `ERETENTION` | -32 | capture closed; retention bookkeeping failed |
+| `ERESOURCE` | -33 | rolling stopped at a configured bound |
 
-### A live view that never connects
+The SPU lane writer uses -20..-23 (`EAGAIN`, `EFAULT`, `EEXHAUSTED`, `EDEPTH`; `prof_spu_lane.h`).
 
-- Both sides on the same subnet, and the PC can open a raw TCP connection to the PS3's IP on `31750` (or the port the agent was started with).
-- The capture must be on `/dev_hdd0/`.
-- The sample's screen shows the address to connect to, or why the live view is off.
+### 8.4 Known limits
 
-### SPU rows UNMAPPABLE
-
-First check whether the capture contains SPU order records. For those captures, inspect the tick analysis, causal bounds, RMAX1 qualification and any order, identity or budget refusal. For legacy captures without order records, enable W32 only with evidence of no wrap within each epoch, such as the matching complete sample receipt with `w32_eligible=1` and successful lifecycle checks. W32 cannot repair missing observations or loss, and these two analysis paths must not be treated as interchangeable.
+- Non-DEX consoles need the profiler linked; DEX support without linking is planned.
+- The live link needs app code, a FILE sink on `/dev_hdd0/`, and no rolling output; one viewer at a time.
+- Rolling output is AUTO-only and refuses active SPU lanes.
+- AUTO cannot be combined with waits, FIFO selection or another profiler archive; LP64 AUTO is not run on hardware.
+- RSX frame capture (beta): one capture at a time; no buffer contents yet; FP constants are never exact: each component
+  shows the last inline write the decoder saw to it in the command stream (cell gcm `cellGcmSetFragmentProgramParameter`
+  writes them so), else the container's value marked "may differ at GPU time" (a value the CPU wrote into the program's
+  memory is not seen), and UNKNOWN after a decoder reset, a full inline-write map, an M2MF copy over it or another
+  program bound at its address; uniform names come from
+  cell gcm program containers (the PSL1GHT `rsx*` program objects are not read yet), at most 32 per program and 16
+  programs remembered; register state is
+  what the owner's command buffer wrote: a CALL into another buffer resets the decoder (registers unknown until
+  written again) and writes from other contexts are not seen; the baseline needs room in the staging blocks (16 KiB
+  at most); draws inside
+  CALL segments are timed by AUTO but not listed; an immediate draw whose vertex data wraps or flushes the command
+  buffer is listed with its timing incomplete; a fragment program bound without a program container is recorded by
+  address only. A program is hashed when it is bound: every bind while a capture is armed hashes all its
+  instruction bytes. A program bound before the capture keeps the identity of that bind and is shown as "bound before
+  capture, not revalidated" (an in-place rewrite since then would not be seen); one whose sampled bytes (first, middle
+  and last 16) changed between two binds outside a capture has no identity. A draw whose AUTO operation is of
+  another kind or frame, or whose hooked call and decoded words disagree, is listed as a timing mismatch and left out
+  of every total. Times are reached-marker
+  intervals (they include queued work and overlap neighbours).
+- `quick_exit` makes one best-effort drain of PPU zones and frames only (no trailer, no extension data).
+- SPU durations are decrementer ticks, not wall time; SPU zones in SPURS jobs are untested.

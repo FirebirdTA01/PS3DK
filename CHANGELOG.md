@@ -54,7 +54,33 @@ The version stamped into builds is generated from the most recent
   temporary breakpoints and disables the current breakpoint before continuing.
   Windows GDB packaging and the released Linux GDB dependency fix remain pending.
 
+- **Profiler live viewer auto-start (opt-in).** With `PS3_PROF_LIVE_AUTOSTART=ON`
+  (CMake) or `PS3DK_PROF_LIVE_AUTOSTART=1` plus `-lnet -lsysmodule_stub`, any
+  profiler build starts the live agent after init, with no application code.
+  This covers plain, extension, wait, function, counter, the classic automatic
+  lifecycle, and `PS3_PROF_AUTO` builds. The runtime brings up the network it
+  needs, stops the agent after the capture is finalized (a connected viewer
+  gets `END`), and releases only its own network hold. Off by default; see
+  "Live viewer auto-start" in [docs/profiler-guide.md](docs/profiler-guide.md)
+  for when to turn it on, its cost, and the optional `PS3_PROF_LIVE_PORT` and
+  `PS3_PROF_LIVE_NET_POOL_KB` settings.
+
 ### Changed
+
+- **libnet coordinates with the profiler's live auto-start.** Nothing
+  changes unless a program links the opt-in auto-start: `netInitialize`,
+  `netDeinitialize`, `sys_net_initialize_network_ex` and
+  `sys_net_finalize_network` make the same system calls with the same results
+  as before, in any mix. While the auto-started agent holds the network, the
+  network stays its creator's. When the app brought it up, the profiler joins
+  it, and the app's teardown first stops the agent (a viewer sees a
+  disconnect) and then reaches the system unchanged. When the profiler
+  brought it up, `netInitialize` joins it and the matching `netDeinitialize`
+  leaves it up. A `sys_net_initialize_network_ex` with the app's own pool
+  makes the profiler step aside: its network is finalized, the NET module
+  stays loaded, one TTY line is printed, and the app's call goes through
+  unchanged. `sys_net_finalize_network` is now a libnet function over the
+  same system call.
 
 - **Pinned Ubuntu release for builds.** CI and release builds run on the
   `ubuntu-26.04` runner label instead of the moving `ubuntu-latest`, so a move

@@ -15,6 +15,40 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[test]
+fn successful_windows_remain_savable_after_end_and_disconnect() {
+    let mut t=Triggers::default();t.availability=Availability::Ready;
+    let r=t.start(Command::Begin{name:"first".into()}).unwrap();
+    t.on_ack(Ack{request:r,result:0,window_id:7,command:T_CAPTURE_BEGIN});
+    let r=t.start(Command::End).unwrap();
+    t.on_ack(Ack{request:r,result:0,window_id:7,command:T_CAPTURE_END});
+    assert_eq!(t.windows.len(),1);
+    assert_eq!((t.windows[0].id,t.windows[0].name.as_str()),(7,"first"));
+    assert!(t.windows[0].end_acknowledged);
+    let r=t.start(Command::Frames{name:"next".into(),frames:3}).unwrap();
+    t.on_ack(Ack{request:r,result:0,window_id:8,command:T_CAPTURE_FRAMES});
+    assert!(!t.windows[1].end_acknowledged,"ACK is not a WINDOW_END record");
+    t.on_link(&LinkState::Failed(LinkError::Closed),None);
+    assert_eq!(t.windows.len(),2);
+    assert!(t.blocked().is_some());
+    assert!(Triggers::default().windows.is_empty(),"new session never inherits ids");
+}
+
+#[test]
+fn refused_commands_do_not_create_save_entries_and_history_is_bounded() {
+    let mut t=Triggers::default();t.availability=Availability::Ready;
+    let r=t.start(Command::Begin{name:"refused".into()}).unwrap();
+    t.on_ack(Ack{request:r,result:-1,window_id:0,command:T_CAPTURE_BEGIN});
+    assert!(t.windows.is_empty());
+    for id in 1..=70 {
+        let r=t.start(Command::Frames{name:format!("window{id}"),frames:1}).unwrap();
+        t.on_ack(Ack{request:r,result:0,window_id:id,command:T_CAPTURE_FRAMES});
+    }
+    assert_eq!(t.windows.len(),64);
+    assert_eq!(t.windows.first().unwrap().id,7);
+    assert_eq!(t.windows.last().unwrap().id,70);
+}
+
 fn wire(t: u16, payload: &[u8]) -> Vec<u8> {
     let mut f = t.to_le_bytes().to_vec();
     f.extend_from_slice(&0u16.to_le_bytes());
@@ -344,6 +378,11 @@ fn a_v1_agent_is_detected_and_never_sent_a_command() {
     let stream = data_and_end(&cap);
     let (port, seen) = agent(vec![
         Box::new(|mut s: TcpStream, seen: Seen| {
+            let (t,p)=read_frame(&mut s).unwrap();
+            assert_eq!((t,&p[4..6]),(T_CLIENT_HELLO,&3u16.to_le_bytes()[..]));
+            seen.lock().unwrap().push((t,p));
+        }),
+        Box::new(|mut s: TcpStream, seen: Seen| {
             let (t, p) = read_frame(&mut s).unwrap();
             assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &2u16.to_le_bytes()[..]));
             seen.lock().unwrap().push((t, p));
@@ -383,8 +422,8 @@ fn a_v1_agent_is_detected_and_never_sent_a_command() {
     let v = client.join();
     assert!(matches!(v.outcome, Some(Outcome::Published(_))), "{:?}", v.outcome);
     let types: Vec<u16> = seen.lock().unwrap().iter().map(|f| f.0).collect();
-    assert_eq!(types[..2], [T_CLIENT_HELLO, T_CLIENT_HELLO]);
-    assert!(types[2..].iter().all(|t| *t == T_PING), "only PINGs on the v1 session: {types:?}");
+    assert_eq!(types[..3], [T_CLIENT_HELLO, T_CLIENT_HELLO, T_CLIENT_HELLO]);
+    assert!(types[3..].iter().all(|t| *t == T_PING), "only PINGs on the v1 session: {types:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -396,7 +435,7 @@ fn a_v2_agent_gets_one_command_at_a_time_and_its_answers_are_shown() {
     let stream = data_and_end(&cap);
     let (port, seen) = agent(vec![Box::new(move |mut s: TcpStream, seen: Seen| {
         let (t, p) = read_frame(&mut s).unwrap();
-        assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &2u16.to_le_bytes()[..]));
+        assert_eq!((t, &p[4..6]), (T_CLIENT_HELLO, &VERSION.to_le_bytes()[..]));
         seen.lock().unwrap().push((t, p));
         s.write_all(&hello(2, CAP_TRIGGERS)).unwrap();
         let mut answered = 0;

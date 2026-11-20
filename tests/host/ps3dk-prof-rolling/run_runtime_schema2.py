@@ -116,7 +116,8 @@ int32_t gcmAddressToOffset(void *,u32 *);
         'fifo/fifo_runtime.c', 'fifo/fifo_writer.c',
         'auto_rsx/auto_runtime.c', 'auto_rsx/auto_config.c', 'auto_rsx/auto_wire.c', 'auto_rsx/auto_writer.c',
         'auto_rsx/auto_queue.c', 'auto_rsx/auto_commands.c', 'auto_rsx/auto_completion.c', 'auto_rsx/auto_frames.c',
-        'auto_rsx/auto_clock.c', 'auto_rsx/auto_ring.c', 'auto_rsx/auto_ring_commands.c', 'auto_rsx/auto_ring_layout.c')]
+        'auto_rsx/auto_clock.c', 'auto_rsx/auto_ring.c', 'auto_rsx/auto_ring_commands.c', 'auto_rsx/auto_ring_layout.c',
+        'rsx_frame/rsxf_runtime.c', 'rsx_frame/rsxf_wire.c', 'rsx_frame/rsxf_decode.c')]
     sources += [HERE / 'runtime_schema2_test.c']
     if a.public_options:
         flags += ['-DTEST_PUBLIC_OPTIONS','-DPS3DK_PROF_ROLLING_PUBLIC']

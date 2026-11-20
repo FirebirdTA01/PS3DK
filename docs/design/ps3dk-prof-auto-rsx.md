@@ -133,8 +133,11 @@ its build frame. Unknown build flags and a nonzero reserved field are refused.
 
 Kinds are ARRAY=1, INDEX=2, CLEAR=3 and, with kind mask bit 8, FRAME=4. Flags
 are TOKEN=1, RAW_VALID=2, INCOMPLETE=4, CLOCK_INVALID=8, READ_REFUSED=16,
-PUBLICATION_UNKNOWN=32 and, when CONFIG covers CALL, SEGMENT=64. Unknown bits
-are refused.
+PUBLICATION_UNKNOWN=32 and, when CONFIG covers CALL, SEGMENT=64; ringed CONFIGs
+add RING=128 and ISOLATED=256 (the RSX frame capture's ISOLATED timing wrote a
+WAIT_FOR_IDLE before each of the draw's markers: the reader labels such a frame
+ISOLATED and keeps it out of the tag and range summaries). Unknown bits are
+refused.
 
 A FRAME record (D2) marks one frame boundary on the RSX: role 1 (args[0]) is
 emitted in the ring when the owner opens the frame, role 2 when it closes it

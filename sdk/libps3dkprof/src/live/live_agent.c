@@ -126,7 +126,8 @@ static void queue_hello(live_agent *a, live_conn *c)
     uint32_t n;
     live_put16(p, c->version); /* the version the viewer asked for */
     live_put16(p + 2, LIVE_AGENT_VERSION);
-    live_put32(p + 4, c->version >= 2 && a->cmd ? LIVE_CAP_TRIGGERS : 0u); /* v1: the reserved 0 */
+    live_put32(p + 4, (c->version >= 2 && a->cmd ? LIVE_CAP_TRIGGERS : 0u) |
+                      (c->version >= 3 && a->rsxf && a->rsxf->available() ? LIVE_CAP_RSX_FRAME : 0u)); /* v1: 0 */
     live_put64(p + 8, a->session_id);
     n = 16;
     live_put16(p + n, a->app_len);
@@ -202,6 +203,8 @@ static int stream_len_ok(const live_conn *c, uint32_t type, uint32_t len)
         return len == 4u;
     case LIVE_T_CAPTURE_FRAMES:
         return len >= 12u + 1u && len <= 12u + LIVE_MAX_WINDOW_NAME;
+    case LIVE_T_RSX_FRAME_REQ:
+        return c->version >= 3 && len >= 12u && len <= 12u + LIVE_MAX_WINDOW_NAME;
     default:
         return 0;
     }
@@ -218,6 +221,56 @@ static void stage_ack(live_conn *c, int32_t result, uint32_t window_id)
     c->cmd_queued = 0;
 }
 
+/* RSX_FRAME_REQ (v3): answered at once; the accepted capture's progress follows as STATE. */
+static int on_rsx_frame(live_agent *a, live_conn *c)
+{
+    const uint8_t *p = c->in + LIVE_HDR_BYTES;
+    uint32_t len = live_get32(c->in + 4), req = live_get32(p), flags = live_get16(p + 4);
+    uint32_t frames = live_get16(p + 6), name_len = live_get16(p + 8), id = 0;
+    int rc;
+    if (req == 0 || frames != 1 || live_get16(p + 10) != 0 || len != 12u + name_len || c->rsxf_ack_ready)
+        return -1;
+    if (c->end_queued)
+        return 0;
+    /* one followed capture per link: a request before the previous capture's final STATE is sent would lose it */
+    rc = c->rsxf_id ? PS3DK_PROF_EBUSY
+         : a->rsxf && a->rsxf->available() ? a->rsxf->request(req, flags, (const char *)p + 12, name_len, &id)
+                                           : PS3DK_PROF_ENOTSUP;
+    live_put32(c->rsxf_ack, req);
+    live_put32(c->rsxf_ack + 4, (uint32_t)rc);
+    live_put32(c->rsxf_ack + 8, rc == 0 ? id : 0u);
+    live_put32(c->rsxf_ack + 12, 0);
+    c->rsxf_ack_ready = 1;
+    if (rc == 0) {
+        c->rsxf_id = id;
+        c->rsxf_sent_state = 0;
+    }
+    return 0;
+}
+
+/* The followed capture's state, when it changed since the last STATE: 1 with the frame staged in out. */
+static int rsxf_state_frame(live_agent *a, live_conn *c, uint8_t out[LIVE_RSXF_STATE_BYTES])
+{
+    live_rsxf_status s;
+    if (!c->rsxf_id || !a->rsxf || c->end_queued)
+        return 0;
+    a->rsxf->status(&s);
+    if (s.id != c->rsxf_id || s.state < 1 || s.state > 4 || s.state == c->rsxf_sent_state)
+        return 0;
+    memset(out, 0, LIVE_RSXF_STATE_BYTES);
+    live_put32(out, s.id);
+    out[4] = (uint8_t)s.state;
+    out[5] = (uint8_t)s.reason;
+    live_put32(out + 8, s.draws);
+    live_put32(out + 12, s.request);
+    live_put64(out + 16, s.frame);
+    live_put64(out + 24, s.bytes);
+    c->rsxf_sent_state = s.state;
+    if (s.state >= 3)
+        c->rsxf_id = 0; /* final */
+    return 1;
+}
+
 /* A complete command frame in c->in (its length already bounded by
  * stream_len_ok). Returns -1 for a protocol violation. */
 static int on_command(live_agent *a, live_conn *c, uint64_t now)
@@ -226,6 +279,8 @@ static int on_command(live_agent *a, live_conn *c, uint64_t now)
     uint32_t type = live_get16(c->in), len = live_get32(c->in + 4);
     uint32_t req = live_get32(p), frames = 0, name_len = 0;
     const char *name = NULL;
+    if (type == LIVE_T_RSX_FRAME_REQ)
+        return on_rsx_frame(a, c);
     if (type == LIVE_T_CAPTURE_BEGIN) {
         name_len = live_get16(p + 4);
         if (live_get16(p + 6) != 0 || len != 8u + name_len)
@@ -467,6 +522,21 @@ static void *agent_main(void *arg)
                 atomic_fetch_add(&a->pongs, 1);
                 continue;
             }
+            if (c->rsxf_ack_ready) {
+                c->rsxf_ack_ready = 0;
+                queue_frame(&c->out, LIVE_T_RSX_FRAME_ACK, c->rsxf_ack, LIVE_RSXF_ACK_BYTES);
+                if (live_get32(c->rsxf_ack + 4) != 0)
+                    atomic_fetch_add(&a->ack_refusals, 1);
+                atomic_fetch_add(&a->acks, 1);
+                continue;
+            }
+            {
+                uint8_t st[LIVE_RSXF_STATE_BYTES];
+                if (rsxf_state_frame(a, c, st)) {
+                    queue_frame(&c->out, LIVE_T_RSX_FRAME_STATE, st, LIVE_RSXF_STATE_BYTES);
+                    continue;
+                }
+            }
             service_command(a, c, now);
             if (c->ack_ready) {
                 c->ack_ready = 0;
@@ -512,7 +582,8 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     if (plen == 0 || plen >= sizeof a->path || !src->finalization || !src->app || src->app_len == 0 ||
         src->app_len > LIVE_MAX_APP || src->build_id_len > LIVE_MAX_BUILD_ID ||
         (src->build_id_len && !src->build_id) ||
-        (src->cmd && (!src->cmd->submit || !src->cmd->poll || !src->cmd->cancel)))
+        (src->cmd && (!src->cmd->submit || !src->cmd->poll || !src->cmd->cancel)) ||
+        (src->rsxf && (!src->rsxf->request || !src->rsxf->status || !src->rsxf->available)))
         return LIVE_EINVAL;
     const char *base = strrchr(src->path, '/');
     base = base ? base + 1 : src->path;
@@ -533,6 +604,7 @@ int live_agent_start(live_agent *a, const live_config *cfg, const live_source *s
     a->finalization = src->finalization;
     a->ctx = src->ctx;
     a->cmd = src->cmd;
+    a->rsxf = src->rsxf;
     memset(&a->conn, 0, sizeof a->conn);
     a->conn.fd = a->conn.file_fd = -1;
     a->conn.phase = C_NONE;

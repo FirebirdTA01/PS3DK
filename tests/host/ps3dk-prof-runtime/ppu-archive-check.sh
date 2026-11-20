@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # The PPU profiler archives as the SDK Makefile builds them, both ABIs:
-#   1. exact members: libps3dkprof.a = the core + the live link (live_agent, live_os_lv2, live_api);
-#      libps3prof.a = the core + the arc writer + startup, with no live member;
+#   1. exact members: libps3dkprof.a = the core + the live link (live_agent, live_os_lv2, live_api) + its opt-in
+#      auto-start (live_autostart); libps3prof.a = the core + the arc writer + startup + the same four live members;
 #   2. symbols: every defined global is the public API or under ps3dk_prof__, no ps3dk_prof_test_ symbol, and both
 #      archives define the core finalization accessor.  The automatic archive also exports, as it already did before
-#      the live link, its startup anchor, __ps3dk_prof_thread_exit and ps3prof_arcs_write (listed exactly);
-#   3. links against an installed SDK: a program that calls the live API links and pulls the three live members;
-#      one that does not call it pulls none of them, and the profiler members it does pull call no network
-#      function.  librt's own close() pulls librt's socket.o into any program that closes a file; a control with no
+#      the live link, its startup anchor, __ps3dk_prof_thread_exit and ps3prof_arcs_write; both export the
+#      auto-start anchor (listed exactly);
+#   3. links against an installed SDK: a program that calls the live API links and pulls the three live members
+#      (not the auto-start); one that does not call it pulls none of them, and the profiler members it does pull
+#      call no network function; one that requests auto-start (PS3DK_PROF_LIVE_AUTOSTART, -lnet -lsysmodule_stub)
+#      pulls all four, from the manual archive and from the automatic one.  librt's own close() pulls librt's socket.o into any program that closes a file; a control with no
 #      profiler shows that.
 #
 #   ppu-archive-check.sh <out-dir> <ps3dev> <installed-ps3dk>
@@ -40,13 +42,13 @@ else
     exit 1
 fi
 lib="$out/build/sdk/libps3dkprof"
-api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record \
-ps3dk_prof_init ps3dk_prof_live_get_stats ps3dk_prof_live_start ps3dk_prof_live_stop ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks \
-ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin \
-ps3dk_prof_zone_end"
-auto_api="ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token \
-ps3dk_prof_get_capture_record ps3dk_prof_init ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path \
-ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end ps3dk_prof_zone_begin ps3dk_prof_zone_end"
+api="ps3dk_prof_capture_begin ps3dk_prof_capture_end ps3dk_prof_capture_seal ps3dk_prof_capture_state \
+ps3dk_prof_config_defaults ps3dk_prof_drain ps3dk_prof_frame ps3dk_prof_frame_token ps3dk_prof_get_capture_record \
+ps3dk_prof_get_rolling_result ps3dk_prof_init ps3dk_prof_live_get_stats ps3dk_prof_live_start ps3dk_prof_live_stop \
+ps3dk_prof_sdk_version ps3dk_prof_sdk_version_len ps3dk_prof_set_capture_retention ps3dk_prof_set_rolling_options \
+ps3dk_prof_set_sink_callbacks ps3dk_prof_set_sink_path ps3dk_prof_shutdown ps3dk_prof_thread_begin ps3dk_prof_thread_end \
+ps3dk_prof_zone_begin ps3dk_prof_zone_end"
+auto_api="$api"
 
 # 2. Members and symbols.
 for abi in ilp32 lp64; do
@@ -54,13 +56,13 @@ for abi in ilp32 lp64; do
         ar="$lib/$abi/$a.a"
         tag="$abi $a"
         if [ "$a" = libps3dkprof ]; then
-            want="live_agent.o live_api.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o"
+            want="live_agent.o live_api.o live_autostart.o live_os_lv2.o pal_lv2.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o"
             want_api="$api"
-            extra=""
+            extra="__ps3dk_prof_live_autostart_anchor"
         else
-            want="pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o startup.o"
+            want="live_agent.o live_api.o live_autostart.o live_os_lv2.o pal_lv2.o prof_arcs_writer.o prof_core.o prof_drain.o prof_version.o roll_file.o roll_retention_inspect.o roll_store.o startup.o"
             want_api="$auto_api"
-            extra="__ps3dk_prof_startup_anchor __ps3dk_prof_thread_exit ps3prof_arcs_write"
+            extra="__ps3dk_prof_live_autostart_anchor __ps3dk_prof_startup_anchor __ps3dk_prof_thread_exit ps3prof_arcs_write"
         fi
         # Producers write to files first: a pipeline would hide their exit status.
         if ! "${cross}ar" t "$ar" >"$out/$abi-$a.members"; then
@@ -146,10 +148,16 @@ net_calls='^(socket|bind|listen|accept|send|recv|poll|socketpoll|getsockname|set
 pulled_by_close() {
     grep -A1 -E 'librt\.a\(socket\.o\)$' "$1" | grep -q 'librt\.a(close\.o) (__librt_socketclose_r)'
 }
-for prog in uses_live no_live close_only; do
-    if "${cross}gcc" -O2 -std=c11 -DPS3DK_PROF=1 -I"$root/sdk/include" "$out/$prog.c" -o "$out/$prog.elf" \
-        -B"$ps3dk/ppu/lib/" -B"$ps3dk/ppu/powerpc64-ps3-elf/lib/" -L"$lib/ilp32" -lps3dkprof -L"$ps3dk/ppu/lib" \
-        -lrt -llv2 -lm -Wl,-Map,"$out/$prog.map" >"$out/$prog.link.log" 2>&1; then
+for prog in uses_live no_live close_only autostart autostart_auto; do
+    src="$out/$prog.c" defs="" plib=ps3dkprof extra_libs=""
+    case "$prog" in
+    autostart) src="$out/no_live.c" defs="-DPS3DK_PROF_LIVE_AUTOSTART=1" extra_libs="-lnet -lsysmodule_stub" ;;
+    autostart_auto) src="$out/no_live.c" defs="-DPS3DK_PROF_LIVE_AUTOSTART=1" plib=ps3prof
+        extra_libs="-Wl,-u,__ps3dk_prof_startup_anchor -lnet -lsysmodule_stub" ;;
+    esac
+    if "${cross}gcc" -O2 -std=c11 -DPS3DK_PROF=1 $defs -I"$root/sdk/include" "$src" -o "$out/$prog.elf" \
+        -B"$ps3dk/ppu/lib/" -B"$ps3dk/ppu/powerpc64-ps3-elf/lib/" -L"$lib/ilp32" -l$plib -L"$ps3dk/ppu/lib" \
+        $extra_libs -lrt -llv2 -lm -Wl,-Map,"$out/$prog.map" >"$out/$prog.link.log" 2>&1; then
         ok "$prog links"
     else
         tail -n 20 "$out/$prog.link.log"
@@ -158,16 +166,24 @@ for prog in uses_live no_live close_only; do
     fi
     n=0
     for m in live_agent.o live_os_lv2.o live_api.o; do
-        grep -q "libps3dkprof.a($m)" "$out/$prog.map" && n=$((n + 1))
+        grep -q "lib$plib.a($m)" "$out/$prog.map" && n=$((n + 1))
     done
+    auto_pulled=0
+    grep -q "lib$plib.a(live_autostart.o)" "$out/$prog.map" && auto_pulled=1
     case "$prog" in
+    autostart | autostart_auto)
+        [ "$n" = 3 ] && [ "$auto_pulled" = 1 ] && ok "$prog pulls the three live members and the auto-start" ||
+            bad "$prog pulls $n of 3 live members, auto-start $auto_pulled"
+        ;;
     uses_live)
         [ "$n" = 3 ] && ok "$prog pulls all three live members" || bad "$prog pulls $n of 3 live members"
+        [ "$auto_pulled" = 0 ] && ok "$prog pulls no auto-start" || bad "$prog pulls the auto-start member"
         grep -q "libps3dkprof.a(prof_drain.o)" "$out/$prog.map" && ok "$prog pulls the core record's object" ||
             bad "$prog lacks prof_drain.o"
         ;;
     no_live)
-        [ "$n" = 0 ] && ok "$prog pulls no live member" || bad "$prog pulls $n live members"
+        [ "$n" = 0 ] && [ "$auto_pulled" = 0 ] && ok "$prog pulls no live member" ||
+            bad "$prog pulls $n live members (auto-start $auto_pulled)"
         # The profiler members it did pull must not call the network: extract them and list their undefined symbols.
         rm -rf "$out/$prog.members"
         mkdir -p "$out/$prog.members"

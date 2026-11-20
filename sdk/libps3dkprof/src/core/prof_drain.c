@@ -368,6 +368,9 @@ static void enc_profile(prof *p)
  * A sink failure here is recorded exactly as one in the first drain was: init still succeeds and the next drain or
  * shutdown reports ESINKFAIL.  A CALLBACK sink keeps the first-drain start step: no callback runs during init.
  * AUTO RSX CONFIG is not part of this step; it stays mutable after init and the drainer writes it once frozen. */
+#ifdef PS3DK_PROF_WITH_AUTO
+int ps3dk_prof__rsxf_selected(void);
+#endif
 static void original_header(prof *p, uint8_t head[16])
 {
     static const uint8_t magic[16] = {'P', 'S', '3', 'D', 'K', 'P', 'R', 'F', 1, 0, 0, 0, 0, 0, 0, 0};
@@ -390,8 +393,11 @@ static void original_header(prof *p, uint8_t head[16])
         head[12] |= 64; /* file_flags bit 6: FIFO wrap events (chunk types 31-33); needs bit 0 */
 #endif
 #ifdef PS3DK_PROF_WITH_AUTO
-    if (p->ext_flags)
+    if (p->ext_flags) {
         head[12] |= 128; /* automatic RSX observation: chunks 34..38, requires bit 0 */
+        if (ps3dk_prof__rsxf_selected())
+            head[13] |= 4; /* file_flags bit 10: RSX frame captures (chunks 44..48), selected by the executable */
+    }
 #endif
     head[13] |= 2;   /* file_flags bit 9: capture windows (chunks 41, 42); heavy data only inside them */
 }
@@ -1405,7 +1411,20 @@ void *p_drain_main(void *arg)
     return NULL;
 }
 
+/* Weak: linked only with the live auto-start member (prof_frame_hook.h). */
+extern void ps3dk_prof__live_autostart_after_shutdown(void) __attribute__((weak));
+
+static int shutdown_impl(int *finalized);
+
 int ps3dk_prof_shutdown(void)
+{
+    int finalized = 0, rc = shutdown_impl(&finalized);
+    if (finalized && ps3dk_prof__live_autostart_after_shutdown)
+        ps3dk_prof__live_autostart_after_shutdown();   /* after the finalization a live viewer's END needs */
+    return rc;
+}
+
+static int shutdown_impl(int *finalized)
 {
     prof *p = ready_prof();
     tls_state *t = &g_tls;
@@ -1442,6 +1461,7 @@ int ps3dk_prof_shutdown(void)
         ST_REL(&p->phase, 3u);
         rc = retain_completed(p, rc);
         publish_finalization(p, rc);
+        *finalized = 1;
         return rc;
     }
 
@@ -1457,5 +1477,6 @@ int ps3dk_prof_shutdown(void)
         rc = PS3DK_PROF_ETHREAD;   /* after every sink and trailer severity */
     rc = retain_completed(p, rc);
     publish_finalization(p, rc);
+    *finalized = 1;
     return rc;
 }

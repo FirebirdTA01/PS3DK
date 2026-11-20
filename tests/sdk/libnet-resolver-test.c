@@ -27,7 +27,8 @@ static int failures, herr, neterr, null_result, legacy_init, init_calls, final_c
 static int load_calls, unload_calls, load_result, init_result;
 int cellSysmoduleLoadModule(uint16_t id) { ++load_calls; if (id != 0) return -1; return load_result; }
 int cellSysmoduleUnloadModule(uint16_t id) { ++unload_calls; return id != 0 ? -1 : 0; }
-int sys_net_finalize_network(void) { ++final_calls; return 0; }
+/* the raw PRX finalize (raw-symbols.txt); sys_net_finalize_network is libnet's front end over it */
+int __ps3dk_raw_sys_net_finalize_network(void) { ++final_calls; return 0; }
 int __ps3dk_raw_socketclose(int fd) { (void)fd; return 0; }
 static char hostname[] = "fixture.example", alias[] = "alias.example";
 static uint8_t address[] = {127, 0, 0, 1};

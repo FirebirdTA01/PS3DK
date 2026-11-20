@@ -3,8 +3,10 @@
  * FILE-sink capture. The app passes no path: start reads the runtime's
  * capture record, and END waits for the runtime's finalization record.
  *
- * Calls are caller-serialized: init, live_start, shutdown and live_stop are
- * never concurrent. The agent object is never freed; after ETIMEDOUT or
+ * The app's calls are caller-serialized: init, live_start, shutdown and
+ * live_stop are never concurrent. The opt-in auto-start runtime
+ * (live_autostart.c) runs beside them, so start, stop and stats also take
+ * one internal lock. The agent object is never freed; after ETIMEDOUT or
  * ECLOCK its thread may still use it.
  *
  * Capture triggers (protocol v2): the agent thread queues a viewer's command
@@ -27,6 +29,30 @@ enum { API_NEVER, API_RUNNING, API_STOPPED, API_JOIN_FAILED };
 
 static live_agent g_agent; /* zero-initialized static storage, as live_agent.h requires */
 static int g_api_state;
+
+/* Start, stop, stats and the auto-start runtime (live_autostart.c) are serialized by this lock: the app's calls stay
+ * caller-serialized among themselves, but the auto-start thread and the shutdown hook run beside them.  A cold-path
+ * spin with a 1 ms sleep, so it needs no initialization (it may be taken from a constructor). */
+static atomic_uint g_lock;
+/* Who started the running agent: the app (ps3dk_prof_live_start) or the auto-start runtime. */
+static int g_owner_auto;
+/* The configuration the auto-start runtime asked for (before test overrides), for the explicit-start rule. */
+static live_config g_auto_requested;
+
+void ps3dk_prof__live_lock(void)
+{
+    for (;;) {
+        unsigned z = 0;
+        if (atomic_compare_exchange_weak_explicit(&g_lock, &z, 1u, memory_order_acquire, memory_order_relaxed))
+            return;
+        pal_sleep_us(1000);
+    }
+}
+
+void ps3dk_prof__live_unlock(void)
+{
+    atomic_store_explicit(&g_lock, 0u, memory_order_release);
+}
 
 /* ---- capture triggers ------------------------------------------------------------------------------------------- */
 
@@ -212,6 +238,45 @@ static void live_frame_hook(void)
 
 static const live_cmd_ops g_cmd_ops = {.submit = cmd_submit, .poll = cmd_poll, .cancel = cmd_cancel};
 
+/* RSX frame capture (protocol v3): present when the AUTO runtime is linked and selected the capture. A weak
+ * symbol keeps this archive independent of AUTO; its types match rsx_frame/rsxf.h field for field. */
+typedef struct rsxf_status_view {
+    uint32_t id, request, state, reason, draws;
+    uint64_t frame, bytes;
+} rsxf_status_view;
+typedef struct rsxf_ops_view {
+    int (*request)(uint32_t, uint32_t, const char *, uint32_t, uint32_t *);
+    void (*status)(rsxf_status_view *);
+    int (*available)(void);
+} rsxf_ops_view;
+extern const rsxf_ops_view *ps3dk_prof__rsxf_live_ops(void) __attribute__((weak));
+static const rsxf_ops_view *rsxf_ops(void)
+{
+    return ps3dk_prof__rsxf_live_ops ? ps3dk_prof__rsxf_live_ops() : NULL;
+}
+static int rsxf_request(uint32_t req, uint32_t flags, const char *name, uint32_t n, uint32_t *id)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    return o ? o->request(req, flags, name, n, id) : PS3DK_PROF_ENOTSUP;
+}
+static void rsxf_status(live_rsxf_status *out)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    rsxf_status_view m;
+    memset(out, 0, sizeof *out);
+    if (!o)
+        return;
+    o->status(&m);
+    out->id = m.id; out->request = m.request; out->state = m.state; out->reason = m.reason; out->draws = m.draws;
+    out->frame = m.frame; out->bytes = m.bytes;
+}
+static int rsxf_available(void)
+{
+    const rsxf_ops_view *o = rsxf_ops();
+    return o && o->available();
+}
+static const live_rsxf_ops g_rsxf_ops = {.request = rsxf_request, .status = rsxf_status, .available = rsxf_available};
+
 static const struct ps3dk_prof_finalization *runtime_finalization(void *ctx)
 {
     (void)ctx;
@@ -243,10 +308,10 @@ static int map_config(const ps3dk_prof_live_config *in, live_config *out)
     return PS3DK_PROF_OK;
 }
 
-int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
+/* The checks every start makes before it uses anything: OK with the record filled, or the refusal. */
+static int servable(ps3dk_prof_capture_record *rec)
 {
-    ps3dk_prof_capture_record rec;
-    int rc = ps3dk_prof_get_capture_record(&rec);
+    int rc = ps3dk_prof_get_capture_record(rec);
     if (rc == PS3DK_PROF_ENOTINIT)
         return PS3DK_PROF_ENOTINIT;
     if (ps3dk_prof__shutdown_claimed())
@@ -255,14 +320,47 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
         return rc == PS3DK_PROF_ENOTSUP ? PS3DK_PROF_ENOTSUP : rc; /* ENOTSUP: a callback sink, no file */
     if (ps3dk_prof__capture_rolling())
         return PS3DK_PROF_ENOTSUP; /* append byte offsets cannot serve reused slots */
-    if (!live_os_capture_supported(rec.path))
+    if (!live_os_capture_supported(rec->path))
         return PS3DK_PROF_ENOTSUP;
+    return PS3DK_PROF_OK;
+}
+
+int ps3dk_prof__live_servable(void)
+{
+    ps3dk_prof_capture_record rec;
+    return servable(&rec);
+}
+
+/* An explicit start while the auto-started agent runs: a no-op when every field the app set (nonzero) equals what
+ * the auto-start asked for; anything else is EALREADY, as for any second start. */
+static int auto_compatible(const ps3dk_prof_live_config *in)
+{
+    const live_config *r = &g_auto_requested;
+    if (!in)
+        return 1;
+    if (in->reserved || in->reserved2)
+        return 0;
+    return (!in->port || in->port == r->port) && (!in->poll_us || in->poll_us == r->poll_us) &&
+           (!in->send_timeout_us || in->send_timeout_us == r->send_timeout_us) &&
+           (!in->handshake_timeout_us || in->handshake_timeout_us == r->handshake_timeout_us) &&
+           (!in->stack_bytes || in->stack_bytes == r->stack_bytes) && (!in->cap_bytes || in->cap_bytes == r->cap_bytes);
+}
+
+/* Under the lock.  is_auto: the auto-start runtime's own start. */
+int ps3dk_prof__live_start_locked(const ps3dk_prof_live_config *cfg, int is_auto)
+{
+    ps3dk_prof_capture_record rec;
+    int rc = servable(&rec);
+    if (rc != PS3DK_PROF_OK)
+        return rc;
     if (g_api_state != API_NEVER)
-        return PS3DK_PROF_EALREADY;
+        return !is_auto && g_owner_auto && g_api_state == API_RUNNING && auto_compatible(cfg) ? PS3DK_PROF_OK
+                                                                                                : PS3DK_PROF_EALREADY;
     live_config c;
     rc = map_config(cfg, &c);
     if (rc != PS3DK_PROF_OK)
         return rc;
+    live_config requested = c;
 #ifdef PS3DK_PROF_TEST_HOOKS
     if (ps3dk_prof_test_hooks.live_ephemeral_port) {
         c.port = 0;
@@ -275,7 +373,8 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
 #endif
     live_source src = {.path = rec.path, .session_id = rec.session_id, .app = rec.app, .app_len = rec.app_len,
                        .build_id = (const char *)rec.build_id, .build_id_len = rec.build_id_len,
-                       .finalization = runtime_finalization, .cmd = &g_cmd_ops};
+                       .finalization = runtime_finalization, .cmd = &g_cmd_ops,
+                       .rsxf = rsxf_ops() ? &g_rsxf_ops : NULL};
     ps3dk_prof__set_frame_hook(live_frame_hook); /* before a viewer can send a command */
     rc = live_agent_start(&g_agent, &c, &src);
     if (rc != LIVE_OK)
@@ -283,6 +382,9 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
     switch (rc) {
     case LIVE_OK:
         g_api_state = API_RUNNING;
+        g_owner_auto = is_auto;
+        if (is_auto)
+            g_auto_requested = requested;
         return PS3DK_PROF_OK;
     case LIVE_EINVAL:
         return PS3DK_PROF_EINVAL;
@@ -295,7 +397,38 @@ int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
     }
 }
 
+int ps3dk_prof_live_start(const ps3dk_prof_live_config *cfg)
+{
+    ps3dk_prof__live_lock();
+    int rc = ps3dk_prof__live_start_locked(cfg, 0);
+    ps3dk_prof__live_unlock();
+    return rc;
+}
+
+int ps3dk_prof__live_state_locked(int *owner_auto)
+{
+    *owner_auto = g_api_state != API_NEVER && g_owner_auto;
+    switch (g_api_state) {
+    case API_RUNNING:
+        return LIVE_API_RUNNING;
+    case API_STOPPED:
+        return LIVE_API_STOPPED;
+    case API_JOIN_FAILED:
+        return LIVE_API_JOIN_FAILED;
+    default:
+        return LIVE_API_NEVER;
+    }
+}
+
 int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)
+{
+    ps3dk_prof__live_lock();
+    int rc = ps3dk_prof__live_stop_locked(graceful_us, join_us);
+    ps3dk_prof__live_unlock();
+    return rc;
+}
+
+int ps3dk_prof__live_stop_locked(uint64_t graceful_us, uint64_t join_us)
 {
     switch (g_api_state) {
     case API_NEVER:
@@ -328,10 +461,20 @@ int ps3dk_prof_live_stop(uint64_t graceful_us, uint64_t join_us)
 
 _Static_assert(LIVE_DROP_COUNT == 10, "ps3dk_prof_live_stats names every drop reason");
 
+static int get_stats_locked(ps3dk_prof_live_stats *out);
+
 int ps3dk_prof_live_get_stats(ps3dk_prof_live_stats *out)
 {
     if (!out)
         return PS3DK_PROF_EINVAL;
+    ps3dk_prof__live_lock();
+    int rc = get_stats_locked(out);
+    ps3dk_prof__live_unlock();
+    return rc;
+}
+
+static int get_stats_locked(ps3dk_prof_live_stats *out)
+{
     switch (g_api_state) {
     case API_NEVER:
         return PS3DK_PROF_ENOTINIT;

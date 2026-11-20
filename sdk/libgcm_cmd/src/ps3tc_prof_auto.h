@@ -11,6 +11,10 @@ typedef struct ps3tc_auto_call {
  * covers both markers and every original reservation group before begin. */
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *, const ps3tc_auto_call *, uint64_t caller);
 void ps3dk_prof__auto_end(struct _gcmCtxData *, uint32_t ticket);
+/* Kinds 7 (inline array: count data words), 8 (inline index array: count indices, index_type 1 u16) and 9 (immediate:
+ * SetDrawBegin) are begun only while ps3dk_prof__rsxf_active is non-NULL (one load and a branch otherwise); an
+ * immediate draw ends at SetDrawEnd with ps3dk_prof__auto_end_open. */
+void ps3dk_prof__auto_end_open(struct _gcmCtxData *);
 /* Snapshot committed metadata before PUT, then release the publication
  * frontier after PUT's full barrier. These hooks emit no GPU commands. */
 uint32_t ps3dk_prof__auto_publish_before(struct _gcmCtxData *);
@@ -54,6 +58,10 @@ void ps3dk_prof__auto_segment_call(struct _gcmCtxData *ring, struct _gcmCtxData 
 void ps3dk_prof__auto_segment_call_begin(struct _gcmCtxData *ring, struct _gcmCtxData *segment);
 /* cellGcmSetFragmentProgram in a PS3TC_PROF_AUTO unit (cell/gcm/gcm_cg_bridge.h): the offset just bound. */
 void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context, uint32_t offset);
+/* RSX frame capture: the program container's ucode bound at an FP offset (rsxLoadFragmentProgramLocation), called
+ * only while ps3dk_prof__rsxf_active is non-NULL (the capture selected and attached with the report ring). */
+extern void *ps3dk_prof__rsxf_active;
+void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context, const void *ucode, uint32_t bytes, uint32_t offset);
 void ps3dk_prof__auto_segment_external_open(struct _gcmCtxData *key, const void *buffer, uint32_t size);
 void ps3dk_prof__auto_segment_external_close(struct _gcmCtxData *key);
 /* gcmSetFlip / gcmSetPrepareFlip in a PS3TC_PROF_AUTO translation unit (rsx/gcm_sys.h),

@@ -2,8 +2,40 @@
 #include "auto_commands.h"
 #include "../fifo/fifo_internal.h"
 #include "../rsx/gpu_internal.h"
+#include "../rsx_frame/rsxf.h"
 #include <string.h>
 #include <stddef.h>
+
+/* RSX frame capture (rsxf.h): NULL unless the executable selected it and AUTO attached; every hook below tests it
+ * with one load before calling the capture code, so an unselected build does nothing more. */
+extern void *ps3dk_prof__rsxf_active;
+#define RSXF_ON() (__atomic_load_n(&ps3dk_prof__rsxf_active,__ATOMIC_ACQUIRE)!=NULL)
+/* The owner's AUTO capture (NULL on any other thread, in the drainer or before CONFIG froze). */
+static auto_capture *owner_capture(gpp_ctx *ctx, int observe);
+static void isolate(gpp_ctx *ctx);
+#define RSXF_OWNER() (RSXF_ON() && owner_capture(NULL,0)!=NULL)
+/* The exclusion column of the last covered visit AUTO counted on the owner, for the capture's untimed reason. */
+static int counted(auto_frames *f,uint32_t kind,uint32_t column)
+{
+    if(RSXF_OWNER()) rsxf_note_column(column);
+    return ps3dk_prof__auto_frames_count(f,kind,column);
+}
+__attribute__((unused)) static int counted_outside(auto_frames *f,uint32_t kind)
+{
+    if(RSXF_OWNER()) rsxf_note_column(RSXF_UNTIMED_OUTSIDE_RANGE);
+    return ps3dk_prof__auto_frames_outside(f,kind);
+}
+__attribute__((unused)) static int counted_ring(auto_frames *f,uint32_t kind,uint32_t which)
+{
+    if(RSXF_OWNER()) rsxf_note_column(which ? RSXF_UNTIMED_RING_STATE:RSXF_UNTIMED_RING_FULL);
+    return ps3dk_prof__auto_frames_ring(f,kind,which);
+}
+#undef auto_frames_count
+#undef auto_frames_outside
+#undef auto_frames_ring
+#define auto_frames_count counted
+#define auto_frames_outside counted_outside
+#define auto_frames_ring counted_ring
 
 /* The core admits one capture per process. CONFIG remains mutable only through
  * the owner-side initialization/override window; its encoder cannot freeze it.
@@ -417,6 +449,7 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
         return PS3DK_PROF_ESTOPPED;
     }
     ps3dk_prof__fifo_account_native_start(gc);
+    rsxf_attach(gc,capture && capture->ring_plan.blocks!=0);
     *instance=1;*domain=id;
     return PS3DK_PROF_OK;
 fail:
@@ -753,6 +786,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.kind=(uint16_t)call->kind;e->op.caller=caller;e->op.generation=c->generation;
     e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;e->op.flags=AUTO_OP_RING;
     if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+    if(a->iso_active) e->op.flags|=AUTO_OP_ISOLATED; /* timed with WAIT_FOR_IDLE around its markers */
     e->op.args[0]=(uint32_t)words;
     if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
     if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;
@@ -765,6 +799,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.ring_ordinal=(uint16_t)t.pair;e->op.ring_local=(uint16_t)t.local;
     a->active=e;g_tls.in_gpu=1;
     e->op.tb_before=observation_tb();
+    if(a->iso_active) isolate(ctx);
     segment_report(ctx,e->op.report_begin);
     a->expected_end=(uintptr_t)(void *)ctx->current+words*4u;
     return e->op.serial_end;
@@ -776,16 +811,23 @@ static void ring_end(auto_capture *a, auto_queue_entry *e, uint32_t ticket)
     uintptr_t current=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
     const uint32_t slot=e->op.ring_slot;
     int complete;
-    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<8) {
+    if(a->open_ended && ticket==e->op.serial_end && current>=a->expected_end && end>=current &&
+       end-current<8u+4u*a->iso_active) {
+        e->op.flags|=4|32; /* an immediate draw that filled the buffer: no room for its end marker, nothing else lost */
+    } else if(ticket!=e->op.serial_end || (a->open_ended ? current<a->expected_end:current!=a->expected_end) ||
+              end<current || end-current<8u+4u*a->iso_active) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
-    } else segment_report(ctx,e->op.report_end);
+    } else {
+        if(a->iso_active) isolate(ctx);
+        segment_report(ctx,e->op.report_end);
+    }
     e->op.tb_after=observation_tb();
     if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
     complete=!(e->op.flags&4);
     (void)auto_frames_count(&a->coverage,e->op.kind,complete ? 1:11);
     auto_queue_commit(&a->operations);
-    a->active=NULL;g_tls.in_gpu=0;
+    a->active=NULL;g_tls.in_gpu=0;a->open_ended=0;
     if(a->ring.slots[slot].count==a->ring.pairs) ring_flush(a,ctx);
     else if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
 }
@@ -1442,12 +1484,75 @@ static void late_row(auto_capture *a)
     }
 }
 
+/* ISOLATED RSX frame capture: a WAIT_FOR_IDLE (two words) before each marker of every covered draw of the captured
+ * frame, so the draw starts on an idle RSX and its end report waits for its own work. Room for both is checked with the
+ * draw's; nothing is written outside an isolated capture. */
+static uint32_t isolate_words(void) { return RSXF_ON() && rsxf_isolated() ? 4u : 0u; }
+static void isolate(gpp_ctx *ctx)
+{
+    uint32_t *w=(uint32_t *)(void *)ctx->current;
+    w[0]=(1u<<18)|0x110u;               /* WAIT_FOR_IDLE, one word */
+    w[1]=0;
+    ctx->current=(void *)(w+2);
+}
+
+static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller,uint32_t shape);
+/* An active immediate draw whose words the profiler can no longer follow (a wrap or a flush inside it): it ends
+ * incomplete here (no end marker), the capture otherwise unaffected. */
+static void abandon_open(auto_capture *a)
+{
+    auto_queue_entry *e=a->active;
+    if(!e || !a->open_ended) return;
+    e->op.flags|=4|32;e->op.tb_after=observation_tb();
+    (void)auto_frames_count(&a->coverage,e->op.kind,11);
+    auto_queue_commit(&a->operations);
+    a->active=NULL;g_tls.in_gpu=0;a->open_ended=0;
+}
 uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller)
+{
+    uint32_t ticket,shape=0;
+    auto_capture *a;
+    ps3tc_auto_call cls;
+    int mine;
+    if(call && call->kind>=7 && call->kind<=9) {
+        /* inline array (7), inline index (8), immediate (9): timed only for the RSX frame capture, as operations of
+         * the ARRAY or INDEX class (the AUTO coverage tables keep three kinds); the capture keeps the real kind */
+        if(!RSXF_ON()) return 0;
+        /* the owner's own context only: a segment writer's or another thread's inline or immediate draw never reaches
+         * AUTO's segment, CALL or unobserved-build accounting (AUTO never saw these shapes before the capture) */
+        if(!context || !owner_capture((gpp_ctx *)(void *)context,0)) return 0;
+        shape=call->kind;cls=*call;cls.kind=shape==8 ? 2u:1u;
+        if(shape!=8) cls.start=0;
+        cls.offset=cls.location=0;
+    }
+    if(!RSXF_ON()) return auto_begin(context,call,caller,0);
+    /* the owner's own covered call only: another thread's draw never touches the owner's pending hook */
+    a=owner_capture((gpp_ctx *)(void *)context,0);
+    mine=call && context && a;
+    if(mine)
+        rsxf_hook_begin(context,call->kind,call->mode,call->start,call->count,call->offset,call->index_type,
+                        call->location,call->clear_mask,caller,a->tag);
+    ticket=auto_begin(context,shape ? &cls:call,caller,shape);
+    if(mine) rsxf_hook_admitted(context,ticket && a->active ? a->active->op.id:0);
+    return ticket;
+}
+/* SetDrawEnd of an immediate draw (after its BEGIN_END(0)): the end marker of the open operation, if any. */
+void ps3dk_prof__auto_end_open(struct _gcmCtxData *context)
+{
+    auto_capture *a;
+    if(!context || !p_ready() || !(a=owner_capture((gpp_ctx *)(void *)context,0)) || !a->active || !a->open_ended) {
+        if(RSXF_ON() && context && owner_capture((gpp_ctx *)(void *)context,0)) rsxf_hook_end(context);
+        return;
+    }
+    ps3dk_prof__auto_end(context,a->active->op.serial_end);
+}
+static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *call,uint64_t caller,uint32_t shape)
 {
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     if(!ctx || !p_ready()) return 0;
     if(!p_window_gate(g_prof)) {
         /* no draw timing outside a capture window; a stopped owner still acknowledges the stop here */
+        if(shape) return 0; /* inline and immediate shapes leave AUTO's accounting as it was without them */
         if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
         else unobserved_build(ctx,call);
         return 0;
@@ -1456,7 +1561,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     const auto_wire_config *c;
     auto_queue_entry *e;
     uint64_t words;
-    if(!a) return foreign_begin(ctx,call,caller);
+    if(!a) return shape ? 0u:foreign_begin(ctx,call,caller);
     if(!call || call->kind<1 || call->kind>3) return 0;
     if(g_tls.in_gpu && !a->active) {increment(a,&a->internal_suppressed);return 0;}
     late_row(a);
@@ -1475,24 +1580,30 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
         (void)auto_frames_count(&a->coverage,call->kind,11);
         return 0;
     }
-    if(a->timing && !a->timed_open) { (void)auto_frames_outside(&a->coverage,call->kind);return 0; }
+    if(a->timing && !a->timed_open && !(RSXF_ON() && rsxf_forced())) {
+        (void)auto_frames_outside(&a->coverage,call->kind);return 0;
+    }
 #ifdef PS3DK_PROF_AUTO_RING
     if(a->ring_plan.blocks) {
         if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
-        words=auto_command_words(call);
+        words=shape ? auto_shape_words(call,shape):auto_command_words(call);
         if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
+        a->iso_active=isolate_words();
+        a->open_ended=shape==9;
         if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
-                             (uintptr_t)(void *)ctx->end,words)) {
+                             (uintptr_t)(void *)ctx->end,words+a->iso_active)) {
             (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
         }
         return ring_begin(a,ctx,call,caller,words);
     }
 #endif
     if(a->pool_tail_column) { (void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0; }
-    words=auto_command_words(call);
+    words=shape ? auto_shape_words(call,shape):auto_command_words(call);
     if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
+    a->iso_active=isolate_words();
+    a->open_ended=shape==9;
     if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
-                         (uintptr_t)(void *)ctx->end,words)) {
+                         (uintptr_t)(void *)ctx->end,words+a->iso_active)) {
         (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
     }
     c=auto_config_read(&configuration);
@@ -1512,6 +1623,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     e->op.kind=(uint16_t)call->kind;e->op.caller=caller;e->op.generation=c->generation;
     e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;
     if(a->coverage.active) {e->op.flags=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
+    if(a->iso_active) e->op.flags|=AUTO_OP_ISOLATED; /* timed with WAIT_FOR_IDLE around its markers */
     e->op.args[0]=(uint32_t)words;
     if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
     if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;
@@ -1523,6 +1635,7 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     a->operations_device.sync(a->operations_device.ctx);
     a->active=e;g_tls.in_gpu=1;
     e->op.tb_before=observation_tb();
+    if(a->iso_active) isolate(ctx);
     a->expected_end=(uintptr_t)(void *)ctx->current+(words+6)*4;
     /* The complete app+markers room check above excludes callbacks. The end
      * verifies the actual application's advancement before issuing its marker. */
@@ -1536,7 +1649,13 @@ uint32_t ps3dk_prof__auto_begin(struct _gcmCtxData *context,const ps3tc_auto_cal
     return e->op.serial_end;
 }
 
+static void auto_end(struct _gcmCtxData *context,uint32_t ticket);
 void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
+{
+    auto_end(context,ticket);
+    if(RSXF_ON() && context && owner_capture((gpp_ctx *)(void *)context,0)) rsxf_hook_end(context);
+}
+static void auto_end(struct _gcmCtxData *context,uint32_t ticket)
 {
     auto_capture *a;
     auto_queue_entry *e;
@@ -1558,7 +1677,12 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
 #endif
     c=auto_config_read(&configuration);
     uintptr_t current=(uintptr_t)(void *)a->context->current,end=(uintptr_t)(void *)a->context->end;
-    if(ticket!=e->op.serial_end || current!=a->expected_end || end<current || end-current<24 ||
+    if(a->open_ended && ticket==e->op.serial_end && current>=a->expected_end && end>=current &&
+       end-current<24u+4u*a->iso_active) {
+        e->op.flags|=4|32; /* an immediate draw that filled the buffer: no room for its end marker, nothing else lost */
+    } else if(ticket!=e->op.serial_end || (a->open_ended ? current<a->expected_end:current!=a->expected_end) ||
+       end<current || end-current<24u+4u*a->iso_active ||
+       (a->iso_active && (isolate(a->context),0)) ||
        a->operations_device.reserve_pair(a->operations_device.ctx,e->op.report_end,c->op_label,e->op.serial_end)!=0) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
@@ -1571,7 +1695,7 @@ void ps3dk_prof__auto_end(struct _gcmCtxData *context,uint32_t ticket)
     auto_queue_commit(&a->operations);
     if(complete && !auto_publication_commit(&a->publication,serial))
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);
-    a->active=NULL;g_tls.in_gpu=0;
+    a->active=NULL;g_tls.in_gpu=0;a->open_ended=0;
     if(LD_ACQ(&g_prof->stop_latch)) p_observe_stop(g_prof);
 }
 
@@ -1598,6 +1722,7 @@ void ps3dk_prof__auto_publish_after(struct _gcmCtxData *context,uint32_t frontie
 void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 {
     if(!context || !p_ready()) return;
+    if(RSXF_ON()) rsxf_reset(context);
     ps3dk_prof__fifo_account_unknown(context);
     auto_capture *a=owner_capture((gpp_ctx *)(void *)context,1);
     if(a) {auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);}
@@ -1620,6 +1745,12 @@ void ps3dk_prof__auto_context_reset(struct _gcmCtxData *context)
 /* Report ring hooks (ps3tc_prof_auto.h). Owner context only; the drainer and foreign threads never emit. */
 void ps3dk_prof__auto_prewrap(struct _gcmCtxData *context)
 {
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain) {
+        auto_capture *o=owner_capture((gpp_ctx *)(void *)context,0);
+        if(o) abandon_open(o);
+    }
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain && owner_capture((gpp_ctx *)(void *)context,0))
+        rsxf_wrap(context);
 #ifdef PS3DK_PROF_AUTO_RING
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     auto_capture *a;
@@ -1633,6 +1764,12 @@ void ps3dk_prof__auto_prewrap(struct _gcmCtxData *context)
 }
 void ps3dk_prof__auto_preflush(struct _gcmCtxData *context)
 {
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain) {
+        auto_capture *o=owner_capture((gpp_ctx *)(void *)context,0);
+        if(o) abandon_open(o);
+    }
+    if(RSXF_ON() && context && p_ready() && !g_tls.in_drain && owner_capture((gpp_ctx *)(void *)context,0))
+        rsxf_scan(context);
 #ifdef PS3DK_PROF_AUTO_RING
     gpp_ctx *ctx=(gpp_ctx *)(void *)context;
     auto_capture *a;
@@ -1663,7 +1800,15 @@ void p_auto_owner_retire(void)
 }
 
 static int close_frame(auto_capture *a,uint32_t owner,uint64_t frame);
+static void auto_frame(uint64_t frame,uint64_t tb);
 void p_auto_frame(uint64_t frame,uint64_t tb)
+{
+    auto_capture *a;
+    auto_frame(frame,tb);
+    if(RSXF_ON() && (a=owner_capture(NULL,0)) && !a->active && !g_tls.in_gpu)
+        rsxf_frame(frame,tb,a->owner_incarnation,p_window_gate(g_prof),p_window_id(g_prof));
+}
+static void auto_frame(uint64_t frame,uint64_t tb)
 {
     auto_capture *a=owner_capture(NULL,1);
     if(a && !p_window_gate(g_prof)) {
@@ -2111,7 +2256,17 @@ void p_auto_seal_claim(void)
     auto_config_stop(&configuration);
 }
 
+static void auto_drain(prof *p, int seal);
 void p_auto_drain(prof *p, int seal)
+{
+    const auto_wire_config *c;
+    auto_drain(p,seal);
+    if(p->snk.failed || !rsxf_selected()) return;
+    c=auto_config_read(&configuration);
+    if(!c) return; /* CONFIG not frozen yet: the capture's CONFIG follows AUTO's */
+    rsxf_drain(chunk,p,!c->reason && capture!=NULL,seal);
+}
+static void auto_drain(prof *p, int seal)
 {
     const auto_wire_config *c;
     uint8_t b[64]={0};
@@ -2242,6 +2397,25 @@ void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context,uint32_t offs
     s=segment_find(a,context);
     if(!s || s->external) s=segment_at(a,(gpp_ctx *)(void *)context);
     if(s && s->open) s->fp=offset;
+}
+/* Program bind hooks (gcm_cg_bridge.h, rsx_legacy): the container's ucode bound at an FP offset of the owner
+ * context. Inert unless the RSX frame capture is selected. */
+void ps3dk_prof__rsxf_bind(void *ctx, const void *ucode, uint32_t bytes, uint32_t offset);
+void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *context,const void *ucode,uint32_t bytes,uint32_t offset)
+{
+    if(!RSXF_ON() || !context || !p_ready() || !owner_capture((gpp_ctx *)(void *)context,0)) return;
+    ps3dk_prof__rsxf_bind(context,ucode,bytes,offset);
+}
+void ps3dk_prof__rsxf_container(void *ctx, const void *container, uint32_t kind);
+void ps3dk_prof__rsxf_container_bind(struct _gcmCtxData *context,const void *container,uint32_t kind)
+{
+    if(!RSXF_ON() || !context || !p_ready() || !owner_capture((gpp_ctx *)(void *)context,0)) return;
+    ps3dk_prof__rsxf_container(context,container,kind);
+}
+/* 1 on the registered AUTO owner thread (labels are owner-only). */
+int ps3dk_prof__auto_owner_self(void)
+{
+    return p_ready() && owner_capture(NULL,0)!=NULL;
 }
 /* One refused range, by reason (AUTO_RR_*): the capture totals (STATUS) and, inside a coverage frame, its row. A row
  * count that reaches UINT32_MAX sticks there and marks the row SATURATED. */

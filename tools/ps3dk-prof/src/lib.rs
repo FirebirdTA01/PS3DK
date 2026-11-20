@@ -30,6 +30,7 @@ pub mod elf_symbols;
 pub mod frames_foreign;
 pub mod hash;
 pub mod model;
+pub mod nv40_disasm;
 pub mod paths;
 pub mod profile;
 pub mod reader;
@@ -42,6 +43,8 @@ pub mod rolling_file;
 pub mod rsx_measured;
 pub mod report;
 pub mod rsx_capture;
+pub mod rsx_frame;
+pub mod rsx_state;
 pub mod spu_ticks;
 pub mod waits;
 pub mod windows;
@@ -58,6 +61,9 @@ pub use model::{
 pub mod arcs;
 pub mod companions;
 pub mod export;
+pub mod snapshot_support;
+pub mod snapshot_export;
+pub mod sha256;
 pub mod gmon;
 mod wire;
 

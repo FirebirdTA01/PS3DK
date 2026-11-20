@@ -219,6 +219,13 @@ pub const OP_READ_REFUSED: u16 = 16;
 pub const OP_PUBLICATION_UNKNOWN: u16 = 32;
 /// D1: built inside a CALL segment; u32@92 segment ordinal, u32@116 call ordinal.  Only when CONFIG covers CALL.
 pub const OP_SEGMENT: u16 = 64;
+/// Ringed CONFIGs: the RSX frame capture's ISOLATED timing wrote a WAIT_FOR_IDLE before each of this draw's markers.
+/// Its interval is not comparable with pipelined ones: a frame holding such operations is labelled ISOLATED and kept
+/// out of the cross-frame tag and range summaries.
+pub const OP_ISOLATED: u16 = 256;
+/// The label of a frame whose draws the RSX frame capture timed isolated.
+pub const ISOLATED_FRAME: &str = "ISOLATED: timed by the RSX frame capture with WAIT_FOR_IDLE around each draw's \
+markers; its span and busy time are not comparable with pipelined frames and stay out of the tag and range summaries";
 pub const FR_TOKEN: u16 = 1;
 pub const FR_FINAL: u16 = 2;
 pub const FR_SATURATED: u16 = 4;
@@ -765,7 +772,7 @@ impl Reader {
             CHUNK_AUTO_CONFIG => self.config(payload, cap, rsx_domains, declared),
             CHUNK_AUTO_OPS => self.ops(payload),
             CHUNK_AUTO_COVERAGE => self.coverage(payload),
-            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref()),
+            CHUNK_AUTO_STATUS => self.status(payload, cap.export.as_ref(), cap.snapshot.as_ref()),
             CHUNK_AUTO_CLOCK => self.clock(payload),
             _ => unreachable!("AUTO chunk type {ty}"),
         }
@@ -1028,7 +1035,7 @@ impl Reader {
             if id <= self.last_op {
                 return bad(r, format!("{at}: id not above {}", self.last_op));
             }
-            let known = if cfg.ringed() { 255 } else if cfg.segments_covered() { 127 } else { 63 };
+            let known = if cfg.ringed() { 255 | OP_ISOLATED } else if cfg.segments_covered() { 127 } else { 63 };
             if flags & !known != 0 {
                 return bad(r, format!("{at}: unknown flags {flags:#x}"));
             }
@@ -1476,7 +1483,7 @@ impl Reader {
         Ok(())
     }
 
-    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>) -> Result<(), Malformed> {
+    fn status(&mut self, payload: &[u8], export: Option<&crate::model::ExportRecord>, snapshot: Option<&crate::snapshot_support::Selection>) -> Result<(), Malformed> {
         let r = Rule::AutoStatus;
         let att = self.result.config.as_ref().and_then(Config::attached);
         let ringed = att.is_some_and(Attached::ringed);
@@ -1631,7 +1638,7 @@ impl Reader {
                 n[2] == self.result.ops_parsed as u64
             };
             let frames_ok = if let Some(exp) = export {
-                self.result.frames_parsed == exp.frame_last - exp.frame_first + 1
+                self.result.frames_parsed == snapshot.map_or(exp.frame_last - exp.frame_first + 1, |s|s.auto_rows)
                     && n[5] == exp.source_auto_frames
             } else {
                 n[5] == self.result.frames_parsed
@@ -2068,6 +2075,8 @@ pub struct FrameView {
     pub rsx_busy_bounds: Option<(u64, u64)>,
     /// Covered operations recorded for this frame that were built inside CALL segments.
     pub segment_ops: u64,
+    /// Covered operations of this frame the RSX frame capture timed isolated (OP_ISOLATED); nonzero labels the frame.
+    pub isolated_ops: u64,
     /// 63/11 only (else zero): `records` is then the frame's BUILD population (records not built in a segment
     /// recorded here, plus segment records built here wherever recorded), reconciled with `observed`; `recorded` is
     /// the EXECUTION population (covered records recorded here, which timing uses); `segment_imports` the segment
@@ -2539,6 +2548,7 @@ pub(crate) fn analyze_inventory(inv: &Inventory, export: Option<&crate::model::E
             rsx_frame_ppu: None,
             rsx_busy_bounds: None,
             segment_ops: ops.iter().filter(|o| o.flags & OP_SEGMENT != 0).count() as u64,
+            isolated_ops: ops.iter().filter(|o| o.flags & OP_ISOLATED != 0).count() as u64,
             recorded: if build { ops.len() as u64 } else { 0 },
             segment_imports: if build {
                 ops.iter().filter(|o| o.flags & OP_SEGMENT != 0 && o.build != Some((f.owner, f.frame))).count() as u64
@@ -2999,6 +3009,9 @@ pub fn write_text<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         if r.unsealed.is_some() && f.flags & FR_OPEN != 0 {
             writeln!(out, "  row OPEN in the file: the writer implied its closure; its end was not observed")?;
         }
+        if f.isolated_ops != 0 {
+            writeln!(out, "  {ISOLATED_FRAME} ({} operation(s))", f.isolated_ops)?;
+        }
         if r.build_frames {
             if r.call_bracket {
                 writeln!(out, "  segments: built records {:?} recorded here {}; imports {}, unrepresented >= {}, call_covered {}, dropped \
@@ -3132,6 +3145,10 @@ pub fn write_json<W: std::io::Write>(out: &mut W, r: &Report) -> std::io::Result
         "rsx_frame_ppu":f.rsx_frame_ppu.map(|(a, b)| json!({"lo":a,"hi":b})),"segment_ops":f.segment_ops,
         "presentation":f.presentation.as_ref().map(presentation_json),
         "verdict":f.verdict.key(),"reason":f.reason}))).map(|(f, mut v)| {
+        if f.isolated_ops != 0 {
+            // only frames the RSX frame capture timed isolated: other captures keep their exact JSON
+            v["isolated_ops"] = json!(f.isolated_ops);
+        }
         if r.build_frames {
             // 63/11: the build count (observed, reconciled with `records`) and the execution count are distinct
             let built: u64 = f.observed.iter().fold(0u64, |a, &b| a.saturating_add(b));
@@ -3332,9 +3349,9 @@ fn op_kind_name(kind: u16) -> &'static str {
 }
 
 fn op_flag_names(flags: u16) -> String {
-    const NAMES: [(u16, &str); 7] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
+    const NAMES: [(u16, &str); 8] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
         (OP_CLOCK_INVALID, "CLOCK_INVALID"), (OP_READ_REFUSED, "READ_REFUSED"),
-        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT")];
+        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT"), (OP_ISOLATED, "ISOLATED")];
     let v: Vec<&str> = NAMES.iter().filter(|(b, _)| flags & b != 0).map(|(_, n)| *n).collect();
     if v.is_empty() { "-".into() } else { v.join("|") }
 }
@@ -3469,6 +3486,9 @@ pub struct TagFrame {
     pub ranges_refused: u32,
     /// 3071/11 and 4095/11: `ranges_refused` by reason (RANGE_REASONS order); None for older writers.
     pub range_refused: Option<[u32; 10]>,
+    /// Covered operations the RSX frame capture timed isolated (OP_ISOLATED): such a frame is shown but kept out of
+    /// the summaries.
+    pub isolated_ops: u64,
 }
 #[derive(Debug, Clone, Default)]
 pub struct ByTag {
@@ -3536,6 +3556,7 @@ fn by_tag_impl(cap: &Capture) -> ByTag {
         let key = (f.owner, f.frame);
         let mine: Vec<&Op> = inv.ops.iter().filter(|o| o.token() == Some(key)).collect();
         let mut tf = TagFrame { owner: f.owner, frame: f.frame, outside_timed_range: f.outside_timed, ranges_refused: f.ranges_refused, range_refused: f.range_refused, ..TagFrame::default() };
+        tf.isolated_ops = mine.iter().filter(|o| o.covered() && o.flags & OP_ISOLATED != 0).count() as u64;
         let excluded = (0..3).fold(0u64, |a, k| a.saturating_add(f.excluded(k)));
         tf.untimed = f.outside_timed.iter().fold(excluded, |a, &b| a.saturating_add(b));
         tf.unrepresented = f.segment_unrepresented;
@@ -3669,10 +3690,20 @@ fn p95(mut v: Vec<u64>) -> u64 {
     v[rank as usize - 1]
 }
 
+/// The frames the summaries cover: every frame but those the RSX frame capture timed isolated.
+fn summarized(b: &ByTag) -> impl Iterator<Item = &TagFrame> {
+    b.frames.iter().filter(|f| f.isolated_ops == 0)
+}
+
+/// Frames kept out of the summaries because the RSX frame capture timed them isolated.
+pub fn isolated_frames(b: &ByTag) -> u64 {
+    b.frames.iter().filter(|f| f.isolated_ops != 0).count() as u64
+}
+
 /// Whole-window summary per tag: (frames seen, op sum, busy sum, busy median per frame, busy p95 per frame) over the frames it appears in.
 pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<u32, Vec<&TagRow>> = BTreeMap::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for (t, r) in &f.tags { per.entry(*t).or_default().push(r); }
     }
     per.into_iter().map(|(t, rows)| {
@@ -3685,7 +3716,7 @@ pub fn tag_summary(b: &ByTag) -> BTreeMap<u32, (u64, u64, u64, u64, u64)> {
 /// Whole-window summary per range name: (frames seen, ranges, raw sum, raw median per frame, raw p95 per frame).
 pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<String, Vec<&RangeRow>> = BTreeMap::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for (n, r) in &f.ranges { per.entry(n.clone()).or_default().push(r); }
     }
     per.into_iter().map(|(n, rows)| {
@@ -3702,7 +3733,7 @@ pub fn range_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
 pub fn range_occurrence_summary(b: &ByTag) -> BTreeMap<String, (u64, u64, u64, u64, u64)> {
     let mut per: BTreeMap<String, (u64, u64, u64, u64, u64)> = BTreeMap::new();
     let mut seen: std::collections::BTreeSet<(String, u32, u64)> = std::collections::BTreeSet::new();
-    for f in &b.frames {
+    for f in summarized(b) {
         for r in &f.range_occurrences {
             let entry = per.entry(r.name.clone()).or_default();
             if seen.insert((r.name.clone(), f.owner, f.frame)) { entry.0 += 1; }
@@ -3728,7 +3759,8 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         writeln!(out, "{t}; the summary covers the retained rows only")?;
     }
     for f in &b.frames {
-        writeln!(out, "frame {}/{}: untimed {}, unrepresented {}", f.owner, f.frame, f.untimed, f.unrepresented)?;
+        writeln!(out, "frame {}/{}: untimed {}, unrepresented {}{}", f.owner, f.frame, f.untimed, f.unrepresented,
+            if f.isolated_ops != 0 { "; ISOLATED (RSX frame capture), not in the summary" } else { "" })?;
         if let Some(by) = f.range_refused.as_ref().filter(|_| f.ranges_refused != 0) {
             writeln!(out, "  AUTO ranges refused: {}", row_reasons_text(f.ranges_refused, by))?;
         }
@@ -3748,6 +3780,9 @@ pub fn write_by_tag_text<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         }
     }
     writeln!(out, "summary")?;
+    if isolated_frames(b) != 0 {
+        writeln!(out, "  {} frame(s) timed isolated by the RSX frame capture are not in the summary", isolated_frames(b))?;
+    }
     for (t, (n, ops, busy, med, hi)) in tag_summary(b) {
         writeln!(out, "  tag {t:#x}: {n} frame(s), ops {ops}, busy sum {busy}, median per frame {med}, p95 per frame {hi}")?;
     }
@@ -3793,6 +3828,15 @@ pub fn write_by_tag_json<W: std::io::Write>(out: &mut W, b: &ByTag) -> std::io::
         // unsealed captures only, so sealed captures keep their exact JSON
         v["tail"] = json!(t);
     }
+    if isolated_frames(b) != 0 {
+        // only with frames the RSX frame capture timed isolated: other captures keep their exact JSON
+        v["summary"]["isolated_frames_excluded"] = json!(isolated_frames(b));
+        for (f, j) in b.frames.iter().zip(v["frames"].as_array_mut().into_iter().flatten()) {
+            if f.isolated_ops != 0 {
+                j["isolated_ops"] = json!(f.isolated_ops);
+            }
+        }
+    }
     serde_json::to_writer(&mut *out, &v).map_err(std::io::Error::other)?;
     writeln!(out)
 }
@@ -3805,6 +3849,29 @@ mod tests {
         let mut tags = BTreeMap::new();
         tags.insert(tag, TagRow { ops: 1, busy_raw, untimed_in_calls: 0 });
         TagFrame { owner: 1, frame: 0, tags, ..TagFrame::default() }
+    }
+
+    #[test]
+    fn isolated_frames_stay_out_of_the_summaries() {
+        // a pipelined frame and the RSX frame capture's isolated one: the summary keeps only the pipelined frame
+        let mut iso = one(0xa, 900);
+        iso.frame = 1;
+        iso.isolated_ops = 1;
+        iso.ranges.insert("pass".into(), RangeRow { count: 1, raw: 900 });
+        let b = ByTag { tagged: true, frames: vec![one(0xa, 40), iso], tail: None };
+        assert_eq!(*tag_summary(&b).get(&0xa).unwrap(), (1, 1, 40, 40, 40));
+        assert!(range_summary(&b).is_empty());
+        assert_eq!(isolated_frames(&b), 1);
+        let mut text = Vec::new();
+        write_by_tag_text(&mut text, &b).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        assert!(text.contains("frame 1/1: untimed 0, unrepresented 0; ISOLATED (RSX frame capture), not in the summary"));
+        assert!(text.contains("1 frame(s) timed isolated by the RSX frame capture are not in the summary"));
+        let mut json = Vec::new();
+        write_by_tag_json(&mut json, &b).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!((v["summary"]["isolated_frames_excluded"].as_u64(), v["frames"][1]["isolated_ops"].as_u64(),
+            v["frames"][0].get("isolated_ops")), (Some(1), Some(1), None));
     }
 
     #[test]

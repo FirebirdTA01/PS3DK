@@ -30,10 +30,14 @@ PINS=(DRAIN,CORE,LIVE,PPU,INSPECT)
 # Wrong combined metadata still selects the PPU budget; schema2 stays untouched.
 # Public API/header/session delta reviewed after gate129 native AUTO/Rust3 GREEN;
 # private mutation semantics unchanged, isolated baselines remain mandatory.
+# Repinned for the live auto-start: core/drain gain weak hook calls after init and finalization; live_api.c moves
+# its admission checks (the rolling refusal anchor byte for byte) into servable() under a lock.
+# DRAIN/LIVE repinned again for RSX frame capture (file_flags bit 10 when selected; the protocol v3 RSX frame ops and
+# the live source's .rsxf field): no mutation anchor moved.
 APPROVED_PINS={
-    'sdk/libps3dkprof/src/core/prof_drain.c': 'c61973c33502e99257d2150b48d0aa1a2fadc2a176cd1cdd1cb9ea33eee8abb4',
-    'sdk/libps3dkprof/src/core/prof_core.c': 'd3ef8a105899e764fd15401a4b55127b9fb838f83dd4ebd2f8acdba765307cab',
-    'sdk/libps3dkprof/src/live/live_api.c': '03afdc3e424240b9a9c15333c79047ad443be2b9c044816d9b30be64960914ec',
+    'sdk/libps3dkprof/src/core/prof_drain.c': '9dc59f583b8a1c880c06c4c68127cfd9199a61a49ef53ee4bccd15fd3c7f4346',
+    'sdk/libps3dkprof/src/core/prof_core.c': 'fd8ced34b812dd6f2a62a0274db1c5c9a97a1c79737722ee7a6043ad7cd71327',
+    'sdk/libps3dkprof/src/live/live_api.c': 'fdf9c776041e74f477aebd926d10d5e8b34f31ed7d89e579c14ceb56c9b17090',
     'sdk/libps3dkprof/src/rolling/roll_ppu.c': '94c5143367194e458967b62b755cdd77b3afc07fab2f0e9758818115b65fec02',
     'sdk/libps3dkprof/src/rolling/roll_retention_inspect.c': '959224ba03ebc3b9965e64f4d3b0f2d5a453fc7dc52720ee307ea46f596391f0',
 }

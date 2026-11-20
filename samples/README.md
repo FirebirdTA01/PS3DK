@@ -38,6 +38,13 @@ per-SPE job telemetry and raw GPU timestamp reports on non-DEX homebrew consoles
 It currently requires the candidate profiler SDK; the raw device readings are
 not yet a calibrated system timeline. Profiling can be disabled for comparison.
 
+[`rsx-frame`](profiling/rsx-frame/README.md) submits a known draw matrix
+(2 vertex x 3 fragment programs, three texture formats, depth / cull / blend
+variants, an indexed draw, an instance run, labels in nested scopes) every frame,
+requests an RSX frame capture from app code and exits cleanly; its checker
+compares the captured frame with an expected table field by field. Hardware and
+RPCS3 validation are pending.
+
 [`spurs-job-zones`](profiling/spurs-job-zones/README.md) is a finite candidate
 proof of explicit SPU zones inside job-queue jobs. Each job has a distinct lane,
 uses the job context's DMA tag, and returns a lane-bound receipt after successful
