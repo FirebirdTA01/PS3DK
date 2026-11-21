@@ -3,8 +3,8 @@
 # surfaces, index, textures.<slot>, attributes.<index>. The values follow source/main.c (surface(), fixed_function(),
 # bind_texture(), bind_vp()) and the attribute slots the compiler gives POSITION, COLOR and TEXCOORD0 (0, 3, 8); a
 # field not listed is not checked. Fields that depend on the display (sizes, offsets) or on memory placement are left
-# out. Draw 0 (the clear) checks no attribute: the decoder resets before it (state_reset; in RPCS3 the rejected word
-# is a CALL), so the attributes the previous frame disabled are unknown there.
+# out. Draw 0 (the clear) shows the three arrays the previous frame's immediate draw disabled as disabled: the
+# decoder follows the flip's CALL into the firmware's default-state routine (decoder 5), so it no longer resets there.
 #ordinal	table	field	value
 *	surfaces	color_format	"X8R8G8B8"
 *	surfaces	zeta_format	"Z24S8"
@@ -14,6 +14,9 @@
 *	surfaces	targets.mrt	false
 *	surfaces	color0.location	"local"
 *	surfaces	zeta.location	"local"
+0	attributes.0	enabled	false
+0	attributes.3	enabled	false
+0	attributes.8	enabled	false
 1	attributes.0	enabled	true
 2	attributes.0	enabled	true
 3	attributes.0	enabled	true
