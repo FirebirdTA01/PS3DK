@@ -79,44 +79,21 @@ information.
 
 ## PPU C++ runtime is built for a single-threaded model
 
-**Status:** open.  The part that affected exception handling is fixed on
-main (GCC patch 0038: per-thread exception state); the rest of the
-single-threaded configuration remains.
+**Status:** fixed in v0.26.0.  The PPU GCC 16 toolchain builds libstdc++
+and libgcc with the POSIX thread model over librt's pthreads, so
+`std::thread`, `std::mutex`, `std::condition_variable` and `std::future`
+work, function-local statics are initialised under a guard and
+`std::shared_ptr` counts are atomic.  Objects built by an older toolchain
+must be rebuilt to get these.  Documented here for the history.
 
-**Fixed: exception state.** Up to v0.14.0, libsupc++ kept its exception
-globals (the caught-exception stack and uncaught count behind
+**History.** Up to v0.14.0, libsupc++ kept its exception globals (the
+caught-exception stack and uncaught count behind
 `std::current_exception()` and `std::uncaught_exceptions()`) in one
-object shared by every PPU thread, so two threads inside exception
-handling at once saw each other's exceptions (reproduced on RPCS3).  They
-are now thread-local, one per PPU thread.  This isolates the exception
-globals only; the items below still apply to exception handling on
-several threads.
-
-**Remaining.** The PPU GCC is still configured with
-`--enable-threads=single`, so libstdc++ is built without its thread
-layer (`_GLIBCXX_HAS_GTHREADS` is undefined):
-
-- Creating threads through `std::thread` is not available (the
-  launching constructor is compiled out; `join`/`detach` throw and
-  `hardware_concurrency()` returns 0), and `std::mutex` is not provided.
-- `std::shared_ptr` reference counts use the non-atomic single-thread
-  policy, so owners on different threads that share one control block
-  can corrupt its counts.
-- The first initialization of a function-local static is not guarded
-  against two threads reaching it at once.
-- The emergency pool libsupc++ uses to allocate exceptions when `malloc`
-  fails is guarded by a mutex that is a no-op in this configuration, so
-  two threads throwing under memory exhaustion can collide (established
-  from the source, not reproduced).
-
-**Mitigation.** Use the lv2 or pthread primitives from librt for
-threading and locking; initialize function-local statics before starting
-other threads; when `shared_ptr` owners on different threads share a
-control block, hold one lock around every copy, reset and destruction
-that changes its counts.
-
-**Planned fix.** Give the PPU GCC a real thread model backed by the lv2
-threading primitives already used by librt's pthread layer.
+object shared by every PPU thread; GCC patch 0038 made them thread-local.
+Until v0.26.0 the PPU GCC was configured with `--enable-threads=single`:
+`std::thread` could not launch, `std::mutex` was missing, `shared_ptr`
+counts were not atomic and function-local static initialisation was not
+guarded.
 
 ---
 
