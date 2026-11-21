@@ -41,7 +41,10 @@ retention: retain the installed-library anchor/no-anchor RPCS3 controls in
   and is a failure.
 - Two builds of one commit, with the same version inputs, are
   byte-identical, with no exceptions: `scripts/compare-builds.py <A> <B>`
-  on the two zips exits 0.
+  on the two zips exits 0.  The two runs can land on different runner
+  images, so a build tool that writes its own version into shipped files is
+  pinned in the workflow: the release jobs that run CMake use the exact
+  version in `scripts/ci-pin-cmake.sh` and fail if another one is on PATH.
 - Separately, a deliberate version-only comparison (the same tree with only
   the version changed) shows the expected stamp differences and nothing
   else: `scripts/compare-builds.py <A> <B> --version-string <old>=<new>`

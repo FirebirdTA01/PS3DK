@@ -127,6 +127,11 @@ jobs:
               libelf-dev cmake ninja-build python3 \
               libgmp-dev libssl-dev zlib1g-dev
 
+      - name: Pin CMake (scripts/ci-pin-cmake.sh)
+        # One exact CMake for every job that runs it: CMake writes its version
+        # into shipped files, and runner images carry different versions.
+        run: bash scripts/ci-pin-cmake.sh
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
@@ -148,6 +153,9 @@ jobs:
       - name: Build pkg
         run: |
           bash scripts/build-pkg-host.sh build/host-tools-linux/sfo-pkg
+
+      - name: Check the pinned CMake
+        run: bash scripts/ci-pin-cmake.sh --check
 
       - name: Build rsx-cg-compiler
         run: |
@@ -307,6 +315,11 @@ jobs:
               file perl pkg-config mingw-w64 g++-mingw-w64-x86-64
           which x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++ x86_64-w64-mingw32-windres
 
+      - name: Pin CMake (scripts/ci-pin-cmake.sh)
+        # One exact CMake for every job that runs it: CMake writes its version
+        # into shipped files, and runner images carry different versions.
+        run: bash scripts/ci-pin-cmake.sh
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
@@ -335,7 +348,7 @@ jobs:
           x86_64-w64-mingw32-gcc --version | head -1
           cargo --version
           rustc --version
-          cmake --version | head -1
+          bash scripts/ci-pin-cmake.sh --check
 
       - name: Cross-build Windows host tools
         run: |
@@ -703,6 +716,11 @@ jobs:
           # complain at install time" if the cross gcc isn't on PATH.
           which x86_64-w64-mingw32-gcc x86_64-w64-mingw32-g++
 
+      - name: Pin CMake (scripts/ci-pin-cmake.sh)
+        # One exact CMake for every job that runs it: CMake writes its version
+        # into shipped files, and runner images carry different versions.
+        run: bash scripts/ci-pin-cmake.sh
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Probe build env
@@ -710,7 +728,7 @@ jobs:
           gcc --version | head -1
           x86_64-w64-mingw32-gcc --version | head -1
           rustc --version
-          cmake --version | head -1
+          bash scripts/ci-pin-cmake.sh --check
 
       - name: Cache upstream sources
         uses: actions/cache@v5
