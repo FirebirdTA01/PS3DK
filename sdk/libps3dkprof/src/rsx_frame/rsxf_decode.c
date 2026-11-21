@@ -84,6 +84,7 @@ static void event(rsxf_decoder *d, const rsxf_draw_event *ev)
 {
     rsxf_draw_event e = *ev;
     e.zcull_events = d->zc_events; /* the zcull events since the previous draw or clear belong to this one */
+    e.firmware = d->in_routine;
     d->zc_events = 0;
     if (d->sink)
         d->sink(d->sink_user, &e); /* at once: the registers are this draw's */
@@ -395,7 +396,12 @@ static int call(rsxf_decoder *d, uint32_t h)
         return 0;
     }
     d->routines++;
-    return packets(d, d->io + target / 4u, (d->start - target) / 4u, 1);
+    d->in_routine = 1;
+    {
+        const int ok = packets(d, d->io + target / 4u, (d->start - target) / 4u, 1);
+        d->in_routine = 0;
+        return ok;
+    }
 }
 
 static int packets(rsxf_decoder *d, const uint32_t *p, size_t n, int routine)

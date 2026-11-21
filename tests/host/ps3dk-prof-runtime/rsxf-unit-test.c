@@ -447,7 +447,8 @@ static void zpass_and_zcull(void)
         const uint32_t call0[] = {0x00000002u}, call_seg[] = {0x00000040u | 2u}, call_bad[] = {0x00000020u | 2u};
         uint32_t resets;
         prefix[0] = M(0, 0x17cc, 1); prefix[1] = 1; prefix[2] = M(0, 0x1d84, 1); prefix[3] = 3;
-        prefix[4] = 0x00020000u;                                           /* RET */
+        prefix[4] = M(0, 0x1d94, 1); prefix[5] = 0xf0;                     /* a clear inside the routine */
+        prefix[6] = 0x00020000u;                                           /* RET */
         prefix[8] = M(0, 0x17cc, 1); prefix[9] = 0; prefix[10] = 0x00000002u; /* a nested CALL */
         ps3dk_prof__rsxf_decode_init(&d);
         d.io = prefix;
@@ -455,6 +456,12 @@ static void zpass_and_zcull(void)
         decode(call0, 1, 1);
         assert(d.resets == 0 && d.routines == 1 && ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_COUNTING &&
                d.reg[0x1d84 >> 2] == 3);
+        assert(d.n_events == 1 && d.events[0].kind == RSXF_K_CLEAR && d.events[0].firmware == 1 && !d.in_routine);
+        {
+            const uint32_t clear[] = {M(0, 0x1d94, 1), 0xf0};
+            decode(clear, 2, 1);
+            assert(d.n_events == 2 && d.events[1].firmware == 0); /* the app's own clear */
+        }
         resets = d.resets;
         decode(call_seg, 1, 0);
         assert(d.resets == resets + 1 && d.bad_reason == AUTO_RING_REJECT_CALL_TARGET);

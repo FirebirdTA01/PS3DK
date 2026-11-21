@@ -2444,7 +2444,10 @@ void ps3dk_prof__rsxf_zcull_bind(uint32_t bound, uint32_t index, uint32_t offset
                                  uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir,
                                  uint32_t format, uint32_t s_func, uint32_t s_ref, uint32_t s_mask)
 {
-    if(!RSXF_ON() || !p_ready() || !owner_capture(NULL,0)) return;
+    /* the owner thread of the attached capture; CONFIG need not be frozen yet (binds come at start-up, before the
+     * first covered draw), so this is the owner identity alone, never owner_capture's first-observation path */
+    const auto_capture *a=capture;
+    if(!RSXF_ON() || !a || !pal_owner_is_self(&a->owner)) return;
     ps3dk_prof__rsxf_zcull(bound,index,offset,width,height,cull_start,z_format,aa_format,dir,format,s_func,s_ref,s_mask);
 }
 /* Program bind hooks (gcm_cg_bridge.h, rsx_legacy): the container's ucode bound at an FP offset of the owner

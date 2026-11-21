@@ -95,7 +95,9 @@ enum { RSXF_K_ARRAY = 1, RSXF_K_INDEX = 2, RSXF_K_CLEAR = 3, RSXF_K_INLINE_ARRAY
        RSXF_K_IMMEDIATE = 9 };
 enum { RSXF_DF_HOOKED = 1, RSXF_DF_DECODED = 2, RSXF_DF_MISMATCH = 4, RSXF_DF_STATE_UNKNOWN = 8,
        /* decoder 5: INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw (one-shot events) */
-       RSXF_DF_ZCULL_INVALIDATED = 16, RSXF_DF_ZCULL_CLEARED = 32 };
+       RSXF_DF_ZCULL_INVALIDATED = 16, RSXF_DF_ZCULL_CLEARED = 32,
+       /* decoder 5: a decoded-only draw or clear inside a firmware-reserved prefix routine (a flip's CALL) */
+       RSXF_DF_FIRMWARE = 64 };
 enum { RSXF_UNTIMED_OUTSIDE_RANGE = 32, RSXF_UNTIMED_RING_FULL = 33, RSXF_UNTIMED_RING_STATE = 34,
        RSXF_UNTIMED_NOT_HOOKED = 64, RSXF_UNTIMED_NO_WINDOW = 65 };
 enum { RSXF_PROFILE_VP = 1, RSXF_PROFILE_FP = 2 };
@@ -184,6 +186,7 @@ int ps3dk_prof__rsxf_shadowed(uint32_t method);
 typedef struct rsxf_draw_event {
     uint32_t kind, mode, first, count, index_offset, index_type, index_location, clear_mask, words;
     uint32_t zcull_events; /* RSXF_DF_ZCULL_* written since the previous draw or clear */
+    uint32_t firmware;     /* decoded inside a firmware-reserved prefix routine */
 } rsxf_draw_event;
 typedef struct rsxf_decoder {
     uint32_t vp[RSXF_VP_SLOTS][4];
@@ -226,7 +229,7 @@ typedef struct rsxf_decoder {
      * offset. A CALL to a target below start (the firmware's per-flip default-state routine) is decoded there, one
      * level, up to its RET, so its state writes are seen instead of a reset; NULL io: every CALL resets. */
     const uint32_t *io;
-    uint32_t start, routines;
+    uint32_t start, routines, in_routine;
     /* the open BEGIN_END group */
     uint32_t in_group, group_batches;
     rsxf_draw_event group;

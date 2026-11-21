@@ -48,7 +48,11 @@ def capture(name, mode, half='only'):
 
 def matching():
     first, second = capture('pixels-both', 'pixels', 'first'), capture('pixels-both', 'pixels', 'second')
-    second['pairs'] = [{'first': i, 'second': i} for i in range(len(ORDER))]
+    # a draw of the firmware's flip routine before each view's draws: left out of the comparison
+    for c in (first, second):
+        c['draws'].insert(0, {'ordinal': -1, 'label': None, 'firmware': True})
+    second['pairs'] = [{'first': 0, 'second': 0}]
+    second['pairs'] += [{'first': i + 1, 'second': i + 1} for i in range(len(ORDER))]
     return {'captures': [capture('pixels', 'pixels'), capture('observe', 'observe'), first, second]}
 
 
@@ -104,12 +108,20 @@ def main():
              'zcull invalidated')
         case('kil early-z', lambda doc: draw(doc, 0, 'kil_half')['pixels'].update(early_z='eligible'), 'early-z')
         case('region missing', lambda doc: doc['captures'][0].update(zcull_regions=[]), 'zcull region 0')
-        case('pipelined != isolated', lambda doc: draw(doc, 3, 'full')['pixels'].update(samples=W * H - 1),
+        case('pipelined != isolated', lambda doc: doc['captures'][3]['draws'][1 + ORDER.index('full')]['pixels'].update(samples=W * H - 1),
              'pipelined')
         case('a capture missing', lambda doc: doc['captures'].pop(1), 'observe: 0 views')
         case('draw order', lambda doc: doc['captures'][0]['draws'].reverse(), 'draws [')
         case('app query changed', lambda doc: None, 'tty: app query frame 31',
              tty=TTY.replace(f'frame=31 value={W * H}', 'frame=31 value=5'))
+        case('app query line missing', lambda doc: None, 'captured frames missing', tty=TTY.replace('frame=61', 'frame=62'))
+        # a late result outside the captured frames (an emulator's first frames) is not a difference
+        rc, out = run(tmp, matching(), 'PIXELS appquery frame=0 value=0 expect=1\n' + TTY)
+        if rc != 0:
+            print('FAIL an early late result refused:\n' + out)
+            bad += 1
+        else:
+            print('ok   a late result outside the captured frames accepted')
         print('check_pixels host test', 'PASS' if not bad else f'FAIL ({bad})')
         return 1 if bad else 0
 

@@ -155,6 +155,8 @@ pub const DF_STATE_UNKNOWN: u16 = 8;
 /// Decoder 5: INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw.
 pub const DF_ZCULL_INVALIDATED: u16 = 16;
 pub const DF_ZCULL_CLEARED: u16 = 32;
+/// Decoder 5: a decoded-only draw or clear inside a firmware-reserved prefix routine (the flip's CALL), not the app's.
+pub const DF_FIRMWARE: u16 = 64;
 // untimed reasons beyond the AUTO exclusion columns 2..11
 pub const UNTIMED_OUTSIDE_RANGE: u32 = 32;
 pub const UNTIMED_RING_FULL: u32 = 33;
@@ -861,13 +863,16 @@ impl Reader {
                         }
                     }
                     let PendingDraw { state_reset, state, vpc_reset, vpc, fpc, .. } = pd;
-                    let flags_known = if decoder >= 5 { 63 } else { 15 };
+                    let flags_known = if decoder >= 5 { 127 } else { 15 };
                     if flags & !flags_known != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 {
                         return bad(format!("draw {ordinal}: flags {flags:#x}"));
                     }
                     // u32@84: decoder 5 the ZPASS state (5 reserved; FORCED only in a PIXELS capture), zero before
                     if (decoder < 5 && r1 != 0) || r1 > 6 || r1 == 5 || (r1 == 3 && !rec.begin.pixels) {
                         return bad(format!("draw {ordinal}: ZPASS state {r1}"));
+                    }
+                    if flags & DF_FIRMWARE != 0 && (flags & DF_HOOKED != 0 || op_id != 0) {
+                        return bad(format!("draw {ordinal}: FIRMWARE on a hooked draw"));
                     }
                     if (untimed == 0) != (op_id != 0) {
                         return bad(format!("draw {ordinal}: untimed reason {untimed} with op id {op_id}"));
@@ -2580,6 +2585,9 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
                 d.gap.map_or_else(|| "-".into(), |g| g.to_string()), df.text(),
                 px.samples.map_or_else(|| "-".into(), |s| s.to_string()),
                 if d.op_mismatch || d.raw.flags & DF_MISMATCH != 0 { " MISMATCH" } else { "" })?;
+            if d.raw.flags & DF_FIRMWARE != 0 {
+                writeln!(out, "    (in the firmware's flip routine, not the application's)")?;
+            }
         }
     }
     Ok(())
@@ -2707,6 +2715,7 @@ fn draw_json(f: &FrameView, d: &Draw, folder: &Folder) -> Value {
     o.insert("mismatch".into(), json!(d.op_mismatch || r.flags & DF_MISMATCH != 0));
     o.insert("state_unknown".into(), json!(r.flags & DF_STATE_UNKNOWN != 0));
     o.insert("op_id".into(), json!(r.op_id));
+    o.insert("firmware".into(), json!(r.flags & DF_FIRMWARE != 0));
     o.insert("timing".into(), timing_json(&d.timing));
     o.insert("gap".into(), json!(d.gap));
     o.insert("pass".into(), json!(d.pass));
