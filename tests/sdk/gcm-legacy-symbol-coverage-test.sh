@@ -193,23 +193,78 @@ if grep -qE '(^|[^A-Z_])CFLAGS="\$cc_flags"' "$script"; then
 fi
 # Producer side.  Checking only that the OLD spelling is gone leaves the
 # script free to pass no ABI flag at all, so assert it positively: join the
-# backslash continuations, then every `make -C` that builds a merged object
-# must carry ABI_CFLAGS on that same command.
-fed=0
-while IFS= read -r cmd; do
-    case "$cmd" in
-        *"make -C"*)
-            fed=$((fed + 1))
-            case "$cmd" in
-                *'ABI_CFLAGS="$cc_flags"'*) ;;
-                *) fail "build-cell-stub-archives.sh runs a merged-object build with no ABI flag: $cmd" ;;
-            esac
-            ;;
-    esac
-done <<EOF
+# backslash continuations, then every command that builds a merged object -
+# a `make -C`, or the make_clean_all helper (scripts/lib/stub-archive-helpers.sh)
+# that runs `make -C <dir> clean` and `make -C <dir> all` - must carry
+# ABI_CFLAGS on that same command.  When the helper is used, its definition
+# must still run `make -C "$1"`, so the variables assigned on the call reach
+# both makes.  check_d <script> <helper> prints one line per problem and
+# fails if there is any; no merged-object build at all is a problem.
+check_d() {
+    local script="$1" helper="$2" fed=0 helped=0 bad=0 cmd
+    while IFS= read -r cmd; do
+        case "$cmd" in
+            *"make -C"*|*make_clean_all\ *)
+                case "$cmd" in
+                    *"make_clean_all() {"*|*"make_clean_all()"*) continue ;; # a definition, not a call
+                esac
+                fed=$((fed + 1))
+                case "$cmd" in *make_clean_all\ *) helped=$((helped + 1)) ;; esac
+                case "$cmd" in
+                    *'ABI_CFLAGS="$cc_flags"'*) ;;
+                    *) echo "build-cell-stub-archives.sh runs a merged-object build with no ABI flag: $cmd"; bad=1 ;;
+                esac
+                ;;
+        esac
+    done <<EOF
 $(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' "$script" | tr -s ' \t' ' ')
 EOF
-[ "$fed" -gt 0 ] || fail "check D found no merged-object make invocations to verify"
+    if [ "$fed" -eq 0 ]; then
+        echo "check D found no merged-object make invocations to verify"
+        bad=1
+    fi
+    if [ "$helped" -gt 0 ]; then
+        if ! grep -q 'stub-archive-helpers.sh' "$script"; then
+            echo "build-cell-stub-archives.sh calls make_clean_all without sourcing scripts/lib/stub-archive-helpers.sh"
+            bad=1
+        elif [ "$(sed -n '/^make_clean_all() {/,/^}/p' "$helper" | grep -o 'make -C "\$1"' | wc -l)" -lt 2 ]; then
+            echo "make_clean_all in $helper no longer runs make -C \"\$1\" clean and all"
+            bad=1
+        fi
+    fi
+    return "$bad"
+}
+helper="$root/scripts/lib/stub-archive-helpers.sh"
+if ! out=$(check_d "$script" "$helper"); then
+    while IFS= read -r line; do fail "$line"; done <<EOF
+$out
+EOF
+fi
+# Check D's own self-tests: the guard must fail when the merged-object builds
+# are really gone, when one loses its ABI flag, and when the helper stops
+# running make -C.
+cp "$script" "$selftest_root/no-builds.sh"
+sed -i -e 's/make_clean_all "\$[a-z_]*_dir"/true/' -e 's/make -C "\$[a-z_]*_dir"[^|;&]*/true/' "$selftest_root/no-builds.sh"
+if out=$(check_d "$selftest_root/no-builds.sh" "$helper"); then
+    fail "D self-test 1: check D accepted a script with no merged-object build"
+else
+    case "$out" in
+        *"found no merged-object make invocations"*) note "D self-test 1 ok: no merged-object build is refused" ;;
+        *) fail "D self-test 1: refused for another reason: $out" ;;
+    esac
+fi
+sed -e '0,/ABI_CFLAGS="\$cc_flags" \\/s//\\/' "$script" > "$selftest_root/no-flag.sh"
+if out=$(check_d "$selftest_root/no-flag.sh" "$helper"); then
+    fail "D self-test 2: check D accepted a merged-object build without ABI_CFLAGS"
+else
+    note "D self-test 2 ok: a build without the ABI flag is refused"
+fi
+sed -e 's/make -C "\$1"/make -C /' "$helper" > "$selftest_root/helper.sh"
+if grep -q make_clean_all "$script" && out=$(check_d "$script" "$selftest_root/helper.sh"); then
+    fail "D self-test 3: check D accepted a make_clean_all that no longer runs make -C \"\$1\""
+else
+    note "D self-test 3 ok: a helper that stops running make -C \"\$1\" is refused"
+fi
 for mk in sdk/libgcm_sys_legacy sdk/libio_legacy sdk/libc_stub_extras \
           sdk/libfiber_stub_extras sdk/libusb_legacy; do
     [ -f "$root/$mk/Makefile" ] || continue

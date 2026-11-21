@@ -35,6 +35,10 @@ jobs:
       - name: Test sync-versions.sh keeps tools/VERSION canonical
         run: bash tests/sdk/sync-versions-test.sh
 
+      # build-cell-stub-archives.sh: clean and all as two makes, nidgen found under CARGO_TARGET_DIR (no toolchain).
+      - name: Test the stub-archive build helpers
+        run: bash tests/sdk/stub-archive-helpers-test.sh
+
       # Tracked text and the new commits' messages use the project's own
       # terms for the platform (encoded patterns, exact-line exceptions).
       - name: Test the wording scanner's refusals and controls
