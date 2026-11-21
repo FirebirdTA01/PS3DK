@@ -582,3 +582,94 @@ fn vertex_unknown_encodings_and_unterminated() {
     assert_eq!(lines[1].text, "?? deadbeef ; 1 trailing word(s), not a whole instruction");
     assert_eq!((lines[2].kind, lines[2].text.as_str()), (LineKind::Note, "no end bit: the program is unterminated"));
 }
+
+// ---- static texture fetch counts ------------------------------------------------------------------------------------
+
+/// The fetches the DISASSEMBLY shows: (opcode index into TEX_OPS, unit) per fetch line.
+fn listed_fetches(lines: &[Line]) -> Vec<(usize, u32)> {
+    use ps3dk_prof::nv40_disasm::TEX_OPS;
+    let mut out = Vec::new();
+    for l in lines.iter().filter(|l| l.kind == LineKind::Instruction) {
+        let (m, ops) = split_ops(l.text.split(" + ").next().unwrap());
+        let Some(k) = TEX_OPS.iter().position(|o| m.starts_with(o)) else { continue };
+        let unit = ops.last().and_then(|o| o.strip_prefix("TEX")).and_then(|u| u.parse().ok()).expect("a unit");
+        out.push((k, unit));
+    }
+    out
+}
+
+#[test]
+fn texture_fetch_counts_agree_with_the_disassembly_and_the_independent_listing() {
+    use ps3dk_prof::nv40_disasm::{fp_tex_fetches, vp_tex_fetches, TEX_OPS};
+    let mut fetching = 0;
+    for f in fixtures() {
+        let (lines, t) = if f.profile == "vp" {
+            (disasm_vp(&f.words), vp_tex_fetches(&f.words))
+        } else {
+            let bytes: Vec<u8> = f.words.iter().flat_map(|w| w.to_be_bytes()).collect();
+            (disasm_fp(&bytes), fp_tex_fetches(&bytes))
+        };
+        let listed = listed_fetches(&lines);
+        let mut by_op = [0u32; 5];
+        let mut by_unit = [0u32; 16];
+        for &(k, u) in &listed {
+            by_op[k] += 1;
+            by_unit[u as usize] += 1;
+        }
+        assert_eq!((t.by_op, t.by_unit), (by_op, by_unit), "{}: counts differ from the disassembly", f.name);
+        let refs: Vec<String> = f.refs.iter().map(|r| parse_ref(r).op).collect();
+        let independent: Vec<u32> =
+            TEX_OPS.iter().map(|o| refs.iter().filter(|r| r.as_str() == *o).count() as u32).collect();
+        assert_eq!(t.by_op.to_vec(), independent, "{}: counts differ from the independent listing", f.name);
+        assert!(t.exact(), "{}: every fixture decodes through its end bit", f.name);
+        let insns = lines.iter().filter(|l| l.kind == LineKind::Instruction).count() as u32;
+        assert_eq!(t.instructions, insns, "{}", f.name);
+        fetching += usize::from(t.total() > 0);
+    }
+    assert!(fetching >= 3, "the corpus has fetching programs of both profiles ({fetching})");
+}
+
+#[test]
+fn texture_fetch_counts_by_opcode_unit_and_shape() {
+    use ps3dk_prof::nv40_disasm::fp_tex_fetches;
+    let fetch = |op: u32, unit: u32, end: u32| [(op << 24) | (0xF << 9) | (4 << 13) | (unit << 17) | end, 1 | PAD | TRI, PAD, PAD | (0x7FC << 19)];
+    // TEX unit 3, TXP unit 3, TXB unit 0, TXD unit 15, TXL unit 7 (end)
+    let program = [fetch(0x17, 3, 0), fetch(0x18, 3, 0), fetch(0x31, 0, 0), fetch(0x19, 15, 0), fetch(0x2F, 7, 1)];
+    let t = fp_tex_fetches(&fp_bytes(&program));
+    assert_eq!(t.by_op, [1, 1, 1, 1, 1]);
+    assert_eq!(t.units(), [0, 3, 7, 15]);
+    assert_eq!((t.by_unit[3], t.total(), t.instructions, t.exact()), (2, 5, 5, true));
+    assert_eq!(t.ops_text(), "TEX 1 TXP 1 TXL 1 TXB 1 TXD 1");
+    assert_eq!(listed_fetches(&disasm_fp(&fp_bytes(&program))).len(), 5);
+
+    // A constant block is data: words shaped like a TEX inside it are not a fetch.
+    let reads_const = [(1 << 24) | (0xF << 9), 2 | PAD | TRI, PAD, PAD];
+    let mut bytes = fp_bytes(&[reads_const]);
+    bytes.extend(fp_bytes(&[fetch(0x17, 1, 0)]));
+    bytes.extend(fp_bytes(&[fetch(0x17, 2, 1)]));
+    let t = fp_tex_fetches(&bytes);
+    assert_eq!((t.total(), t.units(), t.instructions, t.exact()), (1, vec![2], 2, true));
+
+    // Branches fetch nothing; an unknown opcode makes the counts a lower bound; so does a missing end bit.
+    let branchy = [[(2 << 24) | (1 << 30), 5 << 18, (1 << 31) | 12, 20], fetch(0x17, 4, 1)];
+    let t = fp_tex_fetches(&fp_bytes(&branchy));
+    assert_eq!((t.total(), t.exact()), (1, true));
+    let unknown = [[(0x30 << 24), TRI | PAD, PAD, PAD], fetch(0x17, 4, 1)];
+    let t = fp_tex_fetches(&fp_bytes(&unknown));
+    assert_eq!((t.total(), t.unknown, t.terminated, t.exact()), (1, 1, true, false));
+    let t = fp_tex_fetches(&fp_bytes(&[fetch(0x17, 4, 0)]));
+    assert_eq!((t.total(), t.terminated, t.exact()), (1, false, false));
+    let t = fp_tex_fetches(&fp_bytes(&[[(1 << 24) | (0xF << 9) | 1, (1 << 2) | PAD | TRI, PAD, PAD]]));
+    assert_eq!((t.total(), t.ops_text(), t.exact()), (0, "none".to_string(), true));
+}
+
+#[test]
+fn vertex_texture_fetch_count() {
+    use ps3dk_prof::nv40_disasm::vp_tex_fetches;
+    let f = fixture("vp_tex_tex2d_v.txt");
+    let t = vp_tex_fetches(&f.words);
+    assert_eq!((t.by_op, t.units(), t.instructions, t.exact()), ([0, 0, 1, 0, 0], vec![0], 4, true));
+    // without the instruction carrying the end bit, the walk is unterminated
+    let t = vp_tex_fetches(&f.words[..12]);
+    assert_eq!((t.total(), t.terminated), (1, false));
+}

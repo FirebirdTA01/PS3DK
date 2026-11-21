@@ -130,7 +130,7 @@ fn state_textures_buffers_tabs_render_and_grouping_by_target_is_cached() {
         st.tab = tab;
         let mut drawn = Drawn::default();
         let _ = ctx.run(Default::default(), |ctx| {
-            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
+            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn));
         });
         assert!(drawn.status.is_some());
     }

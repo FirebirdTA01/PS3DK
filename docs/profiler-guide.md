@@ -887,8 +887,9 @@ agents are negotiated as protocol 2 then 1 and show why the button is unavailabl
 Draws default to descending time, with ordinal ties and unavailable times last. Filter by label, shader, kind or
 ordinal, change the sort, or group by program pair, VP, FP, label, tag, pass or kind. Summary and Shaders show the
 reader's arguments, provenance and stable identities. Captures with register state (decoder 2) fill **State**
-(render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot: size, format, mips,
-filter, wrap, offset and location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
+(render state in groups such as blend, depth and stencil), **Textures** (one row per enabled slot, or per slot the
+fragment program fetches from: whether it is **bound** at this draw, then size, format, mips, filter, wrap, offset and
+location) and **Buffers** (enabled vertex attributes with format, stride, offset and divider,
 the index stream of an indexed draw, and the surfaces). Values this draw changed are highlighted, values that differ
 from the register state when the capture was armed are tinted and labelled **differs from frame start** (not
 "non-default": hardware reset values are not known), and a register not written since the last decoder reset reads
@@ -916,9 +917,26 @@ words. A Both capture appears as two views of one capture, each labelled with it
 totals; the two are never added. **Pairs** lists the draws of the two frames side by side (paired by kind, label and
 programs), with unpaired draws marked.
 
+A texture slot keeps its offset and format after the app stops using it, so a slot showing a format is not
+necessarily one the draw reads. **Bound** says, per slot and per draw: **bound** (enabled and sampled by the draw's
+fragment program), **disabled** (stale state from an earlier bind; such slots are not listed, only counted),
+**enabled, not sampled** (enabled, but the fragment program has no fetch from that unit), **enabled, sampling
+unknown** (no program bytes to tell) or **enable unknown** (not written since the last decoder reset). Whether a
+slot is sampled comes from the fragment program's ucode: from the bytes the capture kept (**Keep fragment shader
+bytes**) or from a shader-folder container with the same hash.
+
+**Texture fetches** are counted statically from each program's ucode with the disassembler: the TEX, TXP, TXL, TXB
+and TXD instructions of a fragment program and the TXL instructions of a vertex program, per opcode and per texture
+unit. A fetch inside a loop counts once and one behind a branch not taken counts too, so this is the program's fetch
+instruction count, not a runtime count of texels sampled. The counts come from the capture's program bytes when it
+kept them, else from a shader-folder container with the program's hash; a count marked `+` is a lower bound (an
+opcode the disassembler does not know, or no end bit). Summary shows the draw's VP + FP total, Shaders each program's
+counts, and the Shader view each program's counts.
+
 **Shader view** lists every program of the selected view with its name, hash and provenance, the draws using it,
-their total and mean time in that view's mode, and the constants that change across those draws. When the capture
-kept the program's bytes it shows the disassembly; encodings the disassembler does not know are shown as raw words.
+their total and mean time in that view's mode, its texture fetches, and the constants that change across those draws.
+When the capture kept the program's bytes it shows the disassembly; encodings the disassembler does not know are shown
+as raw words.
 Vertex-program bytes are kept by phase 4 captures; fragment-program bytes only with **Keep fragment shader bytes**,
 for programs bound while the capture was armed and within the agent's byte cap.
 
@@ -926,9 +944,13 @@ PIPELINED intervals may overlap: their sum is not isolated execution cost. Quali
 bounds (three decimals), with raw ticks on hover; unqualified clocks retain raw ticks and their unavailable-conversion
 notice. Existing EXT-marker captures remain a separate source selector.
 
-**Shader folder…** scans that folder's `.vpo`/`.fpo` files in the background, matching the reader's canonical hash.
-Names supplied by the app take precedence over local filenames, then stable hashes. The folder is session-local;
-the scan visits at most 4096 directory entries and reads at most 64 MiB, reporting invalid files or a reached limit.
+**Shader folder…** scans that folder's `.vpo`/`.fpo` files (Cg program containers) in the background, matching the
+reader's canonical hash, and counts each matched program's texture fetches from its ucode. Names supplied by the app
+take precedence over local filenames, then stable hashes. The folder is session-local and one level deep (no
+subfolders, no symlinks); the scan visits at most 4096 directory entries and reads at most 64 MiB, reporting invalid
+files or a reached limit. When two files hold the same program, the first in path order names it.
+`ps3dk-prof rsx-frame --shader-dir DIR` is the same scan (the reader's code, the same hash, bounds and order), so a
+build's shader output folder names the programs of a capture on the command line too.
 
 Each RSX capture has **Save** and **Save as…**. These use the accepted file/live prefix and the frame exporter, then
 reopen the result and require identical capture data, timing and partial status before publishing. Existing paths
@@ -1015,7 +1037,7 @@ ps3dk-prof fifo [--json] capture.prof               # FIFO wrap phases
 ps3dk-prof auto [--window <id|name>] [--json] capture.prof   # AUTO coverage, clock map, per-frame verdicts
 ps3dk-prof auto --ops [--frame N] [--json] capture.prof      # every AUTO operation record
 ps3dk-prof auto --by-tag [--json] capture.prof      # per frame and tag; range time per name
-ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--json] capture.prof
+ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--shader-dir DIR] [--json] capture.prof
 ps3dk-prof shader-hash [--json] file.vpo file.fpo   # canonical program hashes, as captures name programs
 ps3dk-prof export --window W | --frame N | --frames A..B in.prof out.prof   # standalone sub-capture
 ps3dk-prof rolling [--json] [--max-bytes N] [--max-analysis-bytes N] [--max-analysis-work N] capture.profr
@@ -1028,6 +1050,18 @@ ps3dk-prof check-arcs file.arcs | arcs-json file.arcs | check-pair file.arcs fil
 Exit status: `0` COMPLETE (also a file without a trailer; its output then has the line `ending: NO-TRAILER`), `1`
 INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean (only files
 with SPU/RSX extensions). `auto`, `fifo` exit `1` when the evidence is absent or refused.
+
+`rsx-frame` prints each program with its static texture fetches (`texture fetches: 2 TEX 1 TXP 1; units 0,2
+(capture bytes)`, or `unknown (no program bytes)`) and each draw with a `tex` column (its VP + FP fetch instructions;
+`-` when either is unknown, `N+` a lower bound); `--draw K` adds the draw's fetches by program and its texture slots
+with their bound state (`texture 0: bound, 1 fetches; ...`), listing enabled and fetched slots and counting disabled
+slots that still hold a format. `--shader-dir DIR` names programs from DIR's containers (`file name.fpo` on the
+program line, the file name in the draw list and groups) and counts fetches for programs whose bytes the capture did
+not keep; a DIR that cannot be listed exits `3`, a reached scan limit is reported on stderr. In `--json`, each program
+has `shader_file` and `texture_fetches` (`source` `capture` or `shader_folder`, `total`, `by_op`, `by_unit`, `exact`,
+or null), each draw `texture_fetches` (`vp`, `fp`, `total`, `exact`) and, with register state, `texture_slots` (per
+slot `enabled`, `fetches`, `bound` true/false/null, `state`, `reason`), and the document `shader_dir` (path, files,
+bytes, programs, invalid, limit; null without the option).
 
 For `paths --functions --elf`, pass the unstripped linked ELF (in CMake, the link target's own output with no `.elf`
 suffix), not the stripped `.elf` placed beside the SELF. A build-id mismatch prints a WARNING.
