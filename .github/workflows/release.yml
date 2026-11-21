@@ -132,7 +132,12 @@ jobs:
         # into shipped files, and runner images carry different versions.
         run: bash scripts/ci-pin-cmake.sh
 
-      - uses: dtolnay/rust-toolchain@stable
+      # One exact Rust for every job that builds the Rust tools: @stable moved
+      # with the day of the run.  The version is scripts/ci-pin-rust.sh's.
+      - uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Check the Rust pin (scripts/ci-pin-rust.sh)
+        run: bash scripts/ci-pin-rust.sh --check
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -320,9 +325,14 @@ jobs:
         # into shipped files, and runner images carry different versions.
         run: bash scripts/ci-pin-cmake.sh
 
-      - uses: dtolnay/rust-toolchain@stable
+      # One exact Rust for every job that builds the Rust tools: @stable moved
+      # with the day of the run.  The version is scripts/ci-pin-rust.sh's.
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: x86_64-pc-windows-gnu
+
+      - name: Check the Rust pin (scripts/ci-pin-rust.sh)
+        run: bash scripts/ci-pin-rust.sh --check
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -721,7 +731,12 @@ jobs:
         # into shipped files, and runner images carry different versions.
         run: bash scripts/ci-pin-cmake.sh
 
-      - uses: dtolnay/rust-toolchain@stable
+      # One exact Rust for every job that builds the Rust tools: @stable moved
+      # with the day of the run.  The version is scripts/ci-pin-rust.sh's.
+      - uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Check the Rust pin (scripts/ci-pin-rust.sh)
+        run: bash scripts/ci-pin-rust.sh --check
 
       - name: Probe build env
         run: |

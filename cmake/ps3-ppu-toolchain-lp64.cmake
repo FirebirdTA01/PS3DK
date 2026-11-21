@@ -112,34 +112,6 @@ link_libraries(rt -L${PS3DK}/ppu/lib/lp64)
 # -----------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 
-# Same opt-in observed variants as the ILP32 toolchain. Selection runs after
-# project() measures this toolchain's actual pointer width.
-set(PS3_PROF_WAITS "OFF" CACHE STRING "Observed pthread waits: OFF, MANUAL, AUTO, EXT")
-set_property(CACHE PS3_PROF_WAITS PROPERTY STRINGS OFF MANUAL AUTO EXT)
-if(NOT PS3_PROF_WAITS STREQUAL "OFF" AND NOT PS3_PROF_WAITS STREQUAL "")
-    set(_ps3_wait_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-waits.cmake")
-    if(NOT _ps3_wait_include IN_LIST CMAKE_PROJECT_INCLUDE)
-        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_wait_include}")
-    endif()
-endif()
-
-# Live viewer auto-start (opt-in): every executable that links the profiler starts
-# the live agent with no app code. Registered before the AUTO selector, so its
-# deferred step runs first and the selector maps the live archive it adds.
-option(PS3_PROF_LIVE_AUTOSTART "Profiler live viewer auto-start (opt-in)" OFF)
-if(PS3_PROF_LIVE_AUTOSTART)
-    set(_ps3_live_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-live.cmake")
-    if(NOT _ps3_live_include IN_LIST CMAKE_PROJECT_INCLUDE)
-        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_live_include}")
-    endif()
-endif()
-
-# Automatic RSX observation selects its own providers and init seam. Default
-# builds do not include the selector and keep the existing library selection.
-option(PS3_PROF_AUTO "Automatic RSX observation" OFF)
-if(PS3_PROF_AUTO)
-    set(_ps3_auto_include "${CMAKE_CURRENT_LIST_DIR}/ps3-prof-auto.cmake")
-    if(NOT _ps3_auto_include IN_LIST CMAKE_PROJECT_INCLUDE)
-        list(APPEND CMAKE_PROJECT_INCLUDE "${_ps3_auto_include}")
-    endif()
-endif()
+# Profiler opt-ins (PS3_PROF_WAITS, PS3_PROF_LIVE_AUTOSTART, PS3_PROF_AUTO). Their modules run after project()
+# has measured the actual pointer width, through one CMAKE_PROJECT_INCLUDE file (CMake 3.28 takes one only).
+include("${CMAKE_CURRENT_LIST_DIR}/ps3-prof-register.cmake")
