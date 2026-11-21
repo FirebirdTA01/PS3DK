@@ -91,7 +91,9 @@ if command -v "$cxx" >/dev/null 2>&1; then
     "$cxx" -std=c++17 -Wall -Wextra -Werror -I "$inc" -DPS3TC_PROF_AUTO=1 "$tmp/seam.cc" -o "$tmp/seamxx" && "$tmp/seamxx" || fail "observed label query seam (C++)"
 fi
 "$cc" -std=c11 -Wall -Wextra -Werror -I "$inc" -c "$tmp/seam.c" -o "$tmp/plain.o"
-if nm "$tmp/plain.o" | grep -q ps3dk_prof__auto_label_poll; then fail "the default build references the label-poll hooks"; fi
+# the symbol table into a file first: under pipefail a SIGPIPE'd nm would turn a found reference into "not found"
+nm "$tmp/plain.o" > "$tmp/plain.nm" || fail "nm failed on the default build"
+if grep -q ps3dk_prof__auto_label_poll "$tmp/plain.nm"; then fail "the default build references the label-poll hooks"; fi
 "$cc" -std=c11 -Wall -Wextra -Werror -I "$inc" "$tmp/seam.c" -o "$tmp/plain" && "$tmp/plain" >/dev/null || fail "default label query build"
 echo "label-poll seam: observed in PS3_PROF_AUTO units (C and C++), absent otherwise"
 

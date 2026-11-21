@@ -31,6 +31,8 @@ source "$script_dir/env.sh"
 
 say() { printf "[stub-archives] %s\n" "$*"; }
 die() { printf "[stub-archives] ERROR: %s\n" "$*" >&2; exit 1; }
+# shellcheck disable=SC1091
+source "$script_dir/lib/stub-archive-helpers.sh"
 
 # install_with_legacy <stub> <alias> <legacy dir> <object>... -- replace a
 # PSL1GHT library. The PSL1GHT names that were import trampolines are nidgen
@@ -43,7 +45,7 @@ install_with_legacy() {
     say "building legacy-name wrappers ($legacy, $abi)"
     PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
         PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
-        make -C "$legacy_dir" clean all >/dev/null
+        make_clean_all "$legacy_dir"
     for obj in "$@"; do
         obj="$legacy_dir/build/$obj"
         [[ -f "$obj" ]] || die "legacy wrappers object missing after build: $obj"
@@ -63,7 +65,7 @@ install_with_legacy() {
 [[ -d "$PS3DK/ppu/lib" ]] \
     || die "PSL1GHT runtime not installed at \$PS3DK/ppu/lib. Run scripts/build-psl1ght.sh first."
 
-NIDGEN_BIN="$PS3_TOOLCHAIN_ROOT/tools/target/release/nidgen"
+NIDGEN_BIN="$(nidgen_bin "$PS3_TOOLCHAIN_ROOT")"  # honours CARGO_TARGET_DIR, as cargo does
 say "building nidgen (release)"
 bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
 cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
@@ -273,7 +275,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libgcm_sys_legacy"
         say "building legacy-name wrappers (libgcm_sys_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" ABI_CFLAGS="$cc_flags" \
-            make -C "$legacy_dir" clean all >/dev/null
+            make_clean_all "$legacy_dir"
         legacy_obj="$legacy_dir/build/gcm_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
@@ -288,7 +290,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         legacy_dir="$PS3_TOOLCHAIN_ROOT/sdk/libio_legacy"
         say "building legacy-name wrappers (libio_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" ABI_CFLAGS="$cc_flags" \
-            make -C "$legacy_dir" clean all >/dev/null
+            make_clean_all "$legacy_dir"
         legacy_obj="$legacy_dir/build/io_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
@@ -303,7 +305,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         extras_dir="$PS3_TOOLCHAIN_ROOT/sdk/libc_stub_extras"
         say "building libc_stub_extras (real spu_printf_*, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" ABI_CFLAGS="$cc_flags" \
-            make -C "$extras_dir" clean all >/dev/null
+            make_clean_all "$extras_dir"
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
             "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
@@ -317,7 +319,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         say "building libfiber_stub_extras (pub init + TLS area, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
             PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
-            make -C "$extras_dir" clean all >/dev/null
+            make_clean_all "$extras_dir"
         for extras_obj in "$extras_dir/build/"*.o; do
             [[ -f "$extras_obj" ]] || continue
             "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" r "${produced[0]}" \
@@ -349,7 +351,7 @@ for yaml in "${STUB_YAMLS[@]}"; do
         say "building legacy-name wrappers (libusb_legacy, $abi)"
         PS3DEV="$PS3DEV" PS3DK="$PS3DK" PSL1GHT="$PS3DK" \
             PS3_TOOLCHAIN_ROOT="$PS3_TOOLCHAIN_ROOT" ABI_CFLAGS="$cc_flags" \
-            make -C "$legacy_dir" clean all >/dev/null
+            make_clean_all "$legacy_dir"
         legacy_obj="$legacy_dir/build/usb_legacy_wrappers.o"
         [[ -f "$legacy_obj" ]] \
             || die "legacy wrappers object missing after build: $legacy_obj"
