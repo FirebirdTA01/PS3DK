@@ -48,11 +48,7 @@ def capture(name, mode, half='only'):
 
 def matching():
     first, second = capture('pixels-both', 'pixels', 'first'), capture('pixels-both', 'pixels', 'second')
-    # a draw of the firmware's flip routine before each view's draws: left out of the comparison
-    for c in (first, second):
-        c['draws'].insert(0, {'ordinal': -1, 'label': None, 'firmware': True})
-    second['pairs'] = [{'first': 0, 'second': 0}]
-    second['pairs'] += [{'first': i + 1, 'second': i + 1} for i in range(len(ORDER))]
+    second['pairs'] = [{'first': i, 'second': i} for i in range(len(ORDER))]
     return {'captures': [capture('pixels', 'pixels'), capture('observe', 'observe'), first, second]}
 
 
@@ -108,7 +104,7 @@ def main():
              'zcull invalidated')
         case('kil early-z', lambda doc: draw(doc, 0, 'kil_half')['pixels'].update(early_z='eligible'), 'early-z')
         case('region missing', lambda doc: doc['captures'][0].update(zcull_regions=[]), 'zcull region 0')
-        case('pipelined != isolated', lambda doc: doc['captures'][3]['draws'][1 + ORDER.index('full')]['pixels'].update(samples=W * H - 1),
+        case('pipelined != isolated', lambda doc: doc['captures'][3]['draws'][ORDER.index('full')]['pixels'].update(samples=W * H - 1),
              'pipelined')
         case('a capture missing', lambda doc: doc['captures'].pop(1), 'observe: 0 views')
         case('draw order', lambda doc: doc['captures'][0]['draws'].reverse(), 'draws [')

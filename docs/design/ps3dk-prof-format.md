@@ -964,7 +964,7 @@ DRAW (type 1, length 96):
 |---|---|---|
 | 4 | u32 | ordinal: strictly increasing within the capture (gaps are draws not recorded) |
 | 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
-| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); decoder 5: bit 4 ZCULL_INVALIDATED and bit 5 ZCULL_CLEARED (INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw or clear), bit 6 FIRMWARE (a draw or clear the decoder found inside a firmware-reserved prefix routine, such as a flip's CALL; never HOOKED or timed); at least one of bits 0..1; other bits 0 |
+| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); decoder 5: bit 4 ZCULL_INVALIDATED and bit 5 ZCULL_CLEARED (INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw or clear); at least one of bits 0..1; other bits 0 |
 | 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
 | 16 | u64 | AUTO operation id: nonzero iff the reason is 0; INLINE_ARRAY and IMMEDIATE draws are timed by ARRAY operations and INLINE_INDEX draws by INDEX operations (the AUTO kinds stay 1..3), ARRAY, INDEX and CLEAR by their own kind |
 | 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
@@ -1159,6 +1159,8 @@ An unbound region (BOUND clear) has every field from offset 16 zero. Type 13 is 
 
 The decoder follows a CALL into the firmware-reserved prefix (IO offset 0 up to the context start; the AUTO ring
 decoder's rule) to its RET, so the firmware's per-flip routine is decoded instead of resetting the register state.
+A draw or clear trigger inside such a routine (the default-state routine writes a clear with mask 0) is state only:
+it is not a DRAW record and takes no ordinal.
 
 ### 12.4 RSXF_PROGRAMS (47)
 

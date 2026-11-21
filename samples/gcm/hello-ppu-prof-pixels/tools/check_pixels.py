@@ -9,8 +9,7 @@ For each of the sample's three captures (`ps3dk-prof rsx-frame --json`):
                                (pipelined and isolated counts agree).
 Every capture: zcull region 0 bound before the capture over the depth buffer, every quad's zcull effective, and
 'front' marked zcull-invalidated. With --tty, every 'PIXELS appquery' line has value == expect (the capture never
-changed the app's own query result in a captured frame). Draws the firmware's flip routine
-holds (reader 'firmware') are not the app's and are left out. Prints one DIFF line per difference; exit 0 only on a full match.
+changed the app's own query result in a captured frame). Prints one DIFF line per difference; exit 0 only on a full match.
 
 usage: check_pixels.py --reader <ps3dk-prof> --capture <file.prof> [--tty TTY.log]"""
 import argparse
@@ -36,7 +35,7 @@ def expected(kind, d):
 
 
 def check_view(name, c, mode, diffs):
-    draws = [d for d in c['draws'] if not d.get('firmware')]  # the flip routine's own draws are not the app's
+    draws = c['draws']
     labels = [(d['label'] or '').split('/')[-1] for d in draws]
     if labels != ORDER:
         diffs.append(f'{name}: draws {labels}, expected {ORDER}')
@@ -102,8 +101,6 @@ def main():
                     continue
                 a0 = views[0]['draws'][p['first']]
                 b0 = second['draws'][p['second']]
-                if a0.get('firmware') or b0.get('firmware'):
-                    continue
                 if a0['pixels']['samples'] != b0['pixels']['samples']:
                     diffs.append(f"{name}: {a0['label']} pipelined {a0['pixels']['samples']} != isolated "
                                  f"{b0['pixels']['samples']}")

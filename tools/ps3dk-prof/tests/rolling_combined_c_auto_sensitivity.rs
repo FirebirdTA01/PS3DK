@@ -8,7 +8,14 @@ use combined_auto_support::put16;
 use combined_auto_invalid_support::{accepted,baseline,boundaries,complete,forged,limits,nth,rejected,source,Forgery};
 fn unknown()->Forgery {
     Forgery{name:"ops-unknown-flags",ty:35,occurrence:0,rule:Rule::AutoOps,
-        edit:|p|put16(p,16+14,1|2|128|512)}
+        edit:|p|put16(p,16+14,1|2|128|1024)}
+}
+/// The ring source with frame 8's two draws carrying ZPASS counter deltas (OPS flag 512, u32@156).
+fn zpass()->common::File {
+    let mut f=source();
+    for (k,v) in [(2,1234u32),(3,0)]{let at=nth(&f,35,k);let p=&mut f.chunks[at].payload;put16(p,16+14,3|128|512);
+        p[16+156..16+160].copy_from_slice(&v.to_le_bytes());}
+    f
 }
 /// The ring source with frame 8's two draws timed by an isolated RSX frame capture (OPS flag 256 ISOLATED).
 fn isolated()->common::File {
@@ -29,5 +36,19 @@ fn ordinary_isolated_ring_ops_validate_before_c(){
 }
 #[test] #[ignore="requires prebuilt actual C AUTO encoder"]
 fn c_auto_isolated_ring_ops_are_admitted(){let f=isolated();let cut=nth(&f,35,2);accepted(&f,cut);}
+#[test]
+fn ordinary_zpass_ring_ops_validate_before_c(){
+    let f=zpass();let c=complete(&f);
+    assert!(c.auto.as_ref().unwrap().ops.iter().any(|o|o.zpass==Some(1234)),"the ZPASS delta reads back");
+    let b=f.bytes();
+    for &at in &boundaries(&b)[..f.chunks.len()]{combined::checkpoint_combined(&b[..at],limits()).expect("ZPASS ring ops: valid prefix");}
+}
+#[test]
+fn ordinary_zpass_without_raw_valid_is_rejected_before_c(){
+    forged(&baseline(),&Forgery{name:"ops-zpass-not-raw-valid",ty:35,occurrence:0,rule:Rule::AutoOps,
+        edit:|p|put16(p,16+14,1|4|128|512)});
+}
+#[test] #[ignore="requires prebuilt actual C AUTO encoder"]
+fn c_auto_zpass_ring_ops_are_admitted(){let f=zpass();let cut=nth(&f,35,2);accepted(&f,cut);}
 #[test] #[ignore="requires prebuilt actual C AUTO encoder"]
 fn c_auto_unknown_flag_refusal_is_atomic(){rejected(&baseline(),&unknown());}

@@ -144,9 +144,6 @@ fn states_events_regions_and_the_zcull_picture() {
     assert_eq!(c["draws"][0]["state"]["render"]["zcull.enable.depth"], true);
     assert_eq!(c["draws"][0]["state"]["render"]["zcull.dir"], "LESS");
     assert_eq!(c["overdraw"].as_array().unwrap().len(), 3, "three depth buffers: three targets");
-    assert_eq!(c["draws"][0]["firmware"], false);
-    let fw = reader::read(&capture(&V5, &|v| { v[2] = Rec::Draw(0, 1, 2 | 16 | 64); })).expect("a firmware draw reads");
-    assert_eq!(rf::to_json(&fw, &rf::frames(&fw))["captures"][0]["draws"][0]["firmware"], true);
 
     let p = std::env::temp_dir().join(format!("ps3dk-prof-pixels-{}.prof", std::process::id()));
     std::fs::write(&p, capture(&V5, &|_| {})).unwrap();
@@ -267,9 +264,7 @@ fn every_new_rule_refused_once() {
         "ZCULL_REGION");
     refused("region between a STATE and its DRAW", &V5, &|v| { v.swap(4, 5); }, "ZCULL_REGION");
     refused("zcull statistics record (reserved)", &V5, &|v| { v.insert(4, Rec::Raw(13)); }, "reserved");
-    refused("FIRMWARE on a hooked draw", &V5, &|v| { v[2] = Rec::Draw(0, 1, 1 | 2 | 64); }, "FIRMWARE");
-    refused("FIRMWARE with decoder 4", &v4, &|v| { strip(v); if let Rec::Draw(_, _, fl) = &mut v[1] { *fl = 2 | 64; } },
-        "flags");
+    refused("draw flag 64 (reserved)", &V5, &|v| { v[2] = Rec::Draw(0, 1, 2 | 64); }, "flags");
 }
 
 #[test]

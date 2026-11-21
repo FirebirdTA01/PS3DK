@@ -456,11 +456,12 @@ static void zpass_and_zcull(void)
         decode(call0, 1, 1);
         assert(d.resets == 0 && d.routines == 1 && ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_COUNTING &&
                d.reg[0x1d84 >> 2] == 3);
-        assert(d.n_events == 1 && d.events[0].kind == RSXF_K_CLEAR && d.events[0].firmware == 1 && !d.in_routine);
+        /* the routine's clear trigger is state only: no event, counted */
+        assert(d.n_events == 0 && d.routine_triggers == 1 && !d.in_routine);
         {
             const uint32_t clear[] = {M(0, 0x1d94, 1), 0xf0};
             decode(clear, 2, 1);
-            assert(d.n_events == 2 && d.events[1].firmware == 0); /* the app's own clear */
+            assert(d.n_events == 1 && d.events[0].kind == RSXF_K_CLEAR); /* the app's own clear */
         }
         resets = d.resets;
         decode(call_seg, 1, 0);

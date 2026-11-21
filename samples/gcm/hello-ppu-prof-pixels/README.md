@@ -48,9 +48,8 @@ python3 tools/check_pixels.py --reader ps3dk-prof --capture <executable>-<timeba
 It prints one `DIFF` line per difference and exits 0 only on a full match. Besides the counts it checks the counting
 states, that every quad is timed, that zcull region 0 is recorded as bound before each capture and covers every
 quad's depth buffer with depth cull on, that `front` carries the zcull invalidation, and that `kil_half` is marked
-early-z off. Draws the decoder finds in the firmware's flip routine are left out. `host-tests/test_check.py` checks
-the checker itself without a capture. Clears are not checked: what the counter does over a clear is not
-characterized.
+early-z off. `host-tests/test_check.py` checks the checker itself without a capture. Clears are not checked: what
+the counter does over a clear is not characterized.
 
 ## GPU safety
 

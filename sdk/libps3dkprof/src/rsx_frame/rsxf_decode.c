@@ -83,8 +83,11 @@ uint32_t ps3dk_prof__rsxf_zpass_state(const rsxf_decoder *d)
 static void event(rsxf_decoder *d, const rsxf_draw_event *ev)
 {
     rsxf_draw_event e = *ev;
+    if (d->in_routine) {
+        d->routine_triggers++; /* the firmware's own trigger: not an application draw; its zcull events wait */
+        return;
+    }
     e.zcull_events = d->zc_events; /* the zcull events since the previous draw or clear belong to this one */
-    e.firmware = d->in_routine;
     d->zc_events = 0;
     if (d->sink)
         d->sink(d->sink_user, &e); /* at once: the registers are this draw's */

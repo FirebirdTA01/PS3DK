@@ -949,8 +949,7 @@ CLEAR_ZCULL_SURFACE are events of the next draw. The zcull regions come from `ce
 `cellGcmUnbindZcull` on the owner thread (a driver call, not in the command stream; binds made before the profiler
 attached, or from another thread, are not seen); Summary says whether a recorded region covers the draw's depth
 buffer and depth cull is on, and flags a zcull direction that disagrees with the depth function (a heuristic). Zcull
-statistics reports are not read yet. Draws the decoder finds in the firmware's flip routine are listed as
-**firmware**, not the app's.
+statistics reports are not read yet.
 
 **Texture fetches** are counted statically from each program's ucode with the disassembler: the TEX, TXP, TXL, TXB
 and TXD instructions of a fragment program and the TXL instructions of a vertex program, per opcode and per texture
@@ -1083,7 +1082,7 @@ with SPU/RSX extensions). `auto`, `fifo` exit `1` when the evidence is absent or
 counting state and the early-z note, or why it is not counted) and a `zcull:` line. In `--json` each draw has
 `pixels` (`state`, `samples`, `area`, `per_pixel`, `raw_per_sample`, `early_z`, `shading`, `shading_proxy`,
 `fetch_proxy`, `uncounted`, `zpass_delta`), `zcull` (`invalidated`, `cleared`, `region`, `effective`, `reason`,
-`direction_mismatch`) and `firmware`; each capture `pixels_forced`, `zcull_regions` and `overdraw`.
+`direction_mismatch`); each capture `pixels_forced`, `zcull_regions` and `overdraw`.
 
 `rsx-frame` prints each program with its static texture fetches (`texture fetches: 2 TEX 1 TXP 1; units 0,2
 (capture bytes)`, or `unknown (no program bytes)`) and each draw with a `tex` column (its VP + FP fetch instructions;

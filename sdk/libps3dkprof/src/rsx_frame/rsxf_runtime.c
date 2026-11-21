@@ -1151,8 +1151,6 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
     w.zpass = hooked ? s->hook.zpass : ps3dk_prof__rsxf_zpass_state(&s->dec);
     if (e)
         w.flags |= (uint16_t)(e->zcull_events & (RSXF_DF_ZCULL_INVALIDATED | RSXF_DF_ZCULL_CLEARED));
-    if (e && e->firmware && !hooked)
-        w.flags |= RSXF_DF_FIRMWARE;
     w.tb = p_tb();
     if (w.kind != RSXF_K_CLEAR) {
         w.vp = vp_identity(s, unit, &len, &defs_p, ordinal, &unknown);
