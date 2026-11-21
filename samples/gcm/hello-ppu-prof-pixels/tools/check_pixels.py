@@ -9,7 +9,8 @@ For each of the sample's three captures (`ps3dk-prof rsx-frame --json`):
                                (pipelined and isolated counts agree).
 Every capture: zcull region 0 bound before the capture over the depth buffer, every quad's zcull effective, and
 'front' marked zcull-invalidated. With --tty, every 'PIXELS appquery' line has value == expect (the capture never
-changed the app's own query result in a captured frame). Prints one DIFF line per difference; exit 0 only on a full match.
+changed the app's own query result in a captured frame), and the line PIXELS zcull unbind rc=0. The exit's
+zcull-unbind capture must record region 0 bound before it and then its unbind. Prints one DIFF line per difference; exit 0 only on a full match.
 
 usage: check_pixels.py --reader <ps3dk-prof> --capture <file.prof> [--tty TTY.log]"""
 import argparse
@@ -104,8 +105,20 @@ def main():
                 if a0['pixels']['samples'] != b0['pixels']['samples']:
                     diffs.append(f"{name}: {a0['label']} pipelined {a0['pixels']['samples']} != isolated "
                                  f"{b0['pixels']['samples']}")
+    # the exit's zcull-unbind capture: region 0 bound before it, then its unbind recorded
+    z = caps.get('zcull-unbind', [])
+    if len(z) != 1:
+        diffs.append(f'zcull-unbind: {len(z)} views, expected 1')
+    else:
+        regions = [(r['index'], r['bound'], r['before_capture']) for r in z[0].get('zcull_regions', [])]
+        if regions != [(0, True, True), (0, False, False)]:
+            diffs.append(f'zcull-unbind: regions {regions}, expected region 0 bound before the capture, then unbound')
     if a.tty:
-        lines = re.findall(r'PIXELS appquery frame=(\d+) value=(\d+) expect=(\d+)', open(a.tty, errors='replace').read())
+        tty = open(a.tty, errors='replace').read()
+        unbind = re.findall(r'PIXELS zcull unbind rc=(-?\d+)', tty)
+        if unbind != ['0']:
+            diffs.append(f'tty: zcull unbind {unbind}, expected one line with rc=0')
+        lines = re.findall(r'PIXELS appquery frame=(\d+) value=(\d+) expect=(\d+)', tty)
         if not lines:
             diffs.append('tty: no PIXELS appquery line')
         captured = {'31', '61', '91', '92'}  # the frames each capture recorded

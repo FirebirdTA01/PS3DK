@@ -22,7 +22,8 @@ The app requests three captures itself: frame 30 `pixels` with `PS3DK_PROF_RSX_F
 forced, and `app_query` counting), frame 60 `observe` without it (only `app_query` counted; the rest are `off`), and
 frame 90 `pixels-both` with BOTH | PIXELS (the same counts in the pipelined and the isolated frame, paired per draw).
 After each frame it reads its own query's report and prints `PIXELS appquery frame=<n> value=<v> expect=<W x H>` for
-the captured frames (and any mismatch): the capture must never change the app's own result.
+the captured frames (and any mismatch): the capture must never change the app's own result. At exit a fourth capture,
+`zcull-unbind`, records the zcull region's release (GPU safety below).
 
 ## Build
 
@@ -38,8 +39,9 @@ The configure step refuses without any of the three options.
 ## Run and check
 
 The TTY shows `PIXELS start ... width=<W> height=<H>`, the three `PIXELS request frame=<n> result=<id>` lines, the
-app-query lines, `PIXELS drain flip=ok fence=ok` and `PIXELS EXIT clean frames=120 captures=<a>,<b>,<c>
-appquery_mismatches=0` (exit 0; 2 when a request was refused or the app's query changed in a captured frame). Then:
+app-query lines, `PIXELS drain flip=ok fence=ok`, `PIXELS zcull unbind rc=0 capture=<d>` and `PIXELS EXIT clean
+frames=120 captures=<a>,<b>,<c>,<d> appquery_mismatches=0 zcull_unbind=0` (exit 0; 2 when a request was refused, the
+app's query changed in a captured frame or the unbind failed). Then:
 
 ```sh
 python3 tools/check_pixels.py --reader ps3dk-prof --capture <executable>-<timebase>.prof --tty TTY.log
@@ -57,4 +59,8 @@ As `samples/profiling/rsx-frame`: the fence label (200) is zeroed and read back 
 services system callbacks, a failure stops submitting and goes to the exit drain, and if the drain cannot prove the
 RSX idle the sample prints `PIXELS RECOVERY_REQUIRED at=<where>` and parks (no command, no seal, no return). The
 sample binds one zcull region over its own depth buffer (allocated at the 64 x 64-aligned size the region covers) and
-uses report 600 from the application range only.
+uses report 600 from the application range only. The zcull binding is driver state that may outlive the process,
+so it is released before the seal: after the drain proves the RSX idle, zcull is turned off, a fence is flushed and
+waited for, and region 0 is unbound (inside the `zcull-unbind` capture, which records it); a failed unbind fails the
+exit (2). The park path sends nothing, so it does not unbind. The bind is the last init step: no init failure follows
+it.

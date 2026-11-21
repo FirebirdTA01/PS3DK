@@ -9,7 +9,8 @@
  * captures itself: frame 30 with PIXELS (counting forced around every draw it has off), frame 60 without (only its
  * own query's draw is counted) and frame 90 BOTH | PIXELS (the same counts pipelined and isolated). tools/check_pixels.py
  * checks the captures against the table; the TTY line PIXELS appquery checks that the capture never changed the
- * app's own query result.
+ * app's own query result. At exit, after a proven drain, zcull is turned off behind a fence and the region unbound
+ * inside a fourth capture (zcull-unbind) that records the unbind: a binding left behind could outlive the process.
  *
  * GPU safety (as samples/profiling/rsx-frame): every wait is bounded and services callbacks, the fence label is reset
  * and read back first, a failure stops submitting and goes to the exit drain, and if the drain cannot prove the RSX
@@ -98,6 +99,7 @@ static const char *g_failed;
 static uint64_t g_start;
 static uint32_t g_label_v;
 static int g_flip_pending;
+static int g_zcull_bound; /* region 0 bound (init_zcull); released on every exit after a proven drain */
 
 static uint64_t now_us(void) { return (uint64_t)sys_time_get_system_time(); }
 
@@ -229,9 +231,22 @@ static int init_geometry(void)
 /* One zcull region over the whole depth buffer (64-aligned), LESS: binding it is recorded by the capture. */
 static int init_zcull(void)
 {
-    return cellGcmBindZcull(0, depth_offset, (display_width + 63u) & ~63u, depth_rows, 0, CELL_GCM_ZCULL_Z24S8,
-                            CELL_GCM_SURFACE_CENTER_1, CELL_GCM_ZCULL_LESS, CELL_GCM_ZCULL_LONES,
-                            CELL_GCM_SCULL_SFUNC_ALWAYS, 0, 0xff) == 0;
+    if (cellGcmBindZcull(0, depth_offset, (display_width + 63u) & ~63u, depth_rows, 0, CELL_GCM_ZCULL_Z24S8,
+                         CELL_GCM_SURFACE_CENTER_1, CELL_GCM_ZCULL_LESS, CELL_GCM_ZCULL_LONES,
+                         CELL_GCM_SCULL_SFUNC_ALWAYS, 0, 0xff) != 0)
+        return 0;
+    g_zcull_bound = 1;
+    return 1;
+}
+
+/* The region's unbind (cellGcmUnbindZcull, hooked: the capture records it). Only with the RSX idle or before any GPU
+ * work; a no-op returning 0 when nothing is bound. */
+static int release_zcull(void)
+{
+    if (!g_zcull_bound)
+        return 0;
+    g_zcull_bound = 0;
+    return (int)cellGcmUnbindZcull(0);
 }
 
 static void surface(void)
@@ -355,8 +370,14 @@ int main(void)
         printf("PIXELS label %u did not reset (0x%08x)\n", LABEL_FENCE, (unsigned)*label);
         return 1;
     }
-    if (!init_programs() || !init_geometry() || !init_zcull()) {
-        printf("PIXELS init failed (programs, geometry or zcull)\n");
+    if (!init_programs() || !init_geometry()) {
+        printf("PIXELS init failed (programs or geometry)\n");
+        return 1;
+    }
+    /* the zcull bind is the last init step and no GPU work has run before it: a failure after it would unbind at
+     * once (release_zcull); none follows it today */
+    if (!init_zcull()) {
+        printf("PIXELS init failed (zcull bind)\n");
         return 1;
     }
     printf("PIXELS start frames=%u width=%u height=%u draws_per_frame=%u\n", FRAMES, display_width, display_height,
@@ -422,13 +443,28 @@ int main(void)
     fflush(stdout);
     if (!flip_ok || !fence_ok)
         recovery_required(flip_ok ? "final-fence" : "final-flip");
+    /* The RSX is idle. Release the zcull region before the seal: a binding is driver state that may outlive the
+     * process, and the next app placing its depth buffer in this local memory would cull against it. Zcull off, a
+     * fenced flush, then the unbind, inside one more capture (zcull-unbind) so the capture records the unbind. */
+    int zid = ps3dk_prof_rsx_frame_capture("zcull-unbind", 0u);
+    PS3DK_PROF_FRAME(); /* arms the capture */
+    cellGcmSetZcullEnable(g_ctx, CELL_GCM_FALSE, CELL_GCM_FALSE);
+    g_label_v++;
+    cellGcmSetWriteBackEndLabel(g_ctx, LABEL_FENCE, g_label_v);
+    cellGcmFlush(g_ctx);
+    if (!await(fence_done, g_label_v, DRAIN_US, 0))
+        recovery_required("zcull-off-fence");
+    int unbind_rc = release_zcull();
+    printf("PIXELS zcull unbind rc=%d capture=%d\n", unbind_rc, zid);
+    fflush(stdout);
+    PS3DK_PROF_FRAME(); /* closes it */
     cellSysutilUnregisterCallback(0);
     PS3DK_PROF_AUTO_SEAL();
     if (g_failed) {
         printf("PIXELS EXIT failed at=%s frames=%u\n", g_failed, frames);
         return 1;
     }
-    printf("PIXELS EXIT %s frames=%u captures=%d,%d,%d appquery_mismatches=%u\n", g_quit ? "quit" : "clean", frames,
-           ids[0], ids[1], ids[2], query_bad);
-    return ids[0] > 0 && ids[1] > 0 && ids[2] > 0 && !query_bad ? 0 : 2;
+    printf("PIXELS EXIT %s frames=%u captures=%d,%d,%d,%d appquery_mismatches=%u zcull_unbind=%d\n",
+           g_quit ? "quit" : "clean", frames, ids[0], ids[1], ids[2], zid, query_bad, unbind_rc);
+    return ids[0] > 0 && ids[1] > 0 && ids[2] > 0 && zid > 0 && !query_bad && unbind_rc == 0 ? 0 : 2;
 }

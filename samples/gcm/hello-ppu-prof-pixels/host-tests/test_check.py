@@ -49,10 +49,14 @@ def capture(name, mode, half='only'):
 def matching():
     first, second = capture('pixels-both', 'pixels', 'first'), capture('pixels-both', 'pixels', 'second')
     second['pairs'] = [{'first': i, 'second': i} for i in range(len(ORDER))]
-    return {'captures': [capture('pixels', 'pixels'), capture('observe', 'observe'), first, second]}
+    unbind = {'name': 'zcull-unbind', 'half': 'only', 'draws': [], 'pairs': [],
+              'zcull_regions': [{'index': 0, 'bound': True, 'before_capture': True},
+                                {'index': 0, 'bound': False, 'before_capture': False}]}
+    return {'captures': [capture('pixels', 'pixels'), capture('observe', 'observe'), first, second, unbind]}
 
 
-TTY = ''.join(f'PIXELS appquery frame={f} value={W * H} expect={W * H}\n' for f in (31, 61, 91, 92))
+TTY = ''.join(f'PIXELS appquery frame={f} value={W * H} expect={W * H}\n' for f in (31, 61, 91, 92)) + \
+    'PIXELS zcull unbind rc=0 capture=5\n'
 
 
 def run(tmp, doc, tty=TTY):
@@ -110,6 +114,10 @@ def main():
         case('draw order', lambda doc: doc['captures'][0]['draws'].reverse(), 'draws [')
         case('app query changed', lambda doc: None, 'tty: app query frame 31',
              tty=TTY.replace(f'frame=31 value={W * H}', 'frame=31 value=5'))
+        case('unbind failed', lambda doc: None, 'tty: zcull unbind', tty=TTY.replace('rc=0 capture', 'rc=-2147 capture'))
+        case('unbind line missing', lambda doc: None, 'tty: zcull unbind', tty=TTY.replace('PIXELS zcull unbind', 'x'))
+        case('unbind not recorded', lambda doc: doc['captures'][4]['zcull_regions'].pop(), 'zcull-unbind: regions')
+        case('unbind capture missing', lambda doc: doc['captures'].pop(4), 'zcull-unbind: 0 views')
         case('app query line missing', lambda doc: None, 'captured frames missing', tty=TTY.replace('frame=61', 'frame=62'))
         # a late result outside the captured frames (an emulator's first frames) is not a difference
         rc, out = run(tmp, matching(), 'PIXELS appquery frame=0 value=0 expect=1\n' + TTY)
