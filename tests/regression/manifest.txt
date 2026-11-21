@@ -250,6 +250,11 @@ librsx-cmds-gcm_cmd-lp64,tests/regression/librsx-cmds/librsx-cmds-gcm_cmd-lp64.f
 # gcm-reset-buffer: cellGcmResetDefaultCommandBufferUnsafe returns the RSX to the start of the
 # default buffer and rewinds context->current with it; a label written afterwards lands.
 gcm-reset-buffer,tests/regression/gcm-reset-buffer/gcm-reset-buffer.fake.self,20,RAN-CLEAN,GCM_RESET_OK,GCM_RESET_FAIL [0-9]
+# cellgcm-transfer-data: cellGcmSetTransferData copies a padded-pitch local-to-main block with M2MF;
+# the payload must match byte for byte and the row padding and guard bands must stay untouched.
+# INCONCLUSIVE means the completion label made no progress, which is a failed run, not a pass.
+cellgcm-transfer-data-ilp32,tests/regression/cellgcm-transfer-data/cellgcm-transfer-data-ilp32.fake.self,30,RAN-CLEAN,(?m)^TRANSFER_DATA_OK\r?$,TRANSFER_DATA_FAIL|TRANSFER_DATA_INCONCLUSIVE
+cellgcm-transfer-data-lp64,tests/regression/cellgcm-transfer-data/cellgcm-transfer-data-lp64.fake.self,30,RAN-CLEAN,(?m)^TRANSFER_DATA_OK\r?$,TRANSFER_DATA_FAIL|TRANSFER_DATA_INCONCLUSIVE
 # gcm-default-fifo-norewind: gcmSetDefaultFifoSize after cellGcmInit (as libPSGL calls it) keeps the
 # live cursor; the first flush must not leave PUT behind GET without a wrap (RPCS3 diagnostic).
 gcm-default-fifo-norewind-ilp32,tests/regression/gcm-default-fifo-norewind/gcm-default-fifo-norewind-ilp32.fake.self,30,RAN-CLEAN,(?m)^GCM_NOREWIND_OK checks=7 failures=0\r?$,GCM_NOREWIND_FAIL
