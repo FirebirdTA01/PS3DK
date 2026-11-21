@@ -71,7 +71,9 @@ note "driver: -mspurs-job"
 run_case driver "CFLAGS -mspurs-job LDFLAGS -mspurs-job -Wl,-q" \
     || { tail -20 "$tmp/driver-build.build.log" >&2; fail "driver: build failed"; }
 elf=$(find "$tmp/driver-build" -path '*/spu/job/job.bin' | head -1)
-spu-elf-nm "$elf" | grep -q ' T cellSpursJobMain2$' || fail "driver: cellSpursJobMain2 missing from $elf"
+# the symbol table into a file first: under pipefail, `nm | grep -q` fails when nm is SIGPIPE'd after the match
+spu-elf-nm "$elf" > "$tmp/driver.nm" || fail "driver: spu-elf-nm failed on $elf"
+grep -q ' T cellSpursJobMain2$' "$tmp/driver.nm" || fail "driver: cellSpursJobMain2 missing from $elf"
 note "driver PASS"
 
 note "manual: NOSTARTFILES + spurs_job.ld + libspurs_job"

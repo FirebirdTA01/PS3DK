@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define CHECK(c)                                                                   \
@@ -313,6 +314,27 @@ static uint16_t start_agent(live_config cfg)
 }
 
 static unsigned long long drops(enum live_drop d) { return atomic_load(&g_agent.drops[d]); }
+static unsigned long long drops_total(void)
+{
+    unsigned long long n = 0;
+    for (int d = 0; d < LIVE_DROP_COUNT; ++d)
+        n += drops((enum live_drop)d);
+    return n;
+}
+/* The agent has ended a connection this side closed: it counts the drop on its own thread before it frees the
+ * connection slot, and it accepts on that thread too, so a viewer opened after this returns is never refused BUSY
+ * for the old link.  1 when the count reached n within ms (the bound only reports a hang). */
+static int wait_drops_total(unsigned long long n, int ms)
+{
+    uint64_t until = now_us() + (uint64_t)ms * 1000u;
+    while (drops_total() < n) {
+        if (now_us() >= until)
+            return 0;
+        struct timespec t = {0, 200000};
+        nanosleep(&t, NULL);
+    }
+    return 1;
+}
 
 static int has_hello(client *c) { return c->hello; }
 static int has_bytes_1m(client *c) { return c->len >= (1u << 20); }
@@ -1341,7 +1363,10 @@ static void case_rsxf_unavailable_and_v2(void)
     send_rsxf(c->fd, 1, 0, 1, "x", 0);
     cl_pump(c, 2000, has_rsxf_ack);
     CHECK((int32_t)live_get32(c->rsxf_ack + 4) == PS3DK_PROF_ENOTSUP && atomic_load(&g_rf.requests) == 0);
+    unsigned long long ended = drops_total();
     cl_free(c);
+    /* the next viewer only after the agent ended this link: until then it holds the one slot and refuses BUSY */
+    CHECK(wait_drops_total(ended + 1, 2000));
     atomic_store(&g_rf.available, 1);
     client *d = cl_open_v(port, 2);
     cl_pump(d, 2000, has_hello);

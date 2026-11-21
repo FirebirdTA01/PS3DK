@@ -34,9 +34,14 @@ r=subprocess.run(cmd,capture_output=True)
 assert r.returncode==0,r.stderr.decode()
 run=[str(a.out/'test')]
 if a.sanitize=='thread':run=['setarch','x86_64','-R',*run]
-r=subprocess.run(run,capture_output=True,timeout=30,env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1:exitcode=66'))
+# The TSan negative control (relaxed-publication) must report the race, but TSan reports only accesses that overlapped
+# in one run: repeat it, bounded, while a run ends clean (rc 0); any other outcome is judged at once.
+attempts=20 if a.mutant=='relaxed-publication' else 1
+for attempt in range(1,attempts+1):
+    r=subprocess.run(run,capture_output=True,timeout=30,env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1:exitcode=66'))
+    if r.returncode!=0:break
 (a.out/'run.stdout').write_bytes(r.stdout);(a.out/'run.stderr').write_bytes(r.stderr)
-(a.out/'commands.json').write_bytes((json.dumps(dict(build=cmd,run=run,rc=r.returncode),indent=2)+'\n').encode())
+(a.out/'commands.json').write_bytes((json.dumps(dict(build=cmd,run=run,rc=r.returncode,attempts=attempt),indent=2)+'\n').encode())
 if a.mutant:
     if a.mutant=='relaxed-publication':
         assert a.sanitize=='thread' and r.returncode==66 and b'ThreadSanitizer: data race' in r.stderr,r.stderr.decode()
@@ -48,7 +53,7 @@ if a.mutant:
             'label-regression':b'==AUTO_COMPLETION_REFUSED',
         }[a.mutant]
         assert r.returncode!=0 and b'Assertion' in r.stderr and expected in r.stderr,r.stderr.decode()
-    print(a.mutant,'rejected')
+    print(a.mutant,'rejected' + (f' (attempt {attempt} of {attempts})' if attempts>1 else ''))
 else:
     assert r.returncode==0,r.stderr.decode()
     print(r.stdout.decode(),end='')

@@ -147,6 +147,7 @@ CORE_TSAN = ['seal_P1', 'seal_P2', 'seal_P3', 'seal_P4', 'seal_P5', 'seal_P6', '
              'fault_reason_concurrent']
 RT_HEAVY = {'cap_262144', 'cap_262145', 'after_cap_counting', 'sat_five'}  # not under TSan (length only)
 RT_NEG = {'neg_plain_other': 'rsxcap_other_add', 'neg_late_fields': 'rsxcap_request'}
+NEG_ATTEMPTS = 8  # runs of a TSan negative control before "no report" is a failure
 # THREAD mode with the real drain thread: only in the build with the SC device-memory seam (the TSan build)
 RT_THREAD = {'thread_capture_basic', 'thread_capture_shutdown', 'thread_other_stress'}
 CT = ['formatter_records', 'draw_kinds', 'lengths', 'capacity_end_494', 'capacity_end_482', 'capacity_begin_121',
@@ -234,12 +235,18 @@ if want('tsan'):
                 if f.suffix in ('.prof', '.expect'):
                     shutil.copy(f, cap_dirs['tsan'] / f.name)
         row('tsan', case, st == 'PASS', status=st)
+    # A negative control must report the race, but TSan reports only accesses that actually overlapped in one run:
+    # repeat, bounded by attempts (each a fresh run directory), until the named race is reported.
     for case, fn in RT_NEG.items():
         e = exes[('rt', 'tsan')]
-        st, r, cd = run_case(e, out / 'rt-tsan', 'RT', case, 'tsan', timeout=1800) if e else ('INVALID', None, None)
-        n = r.stderr.count('WARNING: ThreadSanitizer: data race') if r else 0
-        named = fn in (r.stderr if r else '')
-        row('tsan', case, n > 0 and named, f'(NEGATIVE) {n} data-race reports, {fn} named {named}')
+        n, named, tries = 0, False, 0
+        while e and tries < NEG_ATTEMPTS and not (n > 0 and named):
+            tries += 1
+            st, r, cd = run_case(e, out / f'rt-tsan-neg{tries}', 'RT', case, 'tsan', timeout=1800)
+            n = r.stderr.count('WARNING: ThreadSanitizer: data race') if r else 0
+            named = fn in (r.stderr if r else '')
+        row('tsan', case, n > 0 and named,
+            f'(NEGATIVE) {n} data-race reports, {fn} named {named}, attempt {tries} of {NEG_ATTEMPTS}')
 
 # ---------------------------------------------------------------- ct
 if want('ct'):
