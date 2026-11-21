@@ -795,6 +795,20 @@ jobs:
       - name: Test RPCS3 debugger launcher ownership and cleanup (POSIX)
         run: python3 tests/host/debugger-launcher-test.py "${RUNNER_TEMP}/debugger-launcher"
 
+      # Portable GDB remote-protocol core: replay the frozen fixtures against the
+      # real codec and session, plain and under non-recovering ASan/UBSan.  The
+      # not-implemented stub is the negative control: it must build and then fail
+      # the replay with exit status 1, or the harness is not judging anything.
+      - name: Replay the portable GDB RSP core against its frozen fixtures
+        run: |
+          core="gdbstub_codec.c gdbstub_session.c"
+          make -C sdk/libgdbstub BUILD="${RUNNER_TEMP}/gdbstub-plain" CORE="$core" test
+          make -C sdk/libgdbstub BUILD="${RUNNER_TEMP}/gdbstub-san" CORE="$core" CFLAGS="-std=c99 -O2 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" test
+          make -C sdk/libgdbstub BUILD="${RUNNER_TEMP}/gdbstub-red" all
+          rc=0
+          (cd sdk/libgdbstub && "${RUNNER_TEMP}/gdbstub-red/red_test" fixtures.json register-layout.json) > "${RUNNER_TEMP}/gdbstub-red.log" || rc=$?
+          if [ "$rc" -ne 1 ]; then cat "${RUNNER_TEMP}/gdbstub-red.log"; echo "negative control: NIMPL stub exited $rc, expected 1"; exit 1; fi
+
       - name: Test shader-compiler suite runner self-check
         run: bash tests/shader-compiler/suite-runner-test.sh
 
