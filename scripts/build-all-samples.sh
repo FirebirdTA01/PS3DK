@@ -46,6 +46,13 @@ MUST_PASS_SAMPLES=(
     "gcm/hello-ppu-cellgcm-sysinfo"
 )
 
+# Configure options a sample needs to build at all (it refuses at configure without them).
+sample_cmake_args() {
+    case "$1" in
+        gcm/hello-ppu-prof-auto-verdicts) echo "-DPS3_PROF_AUTO=ON" ;;
+    esac
+}
+
 SAMPLES_ROOT="$PS3_TOOLCHAIN_ROOT/samples"
 if $LP64; then
     TOOLCHAIN_FILE="$PS3_TOOLCHAIN_ROOT/cmake/ps3-ppu-toolchain-lp64.cmake"
@@ -89,8 +96,9 @@ while IFS= read -r -d '' cmake_file; do
 
     mkdir -p "$build_dir"
 
+    read -r -a extra_args <<< "$(sample_cmake_args "$sample_name")"
     if ! cmake -S "$sample_dir" -B "$build_dir" \
-        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
+        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" "${extra_args[@]}" \
         >"$build_dir/cmake.log" 2>&1; then
         say "  CMake configure FAILED — see $build_dir/cmake.log"
         FAILED+=("$sample_name (configure)")

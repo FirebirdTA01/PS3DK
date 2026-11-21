@@ -4,7 +4,9 @@
 --mutant compile-as-driver drops the explicit '-x c' from the identity compile; --mutant internal-definitions drops
 the extern declarations from the generated source. Each must fail the C++-driver controls. --mutant
 positional-inputs binds only the positional files named on the command line (the reviewed defect: a changed -l
-library kept the binding); it must fail the traced-input controls.
+library kept the binding); it must fail the traced-input controls. --mutant no-driver-env runs the trial link
+without the environment the driver prints with -### (the reviewed defect: collect2 then searched PATH for the
+linker); it must fail the minimal-PATH control.
 """
 import argparse,importlib.util,json,os,shutil,subprocess,sys,unittest
 from pathlib import Path
@@ -27,6 +29,9 @@ def load(mutant):
     elif mutant=='positional-inputs':
         old="traced, linker_command = _traced_inputs([argv[0], *args], trial_obj, cwd)";assert code.count(old)==1
         code=code.replace(old,"_, linker_command = _traced_inputs([argv[0], *args], trial_obj, cwd); traced = set(files)")
+    elif mutant=='no-driver-env':
+        old="return [prog, *final[1:]], {**os.environ, **env}";assert code.count(old)==1
+        code=code.replace(old,"return [prog, *final[1:]], dict(os.environ)")
     module=type(sys)('auto_identity');module.__file__=str(MODULE)
     exec(compile(code,str(MODULE),'exec'),module.__dict__)
     return module
@@ -272,6 +277,30 @@ class Identity(unittest.TestCase):
         self.map.unlink()
         with self.assertRaisesRegex(ValueError,'link map missing'):I.finish(r,self.map,require_map=True)
 
+    def test_trial_link_needs_no_path(self):
+        # Review: the trial link ran collect2 from 'driver -###' without the driver's environment, so collect2 looked
+        # for the linker on PATH and the configure failed unless the toolchain's bin directory was on PATH. With PATH
+        # naming one directory without a linker, the trial link must still run the linker the driver's -B prefix
+        # supplies. (That directory holds the assembler only: the host driver takes 'as' from PATH for the identity
+        # compile, where a cross driver finds its own.)
+        bdir=self.p/'prefix';bdir.mkdir();log=self.p/'ld.log'
+        real_ld=shutil.which('ld');self.assertTrue(real_ld)
+        ld=bdir/'ld';ld.write_text('#!/bin/sh\necho "$0" >> "'+str(log)+'"\nexec '+real_ld+' "$@"\n');ld.chmod(0o755)
+        empty=self.p/'as-only-path';empty.mkdir()
+        real_as=shutil.which('as');self.assertTrue(real_as)
+        (empty/'as').symlink_to(real_as)
+        driver=shutil.which('cc');self.assertTrue(driver)
+        argv=[str(Path(driver).resolve()),'-B'+str(bdir)+'/',str(self.obj),'-o',str(self.elf)]
+        old=os.environ['PATH']
+        try:
+            os.environ['PATH']=str(empty)
+            r=self.prepare(argv)
+        finally:
+            os.environ['PATH']=old
+        self.assertTrue(log.is_file() and str(ld) in log.read_text(),'the trial link did not run the -B linker')
+        subprocess.run(r['command'],check=True)
+        subprocess.run([str(self.elf)],check=True)
+
     def test_package_binds_exact_elf(self):
         r=self.prepare();subprocess.run(r['command'],check=True);I.finish(r,self.map)
         signed=self.p/'app.self';signed.write_bytes(b'signed fixture')
@@ -283,7 +312,7 @@ class Identity(unittest.TestCase):
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True)
-    ap.add_argument('--mutant',choices=['compile-as-driver','internal-definitions','positional-inputs'])
+    ap.add_argument('--mutant',choices=['compile-as-driver','internal-definitions','positional-inputs','no-driver-env'])
     args,rest=ap.parse_known_args();OUT=args.out.resolve();OUT.mkdir(parents=True,exist_ok=False)
     MUTANT=args.mutant;I=load(MUTANT)
     if MUTANT:
@@ -291,6 +320,8 @@ if __name__=='__main__':
         if MUTANT=='positional-inputs':
             cases=['Identity.test_library_change_changes_binding','Identity.test_linker_script_inputs_are_bound',
                    'Identity.test_driver_default_inputs_are_bound']
+        if MUTANT=='no-driver-env':
+            cases=['Identity.test_trial_link_needs_no_path']
         result=unittest.main(argv=[__file__,*cases],exit=False).result
         killed=bool(result.failures or result.errors)
         print(MUTANT,'KILLED' if killed else 'SURVIVED',file=sys.stderr)
