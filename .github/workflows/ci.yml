@@ -1152,6 +1152,9 @@ jobs:
       - name: Test GCM transfer data emitter words and negative controls
         run: bash tests/host/gcm-transfer-data-test.sh
 
+      - name: Test the cellgcm-transfer-data probe judge and its mutation controls
+        run: python3 tests/regression/cellgcm-transfer-data/judge_control_test.py
+
       - name: Test A2 label probe classifier and abort path
         run: bash tests/host/a2p-probe-test.sh
 
