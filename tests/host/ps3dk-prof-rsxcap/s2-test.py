@@ -8,7 +8,9 @@ Groups (exit 0 only if every row passes):
         per process, plain and ASan/UBSan; each capture-writing case leaves <name>.prof + <name>.expect;
   tsan  the rt cases (all but the four longest) and the core seal / fault-reason cases under -fsanitize=thread (the
         rt build with the SC device-memory seam), no suppressions; the two NEGATIVE controls must report a data race
-        in their named function;
+        in their named function, rerun (at most NEG_ATTEMPTS runs) only after a clean completed run that missed it: a
+        timeout, a signal, a stall, any other exit or diagnostic is INVALID and an unrelated race FAILS at once
+        (deterministic controls neg_retry_*);
   ct    rsxcap_contract.c: the formatter, emitter, kind table and pool against the frozen fixture; the fixture pin;
         the pool layout measured from the object;
   rd    the committed reader: `ps3dk-prof check` exit codes, the round-trip checker (rsxcap_check.rs) over every
@@ -34,6 +36,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import types
 import zlib
 
 # capture windows: the shared helper opens a CAPTURE_WHOLE_RUN window right after every successful init
@@ -147,7 +150,42 @@ CORE_TSAN = ['seal_P1', 'seal_P2', 'seal_P3', 'seal_P4', 'seal_P5', 'seal_P6', '
              'fault_reason_concurrent']
 RT_HEAVY = {'cap_262144', 'cap_262145', 'after_cap_counting', 'sat_five'}  # not under TSan (length only)
 RT_NEG = {'neg_plain_other': 'rsxcap_other_add', 'neg_late_fields': 'rsxcap_request'}
-NEG_ATTEMPTS = 8  # runs of a TSan negative control before "no report" is a failure
+NEG_ATTEMPTS = 8  # clean runs of a TSan negative control that missed the race before the row FAILS
+TSAN_RACE = 'WARNING: ThreadSanitizer: data race'
+
+
+def neg_outcome(r, fn):
+    """One run of a TSan negative control: RACE (only data-race reports, each naming fn, TSan's exit code 66),
+    MISS (a clean completed run: rc 0, the case's PASS line, no sanitizer text), FAIL (a data race that does not
+    name fn) or INVALID (a timeout, a signal, a harness stall, any other exit or diagnostic)."""
+    if r is None or r.returncode < 0:
+        return 'INVALID'
+    err = r.stderr
+    blocks = err.split(TSAN_RACE)[1:]
+    if any(fn not in b.split('==================')[0] for b in blocks):
+        return 'FAIL'
+    other = err.count('ThreadSanitizer') - err.count(TSAN_RACE) - err.count('ThreadSanitizer: reported') - \
+        err.count('SUMMARY: ThreadSanitizer: data race')
+    if any(t in err for t in SAN_TEXT if t != 'ThreadSanitizer') or other:
+        return 'INVALID'
+    if blocks:
+        return 'RACE' if r.returncode == 66 else 'INVALID'
+    return 'MISS' if classify(r, 'RT', r.case) == 'PASS' else 'INVALID'
+
+
+def neg_loop(run_once, fn, attempts):
+    """Repeat a negative control only while a run completes clean without the race (TSan reports only accesses that
+    overlapped in that run); any other outcome is judged at once. Returns (status, outcomes)."""
+    outs = []
+    while len(outs) < attempts:
+        r = run_once(len(outs) + 1)
+        o = neg_outcome(r, fn)
+        outs.append(o)
+        if o == 'RACE':
+            return 'PASS', outs
+        if o != 'MISS':
+            return o, outs
+    return 'FAIL', outs
 # THREAD mode with the real drain thread: only in the build with the SC device-memory seam (the TSan build)
 RT_THREAD = {'thread_capture_basic', 'thread_capture_shutdown', 'thread_other_stress'}
 CT = ['formatter_records', 'draw_kinds', 'lengths', 'capacity_end_494', 'capacity_end_482', 'capacity_begin_121',
@@ -235,18 +273,47 @@ if want('tsan'):
                 if f.suffix in ('.prof', '.expect'):
                     shutil.copy(f, cap_dirs['tsan'] / f.name)
         row('tsan', case, st == 'PASS', status=st)
-    # A negative control must report the race, but TSan reports only accesses that actually overlapped in one run:
-    # repeat, bounded by attempts (each a fresh run directory), until the named race is reported.
+    # the negative-control retry: only a clean miss is retried; every other first outcome is judged at once
+    fn = 'rsxcap_other_add'
+
+    def fake(rc, err='', ok=True):
+        return types.SimpleNamespace(returncode=rc, stderr=err, case='neg_plain_other',
+                                     stdout='RT neg_plain_other PASS\n' if ok else '')
+    race = fake(66, f'{TSAN_RACE} (pid=1)\n  #0 {fn} x.c:1\n==================\n'
+                    'ThreadSanitizer: reported 1 warnings\n')
+    other = fake(66, f'{TSAN_RACE} (pid=1)\n  #0 unrelated_fn y.c:2\n==================\n'
+                     'ThreadSanitizer: reported 1 warnings\n')
+    clean = fake(0)
+    seqs = {
+        'timeout_then_race': ([None, race], 'INVALID', 1),
+        'sigsegv_then_race': ([fake(-11, 'Segmentation fault', ok=False), race], 'INVALID', 1),
+        'unrelated_race_then_race': ([other, race], 'FAIL', 1),
+        'stall_then_race': ([fake(3, '', ok=False), race], 'INVALID', 1),
+        'tsan_other_diag_then_race': ([fake(66, 'WARNING: ThreadSanitizer: heap-use-after-free\n'), race], 'INVALID', 1),
+        'clean_miss_then_race': ([clean, race], 'PASS', 2),
+        'clean_misses_exhausted': ([clean] * 3, 'FAIL', 3),
+    }
+    for name, (seq, want_st, want_n) in seqs.items():
+        calls = []
+
+        def once(k, seq=seq, calls=calls):
+            calls.append(k)
+            return seq[k - 1]
+        st, outs = neg_loop(once, fn, 3)
+        row('tsan', f'neg_retry_{name}', (st, len(calls)) == (want_st, want_n),
+            f'{st} after {len(calls)} run(s) ({" ".join(outs)}), want {want_st} after {want_n}')
+    # A negative control must report the race in its named function, but TSan reports only accesses that actually
+    # overlapped in one run: repeat (each a fresh run directory) only after a clean completed run that missed it.
     for case, fn in RT_NEG.items():
         e = exes[('rt', 'tsan')]
-        n, named, tries = 0, False, 0
-        while e and tries < NEG_ATTEMPTS and not (n > 0 and named):
-            tries += 1
-            st, r, cd = run_case(e, out / f'rt-tsan-neg{tries}', 'RT', case, 'tsan', timeout=1800)
-            n = r.stderr.count('WARNING: ThreadSanitizer: data race') if r else 0
-            named = fn in (r.stderr if r else '')
-        row('tsan', case, n > 0 and named,
-            f'(NEGATIVE) {n} data-race reports, {fn} named {named}, attempt {tries} of {NEG_ATTEMPTS}')
+
+        def once(k, case=case, e=e):
+            r = run_case(e, out / f'rt-tsan-neg{k}', 'RT', case, 'tsan', timeout=1800)[1]
+            if r is not None:
+                r.case = case
+            return r
+        st, outs = neg_loop(once, fn, NEG_ATTEMPTS) if e else ('INVALID', [])
+        row('tsan', case, st == 'PASS', f'(NEGATIVE) {fn}: runs {" ".join(outs)} of at most {NEG_ATTEMPTS}', status=st)
 
 # ---------------------------------------------------------------- ct
 if want('ct'):
