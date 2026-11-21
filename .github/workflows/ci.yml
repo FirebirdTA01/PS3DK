@@ -323,6 +323,18 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
           python3 tests/host/ps3dk-prof-runtime/live-autostart-test.py "$RUNNER_TEMP/live-e2e/autostart"
           python3 tests/host/ps3dk-prof-runtime/live-autostart-cmake-test.py "$RUNNER_TEMP/live-e2e/autostart-cmake"
+      # The toolchain files' profiler options through one CMAKE_PROJECT_INCLUDE file: the runner's CMake, and
+      # CMake 3.28 (Kitware's tarball, sha256-checked), where the variable takes one file only.
+      - name: Profiler options on the runner's CMake and on CMake 3.28
+        if: matrix.suite == 'live-e2e'
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/prof-register-cmake-test.py "$RUNNER_TEMP/live-e2e/register-cmake"
+          v=3.28.3; t="$RUNNER_TEMP/cmake-$v-linux-x86_64.tar.gz"
+          curl -fsSL --retry 3 -o "$t" "https://github.com/Kitware/CMake/releases/download/v$v/cmake-$v-linux-x86_64.tar.gz"
+          echo "804d231460ab3c8b556a42d2660af4ac7a0e21c98a7f8ee3318a74b4a9a187a6  $t" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/cmake-$v"; tar -C "$RUNNER_TEMP/cmake-$v" --strip-components=1 -xzf "$t"
+          python3 tests/host/ps3dk-prof-runtime/prof-register-cmake-test.py "$RUNNER_TEMP/live-e2e/register-cmake-$v" \
+            --cmake "$RUNNER_TEMP/cmake-$v/bin/cmake"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"
@@ -440,6 +452,8 @@ jobs:
       # hello-ppu-prof-auto-verdicts: bounded waits, stop and exit policy on a fake clock, with sensitivity mutants.
       - name: Verdict sample wait and exit policy host test
         run: python3 tests/host/prof-auto-verdicts-test.py
+      - name: Verdict sample refuses to configure without PS3_PROF_AUTO
+        run: python3 tests/host/prof-auto-verdicts-configure-test.py "$RUNNER_TEMP/prof-auto-verdicts-configure"
 
       # Automatic function paths (libps3dkprof_func runtime): the deterministic call-tree, stack-loss, capacity,
       # cut/ack and lifecycle controls, plain, ASan+UBSan and TSan, plus TSan mutants of the snapshot handoff.
@@ -589,7 +603,7 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
           python3 tests/host/ps3dk-prof-runtime/auto-ring-option-cmake-test.py --out "$RUNNER_TEMP/auto-ring-option-cmake"
           python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
-          for mutant in compile-as-driver internal-definitions positional-inputs; do
+          for mutant in compile-as-driver internal-definitions positional-inputs no-driver-env; do
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-selector-test.py --out "$RUNNER_TEMP/auto-selector"
@@ -1233,6 +1247,9 @@ jobs:
       # SDK install put there, never nested as cmake/cmake.
       - name: Test the packaged cmake/ layout and its release-tree check
         run: bash tests/host/release-tree-cmake-layout-test.sh
+      # release.yml installs one exact Rust (dtolnay ref = scripts/ci-pin-rust.sh) and checks it per job.
+      - name: Test the release Rust pin
+        run: bash tests/host/ci-pin-rust-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
       # libgcc the lock-free FDE registry in both multilibs.

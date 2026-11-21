@@ -178,12 +178,28 @@ def _normalize(arg):
     return arg
 
 
+# The environment a gcc driver gives the programs it runs, which -### prints but does not set: collect2 finds the real
+# linker through COMPILER_PATH (the driver's own program directories and every -B prefix), so a collect2 run without
+# it searches PATH instead and fails, or finds another linker, when the toolchain's bin directory is not on PATH.
+_DRIVER_ENV = re.compile(r'^(COMPILER_PATH|LIBRARY_PATH|COLLECT_GCC|COLLECT_GCC_OPTIONS|COLLECT_LTO_WRAPPER)=(.*)$')
+
+
 def _linker_command(argv, placeholder, cwd):
-    """The final linker command the driver runs for this link (all specs applied), from 'driver ... -###'."""
+    """(The final linker command the driver runs for this link (all specs applied), from 'driver ... -###', and the
+    environment the driver would run it with.)"""
     r = subprocess.run([*argv, str(placeholder), '-###'], capture_output=True, text=True, timeout=300, cwd=cwd)
     if r.returncode:
         raise ValueError('driver could not plan the link (-###): '+(r.stderr or r.stdout)[-2000:])
-    lines = [l for l in r.stderr.splitlines() if l.startswith(' ') and not l.lstrip().startswith('COLLECT_')]
+    lines = []
+    seen = {}
+    env = {}
+    for l in r.stderr.splitlines():
+        m = _DRIVER_ENV.match(l)
+        if m:
+            seen[m.group(1)] = m.group(2)
+        elif l.startswith(' ') and not l.lstrip().startswith('COLLECT_'):
+            lines.append(l)
+            env = dict(seen)  # what the driver had exported when it would run this command
     if not lines:
         raise ValueError('driver printed no linker command for -###')
     # gcc quotes -### arguments shell-style and doubles backslashes inside quotes, so POSIX splitting is exact.
@@ -200,15 +216,15 @@ def _linker_command(argv, placeholder, cwd):
         if not found or not Path(found).is_file():
             raise ValueError('cannot resolve the linker program '+prog)
         prog = found
-    return [prog, *final[1:]]
+    return [prog, *final[1:]], {**os.environ, **env}
 
 
 def _traced_inputs(argv, placeholder, cwd):
     """(Every file the linker opens, normalized final linker command), by running the driver's own final linker
     command with --verbose FIRST, so that options the linker handles while parsing (-T) are traced too."""
-    command = _linker_command(argv, placeholder, cwd)
+    command, env = _linker_command(argv, placeholder, cwd)
     r = subprocess.run([command[0], '--verbose', *command[1:]], capture_output=True, text=True, timeout=1800,
-                       cwd=cwd)
+                       cwd=cwd, env=env)
     if r.returncode:
         raise ValueError('trial link failed, so its inputs cannot be resolved: '+(r.stderr or r.stdout)[-2000:])
     opened = set()

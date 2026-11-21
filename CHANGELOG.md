@@ -16,6 +16,29 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
+  toolchain files now name one project-include file, which includes the
+  selected profiler modules in order, so `PS3_PROF_WAITS`,
+  `PS3_PROF_LIVE_AUTOSTART` and `PS3_PROF_AUTO`, in every combination they
+  support, configure on CMake older than 3.29. A `CMAKE_PROJECT_INCLUDE` the project sets itself
+  still runs, first.
+- **`PS3_PROF_AUTO` link identity without the toolchain on `PATH`.** The trial
+  link that records the link's inputs ran the driver's linker command without
+  the environment the driver gives it, so the linker was looked up on `PATH`
+  and the executable's link failed unless the toolchain's `ppu/bin` was on
+  `PATH`. It now runs with the driver's own search paths.
+
+### Changed
+
+- `samples/gcm/hello-ppu-prof-auto-verdicts` stops at configure with a message
+  naming `-DPS3_PROF_AUTO=ON` when `PS3_PROF_AUTO` is off, instead of building
+  a sample that records nothing. `scripts/build-all-samples.sh` configures it
+  with the option.
+- The release workflow builds with one exact Rust (`scripts/ci-pin-rust.sh`,
+  1.100.0) and checks it in every job that installs Rust, as it does for CMake.
+
 ## [v0.28.0] — 2026-11-21
 
 ### Added

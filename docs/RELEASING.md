@@ -44,7 +44,9 @@ retention: retain the installed-library anchor/no-anchor RPCS3 controls in
   on the two zips exits 0.  The two runs can land on different runner
   images, so a build tool that writes its own version into shipped files is
   pinned in the workflow: the release jobs that run CMake use the exact
-  version in `scripts/ci-pin-cmake.sh` and fail if another one is on PATH.
+  version in `scripts/ci-pin-cmake.sh` and fail if another one is on PATH,
+  and the jobs that build the Rust tools install the exact Rust in
+  `scripts/ci-pin-rust.sh` and check it with `ci-pin-rust.sh --check`.
 - Separately, a deliberate version-only comparison (the same tree with only
   the version changed) shows the expected stamp differences and nothing
   else: `scripts/compare-builds.py <A> <B> --version-string <old>=<new>`

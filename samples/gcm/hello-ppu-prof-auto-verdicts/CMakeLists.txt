@@ -10,6 +10,15 @@
 cmake_minimum_required(VERSION 3.20)
 project(hello-ppu-prof-auto-verdicts C ASM)
 
+# The phases are known answers for the automatic RSX observer; built without it the sample records nothing and its
+# AUTOVERDICT lines have no capture to check against, so it refuses here instead of building that.
+if(NOT PS3_PROF_AUTO)
+    message(FATAL_ERROR
+        "hello-ppu-prof-auto-verdicts needs automatic RSX observation: configure it with -DPS3_PROF_AUTO=ON "
+        "(and -DPS3_PROF_AUTO_ROOT=<sdk-root> when the providers are not in PS3DK). "
+        "PS3_PROF_AUTO is off in this build directory.")
+endif()
+
 include(ps3-self)
 
 add_executable(hello-ppu-prof-auto-verdicts source/main.c)
