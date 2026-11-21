@@ -454,10 +454,26 @@ await confirmation against the platform ABI; everything else is normative.
 | Program headers | one or more `PT_LOAD` followed by exactly one `0x700000A4` (`PT_SCE_PPURELA`) segment; **no** `PT_TLS`, `0x60000001`, `0x60000002` or `PT_NOTE` |
 | `PHDR[0]` | must be the first `PT_LOAD`; its `p_paddr` = the module-info block's position in the `p_offset` frame (with `p_offset = 0` and `p_vaddr = 0`: its file offset). `p_paddr == 0` means "no module info". |
 
-Our toolchain links every module at base 0 with a single `PT_LOAD`
-(flags RWX) so that every relocation record has `index_addr == index_value
-== 0` and `ptr` equal to the link-time address. Section headers are
-optional; `prx-gen` preserves the input's.
+Our toolchain links every module at base 0 with two `PT_LOAD` segments,
+the layout shipped modules use (issue #137):
+
+| Segment | `p_flags` | Contents |
+|---|---|---|
+| 0, code | `0x00400005` (PPU R+X, SPU R) | ELF and program headers, module-info block, `.text`, import trampolines, unwind tables, `.lib.ent`/`.lib.stub` and the NID/name/address tables |
+| 1, data | `0x00600006` (PPU R+W, SPU R+W) | `.rodata`, `.opd`, `.got`/TOC, `.data.sceFStub`, `.data`, `.bss` |
+
+The data segment follows the code segment directly (16-byte aligned);
+only `PHDR[0]` carries a `p_paddr`. Normative rules:
+
+1. Every `PT_LOAD` sets the SPU read bit `0x00400000`; retail Lv-2
+   refuses a module without it (`0x80010007`). A writable segment also
+   sets the SPU write bit `0x00200000`.
+2. No `PT_LOAD` is both writable and executable. With a single RWX
+   segment retail Lv-2 loads and starts the module, then freezes the
+   process on its first store to `.data` or `.bss`.
+
+The emulator accepts both violations. Section headers are optional;
+`prx-gen` preserves the input's.
 
 ### 8.2 Module-info block (`.rodata.sceModuleInfo`, symbol `__sys_prx_module_info`)
 
@@ -472,10 +488,10 @@ offset  size  field           value / reloc
 0x02    2     version         major, minor (prx-gen --version)
 0x04    28    name            NUL-padded, <= 27 chars (prx-gen --name)
 0x20    4     toc             R_PPC64_ADDR32 .TOC.
-0x24    4     exports_start   R_PPC64_ADDR32 __libentstart + 4
-0x28    4     exports_end     R_PPC64_ADDR32 __libentend
-0x2c    4     imports_start   R_PPC64_ADDR32 __libstubstart + 4
-0x30    4     imports_end     R_PPC64_ADDR32 __libstubend
+0x24    4     exports_start   R_PPC64_ADDR32 .lib.ent.top word + 4
+0x28    4     exports_end     R_PPC64_ADDR32 .lib.ent.btm word
+0x2c    4     imports_start   R_PPC64_ADDR32 .lib.stub.top word + 4
+0x30    4     imports_end     R_PPC64_ADDR32 .lib.stub.btm word
 ```
 
 Normative rules:
@@ -488,15 +504,20 @@ Normative rules:
 
 ### 8.3 Library records (`.lib.ent` / `.lib.stub`)
 
-Both tables use the same 44-byte record; only the meaning of the pointer
-fields differs (import side: section-reference.md §4).
+An export record is 28 bytes (`0x1c`); an import record is the same
+header extended to 44 bytes (`0x2c`; section-reference.md §4). Retail
+Lv-2 walks `.lib.ent` in fixed `0x1c` steps whatever the `size` byte says,
+so a 44-byte export record puts every following record in the wrong
+place and `sys_prx_start_module` hangs; a single record only works
+because the walk ends after it. The emulator walks by the `size` byte
+and accepts both.
 
 ```
 offset  size  field         export meaning
 ------  ----  ------------  ----------------------------------------
-0x00    1     size          0x2c (walk stride; 0 is read as 44)
+0x00    1     size          0x1c
 0x01    1     unk0          0
-0x02    2     version       1
+0x02    2     version       1 (named library), 0 (management record)
 0x04    2     attributes    0x0001 named library | 0x8000 management (0x0001 clear)
 0x06    2     num_func      written at assembly time (label arithmetic)
 0x08    2     num_var       0 in v1
@@ -505,8 +526,11 @@ offset  size  field         export meaning
 0x10    4     name          R_PPC64_ADDR32 -> C string; 0 for the management record
 0x14    4     nids          R_PPC64_ADDR32 -> u32[num_func + num_var]
 0x18    4     addrs         R_PPC64_ADDR32 -> u32[num_func + num_var]; functions are compact-OPD addresses
-0x1c    16    vnids, vstubs, unk4, unk5   0 (export side: variables are appended to nids/addrs)
 ```
+
+Variables are appended to `nids`/`addrs` after the functions. The import
+record's extra `vnids, vstubs, unk4, unk5` words (`0x1c..0x2c`) do not
+exist on the export side.
 
 Normative rules:
 
@@ -525,7 +549,10 @@ Normative rules:
 3. Management-record NIDs: `module_start 0xBC9A0086`,
    `module_stop 0xAB779874`, `module_exit 0x3AB9A95E`,
    `module_prologue 0x0D10FD3F`, `module_epilogue 0x330F7005`. v1 emits
-   the first two. There is no `module_info` NID.
+   the first two as functions, plus the variable `module_info`
+   (`0xD7F43016`, the address of the module-info block) as shipped
+   modules do: the management record is version 0, attributes `0x8000`,
+   2 functions and 1 variable.
 4. `sys_prx_start_module` is two-phase: the kernel publishes exports and
    returns the entry to the guest wrapper, which calls it and reports the
    result; a non-zero `module_start` return unloads the module. Exports
@@ -551,17 +578,25 @@ Normative rules:
 1. `ptr` carries the plain value; the loader performs the HA carry, the
    `>> 2` for DS/branch forms and the PC-relative subtraction.
 2. `offset < align(seg[index_addr].memsz, 0x100)` or the load aborts.
-3. `prx-gen` drops relocations that are load-invariant with a single
-   segment (`REL*`, `TOC16*`, `GOT16*`, `SECTOFF*`, `R_PPC64_NONE`) and
-   refuses any absolute form outside the nine accepted types.
-4. `.TOC.` legitimately resolves outside the segment (`.got + 0x8000`);
-   it is relocated against segment 0, not frozen as an absolute value.
+3. Each segment gets its own base, so `prx-gen` drops a relocation only
+   when its two ends move together: a `REL24`/`REL14` branch whose
+   decoded target is in the branch's own segment (the symbol of a `bl`
+   is the callee's descriptor in `.opd`, so the target comes from the
+   linked instruction); a `TOC16*`/`GOT16*` access whose target is in
+   the TOC's segment, wherever the instruction is; any other
+   PC-relative form whose site and target share a segment; `SECTOFF*`
+   and `R_PPC64_NONE`. A cross-segment `REL64` is emitted as type 44;
+   every other cross-segment relative form is refused, as is any
+   absolute form outside the nine accepted types.
+4. `.TOC.` legitimately resolves outside the image (`.got + 0x8000`);
+   it is relocated against the segment holding `.got`, not frozen as an
+   absolute value.
 
 ### 8.5 Link recipe
 
 ```
 gcc -specs=$PS3DK/ppu/lib/lv2-prx.specs -nostartfiles -Wl,-q \
-    -Wl,--no-warn-rwx-segments -Wl,-T,$PS3DK/ppu/lib/lv2-prx.ld \
+    -Wl,-T,$PS3DK/ppu/lib/lv2-prx.ld \
     $PS3DK/ppu/lib/lv2-prx-crt.o <objects> <libs>
 prx-gen build <elf> -o <mod>.prx --name <name> --version <M.m>
 ```

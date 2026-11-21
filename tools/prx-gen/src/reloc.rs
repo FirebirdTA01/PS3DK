@@ -6,18 +6,31 @@
 //! `index_value`'s runtime base, add `ptr`, and write the result into LOAD
 //! segment `index_addr` at `offset`, encoded per `type`".
 //!
-//! Two consequences drive this module:
+//! Three consequences drive this module:
 //!
 //!   * The loader performs the encoding itself (the carry for `_HA`, the `>>2`
 //!     for the DS and branch forms).  We must hand it the *plain* value.
 //!   * A relocation whose value does not depend on the load base is dead
-//!     weight, and the loader's accepted-type list is short.  Anything
-//!     PC-, TOC-, GOT- or section-relative *within one segment* is invariant
-//!     and gets dropped rather than translated.
+//!     weight, and the loader's accepted-type list is short.  Anything whose
+//!     two ends move together is invariant and gets dropped rather than
+//!     translated.
+//!   * Every LOAD segment gets its own base, so a module with a code segment
+//!     and a data segment (the layout retail Lv-2 needs, issue #137) has to
+//!     be judged per relocation on what actually moves together:
+//!       - a branch (`REL24`/`REL14`) is invariant when the instruction and
+//!         the code it reaches share a segment.  The symbol a `bl` names is
+//!         the function's descriptor in `.opd` (data segment), so the target
+//!         is decoded from the linked instruction, not taken from the symbol;
+//!       - a TOC-relative access (`TOC16*`, `GOT16*`) is relative to r2, so it
+//!         is invariant when its target shares the TOC's segment, wherever
+//!         the instruction itself lives;
+//!       - any other PC-relative form is invariant when the site and the
+//!         target share a segment.  Across segments only `REL64` has a loader
+//!         encoding; the rest are refused.
 
 use anyhow::{bail, Result};
 
-use crate::elf::{Elf, Phdr, SHN_ABS, SHN_COMMON, SHN_UNDEF};
+use crate::elf::{rd_u32, Elf, Phdr, SHN_ABS, SHN_COMMON, SHN_UNDEF};
 
 /// Size of one on-disk PRX relocation record.
 pub const PRX_RELOC_SIZE: usize = 24;
@@ -75,16 +88,30 @@ const R_PPC64_REL16_LO: u32 = 250;
 const R_PPC64_REL16_HI: u32 = 251;
 const R_PPC64_REL16_HA: u32 = 252;
 
-/// How a relocation's value behaves when the module is loaded at an
-/// arbitrary base.
+
+/// How a relocation's value behaves when each LOAD segment is placed at its
+/// own, arbitrary base.
+#[derive(Clone, Copy)]
 enum Class {
-    /// Value is `S + A` — moves with the load base, must be emitted.
-    /// Carries the PRX relocation type to emit.
+    /// Value is `S + A` — moves with the base of the segment holding `S`,
+    /// must be emitted. Carries the PRX relocation type to emit.
     Absolute(u32),
-    /// Value is a difference between two addresses. Invariant when both
-    /// sides live in the same segment, in which case it is dropped.
-    Relative,
-    /// Nothing to do (`R_PPC64_NONE`, and link-time-only bookkeeping).
+    /// `REL24`: a 24-bit branch displacement.
+    Branch24,
+    /// `REL14*`: a 14-bit conditional branch displacement.
+    Branch14,
+    /// `TOC16*`: an offset from r2 to `S + A`.
+    TocRelative,
+    /// `GOT16*`: an offset from r2 to a GOT entry, which lives in `.got`
+    /// beside the TOC by construction.
+    GotRelative,
+    /// Any other `S + A - P`. When site and target sit in different segments,
+    /// the carried PRX type (if any) encodes it for the loader; without one
+    /// the relocation cannot be expressed.
+    PcRelative(Option<u32>),
+    /// `S + A - section start`: invariant wherever the section lands.
+    SectionRelative,
+    /// Nothing to do (`R_PPC64_NONE`).
     Ignore,
 }
 
@@ -104,32 +131,33 @@ fn classify(r_type: u32) -> Option<Class> {
         // holding the TOC.
         R_PPC64_TOC => Class::Absolute(38),
 
-        R_PPC64_REL24
-        | R_PPC64_REL14
-        | R_PPC64_REL14_BRTAKEN
-        | R_PPC64_REL14_BRNTAKEN
-        | R_PPC64_REL32
-        | R_PPC64_REL64
-        | R_PPC64_REL16
-        | R_PPC64_REL16_LO
-        | R_PPC64_REL16_HI
-        | R_PPC64_REL16_HA
-        | R_PPC64_GOT16
-        | R_PPC64_GOT16_LO
-        | R_PPC64_GOT16_HI
-        | R_PPC64_GOT16_HA
-        | R_PPC64_GOT16_DS
-        | R_PPC64_GOT16_LO_DS
-        | R_PPC64_TOC16
+        R_PPC64_REL24 => Class::Branch24,
+        R_PPC64_REL14 | R_PPC64_REL14_BRTAKEN | R_PPC64_REL14_BRNTAKEN => Class::Branch14,
+
+        R_PPC64_TOC16
         | R_PPC64_TOC16_LO
         | R_PPC64_TOC16_HI
         | R_PPC64_TOC16_HA
         | R_PPC64_TOC16_DS
-        | R_PPC64_TOC16_LO_DS
-        | R_PPC64_SECTOFF
-        | R_PPC64_SECTOFF_LO
-        | R_PPC64_SECTOFF_HI
-        | R_PPC64_SECTOFF_HA => Class::Relative,
+        | R_PPC64_TOC16_LO_DS => Class::TocRelative,
+
+        R_PPC64_GOT16
+        | R_PPC64_GOT16_LO
+        | R_PPC64_GOT16_HI
+        | R_PPC64_GOT16_HA
+        | R_PPC64_GOT16_DS
+        | R_PPC64_GOT16_LO_DS => Class::GotRelative,
+
+        // REL64 is the one PC-relative form the loader can apply across
+        // segments (type 44, `value - site`); shipped modules use it from the
+        // data segment back into code.
+        R_PPC64_REL64 => Class::PcRelative(Some(44)),
+        R_PPC64_REL32 | R_PPC64_REL16 | R_PPC64_REL16_LO | R_PPC64_REL16_HI
+        | R_PPC64_REL16_HA => Class::PcRelative(None),
+
+        R_PPC64_SECTOFF | R_PPC64_SECTOFF_LO | R_PPC64_SECTOFF_HI | R_PPC64_SECTOFF_HA => {
+            Class::SectionRelative
+        }
 
         // Absolute forms the Lv-2 loader has no case for.  Reaching one means
         // the module contains a construct we cannot express; fail loudly
@@ -198,7 +226,23 @@ enum ValueBase {
     Absolute,
 }
 
-/// Decide which segment's runtime base a value should be measured against.
+/// `addr` lies in `p`, counting the one-past-the-end address as inside: that
+/// is where an end marker such as `__libstubend` or `_end` sits.
+fn within_inclusive(p: &Phdr, addr: u64) -> bool {
+    addr >= p.p_vaddr && addr <= p.p_vaddr + p.p_memsz
+}
+
+/// The segment an address belongs to: strict containment first, then the
+/// segment it is the end of. With contiguous segments the end of one is the
+/// start of the next, and strict containment (the start) wins there.
+fn segment_of_addr(loads: &[Phdr], addr: u64) -> Option<usize> {
+    loads
+        .iter()
+        .position(|p| p.contains_vaddr(addr))
+        .or_else(|| loads.iter().position(|p| within_inclusive(p, addr)))
+}
+
+/// The segment a symbol moves with.
 ///
 /// Address containment alone is not enough. `.TOC.` is the counterexample that
 /// matters: on PPC64 it is `.got + 0x8000`, so on a small module it resolves
@@ -210,39 +254,123 @@ enum ValueBase {
 /// The symbol's own section is therefore the authoritative answer, with
 /// containment as the fallback for linker-defined symbols that carry no
 /// section.
-fn value_base(elf: &Elf, loads: &[Phdr], addr: u64, shndx: u16, warn: &mut Vec<String>, sym_name: &str) -> ValueBase {
-    // 1. The symbol belongs to a real section: use the segment holding it.
+fn symbol_segment(elf: &Elf, loads: &[Phdr], value: u64, shndx: u16) -> Option<usize> {
     if shndx != SHN_ABS && shndx != SHN_UNDEF && shndx != SHN_COMMON {
         if let Some(sec) = elf.shdrs.get(shndx as usize) {
             if sec.is_alloc() {
-                if let Some(i) = loads.iter().position(|p| p.contains_vaddr(sec.sh_addr)) {
-                    return ValueBase::Segment(i);
+                if let Some(i) = segment_of_addr(loads, sec.sh_addr) {
+                    return Some(i);
                 }
             }
         }
     }
+    segment_of_addr(loads, value)
+}
 
-    // 2. Linker-defined or absolute symbol that still lands in the image.
-    if let Some(i) = loads.iter().position(|p| p.contains_vaddr(addr)) {
+/// The TOC's link-time address and the segment it moves with.
+struct Toc {
+    addr: u64,
+    segment: usize,
+}
+
+fn find_toc(elf: &Elf, loads: &[Phdr]) -> Result<Option<Toc>> {
+    let sym = match elf.syms.iter().find(|s| s.name == ".TOC.") {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    let addr = sym.st_value;
+
+    // 1. `.TOC.` bound to a real section.
+    if sym.st_shndx != SHN_ABS && sym.st_shndx != SHN_UNDEF && sym.st_shndx != SHN_COMMON {
+        if let Some(sec) = elf.shdrs.get(sym.st_shndx as usize) {
+            if sec.is_alloc() {
+                if let Some(i) = segment_of_addr(loads, sec.sh_addr) {
+                    return Ok(Some(Toc { addr, segment: i }));
+                }
+            }
+        }
+    }
+    // 2. The TOC is defined as `.got + 0x8000`: the segment holding `.got`.
+    if let Some(got) = elf.section(".got") {
+        if let Some(i) = segment_of_addr(loads, got.sh_addr) {
+            return Ok(Some(Toc { addr, segment: i }));
+        }
+    }
+    if let Some(i) = segment_of_addr(loads, addr.wrapping_sub(0x8000)) {
+        return Ok(Some(Toc { addr, segment: i }));
+    }
+    // 3. One segment: everything moves together.
+    if loads.len() == 1 {
+        return Ok(Some(Toc { addr, segment: 0 }));
+    }
+    bail!(
+        "cannot tell which segment the TOC (.TOC. = 0x{addr:x}) belongs to: there is no .got \
+         section and the address is outside every PT_LOAD segment"
+    )
+}
+
+/// Decide which segment's runtime base an absolute value is measured against.
+fn value_base(
+    elf: &Elf,
+    loads: &[Phdr],
+    toc: Option<&Toc>,
+    addr: u64,
+    shndx: u16,
+    warn: &mut Vec<String>,
+    sym_name: &str,
+) -> ValueBase {
+    if sym_name == ".TOC." {
+        if let Some(t) = toc {
+            return ValueBase::Segment(t.segment);
+        }
+    }
+
+    if let Some(i) = symbol_segment(elf, loads, addr, shndx) {
         return ValueBase::Segment(i);
     }
 
-    // 3. Outside the image, but the module has a single segment, so everything
-    //    it can name moves by the same delta. `.TOC.` lands here.
+    // Outside the image, but the module has a single segment, so everything
+    // it can name moves by the same delta.
     if loads.len() == 1 {
         warn.push(format!(
             "'{sym_name}' resolves to 0x{addr:x}, outside the segment, but the module has one \
-             PT_LOAD so it is relocated against that segment (expected for .TOC.)"
+             PT_LOAD so it is relocated against that segment"
         ));
         return ValueBase::Segment(0);
     }
 
-    // 4. Genuinely absolute.
     warn.push(format!(
         "'{sym_name}' resolves to 0x{addr:x}, outside every PT_LOAD segment; emitting it as a \
          fixed absolute value"
     ));
     ValueBase::Absolute
+}
+
+fn sign_extend(v: u64, bits: u32) -> i64 {
+    let shift = 64 - bits;
+    ((v << shift) as i64) >> shift
+}
+
+/// Where the linked branch instruction at `site` goes.
+fn branch_target(elf: &Elf, site: u64, class: Class) -> Result<u64> {
+    let off = elf.file_offset_of_vaddr(site).ok_or_else(|| {
+        anyhow::anyhow!("branch relocation at 0x{site:x} is not backed by file content")
+    })?;
+    if off + 4 > elf.data.len() {
+        bail!("branch relocation at 0x{site:x} runs past the end of the file");
+    }
+    let insn = rd_u32(&elf.data, off) as u64;
+    if insn & 0x2 != 0 {
+        bail!(
+            "branch at 0x{site:x} (instruction 0x{insn:08x}) is an absolute branch (AA set); \
+             a relocatable module cannot contain one"
+        );
+    }
+    let disp = match class {
+        Class::Branch24 => sign_extend(insn & 0x03FF_FFFC, 26),
+        _ => sign_extend(insn & 0xFFFC, 16),
+    };
+    Ok((site as i64).wrapping_add(disp) as u64)
 }
 
 /// Convert every allocated `-Wl,-q` relocation into the PRX relocation set.
@@ -272,6 +400,7 @@ pub fn convert(elf: &Elf) -> Result<Conversion> {
     if loads.len() > u8::MAX as usize {
         bail!("{} PT_LOAD segments; the segment index field is one byte", loads.len());
     }
+    let toc = find_toc(elf, &loads)?;
 
     let mut relocs = Vec::new();
     let mut dropped = 0usize;
@@ -328,47 +457,114 @@ pub fn convert(elf: &Elf) -> Result<Conversion> {
         }
 
         let value = (sym.st_value as i64).wrapping_add(rela.r_addend) as u64;
+        let offset = rela.r_offset - loads[index_addr].p_vaddr;
 
         match class {
-            Class::Ignore => {
+            Class::Ignore | Class::SectionRelative | Class::GotRelative => {
                 dropped += 1;
             }
-            Class::Relative => {
-                // Invariant only when both ends move together.
-                let sym_seg = elf.load_index_of_vaddr(value);
-                match sym_seg {
+            Class::Branch24 | Class::Branch14 => {
+                // The symbol of a `bl f` is f's descriptor in `.opd`, which
+                // sits in the data segment; the linker resolved the branch to
+                // the code it describes. Judge the branch by where it goes.
+                let target = branch_target(elf, rela.r_offset, class)?;
+                match elf.load_index_of_vaddr(target) {
                     Some(s) if s == index_addr => dropped += 1,
                     Some(s) => bail!(
-                        "PC/TOC-relative relocation (type {}) at 0x{:x} crosses segments \
-                         ({} -> {}); link the PRX with a single PT_LOAD so relative \
-                         relocations stay load-invariant",
-                        rela.r_type,
+                        "branch at 0x{:x} (relocation type {}, symbol '{}') reaches 0x{target:x} \
+                         in segment {s}, but the branch itself is in segment {index_addr}. \
+                         Segments load at independent addresses and only the code segment is \
+                         executable, so this branch cannot be relocated",
                         rela.r_offset,
-                        index_addr,
-                        s
+                        rela.r_type,
+                        sym.name
                     ),
-                    None => {
-                        // Relative against something outside the image: the
-                        // distance changes when we move. We cannot fix it.
-                        bail!(
-                            "relative relocation (type {}) at 0x{:x} targets 0x{:x}, which is \
-                             outside every PT_LOAD segment",
-                            rela.r_type,
-                            rela.r_offset,
-                            value
-                        );
-                    }
+                    None => bail!(
+                        "branch at 0x{:x} (relocation type {}, symbol '{}') reaches 0x{target:x}, \
+                         which is outside every PT_LOAD segment",
+                        rela.r_offset,
+                        rela.r_type,
+                        sym.name
+                    ),
                 }
             }
+            Class::TocRelative => {
+                let t = toc.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "TOC-relative relocation (type {}) at 0x{:x}, but the module defines no \
+                         .TOC. symbol",
+                        rela.r_type,
+                        rela.r_offset
+                    )
+                })?;
+                match symbol_segment(elf, &loads, value, sym.st_shndx) {
+                    Some(s) if s == t.segment => dropped += 1,
+                    Some(s) => bail!(
+                        "TOC-relative relocation (type {}) at 0x{:x} reaches '{}' (0x{value:x}) in \
+                         segment {s}, but the TOC (0x{:x}) is in segment {}. Segments load at \
+                         independent addresses, so r2 plus a link-time offset would miss the \
+                         target. Data the code addresses through r2 must sit in the TOC's \
+                         segment; lv2-prx.ld puts .rodata, .data and .bss there",
+                        rela.r_type,
+                        rela.r_offset,
+                        sym.name,
+                        t.addr,
+                        t.segment
+                    ),
+                    None => bail!(
+                        "TOC-relative relocation (type {}) at 0x{:x} targets 0x{value:x}, which \
+                         is outside every PT_LOAD segment",
+                        rela.r_type,
+                        rela.r_offset
+                    ),
+                }
+            }
+            Class::PcRelative(cross) => match symbol_segment(elf, &loads, value, sym.st_shndx) {
+                Some(s) if s == index_addr => dropped += 1,
+                Some(s) => match cross {
+                    Some(prx_type) => relocs.push(PrxReloc {
+                        offset,
+                        index_value: s as u8,
+                        index_addr: index_addr as u8,
+                        r_type: prx_type,
+                        ptr: value.wrapping_sub(loads[s].p_vaddr),
+                    }),
+                    None => bail!(
+                        "PC-relative relocation (type {}) at 0x{:x} reaches '{}' in segment {s}, \
+                         but the site is in segment {index_addr}. Segments load at independent \
+                         addresses and the loader can only re-encode a cross-segment \
+                         R_PPC64_REL64, so this one cannot be relocated",
+                        rela.r_type,
+                        rela.r_offset,
+                        sym.name
+                    ),
+                },
+                None => {
+                    // Relative against something outside the image: the
+                    // distance changes when we move. We cannot fix it.
+                    bail!(
+                        "relative relocation (type {}) at 0x{:x} targets 0x{:x}, which is \
+                         outside every PT_LOAD segment",
+                        rela.r_type,
+                        rela.r_offset,
+                        value
+                    );
+                }
+            },
             Class::Absolute(prx_type) => {
-                let base =
-                    value_base(elf, &loads, value, sym.st_shndx, &mut warnings, &sym.name);
+                let base = value_base(
+                    elf,
+                    &loads,
+                    toc.as_ref(),
+                    value,
+                    sym.st_shndx,
+                    &mut warnings,
+                    &sym.name,
+                );
                 let (index_value, ptr) = match base {
                     ValueBase::Segment(s) => (s as u8, value.wrapping_sub(loads[s].p_vaddr)),
                     ValueBase::Absolute => (INDEX_VALUE_ABSOLUTE, value),
                 };
-
-                let offset = rela.r_offset - loads[index_addr].p_vaddr;
 
                 // The loader throws outright if offset >= align(seg.size, 0x100).
                 let limit = (loads[index_addr].p_memsz + 0xFF) & !0xFFu64;

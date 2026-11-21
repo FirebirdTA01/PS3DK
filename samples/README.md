@@ -16,6 +16,7 @@ samples/
 ├── sysutil/       sysutil callbacks, dialogs, save/game/system data
 ├── network/       networking module load + API validation tests
 ├── lv2/           lv2 syscall primitives (threading, synchronisation)
+├── sprx/          relocatable modules (PRX/SPRX) and their loaders
 ├── util/          self-contained PPU utility libraries (hash)
 ├── spu/           SPU toolchain + PPU/SPU interop
 └── spurs/         libspurs sync primitives + Spurs task runtime
@@ -217,6 +218,16 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 | `hello-ppu-sysutil-queries` | License area, Remote Play status and volume, boot game info, HOME export path and paired Bluetooth devices through the new sysutil headers; loads and unloads each system module | **green** + RPCS3 runtime-verified |
 | `hello-ppu-l10n` | `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` + `eucjp2sjis()` — 165-export libl10n scaling test for the nidgen-archive pipeline | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match) |
 | `hello-ppu-input-combined` | Pad + keyboard + mouse polled in one loop; hot-plug on port 0 of each surface printed as it happens; any failed init, callback, read or shutdown call ends the run in FAIL (exit 1), while absent devices, idle frames and a confirmed unplug during a read are normal (`README.md`) | builds both ABIs; RPCS3 run of this revision pending; hot-plug needs a console |
+
+## sprx/
+
+Relocatable modules (`ps3_add_prx`) and the programs that load them; see
+[docs/tools/prx-gen.md](../docs/tools/prx-gen.md).
+
+| Sample | Validates | Status |
+|---|---|---|
+| `module-export` | Module identity and entry points declared in C (`SYS_MODULE_INFO`, `SYS_MODULE_START`, `SYS_MODULE_STOP`), one exported library checked by `ps3_prx_export_roundtrip`, a loader that starts, calls, stops and unloads it | **green** + RPCS3 runtime-verified |
+| [`module-segments`](sprx/module-segments/README.md) | The module layout retail Lv-2 needs (issue #137): code and data segments with the SPU permission bits, `0x1c` export records for two libraries plus the management record, and a `module_start`/`module_stop` that write and read back their own `.data` and `.bss`. The loader prints a verdict per step; ILP32 and LP64 | **green** + RPCS3 runtime-verified; console run pending |
 
 ## lv2/
 

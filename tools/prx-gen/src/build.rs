@@ -16,8 +16,8 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 
 use crate::elf::{
-    wr_u16, wr_u64, Elf, Phdr, ELFOSABI_LV2, ET_EXEC, ET_SCE_PPURELEXEC, PHDR_SIZE, PT_LOAD,
-    PT_SCE_PPURELA,
+    wr_u16, wr_u64, Elf, Phdr, ELFOSABI_LV2, ET_EXEC, ET_SCE_PPURELEXEC, PF_SPU_R, PF_SPU_W, PF_W,
+    PF_X, PHDR_SIZE, PT_LOAD, PT_SCE_PPURELA,
 };
 use crate::module;
 use crate::reloc;
@@ -65,6 +65,26 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
              loadable segment.",
             elf.phdrs[0].p_type
         );
+    }
+
+    // Retail Lv-2 cannot run a module whose own writable data shares an
+    // executable segment: the module loads, but its first store to .data or
+    // .bss freezes the process (issue #137). lv2-prx.ld links a code segment
+    // and a separate data segment; refuse anything else here rather than
+    // build a module that only works in the emulator.
+    for (i, p) in elf.load_segments().iter().enumerate() {
+        if p.p_flags & PF_W != 0 && p.p_flags & PF_X != 0 {
+            bail!(
+                "PT_LOAD segment {i} (vaddr 0x{:x}, flags 0x{:x}) is both writable and \
+                 executable.\n\
+                 Retail Lv-2 freezes a module that writes its own .data/.bss when they share an \
+                 executable segment. Link with the current lv2-prx.ld, which puts code and \
+                 read-only tables in an RX segment and the TOC, .opd and data in a separate RW \
+                 segment.",
+                p.p_vaddr,
+                p.p_flags
+            );
+        }
     }
 
     let loc = module::locate_module_info(&elf)?;
@@ -189,6 +209,24 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
     let mut phdrs: Vec<Phdr> = elf.phdrs.clone();
     phdrs[0].p_paddr = p_paddr;
 
+    // SPU permissions. Retail Lv-2 refuses to load a module whose segment
+    // lacks the SPU read bit (0x80010007), and shipped modules also mark the
+    // data segment SPU-writable: code 0x00400005, data 0x00600006. lv2-prx.ld
+    // already sets them; stamping them here keeps a module linked with a
+    // custom script loadable too.
+    //
+    // p_paddr means "module info offset" only on PHDR[0]; ld fills the other
+    // segments' p_paddr with their vaddr, and shipped modules carry 0 there.
+    for (i, p) in phdrs.iter_mut().filter(|p| p.p_type == PT_LOAD).enumerate() {
+        p.p_flags |= PF_SPU_R;
+        if p.p_flags & PF_W != 0 {
+            p.p_flags |= PF_SPU_W;
+        }
+        if i > 0 {
+            p.p_paddr = 0;
+        }
+    }
+
     // A reserved slot is the last phdr already carrying the reloc type, which
     // is what the linker script produces for a segment with no content.
     let reserved_slot = phdrs
@@ -261,6 +299,12 @@ pub fn build(input: &Path, output: &Path, opts: &BuildOptions) -> Result<()> {
             blob.len()
         );
         println!("  module info    {mi_relocs} relocated pointer fields");
+        for (i, p) in phdrs.iter().filter(|p| p.p_type == PT_LOAD).enumerate() {
+            println!(
+                "  segment {i}      vaddr 0x{:x} memsz 0x{:x} flags 0x{:08x}",
+                p.p_vaddr, p.p_memsz, p.p_flags
+            );
+        }
         if patched_imports > 0 {
             println!("  .lib.stub      {patched_imports} import record(s) had num_func filled in");
         }

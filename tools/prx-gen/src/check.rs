@@ -9,7 +9,8 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 
 use crate::elf::{
-    rd_u16, rd_u32, rd_u64, Elf, ELFOSABI_LV2, ET_SCE_PPURELEXEC, PT_LOAD, PT_SCE_PPURELA,
+    rd_u16, rd_u32, rd_u64, Elf, ELFOSABI_LV2, ET_SCE_PPURELEXEC, PF_SPU_R, PF_SPU_W, PF_W, PF_X,
+    PT_LOAD, PT_SCE_PPURELA,
 };
 use crate::module;
 use crate::reloc::PRX_RELOC_SIZE;
@@ -63,9 +64,37 @@ pub fn check(input: &Path) -> Result<bool> {
     println!("  segments       {} PT_LOAD", loads.len());
     for (i, p) in loads.iter().enumerate() {
         println!(
-            "    [{}] off 0x{:x} vaddr 0x{:x} filesz 0x{:x} memsz 0x{:x} flags 0x{:x}",
+            "    [{}] off 0x{:x} vaddr 0x{:x} filesz 0x{:x} memsz 0x{:x} flags 0x{:08x}",
             i, p.p_offset, p.p_vaddr, p.p_filesz, p.p_memsz, p.p_flags
         );
+    }
+
+    // --- segment permissions (issue #137) ------------------------------------
+    //
+    // The emulator ignores all three of these; retail Lv-2 does not.
+    for (i, p) in loads.iter().enumerate() {
+        if p.p_flags & PF_SPU_R == 0 {
+            r.err(format!(
+                "segment {i} flags 0x{:08x} lack the SPU read bit 0x{PF_SPU_R:08x}; retail Lv-2 \
+                 refuses to load the module (0x80010007)",
+                p.p_flags
+            ));
+        }
+        if p.p_flags & PF_W != 0 && p.p_flags & PF_SPU_W == 0 {
+            r.err(format!(
+                "segment {i} is writable (flags 0x{:08x}) but lacks the SPU write bit \
+                 0x{PF_SPU_W:08x} that every shipped data segment carries (0x00600006)",
+                p.p_flags
+            ));
+        }
+        if p.p_flags & PF_W != 0 && p.p_flags & PF_X != 0 {
+            r.err(format!(
+                "segment {i} is both writable and executable (flags 0x{:08x}); retail Lv-2 \
+                 freezes a module that writes its own .data/.bss in such a segment. Code goes in \
+                 an RX segment (0x00400005), data in a separate RW one (0x00600006)",
+                p.p_flags
+            ));
+        }
     }
 
     let vaddr_to_file = |addr: u64| -> Option<u64> {
@@ -233,6 +262,17 @@ pub fn check(input: &Path) -> Result<bool> {
                 rec.vaddr, rec.size, rec.attributes, rec.num_func, rec.num_var, rec.num_tlsvar, label
             );
 
+            if rec.size != module::EXPORT_RECORD_SIZE {
+                r.err(format!(
+                    "export record at 0x{:x} declares size 0x{:x}; export records must be \
+                     0x{:x} bytes. Retail Lv-2 walks .lib.ent in fixed 0x1c steps, so with any \
+                     other size every record after the first is read from the wrong place and \
+                     sys_prx_start_module hangs",
+                    rec.vaddr,
+                    rec.size,
+                    module::EXPORT_RECORD_SIZE
+                ));
+            }
             if !rec.is_library() && !rec.is_management() {
                 r.err(format!(
                     "export record at 0x{:x} has attributes 0x{:04x}: neither 0x0001 (named \
@@ -309,6 +349,15 @@ pub fn check(input: &Path) -> Result<bool> {
                 rec.num_func,
                 rec.num_var
             );
+            if rec.size != module::IMPORT_RECORD_SIZE {
+                r.err(format!(
+                    "import record at 0x{:x} declares size 0x{:x}; import records are 0x{:x} \
+                     bytes",
+                    rec.vaddr,
+                    rec.size,
+                    module::IMPORT_RECORD_SIZE
+                ));
+            }
             if rec.num_func == 0 && rec.num_var == 0 {
                 r.warn(format!(
                     "import record at 0x{:x} declares no functions; num_func is filled in at \

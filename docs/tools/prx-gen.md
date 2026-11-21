@@ -27,7 +27,27 @@ Converts the `-Wl,-q` link output into a PRX. It stamps the PRX ELF identity
 header at the module-info block, writes the module name, version and
 attributes into that block, fills in the import counts of any `.lib.stub`
 records, and converts the retained ELF relocations into the module's
-relocation segment. Every original byte keeps its file offset.
+relocation segment. It sets the SPU permission bits on every `PT_LOAD`
+(SPU read on all, SPU write on writable ones, so `lv2-prx.ld`'s segments
+come out as `0x00400005` and `0x00600006`) and clears `p_paddr` on all but
+the first. Every original byte keeps its file offset.
+
+A module is linked as two segments, the layout retail Lv-2 needs (issue
+#137): code and the read-only tables the loader walks in an RX segment, and
+the TOC, `.opd`, `.rodata`, `.data` and `.bss` in an RW segment. Each
+segment is placed at its own base, so a relocation is dropped only when its
+two ends move together:
+
+| Relocation | Dropped when | Otherwise |
+|---|---|---|
+| `REL24`, `REL14*` (branches) | the target decoded from the linked instruction is in the branch's segment. A `bl` names the callee's descriptor in `.opd`, which is in the data segment, so the symbol is not the target | refused |
+| `TOC16*`, `GOT16*` | the target is in the TOC's segment, wherever the instruction is | refused |
+| `REL64` | site and target share a segment | emitted as loader type 44 |
+| `REL32`, `REL16*` | site and target share a segment | refused |
+| `SECTOFF*`, `NONE` | always | |
+
+Absolute forms are emitted against the segment of the symbol's section;
+`.TOC.` (which lies past the image) is bound to the segment holding `.got`.
 
 | Option | Meaning |
 |---|---|
@@ -52,6 +72,13 @@ Errors it reports (and refuses to build):
   program header is not `PT_LOAD`;
 - neither the module-info section nor its symbol exists: link against the
   PRX crt (`lv2-prx-crt.o`);
+- a `PT_LOAD` segment is both writable and executable (retail Lv-2 freezes
+  a module that writes its own `.data`/`.bss` in one): link with the current
+  `lv2-prx.ld`;
+- a relocation cannot survive the two segments moving independently: a
+  branch into another segment, a TOC-relative access to data outside the
+  TOC's segment, or a PC-relative form other than `REL64` that crosses
+  segments;
 - the module-info block is outside the first `PT_LOAD` segment, or sits at
   its very start (a `p_paddr` of 0 means "no module info");
 - no module name (pass `--name` or declare `SYS_MODULE_INFO`), a name of 27
@@ -78,6 +105,15 @@ Keep `check` in the build. The failures it catches, such as an export record
 with the wrong attributes or an unrelocated module-info pointer, produce a
 module that loads cleanly and exports nothing, with no diagnostic in the
 emulator log.
+
+Three of its rules exist because the emulator accepts what retail Lv-2 does
+not (issue #137); each is an error:
+
+| Rule | On hardware without it |
+|---|---|
+| every `PT_LOAD` has the SPU read bit `0x00400000`, and a writable one the SPU write bit `0x00200000` | load fails with `0x80010007` |
+| export (`.lib.ent`) records are `0x1c` bytes; import (`.lib.stub`) records `0x2c` | with two or more export records, `sys_prx_start_module` hangs |
+| no `PT_LOAD` is both writable and executable | the first store to the module's `.data` or `.bss` freezes the process |
 
 ### `prx-gen exports <INPUT> [-o <YAML>] [--library <NAME>]`
 
@@ -178,7 +214,7 @@ under `$PS3DK/ppu/lib`). Unrecognised arguments are warned about and ignored.
 
 ```sh
 powerpc64-ps3-elf-gcc -specs="$PS3DK/ppu/lib/lv2-prx.specs" -nostartfiles \
-    -Wl,-q -Wl,--no-warn-rwx-segments -Wl,-T,"$PS3DK/ppu/lib/lv2-prx.ld" \
+    -Wl,-q -Wl,-T,"$PS3DK/ppu/lib/lv2-prx.ld" \
     mymod.o exports.o "$PS3DK/ppu/lib/lv2-prx-crt.o" -o mymod.elf
 prx-gen build mymod.elf -o mymod.prx --name mymod [--version 1.0] [--attributes 0x0000]
 prx-gen check mymod.prx
