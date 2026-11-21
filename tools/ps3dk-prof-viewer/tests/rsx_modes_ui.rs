@@ -91,7 +91,7 @@ fn both_capture_is_two_labelled_views_paired_per_draw_and_ready_only_when_both_a
         st.view = view;
         let mut drawn = Drawn::default();
         let _ = ctx.run(Default::default(), |ctx| {
-            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
+            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn));
         });
         assert!(drawn.status.is_some());
     }

@@ -16,6 +16,24 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **`ps3dk-prof rsx-frame --shader-dir DIR`.** Names the programs of RSX frame
+  captures from a folder of `.vpo`/`.fpo` containers by canonical hash: the
+  viewer's **Shader folder…** scan, now shared by both (one level, at most 4096
+  entries and 64 MiB, first file in path order wins).
+- **Static texture fetch counts.** Each program's TEX, TXP, TXL, TXB and TXD
+  instructions (a vertex program's TXL), per opcode and texture unit, counted
+  from its ucode with the NV40 disassembler: from the capture's program bytes,
+  else from a matched shader-folder container. Shown per program and per draw
+  in `rsx-frame` text and JSON and in the viewer's Summary, Shaders and Shader
+  view.
+- **Bound texture slots.** Each draw's fragment texture slots carry a bound
+  state: bound (enabled and sampled by the fragment program), disabled (stale
+  state still holding a format), enabled but not sampled, or unknown. In
+  `rsx-frame --draw` and `--json` (`texture_slots`) and in the viewer's
+  Textures tab, which no longer lists stale disabled slots.
+
 ## [v0.28.0] — 2026-11-21
 
 ### Added

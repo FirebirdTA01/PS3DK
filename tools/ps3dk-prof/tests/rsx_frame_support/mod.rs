@@ -8,6 +8,8 @@
 
 use super::common::*;
 
+pub mod fetches;
+
 pub const T_CONFIG: u32 = 44;
 pub const T_BEGIN: u32 = 45;
 pub const T_DRAWS: u32 = 46;

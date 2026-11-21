@@ -16,6 +16,8 @@ use serde_json::{json, Value};
 
 use crate::auto_rsx::{self, Op};
 use crate::rsx_state::{self, Registers, VpConstants};
+use crate::nv40_disasm;
+use crate::shader_dir::{Fetches, Folder};
 use std::sync::Arc;
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
@@ -1365,6 +1367,11 @@ pub const CG_PROFILE_FP: u32 = 7004;
 /// The canonical hash of a program container (the Cg binary container: big-endian header, profile 7003 VP or 7004
 /// FP, ucode size at 24 and offset at 28).
 pub fn container_hash(bytes: &[u8]) -> Result<ProgramHash, String> {
+    container_ucode(bytes).map(|(h, _)| h)
+}
+
+/// [`container_hash`], with the ucode bytes the hash walked from (the container's whole ucode).
+pub fn container_ucode(bytes: &[u8]) -> Result<(ProgramHash, &[u8]), String> {
     if bytes.len() < 32 {
         return Err(format!("{} bytes: too short for a program container", bytes.len()));
     }
@@ -1375,8 +1382,8 @@ pub fn container_hash(bytes: &[u8]) -> Result<ProgramHash, String> {
         return Err(format!("ucode [{off:#x}, +{size:#x}) outside the {}-byte container", bytes.len()));
     };
     match profile {
-        CG_PROFILE_VP => Ok(vp_hash(ucode)),
-        CG_PROFILE_FP => Ok(fp_hash(ucode)),
+        CG_PROFILE_VP => Ok((vp_hash(ucode), ucode)),
+        CG_PROFILE_FP => Ok((fp_hash(ucode), ucode)),
         p => Err(format!("profile {p} is neither a vertex (7003) nor a fragment (7004) program")),
     }
 }
@@ -1974,6 +1981,120 @@ pub fn program_name(p: &Program, names: &BTreeMap<(Profile, u64), String>) -> St
     p.name.clone().or_else(|| names.get(&(p.profile, p.hash)).cloned()).unwrap_or_else(|| p.id_text())
 }
 
+/// Where a program's static texture fetch counts come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchOrigin {
+    /// The program bytes the capture kept (complete).
+    Capture,
+    /// A container in the shader folder with the program's canonical hash.
+    ShaderFolder,
+}
+impl FetchOrigin {
+    pub fn name(self) -> &'static str {
+        match self {
+            FetchOrigin::Capture => "capture bytes",
+            FetchOrigin::ShaderFolder => "shader folder",
+        }
+    }
+}
+
+/// Program `index`'s static texture fetches (see [`nv40_disasm::TexFetches`]): from the capture's complete bytes,
+/// else from `folder` (a shader-folder scan) by its canonical hash; None when neither has the program (or its
+/// identity is unavailable).
+pub fn program_fetches(f: &FrameView, index: usize, folder: &crate::shader_dir::Fetches)
+                       -> Option<(nv40_disasm::TexFetches, FetchOrigin)> {
+    let p = f.programs.get(index)?;
+    if p.unreadable {
+        return None;
+    }
+    if let Some(b) = f.bytes_of(index).filter(|b| b.complete) {
+        return Some((crate::shader_dir::tex_fetches(b.profile, &b.bytes), FetchOrigin::Capture));
+    }
+    folder.get(&(p.profile, p.hash)).map(|t| (*t, FetchOrigin::ShaderFolder))
+}
+
+/// Whether a fragment texture slot is bound for a draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bound {
+    /// Enabled at the draw and sampled by its fragment program.
+    Yes,
+    /// Disabled at the draw: whatever offset or format the slot still holds is stale state from an earlier bind.
+    Disabled,
+    /// Enabled, but the draw's fragment program has no fetch from this unit (exact counts).
+    NotSampled,
+    /// The enable state is unknown (not written since the last decoder reset).
+    EnableUnknown,
+    /// Enabled; whether the fragment program samples it is unknown (no complete program bytes, or counts that are
+    /// only a lower bound).
+    SamplingUnknown,
+}
+impl Bound {
+    /// true / false / unknown.
+    pub fn flag(self) -> Option<bool> {
+        match self {
+            Bound::Yes => Some(true),
+            Bound::Disabled | Bound::NotSampled => Some(false),
+            Bound::EnableUnknown | Bound::SamplingUnknown => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Bound::Yes => "bound",
+            Bound::Disabled => "disabled",
+            Bound::NotSampled => "enabled, not sampled",
+            Bound::EnableUnknown => "enable unknown",
+            Bound::SamplingUnknown => "enabled, sampling unknown",
+        }
+    }
+    pub fn reason(self) -> &'static str {
+        match self {
+            Bound::Yes => "enabled at this draw and sampled by its fragment program",
+            Bound::Disabled => "disabled at this draw; the offset and format it still holds are stale state",
+            Bound::NotSampled => "enabled at this draw, but its fragment program has no fetch from this unit",
+            Bound::EnableUnknown => "the enable state is not known (not written since the last decoder reset)",
+            Bound::SamplingUnknown =>
+                "enabled at this draw; whether its fragment program samples it is not known (no program bytes)",
+        }
+    }
+}
+
+/// One fragment texture slot at a draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureSlot {
+    pub slot: u32,
+    /// The slot's enable bit (TEX_CONTROL0 bit 31); None when unknown.
+    pub enabled: Option<bool>,
+    /// The fragment program's fetch instructions from this unit; None when not known (no program bytes, or none
+    /// counted in a program whose counts are only a lower bound).
+    pub fetches: Option<u32>,
+    pub bound: Bound,
+}
+
+/// The 16 fragment texture slots of draw `d`, given its fragment program's fetches (from [`program_fetches`]); None
+/// for a draw without register state (decoder 1).
+pub fn texture_slots(d: &Draw, fp: Option<&nv40_disasm::TexFetches>) -> Option<Vec<TextureSlot>> {
+    let regs = d.registers.as_ref()?;
+    let view = rsx_state::interpret(regs);
+    Some(view.textures.iter().enumerate().map(|(i, t)| {
+        let enabled = match t.iter().find(|f| f.name == "enable").map(|f| &f.value) {
+            Some(rsx_state::Value::Bool(b)) => Some(*b),
+            _ => None,
+        };
+        let fetches = fp.and_then(|t| {
+            let n = t.by_unit[i];
+            (n > 0 || t.exact()).then_some(n)
+        });
+        let bound = match (enabled, fetches) {
+            (Some(false), _) => Bound::Disabled,
+            (None, _) => Bound::EnableUnknown,
+            (Some(true), Some(n)) if n > 0 => Bound::Yes,
+            (Some(true), Some(_)) => Bound::NotSampled,
+            (Some(true), None) => Bound::SamplingUnknown,
+        };
+        TextureSlot { slot: i as u32, enabled, fetches, bound }
+    }).collect())
+}
+
 /// Groups the draws of `f`, largest timed sum first (ties: first draw first).
 pub fn group(f: &FrameView, by: GroupBy, names: &BTreeMap<(Profile, u64), String>) -> Vec<Group> {
     let prog = |i: Option<usize>| i.map_or_else(|| "unknown".to_string(), |i| program_name(&f.programs[i], names));
@@ -2011,7 +2132,7 @@ fn pct(v: u64, total: u64) -> String {
 
 /// The CLI text: per capture a header, then the draw list (or one draw, or groups).
 pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw: Option<u32>,
-                  by: Option<GroupBy>) -> io::Result<()> {
+                  by: Option<GroupBy>, folder: Option<&Folder>) -> io::Result<()> {
     let Some(inv) = &cap.rsx_frame else {
         return writeln!(out, "rsx-frame: capability absent (file_flags bit 10 clear)");
     };
@@ -2021,10 +2142,17 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
     } else {
         writeln!(out, "rsx-frame: no RSXF_CONFIG yet")?;
     }
+    if let Some(d) = folder {
+        let s = &d.scan;
+        writeln!(out, "shader folder {}: {} containers read ({} bytes), {} programs, {} invalid{}", d.path, s.files,
+            s.bytes, s.names.len(), s.invalid, s.limit.as_ref().map_or_else(String::new, |l| format!("; stopped: {l}")))?;
+    }
     if frames.is_empty() {
         return writeln!(out, "no RSX frame captures");
     }
-    let names = BTreeMap::new();
+    let empty = Folder::default();
+    let names = &folder.unwrap_or(&empty).scan.names;
+    let fetches = &folder.unwrap_or(&empty).scan.fetches;
     for f in frames {
         writeln!(out, "capture {} \"{}\": owner {} frame {} window {} source {} timing {}; {}", f.id, f.name, f.owner,
             f.frame, f.window, if f.source == Source::Live { format!("live request {}", f.request_id) } else { "app".into() },
@@ -2057,43 +2185,48 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
             writeln!(out, "  pass {} (depth {}): {}..{} ({} raw), {} draws", p.name, p.depth, p.raw_begin, p.raw_end,
                 p.raw_end - p.raw_begin, p.draws)?;
         }
-        for p in &f.programs {
-            writeln!(out, "  program {} {}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}{}",
-                p.index, p.id_text(), p.name.as_ref().map_or_else(String::new, |n| format!(" \"{n}\"")), p.instructions,
+        for (i, p) in f.programs.iter().enumerate() {
+            writeln!(out, "  program {} {}{}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}{}",
+                p.index, p.id_text(), p.name.as_ref().map_or_else(String::new, |n| format!(" \"{n}\"")),
+                if p.unreadable { None } else { names.get(&(p.profile, p.hash)) }
+                    .map_or_else(String::new, |n| format!(" file {n}")), p.instructions,
                 p.ucode_bytes, p.const_blocks, p.source.name(), p.address, p.first_draw,
                 if p.unterminated { ", UNTERMINATED" } else { "" },
                 if p.not_revalidated { ", bound before capture, not revalidated" } else { "" })?;
+            writeln!(out, "    texture fetches: {}", fetch_text(program_fetches(f, i, fetches)))?;
         }
         if let Some(k) = draw {
             match f.draws.iter().find(|d| d.raw.ordinal == k) {
-                Some(d) => write_draw(out, f, d, &names)?,
+                Some(d) => write_draw(out, f, d, names, fetches)?,
                 None => writeln!(out, "  draw {k}: not recorded in this capture")?,
             }
             continue;
         }
         if let Some(by) = by {
-            for g in group(f, by, &names) {
+            for g in group(f, by, names) {
                 writeln!(out, "  group {}: {} draws (timed {}, untimed {}), {} raw, {}", g.key, g.draws.len(), g.timed,
                     g.untimed, g.sum, pct(g.sum, t.sum))?;
             }
             continue;
         }
-        writeln!(out, "  #  kind prim count instances? tag label vp fp pass time gap")?;
+        writeln!(out, "  #  kind prim count instances? tag label vp fp pass time gap tex")?;
         for d in &f.draws {
-            writeln!(out, "  {} {} {} {} tag {:#x} label {} vp {} fp {} pass {} time {} gap {}{}", d.raw.ordinal,
+            let df = draw_fetches(f, d, fetches);
+            writeln!(out, "  {} {} {} {} tag {:#x} label {} vp {} fp {} pass {} time {} gap {} tex {}{}", d.raw.ordinal,
                 d.raw.kind.name(), primitive_name(d.raw.mode), d.raw.count, d.raw.tag,
                 d.label.as_deref().unwrap_or("-"),
-                d.vp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], &names)),
-                d.fp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], &names)),
+                d.vp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], names)),
+                d.fp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], names)),
                 d.pass.map_or("-", |p| f.passes[p].name.as_str()), d.timing.text(),
-                d.gap.map_or_else(|| "-".into(), |g| g.to_string()),
+                d.gap.map_or_else(|| "-".into(), |g| g.to_string()), df.text(),
                 if d.op_mismatch || d.raw.flags & DF_MISMATCH != 0 { " MISMATCH" } else { "" })?;
         }
     }
     Ok(())
 }
 
-fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Profile, u64), String>) -> io::Result<()> {
+fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Profile, u64), String>,
+              fetches: &Fetches) -> io::Result<()> {
     let r = &d.raw;
     writeln!(out, "  draw {}: {} {} first {} count {} primitives {}", r.ordinal, r.kind.name(), primitive_name(r.mode),
         r.first, r.count, d.primitives().map_or_else(|| "-".into(), |p| p.to_string()))?;
@@ -2109,6 +2242,9 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
     writeln!(out, "    vp {} (start {}) fp {} (FP_ADDRESS {:#x})",
         d.vp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.vp_start,
         d.fp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.fp_address)?;
+    let df = draw_fetches(f, d, fetches);
+    writeln!(out, "    texture fetches: {} (static, per program run); vp {}; fp {}", df.text(),
+        fetch_text(df.vp), fetch_text(df.fp))?;
     writeln!(out, "    seen by: {}{}{}; words {}; caller {:#x}; tb {}", if d.hooked() { "hook " } else { "" },
         if d.decoded() { "stream" } else { "" }, if r.flags & DF_STATE_UNKNOWN != 0 { " (state unknown)" } else { "" },
         r.words, r.caller, r.tb)?;
@@ -2125,10 +2261,18 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
         writeln!(out, "    render: {}", known(&v.render))?;
         writeln!(out, "    surfaces: {}", known(&v.surfaces))?;
         writeln!(out, "    index: {}", known(&v.index))?;
-        for (i, t) in v.textures.iter().enumerate() {
-            if t.iter().any(|f| f.name == "enable" && f.value == rsx_state::Value::Bool(true)) {
-                writeln!(out, "    texture {i}: {}", known(t))?;
+        let slots = texture_slots(d, df.fp.as_ref().map(|(t, _)| t)).unwrap_or_default();
+        let stale = slots.iter().filter(|s| s.bound == Bound::Disabled && s.fetches.unwrap_or(0) == 0
+            && v.textures[s.slot as usize].iter().any(|f| f.name == "format" && f.value != rsx_state::Value::Unknown))
+            .count();
+        for s in &slots {
+            if s.enabled != Some(false) || s.fetches.unwrap_or(0) > 0 {
+                writeln!(out, "    texture {}: {}{}; {}", s.slot, s.bound.name(),
+                    s.fetches.map_or_else(String::new, |n| format!(", {n} fetches")), known(&v.textures[s.slot as usize]))?;
             }
+        }
+        if stale > 0 {
+            writeln!(out, "    textures: {stale} disabled slots still hold a format (stale, not bound)")?;
         }
         for (i, a) in v.attributes.iter().enumerate() {
             if a.iter().any(|f| f.name == "enabled" && f.value == rsx_state::Value::Bool(true)) {
@@ -2139,14 +2283,19 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
     Ok(())
 }
 
-fn program_json(p: &Program) -> Value {
-    json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
+fn program_json(f: &FrameView, i: usize, folder: &Folder) -> Value {
+    let p = &f.programs[i];
+    let mut v = json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
         "name": p.name, "source": p.source.name(), "instructions": p.instructions, "ucode_bytes": p.ucode_bytes,
         "const_blocks": p.const_blocks, "address": p.address, "first_draw": p.first_draw,
         "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated,
         "uniforms": p.uniforms.iter().map(|u| json!({"name": u.name, "resource": u.resource, "count": u.count,
             "kind": if u.kind == UniformKind::VpConstant { "vp_constant" } else { "fp_embedded" }})).collect::<Vec<_>>(),
-        "uniforms_truncated": p.uniforms_truncated})
+        "uniforms_truncated": p.uniforms_truncated});
+    let o = v.as_object_mut().expect("object");
+    o.insert("shader_file".into(), json!(if p.unreadable { None } else { folder.scan.names.get(&(p.profile, p.hash)) }));
+    o.insert("texture_fetches".into(), fetch_json(program_fetches(f, i, &folder.scan.fetches)));
+    v
 }
 
 fn timing_json(t: &Timing) -> Value {
@@ -2159,7 +2308,7 @@ fn timing_json(t: &Timing) -> Value {
     }
 }
 
-fn draw_json(f: &FrameView, d: &Draw) -> Value {
+fn draw_json(f: &FrameView, d: &Draw, folder: &Folder) -> Value {
     let r = &d.raw;
     let index = matches!(r.kind, DrawKind::Index | DrawKind::InlineIndex).then(|| {
         json!({"offset": r.index_offset, "type": if r.index_type == 1 { "u16" } else { "u32" },
@@ -2186,6 +2335,14 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
     o.insert("caller".into(), json!(r.caller));
     o.insert("words".into(), json!(r.words));
     o.insert("tb".into(), json!(r.tb));
+    let df = draw_fetches(f, d, &folder.scan.fetches);
+    o.insert("texture_fetches".into(), json!({"vp": df.vp.map(|(t, _)| t.total()), "fp": df.fp.map(|(t, _)| t.total()),
+        "total": df.total(), "exact": df.exact()}));
+    if let Some(slots) = texture_slots(d, df.fp.as_ref().map(|(t, _)| t)) {
+        o.insert("texture_slots".into(), Value::Array(slots.iter().map(|s| json!({"slot": s.slot,
+            "enabled": s.enabled, "fetches": s.fetches, "bound": s.bound.flag(), "state": s.bound.name(),
+            "reason": s.bound.reason()})).collect()));
+    }
     if let Some(regs) = &d.registers {
         o.insert("state".into(), rsx_state::view_json(&rsx_state::interpret(regs)));
         o.insert("changed".into(), json!(d.changed.iter().map(|&m| rsx_state::register_name(m)).collect::<Vec<_>>()));
@@ -2233,7 +2390,7 @@ fn end_json(e: &End) -> Value {
     v
 }
 
-fn frame_json(f: &FrameView) -> Value {
+fn frame_json(f: &FrameView, folder: &Folder) -> Value {
     let t = &f.totals;
     let totals = json!({"draws": t.draws, "timed": t.timed, "untimed": t.untimed, "missing": t.missing,
         "mismatched": t.mismatched, "sum": t.sum, "gaps": t.gaps, "primitives": t.primitives, "span": t.span.map(|(a, b)| json!([a, b]))});
@@ -2263,21 +2420,87 @@ fn frame_json(f: &FrameView) -> Value {
         json!({"first": f.draws[r.first].raw.ordinal, "length": r.len, "vp_slots": r.vp_slots,
             "fp_offsets": r.fp_offsets, "vp_uniforms": vp_names})
     }).collect()));
-    o.insert("programs".into(), Value::Array(f.programs.iter().map(program_json).collect()));
+    o.insert("programs".into(), Value::Array((0..f.programs.len()).map(|i| program_json(f, i, folder)).collect()));
     o.insert("passes".into(), Value::Array(passes));
-    o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d)).collect()));
+    o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d, folder)).collect()));
     o.insert("end".into(), f.end.as_ref().map_or(Value::Null, end_json));
     v
 }
 
-/// The JSON document of `ps3dk-prof rsx-frame --json` (schema 1).
+/// The JSON document of `ps3dk-prof rsx-frame --json` (schema 1), with no shader folder.
 pub fn to_json(cap: &Capture, frames: &[FrameView]) -> Value {
+    to_json_with(cap, frames, None)
+}
+
+/// [`to_json`] with programs named and counted from a shader folder (`--shader-dir`).
+pub fn to_json_with(cap: &Capture, frames: &[FrameView], folder: Option<&Folder>) -> Value {
     let cfg = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref());
+    let empty = Folder::default();
+    let dir = folder.unwrap_or(&empty);
     json!({
         "schema": 1,
         "capability": cap.rsx_frame.is_some(),
         "availability": cfg.map(|c| c.availability.text()),
         "decoder": cfg.map(|c| c.decoder),
-        "captures": Value::Array(frames.iter().map(frame_json).collect()),
+        "shader_dir": folder.map(|d| json!({"path": d.path, "files": d.scan.files, "bytes": d.scan.bytes,
+            "programs": d.scan.names.len(), "invalid": d.scan.invalid, "limit": d.scan.limit})),
+        "captures": Value::Array(frames.iter().map(|f| frame_json(f, dir)).collect()),
     })
+}
+
+/// The static texture fetches of one draw: its VP's and its FP's (each from [`program_fetches`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawFetches {
+    pub vp: Option<(nv40_disasm::TexFetches, FetchOrigin)>,
+    pub fp: Option<(nv40_disasm::TexFetches, FetchOrigin)>,
+}
+impl DrawFetches {
+    /// VP + FP fetch instructions; None unless both programs' counts are known.
+    pub fn total(&self) -> Option<u32> {
+        Some(self.vp?.0.total() + self.fp?.0.total())
+    }
+    /// Both counts known and exact.
+    pub fn exact(&self) -> bool {
+        self.vp.is_some_and(|(t, _)| t.exact()) && self.fp.is_some_and(|(t, _)| t.exact())
+    }
+    /// `3`, `3+` (a lower bound) or `-` (unknown).
+    pub fn text(&self) -> String {
+        match self.total() {
+            None => "-".into(),
+            Some(n) if self.exact() => n.to_string(),
+            Some(n) => format!("{n}+"),
+        }
+    }
+}
+
+/// The static texture fetches of draw `d`'s programs.
+pub fn draw_fetches(f: &FrameView, d: &Draw, folder: &Fetches) -> DrawFetches {
+    DrawFetches { vp: d.vp.and_then(|i| program_fetches(f, i, folder)), fp: d.fp.and_then(|i| program_fetches(f, i, folder)) }
+}
+
+/// The text of a program's fetch counts.
+pub fn fetch_text(t: Option<(nv40_disasm::TexFetches, FetchOrigin)>) -> String {
+    let Some((t, origin)) = t else { return "unknown (no program bytes)".into() };
+    let units = t.units();
+    format!("{} {}{}{} ({})", t.total(), t.ops_text(),
+        if units.is_empty() { String::new() } else {
+            format!("; units {}", units.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(","))
+        },
+        if t.exact() { "" } else if !t.terminated { "; lower bound: no end bit" } else { "; lower bound: unknown opcodes" },
+        origin.name())
+}
+
+fn fetch_json(t: Option<(nv40_disasm::TexFetches, FetchOrigin)>) -> Value {
+    let Some((t, origin)) = t else { return Value::Null };
+    let mut by_op = serde_json::Map::new();
+    for (o, n) in nv40_disasm::TEX_OPS.iter().zip(t.by_op) {
+        by_op.insert((*o).into(), json!(n));
+    }
+    let mut by_unit = serde_json::Map::new();
+    for u in t.units() {
+        by_unit.insert(u.to_string(), json!(t.by_unit[u as usize]));
+    }
+    json!({"source": match origin { FetchOrigin::Capture => "capture", FetchOrigin::ShaderFolder => "shader_folder" },
+        "total": t.total(), "by_op": by_op, "by_unit": by_unit, "instructions": t.instructions,
+        "unknown_instructions": t.unknown, "terminated": t.terminated, "exact": t.exact()})
 }
