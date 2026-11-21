@@ -255,23 +255,40 @@ pub fn state_tab(p: &mut egui::Ui, c: &Ctx, cache: &mut Cache) {
     }
 }
 
-pub fn textures_tab(p: &mut egui::Ui, c: &Ctx, cache: &mut Cache) {
+/// The slots the Textures tab lists: every slot that is enabled, has an unknown enable state, or is fetched from by
+/// the fragment program; disabled slots no fetch reads are stale state and are only counted.
+pub fn listed_slots(slots: &[rf::TextureSlot]) -> Vec<usize> {
+    (0..slots.len()).filter(|&i| slots[i].enabled != Some(false) || slots[i].fetches.unwrap_or(0) > 0).collect()
+}
+
+pub fn textures_tab(p: &mut egui::Ui, c: &Ctx, cache: &mut Cache, fp: Option<&ps3dk_prof::nv40_disasm::TexFetches>) {
     let d = &c.f.draws[c.index];
     let Some(r) = &d.registers else { return ui::field_message(p, ui::Tone::Neutral, NO_STATE) };
     let s = cache.draw(r);
-    let used: Vec<usize> = (0..s.textures.len()).filter(|&i| enabled(&s.textures[i], "enable")).collect();
-    let unknown = (0..s.textures.len()).filter(|&i| *value(&s.textures[i], "enable") == Value::Unknown).count();
+    let slots = rf::texture_slots(d, fp).unwrap_or_default();
+    let used = listed_slots(&slots);
+    let unknown = slots.iter().filter(|t| t.enabled.is_none()).count();
+    let stale = slots.iter().filter(|t| t.enabled == Some(false) && t.fetches.unwrap_or(0) == 0
+        && *value(&s.textures[t.slot as usize], "format") != Value::Unknown).count();
     if used.is_empty() {
         p.label("No texture slot is enabled at this draw.");
     } else {
-        egui::Grid::new("rsxs-textures").striped(true).num_columns(7).show(p, |p| {
-            for h in ["Slot", "Size", "Format", "Mips", "Filter (min / mag)", "Wrap (s / t / r)", "Offset · location"] {
+        egui::Grid::new("rsxs-textures").striped(true).num_columns(8).show(p, |p| {
+            for h in ["Slot", "Bound", "Size", "Format", "Mips", "Filter (min / mag)", "Wrap (s / t / r)", "Offset · location"] {
                 p.label(RichText::new(h).strong());
             }
             p.end_row();
             for &i in &used {
                 let t = &s.textures[i];
+                let b = slots[i];
                 p.label(i.to_string());
+                let tone = match b.bound.flag() {
+                    Some(true) => ui::Tone::Success,
+                    Some(false) => ui::Tone::Warning,
+                    None => ui::Tone::Neutral,
+                };
+                ui::badge(p, &format!("{}{}", b.bound.name(), b.fetches.filter(|&n| n > 0).map_or_else(String::new, |n| format!(" · {n} fetches"))), tone)
+                    .on_hover_text(b.bound.reason());
                 p.label(format!("{}x{}{}", val(t, "width"), val(t, "height"), match value(t, "depth") {
                     Value::Uint(n) if *n > 1 => format!("x{n}"),
                     _ => String::new(),
@@ -288,7 +305,12 @@ pub fn textures_tab(p: &mut egui::Ui, c: &Ctx, cache: &mut Cache) {
     if unknown > 0 {
         ui::field_message(p, ui::Tone::Neutral, &format!("{unknown} slots have an unknown enable state (not written since the last decoder reset)."));
     }
-    ui::field_message(p, ui::Tone::Neutral, "Enabled slots are listed; which of them the fragment program samples is not recorded.");
+    if stale > 0 {
+        ui::field_message(p, ui::Tone::Neutral, &format!("{stale} disabled slots still hold a format from an earlier bind: stale state, not bound, not listed."));
+    }
+    if fp.is_none() {
+        ui::field_message(p, ui::Tone::Neutral, "Whether the fragment program samples each enabled slot needs its bytes: request the capture with 'Keep fragment shader bytes', or choose a shader folder that holds its container.");
+    }
 }
 
 pub fn buffers_tab(p: &mut egui::Ui, c: &Ctx, cache: &mut Cache) {

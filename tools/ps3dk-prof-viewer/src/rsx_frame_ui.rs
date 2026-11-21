@@ -223,7 +223,8 @@ fn program(f: &FrameView, i: Option<usize>, names: &Names) -> (String, String) {
         },
     )
 }
-pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &mut State, out: &mut Drawn) {
+pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, fetches: &crate::shader_names::Fetches, scan: u64,
+            st: &mut State, out: &mut Drawn) {
     *out = Drawn::default();
     ui::page_header(
         p,
@@ -280,7 +281,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
             }
         }
         if p.button("Shader folder…")
-            .on_hover_text("Match local .vpo/.fpo files by their stable program hash; session only")
+            .on_hover_text("Match local .vpo/.fpo files by their stable program hash, naming programs and counting their texture fetches; session only")
             .clicked()
         {
             out.shader_folder = true;
@@ -321,7 +322,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      if f.half!=Half::Only {p.selectable_value(&mut st.view,View::Pairs,"Pairs (pipelined vs isolated)");}
    });
    match st.view {
-     View::Shaders=>{crate::rsx_shader_ui::shader_page(p,v,f,names,&mut st.shaders);return;},
+     View::Shaders=>{crate::rsx_shader_ui::shader_page(p,v,f,names,fetches,&mut st.shaders);return;},
      View::Pairs=>{crate::rsx_modes_ui::pairs_page(p,v,f.id);return;},
      View::Draws=>{},
    }
@@ -352,6 +353,8 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
        if d.raw.kind==rf::DrawKind::Clear{p.label(format!("Clear mask {:#x}",d.raw.clear_mask));}
        p.label(format!("{}{}{}{}",if d.hooked(){"Hooked "}else{""},if d.decoded(){"Decoded "}else{""},if d.raw.flags&rf::DF_STATE_UNKNOWN!=0{"State unknown "}else{""},if d.op_mismatch{"AUTO kind mismatch"}else{""}));
        p.label(format!("Caller {:#x} · {} command words · PPU tick {}",d.raw.caller,d.raw.words,d.raw.tb));
+       let df=rf::draw_fetches(f,d,fetches);
+       p.label(format!("Texture fetches {} · VP {} · FP {}",df.text(),rf::fetch_text(df.vp),rf::fetch_text(df.fp))).on_hover_text(crate::rsx_shader_ui::FETCH_HOVER);
        crate::rsx_state_ui::changed_list(p,&sx);
      },
      Tab::Shaders=>{for (title,id) in [("Vertex program",d.vp),("Fragment program",d.fp)]{
@@ -359,11 +362,12 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
          p.label(program_label(prog,names));p.monospace(prog.id_text());
          if let Some((what,why))=provenance(prog){ui::field_message(p,ui::Tone::Warning,&format!("{}{}: {why}",what[..1].to_uppercase(),&what[1..]));}p.label(format!("{} instructions · {} bytes · {} inline constant blocks · source {}",prog.instructions,prog.ucode_bytes,prog.const_blocks,prog.source.name()));
          p.label(format!("Address {:#x} (diagnostic only) · first draw {}",prog.address,prog.first_draw));
+         p.label(format!("Texture fetches: {}",rf::fetch_text(id.and_then(|i|rf::program_fetches(f,i,fetches))))).on_hover_text(crate::rsx_shader_ui::FETCH_HOVER);
          if prog.unterminated{ui::field_message(p,ui::Tone::Warning,"Unterminated: no end bit within the bound");}
        }else{p.label("Program identity unavailable for this draw.");}
      }},
      Tab::State=>crate::rsx_state_ui::state_tab(p,&sx,&mut st.state_cache),
-     Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache),
+     Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache,rf::draw_fetches(f,d,fetches).fp.map(|(t,_)|t).as_ref()),
      Tab::Buffers=>crate::rsx_state_ui::buffers_tab(p,&sx,&mut st.state_cache),
      Tab::Constants=>crate::rsx_constants_ui::constants_tab(p,f,di,v),
    }
