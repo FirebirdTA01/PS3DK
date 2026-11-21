@@ -904,7 +904,7 @@ Written at attach, before any other type 44..48 chunk; a file with a TRAILER mus
 |---|---|---|
 | 0 | u16 | schema = 1 |
 | 2 | u16 | flags = 0 |
-| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); 4 also program bytes and BOTH captures (UCODE, SECOND) and the FP bytes cap below; other values MALFORMED |
+| 4 | u32 | decoder version: 1 draws and programs; 2 also the 3D register file (BASELINE and STATE records, 12.3); 3 also VP constants, FP embedded constants and uniform names (VPCONST, FPCONST, UNIFORM); 4 also program bytes and BOTH captures (UCODE, SECOND) and the FP bytes cap below; 5 also each draw's ZPASS counting state and zcull event flags, the PIXELS request flag and ZCULL_REGION records; other values MALFORMED |
 | 8 | u32 | availability: 0 available; 1 no AUTO attach; 2 no report ring; 3 decoder unavailable |
 | 12 | u32 | staging block bytes: 32768..1048576, a multiple of 8 (a block holds the largest per-draw unit: STATE for all 2048 registers, VPCONST for all 468 slots, two UNIFORM records of 32 entries, a full FPCONST, the definitions and DRAW, 31,712 bytes) |
 | 16 | u32 | staging blocks: 1..16 |
@@ -924,7 +924,7 @@ most 16 MiB; 0 for earlier decoders); offsets 36..63 stay reserved.
 |---|---|---|
 | 0 | u32 | capture id: 1.., strictly greater than every earlier capture id of the file |
 | 4 | u16 | source: 1 live request, 2 app call |
-| 6 | u16 | flags: bit 0 ISOLATED, bit 1 FP_BYTES, bit 2 BOTH; other bits 0 |
+| 6 | u16 | flags: bit 0 ISOLATED, bit 1 FP_BYTES, bit 2 BOTH, bit 3 PIXELS (decoder 5); other bits 0 |
 | 8 | u32 | request id (live: the viewer's id, nonzero; app: 0) |
 | 12 | u32 | owner (the AUTO owner incarnation) |
 | 16 | u64 | frame (the owner frame being captured) |
@@ -940,8 +940,9 @@ most 16 MiB; 0 for earlier decoders); offsets 36..63 stay reserved.
 
 Flags (offset 6): bit 0 ISOLATED (every draw's begin and end markers follow a WAIT_FOR_IDLE: each interval is that
 draw alone), bit 1 FP_BYTES (FP ucode bytes requested), bit 2 BOTH (two consecutive frames, the first pipelined, the
-second isolated, from the SECOND record on); ISOLATED with BOTH is MALFORMED, other bits 0. A reader never sums or
-compares intervals of the two modes as one: a BOTH capture reads as two frames, one per mode.
+second isolated, from the SECOND record on), bit 3 PIXELS (decoder 5: ZPASS pixel counting forced on around each
+captured draw the application had it off for, see DRAW u32@84); ISOLATED with BOTH is MALFORMED, other bits 0. A reader
+never sums or compares intervals of the two modes as one: a BOTH capture reads as two frames, one per mode.
 
 At most one capture is open (BEGIN without its END) at a time.
 
@@ -963,7 +964,7 @@ DRAW (type 1, length 96):
 |---|---|---|
 | 4 | u32 | ordinal: strictly increasing within the capture (gaps are draws not recorded) |
 | 8 | u16 | kind: 1 ARRAY, 2 INDEX, 3 CLEAR, 7 INLINE_ARRAY, 8 INLINE_INDEX, 9 IMMEDIATE |
-| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); at least one of bits 0..1; other bits 0 |
+| 10 | u16 | flags: bit 0 HOOKED (an SDK draw hook saw it), bit 1 DECODED (the stream decoder saw its trigger), bit 2 MISMATCH (hook and stream disagree), bit 3 STATE_UNKNOWN (decoder state not known at this draw); decoder 5: bit 4 ZCULL_INVALIDATED and bit 5 ZCULL_CLEARED (INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw or clear), bit 6 FIRMWARE (a draw or clear the decoder found inside a firmware-reserved prefix routine, such as a flip's CALL; never HOOKED or timed); at least one of bits 0..1; other bits 0 |
 | 12 | u32 | untimed reason: 0 timed (op id nonzero); 2..11 the AUTO exclusion column (`EXCLUSIONS[r - 2]`); 32 outside a timed range; 33 report ring full; 34 report ring state; 64 not hooked; 65 no capture window |
 | 16 | u64 | AUTO operation id: nonzero iff the reason is 0; INLINE_ARRAY and IMMEDIATE draws are timed by ARRAY operations and INLINE_INDEX draws by INDEX operations (the AUTO kinds stay 1..3), ARRAY, INDEX and CLEAR by their own kind |
 | 24 | u32 | primitive mode (BEGIN_END value 1..10; 0 for CLEAR) |
@@ -982,8 +983,17 @@ DRAW (type 1, length 96):
 | 68 | u32 | VP start slot |
 | 72 | u64 | caller PC (HOOKED; else 0) |
 | 80 | u32 | command words of the draw |
-| 84 | u32 | reserved = 0 |
+| 84 | u32 | decoder 5: ZPASS counting state: 0 unknown (the decoder reset since it attached), 1 COUNTING (the application had QUERY_ENABLE on), 2 OFF (it had it off), 3 FORCED (a PIXELS capture turned it on around this draw), 4 PAUSED (off inside an open, or possibly open, application occlusion query: never forced), 5 reserved (MALFORMED), 6 UNTOUCHED (no ZPASS method seen since the decoder attached); FORCED only in a PIXELS capture; 0 for earlier decoders |
 | 88 | u64 | PPU timebase at the hook (HOOKED) or at decode |
+
+The passed samples of a timed draw are its AUTO operation's OPS flag 512 (ZPASS) value: u32@156 of the OPS record
+holds the ZPASS counter's value word in the draw's end report minus the one in its begin report, mod 2^32 (every AUTO
+marker is a type-1 report). Flag 512 is set only on RAW_VALID RING ARRAY/INDEX/CLEAR records of draws a capture
+recorded (ringed CONFIGs); without it u32@156 is 0. The delta is a sample count only when the DRAW state is COUNTING
+or FORCED. The profiler never writes QUERY_RESET. With PIXELS, a forced draw gets QUERY_ENABLE 1 before its begin
+marker and 0 after its end marker (never around an IMMEDIATE draw); the decoder skips those words. The application's
+query is tracked from its own words: QUERY_RESET with value 1 opens it, its type-1 QUERY_GET to a report outside the
+profiler's range closes it. QUERY_RESET, INVALIDATE_ZCULL and CLEAR_ZCULL_SURFACE are not register state.
 
 PROGRAM (type 2, length 48), the first time a program identity is seen in the capture:
 
@@ -1120,6 +1130,35 @@ MALFORMED.
 
 SECOND (type 11), decoder 4, length 16, only in a BOTH capture, once, between draws: u32 the first ordinal of the
 second (isolated) frame (greater than every earlier draw's), u64 that frame's number.
+
+ZCULL_REGION (type 12), decoder 5, length 64: one zcull region as `cellGcmBindZcull` (or `cellGcmUnbindZcull`) left it
+on the owner thread. Written for every bound region at arming (flag BEFORE_CAPTURE, ordinal 0, before any draw or
+STATE record) and on each bind or unbind while armed (between draws: never between a STATE, VPCONST or FPCONST record
+and its DRAW). The region applies from draw `ordinal` on.
+
+| off | type | field |
+|---|---|---|
+| 4 | u32 | ordinal: the next draw's (greater than every earlier draw's) |
+| 8 | u32 | region index 0..7 |
+| 12 | u32 | flags: bit 0 BOUND, bit 1 BEFORE_CAPTURE; other bits 0 |
+| 16 | u32 | depth buffer offset |
+| 20 | u32 | width |
+| 24 | u32 | height |
+| 28 | u32 | cull start |
+| 32 | u32 | z format |
+| 36 | u32 | antialias format |
+| 40 | u32 | zcull direction |
+| 44 | u32 | zcull format |
+| 48 | u32 | stencil cull function |
+| 52 | u32 | stencil cull reference |
+| 56 | u32 | stencil cull mask |
+| 60 | u32 | reserved = 0 |
+
+An unbound region (BOUND clear) has every field from offset 16 zero. Type 13 is reserved for zcull statistics
+(report types 2..5): MALFORMED until it is defined.
+
+The decoder follows a CALL into the firmware-reserved prefix (IO offset 0 up to the context start; the AUTO ring
+decoder's rule) to its RET, so the firmware's per-flip routine is decoded instead of resetting the register state.
 
 ### 12.4 RSXF_PROGRAMS (47)
 

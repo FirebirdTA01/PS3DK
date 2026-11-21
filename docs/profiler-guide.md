@@ -925,6 +925,33 @@ unknown** (no program bytes to tell) or **enable unknown** (not written since th
 slot is sampled comes from the fragment program's ucode: from the bytes the capture kept (**Keep fragment shader
 bytes**) or from a shader-folder container with the same hash.
 
+**Pixels per draw.** Every captured draw that is timed gets a passed-sample count: the ZPASS counter over the draw,
+read from the report values beside the timestamps AUTO already writes (no extra command words). It is a count only
+when ZPASS counting was on for the draw: the app had it on (**counting**), or the capture forced it (**forced**). Turn
+on **Force pixel counting** (request flag `PS3DK_PROF_RSX_FRAME_PIXELS`) to count every draw: 4 command words per draw
+the app has counting off for, in the captured frame only. Leave it off when the app relies on counting being off
+outside its own occlusion queries; it is never applied inside an open app query the app has paused (**paused**), nor
+around an immediate draw. What the count means:
+
+- samples that passed every per-fragment test (depth, stencil, alpha, KIL); early-z and zcull rejections are not
+  counted, so it is not fragments shaded. A program that kills fragments (FP_CONTROL KIL or a KIL in its ucode)
+  disables early depth rejection: such a draw is marked **shading >= count**; otherwise **shading ~ count**, unless
+  the program writes depth (not detected). MSAA counts samples, not pixels.
+- **Overdraw**: per render target, the counted samples over the target's area in samples (1.0: every sample written
+  once). Per draw, its share of the target. A draw with high time but few samples is program- or texture-bound per
+  sample; one with many samples per pixel is overdraw. In an ISOLATED view the Summary shows raw ticks per sample;
+  sample-instructions (samples x FP instructions) and sample-fetches (x texture fetches) are work proxies.
+- Pipelined and isolated counts agree when the RSX writes the counter in order (a BOTH capture checks it per draw).
+
+**Zcull per draw.** The State tab's **zcull** group shows the stream's zcull state: depth and stencil cull enables,
+direction and format, the limits, the stencil cull function, ZPASS and zcull-statistics enables. INVALIDATE_ZCULL and
+CLEAR_ZCULL_SURFACE are events of the next draw. The zcull regions come from `cellGcmBindZcull` /
+`cellGcmUnbindZcull` on the owner thread (a driver call, not in the command stream; binds made before the profiler
+attached, or from another thread, are not seen); Summary says whether a recorded region covers the draw's depth
+buffer and depth cull is on, and flags a zcull direction that disagrees with the depth function (a heuristic). Zcull
+statistics reports are not read yet. Draws the decoder finds in the firmware's flip routine are listed as
+**firmware**, not the app's.
+
 **Texture fetches** are counted statically from each program's ucode with the disassembler: the TEX, TXP, TXL, TXB
 and TXD instructions of a fragment program and the TXL instructions of a vertex program, per opcode and per texture
 unit. A fetch inside a loop counts once and one behind a branch not taken counts too, so this is the program's fetch
@@ -1050,6 +1077,13 @@ ps3dk-prof check-arcs file.arcs | arcs-json file.arcs | check-pair file.arcs fil
 Exit status: `0` COMPLETE (also a file without a trailer; its output then has the line `ending: NO-TRAILER`), `1`
 INCOMPLETE, `2` MALFORMED, `3` usage or I/O error, `4` COMPLETE but a domain-extension source is not clean (only files
 with SPU/RSX extensions). `auto`, `fifo` exit `1` when the evidence is absent or refused.
+
+`rsx-frame` prints per render target its draws, counted draws, samples and overdraw, an `smp` column in the draw list
+(passed samples, `-` when not counted), and with `--draw K` a `pixels:` line (the count, its share of the target, the
+counting state and the early-z note, or why it is not counted) and a `zcull:` line. In `--json` each draw has
+`pixels` (`state`, `samples`, `area`, `per_pixel`, `raw_per_sample`, `early_z`, `shading`, `shading_proxy`,
+`fetch_proxy`, `uncounted`, `zpass_delta`), `zcull` (`invalidated`, `cleared`, `region`, `effective`, `reason`,
+`direction_mismatch`) and `firmware`; each capture `pixels_forced`, `zcull_regions` and `overdraw`.
 
 `rsx-frame` prints each program with its static texture fetches (`texture fetches: 2 TEX 1 TXP 1; units 0,2
 (capture bytes)`, or `unknown (no program bytes)`) and each draw with a `tex` column (its VP + FP fetch instructions;
