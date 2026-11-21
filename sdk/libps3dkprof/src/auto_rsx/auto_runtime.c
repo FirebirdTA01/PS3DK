@@ -449,6 +449,8 @@ static int attach(ps3dk_prof_gcm_ctx *ctx, const ps3dk_prof_auto_options *option
         return PS3DK_PROF_ESTOPPED;
     }
     ps3dk_prof__fifo_account_native_start(gc);
+    rsxf_profiler_reports(o->report_first,o->report_count);
+    rsxf_firmware_prefix(capture ? capture->shadow.io:NULL,capture ? capture->shadow.start:0);
     rsxf_attach(gc,capture && capture->ring_plan.blocks!=0);
     *instance=1;*domain=id;
     return PS3DK_PROF_OK;
@@ -748,6 +750,7 @@ static int ring_open(auto_capture *a, gpp_ctx *ctx, uint64_t frame, uint32_t win
 }
 
 static void segment_report(gpp_ctx *ctx,uint32_t report);
+static void zpass_enable(gpp_ctx *ctx,uint32_t on);
 /* Owner ARRAY/INDEX/CLEAR on the attached ring with the report ring: metadata first (a snapshot claim, cancelled if
  * nothing follows), then the open block, or a new block (ring_open). The draw's begin timestamp goes to its local pair
  * with no per-draw label release: the block's flush publishes it. Exclusions: room 2, metadata 4, reentry 5, stopped 9,
@@ -774,7 +777,9 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     if(r==AUTO_RING_BOUNDARY) {
         /* another frame or window (an END and reopen show different ids) or a full block: settle it first */
         if(a->ring.active) ring_flush(a,ctx);
-        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words,&t);
+        /* the whole bracket below the new block's flush tail: the draw, its two markers (ring_open's +4), and the
+         * capture's isolation and forced-counting words, so no injected command can be left without its pair */
+        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words+a->iso_active+a->pix_active,&t);
     }
     if(r!=AUTO_RING_OK) {
         (void)auto_queue_cancel_snapshot(&a->operations);
@@ -787,6 +792,7 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.tag=a->tag;e->op.fp_offset=a->fp_ring;e->op.flags=AUTO_OP_RING;
     if(a->coverage.active) {e->op.flags|=1;e->op.frame_owner=a->owner_incarnation;e->op.frame=a->coverage.live.frame;}
     if(a->iso_active) e->op.flags|=AUTO_OP_ISOLATED; /* timed with WAIT_FOR_IDLE around its markers */
+    if(RSXF_ON() && rsxf_forced()) e->op.flags|=AUTO_OP_ZPASS; /* a captured draw: its counter delta is read */
     e->op.args[0]=(uint32_t)words;
     if(call->kind==1) {e->op.args[1]=call->start;e->op.args[2]=call->count;e->op.args[5]=call->mode;}
     if(call->kind==2) {e->op.args[2]=call->count;e->op.args[3]=call->offset;
@@ -799,6 +805,13 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     e->op.ring_ordinal=(uint16_t)t.pair;e->op.ring_local=(uint16_t)t.local;
     a->active=e;g_tls.in_gpu=1;
     e->op.tb_before=observation_tb();
+    if(a->pix_active) {
+        /* PIXELS: counting on for this draw; the decoder skips these words, so its shadow keeps the app's value */
+        rsxf_scan(ctx);
+        zpass_enable(ctx,1u);
+        rsxf_skip(ctx);
+        rsxf_pixel_forced(ctx);
+    }
     if(a->iso_active) isolate(ctx);
     segment_report(ctx,e->op.report_begin);
     a->expected_end=(uintptr_t)(void *)ctx->current+words*4u;
@@ -811,23 +824,33 @@ static void ring_end(auto_capture *a, auto_queue_entry *e, uint32_t ticket)
     uintptr_t current=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
     const uint32_t slot=e->op.ring_slot;
     int complete;
+    /* the end needs its marker (2 words) and the second half of the isolation (iso_active/2) and forced-counting
+     * (pix_active/2) words: 8 + 2*iso_active + 2*pix_active bytes, exactly what the bracket reserved */
+    if(a->pix_active) rsxf_scan(ctx); /* the application's draw words, before the profiler's end words */
     if(a->open_ended && ticket==e->op.serial_end && current>=a->expected_end && end>=current &&
-       end-current<8u+4u*a->iso_active) {
+       end-current<8u+2u*a->iso_active+2u*a->pix_active) {
         e->op.flags|=4|32; /* an immediate draw that filled the buffer: no room for its end marker, nothing else lost */
     } else if(ticket!=e->op.serial_end || (a->open_ended ? current<a->expected_end:current!=a->expected_end) ||
-              end<current || end-current<8u+4u*a->iso_active) {
+              end<current || end-current<8u+2u*a->iso_active+2u*a->pix_active) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
     } else {
         if(a->iso_active) isolate(ctx);
         segment_report(ctx,e->op.report_end);
     }
+    if(a->pix_active) {
+        /* counting back off (the application had it off); also on a refused end, whenever two words still fit */
+        current=(uintptr_t)(void *)ctx->current;end=(uintptr_t)(void *)ctx->end;
+        if(end>=current && end-current>=8u) zpass_enable(ctx,0u);
+        rsxf_skip(ctx);
+    }
+    if(e->op.flags&4) {e->op.flags&=(uint16_t)~AUTO_OP_ZPASS;}
     e->op.tb_after=observation_tb();
     if(e->op.tb_after<e->op.tb_before) e->op.flags|=8;
     complete=!(e->op.flags&4);
     (void)auto_frames_count(&a->coverage,e->op.kind,complete ? 1:11);
     auto_queue_commit(&a->operations);
-    a->active=NULL;g_tls.in_gpu=0;a->open_ended=0;
+    a->active=NULL;g_tls.in_gpu=0;a->open_ended=0;a->pix_active=0;
     if(a->ring.slots[slot].count==a->ring.pairs) ring_flush(a,ctx);
     else if(LD_ACQ(&a->ring_flush_request)) ring_settle(a);
 }
@@ -1488,6 +1511,14 @@ static void late_row(auto_capture *a)
  * frame, so the draw starts on an idle RSX and its end report waits for its own work. Room for both is checked with the
  * draw's; nothing is written outside an isolated capture. */
 static uint32_t isolate_words(void) { return RSXF_ON() && rsxf_isolated() ? 4u : 0u; }
+/* PIXELS: QUERY_ENABLE (ZPASS pixel counting) on before a captured draw's begin marker, off after its end marker. */
+__attribute__((unused)) static void zpass_enable(gpp_ctx *ctx,uint32_t on)
+{
+    uint32_t *w=(uint32_t *)(void *)ctx->current;
+    w[0]=(1u<<18)|0x17ccu;              /* QUERY_ENABLE, one word */
+    w[1]=on;
+    ctx->current=(void *)(w+2);
+}
 static void isolate(gpp_ctx *ctx)
 {
     uint32_t *w=(uint32_t *)(void *)ctx->current;
@@ -1590,11 +1621,18 @@ static uint32_t auto_begin(struct _gcmCtxData *context,const ps3tc_auto_call *ca
         if(!words) { (void)auto_frames_count(&a->coverage,call->kind,6);return 0; }
         a->iso_active=isolate_words();
         a->open_ended=shape==9;
+        /* PIXELS: never around an immediate draw (its end may leave no room to turn counting back off) */
+        a->pix_active=RSXF_ON() && !a->open_ended && rsxf_pixel_force(ctx) ? 4u:0u;
         if(!auto_command_room((uintptr_t)(void *)ctx->begin,(uintptr_t)(void *)ctx->current,
-                             (uintptr_t)(void *)ctx->end,words+a->iso_active)) {
+                             (uintptr_t)(void *)ctx->end,words+a->iso_active+a->pix_active)) {
+            a->pix_active=0;
             (void)auto_frames_count(&a->coverage,call->kind,2);return 0;
         }
-        return ring_begin(a,ctx,call,caller,words);
+        {
+            uint32_t r=ring_begin(a,ctx,call,caller,words);
+            if(!r) a->pix_active=0;
+            return r;
+        }
     }
 #endif
     if(a->pool_tail_column) { (void)auto_frames_count(&a->coverage,call->kind,a->pool_tail_column);return 0; }
@@ -2170,6 +2208,8 @@ static int ring_read(auto_capture *a, auto_wire_op *record, uint8_t *ack)
     a->ring_device.sync(a->ring_device.ctx); /* the copy before the label: read MAIN after the label read */
     m=(const volatile uint64_t *)(a->ring_ea+(uintptr_t)record->ring_slot*a->ring_plan.stride+32u*record->ring_ordinal);
     record->raw_begin=m[0];record->raw_end=m[2];
+    /* each report is {u64 timer, u32 value, u32 pad}: the value is the high word of the second u64 (big-endian) */
+    if(record->flags&AUTO_OP_ZPASS) record->zpass=(uint32_t)(m[3]>>32)-(uint32_t)(m[1]>>32);
     record->ring_state=a->ring.slots[record->ring_slot].state;
     record->published=label;
     if(record->raw_begin==PRG_POISON || record->raw_end==PRG_POISON) return AUTO_COMPLETION_REFUSED;
@@ -2198,6 +2238,7 @@ static int drain_operations(auto_capture *a,int seal)
             if(result==AUTO_COMPLETION_READY) record.flags|=2;
             else {
                 record.flags|=4;record.raw_begin=record.raw_end=0;
+                record.flags&=(uint16_t)~AUTO_OP_ZPASS;record.zpass=0;
                 if(!batch_ring[n]) {record.flags|=32;record.published=0;}
                 if(result==AUTO_COMPLETION_REFUSED) record.flags|=16;
             }
@@ -2397,6 +2438,21 @@ void ps3dk_prof__auto_fragment_program(struct _gcmCtxData *context,uint32_t offs
     s=segment_find(a,context);
     if(!s || s->external) s=segment_at(a,(gpp_ctx *)(void *)context);
     if(s && s->open) s->fp=offset;
+}
+/* cellGcmBindZcull / cellGcmUnbindZcull (cell/gcm.h, PS3TC_PROF_AUTO units): the region table the capture records.
+ * Owner thread only (binds from other threads are not seen). */
+void ps3dk_prof__rsxf_zcull(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                            uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir, uint32_t format,
+                            uint32_t s_func, uint32_t s_ref, uint32_t s_mask);
+void ps3dk_prof__rsxf_zcull_bind(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                                 uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir,
+                                 uint32_t format, uint32_t s_func, uint32_t s_ref, uint32_t s_mask)
+{
+    /* the owner thread of the attached capture; CONFIG need not be frozen yet (binds come at start-up, before the
+     * first covered draw), so this is the owner identity alone, never owner_capture's first-observation path */
+    const auto_capture *a=capture;
+    if(!RSXF_ON() || !a || !pal_owner_is_self(&a->owner)) return;
+    ps3dk_prof__rsxf_zcull(bound,index,offset,width,height,cull_start,z_format,aa_format,dir,format,s_func,s_ref,s_mask);
 }
 /* Program bind hooks (gcm_cg_bridge.h, rsx_legacy): the container's ucode bound at an FP offset of the owner
  * context. Inert unless the RSX frame capture is selected. */

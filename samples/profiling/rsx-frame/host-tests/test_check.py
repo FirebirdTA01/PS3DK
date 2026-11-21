@@ -60,7 +60,7 @@ def matching(meta, rows, state_rows=(), const_rows=()):
             if ordinal is None or d['ordinal'] == ordinal:
                 section, _, slot = table.partition('.')
                 (d['state'][section][int(slot)] if slot else d['state'][section])[field] = value
-    return {'schema': 1, 'capability': True, 'availability': 'available', 'decoder': 4, 'captures': [{
+    return {'schema': 1, 'capability': True, 'availability': 'available', 'decoder': 5, 'captures': [{
         'id': 1, 'name': meta['name'], 'source': meta['source'], 'status': meta['status'],
         'timing_mode': meta['timing_mode'], 'text_replaced': 0,
         'totals': {'draws': len(draws), 'timed': len(draws), 'untimed': 0, 'missing': 0, 'mismatched': 0},

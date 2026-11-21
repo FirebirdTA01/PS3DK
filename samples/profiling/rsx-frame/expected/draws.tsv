@@ -20,7 +20,7 @@
 # Every draw is also checked hooked and decoded, with no mismatch, no unknown state, and every program exact
 # (readable, terminated, not "bound before capture").
 @ name	matrix
-@ decoder	4
+@ decoder	5
 @ instance_runs	8:8:offset
 @ both	matrix-both
 @ source	app

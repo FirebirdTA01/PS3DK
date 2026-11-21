@@ -28,6 +28,25 @@ The version stamped into builds is generated from the most recent
   else from a matched shader-folder container. Shown per program and per draw
   in `rsx-frame` text and JSON and in the viewer's Summary, Shaders and Shader
   view.
+- **Passed samples per draw.** RSX frame captures read the ZPASS counter
+  value beside every draw's AUTO timestamps (decoder 5): each draw has a
+  passed-sample count when ZPASS counting was on, with its counting state
+  (counting, off, forced, paused, untouched). The request flag
+  `PS3DK_PROF_RSX_FRAME_PIXELS` (viewer: Force pixel counting) turns
+  counting on around every captured draw the app has it off for, never
+  once the app has used the counter in that frame. The reader derives each
+  draw's share of its render target, overdraw per target, raw ticks per
+  sample in isolated views, and an early-z note ("shading >= count" for
+  programs that kill fragments). In `rsx-frame` text and JSON, and in the
+  viewer's draw table (Samples), Summary and overdraw panel.
+- **Zcull per draw.** The zcull enables, direction, format, limits and
+  stencil cull from the command stream; INVALIDATE_ZCULL and
+  CLEAR_ZCULL_SURFACE as per-draw events; the regions
+  `cellGcmBindZcull` / `cellGcmUnbindZcull` bind on the owner thread
+  (ZCULL_REGION records), joined to each draw's depth buffer. Zcull
+  statistics reports are reserved, not read yet.
+- `samples/gcm/hello-ppu-prof-pixels`: known answers for the counts and the
+  zcull state, with a checker.
 - **Bound texture slots.** Each draw's fragment texture slots carry a bound
   state: bound (enabled and sampled by the fragment program), disabled (stale
   state still holding a format), enabled but not sampled, or unknown. In

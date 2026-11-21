@@ -791,6 +791,8 @@ pub struct TexFetches {
     pub unknown: u32,
     /// The walk ended on the program's end bit (false: unterminated or cut short, the counts are a lower bound).
     pub terminated: bool,
+    /// Fragment KIL instructions (a program that kills fragments disables early depth rejection).
+    pub kil: u32,
 }
 impl TexFetches {
     pub fn total(&self) -> u32 {
@@ -858,6 +860,7 @@ pub fn fp_tex_fetches(bytes: &[u8]) -> TexFetches {
                     t.by_op[k] += 1;
                     t.by_unit[bits(hw[0], 17, 4) as usize] += 1;
                 }
+                Some((_, _, FpKind::Kil)) => t.kil += 1,
                 Some(_) => {}
             }
         }

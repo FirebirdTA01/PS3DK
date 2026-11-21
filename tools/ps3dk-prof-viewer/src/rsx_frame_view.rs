@@ -113,6 +113,13 @@ pub enum DrawColumn {
     Kind,
     Count,
     Gap,
+    Samples,
+}
+/// A draw's passed samples, when counted (counting on or forced, and the draw timed).
+pub fn samples(f: &FrameView, d: &rf::Draw) -> Option<u64> {
+    matches!(rf::ZpassState::of(f, d), rf::ZpassState::Counting | rf::ZpassState::Forced)
+        .then_some(d.zpass_delta.map(u64::from))
+        .flatten()
 }
 pub fn sorted_draws(
     f: &FrameView,
@@ -176,6 +183,7 @@ pub fn sorted_draws(
             }
             DrawColumn::Count => numeric(Some(a.raw.count as u64), Some(b.raw.count as u64)),
             DrawColumn::Gap => numeric(a.gap, b.gap),
+            DrawColumn::Samples => numeric(samples(f, a), samples(f, b)),
         };
         cmp.then(a.raw.ordinal.cmp(&b.raw.ordinal))
     });

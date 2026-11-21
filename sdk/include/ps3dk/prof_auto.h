@@ -185,10 +185,19 @@ int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags);
  *            its own (the frame runs slower; never mixed with pipelined times);
  *  FP_BYTES  store each fragment program's ucode bytes once (bound while the capture is armed, up to the per-capture
  *            cap, PS3_PROF_RSX_FRAME_FP_BYTES_KB); vertex program bytes are always stored (from the command stream);
- *  BOTH      two consecutive frames: the first pipelined, the second isolated, its draws paired with the first's. */
+ *  BOTH      two consecutive frames: the first pipelined, the second isolated, its draws paired with the first's;
+ *  PIXELS    force ZPASS pixel counting on around each captured draw the application has it off for (QUERY_ENABLE 1
+ *            before its begin marker, 0 after its end marker: 4 command words per such draw), so every draw gets a
+ *            passed-sample count. Never around an immediate draw, and never once the application has used the
+ *            counter in that frame (a reset, an enable or disable, or a read of its ZPASS report: a report reads the
+ *            cumulative counter, it does not hand it back); the use carries into the next frame unless the
+ *            application read its report after its last reset or enable in that frame. Without it a draw is counted only when the application itself has
+ *            counting on. Leave it off when the application relies on QUERY_ENABLE being off for draws outside its
+ *            own queries, or reads a query in a later frame than its last reset or enable. */
 #define PS3DK_PROF_RSX_FRAME_ISOLATED 1u
 #define PS3DK_PROF_RSX_FRAME_FP_BYTES 2u
 #define PS3DK_PROF_RSX_FRAME_BOTH 4u
+#define PS3DK_PROF_RSX_FRAME_PIXELS 8u
 /* Per-draw labels (owner thread; other threads are ignored): a label applies to later draws until replaced, its
  * scope ends or the frame ends; scopes nest to depth 8 and a draw's label is "scope/scope/label" (at most 63 bytes,
  * a longer path is cut on a UTF-8 character boundary; an invalid byte becomes '?'). The strings must stay valid until

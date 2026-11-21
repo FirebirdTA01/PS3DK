@@ -569,7 +569,7 @@ PC app equivalent: none.
 
 | Call | Thread | Result |
 |---|---|---|
-| `int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags)` / `PS3DK_PROF_RSX_FRAME_CAPTURE(name)` | any | capture id (> 0); `EBUSY` one outstanding, `ENOTSUP` not selected / no ring / no AUTO owner, `EINVAL` an unknown flag, `ISOLATED` with `BOTH`, or a name over 63 bytes; flags `PS3DK_PROF_RSX_FRAME_ISOLATED` 1, `_FP_BYTES` 2, `_BOTH` 4, `ENOTINIT` not initialized, `ENOMEM` staging blocks, `ESTOPPED` shutdown begun; the name is copied as UTF-8 (an invalid byte becomes `?`); the macro is 0 without `PS3_PROF_AUTO` |
+| `int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags)` / `PS3DK_PROF_RSX_FRAME_CAPTURE(name)` | any | capture id (> 0); `EBUSY` one outstanding, `ENOTSUP` not selected / no ring / no AUTO owner, `EINVAL` an unknown flag, `ISOLATED` with `BOTH`, or a name over 63 bytes; flags `PS3DK_PROF_RSX_FRAME_ISOLATED` 1, `_FP_BYTES` 2, `_BOTH` 4, `_PIXELS` 8 (force ZPASS counting around captured draws the app has it off for), `ENOTINIT` not initialized, `ENOMEM` staging blocks, `ESTOPPED` shutdown begun; the name is copied as UTF-8 (an invalid byte becomes `?`); the macro is 0 without `PS3_PROF_AUTO` |
 | `void ps3dk_prof_draw_label(const char *label)` / `PS3DK_PROF_DRAW_LABEL(s)` | AUTO owner | none; other threads ignored |
 | `void ps3dk_prof_draw_scope_begin(const char *name)` / `PS3DK_PROF_DRAW_SCOPE_BEGIN(s)` | AUTO owner | none; depth 8, deeper calls counted and balanced by their ends |
 | `void ps3dk_prof_draw_scope_end(void)` / `PS3DK_PROF_DRAW_SCOPE_END()` | AUTO owner | none |
@@ -585,7 +585,9 @@ matched by canonical hash (viewer **Shader folder…**, `ps3dk-prof rsx-frame --
 4096 entries and 64 MiB). Static texture fetch counts per program and per draw come from the program ucode: the bytes
 the capture kept (flag `PS3DK_PROF_RSX_FRAME_FP_BYTES` for fragment programs) or a matched container. A draw's texture
 slot is reported **bound** when it is enabled and its fragment program fetches from it; a disabled slot that still holds
-a format is stale state, not bound. See profiler-guide.md section 7 for the output fields.
+a format is stale state, not bound. Passed samples per draw need no app call either: they are counted whenever the
+app has ZPASS counting on, and around every draw with `PS3DK_PROF_RSX_FRAME_PIXELS`; zcull regions are recorded from
+`cellGcmBindZcull` / `cellGcmUnbindZcull` on the owner thread. See profiler-guide.md section 7 for the output fields.
 
 ## 9. Waits (`prof_wait.h`)
 

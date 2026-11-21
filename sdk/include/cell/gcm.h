@@ -296,9 +296,26 @@ static inline int32_t cellGcmUnbindTile(uint8_t index)
     return (int32_t)gcmUnbindTile(index);
 }
 
+#if defined(PS3TC_PROF_AUTO) && !defined(PS3TC_PROF_AUTO_NO_ZCULL_HOOK)
+/* RSX frame capture (PS3_PROF_RSX_FRAME): the zcull region table, from the owner thread's binds. Unselected, a bind
+ * costs one load and a branch. */
+extern void *ps3dk_prof__rsxf_active;
+void ps3dk_prof__rsxf_zcull_bind(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                                 uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir,
+                                 uint32_t format, uint32_t s_func, uint32_t s_ref, uint32_t s_mask);
+#define PS3TC_GCM_ZCULL_HOOK(...) \
+    do { if (__atomic_load_n(&ps3dk_prof__rsxf_active, __ATOMIC_RELAXED)) ps3dk_prof__rsxf_zcull_bind(__VA_ARGS__); } \
+    while (0)
+#else
+#define PS3TC_GCM_ZCULL_HOOK(...) ((void)0)
+#endif
+
 static inline int32_t cellGcmUnbindZcull(uint8_t index)
 {
-    return (int32_t)gcmUnbindZcull(index);
+    int32_t rc = (int32_t)gcmUnbindZcull(index);
+    if (rc == 0)
+        PS3TC_GCM_ZCULL_HOOK(0u, index, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+    return rc;
 }
 
 /* FIFO operating-mode setter - must be called before cellGcmInit.
@@ -319,9 +336,13 @@ static inline int32_t cellGcmBindZcull(uint8_t index, uint32_t offset,
                                        uint32_t zCullFormat, uint32_t sFunc,
                                        uint32_t sRef, uint32_t sMask)
 {
-    return (int32_t)gcmBindZcull(index, offset, width, height,
-                                 cullStart, zFormat, aaFormat,
-                                 zCullDir, zCullFormat, sFunc, sRef, sMask);
+    int32_t rc = (int32_t)gcmBindZcull(index, offset, width, height,
+                                       cullStart, zFormat, aaFormat,
+                                       zCullDir, zCullFormat, sFunc, sRef, sMask);
+    if (rc == 0)
+        PS3TC_GCM_ZCULL_HOOK(1u, index, offset, width, height, cullStart, zFormat, aaFormat, zCullDir, zCullFormat,
+                             sFunc, sRef, sMask);
+    return rc;
 }
 
 /* Cell OS names - same call shape as our SetTileInfo / BindZcull. */
