@@ -89,6 +89,11 @@ enum { AUTO_KIND_FRAME=4, AUTO_FRAME_BEGIN=1, AUTO_FRAME_END=2, AUTO_OP_SEGMENT=
  * before each of this draw's markers, so its interval is not comparable with pipelined ones (the reader keeps such
  * operations out of its frame rows and summaries and reports them apart). */
 enum { AUTO_OP_ISOLATED=256 };
+/* OPS flag 512 (AUTO_OP_ZPASS, ringed CONFIGs only, RAW_VALID RING records of a draw the RSX frame capture recorded):
+ * u32@156 holds the ZPASS counter's end-report value minus its begin-report value, mod 2^32 (the value word of the
+ * draw's two type-1 reports). It counts samples only when ZPASS counting was on for the draw (the capture's DRAW record
+ * says whether); the profiler never resets the counter. Zero, and the flag clear, otherwise. */
+enum { AUTO_OP_ZPASS=512 };
 /* OPS kind 5 CALL (CALL_BRACKET): the begin report precedes a CALL in the ring,
  * the end report follows its retirement label, and the operation-label release
  * of that CALL completes it with the build's records. TOKEN is the calling
@@ -145,6 +150,7 @@ typedef struct auto_wire_op {
     uint32_t tag;           /* TAG: the tag current at the claim (a segment draw: at its build) */
     uint32_t fp_offset;     /* TAG: the last cellGcmSetFragmentProgram offset on the record's context, 0 if none */
     uint32_t depth;         /* RANGE only: nesting depth 1..4 */
+    uint32_t zpass;         /* AUTO_OP_ZPASS only: the ZPASS counter's end - begin (u32@156) */
     /* REPORT_RING tail at 160: zero for legacy local records. The serials of
      * a ring record are 2*generation-1 / 2*generation on CONFIG's ring_label;
      * report indices name its reusable local block, raw values its MAIN copy.

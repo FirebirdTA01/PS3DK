@@ -29,6 +29,9 @@
 #define rsxf_drain ps3dk_prof__rsxf_drain
 #define rsxf_note_column ps3dk_prof__rsxf_note_column
 #define rsxf_isolated ps3dk_prof__rsxf_isolated
+#define rsxf_pixel_force ps3dk_prof__rsxf_pixel_force
+#define rsxf_skip ps3dk_prof__rsxf_skip
+#define rsxf_profiler_reports ps3dk_prof__rsxf_profiler_reports
 
 /* ---- wire (rsxf_wire.c): pure encoders, little-endian, every reserved byte zero ---------------------------------- */
 enum { RSXF_CHUNK_CONFIG = 44, RSXF_CHUNK_BEGIN = 45, RSXF_CHUNK_DRAWS = 46, RSXF_CHUNK_END = 48 };
@@ -36,15 +39,27 @@ enum { RSXF_CONFIG_BYTES = 64, RSXF_BEGIN_FIXED = 56, RSXF_DRAWS_HEADER = 16, RS
        RSXF_DRAW_BYTES = 96, RSXF_PROGRAM_BYTES = 48, RSXF_NAME_MAX = 63, RSXF_TEXT_MAX = 63 };
 enum { RSXF_REC_DRAW = 1, RSXF_REC_PROGRAM = 2, RSXF_REC_LABEL = 3, RSXF_REC_NAME = 4, RSXF_REC_BASELINE = 5,
        RSXF_REC_STATE = 6, RSXF_REC_VPCONST = 7, RSXF_REC_FPCONST = 8, RSXF_REC_UNIFORM = 9, RSXF_REC_UCODE = 10,
-       RSXF_REC_SECOND = 11 };
+       RSXF_REC_SECOND = 11, RSXF_REC_ZCULL_REGION = 12, RSXF_REC_ZCULL_STATS = 13 };
+/* ZCULL_REGION (decoder 5): one zcull region as cellGcmBindZcull bound it (or its unbind), 64 bytes. ZCULL_STATS (13) is
+ * reserved for zcull statistics reports (report types 2..5): not written; their semantics need hardware
+ * characterization first. */
+enum { RSXF_ZCULL_REGION_BYTES = 64, RSXF_ZCULL_REGIONS = 8 };
+enum { RSXF_ZR_BOUND = 1, RSXF_ZR_BEFORE_CAPTURE = 2 };
 /* Request flags (= BEGIN flags): ISOLATED (WAIT_FOR_IDLE around every captured draw's markers), FP_BYTES (store FP
- * ucode bytes, up to the per-capture cap), BOTH (two consecutive frames: the first pipelined, the second isolated). */
-enum { RSXF_REQ_ISOLATED = 1, RSXF_REQ_FP_BYTES = 2, RSXF_REQ_BOTH = 4, RSXF_REQ_ALL = 7 };
+ * ucode bytes, up to the per-capture cap), BOTH (two consecutive frames: the first pipelined, the second isolated),
+ * PIXELS (force ZPASS pixel counting on around each captured draw the application has it off for; decoder 5). */
+enum { RSXF_REQ_ISOLATED = 1, RSXF_REQ_FP_BYTES = 2, RSXF_REQ_BOTH = 4, RSXF_REQ_PIXELS = 8, RSXF_REQ_ALL = 15 };
+/* A draw's ZPASS pixel counting state (DRAW record u32@84, decoder 5): COUNTING the application had counting on, OFF
+ * it had it off, FORCED the capture turned it on around this draw (PIXELS), PAUSED off inside an open application
+ * occlusion query (never forced), INVALID reserved, UNTOUCHED no ZPASS method seen since the decoder attached (counting
+ * assumed off; PIXELS forces it), UNKNOWN the decoder reset since (unseen words may have changed it). */
+enum { RSXF_ZP_UNKNOWN = 0, RSXF_ZP_COUNTING = 1, RSXF_ZP_OFF = 2, RSXF_ZP_FORCED = 3, RSXF_ZP_PAUSED = 4,
+       RSXF_ZP_INVALID = 5, RSXF_ZP_UNTOUCHED = 6 };
 /* UCODE: a program's bytes in parts of at most RSXF_UCODE_PART bytes; header bytes. */
 enum { RSXF_UCODE_PART = 2048, RSXF_UCODE_HEADER = 32, RSXF_UCODE_LAST = 1, RSXF_SENT_MAX = 256 };
 /* CONFIG decoder version: 1 draws and programs; 2 also the 3D register shadow (BASELINE and STATE records); 3 also VP
  * constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM). */
-enum { RSXF_DECODER = 4 };
+enum { RSXF_DECODER = 5 }; /* 4: also SECOND and UCODE; 5: also ZPASS state, zcull events and ZCULL_REGION */
 /* VP constant slots; VPCONST entries per record; FP constants per draw and uniforms per program, at most. */
 enum { RSXF_VP_CONSTS = 468, RSXF_VPC_PER_REC = 128, RSXF_FPC_MAX = 32, RSXF_UNI_MAX = 32, RSXF_UNI_NAME = 32,
        RSXF_VPC_ENTRY = 24, RSXF_FPC_ENTRY = 24, RSXF_UNI_ENTRY = 40 };
@@ -78,7 +93,9 @@ typedef char rsxf_unit_fits_min_block[(RSXF_DRAWS_HEADER + RSXF_UNIT_WORST <= RS
 enum { RSXF_AVAILABLE = 0, RSXF_NO_AUTO = 1, RSXF_NO_RING = 2, RSXF_NO_DECODER = 3 };
 enum { RSXF_K_ARRAY = 1, RSXF_K_INDEX = 2, RSXF_K_CLEAR = 3, RSXF_K_INLINE_ARRAY = 7, RSXF_K_INLINE_INDEX = 8,
        RSXF_K_IMMEDIATE = 9 };
-enum { RSXF_DF_HOOKED = 1, RSXF_DF_DECODED = 2, RSXF_DF_MISMATCH = 4, RSXF_DF_STATE_UNKNOWN = 8 };
+enum { RSXF_DF_HOOKED = 1, RSXF_DF_DECODED = 2, RSXF_DF_MISMATCH = 4, RSXF_DF_STATE_UNKNOWN = 8,
+       /* decoder 5: INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw (one-shot events) */
+       RSXF_DF_ZCULL_INVALIDATED = 16, RSXF_DF_ZCULL_CLEARED = 32 };
 enum { RSXF_UNTIMED_OUTSIDE_RANGE = 32, RSXF_UNTIMED_RING_FULL = 33, RSXF_UNTIMED_RING_STATE = 34,
        RSXF_UNTIMED_NOT_HOOKED = 64, RSXF_UNTIMED_NO_WINDOW = 65 };
 enum { RSXF_PROFILE_VP = 1, RSXF_PROFILE_FP = 2 };
@@ -103,11 +120,15 @@ typedef struct rsxf_wire_begin {
 } rsxf_wire_begin;
 typedef struct rsxf_wire_draw {
     uint32_t ordinal, untimed, mode, first, count, index_offset, clear_mask, tag, label, vp, fp, fp_address, vp_start,
-             words;
+             words, zpass;
     uint16_t kind, flags;
     uint8_t index_type, index_location;
     uint64_t op_id, caller, tb;
 } rsxf_wire_draw;
+typedef struct rsxf_wire_zcull {
+    uint32_t ordinal; /* the next draw ordinal: the region applies from that draw on */
+    uint32_t index, flags, offset, width, height, cull_start, z_format, aa_format, dir, format, s_func, s_ref, s_mask;
+} rsxf_wire_zcull;
 typedef struct rsxf_wire_program {
     uint32_t index, instructions, ucode_bytes, const_blocks, address, first_draw;
     uint8_t profile, source;
@@ -127,6 +148,7 @@ size_t ps3dk_prof__rsxf_put_config(uint8_t *out, size_t cap, const rsxf_wire_con
 size_t ps3dk_prof__rsxf_put_begin(uint8_t *out, size_t cap, const rsxf_wire_begin *b);
 size_t ps3dk_prof__rsxf_put_draw(uint8_t *out, size_t cap, const rsxf_wire_draw *d);
 size_t ps3dk_prof__rsxf_put_program(uint8_t *out, size_t cap, const rsxf_wire_program *p);
+size_t ps3dk_prof__rsxf_put_zcull(uint8_t *out, size_t cap, const rsxf_wire_zcull *z);
 size_t ps3dk_prof__rsxf_put_text(uint8_t *out, size_t cap, uint16_t type, uint32_t index, const char *s, uint32_t n);
 size_t ps3dk_prof__rsxf_put_draws_header(uint8_t *out, size_t cap, uint32_t id, uint32_t seq, uint32_t records,
                                          uint32_t record_bytes);
@@ -161,6 +183,7 @@ enum { RSXF_VP_SLOTS = 512, RSXF_REGS = 2048, RSXF_REG_WORDS = RSXF_REGS / 32 };
 int ps3dk_prof__rsxf_shadowed(uint32_t method);
 typedef struct rsxf_draw_event {
     uint32_t kind, mode, first, count, index_offset, index_type, index_location, clear_mask, words;
+    uint32_t zcull_events; /* RSXF_DF_ZCULL_* written since the previous draw or clear */
 } rsxf_draw_event;
 typedef struct rsxf_decoder {
     uint32_t vp[RSXF_VP_SLOTS][4];
@@ -194,6 +217,16 @@ typedef struct rsxf_decoder {
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
     uint32_t bad_header, bad_reason, resets; /* the first rejection (AUTO_RING_REJECT_* numbering) */
+    /* ZPASS counting (QUERY_ENABLE is in the register shadow): zq_open an application QUERY_RESET of type 1 not yet
+     * followed by its QUERY_GET of type 1 (a report outside [own_lo, own_hi), the profiler's own report range);
+     * zq_touched any application ZPASS method seen since attach; zq_blind a decoder reset since attach (unseen words
+     * may have touched it). zc_events: RSXF_DF_ZCULL_* since the last draw. */
+    uint32_t own_lo, own_hi, zq_open, zq_touched, zq_blind, zc_events;
+    /* The firmware-reserved prefix (AUTO's init record): io the EA of IO offset 0, start the context start's IO
+     * offset. A CALL to a target below start (the firmware's per-flip default-state routine) is decoded there, one
+     * level, up to its RET, so its state writes are seen instead of a reset; NULL io: every CALL resets. */
+    const uint32_t *io;
+    uint32_t start, routines;
     /* the open BEGIN_END group */
     uint32_t in_group, group_batches;
     rsxf_draw_event group;
@@ -217,6 +250,8 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n);
 uint32_t ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v);
 /* A different program was placed at [lo, hi) of local memory: the inline words remembered there become UNKNOWN. */
 void ps3dk_prof__rsxf_inline_forget(rsxf_decoder *d, uint32_t lo, uint32_t hi);
+/* The application's ZPASS counting state now (RSXF_ZP_COUNTING, _OFF, _PAUSED, _UNTOUCHED or _UNKNOWN). */
+uint32_t ps3dk_prof__rsxf_zpass_state(const rsxf_decoder *d);
 
 /* ---- runtime hooks (rsxf_runtime.c), called from auto_runtime.c -------------------------------------------------- */
 struct _gcmCtxData;
@@ -244,6 +279,20 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
 int rsxf_forced(void);
 /* 1 while an armed capture records ISOLATED draws: AUTO writes WAIT_FOR_IDLE before each of their two markers. */
 int rsxf_isolated(void);
+/* At a covered draw's admission (after rsxf_hook_begin caught the decoder up): 1 when an armed PIXELS capture forces
+ * ZPASS counting on around this draw (QUERY_ENABLE 1 before its begin marker, 0 after its end marker). */
+int rsxf_pixel_force(void *ctx);
+/* The words from the decoder's cursor to ctx->current are the profiler's own (the forced QUERY_ENABLE words): skip
+ * them, so the register shadow keeps the application's value. Call right after writing them, after a scan. */
+void rsxf_skip(void *ctx);
+/* The forced QUERY_ENABLE 1 of the covered draw was written (its record then carries RSXF_ZP_FORCED). */
+#define rsxf_pixel_forced ps3dk_prof__rsxf_pixel_forced
+void rsxf_pixel_forced(void *ctx);
+/* At AUTO attach: the profiler's report range [first, first + count); the application's ZPASS reports are the rest. */
+void rsxf_profiler_reports(uint32_t first, uint32_t count);
+/* At AUTO attach: the firmware-reserved prefix (see rsxf_decoder.io); NULL when AUTO has no init record. */
+#define rsxf_firmware_prefix ps3dk_prof__rsxf_firmware_prefix
+void rsxf_firmware_prefix(const uint32_t *io, uint32_t start);
 /* The drainer, after AUTO's own drain step. emit(type, payload, bytes) returns 0 when the sink took it. */
 typedef int (*rsxf_emit_fn)(void *user, uint32_t type, const uint8_t *data, size_t bytes);
 void rsxf_drain(rsxf_emit_fn emit, void *user, int auto_available, int seal);
@@ -253,6 +302,11 @@ void ps3dk_prof__rsxf_fp_bind(struct _gcmCtxData *ctx, const void *ucode, uint32
 /* A program container (CgBinaryProgram) bound on the owner: kind 1 VP, 2 FP (after its fp_bind). Its uniform names
  * and resources, and an FP's constant blocks with their container values, are read here (bounded), never later. */
 void ps3dk_prof__rsxf_container_bind(struct _gcmCtxData *ctx, const void *container, uint32_t kind);
+/* A zcull region bound (bound 1, after a successful cellGcmBindZcull) or unbound (0, cellGcmUnbindZcull) on the owner
+ * thread; binds from other threads mark the region table unknown. */
+void ps3dk_prof__rsxf_zcull_bind(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                                 uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir,
+                                 uint32_t format, uint32_t s_func, uint32_t s_ref, uint32_t s_mask);
 
 /* ---- live link (protocol v3), read by live_api.c through a weak symbol ------------------------------------------- */
 typedef struct rsxf_status {

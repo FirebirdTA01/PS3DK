@@ -721,7 +721,7 @@ if a.case in RING_RUNTIME:
         assert a.reader,'ringrsxf needs --reader'
         r=run('reader-rsxf',[a.reader,'rsx-frame','--json',files[0]],capture_dir)
         v=json.loads(r.stdout)
-        caps=v['captures'];assert v['availability']=='available' and len(caps)==3,v
+        caps=v['captures'];assert v['availability']=='available' and len(caps)==4,v
         c=caps[2]
         assert (c['name'],c['source'],c['timing_mode'],c['status'])==('third','app','isolated','COMPLETE'),c['status']
         assert len(c['draws'])==10 and all(x['timing']['state']=='timed' for x in c['draws']),c['draws'][:2]
@@ -760,6 +760,16 @@ if a.case in RING_RUNTIME:
         r=run('reader-auto-text',[a.reader,'auto',files[0]],capture_dir)
         assert r.stdout.count(b'ISOLATED: timed by the RSX frame capture')==1,r.stdout[-2000:]
         print('AUTO: frame %d labelled ISOLATED (%d operations)' % iso[0])
+        # PIXELS: per draw the counting state and, where counted, the samples (36 per draw while counting is on)
+        c=caps[3]
+        assert (c['name'],c['status'])==('pixels','COMPLETE'),c['status']
+        px=[(x['pixels']['state'],x['pixels']['samples']) for x in c['draws']]
+        assert px==[('forced',36),('counting',36),('paused',None),('forced',36),('forced',36)],px
+        assert [x['zcull']['invalidated'] for x in c['draws']]==[False,False,False,False,True],c['draws']
+        regions=c['zcull_regions']
+        assert [(r['index'],r['ordinal'],r['bound'],r['before_capture'],r['offset']) for r in regions]==\
+            [(0,0,True,True,0x100000),(1,0,True,False,0x200000)],regions
+        print('PIXELS capture: states and samples %s; zcull regions %d' % (px,len(regions)))
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else

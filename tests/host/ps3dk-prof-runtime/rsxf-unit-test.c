@@ -379,6 +379,111 @@ static void hashes(void)
     }
 }
 
+/* Decoder 5: the application's ZPASS counting state (QUERY_ENABLE shadowed, its occlusion query tracked through
+ * QUERY_RESET and its own type-1 reports, the profiler's report range ignored), and the zcull one-shot events. */
+static void zpass_and_zcull(void)
+{
+    ps3dk_prof__rsxf_decode_init(&d);
+    d.own_lo = 1024;
+    d.own_hi = 2048;
+    assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_UNTOUCHED);
+    {
+        const uint32_t w[] = {M(0, 0x17cc, 1), 1};
+        decode(w, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_COUNTING);
+    }
+    {
+        const uint32_t w[] = {M(0, 0x17cc, 1), 0};
+        decode(w, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+    }
+    {
+        /* the app's query opens (QUERY_RESET 1), counting paused: PAUSED; the profiler's report (index 1030) does not
+         * close it; the app's report (index 600) does */
+        const uint32_t open[] = {M(0, 0x17c8, 1), 1}, own[] = {M(0, 0x1800, 1), (1u << 24) | (1030u * 16u)},
+                       app[] = {M(0, 0x1800, 1), (1u << 24) | (600u * 16u)},
+                       other[] = {M(0, 0x1800, 1), (2u << 24) | (601u * 16u)}, reset2[] = {M(0, 0x17c8, 1), 2};
+        decode(open, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(own, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(other, 2, 1); /* a zcull-statistics report (type 2) is not the query's */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(app, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+        decode(reset2, 2, 1); /* QUERY_RESET of another type opens nothing */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+    }
+    /* one-shot: QUERY_RESET, INVALIDATE_ZCULL and CLEAR_ZCULL_SURFACE are not register state; QUERY_ENABLE is */
+    assert(!ps3dk_prof__rsxf_shadowed(0x17c8) && !ps3dk_prof__rsxf_shadowed(0x0234) &&
+           !ps3dk_prof__rsxf_shadowed(0x1438) && ps3dk_prof__rsxf_shadowed(0x17cc) &&
+           ps3dk_prof__rsxf_shadowed(0x1d84) && ps3dk_prof__rsxf_shadowed(0x1ea4));
+    /* a decoder reset: the state is unknown, and the query's state too (off is then PAUSED: never forced) */
+    ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
+    assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_UNKNOWN);
+    {
+        const uint32_t off[] = {M(0, 0x17cc, 1), 0}, app[] = {M(0, 0x1800, 1), (1u << 24) | (600u * 16u)};
+        decode(off, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(app, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+    }
+    {
+        /* zcull events go to the next draw or clear only */
+        const uint32_t w[] = {M(0, 0x0234, 1), 0, M(0, 0x1d94, 1), 0xf0, M(0, 0x1d94, 1), 0xf0,
+                              M(0, 0x1438, 1), 0, M(0, 0x1d94, 1), 0xf0};
+        d.sink = NULL;
+        d.n_events = 0;
+        decode(w, sizeof w / 4, 1);
+        assert(d.n_events == 3 && d.events[0].zcull_events == RSXF_DF_ZCULL_INVALIDATED &&
+               d.events[1].zcull_events == 0 && d.events[2].zcull_events == RSXF_DF_ZCULL_CLEARED);
+        assert(!((d.reg_known[(0x0234 >> 2) >> 5] >> ((0x0234 >> 2) & 31u)) & 1u));
+    }
+    {
+        /* a CALL into the firmware-reserved prefix (the per-flip default-state routine): its words are decoded up to
+         * its RET, no reset; a target at or past the context start, a routine without RET or with a nested CALL
+         * resets (as before, without the prefix record) */
+        static uint32_t prefix[16];
+        const uint32_t call0[] = {0x00000002u}, call_seg[] = {0x00000040u | 2u}, call_bad[] = {0x00000020u | 2u};
+        uint32_t resets;
+        prefix[0] = M(0, 0x17cc, 1); prefix[1] = 1; prefix[2] = M(0, 0x1d84, 1); prefix[3] = 3;
+        prefix[4] = 0x00020000u;                                           /* RET */
+        prefix[8] = M(0, 0x17cc, 1); prefix[9] = 0; prefix[10] = 0x00000002u; /* a nested CALL */
+        ps3dk_prof__rsxf_decode_init(&d);
+        d.io = prefix;
+        d.start = sizeof prefix; /* the context starts right after the prefix */
+        decode(call0, 1, 1);
+        assert(d.resets == 0 && d.routines == 1 && ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_COUNTING &&
+               d.reg[0x1d84 >> 2] == 3);
+        resets = d.resets;
+        decode(call_seg, 1, 0);
+        assert(d.resets == resets + 1 && d.bad_reason == AUTO_RING_REJECT_CALL_TARGET);
+        resets = d.resets;
+        decode(call_bad, 1, 0);
+        assert(d.resets == resets + 1 && ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_UNKNOWN);
+        d.io = NULL;
+        decode(call0, 1, 0); /* no prefix record: every CALL resets */
+        assert(d.resets == resets + 2);
+    }
+    {
+        /* the region record: an unbound region carries no fields; index 8 and unknown flags are refused */
+        uint8_t buf[64];
+        rsxf_wire_zcull z;
+        memset(&z, 0, sizeof z);
+        z.index = 8;
+        assert(!ps3dk_prof__rsxf_put_zcull(buf, sizeof buf, &z));
+        z.index = 7;
+        z.offset = 0x1000;
+        assert(!ps3dk_prof__rsxf_put_zcull(buf, sizeof buf, &z)); /* unbound with an offset */
+        z.flags = 4;
+        assert(!ps3dk_prof__rsxf_put_zcull(buf, sizeof buf, &z));
+        z.flags = RSXF_ZR_BOUND;
+        assert(!ps3dk_prof__rsxf_put_zcull(buf, 63, &z));
+        assert(ps3dk_prof__rsxf_put_zcull(buf, sizeof buf, &z) == RSXF_ZCULL_REGION_BYTES);
+        assert(buf[0] == RSXF_REC_ZCULL_REGION && buf[2] == 64 && buf[8] == 7 && buf[12] == 1 && buf[17] == 0x10);
+    }
+}
+
 static void encoders(FILE *out, uint32_t owner)
 {
     uint8_t buf[4096], rec[1024];
@@ -410,23 +515,30 @@ static void encoders(FILE *out, uint32_t owner)
     memset(&w, 0, sizeof w);
     w.ordinal = 0; w.kind = RSXF_K_ARRAY; w.flags = RSXF_DF_DECODED; w.untimed = RSXF_UNTIMED_NOT_HOOKED;
     w.mode = 5; w.count = 36; w.label = 1; w.fp = 1; w.fp_address = 0x40;
+    w.zpass = RSXF_ZP_OFF; w.flags |= RSXF_DF_ZCULL_INVALIDATED; /* decoder 5 */
     {
-        /* the register file at arming, then what the draw changed */
+        /* the register file at arming, a zcull region bound before it, then what the draw changed */
         const uint16_t bi[2] = {0x310 >> 2, 0xa74 >> 2}, si[1] = {0xa6c >> 2};
         const uint32_t bv[2] = {1, 1}, sv[1] = {0x203};
         uint8_t tmp[1024];
+        rsxf_wire_zcull z;
         size_t pre = ps3dk_prof__rsxf_put_regs(tmp, sizeof tmp, RSXF_REC_BASELINE, 0, 0, bi, bv, 2);
         assert(pre == 32);
+        memset(&z, 0, sizeof z);
+        z.index = 2; z.flags = RSXF_ZR_BOUND | RSXF_ZR_BEFORE_CAPTURE; z.offset = 0x100000; z.width = 640;
+        z.height = 480; z.z_format = 2; z.format = 1; z.s_func = 8; z.s_mask = 0xff;
+        pre += ps3dk_prof__rsxf_put_zcull(tmp + pre, sizeof tmp - pre, &z);
+        assert(pre == 96);
         pre += ps3dk_prof__rsxf_put_regs(tmp + pre, sizeof tmp - pre, RSXF_REC_STATE, 0, 0, si, sv, 1);
-        assert(pre == 56);
+        assert(pre == 120);
         /* BASELINE, then the draw's STATE, then its definitions and the DRAW */
         memmove(rec + pre, rec, r);
         memcpy(rec, tmp, pre);
         r += pre;
     }
     r += ps3dk_prof__rsxf_put_draw(rec + r, sizeof rec - r, &w);
-    assert(r == 56 + RSXF_PROGRAM_BYTES + 32 + RSXF_DRAW_BYTES);
-    n = ps3dk_prof__rsxf_put_draws_header(buf, sizeof buf, 1, 0, 5, (uint32_t)r);
+    assert(r == 120 + RSXF_PROGRAM_BYTES + 32 + RSXF_DRAW_BYTES);
+    n = ps3dk_prof__rsxf_put_draws_header(buf, sizeof buf, 1, 0, 6, (uint32_t)r);
     memcpy(buf + n, rec, r);
     n += r;
     fwrite("D", 1, 1, out); fwrite(&n, 4, 1, out); fwrite(buf, 1, n, out);
@@ -459,6 +571,7 @@ int main(int argc, char **argv)
     cursors_after_unknown_flow();
     register_records();
     utf8();
+    zpass_and_zcull();
     encoders(out, owner);
     assert(fclose(out) == 0);
     puts("rsxf units PASS");

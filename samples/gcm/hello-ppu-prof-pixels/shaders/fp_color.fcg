@@ -1,0 +1,7 @@
+// hello-ppu-prof-pixels: a solid colour (no KIL: early depth rejection may apply).
+void main(
+    float2 in_uv : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    out_color = float4(0.2f + 0.6f * in_uv.x, 0.4f, 0.8f - 0.6f * in_uv.y, 1.0f);
+}

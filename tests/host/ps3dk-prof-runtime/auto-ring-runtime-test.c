@@ -18,7 +18,9 @@
  *   8 rsxf: RSX frame capture selected (PS3_PROF_RSX_FRAME, 32 KiB staging blocks: the minimum): a VP uploaded in the stream and an FP
  *          bound through its container, labels in a scope, hooked array draws and clears, raw draws the hooks never
  *          see, refusals (busy, flags), then a second capture with the drainer held that truncates when both staging
- *          blocks are full. auto-runtime-test.py reads the capture back with the reader. */
+ *          blocks are full, an ISOLATED capture, then a PIXELS capture (forced ZPASS counting around draws the
+ *          application has counting off for, never inside its paused occlusion query) with zcull binds and events.
+ *          auto-runtime-test.py reads the captures back with the reader. */
 #include <assert.h>
 #include <sched.h>
 #include <stdio.h>
@@ -79,6 +81,9 @@ static uint32_t fifo[WORDS];
 #define M(sub,m,n) (((uint32_t)(n)<<18)|((uint32_t)(sub)<<13)|(m))
 
 static uint64_t reports[2048][2];
+/* the executor's ZPASS counter: QUERY_ENABLE gates it, QUERY_RESET type 1 zeroes it, each vertex-batch vertex adds one
+ * sample, and a type-1 report stores it in the value word (the high half of a report's second u64) */
+static uint32_t zp_on,zp_count;
 static uint32_t labels[256];
 static gpp_ctx context;
 static uint8_t *main_ring;
@@ -122,7 +127,13 @@ static void apply(uint32_t sub,uint32_t m,uint32_t v)
         if(m==0x1d6c || m==0x64) sem=v/16u;
         else if(m==0x1d70) st32(&labels[sem],(v&0xff00ff00u)|((v>>16)&255u)|((v&255u)<<16));
         else if(m==0x68) assert(ld32(&labels[sem])==v); /* in order: the release already executed */
-        else if(m==0x1800) st64(&reports[(v&0xffffffu)/16u][0],++gpu_clock);
+        else if(m==0x1800) {
+            st64(&reports[(v&0xffffffu)/16u][0],++gpu_clock);
+            if((v>>24)==1u) st64(&reports[(v&0xffffffu)/16u][1],(uint64_t)zp_count<<32);
+        }
+        else if(m==0x17cc) zp_on=v;
+        else if(m==0x17c8 && v==1u) zp_count=0;
+        else if(m==0x1814 && zp_on) zp_count+=(v>>24)+1u;
         return;
     }
     if(sub>1 && (TEST_RING_MODE>=6 && TEST_RING_MODE<=7)) return;   /* the routine's other subchannels */
@@ -541,7 +552,7 @@ int main(void)
         ps3dk_prof__rsxf_fp_bind((void *)&context,fp_ucode,sizeof fp_ucode,0x2000u);
         ps3dk_prof_frame();
         draw();
-        assert(ps3dk_prof_rsx_frame_capture("bad",8u)==PS3DK_PROF_EINVAL);   /* an unknown flag */
+        assert(ps3dk_prof_rsx_frame_capture("bad",16u)==PS3DK_PROF_EINVAL);  /* an unknown flag */
         assert(ps3dk_prof_rsx_frame_capture("bad",5u)==PS3DK_PROF_EINVAL);   /* ISOLATED with BOTH */
         id=ps3dk_prof_rsx_frame_capture("first",0u);
         assert(id>0);
@@ -653,6 +664,50 @@ int main(void)
         }
         ps3dk_prof_frame();
         app_flush(0);app_flush(0);settle_drainer(a);
+        {
+            /* PIXELS: a zcull region bound before arming and one while armed; draws with counting untouched (forced),
+             * on (not forced), off inside an open application query (paused: not forced), off after the app's report
+             * closed it (forced); an INVALIDATE_ZCULL before the last. Each array draw has 36 vertices: the executor
+             * counts 36 samples while counting is on. */
+            uint32_t forced[5],*from;
+            int pid;
+            ps3dk_prof__rsxf_zcull_bind(1u,0u,0x100000u,640u,480u,0u,2u,0u,0u,1u,8u,0u,0xffu);
+            for(int i=0;i<20000;i++) {
+                pid=ps3dk_prof_rsx_frame_capture("pixels",PS3DK_PROF_RSX_FRAME_PIXELS);
+                if(pid!=PS3DK_PROF_EBUSY) break;
+                struct timespec t={0,100000};nanosleep(&t,NULL);
+            }
+            assert(pid>0);
+            ps3dk_prof_frame();
+            ps3dk_prof__rsxf_zcull_bind(1u,1u,0x200000u,320u,240u,0u,2u,0u,0u,1u,8u,0u,0xffu);
+            for(uint32_t k=0;k<5;k++) {
+                uint32_t t;
+                if((uint32_t)(context.end-context.current)<40u) {w=reserve(40);memset(w,0,40u*4u);}
+                if(k==1) {w=reserve(2);w[0]=M(0,0x17cc,1);w[1]=1;}                      /* the app counts */
+                if(k==2) {w=reserve(4);w[0]=M(0,0x17c8,1);w[1]=1;w[2]=M(0,0x17cc,1);w[3]=0;} /* its query, paused */
+                if(k==3) {w=reserve(2);w[0]=M(0,0x1800,1);w[1]=(1u<<24)|(600u*16u);}      /* its report closes it */
+                if(k==4) {w=reserve(2);w[0]=M(0,0x0234,1);w[1]=0;}                       /* INVALIDATE_ZCULL */
+                from=context.current;
+                t=ps3dk_prof__auto_begin((void *)&context,&array,0x5678);
+                /* the array draw's words as the hooked emitter writes them (the 10 words AUTO expects) */
+                w=reserve(10);
+                w[0]=M(0,0x100,3)|0x40000000u;w[1]=w[2]=w[3]=0;
+                w[4]=M(0,0x1808,1);w[5]=5;w[6]=M(0,0x1814,1);w[7]=(35u<<24)|0u;w[8]=M(0,0x1808,1);w[9]=0;
+                ps3dk_prof__auto_end((void *)&context,t);
+                assert(t!=0);
+                forced[k]=0;
+                for(const uint32_t *p=from;p<context.current;) {
+                    uint32_t h=*p,n=(h>>18)&2047u;
+                    if(h==M(0,0x17cc,1)) forced[k]=forced[k]*10u+1u+p[1]; /* 2 = on, 1 = off, in order */
+                    p+=1u+n;
+                }
+            }
+            /* forced: QUERY_ENABLE 1 before the begin marker, 0 after the end marker; otherwise none */
+            assert(forced[0]==21u && forced[1]==0u && forced[2]==0u && forced[3]==21u && forced[4]==21u);
+            ps3dk_prof_frame();
+            app_flush(0);app_flush(0);settle_drainer(a);
+            printf("capture %d: PIXELS forced %u %u %u %u %u\n",pid,forced[0],forced[1],forced[2],forced[3],forced[4]);
+        }
     }
     puts("RSX frame capture runtime PASS");
 #else

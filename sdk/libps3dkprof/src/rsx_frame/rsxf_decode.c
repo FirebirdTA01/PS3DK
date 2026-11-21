@@ -35,6 +35,8 @@ int ps3dk_prof__rsxf_shadowed(uint32_t m)
     case 0x0100u: case 0x0104u: /* NOP, NOTIFY */
     case 0x1710u: case 0x1714u: case 0x1fd8u: /* vertex cache invalidates, texture cache control */
     case 0x1800u: /* report write (GET_REPORT: every AUTO marker) */
+    case 0x17c8u: /* QUERY_RESET (clear report value) */
+    case 0x0234u: case 0x1438u: /* INVALIDATE_ZCULL, CLEAR_ZCULL_SURFACE: per-draw events (decoder 5), not state */
     case 0x1d70u: case 0x1d74u: /* back-end write and texture-read semaphore releases */
         return 0; /* one-shot actions: their last value is not state (it would differ between identical draws) */
     case 0x1efcu: case M_VP_UPLOAD_FROM: /* the VP constant and instruction upload pointers (ports' cursors) */
@@ -66,14 +68,27 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
     d->vp_generation++;
     d->in_group = 0;
     d->resets++;
+    d->zq_blind = 1;
+    d->zq_open = 2; /* unknown until the application's next QUERY_RESET or ZPASS report */
 }
 
-static void event(rsxf_decoder *d, const rsxf_draw_event *e)
+uint32_t ps3dk_prof__rsxf_zpass_state(const rsxf_decoder *d)
 {
+    const uint32_t i = 0x17ccu >> 2;
+    if (d->reg_known[i >> 5] & (1u << (i & 31u)))
+        return d->reg[i] ? RSXF_ZP_COUNTING : d->zq_open ? RSXF_ZP_PAUSED : RSXF_ZP_OFF;
+    return d->zq_touched || d->zq_blind ? RSXF_ZP_UNKNOWN : RSXF_ZP_UNTOUCHED;
+}
+
+static void event(rsxf_decoder *d, const rsxf_draw_event *ev)
+{
+    rsxf_draw_event e = *ev;
+    e.zcull_events = d->zc_events; /* the zcull events since the previous draw or clear belong to this one */
+    d->zc_events = 0;
     if (d->sink)
-        d->sink(d->sink_user, e); /* at once: the registers are this draw's */
+        d->sink(d->sink_user, &e); /* at once: the registers are this draw's */
     else if (d->n_events < sizeof d->events / sizeof d->events[0])
-        d->events[d->n_events++] = *e;
+        d->events[d->n_events++] = e;
     else
         d->lost_events++;
 }
@@ -133,6 +148,23 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
     case M_FP_ADDRESS: d->fp_address = v; d->known |= 2u; return;
     case M_INDEX_OFFSET: d->index_offset = v; d->known |= 4u; return;
     case M_INDEX_DMA: d->index_dma = v; return;
+    case 0x17c8u: /* QUERY_RESET: type 1 (ZPASS) opens an application occlusion query */
+        d->zq_touched = 1;
+        if (v == 1u)
+            d->zq_open = 1;
+        break;
+    case 0x17ccu: d->zq_touched = 1; break; /* QUERY_ENABLE: its value is shadowed */
+    case 0x1800u: {
+        /* a ZPASS report (type 1) the application wrote outside the profiler's range closes its query */
+        const uint32_t index = (v & 0xffffffu) >> 4;
+        if ((v >> 24) == 1u && !(index >= d->own_lo && index < d->own_hi)) {
+            d->zq_touched = 1;
+            d->zq_open = 0;
+        }
+        break;
+    }
+    case 0x0234u: d->zc_events |= RSXF_DF_ZCULL_INVALIDATED; break;
+    case 0x1438u: d->zc_events |= RSXF_DF_ZCULL_CLEARED; break;
     case M_CLEAR: {
         rsxf_draw_event e;
         memset(&e, 0, sizeof e);
@@ -346,17 +378,36 @@ static void method_2d(rsxf_decoder *d, uint32_t sub, uint32_t m, uint32_t v)
     }
 }
 
-int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
+static int packets(rsxf_decoder *d, const uint32_t *p, size_t n, int routine);
+
+/* A CALL into the firmware-reserved prefix: its routine decoded up to its RET (one level, the AUTO ring decoder's
+ * rules: no CALL or JUMP inside, no packet crossing the context start). Any other CALL, or a routine that breaks a
+ * rule, resets the decoder. */
+static int call(rsxf_decoder *d, uint32_t h)
+{
+    const uint32_t target = h & ~3u;
+    if (!d->io) {
+        ps3dk_prof__rsxf_decode_unknown(d, h, AUTO_RING_REJECT_CALL);
+        return 0;
+    }
+    if (target >= d->start) {
+        ps3dk_prof__rsxf_decode_unknown(d, h, AUTO_RING_REJECT_CALL_TARGET);
+        return 0;
+    }
+    d->routines++;
+    return packets(d, d->io + target / 4u, (d->start - target) / 4u, 1);
+}
+
+static int packets(rsxf_decoder *d, const uint32_t *p, size_t n, int routine)
 {
     const uint32_t allowed = 0x40000000u | (2047u << 18) | (7u << 13) | 0x1ffcu;
     size_t at = 0;
     int ok = 1;
-    if (!p)
-        return n == 0;
-    d->words += n;
     while (at < n) {
         uint32_t h = p[at++], count = (h >> 18) & 2047u, m = h & 0x1ffcu, sub = (h >> 13) & 7u;
         uint32_t why = AUTO_RING_REJECT_NONE;
+        if (routine && h == AUTO_RING_RET)
+            return 1;
         if (h & ~allowed) {
             if ((h & 0xe0000003u) == 0x20000000u || (h & 0xe0000003u) == 1u) why = AUTO_RING_REJECT_JUMP;
             else if ((h & 3u) == 2u) why = AUTO_RING_REJECT_CALL;
@@ -365,7 +416,18 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
         } else if (!count && h) why = AUTO_RING_REJECT_EMPTY;
         else if (count > n - at) why = AUTO_RING_REJECT_TRUNCATED;
         else if (!(h & 0x40000000u) && count && m + 4u * (count - 1u) > 0x1ffcu) why = AUTO_RING_REJECT_RANGE;
+        if (why == AUTO_RING_REJECT_CALL && !routine) {
+            if (!call(d, h))
+                ok = 0; /* the decoder reset; it resumes with the next word */
+            continue;
+        }
         if (why) {
+            if (routine) {
+                ps3dk_prof__rsxf_decode_unknown(d, h, why == AUTO_RING_REJECT_CALL ? AUTO_RING_REJECT_ROUTINE_CALL :
+                                                why == AUTO_RING_REJECT_JUMP ? AUTO_RING_REJECT_ROUTINE_JUMP :
+                                                why == AUTO_RING_REJECT_TRUNCATED ? AUTO_RING_REJECT_ROUTINE_BOUND : why);
+                return 0;
+            }
             ps3dk_prof__rsxf_decode_unknown(d, h, why);
             ok = 0;
             if (why == AUTO_RING_REJECT_TRUNCATED)
@@ -383,5 +445,17 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
                 method_m2mf(d, (h & 0x40000000u) ? m : m + 4u * i, p[at + i]);
         at += count;
     }
+    if (routine) {
+        ps3dk_prof__rsxf_decode_unknown(d, 0, AUTO_RING_REJECT_ROUTINE_UNTERMINATED);
+        return 0;
+    }
     return ok;
+}
+
+int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n)
+{
+    if (!p)
+        return n == 0;
+    d->words += n;
+    return packets(d, p, n, 0);
 }

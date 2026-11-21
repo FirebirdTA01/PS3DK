@@ -79,7 +79,9 @@ typedef struct rsxf_state {
     uint64_t fp_hashed, fp_reused; /* bind statistics (host tests) */
     /* owner: the covered draw between begin and end */
     struct { uint32_t active, claimed, kind, mode, first, count, offset, index_type, location, clear_mask, tag;
-             uint64_t caller, op_id; uint32_t column; } hook;
+             uint64_t caller, op_id; uint32_t column, zpass; } hook;
+    /* owner: the zcull regions cellGcmBindZcull bound on the owner thread (flags RSXF_ZR_BOUND) */
+    rsxf_wire_zcull zr[RSXF_ZCULL_REGIONS];
     uint32_t last_column;
     /* requester -> owner (written before REQUESTED) */
     uint32_t req_source, req_id;
@@ -147,6 +149,9 @@ void *ps3dk_prof__rsxf_active;
 #define S (*(rsxf_state **)(void *)&ps3dk_prof__rsxf_active)
 static rsxf_state *g_state;
 static uint32_t g_ringless;      /* the last attach had no report ring */
+static uint32_t g_own_first, g_own_count; /* the profiler's report range (AUTO attach) */
+static const uint32_t *g_fw_io;           /* the firmware-reserved prefix (AUTO's init record) */
+static uint32_t g_fw_start;
 static uint64_t g_slot;          /* RSXCAP_WORD layout */
 static uint32_t g_selected;      /* 0 unknown, 1 no, 2 yes */
 static uint32_t g_config_emitted;
@@ -233,7 +238,23 @@ void rsxf_attach(void *ctx, int ringed)
      * nothing is armed yet. Decoding starts at the context's current word: everything written from here on is seen. */
     s->ctx = ctx;
     s->cursor = ctx ? (uintptr_t)(void *)((gpp_ctx *)ctx)->current : 0;
+    s->dec.own_lo = g_own_first;
+    s->dec.own_hi = g_own_first + g_own_count;
+    s->dec.io = g_fw_io;
+    s->dec.start = g_fw_start;
     ST_REL(&S, s);
+}
+
+void rsxf_firmware_prefix(const uint32_t *io, uint32_t start)
+{
+    g_fw_io = io;
+    g_fw_start = io ? start : 0;
+}
+
+void rsxf_profiler_reports(uint32_t first, uint32_t count)
+{
+    g_own_first = first;
+    g_own_count = count;
 }
 
 /* ---- staging (owner) ---------------------------------------------------------------------------------------------- */
@@ -1127,6 +1148,9 @@ static void record(rsxf_state *s, const rsxf_draw_event *e, int hooked)
     if (w.untimed)
         s->untimed++;
     w.words = e ? e->words : 0;
+    w.zpass = hooked ? s->hook.zpass : ps3dk_prof__rsxf_zpass_state(&s->dec);
+    if (e)
+        w.flags |= (uint16_t)(e->zcull_events & (RSXF_DF_ZCULL_INVALIDATED | RSXF_DF_ZCULL_CLEARED));
     w.tb = p_tb();
     if (w.kind != RSXF_K_CLEAR) {
         w.vp = vp_identity(s, unit, &len, &defs_p, ordinal, &unknown);
@@ -1281,6 +1305,7 @@ void rsxf_hook_begin(void *ctx, uint32_t kind, uint32_t mode, uint32_t first, ui
     s->last_column = 0;
     if (!s->armed)
         return;
+    s->hook.zpass = ps3dk_prof__rsxf_zpass_state(&s->dec);
     s->hook.active = 1;
     s->hook.claimed = 0;
     s->hook.kind = kind;
@@ -1322,6 +1347,74 @@ void rsxf_hook_end(void *ctx)
     if (s->hook.active && !s->hook.claimed && s->armed)
         record(s, NULL, 1);
     s->hook.active = 0;
+}
+
+int rsxf_pixel_force(void *ctx)
+{
+    rsxf_state *s = owner_state(ctx);
+    return s && s->armed && (s->req_flags & RSXF_REQ_PIXELS) && s->hook.active &&
+           (s->hook.zpass == RSXF_ZP_OFF || s->hook.zpass == RSXF_ZP_UNTOUCHED);
+}
+
+void rsxf_pixel_forced(void *ctx)
+{
+    rsxf_state *s = owner_state(ctx);
+    if (s && s->hook.active)
+        s->hook.zpass = RSXF_ZP_FORCED;
+}
+
+void rsxf_skip(void *ctx)
+{
+    rsxf_state *s = owner_state(ctx);
+    gpp_ctx *c = ctx;
+    uintptr_t cur;
+    if (!s || !c || !s->cursor)
+        return;
+    cur = (uintptr_t)(void *)c->current;
+    if (s->cursor <= cur && !((cur - s->cursor) & 3u))
+        s->cursor = cur;
+}
+
+/* One ZCULL_REGION record for region i into the current block (owner, armed); flags add BEFORE_CAPTURE at arming. */
+static int put_zcull(rsxf_state *s, uint32_t i, uint32_t extra)
+{
+    rsxf_wire_zcull z = s->zr[i];
+    uint8_t *p;
+    counts c;
+    z.index = i;
+    z.ordinal = s->draws_seen;
+    z.flags |= extra;
+    if (!(p = reserve(s, RSXF_ZCULL_REGION_BYTES)))
+        return 0;
+    if (!ps3dk_prof__rsxf_put_zcull(p, RSXF_ZCULL_REGION_BYTES, &z))
+        return 0;
+    memset(&c, 0, sizeof c);
+    c.records = 1;
+    commit(s, RSXF_ZCULL_REGION_BYTES, &c);
+    return 1;
+}
+
+void ps3dk_prof__rsxf_zcull(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                            uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir, uint32_t format,
+                            uint32_t s_func, uint32_t s_ref, uint32_t s_mask);
+void ps3dk_prof__rsxf_zcull(uint32_t bound, uint32_t index, uint32_t offset, uint32_t width, uint32_t height,
+                            uint32_t cull_start, uint32_t z_format, uint32_t aa_format, uint32_t dir, uint32_t format,
+                            uint32_t s_func, uint32_t s_ref, uint32_t s_mask)
+{
+    rsxf_state *s = LD_ACQ(&S);
+    rsxf_wire_zcull *z;
+    if (!s || index >= RSXF_ZCULL_REGIONS)
+        return;
+    z = &s->zr[index];
+    memset(z, 0, sizeof *z);
+    if (bound) {
+        z->flags = RSXF_ZR_BOUND;
+        z->offset = offset; z->width = width; z->height = height; z->cull_start = cull_start;
+        z->z_format = z_format; z->aa_format = aa_format; z->dir = dir; z->format = format;
+        z->s_func = s_func; z->s_ref = s_ref; z->s_mask = s_mask;
+    }
+    if (s->armed && s->truncated_at == RSXF_NO_ORDINAL)
+        (void)put_zcull(s, index, 0); /* a bind while armed: from the next draw on */
 }
 
 int rsxf_isolated(void)
@@ -1546,6 +1639,9 @@ static void arm(rsxf_state *s, uint64_t w, uint64_t frame, uint64_t tb, uint32_t
     (void)take_block(s);
     if (!put_baseline(s) || !put_vpc_baseline(s))
         s->truncated_at = 0; /* the baseline does not fit the staging: no draw gets a record (larger blocks help) */
+    for (uint32_t i = 0; i < RSXF_ZCULL_REGIONS && s->truncated_at == RSXF_NO_ORDINAL; i++)
+        if ((s->zr[i].flags & RSXF_ZR_BOUND) && !put_zcull(s, i, RSXF_ZR_BEFORE_CAPTURE))
+            s->truncated_at = 0;
     memset(&b, 0, sizeof b);
     b.id = e;
     b.source = (uint16_t)s->req_source;

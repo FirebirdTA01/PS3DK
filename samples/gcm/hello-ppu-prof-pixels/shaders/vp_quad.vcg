@@ -1,0 +1,11 @@
+// hello-ppu-prof-pixels: the unit quad (0..1 corners) placed at `rect` (x0, y0, x1, y1 in clip space) and depth `z.x`.
+void main(
+    float2 in_position      : POSITION,
+    uniform float4 rect,
+    uniform float4 z,
+    out float4 out_position : POSITION,
+    out float2 out_uv       : TEXCOORD0)
+{
+    out_position = float4(lerp(rect.xy, rect.zw, in_position), z.x, 1.0f);
+    out_uv = in_position;
+}
