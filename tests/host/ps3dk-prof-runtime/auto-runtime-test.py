@@ -721,7 +721,7 @@ if a.case in RING_RUNTIME:
         assert a.reader,'ringrsxf needs --reader'
         r=run('reader-rsxf',[a.reader,'rsx-frame','--json',files[0]],capture_dir)
         v=json.loads(r.stdout)
-        caps=v['captures'];assert v['availability']=='available' and len(caps)==4,v
+        caps=v['captures'];assert v['availability']=='available' and len(caps)==12,[c['name'] for c in caps]
         c=caps[2]
         assert (c['name'],c['source'],c['timing_mode'],c['status'])==('third','app','isolated','COMPLETE'),c['status']
         assert len(c['draws'])==10 and all(x['timing']['state']=='timed' for x in c['draws']),c['draws'][:2]
@@ -756,20 +756,33 @@ if a.case in RING_RUNTIME:
         av=json.loads(r.stdout)
         reports=av['windows'] if 'windows' in av else [av]      # one report per capture window, or the whole file
         iso=sorted({(f['frame'],f['isolated_ops']) for w in reports for f in w['frames'] if 'isolated_ops' in f})
-        assert len(iso)==1 and iso[0][1]==10,iso
+        # the isolated capture's frame, then the two admitted boundary captures with isolation (one draw each)
+        assert [n for _,n in iso]==[10,1,1],iso
         r=run('reader-auto-text',[a.reader,'auto',files[0]],capture_dir)
-        assert r.stdout.count(b'ISOLATED: timed by the RSX frame capture')==1,r.stdout[-2000:]
+        assert r.stdout.count(b'ISOLATED: timed by the RSX frame capture')==3,r.stdout[-2000:]
         print('AUTO: frame %d labelled ISOLATED (%d operations)' % iso[0])
         # PIXELS: per draw the counting state and, where counted, the samples (36 per draw while counting is on)
         c=caps[3]
         assert (c['name'],c['status'])==('pixels','COMPLETE'),c['status']
         px=[(x['pixels']['state'],x['pixels']['samples']) for x in c['draws']]
-        assert px==[('forced',36),('counting',36),('paused',None),('forced',36),('forced',36)],px
+        assert px==[('forced',36),('counting',36),('paused',None),('paused',None),('paused',None)],px
         assert [x['zcull']['invalidated'] for x in c['draws']]==[False,False,False,False,True],c['draws']
         regions=c['zcull_regions']
         assert [(r['index'],r['ordinal'],r['bound'],r['before_capture'],r['offset']) for r in regions]==\
             [(0,0,True,True,0x100000),(1,0,True,False,0x200000)],regions
         print('PIXELS capture: states and samples %s; zcull regions %d' % (px,len(regions)))
+        by={c['name']:c for c in caps}
+        nx=[(x['pixels']['state'],x['pixels']['samples']) for x in by['pixels-next']['draws']]
+        assert nx==[('forced',36)],nx
+        cu=[(x['pixels']['state'],x['pixels']['samples']) for x in by['cumulative']['draws']]
+        assert cu==[('counting',36),('paused',None),('counting',36)],cu
+        for mode in ('pixels','isolated','both'):
+            short=by['edge-%s-short'%mode]['draws'];exact=by['edge-%s-exact'%mode]['draws']
+            assert len(short)==1 and short[0]['timing']['state']=='untimed',short
+            assert len(exact)==1 and exact[0]['timing']['state']=='timed',exact
+            want='forced' if mode!='isolated' else 'off'
+            assert exact[0]['pixels']['state']==want and (exact[0]['pixels']['samples']==36)==(want=='forced'),exact[0]['pixels']
+        print('pixels-next forced again; cumulative B paused; boundary captures refused one word short, admitted exactly')
     raise SystemExit(0)
 if a.case in ('ring','ringwrap'):
     assert result.stdout.endswith((b'AUTO ring attach, partition, budgets and label reservation PASS' if a.case=='ring' else

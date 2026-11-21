@@ -50,8 +50,8 @@ enum { RSXF_ZR_BOUND = 1, RSXF_ZR_BEFORE_CAPTURE = 2 };
  * PIXELS (force ZPASS pixel counting on around each captured draw the application has it off for; decoder 5). */
 enum { RSXF_REQ_ISOLATED = 1, RSXF_REQ_FP_BYTES = 2, RSXF_REQ_BOTH = 4, RSXF_REQ_PIXELS = 8, RSXF_REQ_ALL = 15 };
 /* A draw's ZPASS pixel counting state (DRAW record u32@84, decoder 5): COUNTING the application had counting on, OFF
- * it had it off, FORCED the capture turned it on around this draw (PIXELS), PAUSED off inside an open application
- * occlusion query (never forced), INVALID reserved, UNTOUCHED no ZPASS method seen since the decoder attached (counting
+ * it had it off, FORCED the capture turned it on around this draw (PIXELS), PAUSED off, but the application used the
+ * counter in this frame or carried its use in (never forced), INVALID reserved, UNTOUCHED no ZPASS method seen since the decoder attached (counting
  * assumed off; PIXELS forces it), UNKNOWN the decoder reset since (unseen words may have changed it). */
 enum { RSXF_ZP_UNKNOWN = 0, RSXF_ZP_COUNTING = 1, RSXF_ZP_OFF = 2, RSXF_ZP_FORCED = 3, RSXF_ZP_PAUSED = 4,
        RSXF_ZP_INVALID = 5, RSXF_ZP_UNTOUCHED = 6 };
@@ -217,11 +217,16 @@ typedef struct rsxf_decoder {
     uint64_t vp_generation;    /* +1 per uploaded instruction */
     uint64_t words;            /* decoder cost (words examined) */
     uint32_t bad_header, bad_reason, resets; /* the first rejection (AUTO_RING_REJECT_* numbering) */
-    /* ZPASS counting (QUERY_ENABLE is in the register shadow): zq_open an application QUERY_RESET of type 1 not yet
-     * followed by its QUERY_GET of type 1 (a report outside [own_lo, own_hi), the profiler's own report range);
-     * zq_touched any application ZPASS method seen since attach; zq_blind a decoder reset since attach (unseen words
-     * may have touched it). zc_events: RSXF_DF_ZCULL_* since the last draw. */
-    uint32_t own_lo, own_hi, zq_open, zq_touched, zq_blind, zc_events;
+    /* ZPASS counting (QUERY_ENABLE is in the register shadow). The counter is cumulative: a type-1 report READS it,
+     * it never ends the application's use of it, so ownership is never inferred from a report. zq_used: the
+     * application used the counter (a type-1 QUERY_RESET, a QUERY_ENABLE write or a type-1 QUERY_GET to a report
+     * outside [own_lo, own_hi), the profiler's own range) in this frame, or the frame inherited its use; while set,
+     * counting is never forced. zq_last_get: a report came after the application's last reset or enable (a disable
+     * keeps it). At each frame boundary (ps3dk_prof__rsxf_zpass_frame) the use carries into the next frame unless
+     * zq_last_get (the PIXELS contract: an application query is read within the frame of its last reset or enable).
+     * zq_touched: any application ZPASS method since attach; zq_blind: a decoder reset since attach (unseen words may
+     * have used the counter: the frame is then treated as used). zc_events: RSXF_DF_ZCULL_* since the last draw. */
+    uint32_t own_lo, own_hi, zq_used, zq_last_get, zq_touched, zq_blind, zc_events;
     /* The firmware-reserved prefix (AUTO's init record): io the EA of IO offset 0, start the context start's IO
      * offset. A CALL to a target below start (the firmware's per-flip default-state routine) is decoded there, one
      * level, up to its RET, so its state writes are seen instead of a reset; NULL io: every CALL resets. */
@@ -252,8 +257,12 @@ int ps3dk_prof__rsxf_decode(rsxf_decoder *d, const uint32_t *p, size_t n);
 uint32_t ps3dk_prof__rsxf_inline_word(const rsxf_decoder *d, uint32_t addr, uint32_t *v);
 /* A different program was placed at [lo, hi) of local memory: the inline words remembered there become UNKNOWN. */
 void ps3dk_prof__rsxf_inline_forget(rsxf_decoder *d, uint32_t lo, uint32_t hi);
-/* The application's ZPASS counting state now (RSXF_ZP_COUNTING, _OFF, _PAUSED, _UNTOUCHED or _UNKNOWN). */
+/* The application's ZPASS counting state now (RSXF_ZP_COUNTING, _OFF, _PAUSED, _UNTOUCHED or _UNKNOWN). PAUSED: off,
+ * but the application used the counter in this frame (or carried its use in): never forced. */
 uint32_t ps3dk_prof__rsxf_zpass_state(const rsxf_decoder *d);
+/* The owner's frame boundary (after its words are decoded): the counter use carries into the next frame unless a
+ * report followed the application's last reset or enable. */
+void ps3dk_prof__rsxf_zpass_frame(rsxf_decoder *d);
 
 /* ---- runtime hooks (rsxf_runtime.c), called from auto_runtime.c -------------------------------------------------- */
 struct _gcmCtxData;

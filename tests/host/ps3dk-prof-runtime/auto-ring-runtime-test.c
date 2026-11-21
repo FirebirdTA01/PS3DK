@@ -311,6 +311,43 @@ static void flip_words(uint32_t id,uint32_t target,uint32_t src,uint32_t dst)
     w[5]=M(1,0x30c,2);w[6]=src;w[7]=dst;w[8]=M(7,0x924,1);w[9]=0x80000100u|id;w[10]=0;w[11]=0;
 }
 #endif
+#if TEST_RING_MODE==8
+/* ---- mode 8: RSX frame capture helpers ---- */
+static const ps3tc_auto_call pixel_array={1,5,0,36,0,0,0,0};
+/* An app request, retried while the previous capture is still being written. */
+static int request_capture(const char *name,uint32_t flags)
+{
+    int id=PS3DK_PROF_EBUSY;
+    for(int i=0;i<20000 && id==PS3DK_PROF_EBUSY;i++) {
+        id=ps3dk_prof_rsx_frame_capture(name,flags);
+        if(id==PS3DK_PROF_EBUSY) {struct timespec t={0,100000};nanosleep(&t,NULL);}
+    }
+    return id;
+}
+/* The QUERY_ENABLE packets in [from, to): their values in order as decimal digits (2 = 1, 1 = 0; "21" = on then
+ * off), and the WAIT_FOR_IDLE packets in *wfi. */
+static uint32_t injected(const uint32_t *from,const uint32_t *to,uint32_t *wfi)
+{
+    uint32_t seq=0;
+    *wfi=0;
+    for(const uint32_t *p=from;p<to;) {
+        uint32_t h=*p,n=(h>>18)&2047u;
+        if(h==M(0,0x17cc,1)) seq=seq*10u+1u+p[1];
+        if(h==((1u<<18)|0x110u)) (*wfi)++;
+        p+=1u+n;
+    }
+    return seq;
+}
+/* One hooked 36-vertex array draw (the 10 words AUTO expects); returns its ticket. */
+static uint32_t array_draw(void)
+{
+    uint32_t t=ps3dk_prof__auto_begin((void *)&context,&pixel_array,0x5678),*w=reserve(10);
+    w[0]=M(0,0x100,3)|0x40000000u;w[1]=w[2]=w[3]=0;
+    w[4]=M(0,0x1808,1);w[5]=5;w[6]=M(0,0x1814,1);w[7]=(35u<<24)|0u;w[8]=M(0,0x1808,1);w[9]=0;
+    ps3dk_prof__auto_end((void *)&context,t);
+    return t;
+}
+#endif
 /* before the profiler's startup constructor (100) starts the drain thread that reads these hooks */
 __attribute__((constructor(99))) static void install_hooks(void)
 {
@@ -702,11 +739,102 @@ int main(void)
                     p+=1u+n;
                 }
             }
-            /* forced: QUERY_ENABLE 1 before the begin marker, 0 after the end marker; otherwise none */
-            assert(forced[0]==21u && forced[1]==0u && forced[2]==0u && forced[3]==21u && forced[4]==21u);
+            /* forced: QUERY_ENABLE 1 before the begin marker, 0 after the end marker; once the app used the counter
+             * in the frame (its enable at k=1, its query at k=2, its report at k=3) nothing more is forced in it */
+            assert(forced[0]==21u && forced[1]==0u && forced[2]==0u && forced[3]==0u && forced[4]==0u);
             ps3dk_prof_frame();
             app_flush(0);app_flush(0);settle_drainer(a);
             printf("capture %d: PIXELS forced %u %u %u %u %u\n",pid,forced[0],forced[1],forced[2],forced[3],forced[4]);
+        }
+        {
+            /* the next frame: the last one ended on the app's report, so counting (off) is forced again */
+            uint32_t wfi,*from,seq;
+            int id=request_capture("pixels-next",PS3DK_PROF_RSX_FRAME_PIXELS);
+            assert(id>0);
+            ps3dk_prof_frame();
+            if((uint32_t)(context.end-context.current)<40u) {w=reserve(40);memset(w,0,40u*4u);}
+            from=context.current;
+            assert(array_draw()!=0);
+            seq=injected(from,context.current,&wfi);
+            assert(seq==21u && wfi==0);
+            ps3dk_prof_frame();
+            app_flush(0);app_flush(0);settle_drainer(a);
+            puts("pixels-next: the next frame forces again");
+        }
+        {
+            /* the review's cumulative sequence: RESET, enable, A, disable, report A, B, enable, C, disable, report C.
+             * B follows a report, but report C still counts everything since the reset: B is never forced, and the
+             * app's reports read 36 and 72 (36 samples per draw while counting is on) */
+            uint32_t wfi,*from,seqb;
+            int id=request_capture("cumulative",PS3DK_PROF_RSX_FRAME_PIXELS);
+            assert(id>0);
+            ps3dk_prof_frame();
+            w=reserve(40);memset(w,0,40u*4u);
+            w=reserve(4);w[0]=M(0,0x17c8,1);w[1]=1;w[2]=M(0,0x17cc,1);w[3]=1;
+            assert(array_draw()!=0); /* A */
+            w=reserve(4);w[0]=M(0,0x17cc,1);w[1]=0;w[2]=M(0,0x1800,1);w[3]=(1u<<24)|(600u*16u);
+            from=context.current;
+            assert(array_draw()!=0); /* B */
+            seqb=injected(from,context.current,&wfi);
+            w=reserve(2);w[0]=M(0,0x17cc,1);w[1]=1;
+            assert(array_draw()!=0); /* C */
+            /* disable, then the report: the frame ends on the app's report, so the next frames are free again */
+            w=reserve(4);w[0]=M(0,0x17cc,1);w[1]=0;w[2]=M(0,0x1800,1);w[3]=(1u<<24)|(601u*16u);
+            ps3dk_prof_frame();
+            app_flush(0);app_flush(0);settle_drainer(a);
+            printf("cumulative: B forced=%u report A=%u report C=%u\n",seqb,(uint32_t)(reports[600][1]>>32),
+                   (uint32_t)(reports[601][1]>>32));
+            assert(seqb==0u);
+            assert((uint32_t)(reports[600][1]>>32)==36u && (uint32_t)(reports[601][1]>>32)==72u);
+        }
+        {
+            /* exact FIFO boundaries for the first draw of a new report block (ring_open): physical words left =
+             * the flush tail + the whole bracket (the draw's 10 words, its two markers' 4, and the capture's 4
+             * isolation and/or 4 forced-counting words). One word short: refused before any injected word, AUTO
+             * still admitting; exactly enough: admitted with the complete bracket. */
+            static const struct { const char *name; uint32_t flags, iso, pix; } modes[3]={
+                {"edge-pixels",PS3DK_PROF_RSX_FRAME_PIXELS,0,4},{"edge-isolated",PS3DK_PROF_RSX_FRAME_ISOLATED,4,0},
+                {"edge-both",PS3DK_PROF_RSX_FRAME_ISOLATED|PS3DK_PROF_RSX_FRAME_PIXELS,4,4}};
+            for(uint32_t m=0;m<3;m++) for(uint32_t short_by=1;short_by!=UINT32_MAX;short_by--) {
+                const uint32_t need=AUTO_RING_FLUSH_WORDS+10u+4u+modes[m].iso+modes[m].pix,want=need-short_by;
+                uint32_t wfi,*from,seq,left,t;
+                char name[32];
+                snprintf(name,sizeof name,"%s-%s",modes[m].name,short_by ? "short":"exact");
+                int id=request_capture(name,modes[m].flags);
+                assert(id>0);
+                ps3dk_prof_frame(); /* arms; the open block is settled: the next draw opens a new one */
+                assert(!a->tail.active);
+                left=(uint32_t)(context.end-context.current);
+                if(left<want+64u) {w=reserve(left+1u);memset(w,0,(left+1u)*4u);left=(uint32_t)(context.end-context.current);}
+                assert(left>=want);
+                if(left>want) {w=reserve(left-want);memset(w,0,(left-want)*4u);}
+                assert((uint32_t)(context.end-context.current)==want);
+                from=context.current;
+                t=ps3dk_prof__auto_begin((void *)&context,&pixel_array,0x5678);
+                if(!t) {
+                    /* refused: nothing injected, the application's words follow at once */
+                    assert(context.current==from && !a->operations.stopped);
+                    w=reserve(10);
+                    w[0]=M(0,0x100,3)|0x40000000u;w[1]=w[2]=w[3]=0;
+                    w[4]=M(0,0x1808,1);w[5]=5;w[6]=M(0,0x1814,1);w[7]=(35u<<24)|0u;w[8]=M(0,0x1808,1);w[9]=0;
+                    ps3dk_prof__auto_end((void *)&context,t);
+                    seq=injected(from,context.current,&wfi);
+                    assert(seq==0u && wfi==0u);
+                } else {
+                    w=reserve(10);
+                    w[0]=M(0,0x100,3)|0x40000000u;w[1]=w[2]=w[3]=0;
+                    w[4]=M(0,0x1808,1);w[5]=5;w[6]=M(0,0x1814,1);w[7]=(35u<<24)|0u;w[8]=M(0,0x1808,1);w[9]=0;
+                    ps3dk_prof__auto_end((void *)&context,t);
+                    seq=injected(from,context.current,&wfi);
+                    assert(!a->operations.stopped);
+                    assert(seq==(modes[m].pix ? 21u:0u) && wfi==(modes[m].iso ? 2u:0u));
+                }
+                printf("%s: left %u (need %u) %s, enable sequence %u, wait-for-idle %u\n",name,want,need,
+                       t ? "admitted":"refused",seq,wfi);
+                assert((t!=0)==(short_by==0));
+                ps3dk_prof_frame();
+                app_flush(0);app_flush(0);settle_drainer(a);
+            }
         }
     }
     puts("RSX frame capture runtime PASS");

@@ -20,6 +20,7 @@ fn baseline() -> Vec<(u16, u32)> {
     let mut v = vec![
         (r(0x208), 5 | (2 << 5) | (1 << 8) | (6 << 16) | (5 << 24)),
         (r(0x214), 0x10_0000),
+        (r(0x198), 0xfeed_0000),
         (r(0x200), 64 << 16),
         (r(0x204), 32 << 16),
         (r(0x1d84), 1),
@@ -130,8 +131,8 @@ fn states_events_regions_and_the_zcull_picture() {
     assert_eq!((z[2].effective, z[2].region.map(|r| r.index)), (Some(true), Some(1)), "region 1 from draw 2 on");
     assert_eq!((z[3].effective, z[3].region.map(|r| r.index)), (Some(false), Some(1)));
     assert!(z[3].reason.contains("depth cull is off"), "{}", z[3].reason);
-    assert_eq!((z[4].effective, z[4].region), (Some(false), None));
-    assert!(z[4].reason.contains("no recorded zcull region covers"), "{}", z[4].reason);
+    assert_eq!((z[4].effective, z[4].region), (None, None), "no region seen at this buffer: unknown, never false");
+    assert!(z[4].reason.contains("no recorded zcull region at this depth buffer"), "{}", z[4].reason);
     let json = rf::to_json(&cap, &rf::frames(&cap));
     let c = &json["captures"][0];
     assert_eq!(c["pixels_forced"], true);
@@ -140,7 +141,7 @@ fn states_events_regions_and_the_zcull_picture() {
     assert_eq!(c["draws"][2]["pixels"]["state"], "paused");
     assert_eq!(c["draws"][0]["pixels"]["shading"], "shading >= count");
     assert_eq!(c["draws"][0]["zcull"]["invalidated"], true);
-    assert_eq!(c["draws"][4]["zcull"]["effective"], false);
+    assert_eq!(c["draws"][4]["zcull"]["effective"], serde_json::Value::Null);
     assert_eq!(c["draws"][0]["state"]["render"]["zcull.enable.depth"], true);
     assert_eq!(c["draws"][0]["state"]["render"]["zcull.dir"], "LESS");
     assert_eq!(c["overdraw"].as_array().unwrap().len(), 3, "three depth buffers: three targets");
@@ -154,7 +155,8 @@ fn states_events_regions_and_the_zcull_picture() {
     let (code, out) = cli(&["rsx-frame", "--draw", "0", &ps]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("    pixels: not counted: the draw was not timed"), "{out}");
-    assert!(out.contains("    zcull: a recorded zcull region covers this depth buffer; depth cull is on (region 0); \
+    assert!(out.contains("    zcull: a recorded zcull region covers this depth buffer (extent, format, antialias, local); \
+        depth cull is on (region 0); \
         invalidated before this draw"), "{out}");
     assert!(out.contains("    zcull: direction disagrees with the depth function (heuristic)"), "{out}");
     let (_, out) = cli(&["rsx-frame", "--draw", "4", &ps]);
@@ -294,4 +296,43 @@ fn zpass_ops_are_ring_only() {
         }
     }
     chunks.clear();
+}
+
+/// The review's control: a 1x1 region at the depth buffer's offset does not cover a 64 x 32 target. And the other
+/// compatibility conditions, one at a time: a region short of the clip extent by one row, another zeta format,
+/// another antialias mode, a depth buffer in main memory, an unknown zeta location.
+#[test]
+fn zcull_coverage_needs_extent_format_antialias_and_local_memory() {
+    let draw0 = |edit: &dyn Fn(&mut Vec<Rec>)| {
+        let cap = reader::read(&capture(&V5, edit)).expect("reads");
+        let f = rf::frames(&cap)[0].clone();
+        rf::zcull_at(&f, &f.draws[0])
+    };
+    let region = |w: u32, h: u32| move |v: &mut Vec<Rec>| { v[1] = Rec::Zcull(0, 0, BOUND | BEFORE, 0x10_0000, w, h); };
+    assert_eq!(draw0(&|_| {}).effective, Some(true), "the fixture's region covers its buffer");
+    for (name, z) in [("1x1 region", draw0(&region(1, 1))), ("one row short", draw0(&region(64, 31))),
+                      ("one column short", draw0(&region(63, 32)))] {
+        assert_eq!(z.effective, None, "{name}: {z:?}");
+        assert!(z.reason.contains("does not cover"), "{name}: {}", z.reason);
+    }
+    let regs = |pairs: Vec<(u16, u32)>| move |v: &mut Vec<Rec>| {
+        if let Rec::Regs(_, _, p) = &mut v[0] {
+            for (i, val) in &pairs {
+                match p.iter_mut().find(|x| x.0 == *i) { Some(x) => x.1 = *val, None => p.push((*i, *val)) }
+            }
+            p.sort();
+        }
+    };
+    let z16 = draw0(&regs(vec![(r(0x208), 5 | (1 << 5) | (1 << 8) | (6 << 16) | (5 << 24))]));
+    assert_eq!(z16.effective, None, "another zeta format: {z16:?}");
+    let aa = draw0(&regs(vec![(r(0x208), 5 | (2 << 5) | (1 << 8) | (4 << 12) | (6 << 16) | (5 << 24))]));
+    assert_eq!(aa.effective, None, "another antialias mode: {aa:?}");
+    let main = draw0(&regs(vec![(r(0x198), 0xfeed_0001)]));
+    assert_eq!(main.effective, None, "a depth buffer in main memory: {main:?}");
+    let unknown = draw0(&regs(vec![(r(0x198), 0)]));
+    assert_eq!(unknown.effective, None, "zeta location not a known context DMA: {unknown:?}");
+    assert!(unknown.reason.contains("not known"), "{}", unknown.reason);
+    // the clip origin counts: a region exactly the clip size does not cover a clip moved right by one
+    let moved = draw0(&regs(vec![(r(0x200), (64 << 16) | 1)]));
+    assert_eq!(moved.effective, None, "clip x 1..65 against a 64-wide region: {moved:?}");
 }

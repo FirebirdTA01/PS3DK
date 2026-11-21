@@ -930,8 +930,12 @@ read from the report values beside the timestamps AUTO already writes (no extra 
 when ZPASS counting was on for the draw: the app had it on (**counting**), or the capture forced it (**forced**). Turn
 on **Force pixel counting** (request flag `PS3DK_PROF_RSX_FRAME_PIXELS`) to count every draw: 4 command words per draw
 the app has counting off for, in the captured frame only. Leave it off when the app relies on counting being off
-outside its own occlusion queries; it is never applied inside an open app query the app has paused (**paused**), nor
-around an immediate draw. What the count means:
+outside its own occlusion queries. It is never applied around an immediate draw, and never once the app has used the
+counter in that frame (**paused**): a reset, an enable or disable, or a read of its ZPASS report. A report reads the
+cumulative counter and does not hand it back, so a later report of the same query would count a forced draw. The use
+carries into the next frame unless the app read its report after its last reset or enable in that frame. PIXELS therefore assumes an app reads each
+query within the frame of its last reset or enable; leave it off for an app whose queries run across frames. What
+the count means:
 
 - samples that passed every per-fragment test (depth, stencil, alpha, KIL); early-z and zcull rejections are not
   counted, so it is not fragments shaded. A program that kills fragments (FP_CONTROL KIL or a KIL in its ucode)
@@ -948,7 +952,10 @@ direction and format, the limits, the stencil cull function, ZPASS and zcull-sta
 CLEAR_ZCULL_SURFACE are events of the next draw. The zcull regions come from `cellGcmBindZcull` /
 `cellGcmUnbindZcull` on the owner thread (a driver call, not in the command stream; binds made before the profiler
 attached, or from another thread, are not seen); Summary says whether a recorded region covers the draw's depth
-buffer and depth cull is on, and flags a zcull direction that disagrees with the depth function (a heuristic). Zcull
+buffer (its offset, the draw's clip extent, the zeta format, the antialias mode and local memory) and depth cull is
+on, and flags a zcull direction that disagrees with the depth function (a heuristic). Without such a recorded region
+it says **unknown**, never "not covered": a region bound before the profiler attached, or from another thread, is not
+seen. Zcull
 statistics reports are not read yet.
 
 **Texture fetches** are counted statically from each program's ucode with the disassembler: the TEX, TXP, TXL, TXB

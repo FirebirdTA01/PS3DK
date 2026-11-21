@@ -188,9 +188,12 @@ int ps3dk_prof_rsx_frame_capture(const char *name, uint32_t flags);
  *  BOTH      two consecutive frames: the first pipelined, the second isolated, its draws paired with the first's;
  *  PIXELS    force ZPASS pixel counting on around each captured draw the application has it off for (QUERY_ENABLE 1
  *            before its begin marker, 0 after its end marker: 4 command words per such draw), so every draw gets a
- *            passed-sample count. Never inside an application occlusion query it has paused, never around an
- *            immediate draw. Without it a draw is counted only when the application itself has counting on. Leave it
- *            off when the application relies on QUERY_ENABLE being off for draws outside its own queries. */
+ *            passed-sample count. Never around an immediate draw, and never once the application has used the
+ *            counter in that frame (a reset, an enable or disable, or a read of its ZPASS report: a report reads the
+ *            cumulative counter, it does not hand it back); the use carries into the next frame unless the
+ *            application read its report after its last reset or enable in that frame. Without it a draw is counted only when the application itself has
+ *            counting on. Leave it off when the application relies on QUERY_ENABLE being off for draws outside its
+ *            own queries, or reads a query in a later frame than its last reset or enable. */
 #define PS3DK_PROF_RSX_FRAME_ISOLATED 1u
 #define PS3DK_PROF_RSX_FRAME_FP_BYTES 2u
 #define PS3DK_PROF_RSX_FRAME_BOTH 4u

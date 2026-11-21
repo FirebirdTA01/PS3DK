@@ -19,8 +19,9 @@ pub fn request_menu(p: &mut egui::Ui, o: &mut RequestOptions) {
     );
     p.checkbox(&mut o.pixels, "Force pixel counting").on_hover_text(
         "Turn ZPASS pixel counting on around each captured draw the app has it off for (4 command words per such \
-         draw), so every draw gets a passed-sample count. Never inside an occlusion query the app has paused. Leave \
-         it off when the app relies on counting being off for draws outside its own queries. Older agents refuse it.",
+         draw), so every draw gets a passed-sample count. Never once the app has used the counter in that frame. Leave \
+         it off when the app relies on counting being off for draws outside its own queries, or reads a query in a later \
+         frame. Older agents refuse it.",
     );
 }
 

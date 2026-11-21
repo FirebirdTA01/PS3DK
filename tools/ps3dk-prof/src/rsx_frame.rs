@@ -2195,7 +2195,7 @@ pub enum ZpassState {
     Off,
     /// A PIXELS capture turned counting on around this draw.
     Forced,
-    /// Off inside an application occlusion query that is open (or may be): never forced.
+    /// Off, but the application used the counter in this frame (or carried its use in): never forced.
     Paused,
     /// No ZPASS method was seen since the decoder attached: counting assumed off (PIXELS forces it).
     Untouched,
@@ -2232,7 +2232,7 @@ impl ZpassState {
             ZpassState::NotRecorded => Some("the capture's decoder records no ZPASS state (older than 5)"),
             ZpassState::Unknown => Some("counting state unknown (the decoder reset since it attached)"),
             ZpassState::Off => Some("the application had ZPASS counting off (request the capture with PIXELS to force it)"),
-            ZpassState::Paused => Some("counting off inside an application occlusion query: the capture never forces it there"),
+            ZpassState::Paused => Some("counting off, but the application used the ZPASS counter in this frame (its occlusion query): the capture never forces it then"),
             ZpassState::Untouched => Some("counting never enabled (request the capture with PIXELS to force it)"),
         }
     }
@@ -2393,8 +2393,10 @@ pub struct ZcullAt {
     pub cleared: bool,
     /// The region (its latest record at or before this draw) whose offset is this draw's depth buffer.
     pub region: Option<ZcullRegion>,
-    /// Some(true): a recorded region covers the depth buffer and depth cull is on; Some(false): depth cull is off,
-    /// or no recorded region covers the depth buffer; None: not known.
+    /// Some(true): a recorded region at the depth buffer's offset covers the draw's clip extent with the surface's
+    /// zeta format, antialias mode and local memory, and depth cull is on; Some(false): such a region, but depth
+    /// cull is off; None: not established (no such region recorded: binds before the profiler attached or from
+    /// another thread are not seen; or the region does not match; or a needed register is unknown).
     pub effective: Option<bool>,
     pub reason: &'static str,
     /// A heuristic: the zcull direction disagrees with the depth function (LESS with GREATER/GEQUAL, or the reverse).
@@ -2421,15 +2423,37 @@ pub fn zcull_at(f: &FrameView, d: &Draw) -> ZcullAt {
         Some(rsx_state::Value::Bool(b)) => Some(b),
         _ => None,
     };
-    z.region = zeta.and_then(|o| latest.iter().flatten().find(|r| r.bound && u64::from(r.offset) == o).copied());
-    (z.effective, z.reason) = match (zeta, z.region, depth_on) {
+    // The depth buffer as the draw uses it, from the raw registers: zeta offset and location, the surface format's
+    // zeta format and antialias mode, and the clip extent the draw can write.
+    let raw = |m: u32| regs.get(m);
+    let rt = raw(0x208);
+    let local = raw(0x198).and_then(|v| match v { 0xfeed_0000 => Some(true), 0xfeed_0001 => Some(false), _ => None });
+    let clip = raw(0x200).zip(raw(0x204)).map(|(h, w)| ((h & 0xffff) + (h >> 16), (w & 0xffff) + (w >> 16)));
+    let at_offset = zeta.and_then(|o| latest.iter().flatten().find(|r| r.bound && u64::from(r.offset) == o).copied());
+    z.region = at_offset;
+    // Coverage and compatibility: the region spans the clip extent, and has the surface's zeta format, antialias
+    // mode and memory (zcull is local memory). Any of these unknown leaves coverage unknown.
+    let fits = at_offset.map(|r| -> Option<bool> {
+        let (x_end, y_end) = clip?;
+        let rt = rt?;
+        let zeta_format = (rt >> 5) & 7;
+        let aa = (rt >> 12) & 0xf;
+        Some(r.width >= x_end && r.height >= y_end && r.z_format == zeta_format && r.aa_format == aa && local?)
+    });
+    (z.effective, z.reason) = match (zeta, fits, depth_on) {
         (None, _, _) => (None, "the depth buffer offset is not known"),
-        (_, Some(_), Some(true)) => (Some(true), "a recorded zcull region covers this depth buffer; depth cull is on"),
-        (_, Some(_), Some(false)) => (Some(false), "a recorded region covers this depth buffer, but depth cull is off"),
-        (_, Some(_), None) => (None, "a recorded region covers this depth buffer; the depth cull enable is not known"),
-        (_, None, _) if latest.iter().all(|r| r.is_none()) =>
-            (None, "no zcull region recorded (none bound, or bound before the profiler attached or from another thread)"),
-        (_, None, _) => (Some(false), "no recorded zcull region covers this depth buffer"),
+        (_, Some(Some(true)), Some(true)) =>
+            (Some(true), "a recorded zcull region covers this depth buffer (extent, format, antialias, local); depth cull is on"),
+        (_, Some(Some(true)), Some(false)) =>
+            (Some(false), "a recorded zcull region covers this depth buffer, but depth cull is off"),
+        (_, Some(Some(true)), None) =>
+            (None, "a recorded zcull region covers this depth buffer; the depth cull enable is not known"),
+        (_, Some(Some(false)), _) =>
+            (None, "the zcull region recorded at this depth buffer does not cover its extent or does not match its format, antialias mode or memory; coverage not established"),
+        (_, Some(None), _) =>
+            (None, "a zcull region is recorded at this depth buffer, but the surface's extent, format or memory is not known"),
+        (_, None, _) =>
+            (None, "no recorded zcull region at this depth buffer (a region bound before the profiler attached, or from another thread, is not seen)"),
     };
     let func = match field(&v.render, "depth.func") {
         Some(rsx_state::Value::Name(n)) => Some(n),

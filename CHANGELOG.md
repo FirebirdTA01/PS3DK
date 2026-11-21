@@ -34,7 +34,7 @@ The version stamped into builds is generated from the most recent
   (counting, off, forced, paused, untouched). The request flag
   `PS3DK_PROF_RSX_FRAME_PIXELS` (viewer: Force pixel counting) turns
   counting on around every captured draw the app has it off for, never
-  inside an occlusion query the app has paused. The reader derives each
+  once the app has used the counter in that frame. The reader derives each
   draw's share of its render target, overdraw per target, raw ticks per
   sample in isolated views, and an early-z note ("shading >= count" for
   programs that kill fragments). In `rsx-frame` text and JSON, and in the

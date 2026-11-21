@@ -393,40 +393,50 @@ static void zpass_and_zcull(void)
         assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_COUNTING);
     }
     {
-        const uint32_t w[] = {M(0, 0x17cc, 1), 0};
-        decode(w, 2, 1);
+        /* the application's own enable then disable is its use of the counter: PAUSED for the rest of the frame (a
+         * report reads the counter; it never hands it back) */
+        const uint32_t off[] = {M(0, 0x17cc, 1), 0}, own[] = {M(0, 0x1800, 1), (1u << 24) | (1030u * 16u)},
+                       app[] = {M(0, 0x1800, 1), (1u << 24) | (600u * 16u)},
+                       other[] = {M(0, 0x1800, 1), (2u << 24) | (601u * 16u)}, reset2[] = {M(0, 0x17c8, 1), 2},
+                       reset1[] = {M(0, 0x17c8, 1), 1};
+        decode(off, 2, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(app, 2, 1); /* the app reads its count: still its counter in this frame */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        ps3dk_prof__rsxf_zpass_frame(&d); /* the frame ended on its report: the next frame is free */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+        decode(own, 2, 1);    /* the profiler's own report (index 1030) is not the app's use */
+        decode(other, 2, 1);  /* a zcull-statistics report (type 2) is not the counter's */
+        decode(reset2, 2, 1); /* QUERY_RESET of another type is not either */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+        decode(reset1, 2, 1); /* QUERY_RESET 1: the app's query starts */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        ps3dk_prof__rsxf_zpass_frame(&d); /* the frame ended inside it (no report after it): carried */
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
+        decode(app, 2, 1);
+        ps3dk_prof__rsxf_zpass_frame(&d);
         assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
     }
     {
-        /* the app's query opens (QUERY_RESET 1), counting paused: PAUSED; the profiler's report (index 1030) does not
-         * close it; the app's report (index 600) does */
-        const uint32_t open[] = {M(0, 0x17c8, 1), 1}, own[] = {M(0, 0x1800, 1), (1u << 24) | (1030u * 16u)},
-                       app[] = {M(0, 0x1800, 1), (1u << 24) | (600u * 16u)},
-                       other[] = {M(0, 0x1800, 1), (2u << 24) | (601u * 16u)}, reset2[] = {M(0, 0x17c8, 1), 2};
-        decode(open, 2, 1);
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
-        decode(own, 2, 1);
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
-        decode(other, 2, 1); /* a zcull-statistics report (type 2) is not the query's */
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
-        decode(app, 2, 1);
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
-        decode(reset2, 2, 1); /* QUERY_RESET of another type opens nothing */
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
+        /* the review's cumulative sequence: RESET, enable, A, disable, report A, B, enable, C, report C. B is after
+         * the first report, but the second report still counts everything since the reset: B must stay PAUSED */
+        const uint32_t seq[] = {M(0, 0x17c8, 1), 1, M(0, 0x17cc, 1), 1, M(0, 0x17cc, 1), 0,
+                                M(0, 0x1800, 1), (1u << 24) | (600u * 16u)};
+        decode(seq, sizeof seq / 4, 1);
+        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED); /* draw B */
     }
     /* one-shot: QUERY_RESET, INVALIDATE_ZCULL and CLEAR_ZCULL_SURFACE are not register state; QUERY_ENABLE is */
     assert(!ps3dk_prof__rsxf_shadowed(0x17c8) && !ps3dk_prof__rsxf_shadowed(0x0234) &&
            !ps3dk_prof__rsxf_shadowed(0x1438) && ps3dk_prof__rsxf_shadowed(0x17cc) &&
            ps3dk_prof__rsxf_shadowed(0x1d84) && ps3dk_prof__rsxf_shadowed(0x1ea4));
-    /* a decoder reset: the state is unknown, and the query's state too (off is then PAUSED: never forced) */
+    /* a decoder reset: the state is unknown, and the frame is treated as used (off is then PAUSED: never forced) */
+    ps3dk_prof__rsxf_zpass_frame(&d);
     ps3dk_prof__rsxf_decode_unknown(&d, 0, AUTO_RING_REJECT_JUMP);
     assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_UNKNOWN);
     {
-        const uint32_t off[] = {M(0, 0x17cc, 1), 0}, app[] = {M(0, 0x1800, 1), (1u << 24) | (600u * 16u)};
+        const uint32_t off[] = {M(0, 0x17cc, 1), 0};
         decode(off, 2, 1);
         assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_PAUSED);
-        decode(app, 2, 1);
-        assert(ps3dk_prof__rsxf_zpass_state(&d) == RSXF_ZP_OFF);
     }
     {
         /* zcull events go to the next draw or clear only */
@@ -458,6 +468,7 @@ static void zpass_and_zcull(void)
                d.reg[0x1d84 >> 2] == 3);
         /* the routine's clear trigger is state only: no event, counted */
         assert(d.n_events == 0 && d.routine_triggers == 1 && !d.in_routine);
+        assert(!d.zq_used); /* the routine's QUERY_ENABLE is state, not the application's use of the counter */
         {
             const uint32_t clear[] = {M(0, 0x1d94, 1), 0xf0};
             decode(clear, 2, 1);

@@ -6,7 +6,8 @@
  * half-screen quads with depth off, front-to-back and back-to-front pairs with depth LESS, a quad whose fragment
  * program kills half its samples, and a quad inside the app's own ZPASS occlusion query. A zcull region is bound over
  * the depth buffer at start-up and zcull is invalidated before the first depth-tested draw. The app requests three
- * captures itself: frame 30 with PIXELS (counting forced around every draw it has off), frame 60 without (only its
+ * captures itself: frame 30 with PIXELS (counting forced around every draw before its own query, the last draw of
+ * the frame: its report after its enable frees the next frame), frame 60 without (only its
  * own query's draw is counted) and frame 90 BOTH | PIXELS (the same counts pipelined and isolated). tools/check_pixels.py
  * checks the captures against the table; the TTY line PIXELS appquery checks that the capture never changed the
  * app's own query result. At exit, after a proven drain, zcull is turned off behind a fence and the region unbound

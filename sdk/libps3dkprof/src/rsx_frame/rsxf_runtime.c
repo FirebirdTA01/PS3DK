@@ -1759,6 +1759,11 @@ void rsxf_frame(uint64_t frame, uint64_t tb, uint32_t owner, int window_open, ui
     uint64_t w;
     if (!s)
         return;
+    if (s->ctx) {
+        /* the frame's words first (owner only), then the counter-use carry into the next frame */
+        rsxf_scan(s->ctx);
+        ps3dk_prof__rsxf_zpass_frame(&s->dec);
+    }
     s->label = NULL;
     s->depth = s->depth_excess = 0;
     w = slot_load();

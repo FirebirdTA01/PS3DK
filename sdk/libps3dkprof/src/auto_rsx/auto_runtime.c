@@ -777,7 +777,9 @@ static uint32_t ring_begin(auto_capture *a, gpp_ctx *ctx, const ps3tc_auto_call 
     if(r==AUTO_RING_BOUNDARY) {
         /* another frame or window (an END and reopen show different ids) or a full block: settle it first */
         if(a->ring.active) ring_flush(a,ctx);
-        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words,&t);
+        /* the whole bracket below the new block's flush tail: the draw, its two markers (ring_open's +4), and the
+         * capture's isolation and forced-counting words, so no injected command can be left without its pair */
+        r=ring_stopped(a) ? AUTO_RING_INVALID:ring_open(a,ctx,frame,window,words+a->iso_active+a->pix_active,&t);
     }
     if(r!=AUTO_RING_OK) {
         (void)auto_queue_cancel_snapshot(&a->operations);
@@ -822,12 +824,14 @@ static void ring_end(auto_capture *a, auto_queue_entry *e, uint32_t ticket)
     uintptr_t current=(uintptr_t)(void *)ctx->current,end=(uintptr_t)(void *)ctx->end;
     const uint32_t slot=e->op.ring_slot;
     int complete;
+    /* the end needs its marker (2 words) and the second half of the isolation (iso_active/2) and forced-counting
+     * (pix_active/2) words: 8 + 2*iso_active + 2*pix_active bytes, exactly what the bracket reserved */
     if(a->pix_active) rsxf_scan(ctx); /* the application's draw words, before the profiler's end words */
     if(a->open_ended && ticket==e->op.serial_end && current>=a->expected_end && end>=current &&
-       end-current<8u+4u*a->iso_active+4u*a->pix_active) {
+       end-current<8u+2u*a->iso_active+2u*a->pix_active) {
         e->op.flags|=4|32; /* an immediate draw that filled the buffer: no room for its end marker, nothing else lost */
     } else if(ticket!=e->op.serial_end || (a->open_ended ? current<a->expected_end:current!=a->expected_end) ||
-              end<current || end-current<8u+4u*a->iso_active+4u*a->pix_active) {
+              end<current || end-current<8u+2u*a->iso_active+2u*a->pix_active) {
         e->op.flags|=4|32;
         auto_config_invalidate(&configuration,AUTO_STATUS_RESET);auto_queue_stop(&a->operations);
     } else {

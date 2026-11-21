@@ -69,14 +69,21 @@ void ps3dk_prof__rsxf_decode_unknown(rsxf_decoder *d, uint32_t header, uint32_t 
     d->in_group = 0;
     d->resets++;
     d->zq_blind = 1;
-    d->zq_open = 2; /* unknown until the application's next QUERY_RESET or ZPASS report */
+    /* unseen words may have used the counter: refuse forcing for the rest of this frame */
+    d->zq_used = 1;
+    d->zq_last_get = 1;
+}
+
+void ps3dk_prof__rsxf_zpass_frame(rsxf_decoder *d)
+{
+    d->zq_used = d->zq_used && !d->zq_last_get;
 }
 
 uint32_t ps3dk_prof__rsxf_zpass_state(const rsxf_decoder *d)
 {
     const uint32_t i = 0x17ccu >> 2;
     if (d->reg_known[i >> 5] & (1u << (i & 31u)))
-        return d->reg[i] ? RSXF_ZP_COUNTING : d->zq_open ? RSXF_ZP_PAUSED : RSXF_ZP_OFF;
+        return d->reg[i] ? RSXF_ZP_COUNTING : d->zq_used ? RSXF_ZP_PAUSED : RSXF_ZP_OFF;
     return d->zq_touched || d->zq_blind ? RSXF_ZP_UNKNOWN : RSXF_ZP_UNTOUCHED;
 }
 
@@ -152,18 +159,29 @@ static void method(rsxf_decoder *d, uint32_t m, uint32_t v)
     case M_FP_ADDRESS: d->fp_address = v; d->known |= 2u; return;
     case M_INDEX_OFFSET: d->index_offset = v; d->known |= 4u; return;
     case M_INDEX_DMA: d->index_dma = v; return;
-    case 0x17c8u: /* QUERY_RESET: type 1 (ZPASS) opens an application occlusion query */
+    case 0x17c8u: /* QUERY_RESET: type 1 (ZPASS) is the application using the counter */
         d->zq_touched = 1;
-        if (v == 1u)
-            d->zq_open = 1;
+        if (v == 1u && !d->in_routine) {
+            d->zq_used = 1;
+            d->zq_last_get = 0;
+        }
         break;
-    case 0x17ccu: d->zq_touched = 1; break; /* QUERY_ENABLE: its value is shadowed */
+    case 0x17ccu: /* QUERY_ENABLE (its value is shadowed): the application using the counter */
+        d->zq_touched = 1;
+        if (!d->in_routine) { /* the firmware's default-state routine sets it too: state, not the app's use */
+            d->zq_used = 1;
+            if (v)
+                d->zq_last_get = 0; /* counting again after its report; a disable leaves the count as it was read */
+        }
+        break;
     case 0x1800u: {
-        /* a ZPASS report (type 1) the application wrote outside the profiler's range closes its query */
+        /* a ZPASS report (type 1) the application wrote outside the profiler's range reads the counter: still its
+         * use (a later report of the same query includes everything counted until then) */
         const uint32_t index = (v & 0xffffffu) >> 4;
-        if ((v >> 24) == 1u && !(index >= d->own_lo && index < d->own_hi)) {
+        if ((v >> 24) == 1u && !(index >= d->own_lo && index < d->own_hi) && !d->in_routine) {
             d->zq_touched = 1;
-            d->zq_open = 0;
+            d->zq_used = 1;
+            d->zq_last_get = 1;
         }
         break;
     }

@@ -983,7 +983,7 @@ DRAW (type 1, length 96):
 | 68 | u32 | VP start slot |
 | 72 | u64 | caller PC (HOOKED; else 0) |
 | 80 | u32 | command words of the draw |
-| 84 | u32 | decoder 5: ZPASS counting state: 0 unknown (the decoder reset since it attached), 1 COUNTING (the application had QUERY_ENABLE on), 2 OFF (it had it off), 3 FORCED (a PIXELS capture turned it on around this draw), 4 PAUSED (off inside an open, or possibly open, application occlusion query: never forced), 5 reserved (MALFORMED), 6 UNTOUCHED (no ZPASS method seen since the decoder attached); FORCED only in a PIXELS capture; 0 for earlier decoders |
+| 84 | u32 | decoder 5: ZPASS counting state: 0 unknown (the decoder reset since it attached), 1 COUNTING (the application had QUERY_ENABLE on), 2 OFF (it had it off), 3 FORCED (a PIXELS capture turned it on around this draw), 4 PAUSED (off, and the application used the counter in this frame or carried its use in: never forced), 5 reserved (MALFORMED), 6 UNTOUCHED (no ZPASS method seen since the decoder attached); FORCED only in a PIXELS capture; 0 for earlier decoders |
 | 88 | u64 | PPU timebase at the hook (HOOKED) or at decode |
 
 The passed samples of a timed draw are its AUTO operation's OPS flag 512 (ZPASS) value: u32@156 of the OPS record
@@ -992,8 +992,12 @@ marker is a type-1 report). Flag 512 is set only on RAW_VALID RING ARRAY/INDEX/C
 recorded (ringed CONFIGs); without it u32@156 is 0. The delta is a sample count only when the DRAW state is COUNTING
 or FORCED. The profiler never writes QUERY_RESET. With PIXELS, a forced draw gets QUERY_ENABLE 1 before its begin
 marker and 0 after its end marker (never around an IMMEDIATE draw); the decoder skips those words. The application's
-query is tracked from its own words: QUERY_RESET with value 1 opens it, its type-1 QUERY_GET to a report outside the
-profiler's range closes it. QUERY_RESET, INVALIDATE_ZCULL and CLEAR_ZCULL_SURFACE are not register state.
+use of the counter is tracked from its own words (not the firmware routine's): QUERY_RESET with value 1, a QUERY_ENABLE
+write, or a type-1 QUERY_GET to a report outside the profiler's range. A report reads the cumulative counter; it does
+not end the use. From the first use in a frame no draw of that frame is forced; at the frame boundary the use carries
+into the next frame unless a report followed the application's last reset or enable in the frame (a disable does not
+count; the PIXELS contract: a query is read within the
+frame of its last reset or enable). A decoder reset counts as a use for the rest of its frame. QUERY_RESET, INVALIDATE_ZCULL and CLEAR_ZCULL_SURFACE are not register state.
 
 PROGRAM (type 2, length 48), the first time a program identity is seen in the capture:
 
