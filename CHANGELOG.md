@@ -27,6 +27,10 @@ The version stamped into builds is generated from the most recent
   instructions to 54. Smaller loops, loops that index an array by their
   induction variable, and loops the hardware loop cannot carry are expanded
   as before.
+- **`rsx-cg-compiler`: no register self-copies in fragment programs.**
+  `lerp` of a value computed just before left a `MOV` that copied a register
+  onto itself; those are no longer emitted. About 2.5% of the fragment
+  instructions across the measured shader set were such copies.
 
 ### Fixed
 

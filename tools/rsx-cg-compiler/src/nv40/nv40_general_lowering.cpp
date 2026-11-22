@@ -762,7 +762,7 @@ public:
         renumberSourceIndices();
         applyOrderingPass();
         allocatePhysicalTemps();
-        dropVertexSelfMoves();
+        dropSelfMoves();
         return program_;
     }
 
@@ -11123,11 +11123,17 @@ private:
     // VP: a MOV the allocator coalesced onto its own source register
     // (`MOV R1.x, R1.xxxx`) copies every lane it writes onto itself, so it
     // is dropped (measured: 2xbrz carried three, the established compiler none).
-    void dropVertexSelfMoves()
+    //
+    // FP: the same copy, left mostly by lerp's `MOV a` when `a` already sits
+    // in the result register (measured: 230 of the 9194 instructions of the
+    // fragment bucket).  It is dropped only as a full-precision R-to-R copy:
+    // an H register, a precision or scale stamp, or a fence makes the MOV
+    // more than a copy.
+    void dropSelfMoves()
     {
-        if (profile_ != GeneralProfile::Vertex) return;
+        const bool fragment = profile_ == GeneralProfile::Fragment;
         auto& code = program_.instrs;
-        code.erase(std::remove_if(code.begin(), code.end(), [](const VInstr& vi) {
+        code.erase(std::remove_if(code.begin(), code.end(), [fragment](const VInstr& vi) {
             if (vi.op != VOp::Mov || vi.dst.none || vi.dst.output || vi.dst.address ||
                 vi.sat || vi.ccUpdate || vi.predicate != 0 || vi.stubCoIssuePartner ||
                 vi.stubFenceBefore || vi.stubFenceBrBefore)
@@ -11135,6 +11141,9 @@ private:
             const VSrc& s = vi.srcs[0];
             if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative ||
                 vi.dst.phys < 0 || s.phys != vi.dst.phys)
+                return false;
+            if (fragment && (vi.dst.fp16 || s.fp16 || vi.fpScale != 0 ||
+                             vi.fpPrecisionOverride > NVFX_FP_PRECISION_FP32))
                 return false;
             for (int l = 0; l < 4; ++l)
                 if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;
