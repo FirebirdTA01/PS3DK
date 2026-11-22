@@ -39,9 +39,17 @@ SPRX_SEG_ALL_PASS steps=20 abi=ilp32
 A failed check prints `SPRX_SEG FAIL step=<name> ...` and the run ends with
 `SPRX_SEG_RESULT FAIL failed=<n>`.
 
-The loader looks for its module next to itself (the directory of `argv[0]`)
-and in `/app_home`, first as `.sprx` and then as `.fake.sprx`. A `.self`
-loads the real-signed `.sprx`; a `.fake.self` is refused the `.sprx`
+The loader looks for its module, first as `.sprx` and then as `.fake.sprx`, in:
+
+1. the directory given as `argv[1]`, when it is an absolute path;
+2. the loader's own directory (the directory of `argv[0]`, when that is absolute);
+3. `/app_home`.
+
+A child started with `exitspawn` (the ps3dk-run loader, for example) does not get
+its own path in `argv[0]`, so pass the module's directory as the first argument
+(`ps3dk-run <console> sprx-segments-loader.self -- /dev_hdd0/tmp/<dir>`).
+
+A `.self` loads the real-signed `.sprx`; a `.fake.self` is refused the `.sprx`
 (`0x80010009` on a console) and loads the `.fake.sprx`.
 
 ## Build outputs

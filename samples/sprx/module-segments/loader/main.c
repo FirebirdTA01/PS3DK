@@ -10,8 +10,11 @@
  *   SPRX_SEG_ALL_PASS steps=<n>      the final line when every step passed
  *   SPRX_SEG_RESULT FAIL failed=<n>  the final line otherwise
  *
- * The module is looked for next to this executable (the directory of
- * argv[0]) and in /app_home, as <stem>.sprx first and then <stem>.fake.sprx:
+ * The module is looked for in the directory named by argv[1] when that is an
+ * absolute path (a launcher whose child does not get its own path in argv[0]
+ * passes the module's directory this way), then next to this executable (the
+ * directory of argv[0]), then in /app_home, as <stem>.sprx first and then
+ * <stem>.fake.sprx:
  * a .self loads the real-signed .sprx, a .fake.self needs the .fake.sprx
  * (it gets 0x80010009 for the real one and moves on).
  */
@@ -81,11 +84,21 @@ static int finish(void)
 }
 
 /* Try <dir>/<stem>.sprx then <dir>/<stem>.fake.sprx for each directory. */
-static sys_prx_id_t load_module(const char *argv0, char *loaded, size_t loaded_len)
+static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *loaded, size_t loaded_len)
 {
-	char dirs[2][192];
+	char dirs[3][192];
 	int ndirs = 0;
 
+	if (argv1 != NULL && argv1[0] == '/') {
+		size_t n = strlen(argv1);
+		while (n > 1 && argv1[n - 1] == '/')
+			n--;
+		if (n < sizeof(dirs[0])) {
+			memcpy(dirs[ndirs], argv1, n);
+			dirs[ndirs][n] = '\0';
+			ndirs++;
+		}
+	}
 	if (argv0 != NULL && argv0[0] == '/') {
 		const char *slash = strrchr(argv0, '/');
 		size_t n = (size_t)(slash - argv0);
@@ -95,7 +108,10 @@ static sys_prx_id_t load_module(const char *argv0, char *loaded, size_t loaded_l
 			ndirs++;
 		}
 	}
-	if (ndirs == 0 || strcmp(dirs[0], "/app_home") != 0) {
+	int have_app_home = 0;
+	for (int d = 0; d < ndirs; d++)
+		have_app_home |= strcmp(dirs[d], "/app_home") == 0;
+	if (!have_app_home) {
 		strcpy(dirs[ndirs], "/app_home");
 		ndirs++;
 	}
@@ -126,7 +142,7 @@ int main(int argc, char **argv)
 	/* --- load --------------------------------------------------------- */
 	begin("load");
 	char loaded[256] = "";
-	sys_prx_id_t id = load_module(argc > 0 ? argv[0] : NULL, loaded, sizeof(loaded));
+	sys_prx_id_t id = load_module(argc > 1 ? argv[1] : NULL, argc > 0 ? argv[0] : NULL, loaded, sizeof(loaded));
 	if (!verdict(id >= 0, "load", "id=0x%08lx path=%s", (unsigned long)(uint32_t)id,
 	             loaded[0] ? loaded : "(none)"))
 		return finish();
