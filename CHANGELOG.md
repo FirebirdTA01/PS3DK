@@ -45,6 +45,11 @@ The version stamped into builds is generated from the most recent
   instructions. Such arithmetic is now done at compile time.
   A matrix whose rows are constants is read as inline constants instead of
   being copied into registers a lane at a time.
+- **`rsx-cg-compiler`: scalars share registers when a fragment program runs
+  out of them.** Every temporary took a whole register, also a scalar that
+  uses one lane of it, and a program holding more than 48 values at a time
+  was refused. Such a program now has its scalars packed four to a register.
+  A program that fits is compiled as before.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The

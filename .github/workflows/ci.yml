@@ -810,6 +810,9 @@ jobs:
       - name: Float and integer literals fold together, judged by value and shape
         run: bash tests/shader-compiler/mixed-literal-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Scalars share registers when a fragment program is over the register budget
+        run: bash tests/shader-compiler/fp-scalar-pack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Loop carries written in place, judged by value and shape
         run: bash tests/shader-compiler/loop-carry-in-place-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
