@@ -792,6 +792,9 @@ jobs:
       - name: Vertex coissue shared-source value regression
         run: bash tests/shader-compiler/vp-coissue-source-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: A struct passed by value to a helper is the argument's value, judged by value
+        run: bash tests/shader-compiler/struct-value-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Vertex normalize float3 and float4 value regression
         run: bash tests/shader-compiler/vp-normalize-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

@@ -16,6 +16,22 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Fixed
+
+- **`rsx-cg-compiler`: a struct passed by value to a helper function.** Inside
+  the helper, the parameter's members did not take the argument's values. A
+  fragment helper read the entry inputs named by the struct's semantics, so
+  every write the caller had made to the argument was dropped and the program
+  compiled to the wrong value with exit 0; when the caller had a variable
+  with the parameter's name, the helper read that variable instead (vertex
+  programs too). The parameter now carries the argument's members, through
+  any number of helper levels, and a struct type without semantics, which was
+  refused, compiles. A local copied whole from another struct (`V l = i;`)
+  keeps a write made to the source before the copy, and a vertex helper given
+  the entry's struct input whole no longer needs the entry to have read every
+  member first. A member the argument never assigned, and a helper's result
+  passed straight in as the argument, are refused by name.
+
 ## [v0.28.8] — 2026-11-21
 
 ### Fixed

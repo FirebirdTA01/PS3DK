@@ -122,6 +122,10 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // Helper parameters currently bound to a struct VALUE rather than to
+    // (a path into) an entry struct input (struct-value-argument): set or
+    // cleared at every binding of the parameter, read while its body is built.
+    std::unordered_set<const ParamDecl*> valueStructParams_;
     // Values an inlined call returns (t_8c4a982e): the inputs they depend
     // on claim an implicit TEXCOORD even when the call's result is dead.
     std::vector<IRValueID> implicitClaimRoots_;
