@@ -315,16 +315,28 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
     // Fragment constant sharing (canonicalizeConstants) is tried first; when
     // the program it produces fails to emit, the IR pipeline runs again
     // without it, and only the kept attempt's emit diagnostics are printed.
+    // Likewise a large fixed-count fragment loop is first kept as a hardware
+    // loop (static-loop-regions); when a program that kept one fails to build
+    // or to emit, it is compiled again with every such loop expanded.
     decltype(IRBuilder{}.build(*ast, semantic)) irModule;
     nv40::UcodeOutput  ucode;
     nv40::FpAttributes fpAttrs;
     nv40::VpAttributes vpAttrs;
     std::string        irDump;
-    for (bool fpConstCanon = true;; fpConstCanon = false)
+    bool fpConstCanon = true;
+    bool keepStaticLoops = true;
+    for (;;)
     {
         bool fpCanonChanged = false;
         IRBuilder irBuilder;
+        irBuilder.setKeepStaticLoops(keepStaticLoops);
         irModule = irBuilder.build(*ast, semantic);
+        const bool loopsKept = keepStaticLoops && irBuilder.staticLoopsKept() > 0;
+        if ((irBuilder.hasErrors() || !irModule) && loopsKept)
+        {
+            keepStaticLoops = false;
+            continue;
+        }
         if (irBuilder.hasErrors() || !irModule)
         {
             for (const auto& err : irBuilder.errors())
@@ -521,7 +533,16 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
             vpAttrs = r.attrs;
         }
         if (!ucode.ok && stage == ShaderStage::Fragment && fpConstCanon && fpCanonChanged)
+        {
+            fpConstCanon = false;
             continue;
+        }
+        if (!ucode.ok && loopsKept)
+        {
+            keepStaticLoops = false;
+            fpConstCanon = true;
+            continue;
+        }
         break;
     }
 

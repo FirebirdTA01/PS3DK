@@ -28,6 +28,13 @@ public:
     const std::vector<std::string>& errors() const { return errors_; }
     bool hasErrors() const { return !errors_.empty(); }
 
+    // A fixed-count fragment loop whose expansion would be large is kept as
+    // a hardware loop (static-loop-regions).  The driver turns this off and
+    // builds again when a program that kept one fails to compile, so keeping
+    // a loop never costs acceptance.
+    void setKeepStaticLoops(bool keep) { keepStaticLoops_ = keep; }
+    int staticLoopsKept() const { return staticLoopsKept_; }
+
     // Type conversion helpers
     static IRTypeInfo getIRType(const CgType& cgType);
     static IRTypeInfo getIRType(TypeNode* typeNode);
@@ -284,7 +291,13 @@ private:
     // A fragment `for` that cannot be expanded becomes a hardware loop
     // region (IROp::LoopCarry .. LoopOut, ir.h).  Returns false, having
     // built nothing, when the loop is outside the admitted shape.
-    bool tryBuildHardwareLoop(ForStmt* stmt);
+    // With a plan the trip count is already proven (tryUnrollStaticFor):
+    // LOOP {trips, 0, 1} with no header test, and `headBreak` - the body's
+    // leading `if (c) break;` - as the BRK at the head of every iteration.
+    struct StaticLoopPlan { int trips = 0; IfStmt* headBreak = nullptr; };
+    bool tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan = nullptr);
+    bool keepStaticLoops_ = true;
+    int staticLoopsKept_ = 0;
     // arrayStorageKey resolving a row index bound to an integer constant.
     bool storageKey(ExprNode* expr, std::string& key);
     // Values bound to names a hardware loop's body assigned without

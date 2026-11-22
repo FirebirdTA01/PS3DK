@@ -3312,6 +3312,195 @@ bool stmtContainsBreakOrContinue(StmtNode* stmt)
     }
 }
 
+// The size of a loop body as the established compiler weighs it when it
+// chooses between expanding a fixed-count loop and emitting a hardware loop
+// (measured on fragment programs: a loop is expanded while
+// trips * (cost + 1) <= 150).  One per operation - an arithmetic or
+// comparison operator, a compound assignment, a swizzle, a conversion, an
+// intrinsic call - with lerp counting four; names, literals and a plain
+// assignment are free, and a helper call costs its body.  Constructors,
+// ifs and nested loops are not measured and are estimated the same way, so
+// a loop near the boundary may be chosen differently.
+constexpr long kLoopCostCap = 1000000;
+
+long loopStmtCost(const StmtNode* stmt, int depth);
+
+long loopExprCost(const ExprNode* e, int depth)
+{
+    if (!e) return 0;
+    if (depth > 32) return kLoopCostCap;
+    long cost = 0;
+    switch (e->kind)
+    {
+    case ExprKind::Binary: {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        cost = (b->op == BinaryOp::Assign || b->op == BinaryOp::Comma) ? 0 : 1;
+        cost += loopExprCost(b->left.get(), depth) + loopExprCost(b->right.get(), depth);
+        break;
+    }
+    case ExprKind::Unary: {
+        auto* u = static_cast<const UnaryExpr*>(e);
+        const bool literal = u->operand && u->operand->kind == ExprKind::Literal;
+        cost = (literal ? 0 : 1) + loopExprCost(u->operand.get(), depth);
+        break;
+    }
+    case ExprKind::Call: {
+        auto* c = static_cast<const CallExpr*>(e);
+        for (const auto& arg : c->arguments) cost += loopExprCost(arg.get(), depth);
+        const FunctionDecl* fn = c->resolvedFunction && c->resolvedFunction->kind == DeclKind::Function
+            ? static_cast<const FunctionDecl*>(c->resolvedFunction) : nullptr;
+        if (fn && fn->body) cost += loopStmtCost(fn->body.get(), depth + 1);
+        else cost += c->functionName == "lerp" ? 4 : 1;
+        break;
+    }
+    case ExprKind::MemberAccess: {
+        auto* m = static_cast<const MemberAccessExpr*>(e);
+        cost = ((m->isSwizzle || m->isMatrixSwizzle) ? 1 : 0) + loopExprCost(m->object.get(), depth);
+        break;
+    }
+    case ExprKind::Index: {
+        auto* i = static_cast<const IndexExpr*>(e);
+        cost = 1 + loopExprCost(i->array.get(), depth) + loopExprCost(i->index.get(), depth);
+        break;
+    }
+    case ExprKind::Ternary: {
+        auto* t = static_cast<const TernaryExpr*>(e);
+        cost = 1 + loopExprCost(t->condition.get(), depth) + loopExprCost(t->thenExpr.get(), depth) +
+               loopExprCost(t->elseExpr.get(), depth);
+        break;
+    }
+    case ExprKind::Cast:
+        cost = 1 + loopExprCost(static_cast<const CastExpr*>(e)->operand.get(), depth);
+        break;
+    case ExprKind::Constructor: {
+        bool built = false;
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments) {
+            cost += loopExprCost(arg.get(), depth);
+            if (arg && arg->kind != ExprKind::Literal) built = true;
+        }
+        if (built) cost += 1;
+        break;
+    }
+    default:
+        break;
+    }
+    return std::min(cost, kLoopCostCap);
+}
+
+long loopStmtCost(const StmtNode* stmt, int depth)
+{
+    if (!stmt) return 0;
+    long cost = 0;
+    switch (stmt->kind)
+    {
+    case StmtKind::Expr:
+        cost = loopExprCost(static_cast<const ExprStmt*>(stmt)->expr.get(), depth);
+        break;
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(stmt)->declarations)
+            if (d && d->kind == DeclKind::Variable)
+                cost += loopExprCost(static_cast<const VarDecl*>(d.get())->initializer.get(), depth);
+        break;
+    case StmtKind::Block:
+        for (const auto& s : static_cast<const BlockStmt*>(stmt)->statements)
+            cost += loopStmtCost(s.get(), depth);
+        break;
+    case StmtKind::If: {
+        auto* i = static_cast<const IfStmt*>(stmt);
+        cost = loopExprCost(i->condition.get(), depth) + loopStmtCost(i->thenBranch.get(), depth) +
+               loopStmtCost(i->elseBranch.get(), depth);
+        break;
+    }
+    case StmtKind::For: {
+        auto* f = static_cast<const ForStmt*>(stmt);
+        cost = loopStmtCost(f->init.get(), depth) + loopExprCost(f->condition.get(), depth) +
+               loopExprCost(f->increment.get(), depth) + loopStmtCost(f->body.get(), depth);
+        break;
+    }
+    case StmtKind::Return:
+        cost = loopExprCost(static_cast<const ReturnStmt*>(stmt)->value.get(), depth);
+        break;
+    default:
+        break;
+    }
+    return std::min(cost, kLoopCostCap);
+}
+
+// Whether an expression holds an index that is not a literal (`a[i]`,
+// `m[i + 1]`).  A loop whose body indexes by its induction has to be
+// expanded: only then is every index a constant.
+bool exprHasComputedIndex(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Binary: {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        return exprHasComputedIndex(b->left.get()) || exprHasComputedIndex(b->right.get());
+    }
+    case ExprKind::Unary:
+        return exprHasComputedIndex(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Call:
+        for (const auto& arg : static_cast<const CallExpr*>(e)->arguments)
+            if (exprHasComputedIndex(arg.get())) return true;
+        return false;
+    case ExprKind::MemberAccess:
+        return exprHasComputedIndex(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        auto* i = static_cast<const IndexExpr*>(e);
+        return !i->index || i->index->kind != ExprKind::Literal || exprHasComputedIndex(i->array.get());
+    }
+    case ExprKind::Ternary: {
+        auto* t = static_cast<const TernaryExpr*>(e);
+        return exprHasComputedIndex(t->condition.get()) || exprHasComputedIndex(t->thenExpr.get()) ||
+               exprHasComputedIndex(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return exprHasComputedIndex(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::Constructor:
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (exprHasComputedIndex(arg.get())) return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+bool stmtHasComputedIndex(const StmtNode* stmt)
+{
+    if (!stmt) return false;
+    switch (stmt->kind)
+    {
+    case StmtKind::Expr:
+        return exprHasComputedIndex(static_cast<const ExprStmt*>(stmt)->expr.get());
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(stmt)->declarations)
+            if (d && d->kind == DeclKind::Variable &&
+                exprHasComputedIndex(static_cast<const VarDecl*>(d.get())->initializer.get()))
+                return true;
+        return false;
+    case StmtKind::Block:
+        for (const auto& s : static_cast<const BlockStmt*>(stmt)->statements)
+            if (stmtHasComputedIndex(s.get())) return true;
+        return false;
+    case StmtKind::If: {
+        auto* i = static_cast<const IfStmt*>(stmt);
+        return exprHasComputedIndex(i->condition.get()) || stmtHasComputedIndex(i->thenBranch.get()) ||
+               stmtHasComputedIndex(i->elseBranch.get());
+    }
+    case StmtKind::Return:
+        return exprHasComputedIndex(static_cast<const ReturnStmt*>(stmt)->value.get());
+    case StmtKind::Empty:
+    case StmtKind::Break:
+    case StmtKind::Continue:
+    case StmtKind::Discard:
+        return false;
+    default:
+        // A nested loop or switch is not walked: treat it as indexing.
+        return true;
+    }
+}
+
 // The body proof is keyed by resolved declaration, not spelling: an inner
 // local named i must not invalidate a loop over an outer i.
 bool loopBodyChanges(StmtNode* body, const std::unordered_set<DeclNode*>& dependencies,
@@ -3832,6 +4021,51 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         if (!exact(final)) return false;
     }
 
+    // A large fixed-count fragment loop stays a loop (static-loop-regions):
+    // the established compiler expands one only while trips * (body + 1) is
+    // at most 150 and emits LOOP {trips, 0, 1} past that, and expanding a
+    // noise octave loop costs its whole body once per trip.  The loop may
+    // open with one `if (c) break;` and have no other exit.  A loop the
+    // hardware path does not take is expanded as before.
+    if (keepStaticLoops_ && module_->shaderStage == ShaderStage::Fragment && hardwareLoopDepth_ == 0 &&
+        currentFunction_ && currentFunction_->isEntryPoint && declares && extraIncrements.empty() &&
+        iterations.size() >= 2)
+    {
+        IfStmt* headBreak = nullptr;
+        bool admitted = !earlyExit;
+        if (earlyExit && stmt->body->kind == StmtKind::Block)
+        {
+            const auto& body = static_cast<BlockStmt*>(stmt->body.get())->statements;
+            if (!body.empty() && body.front() && body.front()->kind == StmtKind::If)
+            {
+                auto* head = static_cast<IfStmt*>(body.front().get());
+                const StmtNode* then = head->thenBranch.get();
+                if (then && then->kind == StmtKind::Block)
+                {
+                    const auto& inner = static_cast<const BlockStmt*>(then)->statements;
+                    then = inner.size() == 1 ? inner[0].get() : nullptr;
+                }
+                if (!head->elseBranch && head->condition && then && then->kind == StmtKind::Break)
+                    headBreak = head;
+            }
+            admitted = headBreak != nullptr;
+            for (size_t k = 1; admitted && k < body.size(); ++k)
+                if (stmtContainsBreakOrContinue(body[k].get())) admitted = false;
+        }
+        const long cost = loopStmtCost(stmt->body.get(), 0);
+        // Indexing by the induction needs the expansion's constant indices.
+        if (admitted && stmtHasComputedIndex(stmt->body.get())) admitted = false;
+        if (admitted && static_cast<long>(iterations.size()) * (cost + 1) > 150)
+        {
+            const StaticLoopPlan plan{static_cast<int>(iterations.size()), headBreak};
+            if (tryBuildHardwareLoop(stmt, &plan))
+            {
+                ++staticLoopsKept_;
+                return true;
+            }
+        }
+    }
+
     const ScopeState pre = scope_;
     // The for initializer has its own lexical scope, rather than declaring its
     // name in the enclosing block's declaration set.
@@ -3886,7 +4120,7 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
 // writing in an iteration is carried (LoopCarry .. LoopLatch .. LoopOut);
 // one the body writes but never reads first is local to the iteration, and
 // reading it after the loop is refused rather than guessed.
-bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
+bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan)
 {
     // Only into the entry (an inlined helper builds there too); a helper's
     // own standalone IR function is never lowered and keeps its old path.
@@ -3904,7 +4138,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // are written back, then BRK, then the increment.  Any other break or
     // continue keeps the refusal (no predicated exit snapshot yet).
     IfStmt* tailBreak = nullptr;
-    if (stmt->body->kind == StmtKind::Block) {
+    if (!plan && stmt->body->kind == StmtKind::Block) {
         auto* blk = static_cast<BlockStmt*>(stmt->body.get());
         if (!blk->statements.empty() && blk->statements.back() &&
             blk->statements.back()->kind == StmtKind::If) {
@@ -3921,7 +4155,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             for (size_t k = 0; k + 1 < blk->statements.size(); ++k)
                 if (stmtContainsBreakOrContinue(blk->statements[k].get())) return false;
     }
-    if (!tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
+    if (!plan && !tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
         return false;
     if (vertexLoop && tailBreak)
         return false;
@@ -4034,14 +4268,33 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     const size_t beginIndex = block->instructions.size();
     {
         auto begin = std::make_unique<IRInstruction>(IROp::LoopBegin, InvalidIRValue, IRTypeInfo::Void());
-        begin->componentIndex = 255;
+        begin->componentIndex = plan ? plan->trips : 255;
         block->addInstruction(std::move(begin));
     }
     ++hardwareLoopDepth_;
     // The source's own test, before any arm guard joins it: the header
     // checks below judge this compare.
     IRValueID sourceTest = InvalidIRValue;
-    {
+    if (plan) {
+        // The count is the proven trip count, so no header test runs.  A
+        // leading `if (c) break;` is the BRK at the head of the iteration:
+        // nothing of this iteration is written yet, so the carries hold the
+        // previous iteration's values - the state the break leaves.
+        if (plan->headBreak) {
+            const auto beforeCondition = scope_.fold();
+            IRValueID cond = buildExpr(plan->headBreak->condition.get());
+            cond = normalizeCondition(plan->headBreak->condition.get(), cond);
+            if (hasErrors() || scope_.fold() != beforeCondition) {
+                --hardwareLoopDepth_;
+                blockDeclared_.pop_back();
+                return hasErrors() ? true : refuse("the break condition assigns a variable");
+            }
+            auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+            brk->addOperand(cond);
+            brk->guardIsNegated = false;  // break where the source condition is TRUE
+            block->addInstruction(std::move(brk));
+        }
+    } else {
         const auto beforeCondition = scope_.fold();
         IRValueID cond = buildExpr(stmt->condition.get());
         cond = normalizeCondition(stmt->condition.get(), cond);
@@ -4074,7 +4327,14 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     IRValueID tailBreakCond = InvalidIRValue;
     IRValueID inductionAtBreak = InvalidIRValue;
     size_t tailBreakIndex = 0;
-    if (!tailBreak) {
+    if (plan && plan->headBreak) {
+        // The body without its leading break, in the body's own scope.
+        auto& statements = static_cast<BlockStmt*>(stmt->body.get())->statements;
+        std::unique_ptr<StmtNode> head = std::move(statements.front());
+        statements.erase(statements.begin());
+        buildStmt(stmt->body.get());
+        statements.insert(statements.begin(), std::move(head));
+    } else if (!tailBreak) {
         buildStmt(stmt->body.get());
     } else {
         auto* blk = static_cast<BlockStmt*>(stmt->body.get());
@@ -4102,8 +4362,19 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             return refuse("the break condition assigns a variable");
         }
     }
-    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator())
-        buildExpr(stmt->increment.get());
+    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator()) {
+        // With a proven count the induction only matters where the body
+        // reads it: unread, its step is not built and its carry folds away.
+        bool inductionRead = !plan;
+        if (plan) {
+            const auto bound = nameToValue_.find(varName);
+            const IRValueID carried = bound == nameToValue_.end() ? InvalidIRValue : bound->second;
+            for (size_t i = beginIndex; i < block->instructions.size() && !inductionRead; ++i)
+                for (IRValueID op : block->instructions[i]->operands)
+                    if (op == carried) { inductionRead = true; break; }
+        }
+        if (inductionRead) buildExpr(stmt->increment.get());
+    }
     --hardwareLoopDepth_;
     if (hasErrors()) { blockDeclared_.pop_back(); return true; }
     // Effects the region may not have - named first, also in any block the
@@ -4259,8 +4530,10 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // established compiler nests a second LOOP for it, not implemented), so more than
     // 255 iterations is refused; a body that also writes the induction makes
     // the count unknowable from the header, refused too when the bound is
-    // constant (review, constant fractional 300 / .5).
-    {
+    // constant (review, constant fractional 300 / .5).  A planned loop's
+    // count is proven by the expansion's own simulation, and its body does
+    // not write the induction (loopBodyChanges).
+    if (!plan) {
         // Each of start and bound is CONSTANT (evaluated here), RUN-TIME (it
         // reads an input, a uniform, a texture, a carry: the measured
         // LOOP {255} shape) or UNKNOWN (built only from constants through an

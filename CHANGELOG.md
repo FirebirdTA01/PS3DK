@@ -16,6 +16,18 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **`rsx-cg-compiler`: large fixed-count fragment loops stay loops.** A `for`
+  with a known trip count was always expanded, so a noise octave loop cost
+  its whole body once per trip. A loop whose trip count times its body size
+  exceeds 150 operations is now emitted as a hardware `LOOP` with that trip
+  count, the point at which the established compiler does the same; it may
+  open with one `if (c) break;`. A four-octave value-noise loop goes from 162
+  instructions to 54. Smaller loops, loops that index an array by their
+  induction variable, and loops the hardware loop cannot carry are expanded
+  as before.
+
 ### Fixed
 
 - **`rsx-cg-compiler`: a struct passed by value to a helper function.** Inside
