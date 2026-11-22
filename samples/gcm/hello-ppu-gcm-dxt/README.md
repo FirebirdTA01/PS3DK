@@ -35,13 +35,16 @@ For a source checkout, use its `cmake/ps3-ppu-toolchain.cmake`. The shaders in
 ## Run and check
 
 The sample submits 600 frames (VSYNC, double buffered). After the draws of
-frame 0 it fences, copies the framebuffer to main memory with
+frame 120 it fences, copies the framebuffer to main memory with
 `cellGcmSetTransferImage`, fences again and checks the center of every source
 texel in all six panels against the source pattern: 384 checks. The RGB
 tolerance is 2/255, except the DXT5 panel, which allows 20/255 for this
 fixture's 3-bit alpha interpolation after blending. That bound is specific to
 this fixture, not a general encoder quality claim. The readback area is filled
-with a canary first, so an incomplete copy shows up as mismatches.
+with a canary first, so an incomplete copy shows up as mismatches. The check
+is on frame 120 rather than frame 0 because RPCS3 compiles shader pipelines
+asynchronously and skips draws whose pipeline is not ready: its first frames
+can hold only the clear.
 
 The TTY prints the panel geometry, one line per panel with its mismatch count,
 the drain result and a final line:

@@ -3,7 +3,7 @@
  *
  * Six panels in three rows (DXT1, DXT3, DXT5): left the 8x8 A8R8G8B8 source, right the compressed payload that
  * tools/dxt-encoder/dxt-example made from it (source/assets.h). The DXT3 and DXT5 rows blend over the background;
- * the DXT1 row ignores alpha in both panels. Frame 0 is copied to main memory behind a fence and every source texel
+ * the DXT1 row ignores alpha in both panels. Frame 120 is copied to main memory behind a fence and every source texel
  * center of every panel is checked against the source pattern; the image and a receipt go to /dev_hdd0/tmp.
  *
  * GPU safety (as the profiler pixel samples): the fence label is reset and read back before any GPU work, every wait
@@ -41,6 +41,8 @@ SYS_PROCESS_PARAM(1001, 0x100000);
 #define HOST_SIZE      (16 * 1024 * 1024)
 #define READBACK_AT    (CB_SIZE + 128)   /* frame-0 copy, in the mapped host buffer after the command buffer */
 #define FRAMES         600u
+#define CHECK_FRAME    120u              /* read back here, not frame 0: an emulator that compiles shaders
+                                            * asynchronously may skip the first frames' draws */
 #define TEX_W          8u
 #define TEX_H          8u
 #define PANEL_COUNT    6u
@@ -538,7 +540,7 @@ int main(void)
         if (g_quit)
             break;
         render_frame();
-        if (frames == 0) {
+        if (frames == CHECK_FRAME) {
             if (!read_back()) {
                 fail("readback-fence");
                 break;
