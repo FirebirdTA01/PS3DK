@@ -142,6 +142,13 @@ The version stamped into builds is generated from the most recent
   `sprx-segments` / `sprx-segments-lp64`: a module that exports two libraries
   and writes its own `.data` and `.bss` in `module_start` and `module_stop`,
   with a loader that prints a verdict for every step.
+- New sample `samples/sprx/vsh-plugin` (both ABIs) and regression row
+  `sprx-vsh-plugin` (ILP32): a VSH plugin for webMAN MOD's
+  `/loadprx.ps3` and `/unloadprx.ps3`. `module_start` starts a worker with
+  `sys_ppu_thread_create` and `module_stop` joins it; on a thread with no
+  caller (the plugin loader's) each ends with the bare exit system call, and
+  `module_stop` first sends the final stop report. A loader runs the
+  game-process path. The pattern is documented in `docs/tools/prx-gen.md`.
 - `samples/gcm/hello-ppu-prof-auto-verdicts` stops at configure with a message
   naming `-DPS3_PROF_AUTO=ON` when `PS3_PROF_AUTO` is off, instead of building
   a sample that records nothing. `scripts/build-all-samples.sh` configures it

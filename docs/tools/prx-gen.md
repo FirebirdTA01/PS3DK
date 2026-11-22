@@ -294,6 +294,72 @@ pthread API: it has no TLS of its own, and `prx-gen` refuses TLS relocations.
   exit, and one without (see below) through the bare exit system call (41).
   Either way the exit code reaches `sys_ppu_thread_join`.
 
+### 6. VSH plugins
+
+A VSH plugin is a module that a plugin loader (webMAN MOD's `/loadprx.ps3`
+and `/unloadprx.ps3` pages, through Cobra) loads into the VSH process on a CFW or HEN console. Its `module_start` and
+`module_stop` run on different kinds of thread depending on who loads it, and
+a plugin has to handle both. `samples/sprx/vsh-plugin` is the worked
+example; its loader runs the loader path below in a game process.
+
+| | Loader path: `sys_prx_start_module` / `sys_prx_stop_module` in a game | Plugin loader path: Cobra in VSH |
+|---|---|---|
+| Thread | a normal thread: a TLS area and a caller to return to | made by the kernel: no TLS area, a 4 KiB stack, and a poisoned return address (`0xBADADD00`, reported by testers in issue #137) |
+| Ending `module_start` / `module_stop` | return the result | end the thread with system call 41 (returning faults, and liblv2's `sys_ppu_thread_exit` reads TLS); its exit code is the result |
+| Final stop report | liblv2's `sys_prx_stop_module` sends it after `module_stop` returns | `module_stop` must send it itself, or the module never reaches the stopped state and the unload waits for ever |
+| `argp` | whatever the caller passes | none |
+
+**The pattern.** `module_start` and `module_stop` do as little as possible
+on the thread they are given:
+
+1. `module_start` starts a worker with `sys_ppu_thread_create`. The worker is
+   a normal thread (liblv2 gives it a TLS area and the stack size asked for)
+   and does the plugin's job. Then `module_start` ends with
+   `SYS_PRX_RESIDENT`: by returning on the loader path, with system call 41 on
+   the plugin loader path.
+2. `module_stop` tells the worker to stop, joins it (`sys_ppu_thread_join` is
+   a bare system call, fine on either thread), and ends with
+   `SYS_PRX_STOP_OK`. On the plugin loader path it first sends the final stop
+   report, then ends with system call 41.
+
+To tell the paths apart, the sample checks for a usable caller: a return
+address that is not 0, is word-aligned and is not the poison value, and a
+TLS area (r13 at least `0x7000`, as in `<sys/ppu_thread.h>`'s exit). Either
+missing means the plugin loader path. Both checks read registers only.
+
+**The final stop report** is system call 482 (`_sys_prx_stop_module`) on the
+module's own id (system call 461, `_sys_prx_get_module_id_by_address`, with
+any address inside the module) with flags 0 and a five-word option block:
+size `0x28`, command 2, entry 0, result 0, entry 0. Command 2 with result 0
+moves the module from stopping to stopped, which is what lets the unload
+finish; result 1 means "cannot stop" and leaves it stopping. liblv2's
+`sys_prx_stop_module` sends exactly this report after `module_stop` returns,
+so a plugin must not send it on the loader path: the module would already be
+stopped when liblv2's own report arrives. (Semantics as RPCS3 models them,
+`rpcs3/Emu/Cell/lv2/sys_prx.cpp`, `_sys_prx_stop_module`; the plugin loader
+sending only the first stop command is how Cobra's module code behaves, as
+discussed in issue #137.)
+
+**Known limits.**
+
+- The plugin loader path is not emulated: RPCS3 has no VSH plugin loader, so
+  that path is tested only on a console.
+- The path check relies on the plugin loader's thread having neither a TLS
+  area nor a normal return address. A loader that gave its thread one but
+  not the other is still caught; one that gave it both but still did not
+  finish the stop would not be.
+- The plugin loader's thread has a 4 KiB stack. Keep `module_start` and
+  `module_stop` small and leave the work, and anything that needs a stack
+  or TLS (newlib, file I/O through stdio), to the worker.
+- Write the module's own `.data` and `.bss` freely (the two-segment layout
+  makes that work), but there is no thread_local or pthread API in a module.
+- Under LP64, GCC puts a `switch` jump table in `.text` and reaches it
+  through r2, so the access crosses from the data segment to the code
+  segment and `prx-gen` refuses the module. Build LP64 module code with
+  `-fno-jump-tables`; newlib's formatted I/O has such tables and cannot be
+  linked into an LP64 module. ILP32 modules are not affected. VSH plugins
+  are normally ILP32.
+
 ## See also
 
 - [docs/design/sprx-generation.md](../design/sprx-generation.md): format and design notes

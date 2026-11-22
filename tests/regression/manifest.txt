@@ -13,6 +13,10 @@ sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT
 sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL
 sprx-segments,tests/regression/sprx-segments/sprx-segments.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
 sprx-segments-lp64,tests/regression/sprx-segments/sprx-segments-lp64.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+# sprx-vsh-plugin: the VSH plugin sample's loader path, twice per boot: start with a caller, a sys_ppu_thread_create
+# worker ticking .data and .bss counters into an fsync'd log, stop and join, unload.  ILP32 only: the LP64 plugin
+# builds, but RPCS3's PPU recompiler fails on it ("Unsupported relocation(1)") and the boot hangs after the load.
+sprx-vsh-plugin,tests/regression/sprx-vsh-plugin/sprx-vsh-plugin.fake.self,40,RAN-CLEAN,VSHP_ALL_PASS,VSHP FAIL|VSHP_RESULT FAIL
 # sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.
 sys-tty,tests/regression/sys-tty/sys-tty.fake.self,20,RAN-CLEAN,(?s)SYS_TTY_ROW reference-name write.*SYS_TTY_ROW psl1ght-name write.*SYS_TTY_OK,SYS_TTY_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
