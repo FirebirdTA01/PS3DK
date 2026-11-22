@@ -305,7 +305,9 @@ Only `for` loops compile, in one of two ways:
   In a fragment program a large loop of this kind is kept as a hardware
   `LOOP` with the fixed trip count instead: one whose trip count times its
   body size (operations plus one) exceeds 150, the point where the
-  established compiler stops expanding. The loop must declare its own
+  established compiler stops expanding a braced body (it expands a body that
+  is a single unbraced statement whatever its size; here that loop is kept
+  too). The loop must declare its own
   induction variable and may open with one `if (c) break;`; a loop that
   indexes an array by its induction variable, or that the hardware loop
   cannot carry, is expanded as before.

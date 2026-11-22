@@ -22,9 +22,11 @@ The version stamped into builds is generated from the most recent
   with a known trip count was always expanded, so a noise octave loop cost
   its whole body once per trip. A loop whose trip count times its body size
   exceeds 150 operations is now emitted as a hardware `LOOP` with that trip
-  count, the point at which the established compiler does the same; it may
-  open with one `if (c) break;`. A four-octave value-noise loop goes from 162
-  instructions to 54. Smaller loops, loops that index an array by their
+  count, the point at which the established compiler does the same for a
+  braced body; it may open with one `if (c) break;`. (The established
+  compiler expands a body that is a single unbraced statement whatever its
+  size; such a loop is kept here as well.) A four-octave value-noise loop
+  goes from 162 instructions to 54. Smaller loops, loops that index an array by their
   induction variable, and loops the hardware loop cannot carry are expanded
   as before.
 - **`rsx-cg-compiler`: no register self-copies in fragment programs.**
