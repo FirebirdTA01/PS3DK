@@ -166,14 +166,27 @@ printed to stdout.
 
 | Option | Default | Effect |
 |---|---|---|
-| `-O0`, `-O1`, `-O2`, `-O3` (also `--O0` ... `--O3`) | `-O1` | Optimisation level, named to match the established compiler's levels. |
-| `-O4` / `--O4` | | `-O3` plus optimisations beyond what the established compiler applies; reserved for this compiler's own improvements. |
+| `-O0`, `-O1`, `-O2`, `-O3` (also `--O0` ... `--O3`) | `-O1` | Optimisation level, named to match the established compiler's levels. Accepted for compatibility: all four give the same output today. |
+| `-O4` / `--O4` | | Optimisations beyond what the established compiler applies. Today: scalar temporaries of a fragment program are packed into shared registers, four to a register; this may lower the register count or add instructions. |
 | `--fastmath` | on | Fast-math. |
-| `--nofastmath` | | Disable fast-math. |
+| `--nofastmath` | | Disable fast-math. Accepted for compatibility: no effect today. |
 
-**Current behaviour:** the levels and fast-math switches are accepted and
-recorded, but no pass in this compiler is gated on them yet, so every level
-and both fast-math settings produce the same output today. The cleanup the
+**When to use `-O4`:** to try reducing a fragment program's register pressure;
+compare the register and instruction counts of each program with and without
+it. The program computes the same result; its values sit in other
+registers and lanes. The cost: a copy that the default level drops because both
+values share a register can survive when they now sit in different lanes, so
+some programs come out a few instructions longer, and a few use one more
+register. Measured over the two shader sets used for this compiler's
+regression runs, `-O4` uses 5% and 13% fewer registers in total and 0.7% and
+2% more instructions, with no program newly refused. Leave it off when
+instruction count matters more than registers, and when you compare output
+against the established compiler: `-O4` output is deliberately different from
+it. Vertex programs are not affected.
+
+**Current behaviour:** `-O0` to `-O3` and the fast-math switches are accepted
+and recorded, but no pass in this compiler is gated on them yet, so they all
+produce the same output today; only `-O4` changes it. The cleanup the
 compiler always does (algebraic simplification, common-subexpression
 elimination, dead-code elimination, constant folding and constant sharing,
 if-conversion, expansion of `for` loops with constant bounds) runs at every level.

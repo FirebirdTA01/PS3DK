@@ -720,6 +720,10 @@ public:
         seedParameters();
     }
 
+    // -O4: pack scalar temporaries four to a register in every fragment
+    // program, not only in one that is over the register budget.
+    void setPackScalarsAlways(bool always) { packScalarsAlways_ = always; }
+
     VirtualProgram run()
     {
         std::vector<const IRBasicBlock*> order;
@@ -11328,13 +11332,16 @@ private:
     // one is given a lane of a shared register for exactly its lifetime, its
     // writers write that lane and its readers read it.
     //
-    // Only a program that could not be allocated otherwise is touched, so no
-    // accepted program changes.  A scalar is packed only when every writer is
+    // By default only a program that could not be allocated otherwise is
+    // touched, so no accepted program changes; -O4 packs every program, which
+    // lowers the register count below what one register per value gives.  A
+    // scalar is packed only when every writer is
     // an operation whose result lane does not matter (a componentwise
     // operation, a dot product, a select) and every reader takes it through
     // lane x of its swizzle.  In a hardware loop a value that reaches an
     // iteration from outside it, or from the iteration before, keeps its lane
     // for the whole loop.
+    bool packScalarsAlways_ = false;
     void packFragmentScalarsWhenOverBudget()
     {
         if (profile_ != GeneralProfile::Fragment) return;
@@ -11426,7 +11433,7 @@ private:
             }
         }
         // 48 registers: the highest usable fragment temp index is 47.
-        if (peak <= 48 && std::getenv("RSX_FORCE_SCALAR_PACK") == nullptr) return;
+        if (peak <= 48 && !packScalarsAlways_) return;
 
         std::vector<int> scalars;
         for (const auto& [vreg, r] : info) {
@@ -13830,10 +13837,11 @@ static void appendBuilderDiagnostics(const VirtualProgram& program, UcodeOutput&
 
 UcodeOutput lowerFragmentProgramGeneral(const IRModule& module,
                                         const IRFunction& entry,
-                                        const rsx_cg::CompileOptions&,
+                                        const rsx_cg::CompileOptions& opts,
                                         FpAttributes* attrsOut)
 {
     GeneralBuilder builder(GeneralProfile::Fragment, entry, module);
+    builder.setPackScalarsAlways(opts.opt == rsx_cg::OptLevel::O4);
     VirtualProgram program = builder.run();
     UcodeOutput out = emitFragmentVirtual(program, entry, attrsOut);
     appendBuilderDiagnostics(program, out);

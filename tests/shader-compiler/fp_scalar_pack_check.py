@@ -13,17 +13,15 @@ binary32):
              them are held at once in any order.  Refused before; accepted
              now, within 48 registers.
   fits       the same shape with 40 scalars is under the budget and is
-             compiled twice, as it is and with packing forced by
-             RSX_FORCE_SCALAR_PACK: both compute the same values, and the two
-             containers differ, so the forcing switch is known to act.
+             compiled twice, as it is and at -O4, which packs every program:
+             both compute the same values, the two containers differ, and the
+             -O4 one uses fewer registers.
   forced     the value rows of the self-copy and lane-move tests (selects,
-             lerps, lane copies, a kept loop) compiled with packing forced by
-             RSX_FORCE_SCALAR_PACK, so the rewrite is exercised on shapes the
-             wide program does not have.
+             lerps, lane copies, a kept loop) compiled at -O4, so the rewrite
+             is exercised on shapes the wide program does not have.
 """
 import argparse
 import math
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -59,12 +57,9 @@ def wide_expected(count, x, y):
 def compile_blob(compiler, tmp, name, source, force=False):
     src, dst = Path(tmp) / (name + '.cg'), Path(tmp) / (name + '.bin')
     src.write_text(source)
-    env = dict(os.environ)
-    env.pop('RSX_FORCE_SCALAR_PACK', None)
-    if force:
-        env['RSX_FORCE_SCALAR_PACK'] = '1'
-    run = subprocess.run([compiler, '-p', 'sce_fp_rsx', '--emit-container', str(dst), str(src)],
-                         capture_output=True, text=True, timeout=120, env=env)
+    run = subprocess.run([compiler, '-p', 'sce_fp_rsx'] + (['-O4'] if force else []) +
+                         ['--emit-container', str(dst), str(src)],
+                         capture_output=True, text=True, timeout=120)
     if run.returncode != 0 or not dst.exists():
         text = [l for l in (run.stdout + run.stderr).strip().splitlines() if 'nv40' in l or 'error' in l]
         return None, (text or ['refused'])[0][:160]
@@ -114,7 +109,10 @@ def main():
             failures.append('fits refused: ' + (why or why2))
         else:
             if plain == forced:
-                failures.append('fits: forcing the packing changed nothing, the control is inert')
+                failures.append('fits: -O4 changed nothing, the control is inert')
+            elif registers(forced) >= registers(plain):
+                failures.append('fits: -O4 uses %d registers, the default %d'
+                                % (registers(forced), registers(plain)))
             for label, blob in (('fits', plain), ('fits forced', forced)):
                 for x, y in VECTORS:
                     want = wide_expected(40, x, y)
