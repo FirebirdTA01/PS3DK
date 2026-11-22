@@ -145,7 +145,7 @@ function Join-ShaderCompileInputs($Ours, $Reference) {
     $result.identity_version='1'; $result.source_sha256=$Ours.SourceHash
     $result.compile_flags=ConvertTo-Json -InputObject ([ordered]@{ours=@($Ours.Flags);reference=@($Reference.Flags)}) -Compress -Depth 6
     $result.resolved_includes=ConvertTo-Json -InputObject @($includes) -Compress -Depth 6
-    $result.established_sha256=$Reference.OracleHash; $result.input_status='versioned'
+    $result.established_sha256=$Reference.EstablishedHash; $result.input_status='versioned'
     $row=[pscustomobject]$result
     $null=Get-ContainerMetricIdentity $row
     return $row

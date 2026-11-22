@@ -37,7 +37,7 @@
  *         but judged ONLY when the row immediately before it is a
  *         reference row that judged identical - that row is the
  *         premise that makes the default container an measurement for the
- *         general one; otherwise status path-pair-unoracled, counted
+ *         general one; otherwise status path-pair-unjudged, counted
  *         on its own line, neither pass nor fail) |
  *         VP ROWS (increment 4, gate 5): control-vp-identical |
  *         control-vp-mismatch | control-vp-auto | control-vp-unwritten
@@ -59,7 +59,7 @@
  *         varying required by either FP: neither side is rendered) |
  *         internal-error (a render_side code the judge does not map) |
  *         vacuous (neither side painted a pixel: no verdict, never
- *         counted as identical) | path-pair-unoracled (the premise row
+ *         counted as identical) | path-pair-unjudged (the premise row
  *         before a path-pair row did not judge identical) |
  *         unstable-a | unstable-b (that side painted but no two
  *         consecutive readbacks agreed: output varies between draws) |
@@ -72,7 +72,7 @@
  *         about it - not identical, counted on its own line) |
  *         vp-controls-invalid | vp-auto-invalid (withheld: a VP control
  *         failed) | vp-channel-missing (the stager did not provide a
- *         coverage FP the row needs) | vp-path-pair-unoracled |
+ *         coverage FP the row needs) | vp-path-pair-unjudged |
  *         uniforms-differ (the two vertex containers enumerate uniforms
  *         differently, so the same synthesis would feed them different
  *         values: a finding about the containers, no pixel verdict) |
@@ -4402,7 +4402,7 @@ int main(int argc, const char **argv)
 	int vacuous = 0;       /* gated rows where neither side painted */
 	int blind = 0;         /* gated rows whose KIL never fired: no verdict on the kill */
 	int unstable = 0;      /* gated rows where a side never repeated a frame */
-	int unoracled = 0;     /* path-pair rows whose premise row was not identical */
+	int unjudged = 0;     /* path-pair rows whose premise row was not identical */
 	int vp_ok = 1;         /* flipped by a failed control-vp-identical/mismatch */
 	int vp_autos_ok = 1;   /* flipped by a failed control-vp-auto */
 	int vp_skipped = 0;    /* vp rows withheld behind a red VP control */
@@ -4469,14 +4469,14 @@ int main(int argc, const char **argv)
 		 * must have judged identical.  "Default equals general" is
 		 * satisfiable by both being wrong the same way, so the row
 		 * checks the premise in the run rather than assuming it, and a
-		 * failed premise withholds the verdict as unoracled - the
+		 * failed premise withholds the verdict as unjudged - the
 		 * premise row itself already failed the run as a reference
 		 * row (review condition on the path-pair role). */
 		if (strcmp(p->role, "path-pair") == 0 &&
 		    !(strcmp(prev_role, "reference") == 0 &&
 		      strcmp(prev_status, "identical") == 0 &&
 		      strcmp(prev_a_path, p->a_path) == 0)) {
-			r.status = "path-pair-unoracled";
+			r.status = "path-pair-unjudged";
 			r.max_delta = 0;
 			r.diff_pixels = 0;
 			r.total_pixels = 0;
@@ -4488,7 +4488,7 @@ int main(int argc, const char **argv)
 			         prev_status[0] ? prev_status : "none");
 			snprintf(r.artifact, sizeof(r.artifact), "-");
 			print_row(p, &r);
-			unoracled++;
+			unjudged++;
 			prev_role = p->role;
 			prev_status = r.status;
 			prev_name = p->name;
@@ -4547,7 +4547,7 @@ int main(int argc, const char **argv)
 		    !(strcmp(prev_role, "vp-reference") == 0 &&
 		      strcmp(prev_status, "identical") == 0 &&
 		      strcmp(prev_a_path, p->a_path) == 0)) {
-			r.status = "vp-path-pair-unoracled";
+			r.status = "vp-path-pair-unjudged";
 			r.max_delta = 0;
 			r.diff_pixels = 0;
 			r.total_pixels = 0;
@@ -4559,7 +4559,7 @@ int main(int argc, const char **argv)
 			         prev_status[0] ? prev_status : "none");
 			snprintf(r.artifact, sizeof(r.artifact), "-");
 			print_row(p, &r);
-			unoracled++;
+			unjudged++;
 			prev_role = p->role;
 			prev_status = r.status;
 			prev_name = p->name;
@@ -5013,9 +5013,9 @@ int main(int argc, const char **argv)
 	free(canary);
 
 	int corpus = g_npairs - 2;
-	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d discard-blind pairs (a KIL that never fired: no verdict on the kill), %d path-pair rows unoracled, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control, %d rows withheld behind a red MRT/depth control\n",
-	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - blind - unoracled - unstable - vp_skipped - outputs_skipped,
-	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, blind, unoracled, unstable, vp_skipped, outputs_skipped);
+	printf("shader-differential: controls valid, %d judged pairs, %d gate failures, %d uniform-dependent pairs skipped, %d sampler-dependent pairs skipped, %d pairs the binder could not serve, %d vacuous pairs (neither side painted), %d discard-blind pairs (a KIL that never fired: no verdict on the kill), %d path-pair rows unjudged, %d unstable pairs (a side never repeated a frame), %d vp rows withheld behind a red VP control, %d rows withheld behind a red MRT/depth control\n",
+	       corpus - uniforms_skipped - textures_skipped - unsupported - vacuous - blind - unjudged - unstable - vp_skipped - outputs_skipped,
+	       failures, uniforms_skipped, textures_skipped, unsupported, vacuous, blind, unjudged, unstable, vp_skipped, outputs_skipped);
 	/* What makes a red uniform control fail the run is the control's
 	 * own failures++ in its branch above — by the time rows are
 	 * skipped, failures is already nonzero.  No second guard here:

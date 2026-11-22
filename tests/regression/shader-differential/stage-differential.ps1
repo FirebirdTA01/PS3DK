@@ -608,7 +608,7 @@ if ($Corpus) {
 # exists afterwards.
 function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_fp_rsx") {
     $inputs = Get-ShaderCompileInputs $src @('-p',$Profile)
-    $oracleHash = (Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
+    $establishedHash = (Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
     $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     $prevEap = $ErrorActionPreference
@@ -618,10 +618,10 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
     $refRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     Assert-ShaderCompileInputs $inputs
-    if ((Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oracleHash) {
+    if ((Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $establishedHash) {
         throw 'established compiler changed during compile'
     }
-    $inputs | Add-Member NoteProperty OracleHash $oracleHash
+    $inputs | Add-Member NoteProperty EstablishedHash $establishedHash
     $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     $script:lastCompileRc = $refRc
     return ($refRc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)

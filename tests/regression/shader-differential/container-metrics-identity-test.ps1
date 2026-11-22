@@ -45,7 +45,7 @@ Check 'changed compile flags fail coverage' {
 Check 'measurement drift is distinguished from source drift' {
     $r=Row; $r.established_sha256='d'*64
     $s=Get-ContainerMetricsGateSummary @($r) @(Row)
-    Assert ($s.OracleMismatches -eq 1 -and $s.SourceVersionMismatches -eq 0)
+    Assert ($s.EstablishedMismatches -eq 1 -and $s.SourceVersionMismatches -eq 0)
 }
 Check 'include bytes enter identity' {
     $a=Row; $b=Row
@@ -120,7 +120,7 @@ try {
     Check 'old pixel status is never inherited by input metadata' {
         $a=Get-ShaderCompileInputs $src @('-O1')
         $b=Get-ShaderCompileInputs $src @('-p','sce_fp_rsx')
-        $b | Add-Member NoteProperty OracleHash ('c'*64)
+        $b | Add-Member NoteProperty EstablishedHash ('c'*64)
         $p=Join-ShaderCompileInputs $a $b
         Assert ($null -eq $p.pixel_status -and $p.identity_version -eq '1')
     }
