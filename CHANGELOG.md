@@ -29,8 +29,8 @@ The version stamped into builds is generated from the most recent
   as before.
 - **`rsx-cg-compiler`: no register self-copies in fragment programs.**
   `lerp` of a value computed just before left a `MOV` that copied a register
-  onto itself; those are no longer emitted. About 2.5% of the fragment
-  instructions across the measured shader set were such copies.
+  onto itself; those are no longer emitted. Across the two measured shader
+  sets that removes 1611 fragment instructions, about 1.8%.
 
 ### Fixed
 
