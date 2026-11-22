@@ -1439,6 +1439,14 @@ jobs:
       - name: Test the DXT1/3/5 block encoder against an independent decoder
         run: bash tests/sdk/dxt-encoder-test.sh
 
+      # hello-ppu-gcm-dxt: its embedded payloads must be the dxt-example output,
+      # and its framebuffer checks must reject wrong, moved and blank texels.
+      - name: Test the DXT sample assets match the dxt-encoder example output
+        run: bash tests/sdk/gcm-dxt-assets-test.sh
+
+      - name: Test rendering sample framebuffer checks
+        run: bash tests/sdk/gcm-render-pixels-test.sh
+
       # ps3_add_self, ps3_add_prx, and ps3_add_pkg default to CMAKE_CURRENT_BINARY_DIR,
       # with opt-back via PS3_SELF_OUTPUT_DIRECTORY and OUTPUT_DIRECTORY keyword.
       - name: Test ps3_add_self output directory override and default behavior
