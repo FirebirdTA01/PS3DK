@@ -80,6 +80,18 @@ FP_ROWS = {
                         'float3 f(V q) { return q.a + q.b; }\n'
                         + MAIN2 + ' I li; li.v.a = n * 2; li.v.b = m * 3; li.k = 1;\n'
                         ' return float4(f(li.v), 1);\n}\n', v3(lambda a, b, c: 2 * a + 3 * b)),
+    # a member that is not a float or int kind travels with the argument:
+    # unread (these two compiled before the fix and must keep compiling) ...
+    'spare_bool': ('struct W { float3 a : TEXCOORD0; bool spare; };\nfloat3 f(W q) { return q.a; }\n'
+                   'float4 main(float3 p : TEXCOORD0) : COLOR {\n W l; l.a = p; l.spare = true;\n'
+                   ' return float4(f(l), 1);\n}\n', v3(lambda a, b, c: a)),
+    'spare_unsigned': ('struct W { float3 a : TEXCOORD0; unsigned int spare; };\nfloat3 f(W q) { return q.a; }\n'
+                       'float4 main(float3 p : TEXCOORD0) : COLOR {\n W l; l.a = p; l.spare = 1;\n'
+                       ' return float4(f(l), 1);\n}\n', v3(lambda a, b, c: a)),
+    # ... and read
+    'bool_member_read': ('struct W { float3 a; bool on; };\nfloat3 f(W q) { return q.on ? q.a : q.a * 2; }\n'
+                         + MAIN2 + ' W l; l.a = n; l.on = m.x > 1.25;\n return float4(f(l), 1);\n}\n',
+                         lambda a, b, c: [x if b[0] > 1.25 else 2 * x for x in a[:3]] + [1.0]),
     # a struct returned by one helper, passed by value to another
     'returned_then_passed': (PLAN + UV2 + ' S atPlan = make(uv);\n'
                              ' return float4(inner(atPlan), 1);\n}\n',

@@ -6458,10 +6458,10 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         // A uniform struct has leaf values, not a whole-struct SSA
         // operand. Defer named leaf capture until every argument has been
         // evaluated, but before any callee parameter is installed.
-        // Both profiles capture a struct whose every leaf is bound (a local
-        // the caller built): a fragment helper given one used to read entry
-        // attributes named after its own parameter (struct-value-argument).
-        // The matrix-field and uniform-struct captures stay vertex rules.
+        // Capture is a vertex rule.  A fragment argument's leaves are renamed
+        // to the parameter by the inliner instead (struct-value-argument):
+        // renaming carries a leaf of any type, where capture converts each
+        // leaf and admits only float and int kinds.
         if (calleeDecl &&
             (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
             i < calleeDecl->parameters.size()) {
@@ -6505,8 +6505,8 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
             }
             if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
                 getStructFields(param->type.get()) &&
-                ((vertex && (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument))) ||
-                 hasBoundStructLeaves(param->type.get(), argument))) {
+                vertex && (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
+                           hasBoundStructLeaves(param->type.get(), argument))) {
                 captureStructArgument[i] = true;
                 // Side-effect-free selections see completed-argument state.
                 // An effectful index instead executes once, in argument order,
