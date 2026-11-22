@@ -22,15 +22,22 @@ The version stamped into builds is generated from the most recent
   with a known trip count was always expanded, so a noise octave loop cost
   its whole body once per trip. A loop whose trip count times its body size
   exceeds 150 operations is now emitted as a hardware `LOOP` with that trip
-  count, the point at which the established compiler does the same; it may
-  open with one `if (c) break;`. A four-octave value-noise loop goes from 162
-  instructions to 54. Smaller loops, loops that index an array by their
+  count, the point at which the established compiler does the same for a
+  braced body; it may open with one `if (c) break;`. (The established
+  compiler expands a body that is a single unbraced statement whatever its
+  size; such a loop is kept here as well.) A four-octave value-noise loop
+  goes from 162 instructions to 54. Smaller loops, loops that index an array by their
   induction variable, and loops the hardware loop cannot carry are expanded
   as before.
 - **`rsx-cg-compiler`: no register self-copies in fragment programs.**
   `lerp` of a value computed just before left a `MOV` that copied a register
   onto itself; those are no longer emitted. Across the two measured shader
   sets that removes 1611 fragment instructions, about 1.8%.
+- **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
+  loop, a variable that changes every iteration (`amp *= 0.5`) was computed
+  into a second register and copied back at the end of each iteration. The
+  instruction that computes it now writes the variable's register directly
+  wherever nothing later in the iteration still needs the old value.
 
 ### Fixed
 
