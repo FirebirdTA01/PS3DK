@@ -801,6 +801,9 @@ jobs:
       - name: Large fixed-count fragment loops kept as hardware loops, judged by value and shape
         run: bash tests/shader-compiler/static-loop-region-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Fragment programs carry no register self-copies, lerp rows judged by value and shape
+        run: bash tests/shader-compiler/fp-self-copy-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Vertex normalize float3 and float4 value regression
         run: bash tests/shader-compiler/vp-normalize-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
