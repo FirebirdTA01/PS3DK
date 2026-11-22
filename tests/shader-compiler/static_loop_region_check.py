@@ -97,6 +97,16 @@ ROWS = {
                        ' for (int o = 0; o < 4; o++) { sum += float(o) * amp * vn(p); p *= 2.0; amp *= 0.5; }\n'
                        ' return float4(sum, 0, 0, 1);\n}\n',
                        lambda x, y, n: [fbm(x, y, weight=float), 0.0], [4]),
+    # a name bound to the induction carries it out of the loop: the step is
+    # kept though no instruction of the body reads it
+    'induction_alias': (HEAD + ' float sum = 0.0; int last = -1;\n'
+                        ' for (int i = 0; i < 32; i++) { sum += uv.x * uv.y; last = i; }\n'
+                        ' return float4(sum, float(last), 0, 1);\n}\n',
+                        lambda x, y, n: [32.0 * (x * y), 31.0], [32]),
+    'induction_alias_later': (HEAD + ' float sum = 0.0; int last = -1; int seen = -1;\n'
+                              ' for (int i = 0; i < 32; i++) { seen = last; last = i; sum += uv.x * uv.y; }\n'
+                              ' return float4(float(seen), float(last), 0, 1);\n}\n',
+                              lambda x, y, n: [30.0, 31.0], [32]),
     # a small loop is expanded as before
     'small_expanded': (HEAD + ' float s = 0.0;\n for (int o = 0; o < 4; o++) { s += uv.x * 0.5; }\n'
                        ' return float4(s, 0, 0, 1);\n}\n', r_small, []),

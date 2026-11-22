@@ -4365,6 +4365,9 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan)
     if (!hasErrors() && currentBlock_ == block && !block->hasTerminator()) {
         // With a proven count the induction only matters where the body
         // reads it: unread, its step is not built and its carry folds away.
+        // A read is an operand of a region instruction, or another name the
+        // body bound to the induction (`last = i;` builds no instruction and
+        // carries the value out of the loop).
         bool inductionRead = !plan;
         if (plan) {
             const auto bound = nameToValue_.find(varName);
@@ -4372,6 +4375,8 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan)
             for (size_t i = beginIndex; i < block->instructions.size() && !inductionRead; ++i)
                 for (IRValueID op : block->instructions[i]->operands)
                     if (op == carried) { inductionRead = true; break; }
+            for (const auto& kv : nameToValue_)
+                if (kv.first != varName && kv.second == carried) inductionRead = true;
         }
         if (inductionRead) buildExpr(stmt->increment.get());
     }
