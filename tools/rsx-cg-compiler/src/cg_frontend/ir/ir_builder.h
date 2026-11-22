@@ -33,6 +33,12 @@ public:
     // builds again when a program that kept one fails to compile, so keeping
     // a loop never costs acceptance.
     void setKeepStaticLoops(bool keep) { keepStaticLoops_ = keep; }
+    // A fragment entry that returns from inside an if (entry-early-returns):
+    // when set, its body is built as an inlined helper's is, so the returns
+    // merge into one result through selects.  The driver sets it only after
+    // the ordinary build failed to emit.
+    void setMergeEntryReturns(bool merge) { mergeEntryReturns_ = merge; }
+    bool entryReturnsInsideIf() const { return entryReturnsInsideIf_; }
     int staticLoopsKept() const { return staticLoopsKept_; }
 
     // Type conversion helpers
@@ -297,6 +303,8 @@ private:
     struct StaticLoopPlan { int trips = 0; IfStmt* headBreak = nullptr; };
     bool tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan = nullptr);
     bool keepStaticLoops_ = true;
+    bool mergeEntryReturns_ = false;
+    bool entryReturnsInsideIf_ = false;
     int staticLoopsKept_ = 0;
     // arrayStorageKey resolving a row index bound to an integer constant.
     bool storageKey(ExprNode* expr, std::string& key);

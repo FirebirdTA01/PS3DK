@@ -1625,6 +1625,8 @@ bool IRBuilder::isDefaultedFragmentOutput(const ParamDecl* param) const
 // Function Building
 // ============================================================================
 
+static bool returnOnlyShape(const StmtNode* stmt, bool& hasReturn);
+
 void IRBuilder::buildFunction(FunctionDecl* decl)
 {
     currentFunction_ = module_->createFunction(decl->name);
@@ -2361,8 +2363,66 @@ void IRBuilder::buildFunction(FunctionDecl* decl)
             }
     }
 
+    // A fragment entry that returns its colour from inside an if
+    // (`if (back) return a; ... return b;`).  Built statement by statement
+    // it has several return blocks, which the back end takes only in two
+    // narrow shapes.  A helper with the same body is fine: the inliner runs
+    // each arm with the rest of the body and joins the results with Select.
+    // So when the driver asks (after the ordinary build failed to emit), the
+    // entry's body is run through that same path and stored once.
+    bool mergedReturns = false;
+    if (decl->body && currentFunction_->isEntryPoint &&
+        module_->shaderStage == ShaderStage::Fragment)
+    {
+        bool shapeOk = true, insideIf = false;
+        for (const auto& s : decl->body->statements)
+        {
+            bool has = false;
+            if (!returnOnlyShape(s.get(), has)) shapeOk = false;
+            if (has && s && s->kind != StmtKind::Return) insideIf = true;
+        }
+        const IRTypeInfo returnType = getIRType(decl->returnType.get());
+        bool plainParameters = true;
+        for (const auto& param : decl->parameters)
+            if (param && (param->storage == StorageQualifier::Out ||
+                          param->storage == StorageQualifier::InOut))
+                plainParameters = false;
+        entryReturnsInsideIf_ = shapeOk && insideIf && plainParameters &&
+            !decl->returnSemantic.isEmpty() && returnType.baseType != IRType::Void &&
+            !(decl->returnType && decl->returnType->baseType == BaseType::Struct);
+        if (entryReturnsInsideIf_ && mergeEntryReturns_)
+        {
+            mergedReturns = true;
+            inlineStack_.push_back(decl);
+            blockDeclared_.emplace_back();
+            const size_t savedFrameTopBlock = inlineFrameTopBlock_;
+            inlineFrameTopBlock_ = blockDeclared_.size() - 1;
+            IRValueID merged = InvalidIRValue;
+            const bool ok = buildInlineFunctionBody(decl, merged);
+            inlineFrameTopBlock_ = savedFrameTopBlock;
+            blockDeclared_.pop_back();
+            inlineStack_.pop_back();
+            if (ok && merged != InvalidIRValue)
+            {
+                const Semantic& sem = decl->returnSemantic;
+                auto inst = std::make_unique<IRInstruction>(IROp::StoreOutput,
+                    InvalidIRValue, currentFunction_->returnType);
+                inst->addOperand(merged);
+                inst->semanticName    = sem.name;
+                inst->rawSemanticName = sem.rawName;
+                inst->semanticIndex   = sem.index;
+                currentBlock_->addInstruction(std::move(inst));
+                emitReturn(merged);
+            }
+            else if (!hasErrors())
+            {
+                error(decl->loc, "cannot merge the returns of entry '" + decl->name + "'");
+            }
+        }
+    }
+
     // Build function body
-    if (decl->body)
+    if (decl->body && !mergedReturns)
     {
         buildBlockStmt(decl->body.get());
     }

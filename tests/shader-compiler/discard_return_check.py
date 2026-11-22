@@ -15,13 +15,17 @@ CASES = {
     'shared_prefix': ('float4 q=p*2;if(p.x>0)return q;else discard;',
                       lambda p: [2*x for x in p] if p[0]>0 else None),
     'single_return_control': ('if(p.x<=0)discard;return p;', lambda p: p if p[0]>0 else None),
+    # Several live returns and no discard: a fragment entry's returns are
+    # merged into one result (entry-early-returns).  Still refused in a
+    # vertex program, as every row here is.
+    'multiple_survivors': ('if(p.x>0)return p;else if(p.y>0)return p*2;else return p*3;',
+                           lambda p: p if p[0]>0 else [2*x for x in p] if p[1]>0 else [3*x for x in p]),
 }
 DEBTS = {
     'live_undefined_output': 'float4 q;if(p.x>0)return q;else discard;',
     # Guard construction rejects a terminal discard without a successor.
     'terminal_discard_without_successor': 'if(p.x>0)return p;discard;',
     'store_on_killed_arm': 'if(p.x>0){discard;return p;}return p*2;',
-    'multiple_survivors': 'if(p.x>0)return p;else if(p.y>0)return p*2;else return p*3;',
     'two_survivors_and_kill': 'if(p.x>0)return p;else if(p.y>0)return p*2;else discard;',
     'all_returns_killed': 'if(p.x>0){discard;return p;}else{discard;return p*2;}',
 }

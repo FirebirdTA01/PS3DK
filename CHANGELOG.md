@@ -58,6 +58,10 @@ The version stamped into builds is generated from the most recent
   ddy(x)
   `, as the established compiler computes it. `step` was refused in
   a vertex program and is now one `SGE`.
+- **`rsx-cg-compiler`: a fragment entry may return from inside an `if`.**
+  `if (back) return a; ... return b;` in the entry function was refused with "more
+  than one return block" outside two narrow shapes, though the same body in a
+  helper compiled. Such an entry is now compiled the way the helper is.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
