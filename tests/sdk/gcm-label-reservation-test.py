@@ -75,7 +75,8 @@ EXCEPTIONS = {
         "back at start) is the application's own label in the application range; the PROFILER block holds AUTO's "
         "own operation and clock labels, which an application fence must never write",
 }
-APP_SAMPLES = ["samples/gcm/hello-ppu-gcm-label-reuse", "samples/gcm/hello-ppu-gcm-main-arena"]
+APP_SAMPLES = ["samples/gcm/hello-ppu-gcm-label-reuse", "samples/gcm/hello-ppu-gcm-main-arena",
+               "samples/gcm/hello-ppu-gcm-dxt"]
 
 DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)[ \t]+([^\n]*?)[ \t]*(?:/\*.*|//.*)?$", re.M)
 CAST = re.compile(r"\(\s*(?:const\s+)?(?:u?int(?:8|16|32|64)_t|u8|u16|u32|u64|s32|unsigned(?:\s+int)?|int)\s*\)")

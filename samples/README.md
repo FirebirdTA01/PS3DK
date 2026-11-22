@@ -137,6 +137,12 @@ emission respectively. Their READMEs distinguish those checks from GPU
 rendering. For build-time DXT1/3/5 assets, see the native host example in
 [`tools/dxt-encoder`](../tools/dxt-encoder/README.md).
 
+[`hello-ppu-gcm-dxt`](gcm/hello-ppu-gcm-dxt/README.md) samples that example's
+DXT1, DXT3 and DXT5 output on the RSX next to the uncompressed source, reads
+frame 0 back and checks every source texel center (384 checks), and saves the
+image and a receipt under `/dev_hdd0/tmp`. Its README gives the tolerances,
+the PASS conditions and the bounded waits and exit drain.
+
 RSX / cellGcm graphics.  Incremental: start at "clear the framebuffer",
 grow toward shaders and full-pipeline samples.
 
