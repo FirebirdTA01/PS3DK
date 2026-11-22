@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.28.8] — 2026-11-21
+
 ### Fixed
 
 - **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
@@ -29,6 +31,16 @@ The version stamped into builds is generated from the most recent
   the environment the driver gives it, so the linker was looked up on `PATH`
   and the executable's link failed unless the toolchain's `ppu/bin` was on
   `PATH`. It now runs with the driver's own search paths.
+- **Texture format documentation.** The `gcmTexture.format` description in
+  `<rsx/gcm_sys.h>` names the defined `GCM_TEXTURE_FORMAT_DXT23`,
+  `GCM_TEXTURE_FORMAT_DXT45` and `GCM_TEXTURE_FORMAT_G8B8` in place of three
+  macros that do not exist, and describes the value as one base format plus a
+  layout flag (`SWZ`/`LIN`) and a coordinate-mode flag (`NRM`/`UNRM`).
+- **`scripts/build-cell-stub-archives.sh` under a parallel make.** It ran
+  `make clean all` as one command, which a parallel make (`MAKEFLAGS=-j`) could
+  run out of order and stop on a missing wrappers object; it runs `make clean`
+  and `make all` separately. It also finds `nidgen` under `CARGO_TARGET_DIR`
+  when that is set.
 
 ### Changed
 
