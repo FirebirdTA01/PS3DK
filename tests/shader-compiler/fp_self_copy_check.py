@@ -6,6 +6,10 @@ computed just before, the allocator puts it in that register already and the
 MOV came out as `MOV R4.x, R4.xxxx`: every lane it writes is copied onto
 itself.  Such a full-precision R-to-R copy is dropped now.
 
+A conditional assignment has the same copy: a select is `MOV dst, else;
+MOV CC, cond; MOV dst, then (where cond)`, and its first MOV is left out when
+the else value already sits in dst's register.
+
 Every row is judged by VALUE with the evaluator against a plain Python
 rendering of the same program, and by SHAPE: the container holds no neutral
 self-copy.  Inputs and constants are dyadic, so the expected values are exact
@@ -56,6 +60,22 @@ def r_loop(x, y, s, t):
     return [total, 0.0]
 
 
+def r_select(x, y, s, t):
+    r = frac(x)
+    if s > 0.5:
+        r = y * 0.5
+    return [r, 0.0]
+
+
+def r_select_vector(x, y, s, t):
+    rx, ry = frac(x), frac(y)
+    if t > 0.5:
+        rx, ry = x * 0.5, y * 0.5
+    if s > 0.5:
+        rx, ry = rx + 1.0, ry + 1.0
+    return [rx, ry]
+
+
 # name -> (source, expected(TEX0.x, TEX0.y, TEX1.x, TEX1.y) -> [COLOR.x, COLOR.y])
 ROWS = {
     'nested': (HEAD + ' float a = frac(p.x); float b = frac(p.y); float c = floor(p.x) * 0.25;\n'
@@ -65,6 +85,12 @@ ROWS = {
     'bilinear': (HEAD + ' float a = frac(p.x); float b = frac(p.y);\n'
                  ' float c = frac(p.x + 0.5); float d = frac(p.y + 0.25);\n'
                  ' return float4(lerp(lerp(a, b, q.x), lerp(c, d, q.x), q.y), 0, 0, 1);\n}\n', r_bilinear),
+    # a conditional assignment: the select's default write of a value that is
+    # already in the result register
+    'select': (HEAD + ' float r = frac(p.x);\n if (q.x > 0.5) { r = p.y * 0.5; }\n'
+               ' return float4(r, 0, 0, 1);\n}\n', r_select),
+    'select_vector': (HEAD + ' float2 r = frac(p);\n if (q.y > 0.5) { r = p * 0.5; }\n'
+                      ' if (q.x > 0.5) { r = r + 1.0; }\n return float4(r.x, r.y, 0, 1);\n}\n', r_select_vector),
     # the same blend inside a loop kept as a hardware loop
     'loop': (HEAD + ' float total = 0.0; float amp = 0.5; float2 v = p;\n'
              ' for (int o = 0; o < 8; o++) {\n'
