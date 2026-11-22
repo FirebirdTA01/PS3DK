@@ -2540,6 +2540,58 @@ void IRBuilder::buildStmt(StmtNode* stmt)
     }
 }
 
+namespace { bool stmtContainsBreakOrContinue(StmtNode* stmt); }
+
+// Build `slot` as the exit flags of the innermost statically expanded loop
+// allow (static-loop-early-exit): not at all when a flag is known set,
+// directly when every flag is known clear, otherwise inside `if (!flag)`.
+// The break flag guards a whole iteration; the rest of a block after a
+// statement that may exit is guarded by the continue flag as well.  The
+// statement is lent to the guard for the build and handed back, so the tree
+// is unchanged for the next expansion of the same loop.
+void IRBuilder::buildUnderExitFlags(std::unique_ptr<StmtNode>& slot, bool continueToo)
+{
+    const LoopContext ctx = loopStack_.top();
+    std::vector<std::string> guards;
+    for (const std::string* flag : {&ctx.breakFlag, continueToo ? &ctx.continueFlag : nullptr})
+    {
+        if (!flag || flag->empty()) continue;
+        const auto bound = nameToValue_.find(*flag);
+        if (bound == nameToValue_.end()) continue;
+        const auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(bound->second));
+        if (constant && std::holds_alternative<bool>(constant->value))
+        {
+            if (std::get<bool>(constant->value)) return;
+            continue;
+        }
+        guards.push_back(*flag);
+    }
+    if (guards.empty())
+    {
+        buildStmt(slot.get());
+        return;
+    }
+    const SourceLocation loc = slot->loc;
+    auto boolType = std::make_shared<TypeNode>();
+    boolType->baseType = BaseType::Bool;
+    std::unique_ptr<StmtNode> wrapped = std::move(slot);
+    for (auto guard = guards.rbegin(); guard != guards.rend(); ++guard)
+    {
+        auto flag = std::make_unique<IdentifierExpr>(loc, *guard);
+        flag->resolvedType = boolType;
+        auto clear = std::make_unique<UnaryExpr>(loc, UnaryOp::LogicalNot, std::move(flag));
+        clear->resolvedType = boolType;
+        wrapped = std::make_unique<IfStmt>(loc, std::move(clear), std::move(wrapped));
+    }
+    buildStmt(wrapped.get());
+    for (size_t k = 0; k < guards.size(); ++k)
+    {
+        std::unique_ptr<StmtNode> inner = std::move(static_cast<IfStmt*>(wrapped.get())->thenBranch);
+        wrapped = std::move(inner);
+    }
+    slot = std::move(wrapped);
+}
+
 void IRBuilder::buildBlockStmt(BlockStmt* stmt)
 {
     // The fourth row of ScopeState's boundary table: a block's own
@@ -2547,7 +2599,7 @@ void IRBuilder::buildBlockStmt(BlockStmt* stmt)
     // the declarators are built (no pre-scan - see blockDeclared_).
     const ScopeState pre = scope_;
     blockDeclared_.emplace_back();
-    for (auto& s : stmt->statements)
+    for (size_t k = 0; k < stmt->statements.size(); ++k)
     {
         // A selected literal arm can return directly in the entry block.
         // Its suffix is unreachable, but block bindings still unwind below.
@@ -2555,7 +2607,25 @@ void IRBuilder::buildBlockStmt(BlockStmt* stmt)
             currentFunction_->isEntryPoint && currentBlock_->hasTerminator() &&
             currentBlock_->instructions.back()->op == IROp::Return)
             break;
-        buildStmt(s.get());
+        StmtNode* s = stmt->statements[k].get();
+        buildStmt(s);
+        // In a statically expanded loop a statement that may break or
+        // continue leaves the rest of its block conditional on the exit
+        // flags (static-loop-early-exit).  The rest is lent to a block of
+        // its own for the build and handed back.
+        if (!loopStack_.empty() && loopStack_.top().flagged &&
+            k + 1 < stmt->statements.size() && stmtContainsBreakOrContinue(s))
+        {
+            auto rest = std::make_unique<BlockStmt>(stmt->statements[k + 1]->loc);
+            for (size_t j = k + 1; j < stmt->statements.size(); ++j)
+                rest->statements.push_back(std::move(stmt->statements[j]));
+            std::unique_ptr<StmtNode> slot = std::move(rest);
+            buildUnderExitFlags(slot, true);
+            auto* lent = static_cast<BlockStmt*>(slot.get());
+            for (size_t j = 0; j < lent->statements.size(); ++j)
+                stmt->statements[k + 1 + j] = std::move(lent->statements[j]);
+            break;
+        }
     }
     const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
     blockDeclared_.pop_back();
@@ -3691,7 +3761,38 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         if (b->op == BinaryOp::SubAssign) step = -step;
         else if (b->op != BinaryOp::AddAssign) return false;
     } else return false;
-    if (step == 0 || stmtContainsBreakOrContinue(stmt->body.get())) return false;
+    if (step == 0) return false;
+    // A break or continue of THIS loop is expanded with the loop: each sets
+    // a flag, and what it skips is built under that flag
+    // (static-loop-early-exit).  The induction's value after a break is the
+    // breaking iteration's, which the expansion does not carry, so the loop
+    // must declare its own induction; a comma increment would need the
+    // guard too and keeps the other paths.
+    const bool earlyExit = stmtContainsBreakOrContinue(stmt->body.get());
+    if (earlyExit && (!declares || !extraIncrements.empty())) return false;
+    // A fragment entry loop closed by one `if (c) break;` already becomes a
+    // hardware loop, the shape the established compiler emits for it
+    // (tryBuildHardwareLoop); that path keeps it.
+    if (earlyExit && inlineStack_.empty() && module_->shaderStage == ShaderStage::Fragment &&
+        stmt->body->kind == StmtKind::Block)
+    {
+        const auto& body = static_cast<BlockStmt*>(stmt->body.get())->statements;
+        bool tailOnly = !body.empty() && body.back() && body.back()->kind == StmtKind::If;
+        if (tailOnly)
+        {
+            const auto* last = static_cast<IfStmt*>(body.back().get());
+            const StmtNode* then = last->thenBranch.get();
+            if (then && then->kind == StmtKind::Block)
+            {
+                const auto& inner = static_cast<const BlockStmt*>(then)->statements;
+                then = inner.size() == 1 ? inner[0].get() : nullptr;
+            }
+            tailOnly = !last->elseBranch && then && then->kind == StmtKind::Break;
+        }
+        for (size_t k = 0; tailOnly && k + 1 < body.size(); ++k)
+            if (stmtContainsBreakOrContinue(body[k].get())) tailOnly = false;
+        if (tailOnly) return false;
+    }
     dependencies.insert(induction);
     // A global induction target can also be changed by an otherwise unrelated call.
     watchesGlobal |= !declares && module_->findGlobal(varName) != nullptr;
@@ -3741,12 +3842,30 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
             : unsignedInduction ? createConstant(static_cast<uint32_t>(value))
                                 : createConstant(static_cast<int32_t>(value));
     };
+    LoopContext exits{nullptr, nullptr};
+    if (earlyExit) {
+        const std::string serial = std::to_string(earlyExitCounter_++);
+        exits.flagged = true;
+        exits.breakFlag = "$break" + serial;
+        exits.continueFlag = "$continue" + serial;
+        nameToValue_[exits.breakFlag] = createConstant(false);
+        loopStack_.push(exits);
+    }
     for (int64_t value : iterations) {
         bind(value);
-        buildStmt(stmt->body.get());
+        if (earlyExit) {
+            nameToValue_[exits.continueFlag] = createConstant(false);
+            buildUnderExitFlags(stmt->body, false);
+        }
+        else buildStmt(stmt->body.get());
         if (currentBlock_->hasTerminator()) break;
         for (ExprNode* extra : extraIncrements)
             buildExpr(extra);
+    }
+    if (earlyExit) {
+        loopStack_.pop();
+        nameToValue_.erase(exits.breakFlag);
+        nameToValue_.erase(exits.continueFlag);
     }
     if (!currentBlock_->hasTerminator()) bind(final);
     blockDeclared_.pop_back();
@@ -4930,12 +5049,22 @@ void IRBuilder::buildBreakStmt(BreakStmt* stmt)
         error(stmt->loc, "break statement outside of loop");
         return;
     }
+    if (loopStack_.top().flagged)
+    {
+        nameToValue_[loopStack_.top().breakFlag] = createConstant(true);
+        return;
+    }
 
     emitBranch(loopStack_.top().breakTarget);
 }
 
 void IRBuilder::buildContinueStmt(ContinueStmt* stmt)
 {
+    if (!loopStack_.empty() && loopStack_.top().flagged)
+    {
+        nameToValue_[loopStack_.top().continueFlag] = createConstant(true);
+        return;
+    }
     if (loopStack_.empty() || !loopStack_.top().continueTarget)
     {
         error(stmt->loc, "continue statement outside of loop");
@@ -8170,32 +8299,35 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
 // join (a predicated result), and loops/switch need the general path's
 // control-flow milestone.  Each is refused BY NAME so the row stays a named
 // gap rather than a silent drop (the established compiler accepts all of them).
-static bool inlineBlockedShape(const StmtNode* stmt, std::string& why)
+static bool inlineBlockedShape(const StmtNode* stmt, std::string& why, bool inFor = false)
 {
     if (!stmt) return false;
     switch (stmt->kind)
     {
     case StmtKind::Return:   why = "a return inside control flow"; return true;
     case StmtKind::For:
-        // The statement builder will prove the trip sequence at the call site.
-        // Continue rejecting exits nested anywhere in the loop body beforehand.
-        return inlineBlockedShape(static_cast<const ForStmt*>(stmt)->body.get(), why);
+        // The statement builder will prove the trip sequence at the call
+        // site, and expands a break or continue of the loop with it
+        // (static-loop-early-exit); a loop it cannot prove is refused there.
+        return inlineBlockedShape(static_cast<const ForStmt*>(stmt)->body.get(), why, true);
     case StmtKind::While:
     case StmtKind::DoWhile:  why = "a loop"; return true;
     case StmtKind::Switch:
     case StmtKind::Case:
     case StmtKind::Default:  why = "a switch"; return true;
     case StmtKind::Break:
-    case StmtKind::Continue: why = "break/continue"; return true;
+    case StmtKind::Continue:
+        if (inFor) return false;
+        why = "break/continue"; return true;
     case StmtKind::Block:
         for (const auto& inner : static_cast<const BlockStmt*>(stmt)->statements)
-            if (inlineBlockedShape(inner.get(), why)) return true;
+            if (inlineBlockedShape(inner.get(), why, inFor)) return true;
         return false;
     case StmtKind::If:
     {
         const auto* ifs = static_cast<const IfStmt*>(stmt);
-        return inlineBlockedShape(ifs->thenBranch.get(), why) ||
-               inlineBlockedShape(ifs->elseBranch.get(), why);
+        return inlineBlockedShape(ifs->thenBranch.get(), why, inFor) ||
+               inlineBlockedShape(ifs->elseBranch.get(), why, inFor);
     }
     default:
         return false;

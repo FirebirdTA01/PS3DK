@@ -239,8 +239,16 @@ private:
     {
         IRBasicBlock* continueTarget;
         IRBasicBlock* breakTarget;
+        // A statically expanded loop has no blocks to branch to: its break
+        // and continue set these bool bindings, and the statements they
+        // skip are built under a guard on them (static-loop-early-exit).
+        bool flagged = false;
+        std::string breakFlag;
+        std::string continueFlag;
     };
     std::stack<LoopContext> loopStack_;
+    int earlyExitCounter_ = 0;
+    void buildUnderExitFlags(std::unique_ptr<StmtNode>& slot, bool continueToo);
 
     // Label counter for unique block names
     int labelCounter_ = 0;

@@ -31,6 +31,13 @@ The version stamped into builds is generated from the most recent
   the entry's struct input whole no longer needs the entry to have read every
   member first. A member the argument never assigned, and a helper's result
   passed straight in as the argument, are refused by name.
+- **`rsx-cg-compiler`: `break` and `continue` in a `for` loop with a known
+  trip count.** Such a loop is expanded iteration by iteration, and a body
+  with `break` or `continue` was refused, in the entry function and in a
+  helper. Each exit now sets a flag and the statements it skips, including
+  every later iteration after a `break`, are compiled under that flag. The
+  loop must declare its own induction variable and step with a single
+  expression; other loops keep the behaviour they had.
 
 ## [v0.28.8] — 2026-11-21
 
