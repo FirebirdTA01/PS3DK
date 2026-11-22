@@ -43,6 +43,8 @@ The version stamped into builds is generated from the most recent
   `1.5f * 4.0f` was folded to one constant, `1.5f * 4` was computed by the
   shader: a constant written as `1.8556f * 255 / 224` cost three
   instructions. Such arithmetic is now done at compile time.
+  A matrix whose rows are constants is read as inline constants instead of
+  being copied into registers a lane at a time.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The

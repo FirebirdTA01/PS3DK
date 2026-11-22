@@ -6018,6 +6018,39 @@ private:
 
         size_t operandIndex = 0;
         for (int row = 0; row < rows; ++row) {
+            // A row of float constants is one literal source, the same row a
+            // folded constant matrix gives (matrixRows below): nothing is
+            // computed for it.  It used to be copied into a register a lane
+            // at a time, four MOVs for a row the consumer reads once.
+            {
+                VSrc literalRow;
+                literalRow.kind = VSrcKind::Literal;
+                literalRow.literalLanes = static_cast<uint8_t>(cols);
+                bool constantRow = true;
+                for (int col = 0; col < cols && constantRow; ++col) {
+                    const auto* constant = dynamic_cast<const IRConstant*>(
+                        entry_.getValue(inst.operands[operandIndex + static_cast<size_t>(col)]));
+                    const float* value = constant ? std::get_if<float>(&constant->value) : nullptr;
+                    if (!value || constant->type.isVector() || constant->type.isMatrix())
+                        constantRow = false;
+                    else
+                        literalRow.literal[col] = *value;
+                }
+                // A row holding both +0 and -0 stays on the lane-by-lane
+                // path: the literal block is packed by float equality, which
+                // would give both lanes the first zero's sign.
+                bool plusZero = false, minusZero = false;
+                for (int col = 0; col < cols && constantRow; ++col)
+                    if (literalRow.literal[col] == 0.0f)
+                        (std::signbit(literalRow.literal[col]) ? minusZero : plusZero) = true;
+                if (plusZero && minusZero)
+                    constantRow = false;
+                if (constantRow) {
+                    mv.rowSrcs.push_back(literalRow);
+                    operandIndex += static_cast<size_t>(cols);
+                    continue;
+                }
+            }
             const int rowReg = newVReg();
             mv.rowSrcs.push_back(tempSrc(rowReg));
             for (int col = 0; col < cols; ++col, ++operandIndex) {
