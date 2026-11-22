@@ -5365,6 +5365,21 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
+            // A struct copied whole from a named struct (`V l = i;`) takes
+            // the members that source has bound so far: a write made to the
+            // source before the copy is part of the copied value
+            // (struct-value-argument).  Unbound members stay lazy.
+            std::string copiedFrom;
+            if (structInit && !isCall && storageKey(varDecl->initializer.get(), copiedFrom) &&
+                copiedFrom != varDecl->name)
+            {
+                const std::string from = copiedFrom + ".";
+                std::vector<std::pair<std::string, IRValueID>> members;
+                for (const auto& entry : nameToValue_)
+                    if (entry.first.compare(0, from.size(), from) == 0)
+                        members.emplace_back(varDecl->name + "." + entry.first.substr(from.size()), entry.second);
+                for (const auto& member : members) nameToValue_[member.first] = member.second;
+            }
         }
         else if (getStructFields(varDecl->type.get()))
         {
@@ -6443,14 +6458,54 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         // A uniform struct has leaf values, not a whole-struct SSA
         // operand. Defer named leaf capture until every argument has been
         // evaluated, but before any callee parameter is installed.
-        if (module_->shaderStage == ShaderStage::Vertex && calleeDecl &&
+        // Both profiles capture a struct whose every leaf is bound (a local
+        // the caller built): a fragment helper given one used to read entry
+        // attributes named after its own parameter (struct-value-argument).
+        // The matrix-field and uniform-struct captures stay vertex rules.
+        if (calleeDecl &&
             (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
             i < calleeDecl->parameters.size()) {
             const auto* param = calleeDecl->parameters[i].get();
             auto* argument = expr->arguments[i].get();
+            const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+            // A vertex helper never loads an attribute through its own
+            // parameter (struct-argument-binding), so the entry's struct
+            // input passed whole was refused unless the entry had already
+            // read every member.  Load the unread leaves here, as the
+            // entry's own reads; the capture below then binds them.
+            if (vertex && inlineStack_.empty() && argument->kind == ExprKind::Identifier &&
+                param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+                getStructFields(param->type.get()) && !containsMatrixField(param->type.get())) {
+                const auto* id = static_cast<IdentifierExpr*>(argument);
+                const auto* entry = id->resolvedDecl && id->resolvedDecl->kind == DeclKind::Parameter
+                    ? static_cast<const ParamDecl*>(id->resolvedDecl) : nullptr;
+                const auto plain = [&](const auto& self, TypeNode* t) -> bool {
+                    if (!t || t->isArray() || t->isSampler()) return false;
+                    const auto* fields = getStructFields(t);
+                    if (!fields) return true;
+                    for (const auto& field : *fields)
+                        if (!self(self, field.type.get())) return false;
+                    return !fields->empty();
+                };
+                const auto load = [&](const auto& self, TypeNode* t, const std::string& path) -> void {
+                    if (const auto* fields = getStructFields(t)) {
+                        for (const auto& field : *fields)
+                            self(self, field.type.get(), path.empty() ? field.name : path + "." + field.name);
+                        return;
+                    }
+                    const std::string key = id->name + "." + path;
+                    if (nameToValue_.count(key)) return;
+                    const IRValueID loaded = currentFunction_->allocateValueId();
+                    if (emitInputMemberLoad(entry, path, loaded)) nameToValue_[key] = loaded;
+                };
+                if (entry && entry->storage != StorageQualifier::Uniform &&
+                    entry->storage != StorageQualifier::Out && entry->storage != StorageQualifier::InOut &&
+                    plain(plain, entry->type.get()))
+                    load(load, entry->type.get(), "");
+            }
             if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
                 getStructFields(param->type.get()) &&
-                (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
+                ((vertex && (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument))) ||
                  hasBoundStructLeaves(param->type.get(), argument))) {
                 captureStructArgument[i] = true;
                 // Side-effect-free selections see completed-argument state.
@@ -7669,6 +7724,59 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 flattenedForCall.push_back(param->name);
             continue;
         }
+        // A BY-VALUE STRUCT PARAMETER IS ITS ARGUMENT'S LEAVES UNDER ITS OWN
+        // NAME (struct-value-argument).  A struct has no whole value here,
+        // only `name.member` bindings, and nothing renamed them, so inside
+        // the helper `q.a` meant one of two wrong things: the caller's own
+        // variable `q` when it had one (name capture), or - with no such
+        // name - a fresh entry load, which dropped every write the caller
+        // had made to the argument.  Measured against the established
+        // compiler: `l.a = i.b * 2; l.b = i.a * 3; f(l)` is 3*TEX0 + 2*TEX1
+        // there and was TEX0 + TEX1 here, exit 0.
+        //
+        // A leaf the caller never wrote is still loaded lazily, as the entry
+        // input it is, when the argument is (a path into) an entry struct
+        // parameter; for any other argument there is no input behind it and
+        // emitInputMemberLoad refuses by name.
+        if (!param->name.empty() && getStructFields(param->type.get()) &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
+        {
+            std::string source;
+            const bool keyed = argument && storageKey(argument, source);
+            if (!keyed || source != param->name)
+            {
+                const std::string to = param->name + ".";
+                for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                    if (it->first.compare(0, to.size(), to) == 0) it = nameToValue_.erase(it);
+                    else ++it;
+                if (keyed)
+                {
+                    const std::string from = source + ".";
+                    for (const auto& entry : savedNames)
+                        if (entry.first.compare(0, from.size(), from) == 0)
+                            nameToValue_[to + entry.first.substr(from.size())] = entry.second;
+                }
+            }
+            const ExprNode* root = argument;
+            while (root && root->kind == ExprKind::MemberAccess)
+                root = static_cast<const MemberAccessExpr*>(root)->object.get();
+            bool entryInput = false;
+            if (root && root->kind == ExprKind::Identifier)
+            {
+                const auto* decl = static_cast<const IdentifierExpr*>(root)->resolvedDecl;
+                if (decl && decl->kind == DeclKind::Parameter)
+                    entryInput = inlineStack_.empty() ||
+                        valueStructParams_.count(static_cast<const ParamDecl*>(decl)) == 0;
+            }
+            // A local copied whole from an entry struct input (`V l = i;`)
+            // carries that input's value: its unwritten members are still
+            // the entry's, as emitInputMemberLoad resolves them.
+            if (!entryInput && boundValue != InvalidIRValue)
+                for (const auto& entryParam : currentFunction_->parameters)
+                    if (entryParam.valueId == boundValue) entryInput = true;
+            if (entryInput) valueStructParams_.erase(param);
+            else valueStructParams_.insert(param);
+        }
         if (!param->name.empty())
             nameToValue_[param->name] = boundValue;
 
@@ -8818,6 +8926,16 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
             currentFunctionDecl_->parameters.end(), [param](const auto& p) { return p.get() == param; })) {
         error(param->loc, "uncaptured by-value struct member '" + param->name + "." + member +
               "' cannot be loaded as a vertex attribute (struct-argument-binding)");
+        return true;
+    }
+    // A helper parameter bound to a struct VALUE (a caller local, a call
+    // result) has no entry input behind an unwritten member: loading one
+    // would read whatever varying the member's semantic names.
+    if (!inlineStack_.empty() && valueStructParams_.count(param))
+    {
+        error(param->loc, "member '" + param->name + "." + member +
+              "' of a by-value struct argument is read but the argument never assigned it "
+              "(struct-value-argument)");
         return true;
     }
     const std::vector<StructField>* fields = getStructFields(param->type.get());
