@@ -13,8 +13,16 @@ project(sprx_segments_regression C ASM)
 # itself is gated by `prx-gen check` in the build. Hardware is the real test.
 #
 # Built from the shipped sample (add_subdirectory), not a copy, for both ABIs.
-# Each .fake.self is staged here with its .fake.sprx, because RPCS3 mounts
-# /app_home to the booted file's directory.
+# RPCS3 mounts /app_home to the booted file's directory, so each boot file is
+# staged in a directory holding only the module container it must load
+# (issue #20):
+#
+#   ./      <row>.fake.self   + <stem>.fake.sprx   rows sprx-segments[-lp64]
+#   raw/    <row>.elf         + <stem>.prx         rows sprx-segments-raw[-lp64]
+#   real/   <row>.self        + <stem>.sprx        rows sprx-segments-real[-lp64]
+#
+# The loader tries .sprx, .fake.sprx and .prx in turn and prints the path it
+# loaded; each row requires its own container's path.
 
 option(PS3TC_REGRESSION_HOST_STUB "Build with host stubs for CI syntax/link coverage" OFF)
 
@@ -34,16 +42,25 @@ endif()
 add_subdirectory("${_sample}" "${CMAKE_CURRENT_BINARY_DIR}/module-segments")
 
 set(_out "${CMAKE_CURRENT_BINARY_DIR}/module-segments")
+set(_dst "${CMAKE_CURRENT_SOURCE_DIR}")
+set(_stage)
+foreach(_sfx "" "-lp64")
+    string(REPLACE "-" "_" _msfx "${_sfx}")
+    set(_stem "sprx_segments${_msfx}")
+    set(_ldr "sprx-segments-loader${_sfx}")
+    set(_row "sprx-segments${_sfx}")
+    list(APPEND _stage
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.fake.sprx" "${_dst}/${_stem}.fake.sprx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.fake.self" "${_dst}/${_row}.fake.self"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.prx" "${_dst}/raw/${_stem}.prx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.elf" "${_dst}/raw/${_row}.elf"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.sprx" "${_dst}/real/${_stem}.sprx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.self" "${_dst}/real/${_row}.self")
+endforeach()
 add_custom_target(sprx-segments ALL
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/sprx_segments.fake.sprx" "${CMAKE_CURRENT_SOURCE_DIR}/sprx_segments.fake.sprx"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/sprx-segments-loader.fake.self" "${CMAKE_CURRENT_SOURCE_DIR}/sprx-segments.fake.self"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/sprx_segments_lp64.fake.sprx" "${CMAKE_CURRENT_SOURCE_DIR}/sprx_segments_lp64.fake.sprx"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/sprx-segments-loader-lp64.fake.self" "${CMAKE_CURRENT_SOURCE_DIR}/sprx-segments-lp64.fake.self"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_dst}/raw" "${_dst}/real"
+    ${_stage}
     DEPENDS sprx-segments-module sprx-segments-loader
             sprx-segments-module-lp64 sprx-segments-loader-lp64
-    COMMENT "sprx-segments: staging the modules beside their loaders"
+    COMMENT "sprx-segments: staging each container beside its loader"
     VERBATIM)

@@ -149,6 +149,13 @@ The version stamped into builds is generated from the most recent
   caller (the plugin loader's) each ends with the bare exit system call, and
   `module_stop` first sends the final stop report. A loader runs the
   game-process path. The pattern is documented in `docs/tools/prx-gen.md`.
+- The regression battery boots PRX modules from all three containers
+  (#20): besides the `.fake.self` / `.fake.sprx` pairs, the `sprx-segments`
+  and `sprx-vsh-plugin` rows boot a raw `.elf` that loads the unsigned
+  `.prx` and a real `.self` that loads the real-signed `.sprx`, each staged
+  alone with its loader (six new rows: both ABIs for `sprx-segments`, ILP32
+  for `sprx-vsh-plugin`). `sprx-load` and
+  `sprx-module-macros` still boot only the fake pair.
 - `samples/gcm/hello-ppu-prof-auto-verdicts` stops at configure with a message
   naming `-DPS3_PROF_AUTO=ON` when `PS3_PROF_AUTO` is off, instead of building
   a sample that records nothing. `scripts/build-all-samples.sh` configures it

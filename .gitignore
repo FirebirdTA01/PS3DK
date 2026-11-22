@@ -20,6 +20,7 @@ samples/**/*.pkg
 samples/**/*.gnpdrm.pkg
 tests/regression/**/*.elf
 tests/regression/**/*.self
+tests/regression/**/*.prx
 
 # Derived sample assets copied from sdk/assets at pkg-build time.
 samples/sysutil/hello-ppu-png/pkg_files/USRDIR/ps3dk.png

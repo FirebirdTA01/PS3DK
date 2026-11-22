@@ -10,8 +10,13 @@ project(sprx_vsh_plugin_regression C)
 # The plugin loader's path (no caller, no TLS) runs only on a console.
 #
 # Built from the shipped sample (add_subdirectory), not a copy, for both ABIs.
-# Each .fake.self is staged here with its .fake.sprx, because RPCS3 mounts
-# /app_home to the booted file's directory.
+# RPCS3 mounts /app_home to the booted file's directory, so each boot file is
+# staged in a directory holding only the plugin container it must load
+# (issue #20):
+#
+#   ./      <row>.fake.self   + <stem>.fake.sprx   rows sprx-vsh-plugin[-lp64]
+#   raw/    <row>.elf         + <stem>.prx         rows sprx-vsh-plugin-raw[-lp64]
+#   real/   <row>.self        + <stem>.sprx        rows sprx-vsh-plugin-real[-lp64]
 
 option(PS3TC_REGRESSION_HOST_STUB "Build with host stubs for CI syntax/link coverage" OFF)
 
@@ -31,16 +36,25 @@ endif()
 add_subdirectory("${_sample}" "${CMAKE_CURRENT_BINARY_DIR}/vsh-plugin")
 
 set(_out "${CMAKE_CURRENT_BINARY_DIR}/vsh-plugin")
+set(_dst "${CMAKE_CURRENT_SOURCE_DIR}")
+set(_stage)
+foreach(_sfx "" "-lp64")
+    string(REPLACE "-" "_" _msfx "${_sfx}")
+    set(_stem "vsh_plugin${_msfx}")
+    set(_ldr "vsh-plugin-loader${_sfx}")
+    set(_row "sprx-vsh-plugin${_sfx}")
+    list(APPEND _stage
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.fake.sprx" "${_dst}/${_stem}.fake.sprx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.fake.self" "${_dst}/${_row}.fake.self"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.prx" "${_dst}/raw/${_stem}.prx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.elf" "${_dst}/raw/${_row}.elf"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_stem}.sprx" "${_dst}/real/${_stem}.sprx"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_out}/${_ldr}.self" "${_dst}/real/${_row}.self")
+endforeach()
 add_custom_target(sprx-vsh-plugin ALL
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/vsh_plugin.fake.sprx" "${CMAKE_CURRENT_SOURCE_DIR}/vsh_plugin.fake.sprx"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/vsh-plugin-loader.fake.self" "${CMAKE_CURRENT_SOURCE_DIR}/sprx-vsh-plugin.fake.self"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/vsh_plugin_lp64.fake.sprx" "${CMAKE_CURRENT_SOURCE_DIR}/vsh_plugin_lp64.fake.sprx"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_out}/vsh-plugin-loader-lp64.fake.self" "${CMAKE_CURRENT_SOURCE_DIR}/sprx-vsh-plugin-lp64.fake.self"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_dst}/raw" "${_dst}/real"
+    ${_stage}
     DEPENDS vsh-plugin-module vsh-plugin-loader
             vsh-plugin-module-lp64 vsh-plugin-loader-lp64
-    COMMENT "sprx-vsh-plugin: staging the plugins beside their loaders"
+    COMMENT "sprx-vsh-plugin: staging each container beside its loader"
     VERBATIM)
