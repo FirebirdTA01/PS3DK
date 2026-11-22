@@ -206,7 +206,13 @@ SECTIONS
 	.opd		  : ALIGN(4) { KEEP (*(.opd)) }
 	.branch_lt	  : ALIGN(8) { *(.branch_lt) }
 	__lv2_got_start = .;
-	.got		  : ALIGN(8) { *(.got .toc) }
+	/* The trailing word keeps .got even when no input has TOC entries.
+	 * The linker drops an empty .got (a symbol assignment alone does not
+	 * keep it), and then bases .TOC. on the first writable section it
+	 * finds: .lib.stub, in the code segment.  Every TOC-relative access
+	 * to .rodata or .data would then cross segments, and prx-gen refuses
+	 * the module. */
+	.got		  : ALIGN(8) { *(.got .toc) QUAD(0) }
 	__lv2_toc_bias = __lv2_got_start + 0x8000 - .TOC.;
 	.toc.sceStub  : { KEEP (*(.toc.sceStub)) KEEP (*(SORT(.toc.sceStub.*))) }
 

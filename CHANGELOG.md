@@ -91,6 +91,12 @@ The version stamped into builds is generated from the most recent
   executable segment. `prx-gen build` refuses a writable and executable
   segment and sets the SPU bits. Modules must be relinked with this SDK.
 
+- **PRX modules with no TOC entries of their own.** With nothing in `.got`,
+  the linker dropped the section and based the TOC on `.lib.stub`, in the code
+  segment, so every TOC-relative access to `.rodata` or `.data` crossed
+  segments and `prx-gen` refused the module (a module that only imports a
+  liblv2 function was enough). `lv2-prx.ld` now always keeps `.got`, with one
+  word, in the data segment.
 - **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
   toolchain files now name one project-include file, which includes the
   selected profiler modules in order, so `PS3_PROF_WAITS`,
