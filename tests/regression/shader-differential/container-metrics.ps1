@@ -104,10 +104,10 @@ function Add-ContainerMetricsRow(
         source = $Source
         uniform_set = $UniformSet
         ours_instruction_count = $ours.instruction_count
-        reference_instruction_count = $ref.instruction_count
+        established_instruction_count = $ref.instruction_count
         instruction_delta = $ours.instruction_count - $ref.instruction_count
         ours_register_count = $ours.register_count
-        reference_register_count = $ref.register_count
+        established_register_count = $ref.register_count
         register_delta = $ours.register_count - $ref.register_count
         byte_identical = [bool]$ByteIdentical
         staged = [bool]$Staged
@@ -206,7 +206,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
                     if ($row.source_sha256 -cnotin @($versions.source_sha256)) { $sourceMismatches++ }
                     if ($row.compile_flags -cnotin @($versions.compile_flags)) { $flagMismatches++ }
                     if ($row.resolved_includes -cnotin @($versions.resolved_includes)) { $includeMismatches++ }
-                    if ($row.oracle_sha256 -cnotin @($versions.oracle_sha256)) { $oracleMismatches++ }
+                    if ($row.established_sha256 -cnotin @($versions.established_sha256)) { $oracleMismatches++ }
                 }
                 continue
             }

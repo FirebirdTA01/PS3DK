@@ -25,8 +25,8 @@ function Get-ContainerMetricsAllowanceMatch([object[]]$Rows, [object[]]$Baseline
         }
     }
     $identity = @('role', 'name', 'profile', 'source', 'uniform_set')
-    $metrics = @('ours_instruction_count', 'reference_instruction_count', 'instruction_delta',
-                 'ours_register_count', 'reference_register_count', 'register_delta')
+    $metrics = @('ours_instruction_count', 'established_instruction_count', 'instruction_delta',
+                 'ours_register_count', 'established_register_count', 'register_delta')
     function Key($row) {
         foreach ($field in $identity) {
             if ($row.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($row.$field) -or $row.$field.Contains('|')) {
@@ -41,8 +41,8 @@ function Get-ContainerMetricsAllowanceMatch([object[]]$Rows, [object[]]$Baseline
             Integer $counts.$field "$where.$field"
             if ($field -like '*_count' -and $counts.$field -lt 0) { Bad "$where.$field is negative" }
         }
-        if ($counts.instruction_delta -ne ([long]$counts.ours_instruction_count - $counts.reference_instruction_count) -or
-            $counts.register_delta -ne ([long]$counts.ours_register_count - $counts.reference_register_count)) {
+        if ($counts.instruction_delta -ne ([long]$counts.ours_instruction_count - $counts.established_instruction_count) -or
+            $counts.register_delta -ne ([long]$counts.ours_register_count - $counts.established_register_count)) {
             Bad "$where has inconsistent deltas"
         }
     }

@@ -47,9 +47,9 @@ try {
         throw "reference tree count line wrong: $line"
     }
 
-    $pairsDefault = Get-ReferencePairsPathForStage `
-        -ReferencePairs "" `
-        -DefaultPath "reference-pairs.txt" `
+    $pairsDefault = Get-EstablishedPairsPathForStage `
+        -EstablishedPairs "" `
+        -DefaultPath "established-pairs.txt" `
         -ReferenceTreeCorpus $true `
         -ReferenceCorpus $false `
         -PathPairs $false
@@ -57,13 +57,13 @@ try {
         throw "tree-only stage should not implicitly stage curated reference pairs: $pairsDefault"
     }
 
-    $mixedDefault = Get-ReferencePairsPathForStage `
-        -ReferencePairs "" `
-        -DefaultPath "reference-pairs.txt" `
+    $mixedDefault = Get-EstablishedPairsPathForStage `
+        -EstablishedPairs "" `
+        -DefaultPath "established-pairs.txt" `
         -ReferenceTreeCorpus $true `
         -ReferenceCorpus $true `
         -PathPairs $false
-    if ($mixedDefault -ne "reference-pairs.txt") {
+    if ($mixedDefault -ne "established-pairs.txt") {
         throw "mixed reference stage should preserve curated reference-pair default: $mixedDefault"
     }
 } finally {

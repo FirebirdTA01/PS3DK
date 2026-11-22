@@ -62,7 +62,7 @@ try {
         else { $fail++; Write-Host 'FAIL: current must-reject schema' }
     }
     # Preserve every shader/set witness formerly reached by curated path pairs.
-    $reference = @(Get-Content (Join-Path $here 'reference-pairs.txt') | Where-Object { $_ -and -not $_.StartsWith('#') })
+    $reference = @(Get-Content (Join-Path $here 'established-pairs.txt') | Where-Object { $_ -and -not $_.StartsWith('#') })
     foreach ($row in @(Get-Content (Join-Path $here 'path-pairs.txt') | Where-Object { $_ -and -not $_.StartsWith('#') })) {
         $fields = $row.Split('|'); $wanted = $fields[0] + '|' + $fields[1]
         $matches = @($reference | Where-Object { $f=$_.Split('|'); ($f[0]+'|'+$f[1]) -ceq $wanted })

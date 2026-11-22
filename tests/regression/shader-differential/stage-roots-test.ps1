@@ -28,7 +28,7 @@ function New-Tree([string]$name, [bool]$withCorpus) {
     $root = Join-Path $work $name
     $rig = Join-Path $root "tests\regression\shader-differential"
     New-Item -ItemType Directory -Force $rig | Out-Null
-    Set-Content -LiteralPath (Join-Path $rig "reference-pairs.txt") -Value "# $name" -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $rig "established-pairs.txt") -Value "# $name" -Encoding Ascii
     if ($withCorpus) {
         New-Item -ItemType Directory -Force (Join-Path $root "build\shader-corpus") | Out-Null
     }
@@ -96,7 +96,7 @@ try {
     $linked = Join-Path $work "linked"
     $null = & git -C $primary worktree add -q --detach $linked 2>&1
     $ErrorActionPreference = $prevEap
-    if (-not (Test-Path -LiteralPath (Join-Path $linked "tests\regression\shader-differential\reference-pairs.txt"))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $linked "tests\regression\shader-differential\established-pairs.txt"))) {
         throw "could not build a linked worktree for the primary-fallback case"
     }
     $r = Resolve-StageRoots -ScriptDir $scriptRig -RepoRoot $linked

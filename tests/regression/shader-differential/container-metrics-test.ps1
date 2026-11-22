@@ -81,10 +81,10 @@ try {
     if ($rows.Count -ne 1) { throw "expected one metrics row" }
     $row = $rows[0]
     if ($row.ours_instruction_count -ne 37 -or
-        $row.reference_instruction_count -ne 21 -or
+        $row.established_instruction_count -ne 21 -or
         $row.instruction_delta -ne 16 -or
         $row.ours_register_count -ne 3 -or
-        $row.reference_register_count -ne 2 -or
+        $row.established_register_count -ne 2 -or
         $row.register_delta -ne 1) {
         throw "comparison row wrong: $($row | ConvertTo-Json -Compress)"
     }

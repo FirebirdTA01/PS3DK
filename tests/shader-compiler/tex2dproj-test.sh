@@ -23,9 +23,16 @@
 #
 # CONTROL: every accept row fails on a compiler before the TXP lowering
 # ("unsupported IR op sampleproj"), the refusal row is checked against a
-# stub that accepts everything, and with PS3_REF_CG_COMPILER set the rows
-# in BYTE_IDENTICAL must equal the established compiler's container byte for byte.
-set -euo pipefail
+ # stub that accepts everything, and with PS3_ESTABLISHED_CG_COMPILER set the rows
+ # in BYTE_IDENTICAL must equal the established compiler's container byte for byte.
+ # (PS3_REF_CG_COMPILER is the pre-rename identifier; it still works as a fallback.)
+ set -euo pipefail
+
+ # Deprecated-name fallback: honor PS3_REF_CG_COMPILER when the new name is unset.
+ if [[ -z "${PS3_ESTABLISHED_CG_COMPILER:-}" && -n "${PS3_REF_CG_COMPILER:-}" ]]; then
+   PS3_ESTABLISHED_CG_COMPILER="$PS3_REF_CG_COMPILER"
+   export PS3_ESTABLISHED_CG_COMPILER
+ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 here="$repo_root/tests/shader-compiler"
@@ -154,10 +161,10 @@ refuse "tex2Dproj under sce_vp_rsx (the established compiler accepts; a VP tex2D
 
 # ------------------------------------------------ reference byte identity
 BYTE_IDENTICAL="fp_txp_proj4_out_f fp_txp_half_out_f"
-if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
-    [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
+if [[ -n "${PS3_ESTABLISHED_CG_COMPILER:-}" ]]; then
+    [[ -x "$PS3_ESTABLISHED_CG_COMPILER" ]] || fail "PS3_ESTABLISHED_CG_COMPILER is not executable"
     for stem in $(ls "$shaders" | grep -E '^fp_txp_.*_f\.cg$' | grep -v cube | sed 's/\.cg$//'); do
-        "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
+        "$PS3_ESTABLISHED_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
             || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi

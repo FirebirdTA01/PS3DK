@@ -82,15 +82,25 @@ function Format-ReferenceTreeCorpusSummary(
         $CandidateCount, $OursRefused, $ReferenceRefused, $BothRefused, $ByteIdentical, $PairsStaged, $ProbeRows)
 }
 
-function Get-ReferencePairsPathForStage(
-    [string]$ReferencePairs,
+function Get-EstablishedPairsPathForStage(
+    [string]$EstablishedPairs,
     [string]$DefaultPath,
     [bool]$ReferenceTreeCorpus,
     [bool]$ReferenceCorpus,
     [bool]$PathPairs
 ) {
-    if ($ReferencePairs) { return $ReferencePairs }
+    if ($EstablishedPairs) { return $EstablishedPairs }
     if ($ReferenceTreeCorpus -and -not ($ReferenceCorpus -or $PathPairs)) { return "-" }
+    return $DefaultPath
+}
+
+# The curated pairs list was renamed reference-pairs.txt -> established-pairs.txt.
+# Old checkouts (and any caller that still spells it the old way) are readable
+# as a fallback, so the new name wins and the old one is honored when present.
+function Resolve-EstablishedPairsFile([string]$DefaultPath) {
+    if ($DefaultPath -and (Test-Path -LiteralPath $DefaultPath -PathType Leaf)) { return $DefaultPath }
+    $old = Join-Path (Split-Path -Parent $DefaultPath) "reference-pairs.txt"
+    if (Test-Path -LiteralPath $old -PathType Leaf) { return $old }
     return $DefaultPath
 }
 
@@ -134,9 +144,11 @@ function Resolve-StageRoots(
     $rig = Join-Path $repoRoot "tests\regression\shader-differential"
     # A root without the rig's curated list is not a tree this stager can
     # judge; a typo must not fall through to staging nothing from the wrong
-    # place.
-    if (-not (Test-Path -LiteralPath (Join-Path $rig "reference-pairs.txt") -PathType Leaf)) {
-        throw "-RepoRoot does not hold a shader-differential rig (no tests\regression\shader-differential\reference-pairs.txt under $repoRoot)"
+    # place.  The list was renamed reference-pairs.txt -> established-pairs.txt;
+    # honor either so old checkouts still stage.
+    if ((-not (Test-Path -LiteralPath (Join-Path $rig "established-pairs.txt") -PathType Leaf)) -and
+        (-not (Test-Path -LiteralPath (Join-Path $rig "reference-pairs.txt") -PathType Leaf))) {
+        throw "-RepoRoot does not hold a shader-differential rig (no tests\regression\shader-differential\established-pairs.txt (or legacy reference-pairs.txt) under $repoRoot)"
     }
 
     $corpusRoot = ""
