@@ -6855,6 +6855,26 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         return f;
     }
 
+    // fwidth(x), measured on the established compiler: DDX, DDY, then one MAX
+    // of the two magnitudes - the larger of |ddx(x)| and |ddy(x)|, not their
+    // sum.  A user function of that name is called as written.
+    {
+        const bool userFwidth = expr->resolvedFunction &&
+            expr->resolvedFunction->kind == DeclKind::Function &&
+            !static_cast<const FunctionDecl*>(expr->resolvedFunction)->isIntrinsic;
+        if (expr->functionName == "fwidth" && !userFwidth && expr->arguments.size() == 1)
+        {
+            const IRTypeInfo resultType = getExprType(expr);
+            const IRValueID x = buildExpr(expr->arguments[0].get());
+            if (x == InvalidIRValue) return InvalidIRValue;
+            const IRValueID dx = emitInstruction(IROp::Ddx, resultType, {x}, expr->loc);
+            const IRValueID dy = emitInstruction(IROp::Ddy, resultType, {x}, expr->loc);
+            const IRValueID ax = emitInstruction(IROp::Abs, resultType, {dx}, expr->loc);
+            const IRValueID ay = emitInstruction(IROp::Abs, resultType, {dy}, expr->loc);
+            return emitInstruction(IROp::Max, resultType, {ax, ay}, expr->loc);
+        }
+    }
+
     // Check for built-in function
     auto builtinOp = builtinToIROp(expr->functionName);
 
