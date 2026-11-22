@@ -181,14 +181,22 @@ def src_slots(w):
     return out
 
 
-def dead_writes(instrs, outputs):
+def dead_writes(instrs, outputs, loops=()):
+    # `loops` holds the (first, end) instruction range of each hardware loop
+    # body.  A body runs again, so a write in it is also read by any
+    # instruction of the same body, earlier ones included: the value a loop
+    # carries to its next iteration is written last and read first.
     dead = []
     for n, w in enumerate(instrs):
         slot = dst_slot(w)
         if slot is None or slot in outputs:
             continue
-        if not any(slot in src_slots(later) for later in instrs[n + 1:]):
-            dead.append((n, slot))
+        if any(slot in src_slots(later) for later in instrs[n + 1:]):
+            continue
+        if any(first <= n < end and any(slot in src_slots(other) for other in instrs[first:end])
+               for first, end in loops):
+            continue
+        dead.append((n, slot))
     return dead
 
 
@@ -199,6 +207,12 @@ def dead_writes(instrs, outputs):
 control = [[0x202, 0, 0, 0], [0x204, 0, 0, 0]]
 assert dead_writes(control, {0, 1}) == [(1, 2)]
 assert dead_writes(control, {0}) == [(0, 1), (1, 2)]
+# A loop body that reads R1 and then writes it carries the value round: live
+# inside the loop's range, dead when the same two instructions are no loop.
+carry = [[0x200, 0x4, 0, 0], [0x202, 0, 0, 0]]
+assert dead_writes(carry, {0}) == [(1, 1)]
+assert dead_writes(carry, {0}, [(0, 2)]) == []
+assert dead_writes(carry, {0}, [(0, 1)]) == [(1, 1)]
 
 
 work = sys.argv[1]
@@ -225,15 +239,25 @@ for name in sorted(os.listdir(work)):
         continue
     checked += 1
     instrs, i = [], 0
+    at_word, loop_words = {}, []
     while i < len(words):
         w = words[i]
+        at_word[i] = len(instrs)
+        # LOOP (branch bit, opcode 3): hw[3] is the dword index of the first
+        # instruction after the body.
+        if (w[2] >> 31) & 1 and (w[0] >> 24) & 0x3F == 0x03:
+            loop_words.append((len(instrs) + 1, (w[3] & 0x7FFFFFFF) // 4))
         # A source of register type CONST names an inline constant block:
         # sixteen bytes of DATA that must not be walked as an opcode.
         consts = sum(1 for s in (1, 2, 3) if (w[s] & 3) == 2)
         instrs.append(w)
         i += 1 + (1 if consts else 0)
 
-    dead = dead_writes(instrs, outputs)
+    at_word[len(words)] = len(instrs)
+    loops = [(first, at_word[end]) for first, end in loop_words if end in at_word]
+    if len(loops) != len(loop_words):
+        raise SystemExit("FAIL: %s has a LOOP whose target is not an instruction" % name)
+    dead = dead_writes(instrs, outputs, loops)
 
     # log name is the repo-relative path with '/' -> '_', plus '.log'
     shader = name.split("shaders_")[-1]

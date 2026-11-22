@@ -2540,6 +2540,58 @@ void IRBuilder::buildStmt(StmtNode* stmt)
     }
 }
 
+namespace { bool stmtContainsBreakOrContinue(StmtNode* stmt); }
+
+// Build `slot` as the exit flags of the innermost statically expanded loop
+// allow (static-loop-early-exit): not at all when a flag is known set,
+// directly when every flag is known clear, otherwise inside `if (!flag)`.
+// The break flag guards a whole iteration; the rest of a block after a
+// statement that may exit is guarded by the continue flag as well.  The
+// statement is lent to the guard for the build and handed back, so the tree
+// is unchanged for the next expansion of the same loop.
+void IRBuilder::buildUnderExitFlags(std::unique_ptr<StmtNode>& slot, bool continueToo)
+{
+    const LoopContext ctx = loopStack_.top();
+    std::vector<std::string> guards;
+    for (const std::string* flag : {&ctx.breakFlag, continueToo ? &ctx.continueFlag : nullptr})
+    {
+        if (!flag || flag->empty()) continue;
+        const auto bound = nameToValue_.find(*flag);
+        if (bound == nameToValue_.end()) continue;
+        const auto* constant = dynamic_cast<IRConstant*>(currentFunction_->getValue(bound->second));
+        if (constant && std::holds_alternative<bool>(constant->value))
+        {
+            if (std::get<bool>(constant->value)) return;
+            continue;
+        }
+        guards.push_back(*flag);
+    }
+    if (guards.empty())
+    {
+        buildStmt(slot.get());
+        return;
+    }
+    const SourceLocation loc = slot->loc;
+    auto boolType = std::make_shared<TypeNode>();
+    boolType->baseType = BaseType::Bool;
+    std::unique_ptr<StmtNode> wrapped = std::move(slot);
+    for (auto guard = guards.rbegin(); guard != guards.rend(); ++guard)
+    {
+        auto flag = std::make_unique<IdentifierExpr>(loc, *guard);
+        flag->resolvedType = boolType;
+        auto clear = std::make_unique<UnaryExpr>(loc, UnaryOp::LogicalNot, std::move(flag));
+        clear->resolvedType = boolType;
+        wrapped = std::make_unique<IfStmt>(loc, std::move(clear), std::move(wrapped));
+    }
+    buildStmt(wrapped.get());
+    for (size_t k = 0; k < guards.size(); ++k)
+    {
+        std::unique_ptr<StmtNode> inner = std::move(static_cast<IfStmt*>(wrapped.get())->thenBranch);
+        wrapped = std::move(inner);
+    }
+    slot = std::move(wrapped);
+}
+
 void IRBuilder::buildBlockStmt(BlockStmt* stmt)
 {
     // The fourth row of ScopeState's boundary table: a block's own
@@ -2547,7 +2599,7 @@ void IRBuilder::buildBlockStmt(BlockStmt* stmt)
     // the declarators are built (no pre-scan - see blockDeclared_).
     const ScopeState pre = scope_;
     blockDeclared_.emplace_back();
-    for (auto& s : stmt->statements)
+    for (size_t k = 0; k < stmt->statements.size(); ++k)
     {
         // A selected literal arm can return directly in the entry block.
         // Its suffix is unreachable, but block bindings still unwind below.
@@ -2555,7 +2607,25 @@ void IRBuilder::buildBlockStmt(BlockStmt* stmt)
             currentFunction_->isEntryPoint && currentBlock_->hasTerminator() &&
             currentBlock_->instructions.back()->op == IROp::Return)
             break;
-        buildStmt(s.get());
+        StmtNode* s = stmt->statements[k].get();
+        buildStmt(s);
+        // In a statically expanded loop a statement that may break or
+        // continue leaves the rest of its block conditional on the exit
+        // flags (static-loop-early-exit).  The rest is lent to a block of
+        // its own for the build and handed back.
+        if (!loopStack_.empty() && loopStack_.top().flagged &&
+            k + 1 < stmt->statements.size() && stmtContainsBreakOrContinue(s))
+        {
+            auto rest = std::make_unique<BlockStmt>(stmt->statements[k + 1]->loc);
+            for (size_t j = k + 1; j < stmt->statements.size(); ++j)
+                rest->statements.push_back(std::move(stmt->statements[j]));
+            std::unique_ptr<StmtNode> slot = std::move(rest);
+            buildUnderExitFlags(slot, true);
+            auto* lent = static_cast<BlockStmt*>(slot.get());
+            for (size_t j = 0; j < lent->statements.size(); ++j)
+                stmt->statements[k + 1 + j] = std::move(lent->statements[j]);
+            break;
+        }
     }
     const std::unordered_set<std::string> declared = std::move(blockDeclared_.back());
     blockDeclared_.pop_back();
@@ -3242,6 +3312,195 @@ bool stmtContainsBreakOrContinue(StmtNode* stmt)
     }
 }
 
+// The size of a loop body as the established compiler weighs it when it
+// chooses between expanding a fixed-count loop and emitting a hardware loop
+// (measured on fragment programs: a loop is expanded while
+// trips * (cost + 1) <= 150).  One per operation - an arithmetic or
+// comparison operator, a compound assignment, a swizzle, a conversion, an
+// intrinsic call - with lerp counting four; names, literals and a plain
+// assignment are free, and a helper call costs its body.  Constructors,
+// ifs and nested loops are not measured and are estimated the same way, so
+// a loop near the boundary may be chosen differently.
+constexpr long kLoopCostCap = 1000000;
+
+long loopStmtCost(const StmtNode* stmt, int depth);
+
+long loopExprCost(const ExprNode* e, int depth)
+{
+    if (!e) return 0;
+    if (depth > 32) return kLoopCostCap;
+    long cost = 0;
+    switch (e->kind)
+    {
+    case ExprKind::Binary: {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        cost = (b->op == BinaryOp::Assign || b->op == BinaryOp::Comma) ? 0 : 1;
+        cost += loopExprCost(b->left.get(), depth) + loopExprCost(b->right.get(), depth);
+        break;
+    }
+    case ExprKind::Unary: {
+        auto* u = static_cast<const UnaryExpr*>(e);
+        const bool literal = u->operand && u->operand->kind == ExprKind::Literal;
+        cost = (literal ? 0 : 1) + loopExprCost(u->operand.get(), depth);
+        break;
+    }
+    case ExprKind::Call: {
+        auto* c = static_cast<const CallExpr*>(e);
+        for (const auto& arg : c->arguments) cost += loopExprCost(arg.get(), depth);
+        const FunctionDecl* fn = c->resolvedFunction && c->resolvedFunction->kind == DeclKind::Function
+            ? static_cast<const FunctionDecl*>(c->resolvedFunction) : nullptr;
+        if (fn && fn->body) cost += loopStmtCost(fn->body.get(), depth + 1);
+        else cost += c->functionName == "lerp" ? 4 : 1;
+        break;
+    }
+    case ExprKind::MemberAccess: {
+        auto* m = static_cast<const MemberAccessExpr*>(e);
+        cost = ((m->isSwizzle || m->isMatrixSwizzle) ? 1 : 0) + loopExprCost(m->object.get(), depth);
+        break;
+    }
+    case ExprKind::Index: {
+        auto* i = static_cast<const IndexExpr*>(e);
+        cost = 1 + loopExprCost(i->array.get(), depth) + loopExprCost(i->index.get(), depth);
+        break;
+    }
+    case ExprKind::Ternary: {
+        auto* t = static_cast<const TernaryExpr*>(e);
+        cost = 1 + loopExprCost(t->condition.get(), depth) + loopExprCost(t->thenExpr.get(), depth) +
+               loopExprCost(t->elseExpr.get(), depth);
+        break;
+    }
+    case ExprKind::Cast:
+        cost = 1 + loopExprCost(static_cast<const CastExpr*>(e)->operand.get(), depth);
+        break;
+    case ExprKind::Constructor: {
+        bool built = false;
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments) {
+            cost += loopExprCost(arg.get(), depth);
+            if (arg && arg->kind != ExprKind::Literal) built = true;
+        }
+        if (built) cost += 1;
+        break;
+    }
+    default:
+        break;
+    }
+    return std::min(cost, kLoopCostCap);
+}
+
+long loopStmtCost(const StmtNode* stmt, int depth)
+{
+    if (!stmt) return 0;
+    long cost = 0;
+    switch (stmt->kind)
+    {
+    case StmtKind::Expr:
+        cost = loopExprCost(static_cast<const ExprStmt*>(stmt)->expr.get(), depth);
+        break;
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(stmt)->declarations)
+            if (d && d->kind == DeclKind::Variable)
+                cost += loopExprCost(static_cast<const VarDecl*>(d.get())->initializer.get(), depth);
+        break;
+    case StmtKind::Block:
+        for (const auto& s : static_cast<const BlockStmt*>(stmt)->statements)
+            cost += loopStmtCost(s.get(), depth);
+        break;
+    case StmtKind::If: {
+        auto* i = static_cast<const IfStmt*>(stmt);
+        cost = loopExprCost(i->condition.get(), depth) + loopStmtCost(i->thenBranch.get(), depth) +
+               loopStmtCost(i->elseBranch.get(), depth);
+        break;
+    }
+    case StmtKind::For: {
+        auto* f = static_cast<const ForStmt*>(stmt);
+        cost = loopStmtCost(f->init.get(), depth) + loopExprCost(f->condition.get(), depth) +
+               loopExprCost(f->increment.get(), depth) + loopStmtCost(f->body.get(), depth);
+        break;
+    }
+    case StmtKind::Return:
+        cost = loopExprCost(static_cast<const ReturnStmt*>(stmt)->value.get(), depth);
+        break;
+    default:
+        break;
+    }
+    return std::min(cost, kLoopCostCap);
+}
+
+// Whether an expression holds an index that is not a literal (`a[i]`,
+// `m[i + 1]`).  A loop whose body indexes by its induction has to be
+// expanded: only then is every index a constant.
+bool exprHasComputedIndex(const ExprNode* e)
+{
+    if (!e) return false;
+    switch (e->kind)
+    {
+    case ExprKind::Binary: {
+        auto* b = static_cast<const BinaryExpr*>(e);
+        return exprHasComputedIndex(b->left.get()) || exprHasComputedIndex(b->right.get());
+    }
+    case ExprKind::Unary:
+        return exprHasComputedIndex(static_cast<const UnaryExpr*>(e)->operand.get());
+    case ExprKind::Call:
+        for (const auto& arg : static_cast<const CallExpr*>(e)->arguments)
+            if (exprHasComputedIndex(arg.get())) return true;
+        return false;
+    case ExprKind::MemberAccess:
+        return exprHasComputedIndex(static_cast<const MemberAccessExpr*>(e)->object.get());
+    case ExprKind::Index: {
+        auto* i = static_cast<const IndexExpr*>(e);
+        return !i->index || i->index->kind != ExprKind::Literal || exprHasComputedIndex(i->array.get());
+    }
+    case ExprKind::Ternary: {
+        auto* t = static_cast<const TernaryExpr*>(e);
+        return exprHasComputedIndex(t->condition.get()) || exprHasComputedIndex(t->thenExpr.get()) ||
+               exprHasComputedIndex(t->elseExpr.get());
+    }
+    case ExprKind::Cast:
+        return exprHasComputedIndex(static_cast<const CastExpr*>(e)->operand.get());
+    case ExprKind::Constructor:
+        for (const auto& arg : static_cast<const ConstructorExpr*>(e)->arguments)
+            if (exprHasComputedIndex(arg.get())) return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+bool stmtHasComputedIndex(const StmtNode* stmt)
+{
+    if (!stmt) return false;
+    switch (stmt->kind)
+    {
+    case StmtKind::Expr:
+        return exprHasComputedIndex(static_cast<const ExprStmt*>(stmt)->expr.get());
+    case StmtKind::Decl:
+        for (const auto& d : static_cast<const DeclStmt*>(stmt)->declarations)
+            if (d && d->kind == DeclKind::Variable &&
+                exprHasComputedIndex(static_cast<const VarDecl*>(d.get())->initializer.get()))
+                return true;
+        return false;
+    case StmtKind::Block:
+        for (const auto& s : static_cast<const BlockStmt*>(stmt)->statements)
+            if (stmtHasComputedIndex(s.get())) return true;
+        return false;
+    case StmtKind::If: {
+        auto* i = static_cast<const IfStmt*>(stmt);
+        return exprHasComputedIndex(i->condition.get()) || stmtHasComputedIndex(i->thenBranch.get()) ||
+               stmtHasComputedIndex(i->elseBranch.get());
+    }
+    case StmtKind::Return:
+        return exprHasComputedIndex(static_cast<const ReturnStmt*>(stmt)->value.get());
+    case StmtKind::Empty:
+    case StmtKind::Break:
+    case StmtKind::Continue:
+    case StmtKind::Discard:
+        return false;
+    default:
+        // A nested loop or switch is not walked: treat it as indexing.
+        return true;
+    }
+}
+
 // The body proof is keyed by resolved declaration, not spelling: an inner
 // local named i must not invalidate a loop over an outer i.
 bool loopBodyChanges(StmtNode* body, const std::unordered_set<DeclNode*>& dependencies,
@@ -3691,7 +3950,38 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         if (b->op == BinaryOp::SubAssign) step = -step;
         else if (b->op != BinaryOp::AddAssign) return false;
     } else return false;
-    if (step == 0 || stmtContainsBreakOrContinue(stmt->body.get())) return false;
+    if (step == 0) return false;
+    // A break or continue of THIS loop is expanded with the loop: each sets
+    // a flag, and what it skips is built under that flag
+    // (static-loop-early-exit).  The induction's value after a break is the
+    // breaking iteration's, which the expansion does not carry, so the loop
+    // must declare its own induction; a comma increment would need the
+    // guard too and keeps the other paths.
+    const bool earlyExit = stmtContainsBreakOrContinue(stmt->body.get());
+    if (earlyExit && (!declares || !extraIncrements.empty())) return false;
+    // A fragment entry loop closed by one `if (c) break;` already becomes a
+    // hardware loop, the shape the established compiler emits for it
+    // (tryBuildHardwareLoop); that path keeps it.
+    if (earlyExit && inlineStack_.empty() && module_->shaderStage == ShaderStage::Fragment &&
+        stmt->body->kind == StmtKind::Block)
+    {
+        const auto& body = static_cast<BlockStmt*>(stmt->body.get())->statements;
+        bool tailOnly = !body.empty() && body.back() && body.back()->kind == StmtKind::If;
+        if (tailOnly)
+        {
+            const auto* last = static_cast<IfStmt*>(body.back().get());
+            const StmtNode* then = last->thenBranch.get();
+            if (then && then->kind == StmtKind::Block)
+            {
+                const auto& inner = static_cast<const BlockStmt*>(then)->statements;
+                then = inner.size() == 1 ? inner[0].get() : nullptr;
+            }
+            tailOnly = !last->elseBranch && then && then->kind == StmtKind::Break;
+        }
+        for (size_t k = 0; tailOnly && k + 1 < body.size(); ++k)
+            if (stmtContainsBreakOrContinue(body[k].get())) tailOnly = false;
+        if (tailOnly) return false;
+    }
     dependencies.insert(induction);
     // A global induction target can also be changed by an otherwise unrelated call.
     watchesGlobal |= !declares && module_->findGlobal(varName) != nullptr;
@@ -3731,6 +4021,51 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
         if (!exact(final)) return false;
     }
 
+    // A large fixed-count fragment loop stays a loop (static-loop-regions):
+    // the established compiler expands one only while trips * (body + 1) is
+    // at most 150 and emits LOOP {trips, 0, 1} past that, and expanding a
+    // noise octave loop costs its whole body once per trip.  The loop may
+    // open with one `if (c) break;` and have no other exit.  A loop the
+    // hardware path does not take is expanded as before.
+    if (keepStaticLoops_ && module_->shaderStage == ShaderStage::Fragment && hardwareLoopDepth_ == 0 &&
+        currentFunction_ && currentFunction_->isEntryPoint && declares && extraIncrements.empty() &&
+        iterations.size() >= 2)
+    {
+        IfStmt* headBreak = nullptr;
+        bool admitted = !earlyExit;
+        if (earlyExit && stmt->body->kind == StmtKind::Block)
+        {
+            const auto& body = static_cast<BlockStmt*>(stmt->body.get())->statements;
+            if (!body.empty() && body.front() && body.front()->kind == StmtKind::If)
+            {
+                auto* head = static_cast<IfStmt*>(body.front().get());
+                const StmtNode* then = head->thenBranch.get();
+                if (then && then->kind == StmtKind::Block)
+                {
+                    const auto& inner = static_cast<const BlockStmt*>(then)->statements;
+                    then = inner.size() == 1 ? inner[0].get() : nullptr;
+                }
+                if (!head->elseBranch && head->condition && then && then->kind == StmtKind::Break)
+                    headBreak = head;
+            }
+            admitted = headBreak != nullptr;
+            for (size_t k = 1; admitted && k < body.size(); ++k)
+                if (stmtContainsBreakOrContinue(body[k].get())) admitted = false;
+        }
+        const long cost = loopStmtCost(stmt->body.get(), 0);
+        // Indexing by the induction needs the expansion's constant indices.
+        if (admitted && stmtHasComputedIndex(stmt->body.get())) admitted = false;
+        if (admitted && static_cast<long>(iterations.size()) * (cost + 1) > 150)
+        {
+            const StaticLoopPlan plan{static_cast<int>(iterations.size()), headBreak};
+            if (tryBuildHardwareLoop(stmt, &plan))
+            {
+                ++staticLoopsKept_;
+                return true;
+            }
+        }
+    }
+
     const ScopeState pre = scope_;
     // The for initializer has its own lexical scope, rather than declaring its
     // name in the enclosing block's declaration set.
@@ -3741,12 +4076,30 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
             : unsignedInduction ? createConstant(static_cast<uint32_t>(value))
                                 : createConstant(static_cast<int32_t>(value));
     };
+    LoopContext exits{nullptr, nullptr};
+    if (earlyExit) {
+        const std::string serial = std::to_string(earlyExitCounter_++);
+        exits.flagged = true;
+        exits.breakFlag = "$break" + serial;
+        exits.continueFlag = "$continue" + serial;
+        nameToValue_[exits.breakFlag] = createConstant(false);
+        loopStack_.push(exits);
+    }
     for (int64_t value : iterations) {
         bind(value);
-        buildStmt(stmt->body.get());
+        if (earlyExit) {
+            nameToValue_[exits.continueFlag] = createConstant(false);
+            buildUnderExitFlags(stmt->body, false);
+        }
+        else buildStmt(stmt->body.get());
         if (currentBlock_->hasTerminator()) break;
         for (ExprNode* extra : extraIncrements)
             buildExpr(extra);
+    }
+    if (earlyExit) {
+        loopStack_.pop();
+        nameToValue_.erase(exits.breakFlag);
+        nameToValue_.erase(exits.continueFlag);
     }
     if (!currentBlock_->hasTerminator()) bind(final);
     blockDeclared_.pop_back();
@@ -3767,7 +4120,7 @@ bool IRBuilder::tryUnrollStaticFor(ForStmt* stmt)
 // writing in an iteration is carried (LoopCarry .. LoopLatch .. LoopOut);
 // one the body writes but never reads first is local to the iteration, and
 // reading it after the loop is refused rather than guessed.
-bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
+bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan)
 {
     // Only into the entry (an inlined helper builds there too); a helper's
     // own standalone IR function is never lowered and keeps its old path.
@@ -3785,7 +4138,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // are written back, then BRK, then the increment.  Any other break or
     // continue keeps the refusal (no predicated exit snapshot yet).
     IfStmt* tailBreak = nullptr;
-    if (stmt->body->kind == StmtKind::Block) {
+    if (!plan && stmt->body->kind == StmtKind::Block) {
         auto* blk = static_cast<BlockStmt*>(stmt->body.get());
         if (!blk->statements.empty() && blk->statements.back() &&
             blk->statements.back()->kind == StmtKind::If) {
@@ -3802,7 +4155,7 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             for (size_t k = 0; k + 1 < blk->statements.size(); ++k)
                 if (stmtContainsBreakOrContinue(blk->statements[k].get())) return false;
     }
-    if (!tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
+    if (!plan && !tailBreak && stmtContainsBreakOrContinue(stmt->body.get()))
         return false;
     if (vertexLoop && tailBreak)
         return false;
@@ -3915,14 +4268,33 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     const size_t beginIndex = block->instructions.size();
     {
         auto begin = std::make_unique<IRInstruction>(IROp::LoopBegin, InvalidIRValue, IRTypeInfo::Void());
-        begin->componentIndex = 255;
+        begin->componentIndex = plan ? plan->trips : 255;
         block->addInstruction(std::move(begin));
     }
     ++hardwareLoopDepth_;
     // The source's own test, before any arm guard joins it: the header
     // checks below judge this compare.
     IRValueID sourceTest = InvalidIRValue;
-    {
+    if (plan) {
+        // The count is the proven trip count, so no header test runs.  A
+        // leading `if (c) break;` is the BRK at the head of the iteration:
+        // nothing of this iteration is written yet, so the carries hold the
+        // previous iteration's values - the state the break leaves.
+        if (plan->headBreak) {
+            const auto beforeCondition = scope_.fold();
+            IRValueID cond = buildExpr(plan->headBreak->condition.get());
+            cond = normalizeCondition(plan->headBreak->condition.get(), cond);
+            if (hasErrors() || scope_.fold() != beforeCondition) {
+                --hardwareLoopDepth_;
+                blockDeclared_.pop_back();
+                return hasErrors() ? true : refuse("the break condition assigns a variable");
+            }
+            auto brk = std::make_unique<IRInstruction>(IROp::LoopBreakIf, InvalidIRValue, IRTypeInfo::Void());
+            brk->addOperand(cond);
+            brk->guardIsNegated = false;  // break where the source condition is TRUE
+            block->addInstruction(std::move(brk));
+        }
+    } else {
         const auto beforeCondition = scope_.fold();
         IRValueID cond = buildExpr(stmt->condition.get());
         cond = normalizeCondition(stmt->condition.get(), cond);
@@ -3955,7 +4327,14 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     IRValueID tailBreakCond = InvalidIRValue;
     IRValueID inductionAtBreak = InvalidIRValue;
     size_t tailBreakIndex = 0;
-    if (!tailBreak) {
+    if (plan && plan->headBreak) {
+        // The body without its leading break, in the body's own scope.
+        auto& statements = static_cast<BlockStmt*>(stmt->body.get())->statements;
+        std::unique_ptr<StmtNode> head = std::move(statements.front());
+        statements.erase(statements.begin());
+        buildStmt(stmt->body.get());
+        statements.insert(statements.begin(), std::move(head));
+    } else if (!tailBreak) {
         buildStmt(stmt->body.get());
     } else {
         auto* blk = static_cast<BlockStmt*>(stmt->body.get());
@@ -3983,8 +4362,24 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
             return refuse("the break condition assigns a variable");
         }
     }
-    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator())
-        buildExpr(stmt->increment.get());
+    if (!hasErrors() && currentBlock_ == block && !block->hasTerminator()) {
+        // With a proven count the induction only matters where the body
+        // reads it: unread, its step is not built and its carry folds away.
+        // A read is an operand of a region instruction, or another name the
+        // body bound to the induction (`last = i;` builds no instruction and
+        // carries the value out of the loop).
+        bool inductionRead = !plan;
+        if (plan) {
+            const auto bound = nameToValue_.find(varName);
+            const IRValueID carried = bound == nameToValue_.end() ? InvalidIRValue : bound->second;
+            for (size_t i = beginIndex; i < block->instructions.size() && !inductionRead; ++i)
+                for (IRValueID op : block->instructions[i]->operands)
+                    if (op == carried) { inductionRead = true; break; }
+            for (const auto& kv : nameToValue_)
+                if (kv.first != varName && kv.second == carried) inductionRead = true;
+        }
+        if (inductionRead) buildExpr(stmt->increment.get());
+    }
     --hardwareLoopDepth_;
     if (hasErrors()) { blockDeclared_.pop_back(); return true; }
     // Effects the region may not have - named first, also in any block the
@@ -4140,8 +4535,10 @@ bool IRBuilder::tryBuildHardwareLoop(ForStmt* stmt)
     // established compiler nests a second LOOP for it, not implemented), so more than
     // 255 iterations is refused; a body that also writes the induction makes
     // the count unknowable from the header, refused too when the bound is
-    // constant (review, constant fractional 300 / .5).
-    {
+    // constant (review, constant fractional 300 / .5).  A planned loop's
+    // count is proven by the expansion's own simulation, and its body does
+    // not write the induction (loopBodyChanges).
+    if (!plan) {
         // Each of start and bound is CONSTANT (evaluated here), RUN-TIME (it
         // reads an input, a uniform, a texture, a carry: the measured
         // LOOP {255} shape) or UNKNOWN (built only from constants through an
@@ -4930,12 +5327,22 @@ void IRBuilder::buildBreakStmt(BreakStmt* stmt)
         error(stmt->loc, "break statement outside of loop");
         return;
     }
+    if (loopStack_.top().flagged)
+    {
+        nameToValue_[loopStack_.top().breakFlag] = createConstant(true);
+        return;
+    }
 
     emitBranch(loopStack_.top().breakTarget);
 }
 
 void IRBuilder::buildContinueStmt(ContinueStmt* stmt)
 {
+    if (!loopStack_.empty() && loopStack_.top().flagged)
+    {
+        nameToValue_[loopStack_.top().continueFlag] = createConstant(true);
+        return;
+    }
     if (loopStack_.empty() || !loopStack_.top().continueTarget)
     {
         error(stmt->loc, "continue statement outside of loop");
@@ -5365,6 +5772,21 @@ void IRBuilder::buildDeclStmt(DeclStmt* stmt)
             // For now, just use the initializer value as the variable value
             nameToValue_[varDecl->name] = initValue;
             declToValue_[varDecl] = initValue;
+            // A struct copied whole from a named struct (`V l = i;`) takes
+            // the members that source has bound so far: a write made to the
+            // source before the copy is part of the copied value
+            // (struct-value-argument).  Unbound members stay lazy.
+            std::string copiedFrom;
+            if (structInit && !isCall && storageKey(varDecl->initializer.get(), copiedFrom) &&
+                copiedFrom != varDecl->name)
+            {
+                const std::string from = copiedFrom + ".";
+                std::vector<std::pair<std::string, IRValueID>> members;
+                for (const auto& entry : nameToValue_)
+                    if (entry.first.compare(0, from.size(), from) == 0)
+                        members.emplace_back(varDecl->name + "." + entry.first.substr(from.size()), entry.second);
+                for (const auto& member : members) nameToValue_[member.first] = member.second;
+            }
         }
         else if (getStructFields(varDecl->type.get()))
         {
@@ -6443,15 +6865,55 @@ IRValueID IRBuilder::buildCallExprImpl(CallExpr* expr)
         // A uniform struct has leaf values, not a whole-struct SSA
         // operand. Defer named leaf capture until every argument has been
         // evaluated, but before any callee parameter is installed.
-        if (module_->shaderStage == ShaderStage::Vertex && calleeDecl &&
+        // Capture is a vertex rule.  A fragment argument's leaves are renamed
+        // to the parameter by the inliner instead (struct-value-argument):
+        // renaming carries a leaf of any type, where capture converts each
+        // leaf and admits only float and int kinds.
+        if (calleeDecl &&
             (currentFunction_->isEntryPoint || !inlineStack_.empty()) &&
             i < calleeDecl->parameters.size()) {
             const auto* param = calleeDecl->parameters[i].get();
             auto* argument = expr->arguments[i].get();
+            const bool vertex = module_->shaderStage == ShaderStage::Vertex;
+            // A vertex helper never loads an attribute through its own
+            // parameter (struct-argument-binding), so the entry's struct
+            // input passed whole was refused unless the entry had already
+            // read every member.  Load the unread leaves here, as the
+            // entry's own reads; the capture below then binds them.
+            if (vertex && inlineStack_.empty() && argument->kind == ExprKind::Identifier &&
+                param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
+                getStructFields(param->type.get()) && !containsMatrixField(param->type.get())) {
+                const auto* id = static_cast<IdentifierExpr*>(argument);
+                const auto* entry = id->resolvedDecl && id->resolvedDecl->kind == DeclKind::Parameter
+                    ? static_cast<const ParamDecl*>(id->resolvedDecl) : nullptr;
+                const auto plain = [&](const auto& self, TypeNode* t) -> bool {
+                    if (!t || t->isArray() || t->isSampler()) return false;
+                    const auto* fields = getStructFields(t);
+                    if (!fields) return true;
+                    for (const auto& field : *fields)
+                        if (!self(self, field.type.get())) return false;
+                    return !fields->empty();
+                };
+                const auto load = [&](const auto& self, TypeNode* t, const std::string& path) -> void {
+                    if (const auto* fields = getStructFields(t)) {
+                        for (const auto& field : *fields)
+                            self(self, field.type.get(), path.empty() ? field.name : path + "." + field.name);
+                        return;
+                    }
+                    const std::string key = id->name + "." + path;
+                    if (nameToValue_.count(key)) return;
+                    const IRValueID loaded = currentFunction_->allocateValueId();
+                    if (emitInputMemberLoad(entry, path, loaded)) nameToValue_[key] = loaded;
+                };
+                if (entry && entry->storage != StorageQualifier::Uniform &&
+                    entry->storage != StorageQualifier::Out && entry->storage != StorageQualifier::InOut &&
+                    plain(plain, entry->type.get()))
+                    load(load, entry->type.get(), "");
+            }
             if (param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut &&
                 getStructFields(param->type.get()) &&
-                (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
-                 hasBoundStructLeaves(param->type.get(), argument))) {
+                vertex && (containsMatrixField(param->type.get()) || uniformStructSourceRoot(argument) ||
+                           hasBoundStructLeaves(param->type.get(), argument))) {
                 captureStructArgument[i] = true;
                 // Side-effect-free selections see completed-argument state.
                 // An effectful index instead executes once, in argument order,
@@ -7669,6 +8131,59 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
                 flattenedForCall.push_back(param->name);
             continue;
         }
+        // A BY-VALUE STRUCT PARAMETER IS ITS ARGUMENT'S LEAVES UNDER ITS OWN
+        // NAME (struct-value-argument).  A struct has no whole value here,
+        // only `name.member` bindings, and nothing renamed them, so inside
+        // the helper `q.a` meant one of two wrong things: the caller's own
+        // variable `q` when it had one (name capture), or - with no such
+        // name - a fresh entry load, which dropped every write the caller
+        // had made to the argument.  Measured against the established
+        // compiler: `l.a = i.b * 2; l.b = i.a * 3; f(l)` is 3*TEX0 + 2*TEX1
+        // there and was TEX0 + TEX1 here, exit 0.
+        //
+        // A leaf the caller never wrote is still loaded lazily, as the entry
+        // input it is, when the argument is (a path into) an entry struct
+        // parameter; for any other argument there is no input behind it and
+        // emitInputMemberLoad refuses by name.
+        if (!param->name.empty() && getStructFields(param->type.get()) &&
+            param->storage != StorageQualifier::Out && param->storage != StorageQualifier::InOut)
+        {
+            std::string source;
+            const bool keyed = argument && storageKey(argument, source);
+            if (!keyed || source != param->name)
+            {
+                const std::string to = param->name + ".";
+                for (auto it = nameToValue_.begin(); it != nameToValue_.end(); )
+                    if (it->first.compare(0, to.size(), to) == 0) it = nameToValue_.erase(it);
+                    else ++it;
+                if (keyed)
+                {
+                    const std::string from = source + ".";
+                    for (const auto& entry : savedNames)
+                        if (entry.first.compare(0, from.size(), from) == 0)
+                            nameToValue_[to + entry.first.substr(from.size())] = entry.second;
+                }
+            }
+            const ExprNode* root = argument;
+            while (root && root->kind == ExprKind::MemberAccess)
+                root = static_cast<const MemberAccessExpr*>(root)->object.get();
+            bool entryInput = false;
+            if (root && root->kind == ExprKind::Identifier)
+            {
+                const auto* decl = static_cast<const IdentifierExpr*>(root)->resolvedDecl;
+                if (decl && decl->kind == DeclKind::Parameter)
+                    entryInput = inlineStack_.empty() ||
+                        valueStructParams_.count(static_cast<const ParamDecl*>(decl)) == 0;
+            }
+            // A local copied whole from an entry struct input (`V l = i;`)
+            // carries that input's value: its unwritten members are still
+            // the entry's, as emitInputMemberLoad resolves them.
+            if (!entryInput && boundValue != InvalidIRValue)
+                for (const auto& entryParam : currentFunction_->parameters)
+                    if (entryParam.valueId == boundValue) entryInput = true;
+            if (entryInput) valueStructParams_.erase(param);
+            else valueStructParams_.insert(param);
+        }
         if (!param->name.empty())
             nameToValue_[param->name] = boundValue;
 
@@ -8062,32 +8577,35 @@ bool IRBuilder::inlineUserFunctionCall(CallExpr* expr,
 // join (a predicated result), and loops/switch need the general path's
 // control-flow milestone.  Each is refused BY NAME so the row stays a named
 // gap rather than a silent drop (the established compiler accepts all of them).
-static bool inlineBlockedShape(const StmtNode* stmt, std::string& why)
+static bool inlineBlockedShape(const StmtNode* stmt, std::string& why, bool inFor = false)
 {
     if (!stmt) return false;
     switch (stmt->kind)
     {
     case StmtKind::Return:   why = "a return inside control flow"; return true;
     case StmtKind::For:
-        // The statement builder will prove the trip sequence at the call site.
-        // Continue rejecting exits nested anywhere in the loop body beforehand.
-        return inlineBlockedShape(static_cast<const ForStmt*>(stmt)->body.get(), why);
+        // The statement builder will prove the trip sequence at the call
+        // site, and expands a break or continue of the loop with it
+        // (static-loop-early-exit); a loop it cannot prove is refused there.
+        return inlineBlockedShape(static_cast<const ForStmt*>(stmt)->body.get(), why, true);
     case StmtKind::While:
     case StmtKind::DoWhile:  why = "a loop"; return true;
     case StmtKind::Switch:
     case StmtKind::Case:
     case StmtKind::Default:  why = "a switch"; return true;
     case StmtKind::Break:
-    case StmtKind::Continue: why = "break/continue"; return true;
+    case StmtKind::Continue:
+        if (inFor) return false;
+        why = "break/continue"; return true;
     case StmtKind::Block:
         for (const auto& inner : static_cast<const BlockStmt*>(stmt)->statements)
-            if (inlineBlockedShape(inner.get(), why)) return true;
+            if (inlineBlockedShape(inner.get(), why, inFor)) return true;
         return false;
     case StmtKind::If:
     {
         const auto* ifs = static_cast<const IfStmt*>(stmt);
-        return inlineBlockedShape(ifs->thenBranch.get(), why) ||
-               inlineBlockedShape(ifs->elseBranch.get(), why);
+        return inlineBlockedShape(ifs->thenBranch.get(), why, inFor) ||
+               inlineBlockedShape(ifs->elseBranch.get(), why, inFor);
     }
     default:
         return false;
@@ -8818,6 +9336,16 @@ bool IRBuilder::emitInputMemberLoad(const ParamDecl* param, const std::string& m
             currentFunctionDecl_->parameters.end(), [param](const auto& p) { return p.get() == param; })) {
         error(param->loc, "uncaptured by-value struct member '" + param->name + "." + member +
               "' cannot be loaded as a vertex attribute (struct-argument-binding)");
+        return true;
+    }
+    // A helper parameter bound to a struct VALUE (a caller local, a call
+    // result) has no entry input behind an unwritten member: loading one
+    // would read whatever varying the member's semantic names.
+    if (!inlineStack_.empty() && valueStructParams_.count(param))
+    {
+        error(param->loc, "member '" + param->name + "." + member +
+              "' of a by-value struct argument is read but the argument never assigned it "
+              "(struct-value-argument)");
         return true;
     }
     const std::vector<StructField>* fields = getStructFields(param->type.get());

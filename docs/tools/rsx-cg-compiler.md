@@ -302,6 +302,15 @@ Only `for` loops compile, in one of two ways:
   bounds (including negative literals) is fully unrolled, up to 64
   iterations. Past 64 the compile fails with `static loop expansion exceeds
   64 iterations; hardware-loop lowering required`.
+  In a fragment program a large loop of this kind is kept as a hardware
+  `LOOP` with the fixed trip count instead: one whose trip count times its
+  body size (operations plus one) exceeds 150, the point where the
+  established compiler stops expanding a braced body (it expands a body that
+  is a single unbraced statement whatever its size; here that loop is kept
+  too). The loop must declare its own
+  induction variable and may open with one `if (c) break;`; a loop that
+  indexes an array by its induction variable, or that the hardware loop
+  cannot carry, is expanded as before.
 - **Run-time loop.** A `for` whose bound is a run-time value (for example a
   uniform) becomes a real loop: in a fragment program a hardware `LOOP` with
   the condition tested at each iteration and a `BRK` where it fails (at most

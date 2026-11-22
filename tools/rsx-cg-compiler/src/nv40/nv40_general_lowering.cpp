@@ -762,7 +762,7 @@ public:
         renumberSourceIndices();
         applyOrderingPass();
         allocatePhysicalTemps();
-        dropVertexSelfMoves();
+        dropSelfMoves();
         return program_;
     }
 
@@ -4577,6 +4577,58 @@ private:
         program_.instrs.push_back(brk);
     }
 
+    // A carry whose next value is computed by ONE instruction of the body
+    // takes it in place: that instruction writes the carry's register and
+    // the latch copy is not emitted (`amp *= 0.5` is one MUL on the carry,
+    // as the established compiler emits it).  That holds only where nothing
+    // after the instruction still needs the old value: no later read of the
+    // carry, and no later break, because a break leaves the loop with the
+    // carries as the iteration found them.
+    bool writeCarryInPlace(int carry, int width, const VSrc& next)
+    {
+        if (profile_ != GeneralProfile::Fragment || next.kind != VSrcKind::Temp ||
+            next.neg || next.abs || next.fp16 || next.index == carry ||
+            singleUseProductTemps_.count(next.index))
+            return false;
+        for (int l = 0; l < width; ++l)
+            if (next.swizzle[l] != l) return false;
+        auto& code = program_.instrs;
+        size_t begin = code.size();
+        for (size_t i = code.size(); i-- > 0;)
+            if (code[i].op == VOp::LoopBegin) { begin = i; break; }
+        if (begin == code.size()) return false;
+        const int mask = (1 << width) - 1;
+        size_t def = code.size();
+        for (size_t i = 0; i < code.size(); ++i) {
+            const VInstr& vi = code[i];
+            if (vi.dst.none || vi.dst.output || vi.dst.address) continue;
+            if (vi.dst.index == carry && i > begin) return false;
+            if (vi.dst.index != next.index) continue;
+            if (def != code.size() || i < begin) return false;      // one definition, inside the region
+            def = i;
+        }
+        if (def == code.size()) return false;
+        const VInstr& d = code[def];
+        if (d.dst.writemask != mask || d.dst.fp16 || d.dst.preferredPhys >= 0 || d.dst.outputPin ||
+            d.predicate != 0 || d.stubCoIssuePartner || d.op == VOp::SelPred)
+            return false;
+        for (size_t i = def + 1; i < code.size(); ++i) {
+            if (code[i].op == VOp::Brk || code[i].op == VOp::LoopBegin || code[i].op == VOp::LoopEnd)
+                return false;
+            for (const VSrc& src : code[i].srcs)
+                if (src.kind == VSrcKind::Temp && src.index == carry) return false;
+        }
+        code[def].dst.index = carry;
+        for (size_t i = def + 1; i < code.size(); ++i)
+            for (VSrc& src : code[i].srcs)
+                if (src.kind == VSrcKind::Temp && src.index == next.index) src.index = carry;
+        for (auto& kv : program_.valueToVReg)
+            if (kv.second == next.index) kv.second = carry;
+        for (auto& kv : program_.valueToSource)
+            if (kv.second.kind == VSrcKind::Temp && kv.second.index == next.index) kv.second.index = carry;
+        return true;
+    }
+
     // Every carry takes its next value IN PARALLEL: a next value that is
     // another carry's register is copied aside first, so a swap (a <- b,
     // b <- a) does not collapse.  A self-copy with the identity swizzle is
@@ -4620,11 +4672,19 @@ private:
             c.src = tempSrc(staged);
             if (c.width == 1) broadcastScalar(c.src);
         }
-        for (const Copy& c : copies) {
+        for (size_t k = 0; k < copies.size(); ++k) {
+            const Copy c = copies[k];
             if (c.src.kind == VSrcKind::Temp && c.src.index == c.dst && !c.src.neg && !c.src.abs) {
                 bool identity = true;
                 for (int l = 0; l < c.width; ++l) identity = identity && c.src.swizzle[l] == l;
                 if (identity) continue;
+            }
+            if (writeCarryInPlace(c.dst, c.width, c.src)) {
+                // the value now lives in this carry: a later copy of it reads it there
+                for (size_t m = k + 1; m < copies.size(); ++m)
+                    if (copies[m].src.kind == VSrcKind::Temp && copies[m].src.index == c.src.index)
+                        copies[m].src.index = c.dst;
+                continue;
             }
             VInstr mov;
             mov.op = VOp::Mov;
@@ -11123,11 +11183,17 @@ private:
     // VP: a MOV the allocator coalesced onto its own source register
     // (`MOV R1.x, R1.xxxx`) copies every lane it writes onto itself, so it
     // is dropped (measured: 2xbrz carried three, the established compiler none).
-    void dropVertexSelfMoves()
+    //
+    // FP: the same copy, left mostly by lerp's `MOV a` when `a` already sits
+    // in the result register (measured: 230 of the 9194 instructions of the
+    // fragment bucket).  It is dropped only as a full-precision R-to-R copy:
+    // an H register, a precision or scale stamp, or a fence makes the MOV
+    // more than a copy.
+    void dropSelfMoves()
     {
-        if (profile_ != GeneralProfile::Vertex) return;
+        const bool fragment = profile_ == GeneralProfile::Fragment;
         auto& code = program_.instrs;
-        code.erase(std::remove_if(code.begin(), code.end(), [](const VInstr& vi) {
+        code.erase(std::remove_if(code.begin(), code.end(), [fragment](const VInstr& vi) {
             if (vi.op != VOp::Mov || vi.dst.none || vi.dst.output || vi.dst.address ||
                 vi.sat || vi.ccUpdate || vi.predicate != 0 || vi.stubCoIssuePartner ||
                 vi.stubFenceBefore || vi.stubFenceBrBefore)
@@ -11135,6 +11201,9 @@ private:
             const VSrc& s = vi.srcs[0];
             if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative ||
                 vi.dst.phys < 0 || s.phys != vi.dst.phys)
+                return false;
+            if (fragment && (vi.dst.fp16 || s.fp16 || vi.fpScale != 0 ||
+                             vi.fpPrecisionOverride > NVFX_FP_PRECISION_FP32))
                 return false;
             for (int l = 0; l < 4; ++l)
                 if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;

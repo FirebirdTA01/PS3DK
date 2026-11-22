@@ -16,6 +16,54 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **`rsx-cg-compiler`: large fixed-count fragment loops stay loops.** A `for`
+  with a known trip count was always expanded, so a noise octave loop cost
+  its whole body once per trip. A loop whose trip count times its body size
+  exceeds 150 operations is now emitted as a hardware `LOOP` with that trip
+  count, the point at which the established compiler does the same for a
+  braced body; it may open with one `if (c) break;`. (The established
+  compiler expands a body that is a single unbraced statement whatever its
+  size; such a loop is kept here as well.) A four-octave value-noise loop
+  goes from 162 instructions to 54. Smaller loops, loops that index an array by their
+  induction variable, and loops the hardware loop cannot carry are expanded
+  as before.
+- **`rsx-cg-compiler`: no register self-copies in fragment programs.**
+  `lerp` of a value computed just before left a `MOV` that copied a register
+  onto itself; those are no longer emitted. Across the two measured shader
+  sets that removes 1611 fragment instructions, about 1.8%.
+- **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
+  loop, a variable that changes every iteration (`amp *= 0.5`) was computed
+  into a second register and copied back at the end of each iteration. The
+  instruction that computes it now writes the variable's register directly
+  wherever nothing later in the iteration still needs the old value.
+
+### Fixed
+
+- **`rsx-cg-compiler`: a struct passed by value to a helper function.** Inside
+  the helper, the parameter's members did not take the argument's values. A
+  fragment helper read the entry inputs named by the struct's semantics, so
+  every write the caller had made to the argument was dropped and the program
+  compiled to the wrong value with exit 0; when the caller had a variable
+  with the parameter's name, the helper read that variable instead (vertex
+  programs too). The parameter now carries the argument's members, through
+  any number of helper levels, and a struct type without semantics, which was
+  refused, compiles. A local copied whole from another struct (`V l = i;`)
+  keeps a write made to the source before the copy, and a vertex helper given
+  the entry's struct input whole no longer needs the entry to have read every
+  member first. A member the argument never assigned, and a helper's result
+  passed straight in as the argument, are refused by name.
+- **`rsx-cg-compiler`: `break` and `continue` in a `for` loop with a known
+  trip count.** Such a loop is expanded iteration by iteration, and a body
+  with `break` or `continue` was refused, in the entry function and in a
+  helper. Each exit now sets a flag and the statements it skips, including
+  every later iteration after a `break`, are compiled under that flag. The
+  loop must declare its own induction variable and step with a single
+  expression; other loops keep the behaviour they had.
+
+## [v0.28.8] — 2026-11-21
+
 ### Fixed
 
 - **PRX/SPRX modules now load and run on retail consoles (#137).** Three
@@ -54,6 +102,16 @@ The version stamped into builds is generated from the most recent
   the environment the driver gives it, so the linker was looked up on `PATH`
   and the executable's link failed unless the toolchain's `ppu/bin` was on
   `PATH`. It now runs with the driver's own search paths.
+- **Texture format documentation.** The `gcmTexture.format` description in
+  `<rsx/gcm_sys.h>` names the defined `GCM_TEXTURE_FORMAT_DXT23`,
+  `GCM_TEXTURE_FORMAT_DXT45` and `GCM_TEXTURE_FORMAT_G8B8` in place of three
+  macros that do not exist, and describes the value as one base format plus a
+  layout flag (`SWZ`/`LIN`) and a coordinate-mode flag (`NRM`/`UNRM`).
+- **`scripts/build-cell-stub-archives.sh` under a parallel make.** It ran
+  `make clean all` as one command, which a parallel make (`MAKEFLAGS=-j`) could
+  run out of order and stop on a missing wrappers object; it runs `make clean`
+  and `make all` separately. It also finds `nidgen` under `CARGO_TARGET_DIR`
+  when that is set.
 
 ### Changed
 
