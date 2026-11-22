@@ -157,6 +157,11 @@ pthread-key-reuse-lp64,tests/regression/pthread-key-reuse/pthread-key-reuse-lp64
 # racing a function-local static and a shared_ptr.
 pthread-raw-threads-ilp32,tests/regression/pthread-raw-threads/pthread-raw-threads-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
 pthread-raw-threads-lp64,tests/regression/pthread-raw-threads/pthread-raw-threads-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
+# ppu-thread-exit-no-tls: (GCC 16) sys_ppu_thread_exit on a thread made with no TLS area (r13 = 0, the way Cobra runs
+# a plugin's module_start) ends with system call 41 and the joiner gets its 64-bit code; sysThreadCreate and
+# sys_ppu_thread_create threads keep their key and thread_local destructors.
+ppu-thread-exit-no-tls-ilp32,tests/regression/ppu-thread-exit-no-tls/ppu-thread-exit-no-tls-ilp32.fake.self,30,RAN-CLEAN,(?s)PPU_THREAD_EXIT_NO_TLS PASS case=no-tls .*PPU_THREAD_EXIT_NO_TLS_OK,PPU_THREAD_EXIT_NO_TLS FAIL|PPU_THREAD_EXIT_NO_TLS_FAIL|terminate
+ppu-thread-exit-no-tls-lp64,tests/regression/ppu-thread-exit-no-tls/ppu-thread-exit-no-tls-lp64.fake.self,30,RAN-CLEAN,(?s)PPU_THREAD_EXIT_NO_TLS PASS case=no-tls .*PPU_THREAD_EXIT_NO_TLS_OK,PPU_THREAD_EXIT_NO_TLS FAIL|PPU_THREAD_EXIT_NO_TLS_FAIL|terminate
 # cxx-thread-basic: (GCC 16) the C++17 thread library on the posix gthread layer: thread, mutexes, timed waits,
 # condition_variable, throwing call_once, async/future, shared_mutex, shared_ptr, statics, thread_local.
 cxx-thread-basic-ilp32,tests/regression/cxx-thread-basic/cxx-thread-basic-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_BASIC_OK,CXX_THREAD_BASIC_FAIL|terminate

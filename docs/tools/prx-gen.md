@@ -201,8 +201,9 @@ ps3_add_prx(<target>
 | `SIGN` | Also emit `<stem>.sprx` (with `make_sprx`) and `<stem>.fake.sprx` (with `fself`) beside the `.prx` |
 
 The target is linked with `-specs=$PS3DK/ppu/lib/lv2-prx.specs -nostartfiles
--Wl,-q -Wl,-T,$PS3DK/ppu/lib/lv2-prx.ld` plus `lv2-prx-crt.o`; after the
-link, `prx-gen build` writes the module and `prx-gen check` validates it.
+-Wl,-q -Wl,-T,$PS3DK/ppu/lib/lv2-prx.ld` plus `lv2-prx-crt.o`, with
+`-llv2prx` first among its libraries (see
+[Threads in a module](#5-threads-in-a-module)); after the link, `prx-gen build` writes the module and `prx-gen check` validates it.
 `ps3_add_sprx` is an alias for `ps3_add_prx`.
 
 Configure-time errors: target does not exist, `prx-gen` not found in
@@ -223,7 +224,9 @@ fself     mymod.prx mymod.fake.sprx     # optional, fake-signed container
 ```
 
 Run `build` on the **unstripped** link output; `--name` is at most 27
-characters (the module-info field width).
+characters (the module-info field width). `lv2-prx.specs` adds `-llv2prx`
+ahead of the default libraries; a link that names `-lrt` itself must put
+`-llv2prx` before it, or librt's thread pair is linked instead.
 
 ### 2. The importer
 
@@ -273,6 +276,23 @@ the export names and NIDs in order must match; fields an export table cannot
 carry (`archive_name`, signatures) are ignored. On a mismatch the build fails
 with both tables printed, so a renamed export cannot silently strand its
 importers.
+
+### 5. Threads in a module
+
+`sys_ppu_thread_create` and `sys_ppu_thread_exit` (`<sys/ppu_thread.h>`)
+work in a module. `ps3_add_prx` and `lv2-prx.specs` link `liblv2prx.a` ahead
+of librt, and that pair reads no TLS and allocates nothing; librt's own pair is TLS-based
+and cannot link into a module. A module therefore has no thread_local and no
+pthread API: it has no TLS of its own, and `prx-gen` refuses TLS relocations.
+
+- `sys_ppu_thread_create` starts the entry through a small start record, so
+  the full 64-bit argument arrives and a return from the entry ends the
+  thread with exit code 0. The 16 records are a fixed pool, held only from
+  the create until the new thread starts; with all of them held the call
+  returns `EAGAIN` (`0x80010001`).
+- `sys_ppu_thread_exit` ends a thread that has a TLS area through liblv2's
+  exit, and one without (see below) through the bare exit system call (41).
+  Either way the exit code reaches `sys_ppu_thread_join`.
 
 ## See also
 

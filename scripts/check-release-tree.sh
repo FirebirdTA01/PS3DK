@@ -92,6 +92,10 @@ bad() { printf "  FAIL    %s\n" "$1"; fail=$((fail+1)); }
 #                    stamps still looked correct.
 #   lv2-prx-crt.o    without __sys_prx_module_info the crt cannot anchor a
 #                    PRX; the file existing says nothing about that.
+#   liblv2prx.a      a module's sys_ppu_thread_create / sys_ppu_thread_exit;
+#                    lv2-prx.specs links it ahead of librt, and without it a
+#                    module that starts a thread pulls librt's TLS-based
+#                    pthread.o and fails to link.
 #   librt.a pthread  v0.12.0 ships the pthread shim inside librt.a (pthread.o);
 #                    trylock is the member carrying the EDEADLK->EBUSY fold,
 #                    and a cut whose librt.a predates the shim would still
@@ -106,6 +110,8 @@ REQUIRED_SYMBOLS=(
     "ppu/lib/lp64/librt.a|pthread_mutex_init pthread_mutex_trylock pthread_create pthread_once pthread_key_create pthread_cond_wait|defined"
     "ppu/lib/lv2-prx-crt.o|__sys_prx_module_info|any"
     "ppu/lib/lp64/lv2-prx-crt.o|__sys_prx_module_info|any"
+    "ppu/lib/liblv2prx.a|__lv2_thread_exit __lv2_ppu_thread_create|defined"
+    "ppu/lib/lp64/liblv2prx.a|__lv2_thread_exit __lv2_ppu_thread_create|defined"
 )
 
 echo "checking $ROOT${WANT:+ (expecting $WANT)}"

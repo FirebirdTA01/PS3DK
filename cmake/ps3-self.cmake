@@ -543,6 +543,17 @@ function(ps3_add_prx target)
         # so the ILP32 and LP64 builds of it are the same bytes; LP64 modules
         # link this one too.
         target_link_libraries(${target} PRIVATE "${PS3DK}/ppu/lib/lv2-prx-crt.o")
+        # A module's sys_ppu_thread_create / sys_ppu_thread_exit come from
+        # liblv2prx.a (no TLS, no heap), not librt's TLS-based pthread.o.
+        # The toolchain file's link_libraries(rt) puts -lrt ahead of
+        # everything a target adds, and lv2-prx.specs names liblv2prx only
+        # after that, so put it first here; -l lets the driver pick the ABI's
+        # copy from its -L list.
+        get_target_property(_prx_libs ${target} LINK_LIBRARIES)
+        if(NOT _prx_libs)
+            set(_prx_libs "")
+        endif()
+        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES lv2prx ${_prx_libs})
     endif()
 
     set(_prx_output "${_PSP_OUTPUT}")

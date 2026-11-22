@@ -99,6 +99,21 @@ The version stamped into builds is generated from the most recent
   segments and `prx-gen` refused the module (a module that only imports a
   liblv2 function was enough). `lv2-prx.ld` now always keeps `.got`, with one
   word, in the data segment.
+- **`sys_ppu_thread_exit` on a thread with no TLS area.** The exit ran
+  librt's cleanup (thread_local and pthread key destructors), which reads TLS,
+  so a thread the kernel created without a TLS area faulted. Cobra runs a VSH
+  plugin's `module_start` and `module_stop` on such a thread. The exit now
+  checks r13 first, reading nothing from memory, and on such a thread ends
+  with the bare exit system call (41) and no cleanup; the joiner still gets
+  the exit code. Threads with a TLS area keep the cleanup as before.
+- **`sys_ppu_thread_create` and `sys_ppu_thread_exit` in a PRX module.** They
+  pulled librt's thread layer into the module, which is TLS-based, so a module
+  that started a thread failed to link. Modules now get the pair from the new
+  `liblv2prx.a`, which `ps3_add_prx` and `lv2-prx.specs` link ahead of
+  librt: no TLS and no
+  heap, so `module_start` can start a thread even on a thread with no TLS
+  area. A module has no thread_local or pthread key cleanup to run.
+
 - **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
   toolchain files now name one project-include file, which includes the
   selected profiler modules in order, so `PS3_PROF_WAITS`,
