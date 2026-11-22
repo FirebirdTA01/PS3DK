@@ -763,6 +763,7 @@ public:
         applyOrderingPass();
         allocatePhysicalTemps();
         dropSelfMoves();
+        mergeFragmentLaneMoves();
         return program_;
     }
 
@@ -11209,6 +11210,67 @@ private:
                 if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;
             return true;
         }), code.end());
+    }
+
+    // FP: two adjacent MOVs that write different lanes of one register from
+    // one source, alike in everything but the write mask and the swizzle,
+    // are one MOV (`MOV R0.x, R1.x; MOV R0.y, R1.x` is `MOV R0.xy, R1.x`).
+    // A vector built lane by lane left these (measured: 547 such pairs over
+    // the two shader sets, 12 in the established compiler's output).  When
+    // the source is the destination register itself, the second MOV must not
+    // read a lane the first one writes.
+    void mergeFragmentLaneMoves()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        const auto plainMov = [](const VInstr& vi) {
+            return vi.op == VOp::Mov && !vi.dst.none && !vi.dst.address && !vi.ccUpdate &&
+                   !vi.stubCoIssuePartner && vi.scalarSourceDemandMask == 0 &&
+                   (vi.dst.output || vi.dst.phys >= 0);
+        };
+        const auto sameButSwizzle = [](const VSrc& a, const VSrc& b) {
+            return a.kind == b.kind && (a.kind == VSrcKind::Temp || a.index == b.index) &&
+                   a.phys == b.phys &&
+                   a.fp16 == b.fp16 && a.embeddedUniform == b.embeddedUniform &&
+                   // bit for bit: +0 and -0 compare equal as floats, and the merged
+                   // MOV keeps the first literal block
+                   std::memcmp(a.literal.data(), b.literal.data(), sizeof(float) * 4) == 0 &&
+                   a.literalLanes == b.literalLanes &&
+                   a.neg == b.neg && a.abs == b.abs && a.relative == b.relative &&
+                   a.addrReg == b.addrReg && a.addrLane == b.addrLane;
+        };
+        auto& code = program_.instrs;
+        for (size_t i = 0; i + 1 < code.size();) {
+            VInstr& a = code[i];
+            const VInstr& b = code[i + 1];
+            bool merge = plainMov(a) && plainMov(b) &&
+                !b.stubFenceBefore && !b.stubFenceBrBefore &&
+                a.dst.output == b.dst.output && a.dst.fp16 == b.dst.fp16 &&
+                (a.dst.output ? a.dst.index == b.dst.index : a.dst.phys == b.dst.phys) &&
+                (a.dst.writemask & b.dst.writemask) == 0 &&
+                a.sat == b.sat && a.predicate == b.predicate &&
+                a.predicateSwizzle == b.predicateSwizzle && a.disablePc == b.disablePc &&
+                a.fpScale == b.fpScale && a.fpPrecisionOverride == b.fpPrecisionOverride &&
+                a.preservePartialOutputMask == b.preservePartialOutputMask &&
+                sameButSwizzle(a.srcs[0], b.srcs[0]);
+            if (merge && b.srcs[0].kind == VSrcKind::Temp) {
+                const VSrc& s = b.srcs[0];
+                const int dstReg = a.dst.output ? a.dst.index : a.dst.phys;
+                // H registers share hardware slots with R registers: a
+                // mixed pair is left alone rather than reasoned about.
+                if (s.fp16 != a.dst.fp16)
+                    merge = false;
+                else if (s.phys == dstReg)
+                    for (int l = 0; l < 4; ++l)
+                        if ((b.dst.writemask & (1 << l)) &&
+                            (a.dst.writemask & (1 << s.swizzle[l])))
+                            merge = false;
+            }
+            if (!merge) { ++i; continue; }
+            for (int l = 0; l < 4; ++l)
+                if (b.dst.writemask & (1 << l)) a.srcs[0].swizzle[l] = b.srcs[0].swizzle[l];
+            a.dst.writemask |= b.dst.writemask;
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+        }
     }
 
     void allocatePhysicalTemps()

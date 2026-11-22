@@ -35,6 +35,10 @@ The version stamped into builds is generated from the most recent
   sets that removes 1611 fragment instructions, about 1.8%.
   A conditional assignment left the same copy as the first instruction of
   its select; that one is gone as well.
+- **`rsx-cg-compiler`: a vector built from one value is one fragment `MOV`.**
+  `float4(d, d, d, 1.0)` copied `d` into the result one lane at a time;
+  adjacent copies of one source into different lanes of one register are
+  now a single `MOV`.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
