@@ -43,11 +43,17 @@ The loader looks for its module, first as `.sprx` and then as `.fake.sprx`, in:
 
 1. the directory given as `argv[1]`, when it is an absolute path;
 2. the loader's own directory (the directory of `argv[0]`, when that is absolute);
-3. `/app_home`.
+3. `/dev_hdd0/tmp/ps3dk-sprx-segments`, a fixed staging directory (copy the
+   module there over FTP when the launcher's arguments name no directory);
+4. `/app_home`.
+
+Each directory is tried once. Before searching, the loader prints the arguments it
+was started with: `SPRX_SEG argv argc=<n> [0]=... [1]=...`.
 
 A child started with `exitspawn` (the ps3dk-run loader, for example) does not get
-its own path in `argv[0]`, so pass the module's directory as the first argument
-(`ps3dk-run <console> sprx-segments-loader.self -- /dev_hdd0/tmp/<dir>`).
+its own path in `argv[0]`. Pass the module's directory as the first argument
+(`ps3dk-run <console> sprx-segments-loader.self -- /dev_hdd0/tmp/<dir>`), or
+stage the module in `/dev_hdd0/tmp/ps3dk-sprx-segments`.
 
 A `.self` loads the real-signed `.sprx`; a `.fake.self` is refused the `.sprx`
 (`0x80010009` on a console) and loads the `.fake.sprx`.

@@ -13,8 +13,10 @@
  * The module is looked for in the directory named by argv[1] when that is an
  * absolute path (a launcher whose child does not get its own path in argv[0]
  * passes the module's directory this way), then next to this executable (the
- * directory of argv[0]), then in /app_home, as <stem>.sprx first and then
- * <stem>.fake.sprx:
+ * directory of argv[0]), then in /dev_hdd0/tmp/ps3dk-sprx-segments (a fixed
+ * staging directory), then in /app_home, as <stem>.sprx first and then
+ * <stem>.fake.sprx; the argv it was started with is printed first
+ * (SPRX_SEG argv argc=<n> [i]=<s>...):
  * a .self loads the real-signed .sprx, a .fake.self needs the .fake.sprx
  * (it gets 0x80010009 for the real one and moves on).
  */
@@ -29,6 +31,9 @@
 #include "segments_contract.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000);
+
+/* A fixed directory a host can stage the module in (over FTP, say) when the launcher's argv names none. */
+#define SEG_STAGING_DIR "/dev_hdd0/tmp/ps3dk-sprx-segments"
 
 #ifndef MODULE_STEM
 #define MODULE_STEM "sprx_segments"
@@ -86,7 +91,7 @@ static int finish(void)
 /* Try <dir>/<stem>.sprx then <dir>/<stem>.fake.sprx for each directory. */
 static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *loaded, size_t loaded_len)
 {
-	char dirs[3][192];
+	char dirs[4][192];
 	int ndirs = 0;
 
 	if (argv1 != NULL && argv1[0] == '/') {
@@ -108,12 +113,16 @@ static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *load
 			ndirs++;
 		}
 	}
-	int have_app_home = 0;
-	for (int d = 0; d < ndirs; d++)
-		have_app_home |= strcmp(dirs[d], "/app_home") == 0;
-	if (!have_app_home) {
-		strcpy(dirs[ndirs], "/app_home");
-		ndirs++;
+	/* then the fixed staging directory, then /app_home; each directory once */
+	static const char *const fixed[2] = { SEG_STAGING_DIR, "/app_home" };
+	for (int f = 0; f < 2; f++) {
+		int have = 0;
+		for (int d = 0; d < ndirs; d++)
+			have |= strcmp(dirs[d], fixed[f]) == 0;
+		if (!have) {
+			strcpy(dirs[ndirs], fixed[f]);
+			ndirs++;
+		}
 	}
 
 	static const char *const exts[2] = { ".sprx", ".fake.sprx" };
@@ -138,6 +147,12 @@ static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *load
 int main(int argc, char **argv)
 {
 	printf("sprx-segments loader (%s): module %s\n", SEG_ABI, MODULE_STEM);
+	/* what the process was started with: which of the searched directories it could name */
+	printf("SPRX_SEG argv argc=%d", argc);
+	for (int i = 0; i < argc; i++)
+		printf(" [%d]=%s", i, argv[i] ? argv[i] : "(null)");
+	printf("\n");
+	fflush(stdout);
 
 	/* --- load --------------------------------------------------------- */
 	begin("load");
