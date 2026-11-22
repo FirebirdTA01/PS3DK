@@ -100,6 +100,17 @@ def r_inner_only(x, n):
     return [s, t]
 
 
+def r_gt(x, stop):
+    a = 0.0
+    for i in range(4):
+        if x > i:
+            if stop:
+                break
+            continue
+        a += x
+    return a
+
+
 def r_twice(x, n):
     return [fbm(x, n) + fbm(x, n + 2.0), 0.0]
 
@@ -128,6 +139,11 @@ FP_ROWS = {
                    ' s += p.x; } t += 1; }\n' + TAIL, r_inner_only),
     # the same loop in a helper, and expanded twice from one tree
     'helper': (FBM + HEAD + ' float s = fbm(p, n); float t = 0;\n' + TAIL, r_break_first),
+    # the two helper rows that were named refusals in helper-static-loop-test
+    'helper_break_gt': ('float f(float x){float a=0;for(int i=0;i<4;i++){if(x>i)break;a+=x;}return a;}\n'
+                        + HEAD + ' float s = f(n); float t = 0;\n' + TAIL, lambda x, n: [r_gt(n, True), 0.0]),
+    'helper_continue_gt': ('float f(float x){float a=0;for(int i=0;i<4;i++){if(x>i)continue;a+=x;}return a;}\n'
+                           + HEAD + ' float s = f(n); float t = 0;\n' + TAIL, lambda x, n: [r_gt(n, False), 0.0]),
     'helper_twice': (FBM + HEAD + ' float s = fbm(p, n) + fbm(p, n + 2); float t = 0;\n' + TAIL, r_twice),
 }
 VP_ROWS = {
@@ -136,6 +152,10 @@ VP_ROWS = {
                        ' float n = q.x; float s = 0; float a = 0.5;\n'
                        ' for (int o = 0; o < 6; o++) { if (float(o) >= n) break; s += a * p.x; a *= 0.5; }\n'
                        ' op = pos; o3 = float3(s, 0, 0);\n}\n', r_break_first),
+    'vp_helper_continue_gt': ('float f(float x){float a=0;for(int i=0;i<4;i++){if(x>i)continue;a+=x;}return a;}\n'
+                              'void main(float4 pos : POSITION, float3 p : TEXCOORD0, float3 q : TEXCOORD1,\n'
+                              '          out float4 op : POSITION, out float3 o3 : TEXCOORD0) {\n'
+                              ' op = pos; o3 = float3(f(q.x), 0, 0);\n}\n', lambda x, n: [r_gt(n, False), 0.0]),
 }
 VECTORS = [(2.0, 0.0), (2.0, 1.0), (4.0, 2.5), (-8.0, 3.0), (2.0, 6.0), (0.5, 9.0), (2.0, -1.0)]
 POSITION = [0.25, 0.5, 0.75, 1.0]
