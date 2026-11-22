@@ -165,7 +165,7 @@ def encoded_controls():
     return 10, 1, 3
 
 
-def main(compiler, output=None, oracle=False):
+def main(compiler, output=None, established=False):
     controls = encoded_controls()
     with tempfile.TemporaryDirectory(prefix='fp-refract-scalar-') as temporary:
         root = Path(output or temporary)
@@ -173,7 +173,7 @@ def main(compiler, output=None, oracle=False):
         results=[]
         for name,lane,mod,text in cases():
             src=root/(name+'.cg');out=root/(name+'.fpo')
-            if oracle:
+            if established:
                 require(not out.exists(), 'stale measurement output')
                 src.write_text(text)
                 def win(p): return 'C:/'+str(p)[7:] if str(p).startswith('/mnt/c/') else str(p)
@@ -191,4 +191,4 @@ def main(compiler, output=None, oracle=False):
 
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else None,'--oracle' in sys.argv))
+    sys.exit(main(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else None,'--established' in sys.argv))
