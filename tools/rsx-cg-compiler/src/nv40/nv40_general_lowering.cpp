@@ -99,6 +99,9 @@ enum class VOp
     Dp2,
     Dp3,
     Dp4,
+    // VP only: the homogeneous dot product, a.xyz . b.xyz + b.w.  Made by
+    // foldVertexHomogeneousDots after ordering; nothing lowers to it.
+    Dph,
     Min,
     Max,
     Rcp,
@@ -765,6 +768,8 @@ public:
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
+        foldVertexHomogeneousDots();
+        writeVertexOutputsDirectly();
         packFragmentScalarsWhenOverBudget();
         allocatePhysicalTemps();
         dropSelfMoves();
@@ -9993,6 +9998,7 @@ private:
         case VOp::Dp2: return 0x3;
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
+        case VOp::Dph: return srcIndex == 0 ? 0x7 : 0xf;
         case VOp::DivR:
         case VOp::DivSqrt:
             return srcIndex == 0 ? vi.dst.writemask : 0x1;
@@ -11324,6 +11330,164 @@ private:
         }
     }
 
+    // VP: `mul(M, float4(p, 1.0))` built the float4 in a register (a MOV for
+    // p, a MOV for the 1.0) and took four DP4s of it.  A dot product with a
+    // vector whose w is 1 is the homogeneous dot product, a.xyz . b.xyz + b.w,
+    // which is one DPH per row and needs no 1.0 (measured: the established
+    // compiler emits `DPH R0.w, v[0].xyzx, c[259]`; 811 DPH over the vertex
+    // programs of the measured set, none here).
+    //
+    // For a temp whose lane w is written once, by a MOV of the literal 1, and
+    // whose every reader of lane w is a DP4 after that MOV reading the temp
+    // unswizzled: each DP4 becomes a DPH with the temp first, and the MOV of
+    // the 1.0 goes.  When that leaves the temp as a plain copy of p read by
+    // those DPHs alone, they read p itself and the copy goes too.
+    void foldVertexHomogeneousDots()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        for (const VInstr& vi : code)
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::LoopEnd || vi.op == VOp::Brk) return;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        for (size_t wi = 0; wi < code.size(); ++wi) {
+            const VInstr one = code[wi];
+            if (one.op != VOp::Mov || one.dst.none || one.dst.output || one.dst.address ||
+                one.dst.writemask != 0x8 || one.sat || one.ccUpdate || one.predicate != 0)
+                continue;
+            const VSrc& lit = one.srcs[0];
+            if (lit.kind != VSrcKind::Literal || lit.neg || lit.literal[lit.swizzle[3] & 3] != 1.0f)
+                continue;
+            const int T = one.dst.index;
+            bool ok = true;
+            std::vector<std::pair<size_t, size_t>> dots;      // (instruction, operand) reading T.w
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                const VInstr& vi = code[k];
+                if (k != wi && writesTemp(vi, T) && (vi.dst.writemask & 0x8)) ok = false;
+                int operandsOfT = 0;
+                for (size_t n = 0; n < vi.srcs.size() && ok; ++n) {
+                    const VSrc& r = vi.srcs[n];
+                    if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                    ++operandsOfT;
+                    if (!(inputLanesRead(vi, n) & 0x8)) continue;
+                    // A negated or absolute read is not homogeneous: dot(-h, row)
+                    // is -(p . row.xyz) - row.w, and a DPH of -h would add +row.w.
+                    const bool plain = r.swizzle == std::array<uint8_t, 4>{0, 1, 2, 3} &&
+                                       !r.abs && !r.neg;
+                    if (vi.op != VOp::Dp4 || k < wi || n > 1 || !plain || vi.predicate != 0)
+                        ok = false;
+                    else
+                        dots.push_back({k, n});
+                }
+                if (vi.op == VOp::Dp4 && operandsOfT > 1) ok = false;
+            }
+            if (!ok || dots.empty()) continue;
+            for (const auto& [k, n] : dots) {
+                VInstr& dp = code[k];
+                dp.op = VOp::Dph;
+                if (n == 1) std::swap(dp.srcs[0], dp.srcs[1]);
+                dp.srcs[0].swizzle = {0, 1, 2, 0};
+            }
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(wi));
+
+            // The temp may now be a plain copy the DPHs can read through.
+            size_t ci = code.size();
+            int writers = 0;
+            for (size_t k = 0; k < code.size(); ++k)
+                if (writesTemp(code[k], T)) { ++writers; ci = k; }
+            if (writers == 1) {
+                const VInstr copy = code[ci];
+                const VSrc x = copy.srcs[0];
+                bool through = copy.op == VOp::Mov && (copy.dst.writemask & 0x7) == 0x7 &&
+                    !copy.sat && !copy.ccUpdate && copy.predicate == 0 && !x.relative &&
+                    (x.kind == VSrcKind::Input || x.kind == VSrcKind::Temp) &&
+                    !(x.kind == VSrcKind::Temp && x.index == T);
+                std::vector<size_t> readers;
+                for (size_t k = 0; k < code.size() && through; ++k)
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                        // one input register per instruction: the row must not be one
+                        if (code[k].op != VOp::Dph || n != 0 || k < ci || r.neg || r.abs ||
+                            (x.kind == VSrcKind::Input && code[k].srcs[1].kind == VSrcKind::Input))
+                            through = false;
+                        else
+                            readers.push_back(k);
+                    }
+                if (through && x.kind == VSrcKind::Temp)
+                    for (size_t k = ci + 1; k < code.size() && through; ++k)
+                        if (writesTemp(code[k], x.index) &&
+                            std::any_of(readers.begin(), readers.end(), [&](size_t r) { return r > k; }))
+                            through = false;
+                if (through && !readers.empty()) {
+                    for (size_t k : readers) {
+                        VSrc& r = code[k].srcs[0];
+                        const auto swz = r.swizzle;
+                        r = x;
+                        for (int l = 0; l < 4; ++l) r.swizzle[l] = x.swizzle[swz[l]];
+                    }
+                    code.erase(code.begin() + static_cast<std::ptrdiff_t>(ci));
+                }
+            }
+            wi = static_cast<size_t>(-1);   // the list changed: start over
+        }
+    }
+
+    // VP: a value computed into a temp and then copied whole to an output
+    // (`DP4 R0.w ..; DP4 R0.z ..; ..; MOV o[HPOS], R0`) is computed into the
+    // output (measured: the established compiler writes `DP4 o[HPOS].w, ..`;
+    // 598 such copies over the vertex programs of the measured set against
+    // its 176).  The temp must be read by that copy alone, written only
+    // before it by lane-wise or dot-product instructions that do not read
+    // it, cover exactly the copied lanes, and nothing else may write the
+    // output in between.
+    void writeVertexOutputsDirectly()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        for (const VInstr& vi : code)
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::LoopEnd || vi.op == VOp::Brk) return;
+        for (size_t mi = 0; mi < code.size(); ++mi) {
+            const VInstr mov = code[mi];
+            const VSrc& s = mov.srcs[0];
+            if (mov.op != VOp::Mov || !mov.dst.output || mov.dst.userClipOutput || mov.sat ||
+                mov.ccUpdate || mov.predicate != 0 || s.kind != VSrcKind::Temp || s.neg || s.abs)
+                continue;
+            bool ok = true;
+            for (int l = 0; l < 4; ++l)
+                if ((mov.dst.writemask & (1 << l)) && s.swizzle[l] != l) ok = false;
+            const int T = s.index;
+            std::vector<size_t> writers;
+            int written = 0;
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                const VInstr& vi = code[k];
+                for (const VSrc& r : vi.srcs)
+                    if (r.kind == VSrcKind::Temp && r.index == T && k != mi) ok = false;
+                if (vi.dst.none || vi.dst.output || vi.dst.address || vi.dst.index != T) continue;
+                const bool laneWise = componentwiseOp(vi.op) || vi.op == VOp::Dp3 ||
+                                      vi.op == VOp::Dp4 || vi.op == VOp::Dph;
+                if (k > mi || !laneWise || vi.sat || vi.ccUpdate || vi.predicate != 0 ||
+                    (vi.dst.writemask & ~mov.dst.writemask))
+                    ok = false;
+                written |= vi.dst.writemask;
+                writers.push_back(k);
+            }
+            if (!ok || writers.empty() || written != mov.dst.writemask) continue;
+            for (size_t k = writers.front(); k < mi && ok; ++k)
+                if (code[k].dst.output && !code[k].dst.none && code[k].dst.index == mov.dst.index)
+                    ok = false;
+            if (!ok) continue;
+            for (size_t k : writers) {
+                const int mask = code[k].dst.writemask;
+                code[k].dst = mov.dst;
+                code[k].dst.writemask = mask;
+            }
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+            --mi;
+        }
+    }
+
     // FP: every temp gets a whole register, also a scalar that uses one
     // lane of it.  A program that holds more values at a time than the
     // hardware has registers was refused for that alone (measured: a terrain
@@ -12281,6 +12445,7 @@ static const char* vOpName(VOp op)
     case VOp::Dp2: return "Dp2";
     case VOp::Dp3: return "Dp3";
     case VOp::Dp4: return "Dp4";
+    case VOp::Dph: return "Dph";
     case VOp::Min: return "Min";
     case VOp::Max: return "Max";
     case VOp::Rcp: return "Rcp";
@@ -12336,6 +12501,7 @@ static bool tryVpOpcode(VOp op, uint8_t& opcode)
     case VOp::Mad: opcode = VP_OP(MAD); return true;
     case VOp::Dp3: opcode = VP_OP(DP3); return true;
     case VOp::Dp4: opcode = VP_OP(DP4); return true;
+    case VOp::Dph: opcode = VP_OP(DPH); return true;
     case VOp::Max: opcode = VP_OP(MAX); return true;
     case VOp::Min: opcode = VP_OP(MIN); return true;
     case VOp::Rcp: opcode = VP_SCA_OP(RCP); return true;

@@ -818,6 +818,9 @@ jobs:
       - name: A fragment entry may return from inside an if, judged by value
         run: bash tests/shader-compiler/entry-early-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Vertex homogeneous dot products and direct output writes, judged by value and shape
+        run: bash tests/shader-compiler/vp-homogeneous-dot-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Loop carries written in place, judged by value and shape
         run: bash tests/shader-compiler/loop-carry-in-place-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

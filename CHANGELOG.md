@@ -68,6 +68,11 @@ The version stamped into builds is generated from the most recent
   5% and 13% fewer registers in total, for 0.7% and 2% more instructions (a
   copy the default level drops can survive). `-O0` to `-O3` and `--nofastmath` remain accepted
   for compatibility and still change nothing; `--help` and the guide say so.
+- **`rsx-cg-compiler`: vertex programs use the homogeneous dot product and write outputs directly.**
+  `mul(M, float4(p, 1.0))` built the float4 in a register and took four `DP4`s
+  of it; it is now four `DPH`s of `p`. A value computed into a register only to
+  be copied whole to an output is computed into the output. The usual
+  two-matrix position transform goes from 12 instructions to 9.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
