@@ -110,10 +110,14 @@ void usage()
     std::fprintf(stderr,
         "\n"
         "Optimization (fragment profile only; VP output is insensitive):\n"
-        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1)\n"
-        "  -O4                    -O3 plus optimisations past the reference (ours)\n"
+        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1); accepted for\n"
+        "                         compatibility, all four give the same output\n"
+        "  -O4                    Optimisations past the established compiler:\n"
+        "                         pack fragment scalars into shared registers.\n"
+        "                         May use fewer registers or more instructions;\n"
+        "                         compare the counts per program\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
-        "  --nofastmath           Disable fast-math optimizations\n");
+        "  --nofastmath           Accepted for compatibility; no effect yet\n");
 }
 
 std::string slurpFile(const std::string& path)

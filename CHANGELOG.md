@@ -62,6 +62,12 @@ The version stamped into builds is generated from the most recent
   `if (back) return a; ... return b;` in the entry function was refused with "more
   than one return block" outside two narrow shapes, though the same body in a
   helper compiled. Such an entry is now compiled the way the helper is.
+- **`rsx-cg-compiler`: `-O4` packs scalars into shared registers.** `-O4` was
+  accepted and did nothing. It now gives every scalar temporary of a fragment
+  program one lane of a shared register: over the measured shader sets that is
+  5% and 13% fewer registers in total, for 0.7% and 2% more instructions (a
+  copy the default level drops can survive). `-O0` to `-O3` and `--nofastmath` remain accepted
+  for compatibility and still change nothing; `--help` and the guide say so.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
