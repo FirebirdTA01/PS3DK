@@ -2698,7 +2698,14 @@ fn ring_export(src: &[u8], range: std::ops::RangeInclusive<u64>) -> serde_json::
     serde_json::from_slice(&json).unwrap()
 }
 fn auto_json(bytes: &[u8]) -> serde_json::Value {
-    let p = std::env::temp_dir().join(format!("ring-source-{}-{}.prof", std::process::id(), bytes.len()));
+    // The caller's thread must own the file for the whole CLI run: two concurrent callers with
+    // same-length bytes (ring_export_round_trips and ring_export_window_through_the_cli both pass
+    // the ring fixture) would otherwise share one name, and each removes it before returning, so
+    // the removal of one can open the other's CLI input.  The process-wide counter keeps the name
+    // unique.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!("ring-source-{}-{}-{n}.prof", std::process::id(), bytes.len()));
     std::fs::write(&p, bytes).unwrap();
     let (code, json) = cli(&["auto", "--json", p.to_str().unwrap()]);
     let _ = std::fs::remove_file(&p);
