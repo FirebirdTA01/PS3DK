@@ -73,6 +73,8 @@ The version stamped into builds is generated from the most recent
   of it; it is now four `DPH`s of `p`. A value computed into a register only to
   be copied whole to an output is computed into the output. The usual
   two-matrix position transform goes from 12 instructions to 9.
+  A copy that places a value in other output lanes (a scalar result into one
+  lane, a reordered vector) is folded the same way.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The

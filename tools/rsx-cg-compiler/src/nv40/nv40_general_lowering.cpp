@@ -11438,10 +11438,17 @@ private:
     // (`DP4 R0.w ..; DP4 R0.z ..; ..; MOV o[HPOS], R0`) is computed into the
     // output (measured: the established compiler writes `DP4 o[HPOS].w, ..`;
     // 598 such copies over the vertex programs of the measured set against
-    // its 176).  The temp must be read by that copy alone, written only
-    // before it by lane-wise or dot-product instructions that do not read
-    // it, cover exactly the copied lanes, and nothing else may write the
-    // output in between.
+    // its 176).  The temp must be read by that copy alone and written only
+    // before it, by lane-wise or dot-product instructions that do not read
+    // it; nothing else may write those output lanes in between.
+    //
+    // The copy may reorder or repeat lanes (`DP3 R0.x ..; MOV o[TEX1].z,
+    // R0.xxxx` is `DP3 o[TEX1].z ..`): output lane l takes the temp lane the
+    // copy's swizzle names, every such temp lane must be written, and each
+    // writer then writes the output lanes fed from its lanes.  A lane-wise
+    // writer reads, for output lane l, what it read for the temp lane; a dot
+    // product gives every lane the same value and reads as before.  Several
+    // writers of one lane stay in their order, so the last one still wins.
     void writeVertexOutputsDirectly()
     {
         if (profile_ != GeneralProfile::Vertex) return;
@@ -11455,11 +11462,17 @@ private:
                 mov.ccUpdate || mov.predicate != 0 || s.kind != VSrcKind::Temp || s.neg || s.abs)
                 continue;
             bool ok = true;
+            // from[l]: the temp lane output lane l takes; needed: those lanes
+            std::array<int, 4> from = {-1, -1, -1, -1};
+            int needed = 0;
             for (int l = 0; l < 4; ++l)
-                if ((mov.dst.writemask & (1 << l)) && s.swizzle[l] != l) ok = false;
+                if (mov.dst.writemask & (1 << l)) {
+                    from[l] = s.swizzle[l];
+                    needed |= 1 << from[l];
+                }
             const int T = s.index;
-            std::vector<size_t> writers;
-            int written = 0;
+            std::vector<std::pair<size_t, int>> writers;     // (instruction, its new output mask)
+            std::array<int, 4> writersOfLane = {0, 0, 0, 0};
             for (size_t k = 0; k < code.size() && ok; ++k) {
                 const VInstr& vi = code[k];
                 for (const VSrc& r : vi.srcs)
@@ -11467,21 +11480,37 @@ private:
                 if (vi.dst.none || vi.dst.output || vi.dst.address || vi.dst.index != T) continue;
                 const bool laneWise = componentwiseOp(vi.op) || vi.op == VOp::Dp3 ||
                                       vi.op == VOp::Dp4 || vi.op == VOp::Dph;
-                if (k > mi || !laneWise || vi.sat || vi.ccUpdate || vi.predicate != 0 ||
-                    (vi.dst.writemask & ~mov.dst.writemask))
+                if (k > mi || !laneWise || vi.sat || vi.ccUpdate || vi.predicate != 0)
                     ok = false;
-                written |= vi.dst.writemask;
-                writers.push_back(k);
+                int outMask = 0;
+                for (int l = 0; l < 4; ++l) {
+                    if (vi.dst.writemask & (1 << l)) ++writersOfLane[l];
+                    if (from[l] >= 0 && (vi.dst.writemask & (1 << from[l]))) outMask |= 1 << l;
+                }
+                // A writer none of whose lanes the copy takes would be left
+                // writing a temp nobody reads: leave such a shape alone.
+                if (outMask == 0) ok = false;
+                writers.push_back({k, outMask});
             }
-            if (!ok || writers.empty() || written != mov.dst.writemask) continue;
-            for (size_t k = writers.front(); k < mi && ok; ++k)
-                if (code[k].dst.output && !code[k].dst.none && code[k].dst.index == mov.dst.index)
+            for (int l = 0; l < 4; ++l)
+                if ((needed & (1 << l)) && writersOfLane[l] == 0) ok = false;
+            if (!ok || writers.empty()) continue;
+            for (size_t k = writers.front().first; k < mi && ok; ++k)
+                if (code[k].dst.output && !code[k].dst.none && code[k].dst.index == mov.dst.index &&
+                    (code[k].dst.writemask & mov.dst.writemask))
                     ok = false;
             if (!ok) continue;
-            for (size_t k : writers) {
-                const int mask = code[k].dst.writemask;
-                code[k].dst = mov.dst;
-                code[k].dst.writemask = mask;
+            for (const auto& [k, outMask] : writers) {
+                VInstr& w = code[k];
+                if (componentwiseOp(w.op))
+                    for (VSrc& src : w.srcs) {
+                        if (src.kind == VSrcKind::None) continue;
+                        const auto old = src.swizzle;
+                        for (int l = 0; l < 4; ++l)
+                            if (outMask & (1 << l)) src.swizzle[l] = old[from[l]];
+                    }
+                w.dst = mov.dst;
+                w.dst.writemask = outMask;
             }
             code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
             --mi;
