@@ -48,6 +48,9 @@ param(
     # (the established compiler's executable); accept it until callers
     # migrate, then remove.
     [string]$ReferenceCompiler = "",
+    # -ReferencePairs is a deprecated alias for -EstablishedPairs; accept
+    # it until callers migrate, then remove.
+    [string]$ReferencePairs = "",
     # -ReferenceCorpus: also stage EVERY fragment shader under the corpus
     # root (the fetched community corpus, _work/ excluded) as an
     # ours-vs-reference pair under uniform_set auto (increment 3c).  A
@@ -633,6 +636,7 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
 # staged (byte-identical implies pixel-identical); a refusal on either
 # side is a finding, not a skip, so it aborts the stage.
 if (-not $EstablishedCompiler -and $ReferenceCompiler) { $EstablishedCompiler = $ReferenceCompiler }  # deprecated alias
+if (-not $EstablishedPairs -and $ReferencePairs) { $EstablishedPairs = $ReferencePairs }  # deprecated alias
 if (-not $EstablishedCompiler -and $env:PS3_ESTABLISHED_CG_COMPILER) { $EstablishedCompiler = $env:PS3_ESTABLISHED_CG_COMPILER }
 if (-not $EstablishedCompiler -and $env:PS3_REF_CG_COMPILER) { $EstablishedCompiler = $env:PS3_REF_CG_COMPILER }  # deprecated name
 if ($ReferenceTreeCorpus -and -not $EstablishedCompiler) {
