@@ -804,6 +804,9 @@ jobs:
       - name: Fragment programs carry no register self-copies, lerp rows judged by value and shape
         run: bash tests/shader-compiler/fp-self-copy-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Lane-by-lane fragment copies of one source are one MOV, judged by value and shape
+        run: bash tests/shader-compiler/fp-lane-move-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Loop carries written in place, judged by value and shape
         run: bash tests/shader-compiler/loop-carry-in-place-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
