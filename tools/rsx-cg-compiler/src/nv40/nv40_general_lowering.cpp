@@ -12908,7 +12908,21 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     asm_.appendConstBlock(s.literal.data());
                 }
             };
-            emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
+            // The default write is `MOV dst, else`.  Where the allocator put
+            // the else value in dst's own register it copies every written
+            // lane onto itself, and it is left out (a full-precision R
+            // register only: a saturating select or an H register makes the
+            // MOV more than a copy).
+            bool elseInPlace = false;
+            {
+                const VSrc& e = vi.srcs[2];
+                elseInPlace = e.kind == VSrcKind::Temp && e.phys == vi.dst.phys && !e.fp16 &&
+                              !vi.dst.fp16 && !e.neg && !e.abs && !vi.sat;
+                for (int l = 0; l < 4 && elseInPlace; ++l)
+                    if ((vi.dst.writemask & (1 << l)) && e.swizzle[l] != l) elseInPlace = false;
+            }
+            if (!elseInPlace)
+                emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
             emitOne(ccDst, vi.selPerLane ? vi.dst.writemask : 0x1,
                     vi.srcs[0], true, false);
             emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);

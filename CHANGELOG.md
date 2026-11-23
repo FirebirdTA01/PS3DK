@@ -33,6 +33,8 @@ The version stamped into builds is generated from the most recent
   `lerp` of a value computed just before left a `MOV` that copied a register
   onto itself; those are no longer emitted. Across the two measured shader
   sets that removes 1611 fragment instructions, about 1.8%.
+  A conditional assignment left the same copy as the first instruction of
+  its select; that one is gone as well.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
