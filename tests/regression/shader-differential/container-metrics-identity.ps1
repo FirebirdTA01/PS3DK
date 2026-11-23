@@ -12,12 +12,12 @@ function Get-ShaderSourceHash([byte[]]$Bytes) {
 }
 
 function Get-ContainerMetricIdentity($Row) {
-    $fields=@('identity_version','source_sha256','compile_flags','resolved_includes','oracle_sha256')
+    $fields=@('identity_version','source_sha256','compile_flags','resolved_includes','established_sha256')
     if (@($fields | Where-Object { -not [string]::IsNullOrEmpty([string]$Row.$_) }).Count -eq 0) { return '' }
     function Bad($why) { throw "container metrics identity: $why" }
     if ([string]$Row.identity_version -cne '1') { Bad 'unsupported or missing identity_version' }
     if ($Row.input_status -and $Row.input_status -cne 'versioned') { Bad 'unresolved provenance cannot claim a versioned identity' }
-    foreach($field in @('source_sha256','oracle_sha256')) {
+    foreach($field in @('source_sha256','established_sha256')) {
         if ($Row.$field -isnot [string] -or $Row.$field -cnotmatch '^[0-9a-f]{64}$') { Bad "invalid $field" }
     }
     try { $flags=ConvertFrom-Json -InputObject $Row.compile_flags -ErrorAction Stop }
@@ -43,7 +43,7 @@ function Get-ContainerMetricIdentity($Row) {
     }
     $canonicalIncludes=ConvertTo-Json -InputObject @($includes) -Compress -Depth 6
     if($canonicalIncludes -cne $Row.resolved_includes) { Bad 'noncanonical resolved_includes' }
-    $identity=ConvertTo-Json -InputObject @('1',$Row.source_sha256,$canonicalFlags,$canonicalIncludes,$Row.oracle_sha256) -Compress
+    $identity=ConvertTo-Json -InputObject @('1',$Row.source_sha256,$canonicalFlags,$canonicalIncludes,$Row.established_sha256) -Compress
     $sha=[Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)))).Replace('-','').ToLowerInvariant() }
     finally { $sha.Dispose() }
@@ -132,7 +132,7 @@ function Assert-ShaderCompileInputs($Before) {
 function Join-ShaderCompileInputs($Ours, $Reference) {
     if($null -eq $Ours -or $null -eq $Reference) { throw 'missing actual compile input record' }
     if($Ours.SourceHash -cne $Reference.SourceHash) { throw 'ours/reference compiled different source bytes' }
-    $result=[ordered]@{identity_version='';source_sha256='';compile_flags='';resolved_includes='';oracle_sha256='';input_status='unversioned';input_reason=''}
+    $result=[ordered]@{identity_version='';source_sha256='';compile_flags='';resolved_includes='';established_sha256='';input_status='unversioned';input_reason=''}
     if($Ours.Status -ne 'versioned' -or $Reference.Status -ne 'versioned') {
         $result.input_reason="ours=$($Ours.Reason); reference=$($Reference.Reason)"
         return [pscustomobject]$result
@@ -145,7 +145,7 @@ function Join-ShaderCompileInputs($Ours, $Reference) {
     $result.identity_version='1'; $result.source_sha256=$Ours.SourceHash
     $result.compile_flags=ConvertTo-Json -InputObject ([ordered]@{ours=@($Ours.Flags);reference=@($Reference.Flags)}) -Compress -Depth 6
     $result.resolved_includes=ConvertTo-Json -InputObject @($includes) -Compress -Depth 6
-    $result.oracle_sha256=$Reference.OracleHash; $result.input_status='versioned'
+    $result.established_sha256=$Reference.EstablishedHash; $result.input_status='versioned'
     $row=[pscustomobject]$result
     $null=Get-ContainerMetricIdentity $row
     return $row

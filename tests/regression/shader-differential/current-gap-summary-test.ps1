@@ -53,9 +53,9 @@ try {
     $stageLog = Join-Path $work "stage.log"
     @(
         "stager: reference corpus: 117 shaders, 97 pairs staged, 7 byte-identical skipped, ours refused 12, theirs refused 1, 1 excluded, 11 reference-only probe rows (sidecar: reference-corpus-refused.txt)",
-        "stager: path-pair corpus (gate 1): 180 shaders from manifest path-pair-corpus-manifest.txt, 0 excluded, 103 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unoracled), 29 byte-identical legacy/general, 48 pairs staged (0 under set 0 for a file-scope const)",
+        "stager: path-pair corpus (gate 1): 180 shaders from manifest path-pair-corpus-manifest.txt, 0 excluded, 103 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unjudged), 29 byte-identical legacy/general, 48 pairs staged (0 under set 0 for a file-scope const)",
         "stager: vp corpus: 18 vertex shaders, 14 pairs staged, 2 byte-identical skipped, ours refused 2, theirs refused 0, 0 excluded, 0 under set 0 (sidecar: vp-corpus-refused.txt)",
-        "stager: vp path pairs (gate 5): 104 candidates (16 curated from vp-path-pairs.txt + 88 from corpus, 0 already curated and counted once), 0 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unoracled), 0 byte-identical legacy/general, 104 pairs staged (sidecar: vp-path-pair-refused.txt)"
+        "stager: vp path pairs (gate 5): 104 candidates (16 curated from vp-path-pairs.txt + 88 from corpus, 0 already curated and counted once), 0 legacy-refused (out of scope), 0 GENERAL-REFUSED (gate failures), 0 reference-refused (unjudged), 0 byte-identical legacy/general, 104 pairs staged (sidecar: vp-path-pair-refused.txt)"
     ) | Set-Content -Path $stageLog -Encoding Ascii
 
     $result = Invoke-GapSummary $census $metrics $tty $stageLog

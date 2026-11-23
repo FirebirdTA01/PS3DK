@@ -40,6 +40,37 @@ try {
     if (-not $missingFailed) {
         throw "missing manifest entry did not fail loudly"
     }
+
+    # The pairs-list fallback: only the DEFAULT list falls back to the earlier
+    # file name beside it; a list named explicitly is never replaced.
+    $rigOld = Join-Path $work "rig-old"
+    New-Item -ItemType Directory -Force $rigOld | Out-Null
+    $legacy = Join-Path $rigOld "reference-pairs.txt"
+    Set-Content -LiteralPath $legacy -Value "# earlier list" -Encoding Ascii
+    $defaultOld = Join-Path $rigOld "established-pairs.txt"
+    $got = Resolve-EstablishedPairsFile $defaultOld $defaultOld
+    if ($got -ne $legacy) { throw "a missing default list did not fall back to the earlier file: $got" }
+
+    $custom = Join-Path $rigOld "my-pairs.txt"
+    $got = Resolve-EstablishedPairsFile $custom $defaultOld
+    if ($got -ne $custom) { throw "a missing EXPLICIT list was replaced by the earlier file: $got" }
+    $elsewhere = Join-Path $work "scratch\established-pairs.txt"
+    $got = Resolve-EstablishedPairsFile $elsewhere $defaultOld
+    if ($got -ne $elsewhere) { throw "a missing explicit list of the default's NAME in another directory was replaced: $got" }
+
+    Set-Content -LiteralPath $custom -Value "# custom list" -Encoding Ascii
+    $got = Resolve-EstablishedPairsFile $custom $defaultOld
+    if ($got -ne $custom) { throw "an existing explicit list was not returned as asked: $got" }
+
+    Set-Content -LiteralPath $defaultOld -Value "# new list" -Encoding Ascii
+    $got = Resolve-EstablishedPairsFile $defaultOld $defaultOld
+    if ($got -ne $defaultOld) { throw "the default list was not preferred over the earlier file: $got" }
+
+    $rigNew = Join-Path $work "rig-none"
+    New-Item -ItemType Directory -Force $rigNew | Out-Null
+    $defaultNone = Join-Path $rigNew "established-pairs.txt"
+    $got = Resolve-EstablishedPairsFile $defaultNone $defaultNone
+    if ($got -ne $defaultNone) { throw "a missing default with no earlier file did not stay as asked: $got" }
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }

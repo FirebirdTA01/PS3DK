@@ -109,7 +109,9 @@ def reference_insn(reference_exe, container):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ours", required=True, help="WSL path of rsx-cg-compiler")
-    ap.add_argument("--reference", default=os.environ.get("PS3_REF_CG_COMPILER", ""), help="established compiler exe (optional)")
+    # PS3_ESTABLISHED_CG_COMPILER is primary; PS3_REF_CG_COMPILER still works
+    # (the renamed identifier kept as a deprecated fallback).
+    ap.add_argument("--reference", default=(os.environ.get("PS3_ESTABLISHED_CG_COMPILER") or os.environ.get("PS3_REF_CG_COMPILER", "")), help="established compiler exe (optional)")
     ap.add_argument("--out", default=os.path.join(os.environ.get("TEMP", "."), "sd-n-live"))
     ap.add_argument("--max", type=int, default=64)
     a = ap.parse_args()

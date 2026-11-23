@@ -1,4 +1,4 @@
-"name","role","profile","source","uniform_set","ours_instruction_count","reference_instruction_count","instruction_delta","ours_register_count","reference_register_count","register_delta","byte_identical","staged","pixel_status","identity_version","source_sha256","compile_flags","resolved_includes","oracle_sha256"
+"name","role","profile","source","uniform_set","ours_instruction_count","established_instruction_count","instruction_delta","ours_register_count","established_register_count","register_delta","byte_identical","staged","pixel_status","identity_version","source_sha256","compile_flags","resolved_includes","established_sha256"
 "ps_coloured","reference-corpus","sce_fp_rsx","classicube/files/misc/ps3/ps_coloured.fcg","auto","1","1","0","2","2","0","True","False","unknown",,,,,
 "ps_textured","reference-corpus","sce_fp_rsx","classicube/files/misc/ps3/ps_textured.fcg","auto","3","2","1","2","2","0","False","True","unknown",,,,,
 "diffuse_specular_shader","reference-corpus","sce_fp_rsx","crystalct-psl1ght/files/samples/graphics/rsx_Basic/shaders/diffuse_specular_shader.fcg","auto","1","1","0","2","2","0","True","False","unknown",,,,,

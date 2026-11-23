@@ -82,16 +82,35 @@ function Format-ReferenceTreeCorpusSummary(
         $CandidateCount, $OursRefused, $ReferenceRefused, $BothRefused, $ByteIdentical, $PairsStaged, $ProbeRows)
 }
 
-function Get-ReferencePairsPathForStage(
-    [string]$ReferencePairs,
+function Get-EstablishedPairsPathForStage(
+    [string]$EstablishedPairs,
     [string]$DefaultPath,
     [bool]$ReferenceTreeCorpus,
     [bool]$ReferenceCorpus,
     [bool]$PathPairs
 ) {
-    if ($ReferencePairs) { return $ReferencePairs }
+    if ($EstablishedPairs) { return $EstablishedPairs }
     if ($ReferenceTreeCorpus -and -not ($ReferenceCorpus -or $PathPairs)) { return "-" }
     return $DefaultPath
+}
+
+# The curated pairs list was renamed reference-pairs.txt -> established-pairs.txt.
+# An old checkout that still has only the earlier file is readable as a
+# fallback: when the list asked for is the DEFAULT one and it is missing, the
+# earlier file beside it is used.  A list the caller named explicitly is never
+# replaced: a missing one stays missing and fails where it is read, instead of
+# a different list being staged in its place.
+function Resolve-EstablishedPairsFile([string]$Path, [string]$DefaultPath) {
+    if ($Path -and (Test-Path -LiteralPath $Path -PathType Leaf)) { return $Path }
+    if (-not $Path -or -not $DefaultPath) { return $Path }
+    $asked = [System.IO.Path]::GetFullPath($Path)
+    $default = [System.IO.Path]::GetFullPath($DefaultPath)
+    if (-not [string]::Equals($asked, $default, [System.StringComparison]::OrdinalIgnoreCase)) { return $Path }
+    # built from the path as the caller spelled it, so the result compares
+    # equal to what the caller would build itself
+    $old = Join-Path (Split-Path -Parent $DefaultPath) "reference-pairs.txt"
+    if (Test-Path -LiteralPath $old -PathType Leaf) { return $old }
+    return $Path
 }
 
 # ---------------------------------------------------------------------------
@@ -134,9 +153,11 @@ function Resolve-StageRoots(
     $rig = Join-Path $repoRoot "tests\regression\shader-differential"
     # A root without the rig's curated list is not a tree this stager can
     # judge; a typo must not fall through to staging nothing from the wrong
-    # place.
-    if (-not (Test-Path -LiteralPath (Join-Path $rig "reference-pairs.txt") -PathType Leaf)) {
-        throw "-RepoRoot does not hold a shader-differential rig (no tests\regression\shader-differential\reference-pairs.txt under $repoRoot)"
+    # place.  The list was renamed reference-pairs.txt -> established-pairs.txt;
+    # honor either so old checkouts still stage.
+    if ((-not (Test-Path -LiteralPath (Join-Path $rig "established-pairs.txt") -PathType Leaf)) -and
+        (-not (Test-Path -LiteralPath (Join-Path $rig "reference-pairs.txt") -PathType Leaf))) {
+        throw "-RepoRoot does not hold a shader-differential rig (no tests\regression\shader-differential\established-pairs.txt (or legacy reference-pairs.txt) under $repoRoot)"
     }
 
     $corpusRoot = ""

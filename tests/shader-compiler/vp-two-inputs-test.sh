@@ -30,8 +30,15 @@
 # selector, so it cannot see a per-slot identity the compiler meant and
 # lost; the per-row source and swizzle assertions (which input each slot
 # reads, with which lanes) and the rig row's lane recipes carry that proof
-# (review).
-set -euo pipefail
+ # (review).
+ # (PS3_REF_CG_COMPILER is the pre-rename identifier; it still works as a fallback.)
+ set -euo pipefail
+
+ # Deprecated-name fallback: honor PS3_REF_CG_COMPILER when the new name is unset.
+ if [[ -z "${PS3_ESTABLISHED_CG_COMPILER:-}" && -n "${PS3_REF_CG_COMPILER:-}" ]]; then
+   PS3_ESTABLISHED_CG_COMPILER="$PS3_REF_CG_COMPILER"
+   export PS3_ESTABLISHED_CG_COMPILER
+ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 here="$repo_root/tests/shader-compiler"
@@ -148,10 +155,10 @@ accept vp_two_inputs_rig_v "the rig row: p.wwww * n * 0.5 + t * 0.25 into TEXCOO
 
 # ------------------------------------------------ reference byte identity
 BYTE_IDENTICAL=""
-if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
-    [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
+if [[ -n "${PS3_ESTABLISHED_CG_COMPILER:-}" ]]; then
+    [[ -x "$PS3_ESTABLISHED_CG_COMPILER" ]] || fail "PS3_ESTABLISHED_CG_COMPILER is not executable"
     for stem in $(ls "$shaders" | grep -E '^vp_two_inputs_.*_v\.cg$' | sed 's/\.cg$//'); do
-        "$PS3_REF_CG_COMPILER" -profile sce_vp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
+        "$PS3_ESTABLISHED_CG_COMPILER" -profile sce_vp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
             || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi

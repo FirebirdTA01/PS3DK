@@ -32,11 +32,18 @@
 # lanes, which the established compiler performs and this slice does not; a fragment
 # run-time index stays refused (array-uniform-test.sh, C6013).
 #
-# With PS3_REF_CG_COMPILER set (the established compiler's executable, never named in
+# With PS3_ESTABLISHED_CG_COMPILER set (the established compiler's executable, never named in
 # the tree), the accept rows are also compiled by the established compiler and
 # byte-compared; the rows listed in BYTE_IDENTICAL must match, the rest
-# report their status.  Without it the established compiler rows are simply absent.
-set -euo pipefail
+ # report their status.  Without it the established compiler rows are simply absent.
+ # (PS3_REF_CG_COMPILER is the pre-rename identifier; it still works as a fallback.)
+ set -euo pipefail
+
+ # Deprecated-name fallback: honor PS3_REF_CG_COMPILER when the new name is unset.
+ if [[ -z "${PS3_ESTABLISHED_CG_COMPILER:-}" && -n "${PS3_REF_CG_COMPILER:-}" ]]; then
+   PS3_ESTABLISHED_CG_COMPILER="$PS3_REF_CG_COMPILER"
+   export PS3_ESTABLISHED_CG_COMPILER
+ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 compiler="${1:-${RSX_CG_COMPILER:-}}"
@@ -440,10 +447,10 @@ BYTE_IDENTICAL=(vp_array_uniform_dynamic_v vp_array_uniform_consecutive_v
     vp_array_uniform_dyn_scalar_v vp_array_uniform_dyn_computed_v
     vp_array_uniform_dyn_work_between_v vp_array_uniform_dyn_float_index_v
     vp_array_uniform_dyn_half_index_v vp_array_uniform_dyn_float_expr_v)
-if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
-    [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
+if [[ -n "${PS3_ESTABLISHED_CG_COMPILER:-}" ]]; then
+    [[ -x "$PS3_ESTABLISHED_CG_COMPILER" ]] || fail "PS3_ESTABLISHED_CG_COMPILER is not executable"
     for stem in $(grep -oE '^accept [a-z0-9_]+' "${BASH_SOURCE[0]}" | cut -d' ' -f2 | sort -u); do
-        "$PS3_REF_CG_COMPILER" -p sce_vp_rsx -o "$work/$stem.ref.bin" "$shaders/$stem.cg" >"$work/$stem.ref.log" 2>&1 \
+        "$PS3_ESTABLISHED_CG_COMPILER" -p sce_vp_rsx -o "$work/$stem.ref.bin" "$shaders/$stem.cg" >"$work/$stem.ref.log" 2>&1 \
             || fail "reference: $stem did not compile"
         if cmp -s "$work/$stem.bin" "$work/$stem.ref.bin"; then status=identical; else status=differs; fi
         must=no; for b in "${BYTE_IDENTICAL[@]}"; do [[ "$b" == "$stem" ]] && must=yes; done

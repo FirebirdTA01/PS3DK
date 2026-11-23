@@ -9,12 +9,12 @@ function Assert($ok) { if (-not $ok) { throw 'assertion failed' } }
 function Reject([scriptblock]$body) { $threw=$false; try { & $body | Out-Null } catch { $threw=$true }; Assert $threw }
 function Row([string]$hash=('a'*64)) {
     [pscustomobject]@{name='shader';role='reference';profile='sce_fp_rsx';source='test.cg';uniform_set='auto';
-        ours_instruction_count=10;reference_instruction_count=6;instruction_delta=4;
-        ours_register_count=3;reference_register_count=2;register_delta=1;pixel_status='unknown';
+        ours_instruction_count=10;established_instruction_count=6;instruction_delta=4;
+        ours_register_count=3;established_register_count=2;register_delta=1;pixel_status='unknown';
         identity_version='1';source_sha256=$hash;compile_flags='{"ours":[],"reference":["-p","sce_fp_rsx"]}';
-        resolved_includes='[]';oracle_sha256=('c'*64)}
+        resolved_includes='[]';established_sha256=('c'*64)}
 }
-function Legacy { $r=Row; foreach($p in @('identity_version','source_sha256','compile_flags','resolved_includes','oracle_sha256')) { $r.PSObject.Properties.Remove($p) }; $r }
+function Legacy { $r=Row; foreach($p in @('identity_version','source_sha256','compile_flags','resolved_includes','established_sha256')) { $r.PSObject.Properties.Remove($p) }; $r }
 Check 'changed source is not compared to another program' {
     $s=Get-ContainerMetricsGateSummary @(Row ('b'*64)) @(Row)
     Assert ($s.ComparedBaselineRows -eq 0 -and $s.SourceVersionMismatches -eq 1 -and $s.Status -eq 'identity-mismatch')
@@ -34,7 +34,7 @@ Check 'missing identity cannot fall back beside a legacy baseline' {
 Check 'unversioned identities preserve legacy comparison' {
     Assert ((Get-ContainerMetricsGateSummary @(Row) @(Legacy)).ComparedBaselineRows -eq 1)
 }
-foreach($field in @('source_sha256','oracle_sha256')) {
+foreach($field in @('source_sha256','established_sha256')) {
     Check "malformed $field rejected" { $r=Row; $r.$field='broken'; Reject { Get-ContainerMetricsGateSummary @($r) @(Row) } }
 }
 Check 'changed compile flags fail coverage' {
@@ -43,9 +43,9 @@ Check 'changed compile flags fail coverage' {
     Assert ($s.CompileFlagsMismatches -eq 1 -and $s.Status -eq 'identity-mismatch')
 }
 Check 'measurement drift is distinguished from source drift' {
-    $r=Row; $r.oracle_sha256='d'*64
+    $r=Row; $r.established_sha256='d'*64
     $s=Get-ContainerMetricsGateSummary @($r) @(Row)
-    Assert ($s.OracleMismatches -eq 1 -and $s.SourceVersionMismatches -eq 0)
+    Assert ($s.EstablishedMismatches -eq 1 -and $s.SourceVersionMismatches -eq 0)
 }
 Check 'include bytes enter identity' {
     $a=Row; $b=Row
@@ -120,7 +120,7 @@ try {
     Check 'old pixel status is never inherited by input metadata' {
         $a=Get-ShaderCompileInputs $src @('-O1')
         $b=Get-ShaderCompileInputs $src @('-p','sce_fp_rsx')
-        $b | Add-Member NoteProperty OracleHash ('c'*64)
+        $b | Add-Member NoteProperty EstablishedHash ('c'*64)
         $p=Join-ShaderCompileInputs $a $b
         Assert ($null -eq $p.pixel_status -and $p.identity_version -eq '1')
     }
@@ -133,7 +133,7 @@ try {
     }
     Check 'schema-v1 allowance cannot cover a versioned row' {
         $base=Row; $current=Row; $current.ours_instruction_count=11; $current.instruction_delta=5
-        $counts=@('ours_instruction_count','reference_instruction_count','instruction_delta','ours_register_count','reference_register_count','register_delta')
+        $counts=@('ours_instruction_count','established_instruction_count','instruction_delta','ours_register_count','established_register_count','register_delta')
         $a=@{};$b=@{};foreach($f in $counts) {$a[$f]=$base.$f;$b[$f]=$current.$f}
         $entry=@{role=$base.role;name=$base.name;profile=$base.profile;source=$base.source;uniform_set=$base.uniform_set;card='test';reason='test';count=1;historical=$a;current=$b}
         $path=Join-Path $work 'allowance.json'
@@ -142,7 +142,7 @@ try {
     }
     Check 'removing a migrated entry keeps remaining legacy allowance valid' {
         $base=Legacy; $base.name='remaining'; $current=Legacy; $current.name='remaining'; $current.ours_instruction_count=11;$current.instruction_delta=5
-        $counts=@('ours_instruction_count','reference_instruction_count','instruction_delta','ours_register_count','reference_register_count','register_delta')
+        $counts=@('ours_instruction_count','established_instruction_count','instruction_delta','ours_register_count','established_register_count','register_delta')
         $a=@{};$b=@{};foreach($f in $counts) {$a[$f]=$base.$f;$b[$f]=$current.$f}
         $entry=@{role=$base.role;name=$base.name;profile=$base.profile;source=$base.source;uniform_set=$base.uniform_set;card='test';reason='test';count=1;historical=$a;current=$b}
         $path=Join-Path $work 'remaining.json'

@@ -32,7 +32,7 @@ so in its commit message and explain why the higher cost is accepted.
 Versioned input identities (incremental migration)
 
 identity_version=1 adds source_sha256, compile_flags, resolved_includes and
-oracle_sha256 to the five-field row identity. Source and include hashes fold
+established_sha256 to the five-field row identity. Source and include hashes fold
 CRLF bytes to LF; other bytes, including a BOM or standalone CR, are unchanged.
 The established compiler hash covers the executable's exact bytes. Compiler-under-test hashes
 belong in session provenance, not this comparison key: changes between our
@@ -86,8 +86,8 @@ Each entry has exactly these fields:
   card, reason: nonblank strings (a descriptive card is accepted)
   count: the JSON integer 1 (the CSV key must identify one row)
   historical, current: objects with these six JSON integer fields:
-    ours_instruction_count, reference_instruction_count, instruction_delta,
-    ours_register_count, reference_register_count, register_delta
+    ours_instruction_count, established_instruction_count, instruction_delta,
+    ours_register_count, established_register_count, register_delta
 Raw counts must be nonnegative and each delta must equal ours minus reference.
 The historical object pins the baseline CSV values; current pins staged values.
 Counts and deltas must fit signed 32-bit integers. Identity fields cannot contain
