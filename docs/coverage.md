@@ -53,8 +53,8 @@ Platform ABI symbols vs our install tree.  Primary diff is by exact symbol name,
 | `libpamf_stub` | 23 | 23 | 0 | 23 | 100.0% |
 | `libsysutil_photo_decode_stub` | 4 | 4 | 0 | 4 | 100.0% |
 | `libsysutil_photo_import_stub` | 2 | 2 | 0 | 2 | 100.0% |
-| `libsysutil_photo_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libsysutil_photo_export_stub` | 9 | 9 | 0 | 9 | 100.0% |
+| `libsysutil_photo_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libpngdec_stub` | 29 | 29 | 0 | 29 | 100.0% |
 | `libpngenc_stub` | 9 | 9 | 0 | 9 | 100.0% |
 | `libsysutil_print_stub` | 14 | 14 | 0 | 14 | 100.0% |
@@ -78,8 +78,8 @@ Platform ABI symbols vs our install tree.  Primary diff is by exact symbol name,
 | `libsync2_stub` | 38 | 32 | 0 | 32 | 84.2% |
 | `libsysutil_sysconf_ext_stub` | 1 | 1 | 0 | 1 | 100.0% |
 | `libsysmodule_stub` | 8 | 8 | 0 | 8 | 100.0% |
-| `libsysutil_stub` | 174 | 174 | 0 | 174 | 100.0% |
 | `libsysutil_audio_out_stub` | 10 | 10 | 0 | 10 | 100.0% |
+| `libsysutil_stub` | 174 | 174 | 0 | 174 | 100.0% |
 | `libsysutil_ap_stub` | 3 | 3 | 0 | 3 | 100.0% |
 | `libsysutil_avc2_stub` | 54 | 54 | 0 | 54 | 100.0% |
 | `libsysutil_avconf_ext_stub` | 16 | 16 | 0 | 16 | 100.0% |
@@ -605,5 +605,4 @@ Platform ABI symbols vs our install tree.  Primary diff is by exact symbol name,
 0xb53fa02e  _ZnwjjRKSt9nothrow_t
 0xb7dcbfdd  __Setgloballocale
 ```
-
 
