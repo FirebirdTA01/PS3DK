@@ -818,15 +818,17 @@ if ($EstablishedCompiler) {
     # -GeneralLowering corpus sweep must be able to run without it -
     # discard-blend/fpshader, for one, refuses on the general path until
     # CF-2 lands (general-path-discard).
+    $defaultPairs = Join-Path $rig "established-pairs.txt"
     $EstablishedPairs = Get-EstablishedPairsPathForStage `
         -EstablishedPairs $EstablishedPairs `
-        -DefaultPath (Join-Path $rig "established-pairs.txt") `
+        -DefaultPath $defaultPairs `
         -ReferenceTreeCorpus ([bool]$ReferenceTreeCorpus) `
         -ReferenceCorpus ([bool]$ReferenceCorpus) `
         -PathPairs $false
     # The curated list was renamed reference-pairs.txt -> established-pairs.txt;
-    # honor the legacy name as a fallback so old checkouts still stage.
-    if ($EstablishedPairs -ne '-') { $EstablishedPairs = Resolve-EstablishedPairsFile $EstablishedPairs }
+    # honor the legacy name as a fallback so old checkouts still stage - for
+    # the default list only, never in place of a list named explicitly.
+    if ($EstablishedPairs -ne '-') { $EstablishedPairs = Resolve-EstablishedPairsFile $EstablishedPairs $defaultPairs }
     $pairLines = @()
     if ($EstablishedPairs -ne '-') {
         $pairLines = @(Get-Content $EstablishedPairs | Where-Object { $_ -and -not $_.StartsWith("#") })

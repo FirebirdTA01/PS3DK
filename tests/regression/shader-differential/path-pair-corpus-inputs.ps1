@@ -95,13 +95,22 @@ function Get-EstablishedPairsPathForStage(
 }
 
 # The curated pairs list was renamed reference-pairs.txt -> established-pairs.txt.
-# Old checkouts (and any caller that still spells it the old way) are readable
-# as a fallback, so the new name wins and the old one is honored when present.
-function Resolve-EstablishedPairsFile([string]$DefaultPath) {
-    if ($DefaultPath -and (Test-Path -LiteralPath $DefaultPath -PathType Leaf)) { return $DefaultPath }
+# An old checkout that still has only the earlier file is readable as a
+# fallback: when the list asked for is the DEFAULT one and it is missing, the
+# earlier file beside it is used.  A list the caller named explicitly is never
+# replaced: a missing one stays missing and fails where it is read, instead of
+# a different list being staged in its place.
+function Resolve-EstablishedPairsFile([string]$Path, [string]$DefaultPath) {
+    if ($Path -and (Test-Path -LiteralPath $Path -PathType Leaf)) { return $Path }
+    if (-not $Path -or -not $DefaultPath) { return $Path }
+    $asked = [System.IO.Path]::GetFullPath($Path)
+    $default = [System.IO.Path]::GetFullPath($DefaultPath)
+    if (-not [string]::Equals($asked, $default, [System.StringComparison]::OrdinalIgnoreCase)) { return $Path }
+    # built from the path as the caller spelled it, so the result compares
+    # equal to what the caller would build itself
     $old = Join-Path (Split-Path -Parent $DefaultPath) "reference-pairs.txt"
     if (Test-Path -LiteralPath $old -PathType Leaf) { return $old }
-    return $DefaultPath
+    return $Path
 }
 
 # ---------------------------------------------------------------------------
