@@ -423,9 +423,13 @@ Every release candidate MUST:
    `abi-verify check` emit all PASS lines.  The native CellOS Lv-2 runtime is
    the default for the toolchain — there is no separate runtime selection flag
    to pass; the conformance sample is built and inspected as-is.
-2. Diff the sample's emitted manifest against
-   `tests/abi/fixtures/crt1.json` on every common field: ELF header,
-   `.opd` entry shape, `.sys_proc_prx_param` size/magic/version.
+2. Diff the **installed PPU `crt1.o`** manifest (a REL startfile, the same
+   class as the fixture) against `tests/abi/fixtures/crt1.json` on every
+   common field: ELF header, `.opd` entry shape, `.sys_proc_prx_param`
+   size/magic/version.  Object-specific fields — `elf_type` (REL vs EXEC),
+   `os_abi` (untagged `.o` vs 0x66), and the per-symbol / per-relocation /
+   path tables — are inherent to the object class, not to the conformance
+   contract, and are reported as information, not used to gate.
 3. Link and run the sample in RPCS3 with process start, exit-handler
    fire, and clean exit observed in the emulator log.
 

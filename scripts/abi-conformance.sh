@@ -180,6 +180,7 @@ fi
 # The fixture manifest is a REL startfile (crt1.o); the like-for-like 7.2
 # target is our INSTALLED crt1.o, which is what actually carries the .opd
 # compact descriptors and the .sys_proc_prx_param block.
+rel_unavailable=0
 if [ -z "$rel_obj" ]; then
     # Prefer the ILP32 crt1.o (the default PPU runtime), skip the lp64 variant.
     rel_obj="$(find "$ps3dev/ppu" -type f -name 'crt1.o' \
@@ -270,12 +271,36 @@ PY
         fi
     fi
 else
-    info "7.2 skipped: no installed PPU crt1.o found under $ps3dev/ppu (or --rel-obj)"
-    info "     the .opd / .sys_proc_prx_param fixture comparison is unavailable without it"
+    # A strict conformance run MUST check a REL object: silently skipping 7.2
+    # would let "PASS" ride on the linked-sample half alone, which does not
+    # exercise the .opd / .sys_proc_prx_param fixture comparison at all.  This
+    # is a distinct UNAVAILABLE outcome, not a pass and not a (field) finding.
+    rel_unavailable=1
+    printf '  [FAIL] 7.2 UNAVAILABLE: no installed PPU crt1.o found under %s/ppu (or --rel-obj)\n' "$ps3dev"
+    printf '         the .opd / .sys_proc_prx_param REL-vs-fixture comparison could not run.\n'
+    printf '         strict mode must fail on a missing required input; it does NOT pass.\n'
 fi
 
 # ---------------------------------------------------------------- final verdict
+# The 7.2 REL-vs-fixture comparison is a required input.  If it could not run
+# (no installed crt1.o), a strict run must FAIL outright — it cannot pass on
+# the linked-sample half alone.  A report-only run may exit 0, but it says
+# UNAVAILABLE rather than PASS, so a green run is never mistaken for one that
+# actually checked a REL object.
 printf '\n== %s ==\n' "abi-conformance verdict"
+if [ "$rel_unavailable" -eq 1 ]; then
+    echo "UNAVAILABLE — 7.2 (installed crt1.o vs fixture) could not run: the PPU"
+    echo "crt1.o was not found and none was supplied (--rel-obj)."
+    if [ "$report_only" -eq 1 ]; then
+        echo "         Report-only: not blocking, but this is NOT a pass — the REL-vs-"
+        echo "         fixture check has not been performed.  Supply $ps3dev/ppu crt1.o"
+        echo "         or --rel-obj before treating section 7.2 as satisfied."
+        exit 0
+    fi
+    echo "         Strict mode requires the REL object; it is a required input, so the"
+    echo "         run fails rather than passing on unverified ground."
+    exit 1
+fi
 if [ "$fail" -eq 0 ]; then
     echo "PASS — 7.1 (linked sample zero-warnings + abi-verify all-PASS) and 7.2 (installed"
     echo "crt1.o vs fixture conformance fields) hold.  7.3 (RPCS3 run) remains a manual step."
