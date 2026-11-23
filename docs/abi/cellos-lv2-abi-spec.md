@@ -419,8 +419,10 @@ default and treats `.sys_proc_param` as a deprecated alias.
 
 Every release candidate MUST:
 
-1. Build `samples/toolchain/hello-ppu-abi-check` under `-mps3-runtime=native`
-   with zero warnings and have `abi-verify check` emit all PASS lines.
+1. Build `samples/toolchain/hello-ppu-abi-check` with zero warnings and have
+   `abi-verify check` emit all PASS lines.  The native CellOS Lv-2 runtime is
+   the default for the toolchain — there is no separate runtime selection flag
+   to pass; the conformance sample is built and inspected as-is.
 2. Diff the sample's emitted manifest against
    `tests/abi/fixtures/crt1.json` on every common field: ELF header,
    `.opd` entry shape, `.sys_proc_prx_param` size/magic/version.

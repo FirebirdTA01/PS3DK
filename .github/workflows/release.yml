@@ -927,6 +927,21 @@ jobs:
           fi
           echo "docs/coverage.md matches the installed SDK exports"
 
+      # CellOS Lv-2 ABI conformance (ABI spec section 7).  At this point the
+      # native PPU cross toolchain ($PS3DEV/ppu) and our SDK ($PS3DK) are both
+      # installed, so this builds samples/toolchain/hello-ppu-abi-check with
+      # the real native compiler, requires zero warnings and
+      # `abi-verify check` all-PASS, and diffs the sample's manifest against
+      # tests/abi/fixtures/crt1.json.  This gates the release on our own ABI
+      # contract: a compact-OPD / prx-param regression in the toolchain is
+      # caught here, or else requires a fixture update with a documented
+      # rationale per section 7 itself.  It goes red by design when the tree
+      # drifts from the spec — that is a real ABI finding, not a broken gate.
+      - name: Stage 0 — ABI conformance (spec section 7)
+        run: |
+          source scripts/env.sh
+          bash scripts/abi-conformance.sh --ps3dev "$PS3DEV" --sdk "$PS3DK"
+
       - name: Stage 1 — cross-build PPU toolchain (mingw-w64)
         run: |
           source scripts/env.sh
