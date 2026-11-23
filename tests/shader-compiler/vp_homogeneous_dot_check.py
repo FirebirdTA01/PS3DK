@@ -84,6 +84,20 @@ ROWS = {
     'returned': (RETURN_HEAD + ' float4 world = mul(M, float4(p.xyz, 1.0));\n t = uv;\n'
                  ' return mul(N, world);\n}\n',
                  lambda p, uv: {0: mul(N, mul(M, p[:3] + [1.0])), 7: uv}, 4, 4, 0),
+    # scalars computed one by one and placed in output lanes: each dot product
+    # writes its output lane, no register in between
+    'lane_scatter': (' o = p;\n c = float4(dot(p.xyz, m0.xyz), dot(uv.xyz, m1.xyz), dot(p, m2), 1.0);\n'
+                     ' t = float4(uv.xy, dot(uv, n0), dot(p, n1));\n}\n',
+                     lambda p, uv: {0: p, 1: [sum(p[k] * M[0][k] for k in range(3)),
+                                              sum(uv[k] * M[1][k] for k in range(3)), dot4(p, M[2]), 1.0],
+                                    7: [uv[0], uv[1], dot4(uv, N[0]), dot4(p, N[1])]}, 0, None, None),
+    # a lane-wise value copied to the output in another lane order
+    'reordered': (' o = p;\n c = (uv * m0 + n0).zyxw;\n t = uv;\n}\n',
+                  lambda p, uv: (lambda v: {0: p, 1: [v[2], v[1], v[0], v[3]], 7: uv})(
+                      [uv[k] * M[0][k] + N[0][k] for k in range(4)]), 0, 0, None),
+    # one lane repeated into three output lanes
+    'repeated': (' o = p;\n float d = dot(uv, m0);\n c = float4(d, d, d, 1.0);\n t = uv;\n}\n',
+                 lambda p, uv: {0: p, 1: [dot4(uv, M[0])] * 3 + [1.0], 7: uv}, 0, None, None),
     # arithmetic written straight to an output
     'arithmetic': (' o = p;\n c = uv * m0 + n0;\n t = uv;\n}\n',
                    lambda p, uv: {0: p, 1: [uv[k] * M[0][k] + N[0][k] for k in range(4)], 7: uv}, 0, 0, 0),
