@@ -122,18 +122,20 @@ The version stamped into builds is generated from the most recent
   anchor definitions only (a `startup.o` member, from the automatic lifecycle
   archive or a mixed-in one); the expected weak reference from
   `live_autostart.o` passes.
-- **`ps3dk-prof` tests: a shared temporary-name race in the ring export
-  CLI tests.** The `auto_json` helper in the `auto_rsx` test suite wrote
-  its CLI input to a temporary file named by process id and content
-  length.  Two tests that pass the same fixture and can run on different
-  worker threads (`ring_export_round_trips` and
+- **`ps3dk-prof` tests: a shared temporary-name race in the `auto_rsx`
+  CLI tests.** Several tests in the `auto_rsx` test suite wrote their CLI
+  input to a temporary file named only by process id and one or two
+  small values (content length, or a frame range, or nothing).  Two tests
+  that pass the same fixture and can run on different worker threads
+  (`ring_export_round_trips` and
   `ring_export_window_through_the_cli` both pass the `ring` fixture)
   produced the same name, and each thread removes its file just before its
   own read — so one thread's remove could land between the other thread's
   write and its CLI process opening the input, and the CLI then reported
-  "no such file" and returned exit 3.  The name now appends a
-  process-wide monotonically-increasing counter so concurrent callers have
-  distinct files; the counter pattern is already used elsewhere in the
+  "no such file" and returned exit 3.  Every test in this file that
+  names its CLI input with `temp_dir()` now appends a process-wide
+  monotonically-increasing counter so concurrent callers have distinct
+  files; the counter pattern is already used elsewhere in the
   test suite for the same reason.
 
 ## [v0.28.8] — 2026-11-21

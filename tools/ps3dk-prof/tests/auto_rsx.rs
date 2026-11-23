@@ -2639,7 +2639,9 @@ fn ring_uncertain_state_with_raw_valid_is_refused() {
     assert_eq!(n, 1);
     assert_eq!(reader::read(&forged).expect_err("one RAW_VALID record with state 2").rule, Rule::AutoOps);
     let (code, _) = {
-        let p = std::env::temp_dir().join(format!("ring-uncertain-{}.prof", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("ring-uncertain-{}-{n}.prof", std::process::id()));
         std::fs::write(&p, &forged).unwrap();
         let r = cli(&["auto", "--json", p.to_str().unwrap()]);
         let _ = std::fs::remove_file(&p);
@@ -2689,7 +2691,9 @@ fn ring_export(src: &[u8], range: std::ops::RangeInclusive<u64>) -> serde_json::
     let out = ps3dk_prof::export_bytes(src, range.clone())
         .unwrap_or_else(|e| panic!("export {range:?}: {e}"));
     reader::read(&out).unwrap_or_else(|m| panic!("exported {range:?} reads back: {m:?}"));
-    let p = std::env::temp_dir().join(format!("ring-export-{}-{}-{}.prof", std::process::id(), range.start(),
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!("ring-export-{}-{}-{}-{n}.prof", std::process::id(), range.start(),
         range.end()));
     std::fs::write(&p, &out).unwrap();
     let (code, json) = cli(&["auto", "--json", p.to_str().unwrap()]);
@@ -2754,7 +2758,9 @@ fn ring_export_round_trips() {
 fn ring_export_window_through_the_cli() {
     let src = fixture_path("ring");
     let w = auto_json(&fixture("ring"))["windows"][0]["window_id"].as_u64().expect("ring.prof has a window");
-    let out = std::env::temp_dir().join(format!("ring-window-{}.prof", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let out = std::env::temp_dir().join(format!("ring-window-{}-{n}.prof", std::process::id()));
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
         .args(["export", "--window", &w.to_string(), &src, out.to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
@@ -2834,7 +2840,9 @@ fn ring_real_capture_exports_and_refuses_uncertain_state() {
         ring_export_matches(&whole, &v, range);
     }
     let w = whole["windows"][0]["window_id"].as_u64().unwrap();
-    let out = std::env::temp_dir().join(format!("ring-real-window-{}.prof", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let out = std::env::temp_dir().join(format!("ring-real-window-{}-{n}.prof", std::process::id()));
     let o = std::process::Command::new(env!("CARGO_BIN_EXE_ps3dk-prof"))
         .args(["export", "--window", &w.to_string(), &path, out.to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
