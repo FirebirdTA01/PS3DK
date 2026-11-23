@@ -679,8 +679,13 @@ build_psl1ght_tools() {
     local ldflags="-static -static-libgcc -L$DEPS_ROOT/lib -lgmp -lcrypto -lz -lws2_32 -lcrypt32 $REPRO_LD"
 
     local cc="$HOST_TRIPLE-gcc"
-    "$cc" $cflags "$geohot_src/make_self.c"         $ldflags -o "$STAGE_BIN/make_self.exe"
-    "$cc" $cflags -DNPDRM "$geohot_src/make_self.c" $ldflags -o "$STAGE_BIN/make_self_npdrm.exe"
+    # make_self / make_self_npdrm from a build-tree copy with the certified-file header
+    # data-length fix (scripts/gen-make-self-source.sh); -I"$geohot_src" for
+    # the source's own relative includes, as for make_sprx below.
+    local self_src="$SRC_ROOT/make_self_fixed.c"
+    "$script_dir/gen-make-self-source.sh" "$geohot_src/make_self.c" "$self_src"
+    "$cc" $cflags -I"$geohot_src" "$self_src"         $ldflags -o "$STAGE_BIN/make_self.exe"
+    "$cc" $cflags -I"$geohot_src" -DNPDRM "$self_src" $ldflags -o "$STAGE_BIN/make_self_npdrm.exe"
     # make_sprx: geohot make_self.c with the SPRX se_flags relabel.  The
     # relabel, its rationale, and both drift guards are single-sourced in
     # scripts/gen-make-sprx-source.sh, shared with build-psl1ght.sh's

@@ -40,6 +40,8 @@ class InstallOrderTests(unittest.TestCase):
         # stand-in accepts only the host make_sprx output operation.
         self.write('scripts/gen-make-sprx-source.sh',
                    '#!/bin/bash\nset -eu\nmkdir -p "$(dirname "$2")"\nprintf "fixture\\n" > "$2"\n', executable=True)
+        self.write('scripts/gen-make-self-source.sh',
+                   '#!/bin/bash\nset -eu\nmkdir -p "$(dirname "$2")"\nprintf "fixture\\n" > "$2"\n', executable=True)
         self.write('scripts/build-runtime-lv2.sh',
                    '#!/bin/bash\nset -eu\nprintf "runtime override\\n" > "$PS3DEV/runtime-installed"\n', executable=True)
         self.write('scripts/host-compiler',
