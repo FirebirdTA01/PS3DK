@@ -1,0 +1,11 @@
+library: seg_calc
+module: sprx_segments
+archive_name: seg_calc
+version: 1
+exports:
+  - name: seg_calc_add
+    nid: 0xbfea24b9
+    signature: 'int seg_calc_add(int a, int b);'
+  - name: seg_calc_scale
+    nid: 0xfc857344
+    signature: 'int seg_calc_scale(int x, int i);'

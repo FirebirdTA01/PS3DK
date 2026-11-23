@@ -21,16 +21,19 @@
  * name/NID pairs go into the library's YAML so `nidgen archive' can build
  * the lib<name>_stub.a an importer links against.
  *
- * Record layout emitted per library (44 bytes, facts §1.4):
- *   size 0x2c, version 1, attributes 0x0001 (named library),
+ * Record layout emitted per library (28 bytes, the size shipped modules
+ * use; retail Lv-2 walks the export table in fixed 0x1c steps, so a longer
+ * record hangs sys_prx_start_module as soon as there is a second one):
+ *   size 0x1c, version 1, attributes 0x0001 (named library),
  *   num_func = number of PRX_EXPORT_FUNC entries (assembler label
  *   arithmetic - nothing is patched post-link on the export side),
  *   name -> C string, nids -> FNID array, addrs -> array of compact OPD
  *   addresses (a function symbol's value IS its descriptor address under
  *   our ELFv1 layout).
  *
- * The nameless management record (module_start / module_stop, attributes
- * 0x8000) is emitted by the crt (runtime/lv2/crt/lv2-prx.S), which also
+ * The nameless management record (module_start / module_stop and the
+ * module_info variable, attributes 0x8000) is emitted by the crt
+ * (runtime/lv2/crt/lv2-prx.S), which also
  * provides weak defaults returning SYS_PRX_RESIDENT; define either
  * function in C to override.
  *
@@ -92,7 +95,7 @@
 
 /*
  * PRX_LIBRARY_END(tag)
- *   Closes the arrays and emits the 44-byte .lib.ent record.
+ *   Closes the arrays and emits the 28-byte .lib.ent record.
  */
 #define PRX_LIBRARY_END(tag)                                            \
 	.section ".rodata.sceExportNID","a";                            \
@@ -102,7 +105,7 @@
 	.section ".lib.ent","a";                                        \
 	.align 2;                                                       \
 	.Lprx_record_##tag:;                                            \
-	.byte  0x2c;                            /* size         */      \
+	.byte  0x1c;                            /* size         */      \
 	.byte  0x00;                            /* unk0         */      \
 	.short 0x0001;                          /* version      */      \
 	.short SYS_PRX_LIBATTR_LIBRARY;         /* attributes   */      \
@@ -114,11 +117,7 @@
 	.short 0x0000;                          /* unk1         */      \
 	.long  .Lprx_name_##tag;                /* name         */      \
 	.long  .Lprx_nids_##tag;                /* nids         */      \
-	.long  .Lprx_addrs_##tag;               /* addrs        */      \
-	.long  0x00000000;                      /* vnids        */      \
-	.long  0x00000000;                      /* vstubs       */      \
-	.long  0x00000000;                      /* unk4         */      \
-	.long  0x00000000                       /* unk5         */
+	.long  .Lprx_addrs_##tag                /* addrs        */
 
 #else /* C / C++ */
 

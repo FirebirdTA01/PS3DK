@@ -16,7 +16,7 @@ const SEG_MEMSZ: u64 = 0x400;
 const MI_ADDR: u64 = 0x78;
 const LIBENT_TOP: u64 = 0x100;
 const LIBENT: u64 = 0x104;
-const LIBENT_END: u64 = 0x104 + 44 * 2;
+const LIBENT_END: u64 = 0x104 + 28 * 2;
 const LIBSTUB_TOP: u64 = LIBENT_END;
 const LIBSTUB_END: u64 = LIBSTUB_TOP + 4;
 const NIDS: u64 = 0x200;
@@ -68,7 +68,7 @@ fn synth_elf(export_attrs: (u16, u16), extra_relas: &[RelaSpec]) -> Vec<u8> {
     // Two export records: the management record (module_start) and one named
     // library exporting a single function.
     let mut rec = |off: usize, attrs: u16, nfunc: u16, name: u32, nids: u32, addrs: u32| {
-        img[off + module::LR_SIZE] = 44;
+        img[off + module::LR_SIZE] = module::EXPORT_RECORD_SIZE;
         wr_u16(&mut img, off + module::LR_VERSION, 1);
         wr_u16(&mut img, off + module::LR_ATTRIBUTES, attrs);
         wr_u16(&mut img, off + module::LR_NUM_FUNC, nfunc);
@@ -78,7 +78,7 @@ fn synth_elf(export_attrs: (u16, u16), extra_relas: &[RelaSpec]) -> Vec<u8> {
     };
     rec(LIBENT as usize, export_attrs.0, 1, 0, NIDS as u32, ADDRS as u32);
     rec(
-        (LIBENT + 44) as usize,
+        (LIBENT + 28) as usize,
         export_attrs.1,
         1,
         NAME_STR as u32,
@@ -173,7 +173,7 @@ fn synth_elf(export_attrs: (u16, u16), extra_relas: &[RelaSpec]) -> Vec<u8> {
         SectionSpec { name: "", sh_type: 0, sh_flags: 0, sh_addr: 0, sh_offset: 0, sh_size: 0, sh_link: 0, sh_info: 0, sh_entsize: 0 },
         SectionSpec { name: ".rodata.sceModuleInfo", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC, sh_addr: MI_ADDR, sh_offset: MI_ADDR, sh_size: module::MODULE_INFO_SIZE, sh_link: 0, sh_info: 0, sh_entsize: 0 },
         SectionSpec { name: ".text", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC | 0x4, sh_addr: TEXT, sh_offset: TEXT, sh_size: 0x40, sh_link: 0, sh_info: 0, sh_entsize: 0 },
-        SectionSpec { name: ".lib.ent", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC, sh_addr: LIBENT, sh_offset: LIBENT, sh_size: 88, sh_link: 0, sh_info: 0, sh_entsize: 0 },
+        SectionSpec { name: ".lib.ent", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC, sh_addr: LIBENT, sh_offset: LIBENT, sh_size: 56, sh_link: 0, sh_info: 0, sh_entsize: 0 },
         SectionSpec { name: ".opd", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC, sh_addr: OPD, sh_offset: OPD, sh_size: 16, sh_link: 0, sh_info: 0, sh_entsize: 0 },
         SectionSpec { name: ".got", sh_type: SHT_PROGBITS, sh_flags: SHF_ALLOC, sh_addr: 0x200, sh_offset: 0x200, sh_size: 8, sh_link: 0, sh_info: 0, sh_entsize: 0 },
     ];
@@ -303,7 +303,9 @@ fn synth_elf(export_attrs: (u16, u16), extra_relas: &[RelaSpec]) -> Vec<u8> {
 
     let phdr = Phdr {
         p_type: PT_LOAD,
-        p_flags: 7,
+        // One read+execute segment: the module has no writable data, so it
+        // needs no data segment (a writable executable one is refused).
+        p_flags: PF_R | PF_X,
         p_offset: 0,
         p_vaddr: 0,
         p_paddr: 0,

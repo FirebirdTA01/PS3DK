@@ -1,6 +1,6 @@
-//! The two in-module tables: the 52-byte module info block and the 44-byte
-//! library records that make up `.lib.ent` (exports) and `.lib.stub`
-//! (imports).
+//! The two in-module tables: the 52-byte module info block and the library
+//! records that make up `.lib.ent` (exports, 28 bytes) and `.lib.stub`
+//! (imports, 44 bytes).
 //!
 //! Layouts are from `docs/local/sprx-format-facts.md` §1.2 and §1.4.
 
@@ -27,8 +27,19 @@ pub const MI_IMPORTS_START: usize = 0x2C;
 pub const MI_IMPORTS_END: usize = 0x30;
 
 /// Default stride of a library record.  A record may declare a shorter one in
-/// its `size` byte; the loader walks by that byte and falls back to 44.
+/// its `size` byte; the emulator walks by that byte and falls back to 44.
 pub const LIB_RECORD_SIZE: u64 = 44;
+
+/// Size of an export (`.lib.ent`) record.  Retail Lv-2 walks the export table
+/// in fixed 28-byte steps whatever the `size` byte says, and shipped modules
+/// write 0x1c there; a 44-byte record makes the second record start in the
+/// middle of the first, and `sys_prx_start_module` hangs (issue #137).
+pub const EXPORT_RECORD_SIZE: u8 = 0x1c;
+/// Size of an import (`.lib.stub`) record, as shipped modules and our stub
+/// archives write it.
+pub const IMPORT_RECORD_SIZE: u8 = 0x2c;
+/// The fields this tool reads all sit in the first 28 bytes of a record.
+const LIB_RECORD_READ: usize = 0x1c;
 
 // Field offsets within a library record.
 pub const LR_SIZE: usize = 0x00;
@@ -275,7 +286,7 @@ pub fn walk_records(
         let off = to_file(addr)
             .with_context(|| format!("library record at 0x{addr:x} is not inside any segment"))?
             as usize;
-        if off + LIB_RECORD_SIZE as usize > data.len() {
+        if off + LIB_RECORD_READ > data.len() {
             bail!("library record at 0x{addr:x} runs past the end of the file");
         }
         let rec = LibRecord {

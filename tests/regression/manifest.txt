@@ -11,6 +11,8 @@ psgl-buffer-churn-ilp32,tests/regression/psgl-buffer-churn/psgl-buffer-churn-ilp
 psgl-buffer-churn-lp64,tests/regression/psgl-buffer-churn/psgl-buffer-churn-lp64.fake.self,60,RAN-CLEAN,(?m)^CHURN_OK\r?$,HEAP_SMALL_FAIL
 sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT_OK,PRX_FAIL
 sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL
+sprx-segments,tests/regression/sprx-segments/sprx-segments.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+sprx-segments-lp64,tests/regression/sprx-segments/sprx-segments-lp64.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
 # sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.
 sys-tty,tests/regression/sys-tty/sys-tty.fake.self,20,RAN-CLEAN,(?s)SYS_TTY_ROW reference-name write.*SYS_TTY_ROW psl1ght-name write.*SYS_TTY_OK,SYS_TTY_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS

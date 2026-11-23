@@ -12,13 +12,28 @@
  *     module_start through the management export record emitted by
  *     lv2-prx.S (NID 0xBC9A0086).  prx-gen writes e_entry = 0.
  *
- *   - Base address 0 and exactly ONE PT_LOAD segment (flags RWX).  The
- *     loader relocates every PRX segment independently; with a single
- *     segment every relocation entry in the 0x700000A4 segment has
- *     index_addr == index_value == 0 and its addend is the link-time
- *     address itself, which removes a whole class of conversion bugs.
- *     Splitting into RX/RW segments is a follow-up once the system
- *     module layout has been read on CachyOS.
+ *   - Base address 0 and TWO PT_LOAD segments, the layout shipped modules
+ *     use and the one retail Lv-2 needs (issue #137):
+ *
+ *       hdr_load  0x00400005  PPU R+X, SPU R.  ELF + program headers, the
+ *                 module-info block, code, import trampolines, unwind
+ *                 tables and every table the loader only reads
+ *                 (.lib.ent/.lib.stub records, NID/name/address tables).
+ *       hdr_data  0x00600006  PPU R+W, SPU R+W.  Everything the module
+ *                 addresses through r2 or writes: .rodata, .opd, .got/TOC,
+ *                 the import slots the loader patches (.data.sceFStub),
+ *                 .data and .bss.
+ *
+ *     Retail Lv-2 refuses a segment without the SPU read bit (0x80010007),
+ *     and a module that stores to its own .data/.bss inside an executable
+ *     segment freezes the process; the emulator accepts both.
+ *
+ *     The loader places each segment at its own base, so a relocation is
+ *     only invariant when its two ends share a segment; prx-gen decides
+ *     that per relocation.  .rodata sits in the data segment because GCC
+ *     reaches it TOC-relative (r2 + offset), and the TOC lives there.  The
+ *     data segment follows the code segment directly (16-byte aligned), as
+ *     in shipped modules.
  *
  *   - No hdr_param / hdr_prx / hdr_tls program headers.  The loader's
  *     segment switch accepts only PT_LOAD and 0x700000A4; anything else is
@@ -52,7 +67,9 @@ OUTPUT_ARCH(powerpc:common64)
 
 PHDRS
 {
-	hdr_load	PT_LOAD FILEHDR PHDRS	FLAGS(0x01 | 0x02 | 0x04);
+	/* PPU R|X + SPU R, and PPU R|W + SPU R|W (see the header comment). */
+	hdr_load	PT_LOAD FILEHDR PHDRS	FLAGS(0x00400000 | 0x04 | 0x01);
+	hdr_data	PT_LOAD			FLAGS(0x00400000 | 0x00200000 | 0x04 | 0x02);
 
 	/* Reserve the relocation segment's slot at link time.
 	 *
@@ -129,7 +146,11 @@ SECTIONS
 	.lib.stub.btm : { KEEP (*(.lib.stub.btm)) }
 	PROVIDE (__libstubend = .);
 
-	.ppu_rodata         : { *(.ppu_rodata .ppu_rodata.*) }
+	/* --- data segment ------------------------------------------------------
+	 * Everything from here on is in hdr_data.  Read-only data comes first:
+	 * the code reaches it TOC-relative, so it must move with the TOC. */
+	. = ALIGN(16);
+	.ppu_rodata         : { *(.ppu_rodata .ppu_rodata.*) } : hdr_data
 
 	.rodata         : { *(.rodata .rodata.* .gnu.linkonce.r.*) }
 	.rodata1        : { *(.rodata1) }
@@ -185,7 +206,13 @@ SECTIONS
 	.opd		  : ALIGN(4) { KEEP (*(.opd)) }
 	.branch_lt	  : ALIGN(8) { *(.branch_lt) }
 	__lv2_got_start = .;
-	.got		  : ALIGN(8) { *(.got .toc) }
+	/* The trailing word keeps .got even when no input has TOC entries.
+	 * The linker drops an empty .got (a symbol assignment alone does not
+	 * keep it), and then bases .TOC. on the first writable section it
+	 * finds: .lib.stub, in the code segment.  Every TOC-relative access
+	 * to .rodata or .data would then cross segments, and prx-gen refuses
+	 * the module. */
+	.got		  : ALIGN(8) { *(.got .toc) QUAD(0) }
 	__lv2_toc_bias = __lv2_got_start + 0x8000 - .TOC.;
 	.toc.sceStub  : { KEEP (*(.toc.sceStub)) KEEP (*(SORT(.toc.sceStub.*))) }
 

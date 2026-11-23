@@ -28,6 +28,18 @@ pub const PT_LOAD: u32 = 1;
 /// The system's relocation segment (`SCE_PPURELA`).
 pub const PT_SCE_PPURELA: u32 = 0x7000_00A4;
 
+// PT_LOAD p_flags. The low three bits are the ordinary PPU permissions. Lv-2
+// also reads two SPU permission bits: a segment the SPU may read carries
+// 0x0040_0000, one it may also write carries 0x0020_0000 on top. Shipped
+// modules mark every LOAD segment SPU-readable and the data segment
+// SPU-writable (code 0x0040_0005, data 0x0060_0006), and retail Lv-2 refuses
+// a module whose segment lacks the SPU read bit with 0x80010007 (issue #137).
+pub const PF_X: u32 = 0x1;
+pub const PF_W: u32 = 0x2;
+pub const PF_R: u32 = 0x4;
+pub const PF_SPU_W: u32 = 0x0020_0000;
+pub const PF_SPU_R: u32 = 0x0040_0000;
+
 pub const SHT_PROGBITS: u32 = 1;
 pub const SHT_SYMTAB: u32 = 2;
 pub const SHT_STRTAB: u32 = 3;
@@ -295,6 +307,16 @@ impl Elf {
 
     pub fn load_segments(&self) -> Vec<Phdr> {
         self.phdrs.iter().copied().filter(|p| p.p_type == PT_LOAD).collect()
+    }
+
+    /// File offset of the byte at link-time address `addr`, when that byte is
+    /// backed by file content (inside some PT_LOAD's `p_filesz`).
+    pub fn file_offset_of_vaddr(&self, addr: u64) -> Option<usize> {
+        self.phdrs
+            .iter()
+            .filter(|p| p.p_type == PT_LOAD)
+            .find(|p| addr >= p.p_vaddr && addr < p.p_vaddr + p.p_filesz)
+            .map(|p| (p.p_offset + (addr - p.p_vaddr)) as usize)
     }
 
     /// All `SHT_RELA` entries whose target section is allocated, tagged with

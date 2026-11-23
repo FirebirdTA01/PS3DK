@@ -131,7 +131,7 @@ def main():
             mgmt = []
             off = ex_start
             while off < ex_end:
-                r = elf.file_at(off, 44)
+                r = elf.file_at(off, 0x1c)  # an export record is 28 bytes
                 size = elf.data[r] or 44
                 attrs, nfunc = struct.unpack_from(">HH", elf.data, r + 4)
                 nids, addrs = struct.unpack_from(">II", elf.data, r + 0x14)

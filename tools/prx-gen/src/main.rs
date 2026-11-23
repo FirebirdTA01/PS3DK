@@ -19,6 +19,8 @@ mod reloc;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_split;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};

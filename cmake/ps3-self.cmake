@@ -532,12 +532,16 @@ function(ps3_add_prx target)
 
 
     if(NOT _PS3_PRX_SKIP_LINK_FLAGS AND (CMAKE_CROSSCOMPILING OR CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"))
+        # lv2-prx.ld links a code segment and a separate data segment, so ld
+        # has no RWX segment to warn about; a warning here is a real finding.
         target_link_options(${target} PRIVATE
             "-specs=${PS3DK}/ppu/lib/lv2-prx.specs"
             "-nostartfiles"
             "-Wl,-q"
-            "-Wl,--no-warn-rwx-segments"
             "-Wl,-T,${PS3DK}/ppu/lib/lv2-prx.ld")
+        # lv2-prx-crt.o holds only data words and two two-instruction stubs,
+        # so the ILP32 and LP64 builds of it are the same bytes; LP64 modules
+        # link this one too.
         target_link_libraries(${target} PRIVATE "${PS3DK}/ppu/lib/lv2-prx-crt.o")
     endif()
 

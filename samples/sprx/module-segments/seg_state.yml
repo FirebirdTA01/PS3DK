@@ -1,0 +1,14 @@
+library: seg_state
+module: sprx_segments
+archive_name: seg_state
+version: 1
+exports:
+  - name: seg_state_data
+    nid: 0xe99aac83
+    signature: 'uint32_t seg_state_data(void);'
+  - name: seg_state_bss
+    nid: 0xe5999f9b
+    signature: 'uint32_t seg_state_bss(void);'
+  - name: seg_state_bump
+    nid: 0x82e12b5c
+    signature: 'uint32_t seg_state_bump(void);'

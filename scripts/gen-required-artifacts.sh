@@ -71,6 +71,8 @@ ppu_names="$(
 # (hello-sprx-import, linking hello_prx_stub) fails payload validation with
 # "ship it or stop linking it" -- and neither option is right, because the
 # whole point is that the module publishes its own import surface.
+# A name may carry a CMake variable (seg_calc_stub${_sfx}, one stub per ABI
+# in a foreach): it is matched verbatim, exactly as the link-line token is.
 # $0 belongs to awk, not the invoking shell.
 # shellcheck disable=SC2016
 generated_stubs="$(
@@ -81,7 +83,7 @@ generated_stubs="$(
     xargs -0 -r awk '
         {
             rest = $0
-            while (match(rest, /ps3_prx_stub_library[[:space:]]*\([[:space:]]*[A-Za-z0-9_.-]+/)) {
+            while (match(rest, /ps3_prx_stub_library[[:space:]]*\([[:space:]]*[A-Za-z0-9_.${}-]+/)) {
                 name = substr(rest, RSTART, RLENGTH)
                 sub(/.*\([[:space:]]*/, "", name)
                 print name
