@@ -868,35 +868,61 @@ jobs:
       #
       # coverage-report is taken from the native host-tools artifact (not
       # rebuilt here) so the gate only ever re-runs the Rust code, never a
-      # Rust toolchain install.
+      # Rust toolchain install.  That artifact is a tar.xz containing
+      # ps3-sdk-tools-<ver>-linux-x86_64/bin/, so we extract it before use.
+      #
+      # A negative control at the end of the step deliberately perturbs a copy
+      # of the tracked body and asserts the comparator reports a difference:
+      # because it is the only check that can detect drift, it must prove it
+      # can, or the whole gate is vacuous ("compare file against itself").
       - name: Stage 0 — SDK export-coverage report is in sync
         run: |
           source scripts/env.sh
-          regen="$RUNNER_TEMP/coverage-actual.md"
-          CR="$(find artifacts/host-tools-linux -type f -name coverage-report 2>/dev/null | head -n1)"
-          [ -n "$CR" ] || { echo "::error::coverage-report ELF not found in host-tools-linux artifact"; exit 2; }
+          set -eu
+          # -- locate coverage-report, unpacking the Linux host-tools tarball
+          #    (host-tools-linux-x86_64.tar.xz -> ps3-sdk-tools-<ver>-linux-x86_64/bin)
+          extract="$RUNNER_TEMP/host-tools-linux"
+          mkdir -p "$extract"
+          tarball="$(find artifacts/host-tools-linux -type f -name '*.tar.xz' | head -n1)"
+          [ -n "$tarball" ] || { echo "::error::host-tools-linux tarball not found under artifacts/host-tools-linux"; exit 2; }
+          tar -C "$extract" -xf "$tarball"
+          CR="$(find "$extract" -type f -name coverage-report | head -n1)"
+          [ -n "$CR" ] || { echo "::error::coverage-report ELF not found after extracting the host-tools-linux tarball"; exit 2; }
           echo "using $CR"
+          # -- regenerate the report from the just-installed tree
+          regen="$RUNNER_TEMP/coverage-regen.md"
           "$CR" --nid-db tools/nidgen/nids/extracted \
                 --install "$PS3DEV" \
                 --alias-map tools/nidgen/nids/aliases.yaml \
                 --output "$regen"
-          # Tracked file has the two manually-maintained "> **Tool version
-          # / Command**" lines after the title; the tool does not emit them.
-          # Compare body-for-body so those two lines do not cause a diff:
-          # anchor on the first "## " header (both files have it).
-          awk '/^## /{p=1} p' docs/coverage.md  > "$RUNNER_TRACKED.md"
-          awk '/^## /{p=1} p' "$regen"          > "$RUNNER_ACTUAL.md"
-          if ! diff -u "$RUNNER_TRACKED.md" "$RUNNER_ACTUAL.md"; then
-            cat >&2 <<EOF
-
-::error::docs/coverage.md is out of sync with the installed SDK exports.
-Run the regenerate command and commit the result:
-
-  coverage-report --nid-db tools/nidgen/nids/extracted \\
-             --install <\$PS3DEV> \\
-             --alias-map tools/nidgen/nids/aliases.yaml \\
-             --output docs/coverage.md
-EOF
+          # -- compare body-for-body (title + the two hand-maintained header
+          #    lines are skipped; both files share the first '## ' section,
+          #    so anchoring on it keeps the comparison correct as the section
+          #    list changes)
+          tracked_body="$RUNNER_TEMP/coverage-tracked.body"
+          regen_body="$RUNNER_TEMP/coverage-regen.body"
+          awk '/^## /{p=1} p' docs/coverage.md > "$tracked_body"
+          awk '/^## /{p=1} p' "$regen"          > "$regen_body"
+          # -- negative control: prove the comparator can detect drift
+          mutated="$RUNNER_TEMP/coverage-mutated.body"
+          sed '1s/.*/DRIFT-NEGATIVE-CONTROL/' "$tracked_body" > "$mutated"
+          if diff -q "$tracked_body" "$mutated" >/dev/null 2>&1; then
+            echo "::error::negative control matched the unmutated body — drift check is a no-op (comparing a file with itself)"
+            exit 1
+          fi
+          echo "negative control passed: an introduced one-line change is detected as drift"
+          # -- the real gate
+          if ! diff -u "$tracked_body" "$regen_body"; then
+            {
+              echo ""
+              echo "::error::docs/coverage.md is out of sync with the installed SDK exports."
+              echo "Run the regenerate command and commit the result:"
+              echo ""
+              echo "  coverage-report --nid-db tools/nidgen/nids/extracted \\"
+              echo "             --install <\$PS3DEV> \\"
+              echo "             --alias-map tools/nidgen/nids/aliases.yaml \\"
+              echo "             --output docs/coverage.md"
+            } >&2
             exit 1
           fi
           echo "docs/coverage.md matches the installed SDK exports"

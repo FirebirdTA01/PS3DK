@@ -215,6 +215,7 @@ fn snake_to_upper_camel(snake: &str) -> String {
     out
 }
 
+#[derive(Clone)]
 /// A single the platform ABI library loaded from an extracted YAML.
 struct CellSdkLibrary {
     name: String,                          // e.g. "audio"
@@ -290,8 +291,23 @@ fn load_cell_sdk_db(dir: &Path) -> Result<Vec<CellSdkLibrary>> {
         });
     }
 
-    libs.sort_by(|a, b| a.name.cmp(&b.name));
+    // Sort by (library name, archive filename).  name alone is not a key: the
+    // platform-ABI database carries several duplicate library names across
+    // distinct stub archives (cellPhotoUtility is libsysutil_photo_stub AND
+    // libsysutil_photo_export_stub; cellSysutil is libsysutil_stub AND
+    // libsysutil_audio_out_stub; cell_FreeType2 is libfreetypeTT_stub AND
+    // libfreetype_stub).  With a name-only sort the tie order depended on
+    // read_dir() / filesystem walk order, so two builds of the same tree
+    // emitted different row orderings.  archive_filename is the second key,
+    // making the order a pure function of the tree.
+    libs.sort_unstable_by(|a, b| compare_cell_libs(a, b));
     Ok(libs)
+}
+
+fn compare_cell_libs(a: &CellSdkLibrary, b: &CellSdkLibrary) -> std::cmp::Ordering {
+    a.name
+        .cmp(&b.name)
+        .then_with(|| a.archive_filename.cmp(&b.archive_filename))
 }
 
 /// Every global defined symbol from every `.a` archive under `root`, with the
@@ -530,4 +546,94 @@ fn render_report(
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lib(name: &str, archive: &str) -> CellSdkLibrary {
+        CellSdkLibrary {
+            name: name.to_string(),
+            archive_filename: archive.to_string(),
+            exports: BTreeMap::new(),
+            impl_counts: ImplCounts::default(),
+        }
+    }
+
+    use std::cmp::Ordering;
+
+    /// The real duplicate-name cases in the platform-ABI database
+    /// (cellPhotoUtility, cellSysutil, cell_FreeType2) must sort by archive
+    /// filename within a name, and by name across names.  The comparator is
+    /// the single function the sort key goes through, so asserting on it
+    /// directly is the guarantee.
+    #[test]
+    fn duplicate_name_ties_sort_by_archive_filename() {
+        let photo_a = lib("cellPhotoUtility", "libsysutil_photo_export_stub");
+        let photo_b = lib("cellPhotoUtility", "libsysutil_photo_stub");
+        let sys_a = lib("cellSysutil", "libsysutil_audio_out_stub");
+        let sys_b = lib("cellSysutil", "libsysutil_stub");
+        let ft_a = lib("cell_FreeType2", "libfreetypeTT_stub");
+        let ft_b = lib("cell_FreeType2", "libfreetype_stub");
+
+        // Within a name, archive filename is the tie-breaker (byte order):
+        //   photo_export_stub < photo_stub      ('_' 95 < 'e' 101)
+        //   audio_out_stub    < stub            ('a' < 's')
+        //   freetypeTT_stub   < freetype_stub   ('T' 84 < '_' 95)
+        assert_eq!(compare_cell_libs(&photo_a, &photo_b), Ordering::Less);
+        assert_eq!(compare_cell_libs(&photo_b, &photo_a), Ordering::Greater);
+        assert_eq!(compare_cell_libs(&sys_a, &sys_b), Ordering::Less);
+        assert_eq!(compare_cell_libs(&sys_b, &sys_a), Ordering::Greater);
+        assert_eq!(compare_cell_libs(&ft_a, &ft_b), Ordering::Less);
+        assert_eq!(compare_cell_libs(&ft_b, &ft_a), Ordering::Greater);
+
+        // Across names, name dominates archive filename:
+        //   cellPhotoUtility < cellSysutil < cell_FreeType2
+        //   ('P' 80 < 'S' 83 < '_' 95)
+        assert_eq!(compare_cell_libs(&photo_a, &sys_a), Ordering::Less);
+        assert_eq!(compare_cell_libs(&sys_a, &ft_a), Ordering::Less);
+        assert_eq!(compare_cell_libs(&photo_a, &ft_a), Ordering::Less);
+        assert_eq!(compare_cell_libs(&sys_b, &photo_b), Ordering::Greater);
+
+        // A whole family sorts by name even when its archive filename is
+        // lexicographically before/after the other family's.
+        let high_name = lib("cell_FreeType2", "aa_zz");
+        let low_name = lib("cellPhotoUtility", "zz_aa");
+        assert_eq!(compare_cell_libs(&high_name, &low_name), Ordering::Greater);
+
+        // The key guarantee: tie order is a pure function of the tree,
+        // independent of input (walk/read) order.  Feed the same libraries in
+        // one direction, then reversed; the resulting order must be identical.
+        let base: Vec<CellSdkLibrary> = vec![
+            lib("cellSysutil", "libsysutil_stub"),
+            lib("cellPhotoUtility", "libsysutil_photo_export_stub"),
+            lib("cell_FreeType2", "libfreetypeTT_stub"),
+            lib("cellSysutil", "libsysutil_audio_out_stub"),
+            lib("cellPhotoUtility", "libsysutil_photo_stub"),
+            lib("cell_FreeType2", "libfreetype_stub"),
+        ];
+        let mut forward = base.clone();
+        forward.sort_unstable_by(compare_cell_libs);
+        let mut backward = base.clone();
+        backward.reverse();
+        backward.sort_unstable_by(compare_cell_libs);
+
+        let keys_of = |v: &Vec<CellSdkLibrary>| {
+            v.iter().map(|l| format!("{}/{}", l.name, l.archive_filename)).collect::<Vec<_>>()
+        };
+        let keys = keys_of(&forward);
+        assert_eq!(keys, keys_of(&backward), "forward vs reversed input must sort identically");
+        assert_eq!(
+            keys,
+            vec![
+                "cellPhotoUtility/libsysutil_photo_export_stub",
+                "cellPhotoUtility/libsysutil_photo_stub",
+                "cellSysutil/libsysutil_audio_out_stub",
+                "cellSysutil/libsysutil_stub",
+                "cell_FreeType2/libfreetypeTT_stub",
+                "cell_FreeType2/libfreetype_stub",
+            ]
+        );
+    }
 }
