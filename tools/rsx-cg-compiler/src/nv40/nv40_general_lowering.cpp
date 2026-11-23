@@ -761,6 +761,7 @@ public:
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
+        packFragmentScalarsWhenOverBudget();
         allocatePhysicalTemps();
         dropSelfMoves();
         mergeFragmentLaneMoves();
@@ -11303,6 +11304,187 @@ private:
                 if (b.dst.writemask & (1 << l)) a.srcs[0].swizzle[l] = b.srcs[0].swizzle[l];
             a.dst.writemask |= b.dst.writemask;
             code.erase(code.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+        }
+    }
+
+    // FP: every temp gets a whole register, also a scalar that uses one
+    // lane of it.  A program that holds more values at a time than the
+    // hardware has registers was refused for that alone (measured: a terrain
+    // shader holding 58 values at its peak, 33 of them scalars).  When the
+    // peak is over the budget, scalars are packed four to a register: each
+    // one is given a lane of a shared register for exactly its lifetime, its
+    // writers write that lane and its readers read it.
+    //
+    // Only a program that could not be allocated otherwise is touched, so no
+    // accepted program changes.  A scalar is packed only when every writer is
+    // an operation whose result lane does not matter (a componentwise
+    // operation, a dot product, a select) and every reader takes it through
+    // lane x of its swizzle.  In a hardware loop a value that reaches an
+    // iteration from outside it, or from the iteration before, keeps its lane
+    // for the whole loop.
+    void packFragmentScalarsWhenOverBudget()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const size_t none = std::numeric_limits<size_t>::max();
+        struct Info {
+            int mask = 0;
+            size_t first = std::numeric_limits<size_t>::max();
+            size_t last = 0;
+            bool packable = true;
+        };
+        std::unordered_map<int, Info> info;
+        // A select writes its result before it reads its condition and its
+        // taken value, so those may not sit in the result's register at all
+        // (the emitter refuses that): such pairs get different registers.
+        std::unordered_map<int, std::set<int>> apart;
+        const auto tempDst = [](const VDst& d) { return !d.none && !d.output && !d.address; };
+        const auto lanePlain = [](VOp op) {
+            return componentwiseOp(op) || op == VOp::SelPred;
+        };
+        for (size_t i = 0; i < code.size(); ++i) {
+            const VInstr& vi = code[i];
+            for (size_t n = 0; n < vi.srcs.size(); ++n) {
+                const VSrc& s = vi.srcs[n];
+                if (s.kind != VSrcKind::Temp) continue;
+                Info& r = info[s.index];
+                r.last = std::max(r.last, i);
+                if (s.fp16 || vi.op == VOp::Kil) r.packable = false;
+                const int req = requiredSourceMask(vi, n);
+                for (int l = 0; l < 4; ++l)
+                    if ((req & (1 << l)) && s.swizzle[l] != 0) r.packable = false;
+            }
+            if (!tempDst(vi.dst)) continue;
+            if (vi.op == VOp::SelPred)
+                for (int n = 0; n < 2; ++n)
+                    if (vi.srcs[n].kind == VSrcKind::Temp && vi.srcs[n].index != vi.dst.index) {
+                        apart[vi.dst.index].insert(vi.srcs[n].index);
+                        apart[vi.srcs[n].index].insert(vi.dst.index);
+                    }
+            Info& w = info[vi.dst.index];
+            w.mask |= vi.dst.writemask;
+            if (w.first == none) w.first = i;
+            w.last = std::max(w.last, i);
+            const bool laneFree = lanePlain(vi.op) || vi.op == VOp::Dp2 || vi.op == VOp::Dp3 ||
+                                  vi.op == VOp::Dp4;
+            if (!laneFree || vi.dst.fp16 || vi.dst.preferredPhys >= 0 || vi.dst.outputPin ||
+                vi.ccUpdate || vi.predicate != 0 || vi.selPerLane || vi.stubCoIssuePartner ||
+                vi.stubFenceBefore || vi.stubFenceBrBefore || vi.scalarSourceDemandMask != 0 ||
+                vi.preservePartialOutputMask)
+                w.packable = false;
+        }
+        // A hardware loop runs its body again: a value written before the
+        // loop and read inside it is read by the next iteration too, so it
+        // lives to the end of the loop (the allocator's own rule).  A value
+        // written inside the loop is written again before each read.
+        {
+            std::vector<size_t> open;
+            for (size_t i = 0; i < code.size(); ++i) {
+                if (code[i].op == VOp::LoopBegin) { open.push_back(i); continue; }
+                if (code[i].op != VOp::LoopEnd || open.empty()) continue;
+                const size_t begin = open.back();
+                open.pop_back();
+                for (size_t k = begin + 1; k < i; ++k)
+                    for (const VSrc& s : code[k].srcs) {
+                        if (s.kind != VSrcKind::Temp) continue;
+                        Info& r = info[s.index];
+                        if (r.first == none) continue;
+                        // read before its write inside the loop: the value
+                        // comes round from the previous iteration
+                        if (r.first > k) r.first = begin;
+                        if (r.first <= begin) r.last = std::max(r.last, i);
+                    }
+            }
+            if (!open.empty()) return;      // an unclosed loop: leave the program alone
+        }
+        int peak = 0;
+        {
+            std::vector<int> begins(code.size() + 1, 0), ends(code.size() + 1, 0);
+            for (const auto& [vreg, r] : info) {
+                if (r.first == none) continue;
+                ++begins[r.first];
+                ++ends[std::max(r.first, r.last)];
+            }
+            int live = 0;
+            for (size_t i = 0; i < code.size(); ++i) {
+                live += begins[i];
+                peak = std::max(peak, live);
+                live -= ends[i];
+            }
+        }
+        // 48 registers: the highest usable fragment temp index is 47.
+        if (peak <= 48 && std::getenv("RSX_FORCE_SCALAR_PACK") == nullptr) return;
+
+        std::vector<int> scalars;
+        for (const auto& [vreg, r] : info) {
+            if (r.first == none || !r.packable || r.mask != 0x1) continue;
+            const auto half = program_.vregToFp16.find(vreg);
+            if (half != program_.vregToFp16.end() && half->second) continue;
+            scalars.push_back(vreg);
+        }
+        std::sort(scalars.begin(), scalars.end(), [&](int a, int b) {
+            const Info& x = info[a];
+            const Info& y = info[b];
+            return x.first != y.first ? x.first < y.first : a < b;
+        });
+        // A lane is free for a scalar defined strictly after its occupant's
+        // last read: a select writes its result before it reads its
+        // condition, so the two may not share an instruction.
+        struct Shared { int vreg; std::array<size_t, 4> busyUntil; std::array<bool, 4> used; };
+        std::vector<Shared> shared;
+        std::unordered_map<int, std::pair<int, int>> placed;   // scalar -> (register, lane)
+        for (int vreg : scalars) {
+            const Info& r = info[vreg];
+            bool done = false;
+            const auto keepApart = apart.find(vreg);
+            for (Shared& sh : shared) {
+                bool clash = false;
+                if (keepApart != apart.end())
+                    for (int other : keepApart->second) {
+                        const auto at = placed.find(other);
+                        if (at != placed.end() && at->second.first == sh.vreg) clash = true;
+                    }
+                if (clash) continue;
+                for (int l = 0; l < 4 && !done; ++l) {
+                    if (sh.used[l] && sh.busyUntil[l] >= r.first) continue;
+                    sh.used[l] = true;
+                    sh.busyUntil[l] = std::max(r.first, r.last);
+                    placed[vreg] = {sh.vreg, l};
+                    done = true;
+                }
+                if (done) break;
+            }
+            if (done) continue;
+            Shared sh{newVReg(), {0, 0, 0, 0}, {false, false, false, false}};
+            sh.used[0] = true;
+            sh.busyUntil[0] = std::max(r.first, r.last);
+            placed[vreg] = {sh.vreg, 0};
+            shared.push_back(sh);
+        }
+        for (VInstr& vi : code) {
+            const auto dstPlace = tempDst(vi.dst) ? placed.find(vi.dst.index) : placed.end();
+            // The writer writes lane x, so each operand is read through
+            // swizzle lane x alone: say so in every lane, and the result
+            // lane can move without touching the operands again.
+            if (dstPlace != placed.end() && lanePlain(vi.op))
+                for (size_t n = vi.op == VOp::SelPred ? 1 : 0; n < vi.srcs.size(); ++n) {
+                    VSrc& s = vi.srcs[n];
+                    if (s.kind == VSrcKind::None) continue;
+                    const uint8_t lane = s.swizzle[0];
+                    s.swizzle = {lane, lane, lane, lane};
+                }
+            for (VSrc& s : vi.srcs) {
+                if (s.kind != VSrcKind::Temp) continue;
+                const auto at = placed.find(s.index);
+                if (at == placed.end()) continue;
+                for (uint8_t& lane : s.swizzle)
+                    if (lane == 0) lane = static_cast<uint8_t>(at->second.second);
+                s.index = at->second.first;
+            }
+            if (dstPlace != placed.end()) {
+                vi.dst.writemask = 1 << dstPlace->second.second;
+                vi.dst.index = dstPlace->second.first;
+            }
         }
     }
 
