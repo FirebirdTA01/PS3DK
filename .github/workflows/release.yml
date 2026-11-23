@@ -695,6 +695,7 @@ jobs:
     needs:
       - verify-version
       - build-host-tools-windows
+      - build-host-tools-linux
       - build-native-ppu
       - build-native-spu
     runs-on: ubuntu-26.04
@@ -790,6 +791,16 @@ jobs:
           name: ps3dev-spu-native
           path: artifacts/ps3dev-spu
 
+      # The export-coverage step below needs the *native* coverage-report
+      # ELF; the Windows host-tools artifact only ships the .exe.  Pull the
+      # Linux tools tarball so the gate can run on this runner without
+      # re-running the Rust workspace.
+      - name: Download native host tools artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: host-tools-linux-x86_64
+          path: artifacts/host-tools-linux
+
       - name: Extract native PPU + SPU into stage/ps3dev
         run: |
           source scripts/env.sh
@@ -845,6 +856,50 @@ jobs:
         run: |
           source scripts/env.sh
           bash tests/sdk/deterministic-archives-test.sh --ps3dev "$PS3DEV"
+
+      # Keep docs/coverage.md in sync with what this release actually ships.
+      # Regenerate the export-coverage matrix against the just-installed tree
+      # and require it to match the tracked file.  This is the "nothing
+      # regenerates docs/coverage.md" guard: a commit that changes the
+      # tracked stub archives' exports must also refresh the report, or it
+      # fails here.  Only the data matrix is compared — the two
+      # "> **Tool version / Command**" header lines are maintained by the
+      # human who regenerates it and are skipped on purpose.
+      #
+      # coverage-report is taken from the native host-tools artifact (not
+      # rebuilt here) so the gate only ever re-runs the Rust code, never a
+      # Rust toolchain install.
+      - name: Stage 0 — SDK export-coverage report is in sync
+        run: |
+          source scripts/env.sh
+          regen="$RUNNER_TEMP/coverage-actual.md"
+          CR="$(find artifacts/host-tools-linux -type f -name coverage-report 2>/dev/null | head -n1)"
+          [ -n "$CR" ] || { echo "::error::coverage-report ELF not found in host-tools-linux artifact"; exit 2; }
+          echo "using $CR"
+          "$CR" --nid-db tools/nidgen/nids/extracted \
+                --install "$PS3DEV" \
+                --alias-map tools/nidgen/nids/aliases.yaml \
+                --output "$regen"
+          # Tracked file has the two manually-maintained "> **Tool version
+          # / Command**" lines after the title; the tool does not emit them.
+          # Compare body-for-body so those two lines do not cause a diff:
+          # anchor on the first "## " header (both files have it).
+          awk '/^## /{p=1} p' docs/coverage.md  > "$RUNNER_TRACKED.md"
+          awk '/^## /{p=1} p' "$regen"          > "$RUNNER_ACTUAL.md"
+          if ! diff -u "$RUNNER_TRACKED.md" "$RUNNER_ACTUAL.md"; then
+            cat >&2 <<EOF
+
+::error::docs/coverage.md is out of sync with the installed SDK exports.
+Run the regenerate command and commit the result:
+
+  coverage-report --nid-db tools/nidgen/nids/extracted \\
+             --install <\$PS3DEV> \\
+             --alias-map tools/nidgen/nids/aliases.yaml \\
+             --output docs/coverage.md
+EOF
+            exit 1
+          fi
+          echo "docs/coverage.md matches the installed SDK exports"
 
       - name: Stage 1 — cross-build PPU toolchain (mingw-w64)
         run: |
