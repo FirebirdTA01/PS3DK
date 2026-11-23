@@ -96,8 +96,20 @@ A failed check prints `VSHP FAIL step=<name> ...` and the run ends with
 `VSHP_RESULT FAIL failed=<n>`. The second cycle shows that a reload starts
 from a fresh image: its `.data` counter is back at the initial value.
 
-The loader looks for the plugin next to itself (the directory of `argv[0]`)
-and in `/app_home`, as `.sprx`, then `.fake.sprx`, then the unsigned `.prx`.
+The loader looks for the plugin, as `.sprx`, then `.fake.sprx`, then the
+unsigned `.prx`, in:
+
+1. the directory given as `argv[1]`, when it is an absolute path;
+2. its own directory (the directory of `argv[0]`, when that is absolute);
+3. `/dev_hdd0/tmp/ps3dk-vsh-plugin`, a fixed staging directory (copy the
+   plugin there over FTP when the launcher's arguments name no directory);
+4. `/app_home`.
+
+Each directory is tried once. Before searching, the loader prints the arguments
+it was started with: `VSHP argv argc=<n> [0]=... [1]=...`. A child started with
+`exitspawn` (the ps3dk-run loader, for example) gets no usable argv, so stage the
+plugin in the fixed directory for that launcher.
+
 A `.self` loads the real-signed `.sprx`, a `.fake.self` the `.fake.sprx`,
 and on RPCS3 a raw `.elf` boot the `.prx`.
 

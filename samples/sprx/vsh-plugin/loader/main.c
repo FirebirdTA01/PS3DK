@@ -11,9 +11,13 @@
  *   VSHP_ALL_PASS steps=<n>        the final line when every step passed
  *   VSHP_RESULT FAIL failed=<n>    the final line otherwise
  *
- * The module is looked for next to this executable (the directory of
- * argv[0]) and in /app_home, as <stem>.sprx, then <stem>.fake.sprx, then the
- * unsigned <stem>.prx: a .self loads the real-signed .sprx, a .fake.self the
+ * The module is looked for in the directory named by argv[1] when that is an
+ * absolute path, then next to this executable (the directory of argv[0]),
+ * then in /dev_hdd0/tmp/ps3dk-vsh-plugin (a fixed staging directory, for a
+ * launcher whose child gets no usable argv), then in /app_home, as
+ * <stem>.sprx, then <stem>.fake.sprx, then the unsigned <stem>.prx; the argv
+ * it was started with is printed first (VSHP argv argc=<n> [i]=<s>...).
+ * A .self loads the real-signed .sprx, a .fake.self the
  * .fake.sprx, and a raw .elf boot (RPCS3) the .prx.  The regression rows
  * stage one container per directory, so each row proves the one it names.
  */
@@ -28,6 +32,9 @@
 #include <sys/timer.h>
 
 #include "vsh_plugin_contract.h"
+
+/* A fixed directory a host can stage the plugin in (over FTP, say) when the launcher's argv names none. */
+#define VSHP_STAGING_DIR "/dev_hdd0/tmp/ps3dk-vsh-plugin"
 
 SYS_PROCESS_PARAM(1001, 0x10000);
 
@@ -78,11 +85,21 @@ static int finish(void)
 	return 1;
 }
 
-static sys_prx_id_t load_module(const char *argv0, char *loaded, size_t loaded_len)
+static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *loaded, size_t loaded_len)
 {
-	char dirs[2][192];
+	char dirs[4][192];
 	int ndirs = 0;
 
+	if (argv1 != NULL && argv1[0] == '/') {
+		size_t n = strlen(argv1);
+		while (n > 1 && argv1[n - 1] == '/')
+			n--;
+		if (n < sizeof(dirs[0])) {
+			memcpy(dirs[ndirs], argv1, n);
+			dirs[ndirs][n] = '\0';
+			ndirs++;
+		}
+	}
 	if (argv0 != NULL && argv0[0] == '/') {
 		const char *slash = strrchr(argv0, '/');
 		size_t n = (size_t)(slash - argv0);
@@ -92,9 +109,16 @@ static sys_prx_id_t load_module(const char *argv0, char *loaded, size_t loaded_l
 			ndirs++;
 		}
 	}
-	if (ndirs == 0 || strcmp(dirs[0], "/app_home") != 0) {
-		strcpy(dirs[ndirs], "/app_home");
-		ndirs++;
+	/* then the fixed staging directory, then /app_home; each directory once */
+	static const char *const fixed[2] = { VSHP_STAGING_DIR, "/app_home" };
+	for (int f = 0; f < 2; f++) {
+		int have = 0;
+		for (int d = 0; d < ndirs; d++)
+			have |= strcmp(dirs[d], fixed[f]) == 0;
+		if (!have) {
+			strcpy(dirs[ndirs], fixed[f]);
+			ndirs++;
+		}
 	}
 
 	static const char *const exts[3] = { ".sprx", ".fake.sprx", ".prx" };
@@ -149,7 +173,7 @@ static unsigned count_lines(const char *s, const char *prefix)
 
 /* One load, start, run, stop, unload cycle.  Returns 0 if it got far
  * enough to unload, so the next cycle can run. */
-static int cycle(int round, const char *argv0)
+static int cycle(int round, const char *argv1, const char *argv0)
 {
 	char step[48];
 
@@ -158,7 +182,7 @@ static int cycle(int round, const char *argv0)
 	snprintf(step, sizeof(step), "load-%d", round);
 	begin(step);
 	char loaded[256] = "";
-	sys_prx_id_t id = load_module(argv0, loaded, sizeof(loaded));
+	sys_prx_id_t id = load_module(argv1, argv0, loaded, sizeof(loaded));
 	if (!verdict(id >= 0, step, "id=0x%08lx path=%s", (unsigned long)(uint32_t)id, loaded[0] ? loaded : "(none)"))
 		return -1;
 
@@ -228,11 +252,18 @@ int main(int argc, char **argv)
 {
 	printf("vsh-plugin loader (%s): module %s, log %s\n", VSHP_ABI, MODULE_STEM, VSHP_LOG_PATH);
 	fflush(stdout);
+	/* what the process was started with: which of the searched directories it could name */
+	printf("VSHP argv argc=%d", argc);
+	for (int i = 0; i < argc; i++)
+		printf(" [%d]=%s", i, argv[i] ? argv[i] : "(null)");
+	printf("\n");
+	fflush(stdout);
 	const char *argv0 = argc > 0 ? argv[0] : NULL;
+	const char *argv1 = argc > 1 ? argv[1] : NULL;
 
 	/* Twice: a second load gets a fresh image (its .data counter back at
 	 * the initial value), as a plugin reloaded into VSH does. */
-	if (cycle(1, argv0) == 0)
-		cycle(2, argv0);
+	if (cycle(1, argv1, argv0) == 0)
+		cycle(2, argv1, argv0);
 	return finish();
 }
