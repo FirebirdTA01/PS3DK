@@ -60,6 +60,9 @@ struct FpAttributes
     uint8_t  outputFromH0        = 0;        // 1 iff R0 is fp16 (H0)
     uint8_t  depthReplace        = 0;        // 1 iff DEPTH output written
     uint8_t  pixelKillCount      = 0;        // number of KIL opcodes emitted
+    // Instructions in the emitted program, inline constant blocks not
+    // counted.  Not part of the container; -O4 compares two builds by it.
+    uint32_t instructionCount    = 0;
 
     std::vector<FpEmbeddedUniform> embeddedUniforms;
 

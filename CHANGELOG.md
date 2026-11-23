@@ -68,6 +68,16 @@ The version stamped into builds is generated from the most recent
   5% and 13% fewer registers in total, for 0.7% and 2% more instructions (a
   copy the default level drops can survive). `-O0` to `-O3` and `--nofastmath` remain accepted
   for compatibility and still change nothing; `--help` and the guide say so.
+- **`rsx-cg-compiler`: `-O4` is never worse than the default level.** Packing
+  every program made some of them longer. `-O4` now builds each fragment
+  program both ways and keeps the packed one only when it uses fewer
+  registers and has no more instructions; otherwise the output is the
+  default program. The comparison uses the register count the container
+  declares and the number of instructions without inline constant blocks.
+  Over the two measured shader sets the declared register totals go from
+  2129 to 2038 and from 8380 to 7613, with no program longer. A program
+  whose packed build fails while its default build succeeds simply keeps
+  the default build; how often that happens is not measured.
 - **`rsx-cg-compiler`: vertex programs use the homogeneous dot product and write outputs directly.**
   `mul(M, float4(p, 1.0))` built the float4 in a register and took four `DP4`s
   of it; it is now four `DPH`s of `p`. A value computed into a register only to

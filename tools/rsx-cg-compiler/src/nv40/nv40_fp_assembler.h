@@ -99,6 +99,9 @@ public:
     size_t emitRaw(uint32_t hw0, uint32_t hw1, uint32_t hw2, uint32_t hw3);
     void   patchWord(size_t index, uint32_t value) { logicalWords_[index] = value; }
     size_t wordCount() const { return logicalWords_.size(); }
+    // Instructions alone: every entry is four words, and an inline constant
+    // block is data that follows the instruction reading it.
+    size_t instructionCount() const { return logicalWords_.size() / 4 - constBlocks_; }
 
     // Returns the ucode in on-disk halfword-swapped form (matches
     // the established compiler output and what RSX expects in the .fpo blob).
@@ -123,6 +126,7 @@ private:
     // happen to be the last entry in logicalWords_ don't get
     // corrupted.
     size_t lastInstrOffset_ = 0;
+    size_t constBlocks_ = 0;
     bool   hasInstruction_  = false;
 
     // R0 is implicitly reserved for result.color, so the live count

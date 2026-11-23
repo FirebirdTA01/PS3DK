@@ -113,9 +113,10 @@ void usage()
         "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1); accepted for\n"
         "                         compatibility, all four give the same output\n"
         "  -O4                    Optimisations past the established compiler:\n"
-        "                         pack fragment scalars into shared registers.\n"
-        "                         May use fewer registers or more instructions;\n"
-        "                         compare the counts per program\n"
+        "                         pack fragment scalars into shared registers\n"
+        "                         where that gives a program fewer registers\n"
+        "                         and no more instructions; otherwise the\n"
+        "                         program is the default one\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
         "  --nofastmath           Accepted for compatibility; no effect yet\n");
 }
