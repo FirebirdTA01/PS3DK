@@ -807,6 +807,9 @@ jobs:
       - name: Lane-by-lane fragment copies of one source are one MOV, judged by value and shape
         run: bash tests/shader-compiler/fp-lane-move-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: Float and integer literals fold together, judged by value and shape
+        run: bash tests/shader-compiler/mixed-literal-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Loop carries written in place, judged by value and shape
         run: bash tests/shader-compiler/loop-carry-in-place-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 

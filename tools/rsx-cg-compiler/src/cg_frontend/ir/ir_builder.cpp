@@ -6171,9 +6171,31 @@ IRValueID IRBuilder::tryFoldBinaryOp(IROp op, const IRTypeInfo& resultType,
         }
     }
 
+    // A float constant with an INTEGER constant (`1.8556f * 255 / 224`): the
+    // integer is promoted to float, exactly as the runtime conversion would,
+    // and the operation folds.  Two integers never reach here (handled above
+    // as integer arithmetic), and a bool is not promoted.
+    const bool floatResult =
+        resultType.baseType == IRType::Float32 || resultType.baseType == IRType::Float16 ||
+        resultType.elementType == IRType::Float32 || resultType.elementType == IRType::Float16;
+    const auto floatOperand = [&](IRValueID id, std::vector<float>& out) {
+        if (extractFloatComponents(*currentFunction_, id, out)) return true;
+        if (!floatResult) return false;
+        auto* c = dynamic_cast<IRConstant*>(currentFunction_->getValue(id));
+        if (!c) return false;
+        if (std::holds_alternative<int32_t>(c->value)) {
+            out = { static_cast<float>(std::get<int32_t>(c->value)) };
+            return true;
+        }
+        if (std::holds_alternative<uint32_t>(c->value)) {
+            out = { static_cast<float>(std::get<uint32_t>(c->value)) };
+            return true;
+        }
+        return false;
+    };
     std::vector<float> a, b;
-    if (!extractFloatComponents(*currentFunction_, lhs, a)) return InvalidIRValue;
-    if (!extractFloatComponents(*currentFunction_, rhs, b)) return InvalidIRValue;
+    if (!floatOperand(lhs, a)) return InvalidIRValue;
+    if (!floatOperand(rhs, b)) return InvalidIRValue;
 
     // Both operands are float constants.  Broadcasting scalar to vector
     // allows `vec4 * scalar`, `scalar + vec2`, etc., without emitting

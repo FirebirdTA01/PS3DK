@@ -39,6 +39,10 @@ The version stamped into builds is generated from the most recent
   `float4(d, d, d, 1.0)` copied `d` into the result one lane at a time;
   adjacent copies of one source into different lanes of one register are
   now a single `MOV`.
+- **`rsx-cg-compiler`: float and integer literals fold together.**
+  `1.5f * 4.0f` was folded to one constant, `1.5f * 4` was computed by the
+  shader: a constant written as `1.8556f * 255 / 224` cost three
+  instructions. Such arithmetic is now done at compile time.
 - **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
   loop, a variable that changes every iteration (`amp *= 0.5`) was computed
   into a second register and copied back at the end of each iteration. The
