@@ -167,22 +167,22 @@ printed to stdout.
 | Option | Default | Effect |
 |---|---|---|
 | `-O0`, `-O1`, `-O2`, `-O3` (also `--O0` ... `--O3`) | `-O1` | Optimisation level, named to match the established compiler's levels. Accepted for compatibility: all four give the same output today. |
-| `-O4` / `--O4` | | Optimisations beyond what the established compiler applies. Today: scalar temporaries of a fragment program are packed into shared registers, four to a register; this may lower the register count or add instructions. |
+| `-O4` / `--O4` | | Optimisations beyond what the established compiler applies. Today: a fragment program's scalar temporaries are packed into shared registers, four to a register, where that gives fewer registers and no more instructions. |
 | `--fastmath` | on | Fast-math. |
 | `--nofastmath` | | Disable fast-math. Accepted for compatibility: no effect today. |
 
-**When to use `-O4`:** to try reducing a fragment program's register pressure;
-compare the register and instruction counts of each program with and without
-it. The program computes the same result; its values sit in other
-registers and lanes. The cost: a copy that the default level drops because both
-values share a register can survive when they now sit in different lanes, so
-some programs come out a few instructions longer, and a few use one more
-register. Measured over the two shader sets used for this compiler's
-regression runs, `-O4` uses 5% and 13% fewer registers in total and 0.7% and
-2% more instructions, with no program newly refused. Leave it off when
-instruction count matters more than registers, and when you compare output
-against the established compiler: `-O4` output is deliberately different from
-it. Vertex programs are not affected.
+**When to use `-O4`:** to reduce a fragment program's register pressure. The
+compiler builds the program twice, as the default level does and with its
+scalars packed into shared registers, and keeps the packed one only when it
+uses fewer registers and has no more instructions; otherwise the output is
+exactly the default program. So at `-O4` a program never has more registers or
+more instructions than at the default level. That guarantee is about the
+emitted counts, not about run-time speed, which this compiler does not
+measure. Packing every program without that choice costs instructions: a copy
+that is dropped when two values share a register survives when they sit in
+different lanes. Leave `-O4` off when you compare output against the
+established compiler: its output is deliberately different. The back end runs
+twice for each fragment program at `-O4`. Vertex programs are not affected.
 
 **Current behaviour:** `-O0` to `-O3` and the fast-math switches are accepted
 and recorded, but no pass in this compiler is gated on them yet, so they all

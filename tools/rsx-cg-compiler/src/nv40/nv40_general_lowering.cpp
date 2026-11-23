@@ -13711,6 +13711,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint8_t>(tempRegs);
+    attrs.instructionCount = static_cast<uint32_t>(asm_.instructionCount());
     if (attrsOut)
         *attrsOut = attrs;
     return out;
@@ -14035,12 +14036,35 @@ UcodeOutput lowerFragmentProgramGeneral(const IRModule& module,
                                         const rsx_cg::CompileOptions& opts,
                                         FpAttributes* attrsOut)
 {
-    GeneralBuilder builder(GeneralProfile::Fragment, entry, module);
-    builder.setPackScalarsAlways(opts.opt == rsx_cg::OptLevel::O4);
-    VirtualProgram program = builder.run();
-    UcodeOutput out = emitFragmentVirtual(program, entry, attrsOut);
-    appendBuilderDiagnostics(program, out);
-    return out;
+    const auto build = [&](bool packAlways, FpAttributes* attrs) {
+        GeneralBuilder builder(GeneralProfile::Fragment, entry, module);
+        builder.setPackScalarsAlways(packAlways);
+        VirtualProgram program = builder.run();
+        UcodeOutput out = emitFragmentVirtual(program, entry, attrs);
+        appendBuilderDiagnostics(program, out);
+        return out;
+    };
+    if (opts.opt != rsx_cg::OptLevel::O4)
+        return build(false, attrsOut);
+
+    // -O4: packing every scalar lowers the register count of most programs,
+    // but a copy that is dropped when two values share a register survives
+    // when they sit in different lanes, so some programs come out longer and
+    // a few use a register more (measured: +0.65% and +2.0% instructions over
+    // the two shader sets, for -4.9% and -13.1% registers).  So the program is
+    // built both ways and the packed one is kept only where it is better: it
+    // must emit, use fewer registers, and have no more instructions.  The
+    // count is of instructions, not ucode words: a build with two more
+    // instructions and two fewer inline constant blocks has the same number
+    // of words and is longer.
+    FpAttributes plainAttrs, packedAttrs;
+    UcodeOutput plain = build(false, &plainAttrs);
+    UcodeOutput packed = build(true, &packedAttrs);
+    const bool keepPacked = packed.ok &&
+        (!plain.ok || (packedAttrs.registerCount < plainAttrs.registerCount &&
+                       packedAttrs.instructionCount <= plainAttrs.instructionCount));
+    if (attrsOut) *attrsOut = keepPacked ? packedAttrs : plainAttrs;
+    return keepPacked ? packed : plain;
 }
 
 UcodeOutput lowerVertexProgramGeneral(const IRModule& module,

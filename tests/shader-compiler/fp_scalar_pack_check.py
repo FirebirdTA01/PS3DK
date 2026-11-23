@@ -5,7 +5,9 @@ lane of it, and a program holding more than 48 values at a time was refused.
 When the peak is over the budget, scalars are now packed four to a register.
 A program that fits is compiled exactly as before.
 
-Three parts, all judged by VALUE with the evaluator against a plain Python
+Three parts judged by VALUE, and a refusal row (a program no build can emit
+is refused at -O4 with the default level's exit code and diagnostics).  The
+value parts are judged with the evaluator against a plain Python
 rendering (dyadic inputs and constants, so every expected value is exact in
 binary32):
 
@@ -18,7 +20,10 @@ binary32):
              -O4 one uses fewer registers.
   forced     the value rows of the self-copy and lane-move tests (selects,
              lerps, lane copies, a kept loop) compiled at -O4, so the rewrite
-             is exercised on shapes the wide program does not have.
+             is exercised on shapes the wide program does not have.  -O4 keeps
+             the packed program only where it is better, so each row is also
+             held to no more instructions and no more registers than the
+             default level gives it.
 """
 import argparse
 import math
@@ -76,6 +81,10 @@ def registers(blob):
     return top + 1
 
 
+def length(blob):
+    return sum(1 for _ in fp_sources.instructions(fp_sources.ucode_words(blob)))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('compiler')
@@ -121,6 +130,24 @@ def main():
                         failures.append('%s: p=(%s, %s) got %s want %s' % (label, x, y, got, want))
                         break
 
+        # A program neither build can emit is refused at -O4 exactly as at the
+        # default level: same exit code, same diagnostics, no container.
+        tests += 1
+        refused = ('float4 main(float4 p : TEXCOORD0) : COLOR {\n'
+                   ' if (p.x > 0) return p; else if (p.y > 0) return p * 2; else discard;\n}\n')
+        outcomes = []
+        for flags in ([], ['-O4']):
+            src, dst = Path(tmp) / 'refused.cg', Path(tmp) / ('refused%d.bin' % len(flags))
+            src.write_text(refused)
+            run = subprocess.run([args.compiler, '-p', 'sce_fp_rsx'] + flags + ['--emit-container', str(dst), str(src)],
+                                 capture_output=True, text=True, timeout=120)
+            outcomes.append((run.returncode, dst.exists(), run.stderr))
+        if outcomes[0][0] != 1 or outcomes[0][1]:
+            failures.append('refused: the default level exited %d, container %s' % outcomes[0][:2])
+        elif outcomes[0] != outcomes[1]:
+            failures.append('refused: -O4 differs from the default refusal (exit %d against %d)'
+                            % (outcomes[1][0], outcomes[0][0]))
+
         for module, lanes in ((fp_self_copy_check, 2), (fp_lane_move_check, 4)):
             for name, row in module.ROWS.items():
                 tests += 1
@@ -129,6 +156,17 @@ def main():
                 if blob is None:
                     failures.append('forced %s refused: %s' % (name, why))
                     continue
+                # -O4 keeps the packed program only where it is better: fewer
+                # registers and no more instructions than the default level,
+                # and when it is not better, -O4 gives the default program itself
+                plain, _ = compile_blob(args.compiler, tmp, 'plain_' + name, source)
+                if plain is not None and blob != plain:
+                    if length(blob) > length(plain):
+                        failures.append('forced %s: -O4 is %d instructions, the default %d'
+                                        % (name, length(blob), length(plain)))
+                    if registers(blob) >= registers(plain):
+                        failures.append('forced %s: -O4 differs from the default and uses %d registers, '
+                                        'the default %d' % (name, registers(blob), registers(plain)))
                 for x, y, s, t in module.VECTORS:
                     want = expected(x, y, s, t)
                     try:
