@@ -325,16 +325,31 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
     std::string        irDump;
     bool fpConstCanon = true;
     bool keepStaticLoops = true;
+    // A fragment entry that returns from inside an if is first built as
+    // written; when that fails to build or to emit, it is compiled again with
+    // its returns merged into one (entry-early-returns).  When the merged
+    // form fails too, the program is compiled once more as written, so the
+    // diagnostics printed are those of the ordinary build.
+    bool mergeEntryReturns = false;
+    bool mergeEntryReturnsTried = false;
     for (;;)
     {
         bool fpCanonChanged = false;
         IRBuilder irBuilder;
         irBuilder.setKeepStaticLoops(keepStaticLoops);
+        irBuilder.setMergeEntryReturns(mergeEntryReturns);
         irModule = irBuilder.build(*ast, semantic);
         const bool loopsKept = keepStaticLoops && irBuilder.staticLoopsKept() > 0;
         if ((irBuilder.hasErrors() || !irModule) && loopsKept)
         {
             keepStaticLoops = false;
+            continue;
+        }
+        if ((irBuilder.hasErrors() || !irModule) && mergeEntryReturns)
+        {
+            mergeEntryReturns = false;
+            fpConstCanon = true;
+            keepStaticLoops = true;
             continue;
         }
         if (irBuilder.hasErrors() || !irModule)
@@ -541,6 +556,16 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
         {
             keepStaticLoops = false;
             fpConstCanon = true;
+            continue;
+        }
+        if (!ucode.ok && stage == ShaderStage::Fragment &&
+            (mergeEntryReturns ||
+             (!mergeEntryReturnsTried && irBuilder.entryReturnsInsideIf())))
+        {
+            mergeEntryReturns = !mergeEntryReturns;
+            mergeEntryReturnsTried = true;
+            fpConstCanon = true;
+            keepStaticLoops = true;
             continue;
         }
         break;

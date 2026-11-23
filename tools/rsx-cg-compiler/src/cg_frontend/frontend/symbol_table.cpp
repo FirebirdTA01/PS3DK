@@ -671,6 +671,14 @@ void SymbolTable::registerMathFunctions()
         addFunction("ddx", vec, {vec}, {"x"}, nullptr, true);
         addFunction("ddy", vec, {vec}, {"x"}, nullptr, true);
     }
+    // fwidth(x): the larger of |ddx(x)| and |ddy(x)|, as the established
+    // compiler computes it on this profile (expanded in the IR builder).
+    addFunction("fwidth", CgType::Float(), {CgType::Float()}, {"x"}, nullptr, true);
+    for (int size = 2; size <= 4; ++size)
+    {
+        CgType vec = CgType::Vec(ScalarKind::Float, size);
+        addFunction("fwidth", vec, {vec}, {"x"}, nullptr, true);
+    }
 
     // The pack/unpack family (pack-unpack-intrinsics): one NV40 fragment instruction each.
     // Measured on the established compiler: pack_2half / pack_2ushort take half2 or

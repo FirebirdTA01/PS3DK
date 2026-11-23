@@ -7920,10 +7920,23 @@ private:
 
     void lowerStep(const IRInstruction& inst)
     {
-        if (profile_ != GeneralProfile::Fragment ||
-            inst.operands.size() < 2 || inst.result == InvalidIRValue) {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) {
             program_.diagnostics.push_back(
-                "nv40-general: only FP step lowering is supported");
+                "nv40-general: step needs an edge and a value; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        // VP: step(edge, x) is one `SGE x, edge` (measured on the established
+        // compiler: `SGE o[TEX1].x, v[ATTR2].z, c[..].x` for step(0.5, n.z)).
+        // It used to be refused outright.
+        if (profile_ != GeneralProfile::Fragment) {
+            VInstr cmp;
+            cmp.op = VOp::Sge;
+            cmp.dst.index = define(inst.result);
+            cmp.dst.writemask = componentMask(inst.resultType);
+            cmp.srcs[0] = resolve(inst.operands[1]);
+            cmp.srcs[1] = resolve(inst.operands[0]);
+            program_.instrs.push_back(cmp);
             return;
         }
 
