@@ -427,7 +427,7 @@ def word_mutant(blob, pick, edit):
     return bytes(out)
 
 
-def oracle_controls(blob, name):
+def established_controls(blob, name):
     """The judge itself must reject each of these; returns a list of failures."""
     first, last = (lambda n, c, w: n == 0), (lambda n, c, w: n == c - 1)
     def set_sat(n, c, w): w[0] |= SAT
@@ -585,7 +585,7 @@ def main():
             else:
                 print('  ok   %-9s lane-x mutant rejected' % name)
             if name == 'lit2.5':
-                broken = oracle_controls(blob, name)
+                broken = established_controls(blob, name)
                 for b in broken:
                     print('  FAIL measurement control: %s' % b)
                 if not broken:
