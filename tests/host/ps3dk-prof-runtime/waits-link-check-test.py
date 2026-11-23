@@ -48,6 +48,23 @@ weak=dict(providers);weak['__ps3dk_prof_thread_exit']=str(rt)+'(pthread.o)'
 run('legacy-weak-exit-reference',0,maptext(weak))
 weak['__ps3dk_prof_thread_exit']='application.o'
 run('foreign-legacy-exit-definition',1,maptext(weak))
+# PS3_PROF_WAITS=MANUAL + PS3_PROF_LIVE_AUTOSTART is a supported combination (docs/profiler-guide.md
+# lists PS3_PROF_WAITS among live-autostart-capable builds; live_autostart.c:43 weak-REFERENCES the
+# automatic lifecycle anchor to detect one, never defines it).  The weak reference from the live
+# auto-start member is listed in the cross-reference table as the live_autostart.o member of this
+# (manual) archive and must be accepted - the old bare presence test refused exactly this row, so
+# it pins the fix.  A real definition (a startup.o of the automatic lifecycle) is always refused:
+# from a different profiler archive by the mixed-archive guard, and from this one by the anchor
+# guard - the manual waits archive does not contain a startup.o, so the latter row is a build
+# mistake (a startup.o added to libps3dkprof_wait.a) that both the old and the new code refuse.
+weak_live=dict(providers);weak_live['__ps3dk_prof_startup_anchor']=str(prof)+'(live_autostart.o)'
+run('manual-live-autostart-weak-anchor',0,maptext(weak_live))
+foreign_siblings=providers.copy();foreign_siblings['__ps3dk_prof_startup_anchor']=str(lib/'libps3prof_wait.a')+'(startup.o)'
+run('manual-foreign-auto-waits-anchor',1,maptext(foreign_siblings))
+foreign_auto=providers.copy();foreign_auto['__ps3dk_prof_startup_anchor']=str(lib/'libps3dkprof_auto.a')+'(startup.o)'
+run('manual-foreign-auto-lifecycle-anchor',1,maptext(foreign_auto))
+same_arch=providers.copy();same_arch['__ps3dk_prof_startup_anchor']=str(prof)+'(startup.o)'
+run('manual-misbuilt-archive-startup-definition',1,maptext(same_arch))
 header=headers/'prof_wait.h';header.write_text('changed');run('changed-public-header',1)
 header.unlink();run('missing-public-header',1)
 header.write_text('fixture prof_wait.h');run('restored-public-header',0)

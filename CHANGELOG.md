@@ -113,6 +113,15 @@ The version stamped into builds is generated from the most recent
   every later iteration after a `break`, are compiled under that flag. The
   loop must declare its own induction variable and step with a single
   expression; other loops keep the behaviour they had.
+- **`libps3dkprof`: live viewer auto-start in `PS3_PROF_WAITS=MANUAL` and `EXT`
+  links.** The observed-wait link check refused any link in which the automatic
+  lifecycle anchor (`__ps3dk_prof_startup_anchor`) was cross-referenced, so the
+  supported live auto-start combination (the live start member is in the wait
+  archives and its only reference to the anchor is a weak one, used to detect an
+  automatic lifecycle on exit) could not link at all. The check now refuses
+  anchor definitions only (a `startup.o` member, from the automatic lifecycle
+  archive or a mixed-in one); the expected weak reference from
+  `live_autostart.o` passes.
 
 ## [v0.28.8] — 2026-11-21
 
