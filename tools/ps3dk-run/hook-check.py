@@ -12,8 +12,9 @@ so this checks the build that produced it instead:
   2. nm of those objects: the hook object defines ps3dk_run_hook_start, the
      injected main defines main and calls ps3dk_sample_main, and the target's
      own main object defines ps3dk_sample_main (the sample's renamed main).
-     PPC64 functions are .opd descriptors (nm type D) and C++ names are
-     mangled, so both are accepted;
+     PPC64 functions are .opd descriptors (nm type D), C++ names are
+     mangled, and the C++ main's references are weak (nm type w), so all
+     are accepted;
   3. the linked ELF holds the hook's strings "ps3dk-run-watchdog" and the
      argv marker prefix "ps3dk-run=";
   4. with --module, that module ELF holds neither string and its link line
@@ -89,7 +90,7 @@ def main():
     ll = link_line(b, t)
     c1 = 'ps3dk_run_hook.c.' in ll and bool(wrappers) and wrappers[0].name in ll
     hs, ws, ms = syms(nm, hook_obj), syms(nm, wrappers[0]) if wrappers else [], syms(nm, odir / a.main_obj)
-    c2 = (has(hs, 'TD', 'ps3dk_run_hook_start') and has(ws, 'TD', 'main') and has(ws, 'U', SAMPLE_MAIN)
+    c2 = (has(hs, 'TD', 'ps3dk_run_hook_start') and has(ws, 'TD', 'main') and has(ws, 'Uw', SAMPLE_MAIN)
           and has(ms, 'TD', SAMPLE_MAIN))
     elf = next((p for p in (b / f'{t}.elf', b / t) if p.is_file()), None)
     data = elf.read_bytes() if elf else b''

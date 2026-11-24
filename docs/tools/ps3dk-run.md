@@ -281,7 +281,8 @@ Both check five things:
 2. `nm` shows that `ps3dk_run_hook_start` is defined, that the injected
    `main` calls `ps3dk_sample_main`, and that the application's own main
    object defines it. PPC64 functions show as `.opd` descriptors (type D)
-   and C++ names are mangled, so both forms are accepted.
+   C++ names are mangled, and a C++ wrapper's references are weak (type
+   w), so all of these are accepted.
 3. The ELF holds the hook's strings `ps3dk-run-watchdog` and `ps3dk-run=`.
 4. With a module named, the module has neither string and no hook object.
 5. The build was configured with the injection, and the SELF is not older

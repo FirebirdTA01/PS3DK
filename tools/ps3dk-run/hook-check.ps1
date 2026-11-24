@@ -20,7 +20,7 @@ $ll = LinkLine $t
 $c1 = $ll.Contains('ps3dk_run_hook.c.obj') -and $wrapName -and $ll.Contains($wrapName.Name)
 $hs = Syms "$o/run-hook/hook/ps3dk_run_hook.c.obj"; $ws = Syms $(if ($wrapName) { $wrapName.FullName }); $ms = Syms "$o/$mainRel"
 $c2 = ($hs -match ' [TD] ps3dk_run_hook_start$').Count -gt 0 -and ($ws -match ' [TD] main$').Count -gt 0 -and
-      ($ws -match '(^| )U (ps3dk_sample_main|_Z17ps3dk_sample_main[A-Za-z0-9_]*)$').Count -gt 0 -and ($ms -match ' [TD] (ps3dk_sample_main|_Z17ps3dk_sample_main[A-Za-z0-9_]*)$').Count -gt 0
+      ($ws -match '(^| )[Uw] (ps3dk_sample_main|_Z17ps3dk_sample_main[A-Za-z0-9_]*)$').Count -gt 0 -and ($ms -match ' [TD] (ps3dk_sample_main|_Z17ps3dk_sample_main[A-Za-z0-9_]*)$').Count -gt 0
 $elf = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes("$b/$t.elf"))
 $c3 = $elf.Contains('ps3dk-run-watchdog') -and $elf.Contains('ps3dk-run=')
 $c4 = $true
