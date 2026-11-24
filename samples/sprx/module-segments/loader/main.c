@@ -15,10 +15,13 @@
  * passes the module's directory this way), then next to this executable (the
  * directory of argv[0]), then in /dev_hdd0/tmp/ps3dk-sprx-segments (a fixed
  * staging directory), then in /app_home, as <stem>.sprx first and then
- * <stem>.fake.sprx; the argv it was started with is printed first
+ * <stem>.fake.sprx, then the unsigned <stem>.prx; the argv it was started with
+ * is printed first
  * (SPRX_SEG argv argc=<n> [i]=<s>...):
  * a .self loads the real-signed .sprx, a .fake.self needs the .fake.sprx
- * (it gets 0x80010009 for the real one and moves on).
+ * (it gets 0x80010009 for the real one and moves on), and a raw .elf boot on
+ * RPCS3 loads the .prx.  The regression rows stage one container per
+ * directory, so each row proves the one it names.
  */
 
 #include <stdarg.h>
@@ -88,7 +91,7 @@ static int finish(void)
 	return 1;
 }
 
-/* Try <dir>/<stem>.sprx then <dir>/<stem>.fake.sprx for each directory. */
+/* Try <dir>/<stem>.sprx, .fake.sprx, then .prx, for each directory. */
 static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *loaded, size_t loaded_len)
 {
 	char dirs[4][192];
@@ -125,10 +128,10 @@ static sys_prx_id_t load_module(const char *argv1, const char *argv0, char *load
 		}
 	}
 
-	static const char *const exts[2] = { ".sprx", ".fake.sprx" };
+	static const char *const exts[3] = { ".sprx", ".fake.sprx", ".prx" };
 	sys_prx_id_t last = -1;
 	for (int d = 0; d < ndirs; d++) {
-		for (int e = 0; e < 2; e++) {
+		for (int e = 0; e < 3; e++) {
 			char path[256];
 			snprintf(path, sizeof(path), "%s/%s%s", dirs[d], MODULE_STEM, exts[e]);
 			sys_prx_id_t id = sys_prx_load_module(path, 0, NULL);

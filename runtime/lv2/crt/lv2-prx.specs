@@ -1,3 +1,8 @@
 *link_start_lv2:
 %{mprx-nothing:}
 
+%rename lib_lv2 lib_lv2_executable
+
+*lib_lv2:
+-llv2prx %(lib_lv2_executable)
+

@@ -49,6 +49,10 @@ static int pt_cleanup_claim(struct pt_thread *self) { if(!claim_ok||self->cleanu
 static void __lv2_tls_dtors_run(void) { note('D');if(destructor_waits){wait_mutex m=17;CHECK(tested_pthread_mutex_lock(&m)==0);}if(abandon==1)longjmp(exit_jump,1); }
 static int pt_run_tsd_destructors(struct pt_thread *self) { (void)self;note('T');if(destructor_waits){wait_mutex m=17;CHECK(tested_pthread_mutex_lock(&m)==0);}if(abandon==2)longjmp(exit_jump,1);return tsd_ok; }
 static void sysThreadExit(uint64_t code) { CHECK(code==0);note('X');longjmp(exit_jump,1); }
+/* __lv2_thread_exit's TLS check (lv2_thread_tls.h): these threads have TLS.
+ * The TLS-less path is tests/host/librt-thread-exit-test.py's. */
+static int pt_thread_has_tls(void) { return 1; }
+static void __attribute__((noreturn)) pt_raw_thread_exit(uint64_t code) { (void)code;CHECK(0);longjmp(exit_jump,1); }
 static void probe_free(void *p) { CHECK(p!=NULL);note('F'); }
 void __ps3dk_prof_thread_exit(void) __attribute__((weak));
 

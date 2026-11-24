@@ -13,6 +13,18 @@ sprx-load,tests/regression/sprx-load/sprx-load.fake.self,30,RAN-CLEAN,PRX_IMPORT
 sprx-module-macros,tests/regression/sprx-module-macros/sprx-module-macros.fake.self,30,RAN-CLEAN,PRX_MODULE_STOP_OK,PRX_FAIL
 sprx-segments,tests/regression/sprx-segments/sprx-segments.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
 sprx-segments-lp64,tests/regression/sprx-segments/sprx-segments-lp64.fake.self,30,RAN-CLEAN,SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+# Per-row boot artefacts (issue #20): the raw .elf boot loads the unsigned .prx, the real .self the real-signed .sprx,
+# each staged alone with its loader; the required regex names the container that loaded.
+sprx-segments-raw,tests/regression/sprx-segments/raw/sprx-segments.elf,30,RAN-CLEAN,(?s)SPRX_SEG PASS step=load id=0x[0-9a-f]+ path=/app_home/sprx_segments[.]prx.*SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+sprx-segments-raw-lp64,tests/regression/sprx-segments/raw/sprx-segments-lp64.elf,30,RAN-CLEAN,(?s)SPRX_SEG PASS step=load id=0x[0-9a-f]+ path=/app_home/sprx_segments_lp64[.]prx.*SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+sprx-segments-real,tests/regression/sprx-segments/real/sprx-segments.self,30,RAN-CLEAN,(?s)SPRX_SEG PASS step=load id=0x[0-9a-f]+ path=/app_home/sprx_segments[.]sprx.*SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+sprx-segments-real-lp64,tests/regression/sprx-segments/real/sprx-segments-lp64.self,30,RAN-CLEAN,(?s)SPRX_SEG PASS step=load id=0x[0-9a-f]+ path=/app_home/sprx_segments_lp64[.]sprx.*SPRX_SEG_ALL_PASS,SPRX_SEG FAIL|SPRX_SEG_RESULT FAIL
+# sprx-vsh-plugin: the VSH plugin sample's loader path, twice per boot: start with a caller, a sys_ppu_thread_create
+# worker ticking .data and .bss counters into an fsync'd log, stop and join, unload.  ILP32 only: the LP64 plugin
+# builds, but RPCS3's PPU recompiler fails on it ("Unsupported relocation(1)") and the boot hangs after the load.
+sprx-vsh-plugin,tests/regression/sprx-vsh-plugin/sprx-vsh-plugin.fake.self,40,RAN-CLEAN,VSHP_ALL_PASS,VSHP FAIL|VSHP_RESULT FAIL
+sprx-vsh-plugin-raw,tests/regression/sprx-vsh-plugin/raw/sprx-vsh-plugin.elf,40,RAN-CLEAN,(?s)VSHP PASS step=load-1 id=0x[0-9a-f]+ path=/app_home/vsh_plugin[.]prx.*VSHP_ALL_PASS,VSHP FAIL|VSHP_RESULT FAIL
+sprx-vsh-plugin-real,tests/regression/sprx-vsh-plugin/real/sprx-vsh-plugin.self,40,RAN-CLEAN,(?s)VSHP PASS step=load-1 id=0x[0-9a-f]+ path=/app_home/vsh_plugin[.]sprx.*VSHP_ALL_PASS,VSHP FAIL|VSHP_RESULT FAIL
 # sys-tty: the SDK-owned <sys/tty.h> write path (system call 403) under the system and PSL1GHT names.
 sys-tty,tests/regression/sys-tty/sys-tty.fake.self,20,RAN-CLEAN,(?s)SYS_TTY_ROW reference-name write.*SYS_TTY_ROW psl1ght-name write.*SYS_TTY_OK,SYS_TTY_FAIL
 tls,tests/regression/tls/tls-test.fake.self,20,RAN-CLEAN,TLS_OK,TLS_BAD|ENOSYS
@@ -157,6 +169,11 @@ pthread-key-reuse-lp64,tests/regression/pthread-key-reuse/pthread-key-reuse-lp64
 # racing a function-local static and a shared_ptr.
 pthread-raw-threads-ilp32,tests/regression/pthread-raw-threads/pthread-raw-threads-ilp32.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
 pthread-raw-threads-lp64,tests/regression/pthread-raw-threads/pthread-raw-threads-lp64.fake.self,60,RAN-CLEAN,PTHREAD_RAW_THREADS_OK,PTHREAD_RAW_THREADS_FAIL|terminate
+# ppu-thread-exit-no-tls: (GCC 16) sys_ppu_thread_exit on a thread made with no TLS area (r13 = 0, the way Cobra runs
+# a plugin's module_start) ends with system call 41 and the joiner gets its 64-bit code; sysThreadCreate and
+# sys_ppu_thread_create threads keep their key and thread_local destructors.
+ppu-thread-exit-no-tls-ilp32,tests/regression/ppu-thread-exit-no-tls/ppu-thread-exit-no-tls-ilp32.fake.self,30,RAN-CLEAN,(?s)PPU_THREAD_EXIT_NO_TLS PASS case=no-tls .*PPU_THREAD_EXIT_NO_TLS_OK,PPU_THREAD_EXIT_NO_TLS FAIL|PPU_THREAD_EXIT_NO_TLS_FAIL|terminate
+ppu-thread-exit-no-tls-lp64,tests/regression/ppu-thread-exit-no-tls/ppu-thread-exit-no-tls-lp64.fake.self,30,RAN-CLEAN,(?s)PPU_THREAD_EXIT_NO_TLS PASS case=no-tls .*PPU_THREAD_EXIT_NO_TLS_OK,PPU_THREAD_EXIT_NO_TLS FAIL|PPU_THREAD_EXIT_NO_TLS_FAIL|terminate
 # cxx-thread-basic: (GCC 16) the C++17 thread library on the posix gthread layer: thread, mutexes, timed waits,
 # condition_variable, throwing call_once, async/future, shared_mutex, shared_ptr, statics, thread_local.
 cxx-thread-basic-ilp32,tests/regression/cxx-thread-basic/cxx-thread-basic-ilp32.fake.self,60,RAN-CLEAN,CXX_THREAD_BASIC_OK,CXX_THREAD_BASIC_FAIL|terminate

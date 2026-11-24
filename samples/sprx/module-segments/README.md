@@ -39,7 +39,7 @@ SPRX_SEG_ALL_PASS steps=20 abi=ilp32
 A failed check prints `SPRX_SEG FAIL step=<name> ...` and the run ends with
 `SPRX_SEG_RESULT FAIL failed=<n>`.
 
-The loader looks for its module, first as `.sprx` and then as `.fake.sprx`, in:
+The loader looks for its module, as `.sprx`, then `.fake.sprx`, then the unsigned `.prx`, in:
 
 1. the directory given as `argv[1]`, when it is an absolute path;
 2. the loader's own directory (the directory of `argv[0]`, when that is absolute);
@@ -56,7 +56,8 @@ its own path in `argv[0]`. Pass the module's directory as the first argument
 stage the module in `/dev_hdd0/tmp/ps3dk-sprx-segments`.
 
 A `.self` loads the real-signed `.sprx`; a `.fake.self` is refused the `.sprx`
-(`0x80010009` on a console) and loads the `.fake.sprx`.
+(`0x80010009` on a console) and loads the `.fake.sprx`; a raw `.elf` boot on
+RPCS3 loads the `.prx`.
 
 ## Build outputs
 
@@ -68,8 +69,11 @@ Both ABIs are built. Everything lands in the build directory:
 | LP64 | `sprx_segments_lp64.{prx,sprx,fake.sprx}` | `sprx-segments-loader-lp64.{self,fake.self}` |
 
 Copy a loader and its module into the same directory. The regression row
-`tests/regression/sprx-segments` stages the `.fake.self` / `.fake.sprx`
-pairs for RPCS3 (rows `sprx-segments` and `sprx-segments-lp64`).
+`tests/regression/sprx-segments` stages every pair for RPCS3, one container
+per directory: the `.fake.self` / `.fake.sprx` pairs beside its
+`CMakeLists.txt` (rows `sprx-segments`, `sprx-segments-lp64`), the raw
+`.elf` / `.prx` pairs in `raw/` (`sprx-segments-raw`, `-raw-lp64`) and the
+`.self` / `.sprx` pairs in `real/` (`sprx-segments-real`, `-real-lp64`).
 
 RPCS3 accepts the old layout too, so a pass there shows only that the new
 layout still loads and runs; the console is the real test.

@@ -187,6 +187,24 @@ for abi_flag in "" "-mlp64"; do
     install -m 644 "$runtime_src/lv2-prx.specs" "$install_gcc/lv2-prx.specs"
     install -m 644 "$runtime_src/lv2-prx.specs" "$install_ps3dk/lv2-prx.specs"
 
+    # liblv2prx.a: a module's sys_ppu_thread_create / sys_ppu_thread_exit,
+    # with no TLS and no heap (librt's pair is TLS-based and cannot link into
+    # a module).  lv2-prx.specs links it ahead of librt.  Per ABI: it holds
+    # pointers.
+    say "building liblv2prx.a ($abi_label, module thread create/exit)"
+    prx_work="${LIBRT_WORK_ROOT:-$PS3_TOOLCHAIN_ROOT/build/runtime-lv2/librt}/prx-${abi_subdir:-ilp32}"
+    mkdir -p "$prx_work"
+    "$CC" -c $abi_flag -mcpu=cell -O2 \
+        -Werror=implicit-function-declaration \
+        -Werror=incompatible-pointer-types \
+        -Werror=int-conversion \
+        -I"$PS3DK/ppu/include" \
+        -o "$prx_work/lv2-prx-thread.o" "$runtime_src/lv2-prx-thread.c"
+    rm -f "$install_gcc/liblv2prx.a"
+    "$PS3DEV/ppu/bin/powerpc64-ps3-elf-ar" rcs \
+        "$install_gcc/liblv2prx.a" "$prx_work/lv2-prx-thread.o"
+    cp -f "$install_gcc/liblv2prx.a" "$install_ps3dk/liblv2prx.a"
+
     # Build native librt (replaces PSL1GHT's librt.a).  Each wrapper
     # compiles cleanly under both ILP32 and LP64 because the syscall
     # interface is ABI-invariant and width-sensitive types use newlib

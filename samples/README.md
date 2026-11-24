@@ -234,6 +234,7 @@ Relocatable modules (`ps3_add_prx`) and the programs that load them; see
 |---|---|---|
 | `module-export` | Module identity and entry points declared in C (`SYS_MODULE_INFO`, `SYS_MODULE_START`, `SYS_MODULE_STOP`), one exported library checked by `ps3_prx_export_roundtrip`, a loader that starts, calls, stops and unloads it | **green** + RPCS3 runtime-verified |
 | [`module-segments`](sprx/module-segments/README.md) | The module layout retail Lv-2 needs (issue #137): code and data segments with the SPU permission bits, `0x1c` export records for two libraries plus the management record, and a `module_start`/`module_stop` that write and read back their own `.data` and `.bss`. The loader prints a verdict per step; ILP32 and LP64 | **green** + RPCS3 runtime-verified; console run pending |
+| [`vsh-plugin`](sprx/vsh-plugin/README.md) | A VSH plugin for webMAN MOD's `/loadprx.ps3` / `/unloadprx.ps3`: `module_start` starts a worker with `sys_ppu_thread_create` and `module_stop` joins it, each ending with the bare exit system call and (stop) the final stop report when the thread has no caller. The worker logs to `/dev_hdd0/tmp` with `fsync` and counts in `.data` and `.bss`. The loader runs the game-process path twice; builds ILP32 and LP64, RPCS3 rows ILP32 | **green** + RPCS3 runtime-verified (loader path); console runs pending |
 
 ## lv2/
 

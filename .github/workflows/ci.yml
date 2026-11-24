@@ -1195,6 +1195,9 @@ jobs:
       - name: Test small heap blocks preserve free-list links and payloads
         run: bash tests/host/heap-small-block-test.sh
 
+      - name: Test sys_ppu_thread_exit on a thread with no TLS area, and the module thread pair
+        run: bash tests/host/librt-thread-exit-test.sh
+
       - name: Test PSGL client scratch preserves queued draws
         run: bash tests/host/psgl-client-scratch-test.sh
 
