@@ -157,7 +157,10 @@ if [ -z "$elf" ]; then
     fi
     elf="$(find "$build_dir" -maxdepth 1 -type f -name 'hello-ppu-abi-check' 2>/dev/null | head -n1)"
     [ -n "$elf" ] || elf="$(find "$build_dir" -maxdepth 2 -type f -name '*.elf' 2>/dev/null | head -n1)"
-    [ -n "$elf" ] && [ -f "$elf" ] || { note_fail "could not locate the built sample ELF"; exit 1; }
+    if [ -z "$elf" ] || [ ! -f "$elf" ]; then
+        note_fail "could not locate the built sample ELF"
+        exit 1
+    fi
     echo "  sample ELF: $elf"
 else
     [ -f "$elf" ] || { echo "--elf $elf not found" >&2; exit 2; }
@@ -193,7 +196,9 @@ if [ -n "$rel_obj" ] && [ -f "$rel_obj" ]; then
         sed 's/^/  /' "$work/rel.err" >&2
         note_fail "manifest could not be read for $rel_obj"
     else
-        [ -f "$fixture" ] && cp "$fixture" "$work/fixture.json" || true
+        if [ -f "$fixture" ]; then
+            cp "$fixture" "$work/fixture.json"
+        fi
         rc_diff=123
         python3 - "$work/rel.json" "$work/fixture.json" <<'PY'
 import json, sys
