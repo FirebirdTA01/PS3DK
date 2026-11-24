@@ -37,8 +37,14 @@ MANIFEST="$ROOT/cmake/ps3-required-artifacts.txt"
 # bare (rsx) or literal linker flags (-lspurs appears in samples/PSL1GHT/spu/
 # spurs), so strip a leading -l.  The target name is swept up too; it is
 # filtered out by requiring lib<name>.a to actually exist.
+# Samples may ship a NATIVE host test project under samples/*/host-tests/
+# (shell drivers, or a CMake project like ds3-bench's).  Such a file describes
+# a BUILD-LOCAL host archive (ds3b-logic) that never lives in the SDK install,
+# so its link tokens would make this check fail on a library there is no release
+# copy to promise -- the same shape as the generated-stub case below.  Keep it
+# out of the SDK-install scan.
 ppu_names="$(
-    find "$ROOT/samples" -name CMakeLists.txt -print0 |
+    find "$ROOT/samples" -name CMakeLists.txt -not -path '*/host-tests/*' -print0 |
     xargs -0 awk '
         # The FIRST token after the paren is the TARGET, not a library --
         # dropping it is what keeps sample names (libhttptest.a, libsputest.a)
@@ -76,7 +82,7 @@ ppu_names="$(
 # $0 belongs to awk, not the invoking shell.
 # shellcheck disable=SC2016
 generated_stubs="$(
-    find "$ROOT/samples" -name CMakeLists.txt -print0 |
+    find "$ROOT/samples" -name CMakeLists.txt -not -path '*/host-tests/*' -print0 |
     # A batch without a stub declaration is normal, not grep's exit 1
     # (which xargs turns into 123 under pipefail). awk still fails on I/O
     # errors, while no matches produce empty output successfully.
@@ -101,7 +107,7 @@ fi
 # target_link_libraries, so scanning just the PPU link lines misses every SPU
 # library — the manifest had zero SPU coverage for exactly that reason.
 spu_names="$(
-    find "$ROOT/samples" -name CMakeLists.txt -print0 |
+    find "$ROOT/samples" -name CMakeLists.txt -not -path '*/host-tests/*' -print0 |
     xargs -0 awk '
         /ps3_add_spu_image[[:space:]]*\(/ { inblk = 1; want = 0 }
         inblk {
