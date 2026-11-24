@@ -2,7 +2,8 @@
 # gen-make-sprx-source.sh <make_self.c> <output.c>
 #
 # Emits the make_sprx source: a build-tree copy of PSL1GHT's geohot
-# make_self.c with the SPRX container relabel applied.  Both the Windows
+# make_self.c with the SPRX container relabel applied, on top of the
+# certified-file header data-length fix from gen-make-self-source.sh.  Both the Windows
 # cross-build (scripts/build-host-tools-windows.sh) and the native tools
 # step (scripts/build-psl1ght.sh) compile the emitted file with -DSPRX;
 # this script is the ONLY place the relabel and its drift guards live.
@@ -39,8 +40,13 @@ n7=$(grep -c 'set_u16(&(hdr->s_flags), 7);' "$src" || true)
 [[ "$n7" -eq 1 ]] \
     || die "expected exactly one se_flags=7 site in $src, found $n7 — upstream make_self.c changed; re-verify the relabel before trusting make_sprx output"
 
+# The certified-file header data-length fix every make_self flavour carries
+# (gen-make-self-source.sh) goes in first; the relabel is applied to its output.
+fixed="$dst.data-len.c"
+"$(dirname "$0")/gen-make-self-source.sh" "$src" "$fixed"
 sed 's/set_u16(&(hdr->s_flags), 7);/set_u16(\&(hdr->s_flags), 1);/' \
-    "$src" > "$dst"
+    "$fixed" > "$dst"
+rm -f "$fixed"
 if grep -q 'set_u16(&(hdr->s_flags), 7);' "$dst"; then
     die "se_flags 7 still present after the relabel"
 fi

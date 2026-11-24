@@ -721,7 +721,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libelf-dev cmake ninja-build python3
+              libelf-dev cmake ninja-build python3 \
+              libgmp-dev libssl-dev zlib1g-dev
 
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
@@ -853,6 +854,21 @@ jobs:
 
       - name: Test the GCM command-emitter surface (location arg + FP control wrapper)
         run: bash tests/sdk/gcm-command-surface-test.sh
+
+      # make_self / make_self_npdrm / make_sprx: the certified-file header data length is the
+      # data the file stores (header length + data length == file size); a loader
+      # that checks it (PS3HEN's VSH plugin loader) refuses the file otherwise.
+      # Built from PSL1GHT's make_self.c at the commit bootstrap.sh pins.
+      - name: Test the certified-file header data length the signers write
+        run: |
+          pin=$(sed -n 's/^PSL1GHT_COMMIT="\([0-9a-f]*\)".*/\1/p' scripts/bootstrap.sh)
+          test ${#pin} -eq 40
+          src=$(mktemp -d)
+          git -C "$src" init -q
+          git -C "$src" remote add origin https://github.com/ps3dev/PSL1GHT.git
+          git -C "$src" fetch -q --depth 1 origin "$pin"
+          git -C "$src" checkout -q FETCH_HEAD
+          python3 tests/sdk/signed-file-data-len-test.py --make-self-c "$src/tools/geohot/make_self.c"
 
       - name: Test PPU header hygiene ratchet and install ownership
         run: |

@@ -112,7 +112,18 @@ mkdir -p "$PS3DEV/bin"
 IFS=' ' read -r -a _cc_cmd <<< "${CC:-${PREFIX:-}gcc}"
 "${_cc_cmd[@]}" -O2 -I"$SRC/tools/geohot" -DSPRX "$_sprx_gen" \
     -lgmp -lcrypto -lz -o "$PS3DEV/bin/make_sprx"
-unset _sprx_gen _cc_cmd
+# make_self / make_self_npdrm: PSL1GHT's tools/ Makefile installed them from the
+# unmodified make_self.c above; replace both with builds of the copy that carries
+# the certified-file header data-length fix (scripts/gen-make-self-source.sh), so all three
+# signers write the stored data size.
+say "make_self, make_self_npdrm (rebuilt with the certified-file header data-length fix)"
+_self_gen="$PS3_BUILD_ROOT/psl1ght-tools/make_self_fixed.c"
+"$script_dir/gen-make-self-source.sh" "$SRC/tools/geohot/make_self.c" "$_self_gen"
+"${_cc_cmd[@]}" -O2 -I"$SRC/tools/geohot" "$_self_gen" \
+    -lgmp -lcrypto -lz -o "$PS3DEV/bin/make_self"
+"${_cc_cmd[@]}" -O2 -I"$SRC/tools/geohot" -DNPDRM "$_self_gen" \
+    -lgmp -lcrypto -lz -o "$PS3DEV/bin/make_self_npdrm"
+unset _sprx_gen _self_gen _cc_cmd
 say "installed $PS3DEV/bin/make_sprx"
 
 # --------------------------------------------------------------------

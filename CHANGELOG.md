@@ -93,6 +93,14 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **`make_self`, `make_self_npdrm`, `make_sprx`: the certified-file header's data length is
+  the data the file stores.** They wrote the input ELF's size there, although
+  the segments are stored compressed, so the header claimed more data than the
+  file holds. A loader that checks the header against the file refused such a
+  file before loading it: PS3HEN's VSH plugin loader rejected every
+  real-signed `.sprx` (webMAN's load page reported nothing), while the same
+  file loaded in a game process. The field is now the file size minus the
+  header length, as in firmware-signed files.
 - **`rsx-cg-compiler`: a struct passed by value to a helper function.** Inside
   the helper, the parameter's members did not take the argument's values. A
   fragment helper read the entry inputs named by the struct's semantics, so
