@@ -159,7 +159,13 @@ impl Cache {
     }
 }
 
-pub fn shader_page(p: &mut egui::Ui, v: &RsxFrameView, f: &FrameView, names: &Names, cache: &mut Cache) {
+/// Hover text wherever static texture fetch counts are shown.
+pub const FETCH_HOVER: &str = "Static counts: the texture fetch instructions (TEX, TXP, TXL, TXB, TXD; a vertex program's TXL) in the \
+program's ucode, one per instruction whatever its branches and loops do at run time. From the capture's program bytes, \
+else from a shader-folder container with the same hash; a + marks a lower bound (unknown opcodes or no end bit).";
+
+pub fn shader_page(p: &mut egui::Ui, v: &RsxFrameView, f: &FrameView, names: &Names,
+                   fetches: &crate::shader_names::Fetches, cache: &mut Cache) {
     let rows = cache.rows(v, f);
     if rows.is_empty() {
         return ui::field_message(p, ui::Tone::Neutral, "No programs were recorded in this capture.");
@@ -195,6 +201,8 @@ pub fn shader_page(p: &mut egui::Ui, v: &RsxFrameView, f: &FrameView, names: &Na
                 p.label(m.text).on_hover_text(m.hover);
                 p.label(format!("· {} of {} draws timed", r.timed, r.draws));
             });
+            p.label(format!("Texture fetches: {}", ps3dk_prof::rsx_frame::fetch_text(ps3dk_prof::rsx_frame::program_fetches(f, r.index, fetches))))
+                .on_hover_text(FETCH_HOVER);
             if r.varying.is_empty() {
                 p.label("No constant changes across its draws.");
             } else {

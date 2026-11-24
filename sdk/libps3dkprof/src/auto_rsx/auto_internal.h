@@ -117,6 +117,7 @@ typedef struct auto_capture {
     auto_queue_entry *active; /* owner only, between canonical begin/end */
     uintptr_t expected_end;
     uint32_t iso_active;     /* RSX frame capture ISOLATED: 4 words of WAIT_FOR_IDLE in the active draw (0 otherwise) */
+    uint32_t pix_active;     /* RSX frame capture PIXELS: 4 words of forced QUERY_ENABLE in the active draw (0 otherwise) */
     uint32_t open_ended;     /* the active draw is immediate (SetDrawBegin): its words end at SetDrawEnd */
     uint32_t device_initialized, saturated, owner_done;
     /* owner only: open segment contexts (cellGcmSegmentBegin..End) and the

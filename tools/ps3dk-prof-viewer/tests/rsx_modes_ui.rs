@@ -9,7 +9,7 @@ mod rsx_frame_support;
 use common::*;
 use ps3dk_prof::rsx_frame::{FrameStatus, Half};
 use ps3dk_prof_viewer::{
-    live_rsx_frame::{refusal, Mode, RequestOptions, RequestTracker, RsxFrameRequest, FLAG_BOTH, FLAG_FP_BYTES, FLAG_ISOLATED},
+    live_rsx_frame::{refusal, Mode, RequestOptions, RequestTracker, RsxFrameRequest, FLAG_BOTH, FLAG_FP_BYTES, FLAG_ISOLATED, FLAG_PIXELS},
     model::Document,
     rsx_frame_ui::{page, Drawn, State, View},
     rsx_modes_ui::{mode_label, pair_rows},
@@ -58,8 +58,9 @@ fn doc() -> Document {
 #[test]
 fn request_options_map_to_flags_and_isolated_with_both_is_refused_in_words() {
     assert_eq!(RequestOptions::default().flags(), 0);
-    assert_eq!(RequestOptions { mode: Mode::Isolated, fp_bytes: false }.flags(), FLAG_ISOLATED);
-    assert_eq!(RequestOptions { mode: Mode::Both, fp_bytes: true }.flags(), FLAG_BOTH | FLAG_FP_BYTES);
+    assert_eq!(RequestOptions { mode: Mode::Isolated, fp_bytes: false, pixels: false }.flags(), FLAG_ISOLATED);
+    assert_eq!(RequestOptions { mode: Mode::Both, fp_bytes: true, pixels: false }.flags(), FLAG_BOTH | FLAG_FP_BYTES);
+    assert_eq!(RequestOptions { mode: Mode::Pipelined, fp_bytes: false, pixels: true }.flags(), FLAG_PIXELS);
     let r = RsxFrameRequest { name: "n".into() };
     let b = r.encode_with(9, FLAG_BOTH | FLAG_FP_BYTES).unwrap();
     assert_eq!(u16::from_le_bytes([b[12], b[13]]), 6, "flags follow the request id");
@@ -91,7 +92,7 @@ fn both_capture_is_two_labelled_views_paired_per_draw_and_ready_only_when_both_a
         st.view = view;
         let mut drawn = Drawn::default();
         let _ = ctx.run(Default::default(), |ctx| {
-            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
+            eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn));
         });
         assert!(drawn.status.is_some());
     }

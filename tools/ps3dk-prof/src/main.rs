@@ -38,10 +38,14 @@ const USAGE: &str = "usage:
                              per frame and per tag: records, timed RSX busy (merged intervals) and the
                              draws its CALL brackets ran untimed; AUTO range time per name; a whole-
                              window summary; 1 without automatic observation or without tags
-  ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind] [--json] <file>
+  ps3dk-prof rsx-frame [--capture N] [--draw K | --group-by program|vp|fp|label|tag|pass|kind]
+                       [--shader-dir DIR] [--json] <file>
                              RSX frame captures (file_flags bit 10): per capture its draws in submission
-                             order with kind, primitive, counts, tag, label, programs, pass and time (raw RSX
-                             ticks of the AUTO op); 1 when the capture has no RSX frame family
+                             order with kind, primitive, counts, tag, label, programs, pass, time (raw RSX
+                             ticks of the AUTO op) and static texture fetches; --shader-dir names programs
+                             from DIR's .vpo/.fpo containers by canonical hash (the viewer's shader folder:
+                             one level, at most 4096 entries and 64 MiB) and counts fetches from their
+                             ucode; 1 when the capture has no RSX frame family, 3 when DIR cannot be listed
   ps3dk-prof shader-hash [--json] <file>...
                              the canonical program hash of each program container (.vpo/.fpo), as RSX frame
                              captures name programs
@@ -418,6 +422,7 @@ fn counters(args: &[String]) -> ExitCode {
 fn rsx_frame(args: &[String]) -> ExitCode {
     use ps3dk_prof::rsx_frame::{self as rf, GroupBy};
     let (mut json, mut capture, mut draw, mut by, mut path) = (false, None::<u32>, None::<u32>, None::<GroupBy>, None);
+    let mut shader_dir: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
@@ -436,6 +441,10 @@ fn rsx_frame(args: &[String]) -> ExitCode {
                 Some(v) => { by = Some(v); i += 1; }
                 None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
             },
+            "--shader-dir" if shader_dir.is_none() => match val {
+                Some(v) => { shader_dir = Some(v.clone()); i += 1; }
+                None => { eprintln!("{USAGE}"); return ExitCode::from(3); }
+            },
             p if !p.starts_with('-') && path.is_none() => path = Some(p.to_string()),
             _ => { eprintln!("{USAGE}"); return ExitCode::from(3); }
         }
@@ -445,6 +454,20 @@ fn rsx_frame(args: &[String]) -> ExitCode {
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) => { eprintln!("ps3dk-prof: {path}: {e}"); return ExitCode::from(3); }
+    };
+    let folder = match &shader_dir {
+        None => None,
+        Some(d) => {
+            if let Err(e) = std::fs::read_dir(d) {
+                eprintln!("ps3dk-prof: --shader-dir {d}: {e}");
+                return ExitCode::from(3);
+            }
+            let f = ps3dk_prof::shader_dir::Folder::read(std::path::Path::new(d), Default::default());
+            if let Some(l) = &f.scan.limit {
+                eprintln!("ps3dk-prof: --shader-dir {d}: {l}; programs after the limit are not named");
+            }
+            Some(f)
+        }
     };
     match load_file(&bytes) {
         Outcome::Malformed(m) => { eprintln!("{m}"); ExitCode::from(2) }
@@ -456,10 +479,11 @@ fn rsx_frame(args: &[String]) -> ExitCode {
             }
             let mut out = std::io::stdout().lock();
             let result = if json {
-                serde_json::to_writer_pretty(&mut out, &rf::to_json(&a.capture, &frames)).map_err(std::io::Error::other)
+                serde_json::to_writer_pretty(&mut out, &rf::to_json_with(&a.capture, &frames, folder.as_ref()))
+                    .map_err(std::io::Error::other)
                     .and_then(|_| writeln!(out))
             } else {
-                rf::write_text(&mut out, &a.capture, &frames, draw, by)
+                rf::write_text(&mut out, &a.capture, &frames, draw, by, folder.as_ref())
             };
             if let Err(e) = result { eprintln!("ps3dk-prof: output: {e}"); return ExitCode::from(3); }
             if a.capture.rsx_frame.is_none() { ExitCode::from(1) } else { verdict_code(&a) }

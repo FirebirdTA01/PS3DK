@@ -197,6 +197,8 @@ const SURFACE_COLOR: Names = &[(1, "X1R5G5B5_Z1R5G5B5"), (2, "X1R5G5B5_O1R5G5B5"
     (4, "X8R8G8B8_Z8R8G8B8"), (5, "X8R8G8B8"), (8, "A8R8G8B8"), (9, "B8"), (10, "G8B8"), (11, "F_W16Z16Y16X16"),
     (12, "F_W32Z32Y32X32"), (13, "F_X32"), (14, "X8B8G8R8_Z8B8G8R8"), (15, "X8B8G8R8_O8B8G8R8"), (16, "A8B8G8R8")];
 const SURFACE_ZETA: Names = &[(1, "Z16"), (2, "Z24S8")];
+const ZCULL_DIR: Names = &[(0, "LESS"), (1, "GREATER")];
+const ZCULL_FORMAT: Names = &[(0, "MSB"), (1, "LONES")];
 const SURFACE_TYPE: Names = &[(1, "linear"), (2, "swizzled")];
 const ANTIALIAS: Names = &[(0, "CENTER_1"), (3, "DIAGONAL_CENTERED_2"), (4, "SQUARE_CENTERED_4"),
     (5, "SQUARE_ROTATED_4")];
@@ -322,8 +324,17 @@ fn render(r: &Registers) -> Vec<Field> {
         .field("scissor.height", 0x8c4, 16, LO16, Kind::Uint)
         .whole("clip.horizontal", 0x2c0, Kind::Hex)
         .whole("clip.vertical", 0x2c4, Kind::Hex)
-        .whole("zcull.enable", 0x1d84, Kind::Hex)
-        .whole("zcull.stats", 0x1804, Kind::Hex)
+        .field("zcull.enable.depth", 0x1d84, 0, 1, Kind::Bool)
+        .field("zcull.enable.stencil", 0x1d84, 1, 1, Kind::Bool)
+        .field("zcull.dir", 0x1ea4, 0, 0xf, Kind::Named(ZCULL_DIR))
+        .field("zcull.format", 0x1ea4, 4, 0xf, Kind::Named(ZCULL_FORMAT))
+        .field("zcull.limit.move_forward", 0x1ea8, 16, LO16, Kind::Uint)
+        .field("zcull.limit.push_back", 0x1ea8, 0, LO16, Kind::Uint)
+        .field("zcull.scull.func", 0x1eac, 0, LO16, Kind::Uint)
+        .field("zcull.scull.ref", 0x1eac, 16, 0xff, Kind::Uint)
+        .field("zcull.scull.mask", 0x1eac, 24, 0xff, Kind::Hex)
+        .whole("zcull.stats", 0x1804, Kind::Bool)
+        .whole("zpass.enable", 0x17cc, Kind::Bool)
         .whole("clear.color", 0x1d90, Kind::Hex)
         .whole("clear.depth_stencil", 0x1d8c, Kind::Hex)
         .whole("anti_aliasing", 0x1d7c, Kind::Hex)
@@ -457,7 +468,9 @@ pub fn register_name(method: u32) -> String {
         (0xa00, "VIEWPORT_HORIZ"), (0xa04, "VIEWPORT_VERT"), (0xa6c, "DEPTH_FUNC"), (0xa70, "DEPTH_WRITE_ENABLE"),
         (0xa74, "DEPTH_TEST_ENABLE"), (0x181c, "VB_INDEX_BATCH_OFFSET"), (0x1820, "VB_INDEX_BATCH_DMA"),
         (0x1828, "POLYGON_MODE_FRONT"), (0x182c, "POLYGON_MODE_BACK"), (0x1830, "CULL_FACE"), (0x1834, "FRONT_FACE"),
-        (0x183c, "CULL_FACE_ENABLE"), (0x1d60, "FP_CONTROL"), (0x1d84, "ZCULL_ENABLE"), (0x1d8c, "CLEAR_VALUE_DEPTH"),
+        (0x183c, "CULL_FACE_ENABLE"), (0x1d60, "FP_CONTROL"), (0x1d84, "ZCULL_ENABLE"), (0x1ea4, "ZCULL_CONTROL0"),
+        (0x1ea8, "ZCULL_CONTROL1"), (0x1eac, "SCULL_CONTROL"), (0x1804, "ZCULL_STATS_ENABLE"),
+        (0x17cc, "ZPASS_PIXEL_COUNT_ENABLE"), (0x1d8c, "CLEAR_VALUE_DEPTH"),
         (0x1d90, "CLEAR_VALUE_COLOR"), (0x1dac, "RESTART_INDEX_ENABLE"), (0x1db0, "RESTART_INDEX"),
         (0x1e9c, "VP_UPLOAD_FROM_ID"), (0x1ea0, "VP_START_FROM_ID"), (0x1ee0, "POINT_SIZE"),
         (0x1efc, "VP_UPLOAD_CONST_ID"), (0x1fc0, "DIVIDER_FREQUENCY_OP"), (0x1ff0, "VP_ATTRIB_EN"),

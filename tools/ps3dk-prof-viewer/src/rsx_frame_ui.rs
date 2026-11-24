@@ -223,7 +223,8 @@ fn program(f: &FrameView, i: Option<usize>, names: &Names) -> (String, String) {
         },
     )
 }
-pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &mut State, out: &mut Drawn) {
+pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, fetches: &crate::shader_names::Fetches, scan: u64,
+            st: &mut State, out: &mut Drawn) {
     *out = Drawn::default();
     ui::page_header(
         p,
@@ -280,7 +281,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
             }
         }
         if p.button("Shader folder…")
-            .on_hover_text("Match local .vpo/.fpo files by their stable program hash; session only")
+            .on_hover_text("Match local .vpo/.fpo files by their stable program hash, naming programs and counting their texture fetches; session only")
             .clicked()
         {
             out.shader_folder = true;
@@ -307,6 +308,13 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      p.label("Sum");duration(p,v,Some(f.totals.sum));p.label("Span");duration(p,v,f.totals.span.map(|(b,e)|e-b));p.label("Gaps");duration(p,v,Some(f.totals.gaps));
    });
    if f.draws_not_retained>0 {ui::field_message(p,ui::Tone::Warning,&format!("{} draw records were not retained by the reader",f.draws_not_retained));}
+   if f.decoder>=5 {
+     let targets=rf::overdraw(f);
+     if !targets.is_empty() {p.collapsing(format!("Pixels and overdraw{}",if f.pixels_forced{" · counting forced"}else{""}),|p|{
+       ui::field_message(p,ui::Tone::Neutral,PIXELS_NOTE);
+       for t in &targets {p.label(format!("{} · {} draws, {} counted · {} samples{}",t.key,t.draws,t.counted,t.samples,t.overdraw.map_or_else(String::new,|o|format!(" · overdraw {o:.2}"))));}
+     });}
+   }
    for (tone,why) in header_notes(f) {ui::field_message(p,tone,&why);}
    if let Some(e)=&f.end {p.collapsing("Capture evidence",|p|{
      p.label(format!("{} seen / {} recorded; {} hooked / {} decoded only / {} mismatches; {} lost events",e.draws_seen,e.draws_recorded,e.hooked,e.decoded_only,e.mismatches,e.lost_events));
@@ -321,7 +329,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
      if f.half!=Half::Only {p.selectable_value(&mut st.view,View::Pairs,"Pairs (pipelined vs isolated)");}
    });
    match st.view {
-     View::Shaders=>{crate::rsx_shader_ui::shader_page(p,v,f,names,&mut st.shaders);return;},
+     View::Shaders=>{crate::rsx_shader_ui::shader_page(p,v,f,names,fetches,&mut st.shaders);return;},
      View::Pairs=>{crate::rsx_modes_ui::pairs_page(p,v,f.id);return;},
      View::Draws=>{},
    }
@@ -333,7 +341,7 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
        if p.selectable_label(st.by_target,"Render target").clicked(){st.group=None;st.by_target=true;}
      });
    });
-   p.horizontal_wrapped(|p|{p.label("Sort");for (column,name) in [(DrawColumn::Time,"Time"),(DrawColumn::Ordinal,"Ordinal"),(DrawColumn::Kind,"Kind"),(DrawColumn::Count,"Count"),(DrawColumn::Gap,"Gap")]{if p.selectable_label(st.column==column,name).clicked(){if st.column==column{st.descending=!st.descending}else{st.column=column;st.descending=column!=DrawColumn::Ordinal;}}}p.label(if st.descending{"Descending"}else{"Ascending"});});
+   p.horizontal_wrapped(|p|{p.label("Sort");for (column,name) in [(DrawColumn::Time,"Time"),(DrawColumn::Ordinal,"Ordinal"),(DrawColumn::Kind,"Kind"),(DrawColumn::Count,"Count"),(DrawColumn::Gap,"Gap"),(DrawColumn::Samples,"Samples")]{if p.selectable_label(st.column==column,name).clicked(){if st.column==column{st.descending=!st.descending}else{st.column=column;st.descending=column!=DrawColumn::Ordinal;}}}p.label(if st.descending{"Descending"}else{"Ascending"});});
    let cached=st.rows(v,names,scan);let ids=&cached.ids;
    if st.group.is_some()||st.by_target {p.collapsing("Group totals (all draws)",|p|{let groups=&cached.groups;egui::ScrollArea::vertical().id_salt("rsxf-groups").max_height(140.0).show_rows(p,20.0,groups.len(),|p,range|{for i in range {let g=&groups[i];p.horizontal(|p|{p.label(&g.key);p.label(format!("{} timed / {} untimed",g.timed,g.untimed));duration(p,v,Some(g.sum));});}});});}
    if ids.is_empty(){p.label(if f.draws.is_empty(){"No draw records retained in this capture."}else{"No draws match the filter."});}
@@ -352,6 +360,18 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
        if d.raw.kind==rf::DrawKind::Clear{p.label(format!("Clear mask {:#x}",d.raw.clear_mask));}
        p.label(format!("{}{}{}{}",if d.hooked(){"Hooked "}else{""},if d.decoded(){"Decoded "}else{""},if d.raw.flags&rf::DF_STATE_UNKNOWN!=0{"State unknown "}else{""},if d.op_mismatch{"AUTO kind mismatch"}else{""}));
        p.label(format!("Caller {:#x} · {} command words · PPU tick {}",d.raw.caller,d.raw.words,d.raw.tb));
+       let df=rf::draw_fetches(f,d,fetches);
+       p.label(format!("Texture fetches {} · VP {} · FP {}",df.text(),rf::fetch_text(df.vp),rf::fetch_text(df.fp))).on_hover_text(crate::rsx_shader_ui::FETCH_HOVER);
+       let px=rf::pixels(f,d,fetches);
+       match px.samples {
+         Some(s)=>{p.label(format!("Pixels: {s} passed samples · counting {}{}{}",px.state.name(),px.per_pixel.map_or_else(String::new,|v|format!(" · {v:.3} of the target")),px.raw_per_sample.map_or_else(String::new,|r|format!(" · {r:.2} raw ticks per sample")))).on_hover_text(PIXELS_NOTE);
+           if d.raw.kind!=rf::DrawKind::Clear {ui::field_message(p,if px.early_z==rf::EarlyZ::Disabled{ui::Tone::Warning}else{ui::Tone::Neutral},&format!("Early-z {}: {}",px.early_z.name(),px.early_z.shading()));}
+           if let Some(w)=px.shading_proxy {p.label(format!("{w} sample-instructions{}",px.fetch_proxy.map_or_else(String::new,|x|format!(" · {x} sample-fetches"))));}}
+         None=>{p.label(format!("Pixels: not counted · {}",px.state.why_uncounted().unwrap_or("the draw was not timed")));}
+       }
+       let z=rf::zcull_at(f,d);
+       p.label(format!("Zcull: {}{}{}{}",z.reason,z.region.map_or_else(String::new,|r|format!(" (region {})",r.index)),if z.invalidated{" · invalidated before this draw"}else{""},if z.cleared{" · zcull surface cleared before this draw"}else{""}));
+       if z.direction_mismatch==Some(true){ui::field_message(p,ui::Tone::Warning,"Zcull direction disagrees with the depth function (heuristic): zcull may reject nothing.");}
        crate::rsx_state_ui::changed_list(p,&sx);
      },
      Tab::Shaders=>{for (title,id) in [("Vertex program",d.vp),("Fragment program",d.fp)]{
@@ -359,11 +379,12 @@ pub fn page(p: &mut egui::Ui, v: &RsxFrameView, names: &Names, scan: u64, st: &m
          p.label(program_label(prog,names));p.monospace(prog.id_text());
          if let Some((what,why))=provenance(prog){ui::field_message(p,ui::Tone::Warning,&format!("{}{}: {why}",what[..1].to_uppercase(),&what[1..]));}p.label(format!("{} instructions · {} bytes · {} inline constant blocks · source {}",prog.instructions,prog.ucode_bytes,prog.const_blocks,prog.source.name()));
          p.label(format!("Address {:#x} (diagnostic only) · first draw {}",prog.address,prog.first_draw));
+         p.label(format!("Texture fetches: {}",rf::fetch_text(id.and_then(|i|rf::program_fetches(f,i,fetches))))).on_hover_text(crate::rsx_shader_ui::FETCH_HOVER);
          if prog.unterminated{ui::field_message(p,ui::Tone::Warning,"Unterminated: no end bit within the bound");}
        }else{p.label("Program identity unavailable for this draw.");}
      }},
      Tab::State=>crate::rsx_state_ui::state_tab(p,&sx,&mut st.state_cache),
-     Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache),
+     Tab::Textures=>crate::rsx_state_ui::textures_tab(p,&sx,&mut st.state_cache,rf::draw_fetches(f,d,fetches).fp.map(|(t,_)|t).as_ref()),
      Tab::Buffers=>crate::rsx_state_ui::buffers_tab(p,&sx,&mut st.state_cache),
      Tab::Constants=>crate::rsx_constants_ui::constants_tab(p,f,di,v),
    }
@@ -383,10 +404,10 @@ fn draw_table(
     egui::ScrollArea::horizontal()
         .id_salt("rsxf-table-x")
         .show(p, |p| {
-            p.set_min_width(760.0);
+            p.set_min_width(860.0);
             p.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
-            let label_width = (p.available_width() - 685.0).max(75.0);
-            let cols = [130.0, 135.0, 120.0, label_width, 130.0, 130.0];
+            let label_width = (p.available_width() - 785.0).max(75.0);
+            let cols = [130.0, 135.0, 120.0, label_width, 130.0, 130.0, 92.0];
             p.horizontal(|p| {
                 for (name, width) in [
                     "Draw / kind",
@@ -395,6 +416,7 @@ fn draw_table(
                     "Label",
                     "Vertex program",
                     "Fragment program",
+                    "Samples",
                 ]
                 .into_iter()
                 .zip(cols)
@@ -478,6 +500,11 @@ fn draw_table(
                             ),
                             program(f, d.vp, names),
                             program(f, d.fp, names),
+                            match crate::rsx_frame_view::samples(f, d) {
+                                Some(s) => (s.to_string(), "Passed samples (ZPASS counter over the draw)".into()),
+                                None => ("-".into(), rf::ZpassState::of(f, d).why_uncounted()
+                                    .unwrap_or("the draw was not timed").to_string()),
+                            },
                         ];
                         for ((text, hover), width) in cells.into_iter().zip(cols[1..].iter()) {
                             p.add_sized([*width, ROW], egui::Label::new(text).truncate())
@@ -488,6 +515,11 @@ fn draw_table(
             });
         });
 }
+/// What a passed-sample count is (hover text and the overdraw panel).
+pub const PIXELS_NOTE: &str = "Passed samples: the ZPASS counter over the draw, i.e. samples that passed every \
+per-fragment test (depth, stencil, alpha, KIL; early-z and zcull rejections are not counted). Not fragments shaded: a \
+program that kills fragments shades every rasterized sample. MSAA counts samples. Overdraw = samples / target area.";
+
 fn group_name(g: GroupBy) -> &'static str {
     match g {
         GroupBy::Program => "VP + FP",

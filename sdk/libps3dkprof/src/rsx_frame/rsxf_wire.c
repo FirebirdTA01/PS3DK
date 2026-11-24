@@ -52,8 +52,24 @@ size_t ps3dk_prof__rsxf_put_draw(uint8_t *o, size_t cap, const rsxf_wire_draw *d
     le32(o + 28, d->first); le32(o + 32, d->count); le32(o + 36, d->index_offset); o[40] = d->index_type;
     o[41] = d->index_location; le32(o + 44, d->clear_mask); le32(o + 48, d->tag); le32(o + 52, d->label);
     le32(o + 56, d->vp); le32(o + 60, d->fp); le32(o + 64, d->fp_address); le32(o + 68, d->vp_start);
-    le64(o + 72, d->caller); le32(o + 80, d->words); le64(o + 88, d->tb);
+    le64(o + 72, d->caller); le32(o + 80, d->words); le32(o + 84, d->zpass); le64(o + 88, d->tb);
     return RSXF_DRAW_BYTES;
+}
+
+size_t ps3dk_prof__rsxf_put_zcull(uint8_t *o, size_t cap, const rsxf_wire_zcull *z)
+{
+    if (!o || !z || cap < RSXF_ZCULL_REGION_BYTES || z->index >= RSXF_ZCULL_REGIONS ||
+        (z->flags & ~(uint32_t)(RSXF_ZR_BOUND | RSXF_ZR_BEFORE_CAPTURE)) ||
+        (!(z->flags & RSXF_ZR_BOUND) && (z->offset | z->width | z->height | z->cull_start | z->z_format |
+                                         z->aa_format | z->dir | z->format | z->s_func | z->s_ref | z->s_mask)))
+        return 0;
+    memset(o, 0, RSXF_ZCULL_REGION_BYTES);
+    le16(o, RSXF_REC_ZCULL_REGION); le16(o + 2, RSXF_ZCULL_REGION_BYTES); le32(o + 4, z->ordinal);
+    le32(o + 8, z->index); le32(o + 12, z->flags); le32(o + 16, z->offset); le32(o + 20, z->width);
+    le32(o + 24, z->height); le32(o + 28, z->cull_start); le32(o + 32, z->z_format); le32(o + 36, z->aa_format);
+    le32(o + 40, z->dir); le32(o + 44, z->format); le32(o + 48, z->s_func); le32(o + 52, z->s_ref);
+    le32(o + 56, z->s_mask);
+    return RSXF_ZCULL_REGION_BYTES;
 }
 
 size_t ps3dk_prof__rsxf_put_program(uint8_t *o, size_t cap, const rsxf_wire_program *p)

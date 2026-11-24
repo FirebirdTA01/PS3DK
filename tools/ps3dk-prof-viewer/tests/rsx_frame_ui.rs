@@ -143,7 +143,7 @@ fn empty_untimed_and_virtualized_draw_lists_are_explicit() {
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
         eframe::egui::CentralPanel::default().show(ctx, |ui| {
-            page(ui, &v, &Default::default(), 0, &mut st, &mut drawn)
+            page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn)
         });
     });
     assert!(drawn.rows < 100);
@@ -188,7 +188,7 @@ fn long_decoded_capture_renders_a_bounded_number_of_rows() {
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
         eframe::egui::CentralPanel::default().show(ctx, |p| {
-            page(p, &v, &Default::default(), 0, &mut st, &mut drawn)
+            page(p, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn)
         });
     });
     assert!(drawn.rows < 100);

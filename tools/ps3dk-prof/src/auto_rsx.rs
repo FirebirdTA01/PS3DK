@@ -223,6 +223,10 @@ pub const OP_SEGMENT: u16 = 64;
 /// Its interval is not comparable with pipelined ones: a frame holding such operations is labelled ISOLATED and kept
 /// out of the cross-frame tag and range summaries.
 pub const OP_ISOLATED: u16 = 256;
+/// Ringed CONFIGs, RAW_VALID RING ARRAY/INDEX/CLEAR records of draws an RSX frame capture recorded: u32@156 holds the
+/// ZPASS counter's end-report value minus its begin-report value (mod 2^32). It counts passed samples only while ZPASS
+/// counting was on for the draw; the capture's DRAW record says whether.
+pub const OP_ZPASS: u16 = 512;
 /// The label of a frame whose draws the RSX frame capture timed isolated.
 pub const ISOLATED_FRAME: &str = "ISOLATED: timed by the RSX frame capture with WAIT_FOR_IDLE around each draw's \
 markers; its span and busy time are not comparable with pipelined frames and stay out of the tag and range summaries";
@@ -494,6 +498,8 @@ pub struct Op {
     pub depth: u32,
     /// 2047/11 RING records: their block generation, MAIN extent, ordinal, local block and M2MF state.
     pub ring: Option<RingTail>,
+    /// OP_ZPASS records: the ZPASS counter's end - begin (mod 2^32).
+    pub zpass: Option<u32>,
 }
 impl Op {
     pub fn raw_valid(&self) -> bool {
@@ -1035,7 +1041,7 @@ impl Reader {
             if id <= self.last_op {
                 return bad(r, format!("{at}: id not above {}", self.last_op));
             }
-            let known = if cfg.ringed() { 255 | OP_ISOLATED } else if cfg.segments_covered() { 127 } else { 63 };
+            let known = if cfg.ringed() { 255 | OP_ISOLATED | OP_ZPASS } else if cfg.segments_covered() { 127 } else { 63 };
             if flags & !known != 0 {
                 return bad(r, format!("{at}: unknown flags {flags:#x}"));
             }
@@ -1084,8 +1090,12 @@ impl Reader {
             if !(KIND_ARRAY..=KIND_CLEAR).contains(&kind) && !frame_kind && !call_kind && !range_kind {
                 return bad(r, format!("{at}: kind {kind}"));
             }
-            if r4 != 0 || (depth != 0) != range_kind {
+            let zpass_op = flags & OP_ZPASS != 0;
+            if (r4 != 0 && !zpass_op) || (depth != 0) != range_kind {
                 return bad(r, format!("{at}: depth {depth} reserved {r4} (a depth only on a RANGE)"));
+            }
+            if zpass_op && (!ring_op || flags & OP_RAW_VALID == 0 || !(KIND_ARRAY..=KIND_CLEAR).contains(&kind)) {
+                return bad(r, format!("{at}: ZPASS needs a RAW_VALID RING draw or clear"));
             }
             if range_kind && (segment_op || build_known || flags & OP_TOKEN == 0 || args[0] == 0 || args[1] > 1
                 || args[2..].iter().any(|&a| a != 0) || !(1..=4).contains(&depth))
@@ -1202,6 +1212,7 @@ impl Reader {
                 fp_offset: cfg.tagged().then_some(fp_offset),
                 depth,
                 ring: ring_op.then_some(tail),
+                zpass: zpass_op.then_some(r4),
             });
         }
         c.done()
@@ -3349,9 +3360,9 @@ fn op_kind_name(kind: u16) -> &'static str {
 }
 
 fn op_flag_names(flags: u16) -> String {
-    const NAMES: [(u16, &str); 8] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
+    const NAMES: [(u16, &str); 9] = [(OP_TOKEN, "TOKEN"), (OP_RAW_VALID, "RAW_VALID"), (OP_INCOMPLETE, "INCOMPLETE"),
         (OP_CLOCK_INVALID, "CLOCK_INVALID"), (OP_READ_REFUSED, "READ_REFUSED"),
-        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT"), (OP_ISOLATED, "ISOLATED")];
+        (OP_PUBLICATION_UNKNOWN, "PUBLICATION_UNKNOWN"), (OP_SEGMENT, "SEGMENT"), (OP_ISOLATED, "ISOLATED"), (OP_ZPASS, "ZPASS")];
     let v: Vec<&str> = NAMES.iter().filter(|(b, _)| flags & b != 0).map(|(_, n)| *n).collect();
     if v.is_empty() { "-".into() } else { v.join("|") }
 }
@@ -3410,6 +3421,9 @@ pub fn write_ops_json<W: std::io::Write>(out: &mut W, rows: &[OpRow], frame: Opt
             v["tag"] = json!(t);
             v["fp_offset"] = json!(f);
             if o.kind == KIND_RANGE { v["depth"] = json!(o.depth); }
+        }
+        if let Some(z) = o.zpass {
+            v["zpass"] = json!(z);
         }
         v
     }).collect();

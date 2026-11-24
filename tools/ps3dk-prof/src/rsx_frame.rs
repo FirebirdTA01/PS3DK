@@ -16,6 +16,8 @@ use serde_json::{json, Value};
 
 use crate::auto_rsx::{self, Op};
 use crate::rsx_state::{self, Registers, VpConstants};
+use crate::nv40_disasm;
+use crate::shader_dir::{Fetches, Folder};
 use std::sync::Arc;
 use crate::model::{malformed, Capture, Malformed, Rule};
 use crate::wire::Cursor;
@@ -29,13 +31,24 @@ pub const CHUNK_END: u32 = 48;
 pub const SCHEMA: u16 = 1;
 /// CONFIG decoder version: 1 draws and programs only; 2 also the 3D register shadow (BASELINE and STATE records); 3
 /// also VP constants (VPCONST), FP embedded constants (FPCONST) and uniform names (UNIFORM).
-pub const DECODER: u32 = 4;
+/// 5: also the DRAW record's ZPASS state (u32@84), its zcull event flags and ZCULL_REGION records.
+pub const DECODER: u32 = 5;
 pub const REC_UCODE: u16 = 10;
 pub const REC_SECOND: u16 = 11;
+/// Decoder 5: one zcull region as the application's cellGcmBindZcull / cellGcmUnbindZcull left it (64 bytes).
+pub const REC_ZCULL_REGION: u16 = 12;
+/// Reserved for zcull statistics reports (report types 2..5): refused until their semantics are characterized.
+pub const REC_ZCULL_STATS: u16 = 13;
+pub const ZCULL_REGION_BYTES: usize = 64;
+pub const ZCULL_REGIONS: u32 = 8;
+pub const ZR_BOUND: u32 = 1;
+pub const ZR_BEFORE_CAPTURE: u32 = 2;
 /// Request / BEGIN flags.
 pub const REQ_ISOLATED: u16 = 1;
 pub const REQ_FP_BYTES: u16 = 2;
 pub const REQ_BOTH: u16 = 4;
+/// Decoder 5: ZPASS counting forced on around each captured draw the application had it off for.
+pub const REQ_PIXELS: u16 = 8;
 pub const CONFIG_BYTES: usize = 64;
 pub const BEGIN_FIXED: usize = 56;
 pub const DRAWS_HEADER: usize = 16;
@@ -139,6 +152,9 @@ pub const DF_HOOKED: u16 = 1;
 pub const DF_DECODED: u16 = 2;
 pub const DF_MISMATCH: u16 = 4;
 pub const DF_STATE_UNKNOWN: u16 = 8;
+/// Decoder 5: INVALIDATE_ZCULL / CLEAR_ZCULL_SURFACE written since the previous draw.
+pub const DF_ZCULL_INVALIDATED: u16 = 16;
+pub const DF_ZCULL_CLEARED: u16 = 32;
 // untimed reasons beyond the AUTO exclusion columns 2..11
 pub const UNTIMED_OUTSIDE_RANGE: u32 = 32;
 pub const UNTIMED_RING_FULL: u32 = 33;
@@ -202,6 +218,8 @@ pub struct Begin {
     pub program_bytes: bool,
     /// Two consecutive frames: the first pipelined, the second isolated (a SECOND record marks the second).
     pub both: bool,
+    /// PIXELS: ZPASS counting forced on around draws the application had it off for (decoder 5).
+    pub pixels: bool,
     pub request_id: u32,
     pub owner: u32,
     pub frame: u64,
@@ -312,6 +330,8 @@ pub struct RawDraw {
     pub vp_start: u32,
     pub caller: u64,
     pub words: u32,
+    /// Decoder 5: the ZPASS counting state at this draw (u32@84; [`ZpassState`]); 0 before.
+    pub zpass: u32,
     pub tb: u64,
     /// The STATE records before this draw: every register unknown first (a decoder reset), then these
     /// (register index, value) pairs.
@@ -475,6 +495,29 @@ pub struct CaptureRecord {
     /// Program bytes (UCODE records), by (profile, hash).
     pub ucode: BTreeMap<(Profile, u64), UcodeParts>,
     pub ucode_records: u32,
+    /// ZCULL_REGION records, in order (decoder 5).
+    pub zcull_regions: Vec<ZcullRegion>,
+}
+
+/// One ZCULL_REGION record: region `index` as bound (or unbound) from draw `ordinal` on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZcullRegion {
+    pub ordinal: u32,
+    pub index: u32,
+    pub bound: bool,
+    /// Bound before the capture was armed (written at arming).
+    pub before_capture: bool,
+    pub offset: u32,
+    pub width: u32,
+    pub height: u32,
+    pub cull_start: u32,
+    pub z_format: u32,
+    pub aa_format: u32,
+    pub dir: u32,
+    pub format: u32,
+    pub s_func: u32,
+    pub s_ref: u32,
+    pub s_mask: u32,
 }
 
 /// One program's UCODE records so far: its length, the bytes in order, whether the last part was read.
@@ -681,7 +724,8 @@ impl Reader {
             2 => Source::App,
             s => return bad(format!("RSXF_BEGIN source {s}")),
         };
-        if flags & !7 != 0 || (flags & REQ_ISOLATED != 0 && flags & REQ_BOTH != 0) || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
+        let req_known = if cfg.decoder >= 5 { 15 } else { 7 };
+        if flags & !req_known != 0 || (flags & REQ_ISOLATED != 0 && flags & REQ_BOTH != 0) || known & !3 != 0 || r0 != 0 || r1 != 0 || n > NAME_MAX {
             return bad(format!("RSXF_BEGIN flags {flags:#x} known {known:#x} name length {n}"));
         }
         if (source == Source::Live) != (request_id != 0) {
@@ -700,6 +744,7 @@ impl Reader {
                 isolated: flags & 1 != 0,
                 program_bytes: flags & 2 != 0,
                 both: flags & REQ_BOTH != 0,
+                pixels: flags & REQ_PIXELS != 0,
                 request_id,
                 owner,
                 frame,
@@ -725,6 +770,7 @@ impl Reader {
             second: None,
             ucode: BTreeMap::new(),
             ucode_records: 0,
+            zcull_regions: Vec::new(),
         });
         self.open = true;
         self.last_ordinal = None;
@@ -815,8 +861,13 @@ impl Reader {
                         }
                     }
                     let PendingDraw { state_reset, state, vpc_reset, vpc, fpc, .. } = pd;
-                    if flags & !15 != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 || r1 != 0 {
+                    let flags_known = if decoder >= 5 { 63 } else { 15 };
+                    if flags & !flags_known != 0 || flags & (DF_HOOKED | DF_DECODED) == 0 || r0 != 0 {
                         return bad(format!("draw {ordinal}: flags {flags:#x}"));
+                    }
+                    // u32@84: decoder 5 the ZPASS state (5 reserved; FORCED only in a PIXELS capture), zero before
+                    if (decoder < 5 && r1 != 0) || r1 > 6 || r1 == 5 || (r1 == 3 && !rec.begin.pixels) {
+                        return bad(format!("draw {ordinal}: ZPASS state {r1}"));
                     }
                     if (untimed == 0) != (op_id != 0) {
                         return bad(format!("draw {ordinal}: untimed reason {untimed} with op id {op_id}"));
@@ -857,8 +908,8 @@ impl Reader {
                     self.retained += 1;
                     rec.draws.push(RawDraw {
                         ordinal, kind, flags, untimed, op_id, mode, first, count, index_offset, index_type,
-                        index_location, clear_mask, tag, label, vp, fp, fp_address, vp_start, caller, words, tb,
-                        state_reset, state, vpc_reset, vpc, fpc,
+                        index_location, clear_mask, tag, label, vp, fp, fp_address, vp_start, caller, words,
+                        zpass: r1, tb, state_reset, state, vpc_reset, vpc, fpc,
                     });
                 }
                 REC_PROGRAM => {
@@ -1159,6 +1210,28 @@ impl Reader {
                     }
                     rec.second = Some((first, frame));
                 }
+                REC_ZCULL_REGION => {
+                    let ordinal = c.u32()?;
+                    let v: Vec<u32> = (0..13).map(|_| c.u32()).collect::<Result<_, _>>()?;
+                    let r = c.u32()?;
+                    let (index, flags) = (v[0], v[1]);
+                    let bound = flags & ZR_BOUND != 0;
+                    if decoder < 5 || len != ZCULL_REGION_BYTES || index >= ZCULL_REGIONS
+                        || flags & !(ZR_BOUND | ZR_BEFORE_CAPTURE) != 0 || r != 0
+                        || (!bound && v[2..].iter().any(|&x| x != 0))
+                        || (flags & ZR_BEFORE_CAPTURE != 0 && (ordinal != 0 || self.past_baseline))
+                        || self.last_ordinal.is_some_and(|o| ordinal <= o) || self.pending.is_some()
+                    {
+                        return bad(format!("ZCULL_REGION {index} at draw {ordinal}, flags {flags:#x}"));
+                    }
+                    rec.zcull_regions.push(ZcullRegion { ordinal, index, bound,
+                        before_capture: flags & ZR_BEFORE_CAPTURE != 0, offset: v[2], width: v[3], height: v[4],
+                        cull_start: v[5], z_format: v[6], aa_format: v[7], dir: v[8], format: v[9], s_func: v[10],
+                        s_ref: v[11], s_mask: v[12] });
+                }
+                REC_ZCULL_STATS => {
+                    return bad("record type 13 (zcull statistics) is reserved: not defined yet");
+                }
                 _ => return bad(format!("record type {ty}")),
             }
         }
@@ -1365,6 +1438,11 @@ pub const CG_PROFILE_FP: u32 = 7004;
 /// The canonical hash of a program container (the Cg binary container: big-endian header, profile 7003 VP or 7004
 /// FP, ucode size at 24 and offset at 28).
 pub fn container_hash(bytes: &[u8]) -> Result<ProgramHash, String> {
+    container_ucode(bytes).map(|(h, _)| h)
+}
+
+/// [`container_hash`], with the ucode bytes the hash walked from (the container's whole ucode).
+pub fn container_ucode(bytes: &[u8]) -> Result<(ProgramHash, &[u8]), String> {
     if bytes.len() < 32 {
         return Err(format!("{} bytes: too short for a program container", bytes.len()));
     }
@@ -1375,8 +1453,8 @@ pub fn container_hash(bytes: &[u8]) -> Result<ProgramHash, String> {
         return Err(format!("ucode [{off:#x}, +{size:#x}) outside the {}-byte container", bytes.len()));
     };
     match profile {
-        CG_PROFILE_VP => Ok(vp_hash(ucode)),
-        CG_PROFILE_FP => Ok(fp_hash(ucode)),
+        CG_PROFILE_VP => Ok((vp_hash(ucode), ucode)),
+        CG_PROFILE_FP => Ok((fp_hash(ucode), ucode)),
         p => Err(format!("profile {p} is neither a vertex (7003) nor a fragment (7004) program")),
     }
 }
@@ -1440,6 +1518,9 @@ pub struct Draw {
     pub fp_constants: Option<Arc<FpConstants>>,
     /// Index into [`FrameView::instance_runs`].
     pub run: Option<usize>,
+    /// The ZPASS counter's end - begin over this draw (its timed AUTO operation's OP_ZPASS value); a sample count only
+    /// when [`Draw::zpass_state`] says counting was on. See [`pixels`].
+    pub zpass_delta: Option<u32>,
 }
 
 /// Consecutive draws identical except for their constants (same kind, primitive, counts, index stream, programs,
@@ -1563,6 +1644,12 @@ pub struct FrameView {
     pub pairs: Vec<DrawPair>,
     /// Program ucode bytes stored in the capture (UCODE records), by (profile, hash); [`FrameView::bytes_of`].
     pub program_bytes: BTreeMap<(Profile, u64), Arc<ProgramBytes>>,
+    /// The capture's ZCULL_REGION records, in order (decoder 5).
+    pub zcull_regions: Vec<ZcullRegion>,
+    /// The CONFIG decoder version (5: ZPASS states, zcull events and regions are recorded).
+    pub decoder: u32,
+    /// PIXELS: counting was forced on around draws the application had it off for.
+    pub pixels_forced: bool,
 }
 
 /// Which frame of its capture a [`FrameView`] shows.
@@ -1754,6 +1841,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -
             continue; // the other frame of a BOTH capture (its state is still replayed above)
         }
         let mut op_mismatch = false;
+        let mut zpass_delta = None;
         let flagged = d.flags & DF_MISMATCH != 0;
         let timing = if d.op_id == 0 {
             Timing::Untimed(d.untimed)
@@ -1770,7 +1858,10 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -
                         Timing::Invalid("hooked call and decoded draw disagree")
                     } else {
                         match op_interval(o) {
-                            Ok((rb, re)) => Timing::Timed { raw_begin: rb, raw_end: re },
+                            Ok((rb, re)) => {
+                                zpass_delta = o.zpass;
+                                Timing::Timed { raw_begin: rb, raw_end: re }
+                            }
                             Err(why) => Timing::Invalid(why),
                         }
                     }
@@ -1809,7 +1900,7 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -
         let fp = (d.fp != 0).then(|| d.fp as usize - 1);
         let item = Draw { raw: r, label, vp, fp, timing, gap, pass, op_mismatch, registers: regs.clone(), changed,
             vp_constants: vpcs.clone(), vpc_changed, fp_constants: if constants { fpcs.clone() } else { None },
-            run: None };
+            run: None, zpass_delta };
         totals.primitives += item.primitives().unwrap_or(0);
         draws.push(item);
     }
@@ -1847,6 +1938,9 @@ fn view(cap: &Capture, c: &CaptureRecord, ops: &HashMap<u64, &Op>, half: Half) -
             ((profile, hash), Arc::new(ProgramBytes { profile, hash, total: u.total, bytes: u.data.clone(),
                 complete: u.complete }))
         }).collect(),
+        zcull_regions: c.zcull_regions.clone(),
+        decoder: cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref()).map_or(0, |k| k.decoder),
+        pixels_forced: b.pixels,
     };
     let runs = instance_runs(&view);
     for (k, r) in runs.iter().enumerate() {
@@ -1974,6 +2068,409 @@ pub fn program_name(p: &Program, names: &BTreeMap<(Profile, u64), String>) -> St
     p.name.clone().or_else(|| names.get(&(p.profile, p.hash)).cloned()).unwrap_or_else(|| p.id_text())
 }
 
+/// Where a program's static texture fetch counts come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchOrigin {
+    /// The program bytes the capture kept (complete).
+    Capture,
+    /// A container in the shader folder with the program's canonical hash.
+    ShaderFolder,
+}
+impl FetchOrigin {
+    pub fn name(self) -> &'static str {
+        match self {
+            FetchOrigin::Capture => "capture bytes",
+            FetchOrigin::ShaderFolder => "shader folder",
+        }
+    }
+}
+
+/// Program `index`'s static texture fetches (see [`nv40_disasm::TexFetches`]): from the capture's complete bytes,
+/// else from `folder` (a shader-folder scan) by its canonical hash; None when neither has the program (or its
+/// identity is unavailable).
+pub fn program_fetches(f: &FrameView, index: usize, folder: &crate::shader_dir::Fetches)
+                       -> Option<(nv40_disasm::TexFetches, FetchOrigin)> {
+    let p = f.programs.get(index)?;
+    if p.unreadable {
+        return None;
+    }
+    if let Some(b) = f.bytes_of(index).filter(|b| b.complete) {
+        return Some((crate::shader_dir::tex_fetches(b.profile, &b.bytes), FetchOrigin::Capture));
+    }
+    folder.get(&(p.profile, p.hash)).map(|t| (*t, FetchOrigin::ShaderFolder))
+}
+
+/// Whether a fragment texture slot is bound for a draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bound {
+    /// Enabled at the draw and sampled by its fragment program.
+    Yes,
+    /// Disabled at the draw: whatever offset or format the slot still holds is stale state from an earlier bind.
+    Disabled,
+    /// Enabled, but the draw's fragment program has no fetch from this unit (exact counts).
+    NotSampled,
+    /// The enable state is unknown (not written since the last decoder reset).
+    EnableUnknown,
+    /// Enabled; whether the fragment program samples it is unknown (no complete program bytes, or counts that are
+    /// only a lower bound).
+    SamplingUnknown,
+}
+impl Bound {
+    /// true / false / unknown.
+    pub fn flag(self) -> Option<bool> {
+        match self {
+            Bound::Yes => Some(true),
+            Bound::Disabled | Bound::NotSampled => Some(false),
+            Bound::EnableUnknown | Bound::SamplingUnknown => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Bound::Yes => "bound",
+            Bound::Disabled => "disabled",
+            Bound::NotSampled => "enabled, not sampled",
+            Bound::EnableUnknown => "enable unknown",
+            Bound::SamplingUnknown => "enabled, sampling unknown",
+        }
+    }
+    pub fn reason(self) -> &'static str {
+        match self {
+            Bound::Yes => "enabled at this draw and sampled by its fragment program",
+            Bound::Disabled => "disabled at this draw; the offset and format it still holds are stale state",
+            Bound::NotSampled => "enabled at this draw, but its fragment program has no fetch from this unit",
+            Bound::EnableUnknown => "the enable state is not known (not written since the last decoder reset)",
+            Bound::SamplingUnknown =>
+                "enabled at this draw; whether its fragment program samples it is not known (no program bytes)",
+        }
+    }
+}
+
+/// One fragment texture slot at a draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureSlot {
+    pub slot: u32,
+    /// The slot's enable bit (TEX_CONTROL0 bit 31); None when unknown.
+    pub enabled: Option<bool>,
+    /// The fragment program's fetch instructions from this unit; None when not known (no program bytes, or none
+    /// counted in a program whose counts are only a lower bound).
+    pub fetches: Option<u32>,
+    pub bound: Bound,
+}
+
+/// The 16 fragment texture slots of draw `d`, given its fragment program's fetches (from [`program_fetches`]); None
+/// for a draw without register state (decoder 1).
+pub fn texture_slots(d: &Draw, fp: Option<&nv40_disasm::TexFetches>) -> Option<Vec<TextureSlot>> {
+    let regs = d.registers.as_ref()?;
+    let view = rsx_state::interpret(regs);
+    Some(view.textures.iter().enumerate().map(|(i, t)| {
+        let enabled = match t.iter().find(|f| f.name == "enable").map(|f| &f.value) {
+            Some(rsx_state::Value::Bool(b)) => Some(*b),
+            _ => None,
+        };
+        let fetches = fp.and_then(|t| {
+            let n = t.by_unit[i];
+            (n > 0 || t.exact()).then_some(n)
+        });
+        let bound = match (enabled, fetches) {
+            (Some(false), _) => Bound::Disabled,
+            (None, _) => Bound::EnableUnknown,
+            (Some(true), Some(n)) if n > 0 => Bound::Yes,
+            (Some(true), Some(_)) => Bound::NotSampled,
+            (Some(true), None) => Bound::SamplingUnknown,
+        };
+        TextureSlot { slot: i as u32, enabled, fetches, bound }
+    }).collect())
+}
+
+/// A draw's ZPASS pixel counting state (DRAW u32@84, decoder 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZpassState {
+    /// Not recorded: the capture's decoder is older than 5.
+    NotRecorded,
+    /// The decoder reset since attach: unseen words may have changed it.
+    Unknown,
+    /// The application had counting on.
+    Counting,
+    /// The application had counting off.
+    Off,
+    /// A PIXELS capture turned counting on around this draw.
+    Forced,
+    /// Off, but the application used the counter in this frame (or carried its use in): never forced.
+    Paused,
+    /// No ZPASS method was seen since the decoder attached: counting assumed off (PIXELS forces it).
+    Untouched,
+}
+impl ZpassState {
+    pub fn of(f: &FrameView, d: &Draw) -> Self {
+        if f.decoder < 5 {
+            return ZpassState::NotRecorded;
+        }
+        match d.raw.zpass {
+            1 => ZpassState::Counting,
+            2 => ZpassState::Off,
+            3 => ZpassState::Forced,
+            4 => ZpassState::Paused,
+            6 => ZpassState::Untouched,
+            _ => ZpassState::Unknown,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            ZpassState::NotRecorded => "not recorded",
+            ZpassState::Unknown => "unknown",
+            ZpassState::Counting => "counting",
+            ZpassState::Off => "off",
+            ZpassState::Forced => "forced",
+            ZpassState::Paused => "paused",
+            ZpassState::Untouched => "untouched",
+        }
+    }
+    /// Why a draw in this state has no sample count (None when it has one, or would with a timed operation).
+    pub fn why_uncounted(self) -> Option<&'static str> {
+        match self {
+            ZpassState::Counting | ZpassState::Forced => None,
+            ZpassState::NotRecorded => Some("the capture's decoder records no ZPASS state (older than 5)"),
+            ZpassState::Unknown => Some("counting state unknown (the decoder reset since it attached)"),
+            ZpassState::Off => Some("the application had ZPASS counting off (request the capture with PIXELS to force it)"),
+            ZpassState::Paused => Some("counting off, but the application used the ZPASS counter in this frame (its occlusion query): the capture never forces it then"),
+            ZpassState::Untouched => Some("counting never enabled (request the capture with PIXELS to force it)"),
+        }
+    }
+}
+
+/// Whether depth rejection before shading can apply to a draw, from its fragment program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarlyZ {
+    /// The program kills fragments (FP_CONTROL KIL, or a KIL in its ucode): every rasterized sample is shaded, so
+    /// shading work is at least the passed-sample count.
+    Disabled,
+    /// No KIL: early rejection may apply, so shading work is about the passed-sample count (unless the program
+    /// writes depth, which the capture does not detect).
+    Eligible,
+    Unknown,
+}
+impl EarlyZ {
+    pub fn name(self) -> &'static str {
+        match self {
+            EarlyZ::Disabled => "off (the program kills fragments)",
+            EarlyZ::Eligible => "eligible",
+            EarlyZ::Unknown => "unknown",
+        }
+    }
+    /// How shading work relates to the passed-sample count.
+    pub fn shading(self) -> &'static str {
+        match self {
+            EarlyZ::Disabled => "shading >= count",
+            EarlyZ::Eligible => "shading ~ count (unless the program writes depth)",
+            EarlyZ::Unknown => "shading vs count unknown",
+        }
+    }
+}
+
+/// One draw's passed samples and what they mean (see docs/profiler-guide.md, "Pixels per draw").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pixels {
+    pub state: ZpassState,
+    /// Samples that passed every per-fragment test (depth, stencil, alpha, KIL; early-z and zcull rejected ones are
+    /// not counted), when counting was on and the draw was timed.
+    pub samples: Option<u32>,
+    /// The draw's render target area in samples (clip width x height x samples per pixel), when known.
+    pub area: Option<u64>,
+    /// samples / area: this draw's share of a full-target pass (its overdraw contribution).
+    pub per_pixel: Option<f64>,
+    /// ISOLATED views only: the draw's interval (raw RSX ticks) per passed sample.
+    pub raw_per_sample: Option<f64>,
+    pub early_z: EarlyZ,
+    /// samples x the FP's instruction count, and x its texture fetches (static): shading and fetch work proxies.
+    pub shading_proxy: Option<u64>,
+    pub fetch_proxy: Option<u64>,
+}
+
+/// Samples per pixel of the draw's surface (the antialias mode), when known.
+fn aa_samples(v: &rsx_state::StateView) -> Option<u64> {
+    match v.surfaces.iter().find(|f| f.name == "antialias").map(|f| &f.value) {
+        Some(rsx_state::Value::Name(n)) if n.ends_with("_1") => Some(1),
+        Some(rsx_state::Value::Name(n)) if n.ends_with("_2") => Some(2),
+        Some(rsx_state::Value::Name(n)) if n.ends_with("_4") => Some(4),
+        _ => None,
+    }
+}
+fn uint_field(fs: &[rsx_state::Field], name: &str) -> Option<u64> {
+    match fs.iter().find(|f| f.name == name).map(|f| &f.value) {
+        Some(rsx_state::Value::Uint(v)) => Some(u64::from(*v)),
+        Some(rsx_state::Value::Hex(v)) => Some(u64::from(*v)),
+        _ => None,
+    }
+}
+
+/// The passed samples of draw `d` and their derived metrics; `folder` supplies program bytes the capture did not keep
+/// (for the KIL check and the proxies).
+pub fn pixels(f: &FrameView, d: &Draw, folder: &Fetches) -> Pixels {
+    let state = ZpassState::of(f, d);
+    let samples = matches!(state, ZpassState::Counting | ZpassState::Forced).then_some(d.zpass_delta).flatten();
+    let view = d.registers.as_ref().map(|r| rsx_state::interpret(r));
+    let area = view.as_ref().and_then(|v| {
+        Some(uint_field(&v.surfaces, "clip.width")? * uint_field(&v.surfaces, "clip.height")? * aa_samples(v)?)
+    }).filter(|&a| a > 0);
+    let fp = d.fp.and_then(|i| program_fetches(f, i, folder));
+    let kil_reg = d.registers.as_ref().and_then(|r| r.get(0x1d60)).map(|c| c & 0x80 != 0);
+    let early_z = if d.raw.kind == DrawKind::Clear {
+        EarlyZ::Unknown
+    } else if kil_reg == Some(true) || fp.is_some_and(|(t, _)| t.kil > 0) {
+        EarlyZ::Disabled
+    } else if kil_reg == Some(false) || fp.is_some_and(|(t, _)| t.exact()) {
+        EarlyZ::Eligible
+    } else {
+        EarlyZ::Unknown
+    };
+    let insns = d.fp.and_then(|i| f.programs.get(i)).filter(|p| !p.unreadable).map(|p| u64::from(p.instructions));
+    Pixels {
+        state,
+        samples,
+        area,
+        per_pixel: samples.zip(area).map(|(s, a)| s as f64 / a as f64),
+        raw_per_sample: samples.filter(|&s| s > 0 && f.isolated)
+            .and_then(|s| d.timing.interval().map(|t| t as f64 / s as f64)),
+        early_z,
+        shading_proxy: samples.zip(insns).map(|(s, n)| u64::from(s) * n),
+        fetch_proxy: samples.zip(fp).map(|(s, (t, _))| u64::from(s) * u64::from(t.total())),
+    }
+}
+
+/// Passed samples per render target over a view: the overdraw of each target.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetOverdraw {
+    /// `color0 <offset> / zeta <offset> <w>x<h> x<aa>`, or "unknown" without register state.
+    pub key: String,
+    pub draws: u32,
+    /// Draws with a sample count, and their samples.
+    pub counted: u32,
+    pub samples: u64,
+    /// The target's area in samples; samples / area is the overdraw (1.0: every sample written once).
+    pub area: Option<u64>,
+    pub overdraw: Option<f64>,
+}
+
+/// Overdraw per render target (draws that are not clears), in first-draw order.
+pub fn overdraw(f: &FrameView) -> Vec<TargetOverdraw> {
+    let mut out: Vec<TargetOverdraw> = Vec::new();
+    let none = Fetches::new();
+    for d in f.draws.iter().filter(|d| d.raw.kind != DrawKind::Clear) {
+        let p = pixels(f, d, &none);
+        let key = d.registers.as_ref().map(|r| rsx_state::interpret(r)).map_or_else(|| "unknown".to_string(), |v| {
+            let hex = |n: &str| v.surfaces.iter().find(|x| x.name == n).map_or("?".to_string(), |x| x.value.text());
+            format!("color0 {} / zeta {} {}x{} {}", hex("color0.offset"), hex("zeta.offset"),
+                uint_field(&v.surfaces, "clip.width").map_or("?".into(), |w| w.to_string()),
+                uint_field(&v.surfaces, "clip.height").map_or("?".into(), |h| h.to_string()), hex("antialias"))
+        });
+        let i = match out.iter().position(|t| t.key == key) {
+            Some(i) => i,
+            None => {
+                out.push(TargetOverdraw { key, draws: 0, counted: 0, samples: 0, area: p.area, overdraw: None });
+                out.len() - 1
+            }
+        };
+        let t = &mut out[i];
+        t.draws += 1;
+        if let Some(s) = p.samples {
+            t.counted += 1;
+            t.samples += u64::from(s);
+        }
+        if t.area.is_none() {
+            t.area = p.area;
+        }
+    }
+    for t in &mut out {
+        t.overdraw = t.area.filter(|_| t.counted > 0).map(|a| t.samples as f64 / a as f64);
+    }
+    out
+}
+
+/// One draw's zcull picture: the stream's events, the bound region for its depth buffer and whether zcull can act.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZcullAt {
+    pub invalidated: bool,
+    pub cleared: bool,
+    /// The region (its latest record at or before this draw) whose offset is this draw's depth buffer.
+    pub region: Option<ZcullRegion>,
+    /// Some(true): a recorded region at the depth buffer's offset covers the draw's clip extent with the surface's
+    /// zeta format, antialias mode and local memory, and depth cull is on; Some(false): such a region, but depth
+    /// cull is off; None: not established (no such region recorded: binds before the profiler attached or from
+    /// another thread are not seen; or the region does not match; or a needed register is unknown).
+    pub effective: Option<bool>,
+    pub reason: &'static str,
+    /// A heuristic: the zcull direction disagrees with the depth function (LESS with GREATER/GEQUAL, or the reverse).
+    pub direction_mismatch: Option<bool>,
+}
+
+pub fn zcull_at(f: &FrameView, d: &Draw) -> ZcullAt {
+    let mut z = ZcullAt { invalidated: d.raw.flags & DF_ZCULL_INVALIDATED != 0,
+        cleared: d.raw.flags & DF_ZCULL_CLEARED != 0, region: None, effective: None,
+        reason: "no register state", direction_mismatch: None };
+    if f.decoder < 5 {
+        z.reason = "not recorded (decoder older than 5)";
+        return z;
+    }
+    let Some(regs) = &d.registers else { return z };
+    let v = rsx_state::interpret(regs);
+    let field = |fs: &[rsx_state::Field], n: &str| fs.iter().find(|x| x.name == n).map(|x| x.value.clone());
+    let mut latest: [Option<ZcullRegion>; ZCULL_REGIONS as usize] = [None; ZCULL_REGIONS as usize];
+    for r in f.zcull_regions.iter().filter(|r| r.ordinal <= d.raw.ordinal) {
+        latest[r.index as usize] = Some(*r);
+    }
+    let zeta = uint_field(&v.surfaces, "zeta.offset");
+    let depth_on = match field(&v.render, "zcull.enable.depth") {
+        Some(rsx_state::Value::Bool(b)) => Some(b),
+        _ => None,
+    };
+    // The depth buffer as the draw uses it, from the raw registers: zeta offset and location, the surface format's
+    // zeta format and antialias mode, and the clip extent the draw can write.
+    let raw = |m: u32| regs.get(m);
+    let rt = raw(0x208);
+    let local = raw(0x198).and_then(|v| match v { 0xfeed_0000 => Some(true), 0xfeed_0001 => Some(false), _ => None });
+    let clip = raw(0x200).zip(raw(0x204)).map(|(h, w)| ((h & 0xffff) + (h >> 16), (w & 0xffff) + (w >> 16)));
+    let at_offset = zeta.and_then(|o| latest.iter().flatten().find(|r| r.bound && u64::from(r.offset) == o).copied());
+    z.region = at_offset;
+    // Coverage and compatibility: the region spans the clip extent, and has the surface's zeta format, antialias
+    // mode and memory (zcull is local memory). Any of these unknown leaves coverage unknown.
+    let fits = at_offset.map(|r| -> Option<bool> {
+        let (x_end, y_end) = clip?;
+        let rt = rt?;
+        let zeta_format = (rt >> 5) & 7;
+        let aa = (rt >> 12) & 0xf;
+        Some(r.width >= x_end && r.height >= y_end && r.z_format == zeta_format && r.aa_format == aa && local?)
+    });
+    (z.effective, z.reason) = match (zeta, fits, depth_on) {
+        (None, _, _) => (None, "the depth buffer offset is not known"),
+        (_, Some(Some(true)), Some(true)) =>
+            (Some(true), "a recorded zcull region covers this depth buffer (extent, format, antialias, local); depth cull is on"),
+        (_, Some(Some(true)), Some(false)) =>
+            (Some(false), "a recorded zcull region covers this depth buffer, but depth cull is off"),
+        (_, Some(Some(true)), None) =>
+            (None, "a recorded zcull region covers this depth buffer; the depth cull enable is not known"),
+        (_, Some(Some(false)), _) =>
+            (None, "the zcull region recorded at this depth buffer does not cover its extent or does not match its format, antialias mode or memory; coverage not established"),
+        (_, Some(None), _) =>
+            (None, "a zcull region is recorded at this depth buffer, but the surface's extent, format or memory is not known"),
+        (_, None, _) =>
+            (None, "no recorded zcull region at this depth buffer (a region bound before the profiler attached, or from another thread, is not seen)"),
+    };
+    let func = match field(&v.render, "depth.func") {
+        Some(rsx_state::Value::Name(n)) => Some(n),
+        _ => None,
+    };
+    let dir = match field(&v.render, "zcull.dir") {
+        Some(rsx_state::Value::Name(n)) => Some(n),
+        _ => None,
+    };
+    if let (Some(func), Some(dir)) = (func, dir) {
+        let greater = func.starts_with("GREATER") || func.starts_with("GEQUAL");
+        let less = func.starts_with("LESS") || func.starts_with("LEQUAL");
+        z.direction_mismatch = Some((dir == "LESS" && greater) || (dir == "GREATER" && less));
+    }
+    z
+}
+
 /// Groups the draws of `f`, largest timed sum first (ties: first draw first).
 pub fn group(f: &FrameView, by: GroupBy, names: &BTreeMap<(Profile, u64), String>) -> Vec<Group> {
     let prog = |i: Option<usize>| i.map_or_else(|| "unknown".to_string(), |i| program_name(&f.programs[i], names));
@@ -2011,7 +2508,7 @@ fn pct(v: u64, total: u64) -> String {
 
 /// The CLI text: per capture a header, then the draw list (or one draw, or groups).
 pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw: Option<u32>,
-                  by: Option<GroupBy>) -> io::Result<()> {
+                  by: Option<GroupBy>, folder: Option<&Folder>) -> io::Result<()> {
     let Some(inv) = &cap.rsx_frame else {
         return writeln!(out, "rsx-frame: capability absent (file_flags bit 10 clear)");
     };
@@ -2021,10 +2518,17 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
     } else {
         writeln!(out, "rsx-frame: no RSXF_CONFIG yet")?;
     }
+    if let Some(d) = folder {
+        let s = &d.scan;
+        writeln!(out, "shader folder {}: {} containers read ({} bytes), {} programs, {} invalid{}", d.path, s.files,
+            s.bytes, s.names.len(), s.invalid, s.limit.as_ref().map_or_else(String::new, |l| format!("; stopped: {l}")))?;
+    }
     if frames.is_empty() {
         return writeln!(out, "no RSX frame captures");
     }
-    let names = BTreeMap::new();
+    let empty = Folder::default();
+    let names = &folder.unwrap_or(&empty).scan.names;
+    let fetches = &folder.unwrap_or(&empty).scan.fetches;
     for f in frames {
         writeln!(out, "capture {} \"{}\": owner {} frame {} window {} source {} timing {}; {}", f.id, f.name, f.owner,
             f.frame, f.window, if f.source == Source::Live { format!("live request {}", f.request_id) } else { "app".into() },
@@ -2057,43 +2561,56 @@ pub fn write_text(out: &mut dyn Write, cap: &Capture, frames: &[FrameView], draw
             writeln!(out, "  pass {} (depth {}): {}..{} ({} raw), {} draws", p.name, p.depth, p.raw_begin, p.raw_end,
                 p.raw_end - p.raw_begin, p.draws)?;
         }
-        for p in &f.programs {
-            writeln!(out, "  program {} {}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}{}",
-                p.index, p.id_text(), p.name.as_ref().map_or_else(String::new, |n| format!(" \"{n}\"")), p.instructions,
+        for (i, p) in f.programs.iter().enumerate() {
+            writeln!(out, "  program {} {}{}{}: {} instructions, {} bytes, {} constant blocks, {}, first at {:#x} (draw {}){}{}",
+                p.index, p.id_text(), p.name.as_ref().map_or_else(String::new, |n| format!(" \"{n}\"")),
+                if p.unreadable { None } else { names.get(&(p.profile, p.hash)) }
+                    .map_or_else(String::new, |n| format!(" file {n}")), p.instructions,
                 p.ucode_bytes, p.const_blocks, p.source.name(), p.address, p.first_draw,
                 if p.unterminated { ", UNTERMINATED" } else { "" },
                 if p.not_revalidated { ", bound before capture, not revalidated" } else { "" })?;
+            writeln!(out, "    texture fetches: {}", fetch_text(program_fetches(f, i, fetches)))?;
         }
         if let Some(k) = draw {
             match f.draws.iter().find(|d| d.raw.ordinal == k) {
-                Some(d) => write_draw(out, f, d, &names)?,
+                Some(d) => write_draw(out, f, d, names, fetches)?,
                 None => writeln!(out, "  draw {k}: not recorded in this capture")?,
             }
             continue;
         }
         if let Some(by) = by {
-            for g in group(f, by, &names) {
+            for g in group(f, by, names) {
                 writeln!(out, "  group {}: {} draws (timed {}, untimed {}), {} raw, {}", g.key, g.draws.len(), g.timed,
                     g.untimed, g.sum, pct(g.sum, t.sum))?;
             }
             continue;
         }
-        writeln!(out, "  #  kind prim count instances? tag label vp fp pass time gap")?;
+        if f.decoder >= 5 {
+            for t in overdraw(f) {
+                writeln!(out, "  target {}: {} draws ({} counted), {} samples{}", t.key, t.draws, t.counted, t.samples,
+                    t.overdraw.map_or_else(String::new, |o| format!(", overdraw {o:.2}")))?;
+            }
+        }
+        writeln!(out, "  #  kind prim count instances? tag label vp fp pass time gap tex smp")?;
         for d in &f.draws {
-            writeln!(out, "  {} {} {} {} tag {:#x} label {} vp {} fp {} pass {} time {} gap {}{}", d.raw.ordinal,
+            let df = draw_fetches(f, d, fetches);
+            let px = pixels(f, d, fetches);
+            writeln!(out, "  {} {} {} {} tag {:#x} label {} vp {} fp {} pass {} time {} gap {} tex {} smp {}{}", d.raw.ordinal,
                 d.raw.kind.name(), primitive_name(d.raw.mode), d.raw.count, d.raw.tag,
                 d.label.as_deref().unwrap_or("-"),
-                d.vp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], &names)),
-                d.fp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], &names)),
+                d.vp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], names)),
+                d.fp.map_or_else(|| "-".into(), |i| program_name(&f.programs[i], names)),
                 d.pass.map_or("-", |p| f.passes[p].name.as_str()), d.timing.text(),
-                d.gap.map_or_else(|| "-".into(), |g| g.to_string()),
+                d.gap.map_or_else(|| "-".into(), |g| g.to_string()), df.text(),
+                px.samples.map_or_else(|| "-".into(), |s| s.to_string()),
                 if d.op_mismatch || d.raw.flags & DF_MISMATCH != 0 { " MISMATCH" } else { "" })?;
         }
     }
     Ok(())
 }
 
-fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Profile, u64), String>) -> io::Result<()> {
+fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Profile, u64), String>,
+              fetches: &Fetches) -> io::Result<()> {
     let r = &d.raw;
     writeln!(out, "  draw {}: {} {} first {} count {} primitives {}", r.ordinal, r.kind.name(), primitive_name(r.mode),
         r.first, r.count, d.primitives().map_or_else(|| "-".into(), |p| p.to_string()))?;
@@ -2109,6 +2626,27 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
     writeln!(out, "    vp {} (start {}) fp {} (FP_ADDRESS {:#x})",
         d.vp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.vp_start,
         d.fp.map_or_else(|| "unknown".into(), |i| program_name(&f.programs[i], names)), r.fp_address)?;
+    let df = draw_fetches(f, d, fetches);
+    writeln!(out, "    texture fetches: {} (static, per program run); vp {}; fp {}", df.text(),
+        fetch_text(df.vp), fetch_text(df.fp))?;
+    let px = pixels(f, d, fetches);
+    match px.samples {
+        Some(s) => writeln!(out, "    pixels: {s} passed samples (counting {}){}{}{}; early-z {}: {}", px.state.name(),
+            px.per_pixel.map_or_else(String::new, |p| format!(", {p:.3} of the target")),
+            px.raw_per_sample.map_or_else(String::new, |r| format!(", {r:.2} raw ticks per sample (isolated)")),
+            px.shading_proxy.map_or_else(String::new, |w| format!(", {w} sample-instructions")),
+            px.early_z.name(), px.early_z.shading())?,
+        None => writeln!(out, "    pixels: not counted: {}",
+            px.state.why_uncounted().unwrap_or("the draw was not timed"))?,
+    }
+    let z = zcull_at(f, d);
+    writeln!(out, "    zcull: {}{}{}{}", z.reason,
+        z.region.map_or_else(String::new, |r| format!(" (region {})", r.index)),
+        if z.invalidated { "; invalidated before this draw" } else { "" },
+        if z.cleared { "; zcull surface cleared before this draw" } else { "" })?;
+    if z.direction_mismatch == Some(true) {
+        writeln!(out, "    zcull: direction disagrees with the depth function (heuristic)")?;
+    }
     writeln!(out, "    seen by: {}{}{}; words {}; caller {:#x}; tb {}", if d.hooked() { "hook " } else { "" },
         if d.decoded() { "stream" } else { "" }, if r.flags & DF_STATE_UNKNOWN != 0 { " (state unknown)" } else { "" },
         r.words, r.caller, r.tb)?;
@@ -2125,10 +2663,18 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
         writeln!(out, "    render: {}", known(&v.render))?;
         writeln!(out, "    surfaces: {}", known(&v.surfaces))?;
         writeln!(out, "    index: {}", known(&v.index))?;
-        for (i, t) in v.textures.iter().enumerate() {
-            if t.iter().any(|f| f.name == "enable" && f.value == rsx_state::Value::Bool(true)) {
-                writeln!(out, "    texture {i}: {}", known(t))?;
+        let slots = texture_slots(d, df.fp.as_ref().map(|(t, _)| t)).unwrap_or_default();
+        let stale = slots.iter().filter(|s| s.bound == Bound::Disabled && s.fetches.unwrap_or(0) == 0
+            && v.textures[s.slot as usize].iter().any(|f| f.name == "format" && f.value != rsx_state::Value::Unknown))
+            .count();
+        for s in &slots {
+            if s.enabled != Some(false) || s.fetches.unwrap_or(0) > 0 {
+                writeln!(out, "    texture {}: {}{}; {}", s.slot, s.bound.name(),
+                    s.fetches.map_or_else(String::new, |n| format!(", {n} fetches")), known(&v.textures[s.slot as usize]))?;
             }
+        }
+        if stale > 0 {
+            writeln!(out, "    textures: {stale} disabled slots still hold a format (stale, not bound)")?;
         }
         for (i, a) in v.attributes.iter().enumerate() {
             if a.iter().any(|f| f.name == "enabled" && f.value == rsx_state::Value::Bool(true)) {
@@ -2139,14 +2685,19 @@ fn write_draw(out: &mut dyn Write, f: &FrameView, d: &Draw, names: &BTreeMap<(Pr
     Ok(())
 }
 
-fn program_json(p: &Program) -> Value {
-    json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
+fn program_json(f: &FrameView, i: usize, folder: &Folder) -> Value {
+    let p = &f.programs[i];
+    let mut v = json!({"index": p.index, "profile": p.profile.short(), "hash": format!("{:016x}", p.hash), "id": p.id_text(),
         "name": p.name, "source": p.source.name(), "instructions": p.instructions, "ucode_bytes": p.ucode_bytes,
         "const_blocks": p.const_blocks, "address": p.address, "first_draw": p.first_draw,
         "unterminated": p.unterminated, "unreadable": p.unreadable, "not_revalidated": p.not_revalidated,
         "uniforms": p.uniforms.iter().map(|u| json!({"name": u.name, "resource": u.resource, "count": u.count,
             "kind": if u.kind == UniformKind::VpConstant { "vp_constant" } else { "fp_embedded" }})).collect::<Vec<_>>(),
-        "uniforms_truncated": p.uniforms_truncated})
+        "uniforms_truncated": p.uniforms_truncated});
+    let o = v.as_object_mut().expect("object");
+    o.insert("shader_file".into(), json!(if p.unreadable { None } else { folder.scan.names.get(&(p.profile, p.hash)) }));
+    o.insert("texture_fetches".into(), fetch_json(program_fetches(f, i, &folder.scan.fetches)));
+    v
 }
 
 fn timing_json(t: &Timing) -> Value {
@@ -2159,7 +2710,7 @@ fn timing_json(t: &Timing) -> Value {
     }
 }
 
-fn draw_json(f: &FrameView, d: &Draw) -> Value {
+fn draw_json(f: &FrameView, d: &Draw, folder: &Folder) -> Value {
     let r = &d.raw;
     let index = matches!(r.kind, DrawKind::Index | DrawKind::InlineIndex).then(|| {
         json!({"offset": r.index_offset, "type": if r.index_type == 1 { "u16" } else { "u32" },
@@ -2186,6 +2737,25 @@ fn draw_json(f: &FrameView, d: &Draw) -> Value {
     o.insert("caller".into(), json!(r.caller));
     o.insert("words".into(), json!(r.words));
     o.insert("tb".into(), json!(r.tb));
+    let px = pixels(f, d, &folder.scan.fetches);
+    o.insert("pixels".into(), json!({"state": px.state.name(), "samples": px.samples, "area": px.area,
+        "per_pixel": px.per_pixel, "raw_per_sample": px.raw_per_sample, "early_z": px.early_z.name(),
+        "shading": (d.raw.kind != DrawKind::Clear).then(|| px.early_z.shading()),
+        "shading_proxy": px.shading_proxy, "fetch_proxy": px.fetch_proxy,
+        "uncounted": px.samples.is_none().then(|| px.state.why_uncounted().unwrap_or("the draw was not timed")),
+        "zpass_delta": d.zpass_delta}));
+    let z = zcull_at(f, d);
+    o.insert("zcull".into(), json!({"invalidated": z.invalidated, "cleared": z.cleared,
+        "region": z.region.map(|r| r.index), "effective": z.effective, "reason": z.reason,
+        "direction_mismatch": z.direction_mismatch}));
+    let df = draw_fetches(f, d, &folder.scan.fetches);
+    o.insert("texture_fetches".into(), json!({"vp": df.vp.map(|(t, _)| t.total()), "fp": df.fp.map(|(t, _)| t.total()),
+        "total": df.total(), "exact": df.exact()}));
+    if let Some(slots) = texture_slots(d, df.fp.as_ref().map(|(t, _)| t)) {
+        o.insert("texture_slots".into(), Value::Array(slots.iter().map(|s| json!({"slot": s.slot,
+            "enabled": s.enabled, "fetches": s.fetches, "bound": s.bound.flag(), "state": s.bound.name(),
+            "reason": s.bound.reason()})).collect()));
+    }
     if let Some(regs) = &d.registers {
         o.insert("state".into(), rsx_state::view_json(&rsx_state::interpret(regs)));
         o.insert("changed".into(), json!(d.changed.iter().map(|&m| rsx_state::register_name(m)).collect::<Vec<_>>()));
@@ -2233,7 +2803,7 @@ fn end_json(e: &End) -> Value {
     v
 }
 
-fn frame_json(f: &FrameView) -> Value {
+fn frame_json(f: &FrameView, folder: &Folder) -> Value {
     let t = &f.totals;
     let totals = json!({"draws": t.draws, "timed": t.timed, "untimed": t.untimed, "missing": t.missing,
         "mismatched": t.mismatched, "sum": t.sum, "gaps": t.gaps, "primitives": t.primitives, "span": t.span.map(|(a, b)| json!([a, b]))});
@@ -2263,21 +2833,95 @@ fn frame_json(f: &FrameView) -> Value {
         json!({"first": f.draws[r.first].raw.ordinal, "length": r.len, "vp_slots": r.vp_slots,
             "fp_offsets": r.fp_offsets, "vp_uniforms": vp_names})
     }).collect()));
-    o.insert("programs".into(), Value::Array(f.programs.iter().map(program_json).collect()));
+    o.insert("programs".into(), Value::Array((0..f.programs.len()).map(|i| program_json(f, i, folder)).collect()));
     o.insert("passes".into(), Value::Array(passes));
-    o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d)).collect()));
+    o.insert("draws".into(), Value::Array(f.draws.iter().map(|d| draw_json(f, d, folder)).collect()));
+    o.insert("pixels_forced".into(), json!(f.pixels_forced));
+    o.insert("zcull_regions".into(), Value::Array(f.zcull_regions.iter().map(|r| json!({"index": r.index,
+        "ordinal": r.ordinal, "bound": r.bound, "before_capture": r.before_capture, "offset": r.offset,
+        "width": r.width, "height": r.height, "cull_start": r.cull_start, "z_format": r.z_format,
+        "aa_format": r.aa_format, "dir": r.dir, "format": r.format, "s_func": r.s_func, "s_ref": r.s_ref,
+        "s_mask": r.s_mask})).collect()));
+    o.insert("overdraw".into(), Value::Array(overdraw(f).iter().map(|t| json!({"target": t.key, "draws": t.draws,
+        "counted": t.counted, "samples": t.samples, "area": t.area, "overdraw": t.overdraw})).collect()));
     o.insert("end".into(), f.end.as_ref().map_or(Value::Null, end_json));
     v
 }
 
-/// The JSON document of `ps3dk-prof rsx-frame --json` (schema 1).
+/// The JSON document of `ps3dk-prof rsx-frame --json` (schema 1), with no shader folder.
 pub fn to_json(cap: &Capture, frames: &[FrameView]) -> Value {
+    to_json_with(cap, frames, None)
+}
+
+/// [`to_json`] with programs named and counted from a shader folder (`--shader-dir`).
+pub fn to_json_with(cap: &Capture, frames: &[FrameView], folder: Option<&Folder>) -> Value {
     let cfg = cap.rsx_frame.as_ref().and_then(|i| i.config.as_ref());
+    let empty = Folder::default();
+    let dir = folder.unwrap_or(&empty);
     json!({
         "schema": 1,
         "capability": cap.rsx_frame.is_some(),
         "availability": cfg.map(|c| c.availability.text()),
         "decoder": cfg.map(|c| c.decoder),
-        "captures": Value::Array(frames.iter().map(frame_json).collect()),
+        "shader_dir": folder.map(|d| json!({"path": d.path, "files": d.scan.files, "bytes": d.scan.bytes,
+            "programs": d.scan.names.len(), "invalid": d.scan.invalid, "limit": d.scan.limit})),
+        "captures": Value::Array(frames.iter().map(|f| frame_json(f, dir)).collect()),
     })
+}
+
+/// The static texture fetches of one draw: its VP's and its FP's (each from [`program_fetches`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawFetches {
+    pub vp: Option<(nv40_disasm::TexFetches, FetchOrigin)>,
+    pub fp: Option<(nv40_disasm::TexFetches, FetchOrigin)>,
+}
+impl DrawFetches {
+    /// VP + FP fetch instructions; None unless both programs' counts are known.
+    pub fn total(&self) -> Option<u32> {
+        Some(self.vp?.0.total() + self.fp?.0.total())
+    }
+    /// Both counts known and exact.
+    pub fn exact(&self) -> bool {
+        self.vp.is_some_and(|(t, _)| t.exact()) && self.fp.is_some_and(|(t, _)| t.exact())
+    }
+    /// `3`, `3+` (a lower bound) or `-` (unknown).
+    pub fn text(&self) -> String {
+        match self.total() {
+            None => "-".into(),
+            Some(n) if self.exact() => n.to_string(),
+            Some(n) => format!("{n}+"),
+        }
+    }
+}
+
+/// The static texture fetches of draw `d`'s programs.
+pub fn draw_fetches(f: &FrameView, d: &Draw, folder: &Fetches) -> DrawFetches {
+    DrawFetches { vp: d.vp.and_then(|i| program_fetches(f, i, folder)), fp: d.fp.and_then(|i| program_fetches(f, i, folder)) }
+}
+
+/// The text of a program's fetch counts.
+pub fn fetch_text(t: Option<(nv40_disasm::TexFetches, FetchOrigin)>) -> String {
+    let Some((t, origin)) = t else { return "unknown (no program bytes)".into() };
+    let units = t.units();
+    format!("{} {}{}{} ({})", t.total(), t.ops_text(),
+        if units.is_empty() { String::new() } else {
+            format!("; units {}", units.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(","))
+        },
+        if t.exact() { "" } else if !t.terminated { "; lower bound: no end bit" } else { "; lower bound: unknown opcodes" },
+        origin.name())
+}
+
+fn fetch_json(t: Option<(nv40_disasm::TexFetches, FetchOrigin)>) -> Value {
+    let Some((t, origin)) = t else { return Value::Null };
+    let mut by_op = serde_json::Map::new();
+    for (o, n) in nv40_disasm::TEX_OPS.iter().zip(t.by_op) {
+        by_op.insert((*o).into(), json!(n));
+    }
+    let mut by_unit = serde_json::Map::new();
+    for u in t.units() {
+        by_unit.insert(u.to_string(), json!(t.by_unit[u as usize]));
+    }
+    json!({"source": match origin { FetchOrigin::Capture => "capture", FetchOrigin::ShaderFolder => "shader_folder" },
+        "total": t.total(), "by_op": by_op, "by_unit": by_unit, "instructions": t.instructions,
+        "unknown_instructions": t.unknown, "terminated": t.terminated, "exact": t.exact()})
 }

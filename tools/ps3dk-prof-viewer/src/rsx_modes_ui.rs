@@ -17,6 +17,12 @@ pub fn request_menu(p: &mut egui::Ui, o: &mut RequestOptions) {
         "Store the fragment programs' microcode (bound while the capture is armed, up to the capture's byte cap) so \
          the Shader view can disassemble them. Vertex programs are always kept.",
     );
+    p.checkbox(&mut o.pixels, "Force pixel counting").on_hover_text(
+        "Turn ZPASS pixel counting on around each captured draw the app has it off for (4 command words per such \
+         draw), so every draw gets a passed-sample count. Never once the app has used the counter in that frame. Leave \
+         it off when the app relies on counting being off for draws outside its own queries, or reads a query in a later \
+         frame. Older agents refuse it.",
+    );
 }
 
 /// The view's timing mode and, for a BOTH capture, which frame it is.

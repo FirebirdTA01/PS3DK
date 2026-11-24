@@ -104,12 +104,12 @@ fn instance_runs_collapse_into_one_expandable_row() {
     ps3dk_ui::install(&ctx);
     let mut drawn = Drawn::default();
     let _ = ctx.run(Default::default(), |ctx| {
-        eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
+        eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn));
     });
     assert_eq!(drawn.rows, 2, "the run is one row");
     st.expanded.insert(0);
     let _ = ctx.run(Default::default(), |ctx| {
-        eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), 0, &mut st, &mut drawn));
+        eframe::egui::CentralPanel::default().show(ctx, |ui| page(ui, &v, &Default::default(), &Default::default(), 0, &mut st, &mut drawn));
     });
     assert_eq!(drawn.rows, 5);
 }

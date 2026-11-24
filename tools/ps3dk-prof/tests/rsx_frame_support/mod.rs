@@ -8,6 +8,8 @@
 
 use super::common::*;
 
+pub mod fetches;
+
 pub const T_CONFIG: u32 = 44;
 pub const T_BEGIN: u32 = 45;
 pub const T_DRAWS: u32 = 46;
@@ -101,6 +103,8 @@ pub struct XDraw {
     pub vp_start: u32,
     pub caller: u64,
     pub words: u32,
+    /// Decoder 5: the ZPASS state (u32@84).
+    pub zpass: u32,
     pub tb: u64,
 }
 impl XDraw {
@@ -109,7 +113,7 @@ impl XDraw {
         let mut d = XDraw {
             ordinal, kind, flags: 3, untimed: 0, op, mode: 5, first: 0, count: 36, index_offset: 0, index_type: 0,
             index_location: 0, clear_mask: 0, tag: 0, label: 0, vp: 0, fp: 0, fp_address: 0, vp_start: 0,
-            caller: 0x10_2000 + u64::from(ordinal) * 4, words: 10, tb: 5000 + u64::from(ordinal),
+            caller: 0x10_2000 + u64::from(ordinal) * 4, words: 10, zpass: 0, tb: 5000 + u64::from(ordinal),
         };
         match kind {
             2 => { d.index_offset = 0x4000; d.index_type = 1; }
@@ -134,7 +138,7 @@ impl XDraw {
         b.u16(1).u16(96).u32(self.ordinal).u16(self.kind).u16(self.flags).u32(self.untimed).u64(self.op)
             .u32(self.mode).u32(self.first).u32(self.count).u32(self.index_offset).u8(self.index_type)
             .u8(self.index_location).u16(0).u32(self.clear_mask).u32(self.tag).u32(self.label).u32(self.vp)
-            .u32(self.fp).u32(self.fp_address).u32(self.vp_start).u64(self.caller).u32(self.words).u32(0)
+            .u32(self.fp).u32(self.fp_address).u32(self.vp_start).u64(self.caller).u32(self.words).u32(self.zpass)
             .u64(self.tb);
     }
 }
@@ -466,6 +470,15 @@ pub fn ucode_rec(b: &mut Buf, profile: u8, last: bool, part: u16, total: u32, ha
         .u32(data.len() as u32).u32(0);
     b.0.extend_from_slice(data);
     b.0.resize(b.0.len() + pad - data.len(), 0);
+}
+
+/// A ZCULL_REGION record (type 12, decoder 5): (ordinal, index, flags, offset, width, height, the 8 remaining fields).
+pub fn zcull_rec(b: &mut Buf, ordinal: u32, index: u32, flags: u32, offset: u32, width: u32, height: u32, rest: [u32; 8]) {
+    b.u16(12).u16(64).u32(ordinal).u32(index).u32(flags).u32(offset).u32(width).u32(height);
+    for v in rest {
+        b.u32(v);
+    }
+    b.u32(0);
 }
 
 /// A SECOND record (type 11): the first ordinal and the frame of a BOTH capture's isolated frame.

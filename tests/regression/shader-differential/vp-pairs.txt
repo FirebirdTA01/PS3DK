@@ -52,6 +52,7 @@ samples/gcm/hello-ppu-gcm-label-reuse-heavy/shaders/arena_vp.vcg|auto|general
 samples/gcm/hello-ppu-gcm-main-arena/shaders/arena_vp.vcg|auto|general
 samples/gcm/hello-ppu-gcm-zcull-clip-border/shaders/vpshader.vcg|auto|general
 samples/gcm/hello-ppu-prof-auto-verdicts/shaders/vpshader.vcg|auto|general
+samples/gcm/hello-ppu-prof-pixels/shaders/vp_quad.vcg|auto|general
 samples/toolchain/hello-psgl-blend/shaders/vpshader.vcg|auto|general
 samples/toolchain/hello-psgl-cg-binary/shaders/tintvp.vcg|auto|general
 samples/toolchain/hello-psgl-msaa/shaders/vpshader.vcg|auto|general

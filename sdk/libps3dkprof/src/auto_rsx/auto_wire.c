@@ -59,7 +59,7 @@ static size_t encode_ops(uint8_t *b, size_t cap, uint32_t instance, const auto_w
         le32(q+104,o->serial_begin); le32(q+108,o->serial_end); le32(q+112,o->generation);
         le64(q+120,o->published);
         le64(q+128,o->build_frame); le32(q+136,o->build_owner); le16(q+140,o->build_flags);
-        le32(q+144,o->tag); le32(q+148,o->fp_offset); le32(q+152,o->depth);
+        le32(q+144,o->tag); le32(q+148,o->fp_offset); le32(q+152,o->depth); le32(q+156,o->zpass);
         if(width==AUTO_OP_RING_BYTES) {
             le32(q+160,o->ring_generation);le32(q+164,o->ring_slot);
             le16(q+168,o->ring_ordinal);le16(q+170,o->ring_local);le32(q+172,o->ring_state);

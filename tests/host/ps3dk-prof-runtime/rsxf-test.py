@@ -98,6 +98,13 @@ def main():
     st = d[0]['state']['render']
     assert (st['blend.enable'], st['depth.test'], st['depth.func']) == (True, True, 'LEQUAL'), st
     assert d[0]['changed'] == ['DEPTH_FUNC'] and st['cull.enable'] is None, d[0]['changed']
+    # decoder 5: the draw's ZPASS state and zcull event, the region bound before arming
+    assert v['decoder'] == 5 and d[0]['pixels']['state'] == 'off' and d[0]['pixels']['samples'] is None, d[0]['pixels']
+    assert d[0]['pixels']['uncounted'].startswith('the application had ZPASS counting off'), d[0]['pixels']
+    assert d[0]['zcull']['invalidated'] and not d[0]['zcull']['cleared'], d[0]['zcull']
+    zr = c['zcull_regions']
+    assert [(r['index'], r['ordinal'], r['bound'], r['before_capture'], r['offset'], r['width'], r['height'])
+            for r in zr] == [(2, 0, True, True, 0x100000, 640, 480)], zr
     print('RSX frame capture units and reader round trip PASS')
 
 

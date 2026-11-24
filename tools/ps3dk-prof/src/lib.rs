@@ -45,6 +45,7 @@ pub mod report;
 pub mod rsx_capture;
 pub mod rsx_frame;
 pub mod rsx_state;
+pub mod shader_dir;
 pub mod spu_ticks;
 pub mod waits;
 pub mod windows;

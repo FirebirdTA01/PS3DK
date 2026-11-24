@@ -1,0 +1,9 @@
+// hello-ppu-prof-pixels: kills the left half of a full-screen quad (uv.x < 0.5), so exactly half its samples pass.
+void main(
+    float2 in_uv : TEXCOORD0,
+    out float4 out_color : COLOR)
+{
+    if (in_uv.x < 0.5f)
+        discard;
+    out_color = float4(0.9f, 0.3f, 0.2f, 1.0f);
+}

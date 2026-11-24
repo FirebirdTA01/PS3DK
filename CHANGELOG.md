@@ -16,6 +16,43 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Added
+
+- **`ps3dk-prof rsx-frame --shader-dir DIR`.** Names the programs of RSX frame
+  captures from a folder of `.vpo`/`.fpo` containers by canonical hash: the
+  viewer's **Shader folder…** scan, now shared by both (one level, at most 4096
+  entries and 64 MiB, first file in path order wins).
+- **Static texture fetch counts.** Each program's TEX, TXP, TXL, TXB and TXD
+  instructions (a vertex program's TXL), per opcode and texture unit, counted
+  from its ucode with the NV40 disassembler: from the capture's program bytes,
+  else from a matched shader-folder container. Shown per program and per draw
+  in `rsx-frame` text and JSON and in the viewer's Summary, Shaders and Shader
+  view.
+- **Passed samples per draw.** RSX frame captures read the ZPASS counter
+  value beside every draw's AUTO timestamps (decoder 5): each draw has a
+  passed-sample count when ZPASS counting was on, with its counting state
+  (counting, off, forced, paused, untouched). The request flag
+  `PS3DK_PROF_RSX_FRAME_PIXELS` (viewer: Force pixel counting) turns
+  counting on around every captured draw the app has it off for, never
+  once the app has used the counter in that frame. The reader derives each
+  draw's share of its render target, overdraw per target, raw ticks per
+  sample in isolated views, and an early-z note ("shading >= count" for
+  programs that kill fragments). In `rsx-frame` text and JSON, and in the
+  viewer's draw table (Samples), Summary and overdraw panel.
+- **Zcull per draw.** The zcull enables, direction, format, limits and
+  stencil cull from the command stream; INVALIDATE_ZCULL and
+  CLEAR_ZCULL_SURFACE as per-draw events; the regions
+  `cellGcmBindZcull` / `cellGcmUnbindZcull` bind on the owner thread
+  (ZCULL_REGION records), joined to each draw's depth buffer. Zcull
+  statistics reports are reserved, not read yet.
+- `samples/gcm/hello-ppu-prof-pixels`: known answers for the counts and the
+  zcull state, with a checker.
+- **Bound texture slots.** Each draw's fragment texture slots carry a bound
+  state: bound (enabled and sampled by the fragment program), disabled (stale
+  state still holding a format), enabled but not sampled, or unknown. In
+  `rsx-frame --draw` and `--json` (`texture_slots`) and in the viewer's
+  Textures tab, which no longer lists stale disabled slots.
+
 ### Changed
 
 - **`rsx-cg-compiler`: large fixed-count fragment loops stay loops.** A `for`

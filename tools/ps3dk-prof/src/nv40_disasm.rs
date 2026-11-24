@@ -768,3 +768,109 @@ pub fn disasm_fp(bytes: &[u8]) -> Vec<Line> {
     out.push(Line { offset: pos, words: Vec::new(), text: why, kind: LineKind::Note });
     out
 }
+
+// ---- static texture fetch counts -----------------------------------------------------------------------------------
+
+/// The texture-fetch opcodes, in the order [`TexFetches::by_op`] counts them.  A vertex program fetches with TXL only.
+pub const TEX_OPS: [&str; 5] = ["TEX", "TXP", "TXL", "TXB", "TXD"];
+
+/// The texture fetches a program's ucode contains, counted statically: one per fetch instruction in the program as
+/// stored, whatever its branches and loops do at run time (a fetch inside a loop counts once; one behind a branch not
+/// taken counts too).  The walk is the disassembler's (and the canonical hash's): the same instructions, the same
+/// constant blocks skipped, the same end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TexFetches {
+    /// Fetch instructions per opcode, in [`TEX_OPS`] order.
+    pub by_op: [u32; 5],
+    /// Fetch instructions per texture unit: fragment units 0..15, vertex units 0..3.
+    pub by_unit: [u32; 16],
+    /// Instructions walked (constant blocks excluded).
+    pub instructions: u32,
+    /// Instructions whose opcode the disassembler does not know: a fetch among them is not counted, so with any the
+    /// counts are a lower bound.
+    pub unknown: u32,
+    /// The walk ended on the program's end bit (false: unterminated or cut short, the counts are a lower bound).
+    pub terminated: bool,
+    /// Fragment KIL instructions (a program that kills fragments disables early depth rejection).
+    pub kil: u32,
+}
+impl TexFetches {
+    pub fn total(&self) -> u32 {
+        self.by_op.iter().sum()
+    }
+    /// Every instruction was decoded through the end bit: the counts are exact.
+    pub fn exact(&self) -> bool {
+        self.terminated && self.unknown == 0
+    }
+    /// `TEX 2 TXP 0 TXL 1 TXB 0 TXD 0`-style text of the nonzero opcodes (`none` when there is no fetch).
+    pub fn ops_text(&self) -> String {
+        let v: Vec<String> =
+            TEX_OPS.iter().zip(self.by_op).filter(|(_, n)| *n > 0).map(|(o, n)| format!("{o} {n}")).collect();
+        if v.is_empty() { "none".into() } else { v.join(" ") }
+    }
+    /// The units fetched from, ascending.
+    pub fn units(&self) -> Vec<u32> {
+        (0..16).filter(|&u| self.by_unit[u as usize] > 0).collect()
+    }
+}
+
+/// The static texture fetches of a vertex program (`disasm_vp`'s input): TXL in the vector slot, unit hw[2] bits 8..9.
+pub fn vp_tex_fetches(words: &[u32]) -> TexFetches {
+    let mut t = TexFetches::default();
+    let mut n = 0usize;
+    while (n + 1) * 4 <= words.len() && n < VP_MAX_INSTRUCTIONS {
+        let hw = [words[4 * n], words[4 * n + 1], words[4 * n + 2], words[4 * n + 3]];
+        t.instructions += 1;
+        n += 1;
+        let vec = bits(hw[1], 22, 5);
+        if vp_vec_op(vec).is_none() || vp_sca_op(bits(hw[1], 27, 5)).is_none() {
+            t.unknown += 1;
+        } else if vec == 0x19 {
+            t.by_op[2] += 1;
+            t.by_unit[bits(hw[2], 8, 2) as usize] += 1;
+        }
+        if bit(hw[3], 0) {
+            t.terminated = true;
+            break;
+        }
+    }
+    t
+}
+
+/// The static texture fetches of a fragment program (`disasm_fp`'s input: the bytes as they lie in memory): TEX,
+/// TXP, TXL, TXB and TXD, unit hw[0] bits 17..20.  Branch instructions (hw[2] bit 31) fetch nothing.
+pub fn fp_tex_fetches(bytes: &[u8]) -> TexFetches {
+    let swap = |w: u32| w.rotate_left(16);
+    let mut t = TexFetches::default();
+    let (mut pos, mut n) = (0usize, 0usize);
+    while pos + 16 <= bytes.len() && n < FP_MAX_INSTRUCTIONS {
+        let hw = be_words(bytes, pos).map(swap);
+        t.instructions += 1;
+        pos += 16;
+        n += 1;
+        if bit(hw[2], 31) {
+            if fp_branch(hw).is_none() {
+                t.unknown += 1;
+            }
+        } else {
+            match fp_op(bits(hw[0], 24, 6)) {
+                None => t.unknown += 1,
+                Some((name, _, FpKind::Tex)) => {
+                    let k = TEX_OPS.iter().position(|o| *o == name).expect("a fetch opcode");
+                    t.by_op[k] += 1;
+                    t.by_unit[bits(hw[0], 17, 4) as usize] += 1;
+                }
+                Some((_, _, FpKind::Kil)) => t.kil += 1,
+                Some(_) => {}
+            }
+        }
+        if (1..4).any(|k| hw[k] & 3 == 2) {
+            pos = (pos + 16).min(bytes.len());
+        }
+        if bit(hw[0], 0) {
+            t.terminated = true;
+            break;
+        }
+    }
+    t
+}

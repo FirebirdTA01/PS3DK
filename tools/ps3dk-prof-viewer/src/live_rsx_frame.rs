@@ -9,6 +9,8 @@ pub struct RsxFrameRequest {
 pub const FLAG_ISOLATED: u16 = 1;
 pub const FLAG_FP_BYTES: u16 = 2;
 pub const FLAG_BOTH: u16 = 4;
+/// Force ZPASS pixel counting on around each captured draw the app has it off for (agents with decoder 5).
+pub const FLAG_PIXELS: u16 = 8;
 
 /// The timing mode a capture is requested with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,6 +44,7 @@ impl Mode {
 pub struct RequestOptions {
     pub mode: Mode,
     pub fp_bytes: bool,
+    pub pixels: bool,
 }
 impl RequestOptions {
     pub fn flags(self) -> u16 {
@@ -49,7 +52,7 @@ impl RequestOptions {
             Mode::Pipelined => 0,
             Mode::Isolated => FLAG_ISOLATED,
             Mode::Both => FLAG_BOTH,
-        }) | if self.fp_bytes { FLAG_FP_BYTES } else { 0 }
+        }) | if self.fp_bytes { FLAG_FP_BYTES } else { 0 } | if self.pixels { FLAG_PIXELS } else { 0 }
     }
 }
 
@@ -58,7 +61,7 @@ impl RsxFrameRequest {
         self.encode_with(request, 0)
     }
     pub fn encode_with(&self, request: u32, flags: u16) -> Result<Vec<u8>, String> {
-        if flags & !(FLAG_ISOLATED | FLAG_FP_BYTES | FLAG_BOTH) != 0 || flags & (FLAG_ISOLATED | FLAG_BOTH) == FLAG_ISOLATED | FLAG_BOTH {
+        if flags & !(FLAG_ISOLATED | FLAG_FP_BYTES | FLAG_BOTH | FLAG_PIXELS) != 0 || flags & (FLAG_ISOLATED | FLAG_BOTH) == FLAG_ISOLATED | FLAG_BOTH {
             return Err(refusal(-5));
         }
         if request == 0 || self.name.len() > 63 || self.name.contains('\0') {

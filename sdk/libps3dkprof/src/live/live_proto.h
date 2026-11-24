@@ -106,7 +106,8 @@
 #define LIVE_ACK_BYTES 16u
 
 /* Version 3 only (HELLO capability LIVE_CAP_RSX_FRAME), RSX frame capture (format section 12):
- *   RSX_FRAME_REQ (viewer -> agent): u32 request id (nonzero), u16 flags (1 ISOLATED, 2 FP_BYTES, 4 BOTH), u16 frames (1),
+ *   RSX_FRAME_REQ (viewer -> agent): u32 request id (nonzero), u16 flags (1 ISOLATED, 2 FP_BYTES, 4 BOTH, 8 PIXELS),
+ *                  u16 frames (1),
  *                  u16 name length (0..LIVE_MAX_WINDOW_NAME), u16 0, name bytes (UTF-8, no NUL).
  *                  A malformed request, a second one before the first ACK was sent, or one on a v1/v2 session
  *                  closes the link. A refused request (EBUSY, ENOTSUP, EINVAL, ENOMEM, ESTOPPED) gets an ACK.

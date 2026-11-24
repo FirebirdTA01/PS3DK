@@ -131,8 +131,10 @@ static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t
     const uint8_t *c=s->config;uint16_t kind=r16(p+12),flags=r16(p+14);uint64_t id=r64(p),frame=r64(p+16),published=r64(p+120);
     uint32_t owner=r32(p+8),first=r32(c+32)+16,end=r32(c+32)+r32(c+36),build_owner=0,build_flags=0,depth=0,j,mask=au_mask(s);
     uint64_t build_frame=0;int ring=au_ringed(s),segment=(flags&64)!=0,valid=(flags&2)!=0,rc;au_build *entry;
-    /* ring CONFIGs: flags 1..128 and 256 ISOLATED (the RSX frame capture's isolated timing) */
-    if(id<=s->last_op||(flags&~(ring?511u:mask!=7?127u:63u))||kind<1
+    /* ring CONFIGs: flags 1..128, 256 ISOLATED (the RSX frame capture's isolated timing) and 512 ZPASS (u32@156 the
+     * draw's ZPASS counter delta: RAW_VALID RING draws and clears only) */
+    if(id<=s->last_op||(flags&~(ring?1023u:mask!=7?127u:63u))||kind<1
+       ||((flags&512)&&(!(flags&128)||!(flags&2)||kind>3))
        ||(kind>3&&!(kind==4&&(mask&8))&&!(kind==5&&(mask&128))&&!(kind==6&&(mask&512))))return PFR_INVALID;
     if(au_width(s)>=144){build_frame=r64(p+128);build_owner=r32(p+136);build_flags=r16(p+140);
         if((build_flags&~1u)||r16(p+142))return PFR_INVALID;
@@ -140,7 +142,7 @@ static int au_op(au_state *s,au_pools pools,const pfm2_config *cfg,const uint8_t
         if((build_flags&&build_owner!=r32(c+16))||(!build_flags&&(build_owner||build_frame))
            ||(build_flags&&(flags&1)&&owner==build_owner&&build_frame>frame))return PFR_INVALID;
     }
-    if(au_width(s)>=160){depth=r32(p+152);if(r32(p+156)||(depth!=0)!=(kind==6))return PFR_INVALID;}
+    if(au_width(s)>=160){depth=r32(p+152);if((r32(p+156)&&!(flags&512))||(depth!=0)!=(kind==6))return PFR_INVALID;}
     if(ring){
         end=first+2*r32(c+208);
         if(flags&128){rc=au_ring_record(s,p);if(rc)return rc;}
