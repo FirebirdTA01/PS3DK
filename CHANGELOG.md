@@ -52,6 +52,10 @@ The version stamped into builds is generated from the most recent
   state still holding a format), enabled but not sampled, or unknown. In
   `rsx-frame --draw` and `--json` (`texture_slots`) and in the viewer's
   Textures tab, which no longer lists stale disabled slots.
+- **DualShock 3 bench sample.** `samples/input/ds3-bench` shows buttons, sticks
+  and pressure values and fires 200 ms pulses on each rumble motor, with port
+  selection, pressure-mode restore, length-checked records and reconnect
+  handling. Its pad lifecycle has native host tests.
 
 ### Changed
 

@@ -4,6 +4,7 @@ Tracked ABI documentation for each shipped stub archive.
 
 | Library | Module | Entry points | Docs |
 |---|---|---|---|
+| libio / libio_stub | Controllers (`cell/pad.h`, DualShock 3) | 6 used by the DS3 bench | [libpad.md](libpad.md) |
 | libfiber_stub | CELL_SYSMODULE_FIBER (0x0043) | 48 | [libfiber.md](libfiber.md) |
 | libusbd_stub | USB device driver framework | 70 (35 cell + 35 legacy) | [libusbd.md](libusbd.md) |
 | libdmux_stub | PAMF stream demultiplexer | 20 | [libdmux.md](libdmux.md) |

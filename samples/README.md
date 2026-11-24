@@ -30,6 +30,12 @@ cleanup in both ABIs. See its [README](input/hello-ppu-gem-basic/README.md)
 for controls and opt-in runtime checks. Hardware IMU, rumble and sphere colour
 verification is pending; emulator checks cover API/input/lifecycle only.
 
+`ds3-bench` prints DualShock 3 buttons, sticks and pressure values and fires
+200 ms rumble pulses on the small and large motors, with port selection,
+pressure-mode restore and reconnect handling. See its
+[README](input/ds3-bench/README.md) for controls. Hardware verification is
+pending.
+
 ## profiling/
 
 [`heterogeneous-workload`](profiling/heterogeneous-workload/README.md) cycles
