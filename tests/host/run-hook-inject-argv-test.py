@@ -116,7 +116,44 @@ def check(root, out):
         if not ok:
             print(r.stdout + r.stderr)
         fails += not ok
+    fails += check_shared_source_filter(root, out, hook)
     print('run-hook-inject-argv: ' + ('FAIL' if fails else 'PASS'))
+    return fails
+
+
+def check_shared_source_filter(root, out, hook):
+    """PS3DK_RUN_HOOK_TARGETS must isolate the main rename: two executables built from one main.c (an ILP32 and
+    an LP64 loader, as in samples/sprx), only one selected.  A rename set on the source file reaches both, and the
+    excluded one fails to link with no main.  Both must build; only the selected one is hooked."""
+    src = out / 'shared-src'
+    src.mkdir()
+    (src / 'main.c').write_text(SAMPLE_C_ARGS)
+    (src / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.20)
+project(hook_shared C)
+add_library(net INTERFACE)
+add_library(sysmodule_stub INTERFACE)
+add_executable(picked main.c)
+add_executable(excluded_shared main.c)
+''')
+    build = out / 'shared-build'
+    run(['cmake', '-S', str(src), '-B', str(build), '-G', 'Unix Makefiles',
+         f'-DCMAKE_PROJECT_INCLUDE={root}/tests/hardware/psgl-sample-boot/run-hook-inject.cmake',
+         f'-DPS3DK_RUN_HOOK_DIR={hook}', '-DPS3DK_RUN_HOOK_TARGETS=picked'])
+    r = subprocess.run(['cmake', '--build', str(build), '--parallel', '2'], capture_output=True, text=True)
+    fails = 0
+    ok = r.returncode == 0
+    print(f'{"PASS" if ok else "FAIL"} shared main.c, filter=picked: both targets build (rc {r.returncode})')
+    if not ok:
+        print(r.stdout[-3000:] + r.stderr[-3000:])
+        return 1
+    for target, want in (('picked', ['PSGL_SAMPLE_BOOT hook=1', 'ARGC 3', 'ARG one', 'ARG two words']),
+                         ('excluded_shared', ['ARGC 4', 'ARG one', 'ARG two words', 'ARG ' + MARKER])):
+        r = subprocess.run([str(build / target), 'one', 'two words', MARKER], capture_output=True, text=True)
+        lines = r.stdout.splitlines()
+        ok = r.returncode == 0 and lines == want
+        print(f'{"PASS" if ok else "FAIL"} shared main.c, {target}: rc {r.returncode}, saw {lines}'
+              + ('' if ok else f', want {want}'))
+        fails += not ok
     return fails
 
 

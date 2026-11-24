@@ -45,14 +45,15 @@ function(_ps3dk_inject_run_hook)
         get_target_property(sources ${t} SOURCES)
         set(cxx 0)
         foreach(s ${sources})
-            if(s MATCHES "\\.(c|cpp|cc|cxx)$")
-                set_property(SOURCE "${s}" TARGET_DIRECTORY ${t}
-                             APPEND PROPERTY COMPILE_DEFINITIONS "main=ps3dk_sample_main")
-                if(s MATCHES "\\.(cpp|cc|cxx)$")
-                    set(cxx 1)
-                endif()
+            if(s MATCHES "\\.(cpp|cc|cxx)$")
+                set(cxx 1)
             endif()
         endforeach()
+        # The rename is a property of this target, not of its source files: a source property follows the file into
+        # every target in the directory, so an excluded target sharing main.c (an ILP32 and an LP64 build of one
+        # loader) would lose its main too.  The wrapper below #undefs main before defining its own; the hook
+        # sources never use the token.
+        target_compile_definitions(${t} PRIVATE main=ps3dk_sample_main)
         if(cxx)
             set(wrapper "${CMAKE_BINARY_DIR}/run-hook/hook_main_${t}.cpp")
         else()

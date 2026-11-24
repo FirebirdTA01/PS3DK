@@ -12,6 +12,10 @@
 
 #include "ps3dk_run_hook.h"
 
+/* run-hook-inject.cmake renames main for the whole target, this file included:
+   undo it here, after the headers, so this file defines the real entry point. */
+#undef main
+
 #ifdef __cplusplus
 /* A renamed C++ main is an ordinary, mangled function, and each parameter list
    mangles differently: declare the usual ones weak and call the one the sample
