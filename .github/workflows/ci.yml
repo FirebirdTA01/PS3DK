@@ -35,6 +35,10 @@ jobs:
       - name: Test sync-versions.sh keeps tools/VERSION canonical
         run: bash tests/sdk/sync-versions-test.sh
 
+      # build-cell-stub-archives.sh: clean and all as two makes, nidgen found under CARGO_TARGET_DIR (no toolchain).
+      - name: Test the stub-archive build helpers
+        run: bash tests/sdk/stub-archive-helpers-test.sh
+
       # Tracked text and the new commits' messages use the project's own
       # terms for the platform (encoded patterns, exact-line exceptions).
       - name: Test the wording scanner's refusals and controls
@@ -323,6 +327,18 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/live-trigger-test.py "$RUNNER_TEMP/live-e2e/trigger"
           python3 tests/host/ps3dk-prof-runtime/live-autostart-test.py "$RUNNER_TEMP/live-e2e/autostart"
           python3 tests/host/ps3dk-prof-runtime/live-autostart-cmake-test.py "$RUNNER_TEMP/live-e2e/autostart-cmake"
+      # The toolchain files' profiler options through one CMAKE_PROJECT_INCLUDE file: the runner's CMake, and
+      # CMake 3.28 (Kitware's tarball, sha256-checked), where the variable takes one file only.
+      - name: Profiler options on the runner's CMake and on CMake 3.28
+        if: matrix.suite == 'live-e2e'
+        run: |
+          python3 tests/host/ps3dk-prof-runtime/prof-register-cmake-test.py "$RUNNER_TEMP/live-e2e/register-cmake"
+          v=3.28.3; t="$RUNNER_TEMP/cmake-$v-linux-x86_64.tar.gz"
+          curl -fsSL --retry 3 -o "$t" "https://github.com/Kitware/CMake/releases/download/v$v/cmake-$v-linux-x86_64.tar.gz"
+          echo "804d231460ab3c8b556a42d2660af4ac7a0e21c98a7f8ee3318a74b4a9a187a6  $t" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/cmake-$v"; tar -C "$RUNNER_TEMP/cmake-$v" --strip-components=1 -xzf "$t"
+          python3 tests/host/ps3dk-prof-runtime/prof-register-cmake-test.py "$RUNNER_TEMP/live-e2e/register-cmake-$v" \
+            --cmake "$RUNNER_TEMP/cmake-$v/bin/cmake"
       - name: Live client against the real agent and runtime (three runs)
         if: matrix.suite == 'live-e2e'
         run: python3 tests/host/ps3dk-prof-runtime/live-e2e-test.py "$RUNNER_TEMP/live-e2e/e2e"
@@ -441,6 +457,8 @@ jobs:
       # hello-ppu-prof-auto-verdicts: bounded waits, stop and exit policy on a fake clock, with sensitivity mutants.
       - name: Verdict sample wait and exit policy host test
         run: python3 tests/host/prof-auto-verdicts-test.py
+      - name: Verdict sample refuses to configure without PS3_PROF_AUTO
+        run: python3 tests/host/prof-auto-verdicts-configure-test.py "$RUNNER_TEMP/prof-auto-verdicts-configure"
 
       # Automatic function paths (libps3dkprof_func runtime): the deterministic call-tree, stack-loss, capacity,
       # cut/ack and lifecycle controls, plain, ASan+UBSan and TSan, plus TSan mutants of the snapshot handoff.
@@ -590,7 +608,7 @@ jobs:
           python3 tests/host/ps3dk-prof-runtime/auto-cxx-link-test.py --out "$RUNNER_TEMP/auto-cxx-link"
           python3 tests/host/ps3dk-prof-runtime/auto-ring-option-cmake-test.py --out "$RUNNER_TEMP/auto-ring-option-cmake"
           python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity"
-          for mutant in compile-as-driver internal-definitions positional-inputs; do
+          for mutant in compile-as-driver internal-definitions positional-inputs no-driver-env; do
             python3 tests/host/ps3dk-prof-runtime/auto-identity-test.py --out "$RUNNER_TEMP/auto-identity-$mutant" --mutant "$mutant"
           done
           python3 tests/host/ps3dk-prof-runtime/auto-selector-test.py --out "$RUNNER_TEMP/auto-selector"
@@ -704,7 +722,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-              libelf-dev cmake ninja-build python3
+              libelf-dev cmake ninja-build python3 \
+              libgmp-dev libssl-dev zlib1g-dev
 
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
@@ -775,6 +794,38 @@ jobs:
       - name: Vertex coissue shared-source value regression
         run: bash tests/shader-compiler/vp-coissue-source-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
+      - name: A struct passed by value to a helper is the argument's value, judged by value
+        run: bash tests/shader-compiler/struct-value-argument-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: break and continue in a statically expanded loop, judged by value
+        run: bash tests/shader-compiler/static-loop-early-exit-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Large fixed-count fragment loops kept as hardware loops, judged by value and shape
+        run: bash tests/shader-compiler/static-loop-region-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Fragment programs carry no register self-copies, lerp rows judged by value and shape
+        run: bash tests/shader-compiler/fp-self-copy-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Lane-by-lane fragment copies of one source are one MOV, judged by value and shape
+        run: bash tests/shader-compiler/fp-lane-move-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Float and integer literals fold together, judged by value and shape
+        run: bash tests/shader-compiler/mixed-literal-fold-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Scalars share registers when a fragment program is over the register budget
+        run: bash tests/shader-compiler/fp-scalar-pack-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: fwidth and vertex-program step, judged by twin, shape and value
+        run: bash tests/shader-compiler/fwidth-vertex-step-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+      - name: A fragment entry may return from inside an if, judged by value
+        run: bash tests/shader-compiler/entry-early-return-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Vertex homogeneous dot products and direct output writes, judged by value and shape
+        run: bash tests/shader-compiler/vp-homogeneous-dot-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
+      - name: Loop carries written in place, judged by value and shape
+        run: bash tests/shader-compiler/loop-carry-in-place-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
+
       - name: Vertex normalize float3 and float4 value regression
         run: bash tests/shader-compiler/vp-normalize-width-test.sh tools/rsx-cg-compiler/build/rsx-cg-compiler
 
@@ -804,6 +855,21 @@ jobs:
 
       - name: Test the GCM command-emitter surface (location arg + FP control wrapper)
         run: bash tests/sdk/gcm-command-surface-test.sh
+
+      # make_self / make_self_npdrm / make_sprx: the certified-file header data length is the
+      # data the file stores (header length + data length == file size); a loader
+      # that checks it (PS3HEN's VSH plugin loader) refuses the file otherwise.
+      # Built from PSL1GHT's make_self.c at the commit bootstrap.sh pins.
+      - name: Test the certified-file header data length the signers write
+        run: |
+          pin=$(sed -n 's/^PSL1GHT_COMMIT="\([0-9a-f]*\)".*/\1/p' scripts/bootstrap.sh)
+          test ${#pin} -eq 40
+          src=$(mktemp -d)
+          git -C "$src" init -q
+          git -C "$src" remote add origin https://github.com/ps3dev/PSL1GHT.git
+          git -C "$src" fetch -q --depth 1 origin "$pin"
+          git -C "$src" checkout -q FETCH_HEAD
+          python3 tests/sdk/signed-file-data-len-test.py --make-self-c "$src/tools/geohot/make_self.c"
 
       - name: Test PPU header hygiene ratchet and install ownership
         run: |
@@ -1130,6 +1196,9 @@ jobs:
       - name: Test small heap blocks preserve free-list links and payloads
         run: bash tests/host/heap-small-block-test.sh
 
+      - name: Test sys_ppu_thread_exit on a thread with no TLS area, and the module thread pair
+        run: bash tests/host/librt-thread-exit-test.sh
+
       - name: Test PSGL client scratch preserves queued draws
         run: bash tests/host/psgl-client-scratch-test.sh
 
@@ -1138,6 +1207,9 @@ jobs:
 
       - name: Test GCM transfer data emitter words and negative controls
         run: bash tests/host/gcm-transfer-data-test.sh
+
+      - name: Test the cellgcm-transfer-data probe judge and its mutation controls
+        run: python3 tests/regression/cellgcm-transfer-data/judge_control_test.py
 
       - name: Test A2 label probe classifier and abort path
         run: bash tests/host/a2p-probe-test.sh
@@ -1234,6 +1306,9 @@ jobs:
       # SDK install put there, never nested as cmake/cmake.
       - name: Test the packaged cmake/ layout and its release-tree check
         run: bash tests/host/release-tree-cmake-layout-test.sh
+      # release.yml installs one exact Rust (dtolnay ref = scripts/ci-pin-rust.sh) and checks it per job.
+      - name: Test the release Rust pin
+        run: bash tests/host/ci-pin-rust-test.sh
 
       # Skips without PS3DEV or on GCC 12; gcc-16.x 0074 gives the installed
       # libgcc the lock-free FDE registry in both multilibs.
@@ -1412,6 +1487,14 @@ jobs:
       # solids plus a bounded-error gradient, and verifies block byte sizes.
       - name: Test the DXT1/3/5 block encoder against an independent decoder
         run: bash tests/sdk/dxt-encoder-test.sh
+
+      # hello-ppu-gcm-dxt: its embedded payloads must be the dxt-example output,
+      # and its framebuffer checks must reject wrong, moved and blank texels.
+      - name: Test the DXT sample assets match the dxt-encoder example output
+        run: bash tests/sdk/gcm-dxt-assets-test.sh
+
+      - name: Test rendering sample framebuffer checks
+        run: bash tests/sdk/gcm-render-pixels-test.sh
 
       # ps3_add_self, ps3_add_prx, and ps3_add_pkg default to CMAKE_CURRENT_BINARY_DIR,
       # with opt-back via PS3_SELF_OUTPUT_DIRECTORY and OUTPUT_DIRECTORY keyword.

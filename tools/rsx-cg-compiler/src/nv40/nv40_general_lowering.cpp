@@ -99,6 +99,9 @@ enum class VOp
     Dp2,
     Dp3,
     Dp4,
+    // VP only: the homogeneous dot product, a.xyz . b.xyz + b.w.  Made by
+    // foldVertexHomogeneousDots after ordering; nothing lowers to it.
+    Dph,
     Min,
     Max,
     Rcp,
@@ -720,6 +723,10 @@ public:
         seedParameters();
     }
 
+    // -O4: pack scalar temporaries four to a register in every fragment
+    // program, not only in one that is over the register budget.
+    void setPackScalarsAlways(bool always) { packScalarsAlways_ = always; }
+
     VirtualProgram run()
     {
         std::vector<const IRBasicBlock*> order;
@@ -761,8 +768,12 @@ public:
         legalizeInputOperands();
         renumberSourceIndices();
         applyOrderingPass();
+        foldVertexHomogeneousDots();
+        writeVertexOutputsDirectly();
+        packFragmentScalarsWhenOverBudget();
         allocatePhysicalTemps();
-        dropVertexSelfMoves();
+        dropSelfMoves();
+        mergeFragmentLaneMoves();
         return program_;
     }
 
@@ -4577,6 +4588,58 @@ private:
         program_.instrs.push_back(brk);
     }
 
+    // A carry whose next value is computed by ONE instruction of the body
+    // takes it in place: that instruction writes the carry's register and
+    // the latch copy is not emitted (`amp *= 0.5` is one MUL on the carry,
+    // as the established compiler emits it).  That holds only where nothing
+    // after the instruction still needs the old value: no later read of the
+    // carry, and no later break, because a break leaves the loop with the
+    // carries as the iteration found them.
+    bool writeCarryInPlace(int carry, int width, const VSrc& next)
+    {
+        if (profile_ != GeneralProfile::Fragment || next.kind != VSrcKind::Temp ||
+            next.neg || next.abs || next.fp16 || next.index == carry ||
+            singleUseProductTemps_.count(next.index))
+            return false;
+        for (int l = 0; l < width; ++l)
+            if (next.swizzle[l] != l) return false;
+        auto& code = program_.instrs;
+        size_t begin = code.size();
+        for (size_t i = code.size(); i-- > 0;)
+            if (code[i].op == VOp::LoopBegin) { begin = i; break; }
+        if (begin == code.size()) return false;
+        const int mask = (1 << width) - 1;
+        size_t def = code.size();
+        for (size_t i = 0; i < code.size(); ++i) {
+            const VInstr& vi = code[i];
+            if (vi.dst.none || vi.dst.output || vi.dst.address) continue;
+            if (vi.dst.index == carry && i > begin) return false;
+            if (vi.dst.index != next.index) continue;
+            if (def != code.size() || i < begin) return false;      // one definition, inside the region
+            def = i;
+        }
+        if (def == code.size()) return false;
+        const VInstr& d = code[def];
+        if (d.dst.writemask != mask || d.dst.fp16 || d.dst.preferredPhys >= 0 || d.dst.outputPin ||
+            d.predicate != 0 || d.stubCoIssuePartner || d.op == VOp::SelPred)
+            return false;
+        for (size_t i = def + 1; i < code.size(); ++i) {
+            if (code[i].op == VOp::Brk || code[i].op == VOp::LoopBegin || code[i].op == VOp::LoopEnd)
+                return false;
+            for (const VSrc& src : code[i].srcs)
+                if (src.kind == VSrcKind::Temp && src.index == carry) return false;
+        }
+        code[def].dst.index = carry;
+        for (size_t i = def + 1; i < code.size(); ++i)
+            for (VSrc& src : code[i].srcs)
+                if (src.kind == VSrcKind::Temp && src.index == next.index) src.index = carry;
+        for (auto& kv : program_.valueToVReg)
+            if (kv.second == next.index) kv.second = carry;
+        for (auto& kv : program_.valueToSource)
+            if (kv.second.kind == VSrcKind::Temp && kv.second.index == next.index) kv.second.index = carry;
+        return true;
+    }
+
     // Every carry takes its next value IN PARALLEL: a next value that is
     // another carry's register is copied aside first, so a swap (a <- b,
     // b <- a) does not collapse.  A self-copy with the identity swizzle is
@@ -4620,11 +4683,19 @@ private:
             c.src = tempSrc(staged);
             if (c.width == 1) broadcastScalar(c.src);
         }
-        for (const Copy& c : copies) {
+        for (size_t k = 0; k < copies.size(); ++k) {
+            const Copy c = copies[k];
             if (c.src.kind == VSrcKind::Temp && c.src.index == c.dst && !c.src.neg && !c.src.abs) {
                 bool identity = true;
                 for (int l = 0; l < c.width; ++l) identity = identity && c.src.swizzle[l] == l;
                 if (identity) continue;
+            }
+            if (writeCarryInPlace(c.dst, c.width, c.src)) {
+                // the value now lives in this carry: a later copy of it reads it there
+                for (size_t m = k + 1; m < copies.size(); ++m)
+                    if (copies[m].src.kind == VSrcKind::Temp && copies[m].src.index == c.src.index)
+                        copies[m].src.index = c.dst;
+                continue;
             }
             VInstr mov;
             mov.op = VOp::Mov;
@@ -5957,6 +6028,39 @@ private:
 
         size_t operandIndex = 0;
         for (int row = 0; row < rows; ++row) {
+            // A row of float constants is one literal source, the same row a
+            // folded constant matrix gives (matrixRows below): nothing is
+            // computed for it.  It used to be copied into a register a lane
+            // at a time, four MOVs for a row the consumer reads once.
+            {
+                VSrc literalRow;
+                literalRow.kind = VSrcKind::Literal;
+                literalRow.literalLanes = static_cast<uint8_t>(cols);
+                bool constantRow = true;
+                for (int col = 0; col < cols && constantRow; ++col) {
+                    const auto* constant = dynamic_cast<const IRConstant*>(
+                        entry_.getValue(inst.operands[operandIndex + static_cast<size_t>(col)]));
+                    const float* value = constant ? std::get_if<float>(&constant->value) : nullptr;
+                    if (!value || constant->type.isVector() || constant->type.isMatrix())
+                        constantRow = false;
+                    else
+                        literalRow.literal[col] = *value;
+                }
+                // A row holding both +0 and -0 stays on the lane-by-lane
+                // path: the literal block is packed by float equality, which
+                // would give both lanes the first zero's sign.
+                bool plusZero = false, minusZero = false;
+                for (int col = 0; col < cols && constantRow; ++col)
+                    if (literalRow.literal[col] == 0.0f)
+                        (std::signbit(literalRow.literal[col]) ? minusZero : plusZero) = true;
+                if (plusZero && minusZero)
+                    constantRow = false;
+                if (constantRow) {
+                    mv.rowSrcs.push_back(literalRow);
+                    operandIndex += static_cast<size_t>(cols);
+                    continue;
+                }
+            }
             const int rowReg = newVReg();
             mv.rowSrcs.push_back(tempSrc(rowReg));
             for (int col = 0; col < cols; ++col, ++operandIndex) {
@@ -7825,10 +7929,23 @@ private:
 
     void lowerStep(const IRInstruction& inst)
     {
-        if (profile_ != GeneralProfile::Fragment ||
-            inst.operands.size() < 2 || inst.result == InvalidIRValue) {
+        if (inst.operands.size() < 2 || inst.result == InvalidIRValue) {
             program_.diagnostics.push_back(
-                "nv40-general: only FP step lowering is supported");
+                "nv40-general: step needs an edge and a value; refusing");
+            program_.loweringFailed = true;
+            return;
+        }
+        // VP: step(edge, x) is one `SGE x, edge` (measured on the established
+        // compiler: `SGE o[TEX1].x, v[ATTR2].z, c[..].x` for step(0.5, n.z)).
+        // It used to be refused outright.
+        if (profile_ != GeneralProfile::Fragment) {
+            VInstr cmp;
+            cmp.op = VOp::Sge;
+            cmp.dst.index = define(inst.result);
+            cmp.dst.writemask = componentMask(inst.resultType);
+            cmp.srcs[0] = resolve(inst.operands[1]);
+            cmp.srcs[1] = resolve(inst.operands[0]);
+            program_.instrs.push_back(cmp);
             return;
         }
 
@@ -9881,6 +9998,7 @@ private:
         case VOp::Dp2: return 0x3;
         case VOp::Dp3: return 0x7;
         case VOp::Dp4: return 0xf;
+        case VOp::Dph: return srcIndex == 0 ? 0x7 : 0xf;
         case VOp::DivR:
         case VOp::DivSqrt:
             return srcIndex == 0 ? vi.dst.writemask : 0x1;
@@ -11123,11 +11241,17 @@ private:
     // VP: a MOV the allocator coalesced onto its own source register
     // (`MOV R1.x, R1.xxxx`) copies every lane it writes onto itself, so it
     // is dropped (measured: 2xbrz carried three, the established compiler none).
-    void dropVertexSelfMoves()
+    //
+    // FP: the same copy, left mostly by lerp's `MOV a` when `a` already sits
+    // in the result register (measured: 230 of the 9194 instructions of the
+    // fragment bucket).  It is dropped only as a full-precision R-to-R copy:
+    // an H register, a precision or scale stamp, or a fence makes the MOV
+    // more than a copy.
+    void dropSelfMoves()
     {
-        if (profile_ != GeneralProfile::Vertex) return;
+        const bool fragment = profile_ == GeneralProfile::Fragment;
         auto& code = program_.instrs;
-        code.erase(std::remove_if(code.begin(), code.end(), [](const VInstr& vi) {
+        code.erase(std::remove_if(code.begin(), code.end(), [fragment](const VInstr& vi) {
             if (vi.op != VOp::Mov || vi.dst.none || vi.dst.output || vi.dst.address ||
                 vi.sat || vi.ccUpdate || vi.predicate != 0 || vi.stubCoIssuePartner ||
                 vi.stubFenceBefore || vi.stubFenceBrBefore)
@@ -11136,10 +11260,445 @@ private:
             if (s.kind != VSrcKind::Temp || s.neg || s.abs || s.relative ||
                 vi.dst.phys < 0 || s.phys != vi.dst.phys)
                 return false;
+            if (fragment && (vi.dst.fp16 || s.fp16 || vi.fpScale != 0 ||
+                             vi.fpPrecisionOverride > NVFX_FP_PRECISION_FP32))
+                return false;
             for (int l = 0; l < 4; ++l)
                 if ((vi.dst.writemask & (1 << l)) && s.swizzle[l] != l) return false;
             return true;
         }), code.end());
+    }
+
+    // FP: two adjacent MOVs that write different lanes of one register from
+    // one source, alike in everything but the write mask and the swizzle,
+    // are one MOV (`MOV R0.x, R1.x; MOV R0.y, R1.x` is `MOV R0.xy, R1.x`).
+    // A vector built lane by lane left these (measured: 547 such pairs over
+    // the two shader sets, 12 in the established compiler's output).  When
+    // the source is the destination register itself, the second MOV must not
+    // read a lane the first one writes.
+    void mergeFragmentLaneMoves()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        const auto plainMov = [](const VInstr& vi) {
+            return vi.op == VOp::Mov && !vi.dst.none && !vi.dst.address && !vi.ccUpdate &&
+                   !vi.stubCoIssuePartner && vi.scalarSourceDemandMask == 0 &&
+                   (vi.dst.output || vi.dst.phys >= 0);
+        };
+        const auto sameButSwizzle = [](const VSrc& a, const VSrc& b) {
+            return a.kind == b.kind && (a.kind == VSrcKind::Temp || a.index == b.index) &&
+                   a.phys == b.phys &&
+                   a.fp16 == b.fp16 && a.embeddedUniform == b.embeddedUniform &&
+                   // bit for bit: +0 and -0 compare equal as floats, and the merged
+                   // MOV keeps the first literal block
+                   std::memcmp(a.literal.data(), b.literal.data(), sizeof(float) * 4) == 0 &&
+                   a.literalLanes == b.literalLanes &&
+                   a.neg == b.neg && a.abs == b.abs && a.relative == b.relative &&
+                   a.addrReg == b.addrReg && a.addrLane == b.addrLane;
+        };
+        auto& code = program_.instrs;
+        for (size_t i = 0; i + 1 < code.size();) {
+            VInstr& a = code[i];
+            const VInstr& b = code[i + 1];
+            bool merge = plainMov(a) && plainMov(b) &&
+                !b.stubFenceBefore && !b.stubFenceBrBefore &&
+                a.dst.output == b.dst.output && a.dst.fp16 == b.dst.fp16 &&
+                (a.dst.output ? a.dst.index == b.dst.index : a.dst.phys == b.dst.phys) &&
+                (a.dst.writemask & b.dst.writemask) == 0 &&
+                a.sat == b.sat && a.predicate == b.predicate &&
+                a.predicateSwizzle == b.predicateSwizzle && a.disablePc == b.disablePc &&
+                a.fpScale == b.fpScale && a.fpPrecisionOverride == b.fpPrecisionOverride &&
+                a.preservePartialOutputMask == b.preservePartialOutputMask &&
+                sameButSwizzle(a.srcs[0], b.srcs[0]);
+            if (merge && b.srcs[0].kind == VSrcKind::Temp) {
+                const VSrc& s = b.srcs[0];
+                const int dstReg = a.dst.output ? a.dst.index : a.dst.phys;
+                // H registers share hardware slots with R registers: a
+                // mixed pair is left alone rather than reasoned about.
+                if (s.fp16 != a.dst.fp16)
+                    merge = false;
+                else if (s.phys == dstReg)
+                    for (int l = 0; l < 4; ++l)
+                        if ((b.dst.writemask & (1 << l)) &&
+                            (a.dst.writemask & (1 << s.swizzle[l])))
+                            merge = false;
+            }
+            if (!merge) { ++i; continue; }
+            for (int l = 0; l < 4; ++l)
+                if (b.dst.writemask & (1 << l)) a.srcs[0].swizzle[l] = b.srcs[0].swizzle[l];
+            a.dst.writemask |= b.dst.writemask;
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+        }
+    }
+
+    // VP: `mul(M, float4(p, 1.0))` built the float4 in a register (a MOV for
+    // p, a MOV for the 1.0) and took four DP4s of it.  A dot product with a
+    // vector whose w is 1 is the homogeneous dot product, a.xyz . b.xyz + b.w,
+    // which is one DPH per row and needs no 1.0 (measured: the established
+    // compiler emits `DPH R0.w, v[0].xyzx, c[259]`; 811 DPH over the vertex
+    // programs of the measured set, none here).
+    //
+    // For a temp whose lane w is written once, by a MOV of the literal 1, and
+    // whose every reader of lane w is a DP4 after that MOV reading the temp
+    // unswizzled: each DP4 becomes a DPH with the temp first, and the MOV of
+    // the 1.0 goes.  When that leaves the temp as a plain copy of p read by
+    // those DPHs alone, they read p itself and the copy goes too.
+    void foldVertexHomogeneousDots()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        for (const VInstr& vi : code)
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::LoopEnd || vi.op == VOp::Brk) return;
+        const auto writesTemp = [](const VInstr& vi, int reg) {
+            return !vi.dst.none && !vi.dst.output && !vi.dst.address && vi.dst.index == reg;
+        };
+        for (size_t wi = 0; wi < code.size(); ++wi) {
+            const VInstr one = code[wi];
+            if (one.op != VOp::Mov || one.dst.none || one.dst.output || one.dst.address ||
+                one.dst.writemask != 0x8 || one.sat || one.ccUpdate || one.predicate != 0)
+                continue;
+            const VSrc& lit = one.srcs[0];
+            if (lit.kind != VSrcKind::Literal || lit.neg || lit.literal[lit.swizzle[3] & 3] != 1.0f)
+                continue;
+            const int T = one.dst.index;
+            bool ok = true;
+            std::vector<std::pair<size_t, size_t>> dots;      // (instruction, operand) reading T.w
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                const VInstr& vi = code[k];
+                if (k != wi && writesTemp(vi, T) && (vi.dst.writemask & 0x8)) ok = false;
+                int operandsOfT = 0;
+                for (size_t n = 0; n < vi.srcs.size() && ok; ++n) {
+                    const VSrc& r = vi.srcs[n];
+                    if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                    ++operandsOfT;
+                    if (!(inputLanesRead(vi, n) & 0x8)) continue;
+                    // A negated or absolute read is not homogeneous: dot(-h, row)
+                    // is -(p . row.xyz) - row.w, and a DPH of -h would add +row.w.
+                    const bool plain = r.swizzle == std::array<uint8_t, 4>{0, 1, 2, 3} &&
+                                       !r.abs && !r.neg;
+                    if (vi.op != VOp::Dp4 || k < wi || n > 1 || !plain || vi.predicate != 0)
+                        ok = false;
+                    else
+                        dots.push_back({k, n});
+                }
+                if (vi.op == VOp::Dp4 && operandsOfT > 1) ok = false;
+            }
+            if (!ok || dots.empty()) continue;
+            for (const auto& [k, n] : dots) {
+                VInstr& dp = code[k];
+                dp.op = VOp::Dph;
+                if (n == 1) std::swap(dp.srcs[0], dp.srcs[1]);
+                dp.srcs[0].swizzle = {0, 1, 2, 0};
+            }
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(wi));
+
+            // The temp may now be a plain copy the DPHs can read through.
+            size_t ci = code.size();
+            int writers = 0;
+            for (size_t k = 0; k < code.size(); ++k)
+                if (writesTemp(code[k], T)) { ++writers; ci = k; }
+            if (writers == 1) {
+                const VInstr copy = code[ci];
+                const VSrc x = copy.srcs[0];
+                bool through = copy.op == VOp::Mov && (copy.dst.writemask & 0x7) == 0x7 &&
+                    !copy.sat && !copy.ccUpdate && copy.predicate == 0 && !x.relative &&
+                    (x.kind == VSrcKind::Input || x.kind == VSrcKind::Temp) &&
+                    !(x.kind == VSrcKind::Temp && x.index == T);
+                std::vector<size_t> readers;
+                for (size_t k = 0; k < code.size() && through; ++k)
+                    for (size_t n = 0; n < code[k].srcs.size(); ++n) {
+                        const VSrc& r = code[k].srcs[n];
+                        if (r.kind != VSrcKind::Temp || r.index != T) continue;
+                        // one input register per instruction: the row must not be one
+                        if (code[k].op != VOp::Dph || n != 0 || k < ci || r.neg || r.abs ||
+                            (x.kind == VSrcKind::Input && code[k].srcs[1].kind == VSrcKind::Input))
+                            through = false;
+                        else
+                            readers.push_back(k);
+                    }
+                if (through && x.kind == VSrcKind::Temp)
+                    for (size_t k = ci + 1; k < code.size() && through; ++k)
+                        if (writesTemp(code[k], x.index) &&
+                            std::any_of(readers.begin(), readers.end(), [&](size_t r) { return r > k; }))
+                            through = false;
+                if (through && !readers.empty()) {
+                    for (size_t k : readers) {
+                        VSrc& r = code[k].srcs[0];
+                        const auto swz = r.swizzle;
+                        r = x;
+                        for (int l = 0; l < 4; ++l) r.swizzle[l] = x.swizzle[swz[l]];
+                    }
+                    code.erase(code.begin() + static_cast<std::ptrdiff_t>(ci));
+                }
+            }
+            wi = static_cast<size_t>(-1);   // the list changed: start over
+        }
+    }
+
+    // VP: a value computed into a temp and then copied whole to an output
+    // (`DP4 R0.w ..; DP4 R0.z ..; ..; MOV o[HPOS], R0`) is computed into the
+    // output (measured: the established compiler writes `DP4 o[HPOS].w, ..`;
+    // 598 such copies over the vertex programs of the measured set against
+    // its 176).  The temp must be read by that copy alone and written only
+    // before it, by lane-wise or dot-product instructions that do not read
+    // it; nothing else may write those output lanes in between.
+    //
+    // The copy may reorder or repeat lanes (`DP3 R0.x ..; MOV o[TEX1].z,
+    // R0.xxxx` is `DP3 o[TEX1].z ..`): output lane l takes the temp lane the
+    // copy's swizzle names, every such temp lane must be written, and each
+    // writer then writes the output lanes fed from its lanes.  A lane-wise
+    // writer reads, for output lane l, what it read for the temp lane; a dot
+    // product gives every lane the same value and reads as before.  Several
+    // writers of one lane stay in their order, so the last one still wins.
+    void writeVertexOutputsDirectly()
+    {
+        if (profile_ != GeneralProfile::Vertex) return;
+        auto& code = program_.instrs;
+        for (const VInstr& vi : code)
+            if (vi.op == VOp::LoopBegin || vi.op == VOp::LoopEnd || vi.op == VOp::Brk) return;
+        for (size_t mi = 0; mi < code.size(); ++mi) {
+            const VInstr mov = code[mi];
+            const VSrc& s = mov.srcs[0];
+            if (mov.op != VOp::Mov || !mov.dst.output || mov.dst.userClipOutput || mov.sat ||
+                mov.ccUpdate || mov.predicate != 0 || s.kind != VSrcKind::Temp || s.neg || s.abs)
+                continue;
+            bool ok = true;
+            // from[l]: the temp lane output lane l takes; needed: those lanes
+            std::array<int, 4> from = {-1, -1, -1, -1};
+            int needed = 0;
+            for (int l = 0; l < 4; ++l)
+                if (mov.dst.writemask & (1 << l)) {
+                    from[l] = s.swizzle[l];
+                    needed |= 1 << from[l];
+                }
+            const int T = s.index;
+            std::vector<std::pair<size_t, int>> writers;     // (instruction, its new output mask)
+            std::array<int, 4> writersOfLane = {0, 0, 0, 0};
+            for (size_t k = 0; k < code.size() && ok; ++k) {
+                const VInstr& vi = code[k];
+                for (const VSrc& r : vi.srcs)
+                    if (r.kind == VSrcKind::Temp && r.index == T && k != mi) ok = false;
+                if (vi.dst.none || vi.dst.output || vi.dst.address || vi.dst.index != T) continue;
+                const bool laneWise = componentwiseOp(vi.op) || vi.op == VOp::Dp3 ||
+                                      vi.op == VOp::Dp4 || vi.op == VOp::Dph;
+                if (k > mi || !laneWise || vi.sat || vi.ccUpdate || vi.predicate != 0)
+                    ok = false;
+                int outMask = 0;
+                for (int l = 0; l < 4; ++l) {
+                    if (vi.dst.writemask & (1 << l)) ++writersOfLane[l];
+                    if (from[l] >= 0 && (vi.dst.writemask & (1 << from[l]))) outMask |= 1 << l;
+                }
+                // A writer none of whose lanes the copy takes would be left
+                // writing a temp nobody reads: leave such a shape alone.
+                if (outMask == 0) ok = false;
+                writers.push_back({k, outMask});
+            }
+            for (int l = 0; l < 4; ++l)
+                if ((needed & (1 << l)) && writersOfLane[l] == 0) ok = false;
+            if (!ok || writers.empty()) continue;
+            for (size_t k = writers.front().first; k < mi && ok; ++k)
+                if (code[k].dst.output && !code[k].dst.none && code[k].dst.index == mov.dst.index &&
+                    (code[k].dst.writemask & mov.dst.writemask))
+                    ok = false;
+            if (!ok) continue;
+            for (const auto& [k, outMask] : writers) {
+                VInstr& w = code[k];
+                if (componentwiseOp(w.op))
+                    for (VSrc& src : w.srcs) {
+                        if (src.kind == VSrcKind::None) continue;
+                        const auto old = src.swizzle;
+                        for (int l = 0; l < 4; ++l)
+                            if (outMask & (1 << l)) src.swizzle[l] = old[from[l]];
+                    }
+                w.dst = mov.dst;
+                w.dst.writemask = outMask;
+            }
+            code.erase(code.begin() + static_cast<std::ptrdiff_t>(mi));
+            --mi;
+        }
+    }
+
+    // FP: every temp gets a whole register, also a scalar that uses one
+    // lane of it.  A program that holds more values at a time than the
+    // hardware has registers was refused for that alone (measured: a terrain
+    // shader holding 58 values at its peak, 33 of them scalars).  When the
+    // peak is over the budget, scalars are packed four to a register: each
+    // one is given a lane of a shared register for exactly its lifetime, its
+    // writers write that lane and its readers read it.
+    //
+    // By default only a program that could not be allocated otherwise is
+    // touched, so no accepted program changes; -O4 packs every program, which
+    // lowers the register count below what one register per value gives.  A
+    // scalar is packed only when every writer is
+    // an operation whose result lane does not matter (a componentwise
+    // operation, a dot product, a select) and every reader takes it through
+    // lane x of its swizzle.  In a hardware loop a value that reaches an
+    // iteration from outside it, or from the iteration before, keeps its lane
+    // for the whole loop.
+    bool packScalarsAlways_ = false;
+    void packFragmentScalarsWhenOverBudget()
+    {
+        if (profile_ != GeneralProfile::Fragment) return;
+        auto& code = program_.instrs;
+        const size_t none = std::numeric_limits<size_t>::max();
+        struct Info {
+            int mask = 0;
+            size_t first = std::numeric_limits<size_t>::max();
+            size_t last = 0;
+            bool packable = true;
+        };
+        std::unordered_map<int, Info> info;
+        // A select writes its result before it reads its condition and its
+        // taken value, so those may not sit in the result's register at all
+        // (the emitter refuses that): such pairs get different registers.
+        std::unordered_map<int, std::set<int>> apart;
+        const auto tempDst = [](const VDst& d) { return !d.none && !d.output && !d.address; };
+        const auto lanePlain = [](VOp op) {
+            return componentwiseOp(op) || op == VOp::SelPred;
+        };
+        for (size_t i = 0; i < code.size(); ++i) {
+            const VInstr& vi = code[i];
+            for (size_t n = 0; n < vi.srcs.size(); ++n) {
+                const VSrc& s = vi.srcs[n];
+                if (s.kind != VSrcKind::Temp) continue;
+                Info& r = info[s.index];
+                r.last = std::max(r.last, i);
+                if (s.fp16 || vi.op == VOp::Kil) r.packable = false;
+                const int req = requiredSourceMask(vi, n);
+                for (int l = 0; l < 4; ++l)
+                    if ((req & (1 << l)) && s.swizzle[l] != 0) r.packable = false;
+            }
+            if (!tempDst(vi.dst)) continue;
+            if (vi.op == VOp::SelPred)
+                for (int n = 0; n < 2; ++n)
+                    if (vi.srcs[n].kind == VSrcKind::Temp && vi.srcs[n].index != vi.dst.index) {
+                        apart[vi.dst.index].insert(vi.srcs[n].index);
+                        apart[vi.srcs[n].index].insert(vi.dst.index);
+                    }
+            Info& w = info[vi.dst.index];
+            w.mask |= vi.dst.writemask;
+            if (w.first == none) w.first = i;
+            w.last = std::max(w.last, i);
+            const bool laneFree = lanePlain(vi.op) || vi.op == VOp::Dp2 || vi.op == VOp::Dp3 ||
+                                  vi.op == VOp::Dp4;
+            if (!laneFree || vi.dst.fp16 || vi.dst.preferredPhys >= 0 || vi.dst.outputPin ||
+                vi.ccUpdate || vi.predicate != 0 || vi.selPerLane || vi.stubCoIssuePartner ||
+                vi.stubFenceBefore || vi.stubFenceBrBefore || vi.scalarSourceDemandMask != 0 ||
+                vi.preservePartialOutputMask)
+                w.packable = false;
+        }
+        // A hardware loop runs its body again: a value written before the
+        // loop and read inside it is read by the next iteration too, so it
+        // lives to the end of the loop (the allocator's own rule).  A value
+        // written inside the loop is written again before each read.
+        {
+            std::vector<size_t> open;
+            for (size_t i = 0; i < code.size(); ++i) {
+                if (code[i].op == VOp::LoopBegin) { open.push_back(i); continue; }
+                if (code[i].op != VOp::LoopEnd || open.empty()) continue;
+                const size_t begin = open.back();
+                open.pop_back();
+                for (size_t k = begin + 1; k < i; ++k)
+                    for (const VSrc& s : code[k].srcs) {
+                        if (s.kind != VSrcKind::Temp) continue;
+                        Info& r = info[s.index];
+                        if (r.first == none) continue;
+                        // read before its write inside the loop: the value
+                        // comes round from the previous iteration
+                        if (r.first > k) r.first = begin;
+                        if (r.first <= begin) r.last = std::max(r.last, i);
+                    }
+            }
+            if (!open.empty()) return;      // an unclosed loop: leave the program alone
+        }
+        int peak = 0;
+        {
+            std::vector<int> begins(code.size() + 1, 0), ends(code.size() + 1, 0);
+            for (const auto& [vreg, r] : info) {
+                if (r.first == none) continue;
+                ++begins[r.first];
+                ++ends[std::max(r.first, r.last)];
+            }
+            int live = 0;
+            for (size_t i = 0; i < code.size(); ++i) {
+                live += begins[i];
+                peak = std::max(peak, live);
+                live -= ends[i];
+            }
+        }
+        // 48 registers: the highest usable fragment temp index is 47.
+        if (peak <= 48 && !packScalarsAlways_) return;
+
+        std::vector<int> scalars;
+        for (const auto& [vreg, r] : info) {
+            if (r.first == none || !r.packable || r.mask != 0x1) continue;
+            const auto half = program_.vregToFp16.find(vreg);
+            if (half != program_.vregToFp16.end() && half->second) continue;
+            scalars.push_back(vreg);
+        }
+        std::sort(scalars.begin(), scalars.end(), [&](int a, int b) {
+            const Info& x = info[a];
+            const Info& y = info[b];
+            return x.first != y.first ? x.first < y.first : a < b;
+        });
+        // A lane is free for a scalar defined strictly after its occupant's
+        // last read: a select writes its result before it reads its
+        // condition, so the two may not share an instruction.
+        struct Shared { int vreg; std::array<size_t, 4> busyUntil; std::array<bool, 4> used; };
+        std::vector<Shared> shared;
+        std::unordered_map<int, std::pair<int, int>> placed;   // scalar -> (register, lane)
+        for (int vreg : scalars) {
+            const Info& r = info[vreg];
+            bool done = false;
+            const auto keepApart = apart.find(vreg);
+            for (Shared& sh : shared) {
+                bool clash = false;
+                if (keepApart != apart.end())
+                    for (int other : keepApart->second) {
+                        const auto at = placed.find(other);
+                        if (at != placed.end() && at->second.first == sh.vreg) clash = true;
+                    }
+                if (clash) continue;
+                for (int l = 0; l < 4 && !done; ++l) {
+                    if (sh.used[l] && sh.busyUntil[l] >= r.first) continue;
+                    sh.used[l] = true;
+                    sh.busyUntil[l] = std::max(r.first, r.last);
+                    placed[vreg] = {sh.vreg, l};
+                    done = true;
+                }
+                if (done) break;
+            }
+            if (done) continue;
+            Shared sh{newVReg(), {0, 0, 0, 0}, {false, false, false, false}};
+            sh.used[0] = true;
+            sh.busyUntil[0] = std::max(r.first, r.last);
+            placed[vreg] = {sh.vreg, 0};
+            shared.push_back(sh);
+        }
+        for (VInstr& vi : code) {
+            const auto dstPlace = tempDst(vi.dst) ? placed.find(vi.dst.index) : placed.end();
+            // The writer writes lane x, so each operand is read through
+            // swizzle lane x alone: say so in every lane, and the result
+            // lane can move without touching the operands again.
+            if (dstPlace != placed.end() && lanePlain(vi.op))
+                for (size_t n = vi.op == VOp::SelPred ? 1 : 0; n < vi.srcs.size(); ++n) {
+                    VSrc& s = vi.srcs[n];
+                    if (s.kind == VSrcKind::None) continue;
+                    const uint8_t lane = s.swizzle[0];
+                    s.swizzle = {lane, lane, lane, lane};
+                }
+            for (VSrc& s : vi.srcs) {
+                if (s.kind != VSrcKind::Temp) continue;
+                const auto at = placed.find(s.index);
+                if (at == placed.end()) continue;
+                for (uint8_t& lane : s.swizzle)
+                    if (lane == 0) lane = static_cast<uint8_t>(at->second.second);
+                s.index = at->second.first;
+            }
+            if (dstPlace != placed.end()) {
+                vi.dst.writemask = 1 << dstPlace->second.second;
+                vi.dst.index = dstPlace->second.first;
+            }
+        }
     }
 
     void allocatePhysicalTemps()
@@ -11915,6 +12474,7 @@ static const char* vOpName(VOp op)
     case VOp::Dp2: return "Dp2";
     case VOp::Dp3: return "Dp3";
     case VOp::Dp4: return "Dp4";
+    case VOp::Dph: return "Dph";
     case VOp::Min: return "Min";
     case VOp::Max: return "Max";
     case VOp::Rcp: return "Rcp";
@@ -11970,6 +12530,7 @@ static bool tryVpOpcode(VOp op, uint8_t& opcode)
     case VOp::Mad: opcode = VP_OP(MAD); return true;
     case VOp::Dp3: opcode = VP_OP(DP3); return true;
     case VOp::Dp4: opcode = VP_OP(DP4); return true;
+    case VOp::Dph: opcode = VP_OP(DPH); return true;
     case VOp::Max: opcode = VP_OP(MAX); return true;
     case VOp::Min: opcode = VP_OP(MIN); return true;
     case VOp::Rcp: opcode = VP_SCA_OP(RCP); return true;
@@ -12839,7 +13400,21 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
                     asm_.appendConstBlock(s.literal.data());
                 }
             };
-            emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
+            // The default write is `MOV dst, else`.  Where the allocator put
+            // the else value in dst's own register it copies every written
+            // lane onto itself, and it is left out (a full-precision R
+            // register only: a saturating select or an H register makes the
+            // MOV more than a copy).
+            bool elseInPlace = false;
+            {
+                const VSrc& e = vi.srcs[2];
+                elseInPlace = e.kind == VSrcKind::Temp && e.phys == vi.dst.phys && !e.fp16 &&
+                              !vi.dst.fp16 && !e.neg && !e.abs && !vi.sat;
+                for (int l = 0; l < 4 && elseInPlace; ++l)
+                    if ((vi.dst.writemask & (1 << l)) && e.swizzle[l] != l) elseInPlace = false;
+            }
+            if (!elseInPlace)
+                emitOne(selDst, vi.dst.writemask, vi.srcs[2], false, false);
             emitOne(ccDst, vi.selPerLane ? vi.dst.writemask : 0x1,
                     vi.srcs[0], true, false);
             emitOne(selDst, vi.dst.writemask, vi.srcs[1], false, true);
@@ -13136,6 +13711,7 @@ static UcodeOutput emitFragmentVirtual(VirtualProgram& program,
     out.words = asm_.words();
     out.ok = true;
     attrs.registerCount = static_cast<uint8_t>(tempRegs);
+    attrs.instructionCount = static_cast<uint32_t>(asm_.instructionCount());
     if (attrsOut)
         *attrsOut = attrs;
     return out;
@@ -13457,14 +14033,38 @@ static void appendBuilderDiagnostics(const VirtualProgram& program, UcodeOutput&
 
 UcodeOutput lowerFragmentProgramGeneral(const IRModule& module,
                                         const IRFunction& entry,
-                                        const rsx_cg::CompileOptions&,
+                                        const rsx_cg::CompileOptions& opts,
                                         FpAttributes* attrsOut)
 {
-    GeneralBuilder builder(GeneralProfile::Fragment, entry, module);
-    VirtualProgram program = builder.run();
-    UcodeOutput out = emitFragmentVirtual(program, entry, attrsOut);
-    appendBuilderDiagnostics(program, out);
-    return out;
+    const auto build = [&](bool packAlways, FpAttributes* attrs) {
+        GeneralBuilder builder(GeneralProfile::Fragment, entry, module);
+        builder.setPackScalarsAlways(packAlways);
+        VirtualProgram program = builder.run();
+        UcodeOutput out = emitFragmentVirtual(program, entry, attrs);
+        appendBuilderDiagnostics(program, out);
+        return out;
+    };
+    if (opts.opt != rsx_cg::OptLevel::O4)
+        return build(false, attrsOut);
+
+    // -O4: packing every scalar lowers the register count of most programs,
+    // but a copy that is dropped when two values share a register survives
+    // when they sit in different lanes, so some programs come out longer and
+    // a few use a register more (measured: +0.65% and +2.0% instructions over
+    // the two shader sets, for -4.9% and -13.1% registers).  So the program is
+    // built both ways and the packed one is kept only where it is better: it
+    // must emit, use fewer registers, and have no more instructions.  The
+    // count is of instructions, not ucode words: a build with two more
+    // instructions and two fewer inline constant blocks has the same number
+    // of words and is longer.
+    FpAttributes plainAttrs, packedAttrs;
+    UcodeOutput plain = build(false, &plainAttrs);
+    UcodeOutput packed = build(true, &packedAttrs);
+    const bool keepPacked = packed.ok &&
+        (!plain.ok || (packedAttrs.registerCount < plainAttrs.registerCount &&
+                       packedAttrs.instructionCount <= plainAttrs.instructionCount));
+    if (attrsOut) *attrsOut = keepPacked ? packedAttrs : plainAttrs;
+    return keepPacked ? packed : plain;
 }
 
 UcodeOutput lowerVertexProgramGeneral(const IRModule& module,

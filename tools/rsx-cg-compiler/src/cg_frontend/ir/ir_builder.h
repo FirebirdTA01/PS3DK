@@ -28,6 +28,19 @@ public:
     const std::vector<std::string>& errors() const { return errors_; }
     bool hasErrors() const { return !errors_.empty(); }
 
+    // A fixed-count fragment loop whose expansion would be large is kept as
+    // a hardware loop (static-loop-regions).  The driver turns this off and
+    // builds again when a program that kept one fails to compile, so keeping
+    // a loop never costs acceptance.
+    void setKeepStaticLoops(bool keep) { keepStaticLoops_ = keep; }
+    // A fragment entry that returns from inside an if (entry-early-returns):
+    // when set, its body is built as an inlined helper's is, so the returns
+    // merge into one result through selects.  The driver sets it only after
+    // the ordinary build failed to emit.
+    void setMergeEntryReturns(bool merge) { mergeEntryReturns_ = merge; }
+    bool entryReturnsInsideIf() const { return entryReturnsInsideIf_; }
+    int staticLoopsKept() const { return staticLoopsKept_; }
+
     // Type conversion helpers
     static IRTypeInfo getIRType(const CgType& cgType);
     static IRTypeInfo getIRType(TypeNode* typeNode);
@@ -122,6 +135,10 @@ private:
     // (uniform-struct-entry-parameter): the name has no whole-struct value,
     // only `name.member...` bindings, so a whole-struct copy copies those.
     std::unordered_set<std::string> flattenedUniformStructParams_;
+    // Helper parameters currently bound to a struct VALUE rather than to
+    // (a path into) an entry struct input (struct-value-argument): set or
+    // cleared at every binding of the parameter, read while its body is built.
+    std::unordered_set<const ParamDecl*> valueStructParams_;
     // Values an inlined call returns (t_8c4a982e): the inputs they depend
     // on claim an implicit TEXCOORD even when the call's result is dead.
     std::vector<IRValueID> implicitClaimRoots_;
@@ -235,8 +252,16 @@ private:
     {
         IRBasicBlock* continueTarget;
         IRBasicBlock* breakTarget;
+        // A statically expanded loop has no blocks to branch to: its break
+        // and continue set these bool bindings, and the statements they
+        // skip are built under a guard on them (static-loop-early-exit).
+        bool flagged = false;
+        std::string breakFlag;
+        std::string continueFlag;
     };
     std::stack<LoopContext> loopStack_;
+    int earlyExitCounter_ = 0;
+    void buildUnderExitFlags(std::unique_ptr<StmtNode>& slot, bool continueToo);
 
     // Label counter for unique block names
     int labelCounter_ = 0;
@@ -272,7 +297,15 @@ private:
     // A fragment `for` that cannot be expanded becomes a hardware loop
     // region (IROp::LoopCarry .. LoopOut, ir.h).  Returns false, having
     // built nothing, when the loop is outside the admitted shape.
-    bool tryBuildHardwareLoop(ForStmt* stmt);
+    // With a plan the trip count is already proven (tryUnrollStaticFor):
+    // LOOP {trips, 0, 1} with no header test, and `headBreak` - the body's
+    // leading `if (c) break;` - as the BRK at the head of every iteration.
+    struct StaticLoopPlan { int trips = 0; IfStmt* headBreak = nullptr; };
+    bool tryBuildHardwareLoop(ForStmt* stmt, const StaticLoopPlan* plan = nullptr);
+    bool keepStaticLoops_ = true;
+    bool mergeEntryReturns_ = false;
+    bool entryReturnsInsideIf_ = false;
+    int staticLoopsKept_ = 0;
     // arrayStorageKey resolving a row index bound to an integer constant.
     bool storageKey(ExprNode* expr, std::string& key);
     // Values bound to names a hardware loop's body assigned without

@@ -164,7 +164,7 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
             # Decode only consumed source slots. Unused slots may contain
             # arbitrary fields, including a relative source before the ARL.
             sources = {1: (0,), 2: (0, 1), 3: (0, 2), 4: (0, 1, 2),
-                       5: (0, 1), 7: (0, 1), 9: (0, 1), 10: (0, 1),
+                       5: (0, 1), 6: (0, 1), 7: (0, 1), 9: (0, 1), 10: (0, 1),
                        11: (0, 1), 12: (0, 1), 13: (0,), 14: (0,),
                        15: (0,), 16: (0, 1), 18: (0, 1), 19: (0, 1), 20: (0, 1)}
             assert vop in sources, 'unsupported vector opcode %d' % vop
@@ -183,6 +183,9 @@ def evaluate(blob, uniforms, inputs=None, binary32=False, predication=False,
                     width = 3 if vop == 5 else 4
                     assert all(a[k] is not None and b[k] is not None for k in range(width)), 'dot reads an undefined lane'
                     res[j] = sum(a[k] * b[k] for k in range(width))
+                elif vop == 6:  # DPH: a.xyz . b.xyz + b.w, the first operand's w is not read
+                    assert all(a[k] is not None for k in range(3)) and all(x is not None for x in b), 'DPH reads an undefined lane'
+                    res[j] = sum(a[k] * b[k] for k in range(3)) + b[3]
                 elif vop in (2, 3, 4, 9, 10, 11, 12, 14, 15, 16, 18, 19, 20):
                     # opcode numbers from nvfx_shader.h NVFX_VP_INST_VEC_OP_*:
                     # MIN 0x09, SLT 0x0B, FRC 0x0E, FLR 0x0F, SNE 0x14
@@ -427,7 +430,7 @@ def word_mutant(blob, pick, edit):
     return bytes(out)
 
 
-def oracle_controls(blob, name):
+def established_controls(blob, name):
     """The judge itself must reject each of these; returns a list of failures."""
     first, last = (lambda n, c, w: n == 0), (lambda n, c, w: n == c - 1)
     def set_sat(n, c, w): w[0] |= SAT
@@ -585,7 +588,7 @@ def main():
             else:
                 print('  ok   %-9s lane-x mutant rejected' % name)
             if name == 'lit2.5':
-                broken = oracle_controls(blob, name)
+                broken = established_controls(blob, name)
                 for b in broken:
                     print('  FAIL measurement control: %s' % b)
                 if not broken:

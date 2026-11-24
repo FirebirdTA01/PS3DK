@@ -193,6 +193,7 @@ void FpAssembler::appendConstBlock(const float values[4])
     logicalWords_.push_back(raw[1]);
     logicalWords_.push_back(raw[2]);
     logicalWords_.push_back(raw[3]);
+    ++constBlocks_;
     // Deliberately do NOT update lastInstrOffset_ — this block is
     // data, not an instruction.  markEnd() should stamp PROGRAM_END
     // on the real instruction that came before.

@@ -1,20 +1,30 @@
 /* libsputhread SPU thread / group exit + yield traps.
  *
- * Exit routines synchronise with the kernel via SPU event channels
- * (ch22 = WrEventMask, ch23 = WrEventAck, ch24 = RdEventStat) and
- * then deliver the exit code through the regular outbound mailbox
- * (ch28) before issuing a `stop` instruction.  The `stop` trap code
- * tells the kernel which exit operation it is:
+ * Exit routines drain outstanding MFC tag groups via MFC tag-status
+ * channels:
+ *   ch22 = MFC_WrTagMask   (select tag groups to monitor)
+ *   ch23 = MFC_WrTagUpdate (request tag status update: 0=immediate, 2=all)
+ *   ch24 = MFC_RdTagStat   (read tag status mask)
+ * (SPU event channels are ch0/ch1/ch2, distinct from MFC tag channels).
+ *
+ * The tag-status sequence requests immediate tag status (WrTagUpdate 0),
+ * waits for and reads that status from ch24, selects all 32 tag groups
+ * (WrTagMask -1), and requests completion of all selected tags
+ * (WrTagUpdate 2). Reading ch24 then blocks until all tag groups have
+ * completed.
+ *
+ * After the MFC tag groups complete, the routine writes the exit code to
+ * the outbound mailbox (ch28 = SPU_WrOutMbox) and issues a `stop` trap.
+ * The `stop` instruction operand specifies the operation:
  *
  *   stop 0x100  -> sys_spu_thread_group_yield (cooperative yield)
  *   stop 0x101  -> sys_spu_thread_group_exit  (whole thread group)
  *   stop 0x102  -> sys_spu_thread_exit        (this thread only)
  *
- * The two exit functions are byte-identical apart from the `stop`
- * code; group_yield is a one-instruction barrier with no event-
- * channel handshake (the kernel handles re-entry from the yield
- * trap site directly).  `stop` is a no-return instruction; the
- * trailing `bi $0` exists for symmetry / unwind metadata only.
+ * The two exit helpers and group_yield each have a bi $0 after their stop;
+ * switch_system_module instead has rdch after stop. For exit routines,
+ * non-return behavior depends on LV2 kernel trap handling. For group_yield,
+ * execution resumes at the instruction following `stop`.
  */
 	.text
 
@@ -25,20 +35,20 @@
 	.align	3
 sys_spu_thread_exit:
 	il	$2, 0
-	wrch	$ch23, $2            /* ack-state = idle */
-1:	rchcnt	$5, $ch24            /* wait for kernel to populate ch24 */
+	wrch	$ch23, $2            /* ch23 = MFC_WrTagUpdate: request immediate status (0) */
+1:	rchcnt	$5, $ch24            /* wait until ch24 (MFC_RdTagStat) count is readable */
 	ceqi	$4, $5, 1
 	nop	$127
 	brz	$4, 1b
 	ori	$6, $3, 0            /* save exit_code in $6 */
 	hbr	2f, $0
 	il	$7, -1
-	rdch	$3, $ch24            /* drain ch24 */
-	il	$3, 2                /* exit mode = 2 */
-	wrch	$ch22, $7            /* mask all events */
-	wrch	$ch23, $3            /* arm exit */
-	rdch	$2, $ch24            /* wait for kernel ack */
-	wrch	$ch28, $6            /* deliver exit_code */
+	rdch	$3, $ch24            /* read initial tag status from ch24 */
+	il	$3, 2                /* tag update condition = MFC_TAG_UPDATE_ALL (2) */
+	wrch	$ch22, $7            /* ch22 = MFC_WrTagMask: select all 32 tag groups (-1) */
+	wrch	$ch23, $3            /* ch23 = MFC_WrTagUpdate: request completion of all tags */
+	rdch	$2, $ch24            /* wait for and read tag status on ch24 */
+	wrch	$ch28, $6            /* deliver exit_code via ch28 (SPU_WrOutMbox) */
 	stop	0x102                /* trap: thread exit */
 2:	bi	$0
 	.size	sys_spu_thread_exit, . - sys_spu_thread_exit
@@ -51,28 +61,28 @@ sys_spu_thread_exit:
 	.align	3
 sys_spu_thread_group_exit:
 	il	$2, 0
-	wrch	$ch23, $2
-1:	rchcnt	$5, $ch24
+	wrch	$ch23, $2            /* ch23 = MFC_WrTagUpdate: request immediate status (0) */
+1:	rchcnt	$5, $ch24            /* wait until ch24 (MFC_RdTagStat) count is readable */
 	ceqi	$4, $5, 1
 	nop	$127
 	brz	$4, 1b
-	ori	$6, $3, 0
+	ori	$6, $3, 0            /* save exit_code in $6 */
 	hbr	2f, $0
 	il	$7, -1
-	rdch	$3, $ch24
-	il	$3, 2
-	wrch	$ch22, $7
-	wrch	$ch23, $3
-	rdch	$2, $ch24
-	wrch	$ch28, $6
+	rdch	$3, $ch24            /* read initial tag status from ch24 */
+	il	$3, 2                /* tag update condition = MFC_TAG_UPDATE_ALL (2) */
+	wrch	$ch22, $7            /* ch22 = MFC_WrTagMask: select all 32 tag groups (-1) */
+	wrch	$ch23, $3            /* ch23 = MFC_WrTagUpdate: request completion of all tags */
+	rdch	$2, $ch24            /* wait for and read tag status on ch24 */
+	wrch	$ch28, $6            /* deliver exit_code via ch28 (SPU_WrOutMbox) */
 	stop	0x101                /* trap: thread-group exit */
 2:	bi	$0
 	.size	sys_spu_thread_group_exit, . - sys_spu_thread_group_exit
 
 
 /* void sys_spu_thread_group_yield(void)
- * Cooperative yield: trap to the kernel, which may re-schedule the
- * group, then resume execution at the instruction after `stop`. */
+ * Cooperative yield: issues stop 0x100 trap. Execution resumes at the
+ * instruction following `stop`. */
 	.globl	sys_spu_thread_group_yield
 	.type	sys_spu_thread_group_yield, @function
 	.align	3
@@ -84,11 +94,11 @@ sys_spu_thread_group_yield:
 
 /* int sys_spu_thread_switch_system_module(uint32_t newAddress)
  *   r3 = address of the new system module image to swap into LS
- * Driver-level: requests the kernel to replace the running SPU
- * image with a new one.  Same channel handshake as exit (ch22/23/24)
- * plus a `stop 0x120` trap; on EAGAIN the kernel asks us to retry,
- * so the body loops back into the handshake until either CELL_OK
- * or a hard error returns.  Returns the kernel's status code. */
+ * Requests the kernel to replace the running SPU image with a new one.
+ * Executes the MFC tag-status sequence to wait for outstanding MFC tag
+ * groups to complete before issuing `stop 0x120` trap. After each trap,
+ * reads the result from ch29; retries on EAGAIN (0x8001000a), otherwise
+ * returns that result. The status is read on every attempt. */
 	.globl	sys_spu_thread_switch_system_module
 	.type	sys_spu_thread_switch_system_module, @function
 	.align	3
@@ -101,21 +111,21 @@ sys_spu_thread_switch_system_module:
 	ori	$3, $4, 0
 	bi	$0
 1:	il	$5, 0
-	wrch	$ch23, $5           /* ack=0: reset event-state */
+	wrch	$ch23, $5           /* ch23 = MFC_WrTagUpdate: request immediate status (0) */
 2:	rchcnt	$7, $ch24
 	ceqi	$6, $7, 1
 	.long	0x4020007f          /* nop $127 */
-	brz	$6, 2b              /* spin until ch24 has one event */
+	brz	$6, 2b              /* wait until ch24 (MFC_RdTagStat) count is readable */
 	il	$9, -1
 	hbrr	3f, .Lssm_retry     /* hint: brnz at 3f goes back to retry */
 	ori	$6, $3, 0           /* $6 = new module address */
-	rdch	$2, $ch24           /* drain ch24 */
-	il	$3, 2
-	wrch	$ch22, $9           /* mask all events */
+	rdch	$2, $ch24           /* read initial tag status from ch24 */
+	il	$3, 2               /* tag update condition = MFC_TAG_UPDATE_ALL (2) */
+	wrch	$ch22, $9           /* ch22 = MFC_WrTagMask: select all 32 tag groups (-1) */
 	ilhu	$8, 0x8001
-	wrch	$ch23, $3           /* ack=2: arm */
+	wrch	$ch23, $3           /* ch23 = MFC_WrTagUpdate: request completion of all tags */
 	ori	$5, $8, 10          /* $5 = 0x8001000a (EAGAIN compare value) */
-	rdch	$2, $ch24           /* wait for kernel ack */
+	rdch	$2, $ch24           /* wait for and read tag status on ch24 */
 .Lssm_retry:
 	wrch	$ch28, $6           /* arg = new module address */
 	stop	0x120               /* trap: switch_system_module */

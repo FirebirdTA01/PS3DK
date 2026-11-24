@@ -110,10 +110,15 @@ void usage()
     std::fprintf(stderr,
         "\n"
         "Optimization (fragment profile only; VP output is insensitive):\n"
-        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1)\n"
-        "  -O4                    -O3 plus optimisations past the reference (ours)\n"
+        "  -O0 / -O1 / -O2 / -O3  Optimization level (default: -O1); accepted for\n"
+        "                         compatibility, all four give the same output\n"
+        "  -O4                    Optimisations past the established compiler:\n"
+        "                         pack fragment scalars into shared registers\n"
+        "                         where that gives a program fewer registers\n"
+        "                         and no more instructions; otherwise the\n"
+        "                         program is the default one\n"
         "  --fastmath             Enable fast-math optimizations (default)\n"
-        "  --nofastmath           Disable fast-math optimizations\n");
+        "  --nofastmath           Accepted for compatibility; no effect yet\n");
 }
 
 std::string slurpFile(const std::string& path)
@@ -315,16 +320,43 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
     // Fragment constant sharing (canonicalizeConstants) is tried first; when
     // the program it produces fails to emit, the IR pipeline runs again
     // without it, and only the kept attempt's emit diagnostics are printed.
+    // Likewise a large fixed-count fragment loop is first kept as a hardware
+    // loop (static-loop-regions); when a program that kept one fails to build
+    // or to emit, it is compiled again with every such loop expanded.
     decltype(IRBuilder{}.build(*ast, semantic)) irModule;
     nv40::UcodeOutput  ucode;
     nv40::FpAttributes fpAttrs;
     nv40::VpAttributes vpAttrs;
     std::string        irDump;
-    for (bool fpConstCanon = true;; fpConstCanon = false)
+    bool fpConstCanon = true;
+    bool keepStaticLoops = true;
+    // A fragment entry that returns from inside an if is first built as
+    // written; when that fails to build or to emit, it is compiled again with
+    // its returns merged into one (entry-early-returns).  When the merged
+    // form fails too, the program is compiled once more as written, so the
+    // diagnostics printed are those of the ordinary build.
+    bool mergeEntryReturns = false;
+    bool mergeEntryReturnsTried = false;
+    for (;;)
     {
         bool fpCanonChanged = false;
         IRBuilder irBuilder;
+        irBuilder.setKeepStaticLoops(keepStaticLoops);
+        irBuilder.setMergeEntryReturns(mergeEntryReturns);
         irModule = irBuilder.build(*ast, semantic);
+        const bool loopsKept = keepStaticLoops && irBuilder.staticLoopsKept() > 0;
+        if ((irBuilder.hasErrors() || !irModule) && loopsKept)
+        {
+            keepStaticLoops = false;
+            continue;
+        }
+        if ((irBuilder.hasErrors() || !irModule) && mergeEntryReturns)
+        {
+            mergeEntryReturns = false;
+            fpConstCanon = true;
+            keepStaticLoops = true;
+            continue;
+        }
         if (irBuilder.hasErrors() || !irModule)
         {
             for (const auto& err : irBuilder.errors())
@@ -521,7 +553,26 @@ int compileProgram(CompilerContext& ctx, const std::string& source,
             vpAttrs = r.attrs;
         }
         if (!ucode.ok && stage == ShaderStage::Fragment && fpConstCanon && fpCanonChanged)
+        {
+            fpConstCanon = false;
             continue;
+        }
+        if (!ucode.ok && loopsKept)
+        {
+            keepStaticLoops = false;
+            fpConstCanon = true;
+            continue;
+        }
+        if (!ucode.ok && stage == ShaderStage::Fragment &&
+            (mergeEntryReturns ||
+             (!mergeEntryReturnsTried && irBuilder.entryReturnsInsideIf())))
+        {
+            mergeEntryReturns = !mergeEntryReturns;
+            mergeEntryReturnsTried = true;
+            fpConstCanon = true;
+            keepStaticLoops = true;
+            continue;
+        }
         break;
     }
 

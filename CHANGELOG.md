@@ -53,6 +53,235 @@ The version stamped into builds is generated from the most recent
   `rsx-frame --draw` and `--json` (`texture_slots`) and in the viewer's
   Textures tab, which no longer lists stale disabled slots.
 
+### Changed
+
+- **`rsx-cg-compiler`: large fixed-count fragment loops stay loops.** A `for`
+  with a known trip count was always expanded, so a noise octave loop cost
+  its whole body once per trip. A loop whose trip count times its body size
+  exceeds 150 operations is now emitted as a hardware `LOOP` with that trip
+  count, the point at which the established compiler does the same for a
+  braced body; it may open with one `if (c) break;`. (The established
+  compiler expands a body that is a single unbraced statement whatever its
+  size; such a loop is kept here as well.) A four-octave value-noise loop
+  goes from 162 instructions to 54. Smaller loops, loops that index an array by their
+  induction variable, and loops the hardware loop cannot carry are expanded
+  as before.
+- **`rsx-cg-compiler`: no register self-copies in fragment programs.**
+  `lerp` of a value computed just before left a `MOV` that copied a register
+  onto itself; those are no longer emitted. Across the two measured shader
+  sets that removes 1611 fragment instructions, about 1.8%.
+  A conditional assignment left the same copy as the first instruction of
+  its select; that one is gone as well.
+- **`rsx-cg-compiler`: a vector built from one value is one fragment `MOV`.**
+  `float4(d, d, d, 1.0)` copied `d` into the result one lane at a time;
+  adjacent copies of one source into different lanes of one register are
+  now a single `MOV`.
+- **`rsx-cg-compiler`: float and integer literals fold together.**
+  `1.5f * 4.0f` was folded to one constant, `1.5f * 4` was computed by the
+  shader: a constant written as `1.8556f * 255 / 224` cost three
+  instructions. Such arithmetic is now done at compile time.
+  A matrix whose rows are constants is read as inline constants instead of
+  being copied into registers a lane at a time.
+- **`rsx-cg-compiler`: scalars share registers when a fragment program runs
+  out of them.** Every temporary took a whole register, also a scalar that
+  uses one lane of it, and a program holding more than 48 values at a time
+  was refused. Such a program now has its scalars packed four to a register.
+  A program that fits is compiled as before.
+- **`rsx-cg-compiler`: `fwidth`, and `step` in a vertex program.**
+  `fwidth(x)` was not declared; it is now the larger of `
+  ddx(x)
+  ` and
+  `
+  ddy(x)
+  `, as the established compiler computes it. `step` was refused in
+  a vertex program and is now one `SGE`.
+- **`rsx-cg-compiler`: a fragment entry may return from inside an `if`.**
+  `if (back) return a; ... return b;` in the entry function was refused with "more
+  than one return block" outside two narrow shapes, though the same body in a
+  helper compiled. Such an entry is now compiled the way the helper is.
+- **`rsx-cg-compiler`: `-O4` packs scalars into shared registers.** `-O4` was
+  accepted and did nothing. It now gives every scalar temporary of a fragment
+  program one lane of a shared register: over the measured shader sets that is
+  5% and 13% fewer registers in total, for 0.7% and 2% more instructions (a
+  copy the default level drops can survive). `-O0` to `-O3` and `--nofastmath` remain accepted
+  for compatibility and still change nothing; `--help` and the guide say so.
+- **`rsx-cg-compiler`: `-O4` is never worse than the default level.** Packing
+  every program made some of them longer. `-O4` now builds each fragment
+  program both ways and keeps the packed one only when it uses fewer
+  registers and has no more instructions; otherwise the output is the
+  default program. The comparison uses the register count the container
+  declares and the number of instructions without inline constant blocks.
+  Over the two measured shader sets the declared register totals go from
+  2129 to 2038 and from 8380 to 7613, with no program longer. A program
+  whose packed build fails while its default build succeeds simply keeps
+  the default build; how often that happens is not measured.
+- **`rsx-cg-compiler`: vertex programs use the homogeneous dot product and write outputs directly.**
+  `mul(M, float4(p, 1.0))` built the float4 in a register and took four `DP4`s
+  of it; it is now four `DPH`s of `p`. A value computed into a register only to
+  be copied whole to an output is computed into the output. The usual
+  two-matrix position transform goes from 12 instructions to 9.
+  A copy that places a value in other output lanes (a scalar result into one
+  lane, a reordered vector) is folded the same way.
+- **`rsx-cg-compiler`: loop variables are updated in place.** In a hardware
+  loop, a variable that changes every iteration (`amp *= 0.5`) was computed
+  into a second register and copied back at the end of each iteration. The
+  instruction that computes it now writes the variable's register directly
+  wherever nothing later in the iteration still needs the old value.
+
+### Fixed
+
+- **`make_self`, `make_self_npdrm`, `make_sprx`: the certified-file header's data length is
+  the data the file stores.** They wrote the input ELF's size there, although
+  the segments are stored compressed, so the header claimed more data than the
+  file holds. A loader that checks the header against the file refused such a
+  file before loading it: PS3HEN's VSH plugin loader rejected every
+  real-signed `.sprx` (webMAN's load page reported nothing), while the same
+  file loaded in a game process. The field is now the file size minus the
+  header length, as in firmware-signed files.
+- **`rsx-cg-compiler`: a struct passed by value to a helper function.** Inside
+  the helper, the parameter's members did not take the argument's values. A
+  fragment helper read the entry inputs named by the struct's semantics, so
+  every write the caller had made to the argument was dropped and the program
+  compiled to the wrong value with exit 0; when the caller had a variable
+  with the parameter's name, the helper read that variable instead (vertex
+  programs too). The parameter now carries the argument's members, through
+  any number of helper levels, and a struct type without semantics, which was
+  refused, compiles. A local copied whole from another struct (`V l = i;`)
+  keeps a write made to the source before the copy, and a vertex helper given
+  the entry's struct input whole no longer needs the entry to have read every
+  member first. A member the argument never assigned, and a helper's result
+  passed straight in as the argument, are refused by name.
+- **`rsx-cg-compiler`: `break` and `continue` in a `for` loop with a known
+  trip count.** Such a loop is expanded iteration by iteration, and a body
+  with `break` or `continue` was refused, in the entry function and in a
+  helper. Each exit now sets a flag and the statements it skips, including
+  every later iteration after a `break`, are compiled under that flag. The
+  loop must declare its own induction variable and step with a single
+  expression; other loops keep the behaviour they had.
+- **`libps3dkprof`: live viewer auto-start in `PS3_PROF_WAITS=MANUAL` and `EXT`
+  links.** The observed-wait link check refused any link in which the automatic
+  lifecycle anchor (`__ps3dk_prof_startup_anchor`) was cross-referenced, so the
+  supported live auto-start combination (the live start member is in the wait
+  archives and its only reference to the anchor is a weak one, used to detect an
+  automatic lifecycle on exit) could not link at all. The check now refuses
+  anchor definitions only (a `startup.o` member, from the automatic lifecycle
+  archive or a mixed-in one); the expected weak reference from
+  `live_autostart.o` passes.
+- **`ps3dk-prof` tests: a shared temporary-name race in the `auto_rsx`
+  CLI tests.** Several tests in the `auto_rsx` test suite wrote their CLI
+  input to a temporary file named only by process id and one or two
+  small values (content length, or a frame range, or nothing).  Two tests
+  that pass the same fixture and can run on different worker threads
+  (`ring_export_round_trips` and
+  `ring_export_window_through_the_cli` both pass the `ring` fixture)
+  produced the same name, and each thread removes its file just before its
+  own read — so one thread's remove could land between the other thread's
+  write and its CLI process opening the input, and the CLI then reported
+  "no such file" and returned exit 3.  Every test in this file that
+  names its CLI input with `temp_dir()` now appends a process-wide
+  monotonically-increasing counter so concurrent callers have distinct
+  files; the counter pattern is already used elsewhere in the
+  test suite for the same reason.
+
+## [v0.28.8] — 2026-11-21
+
+### Fixed
+
+- **PRX/SPRX modules now load and run on retail consoles (#137).** Three
+  layout problems the emulator accepted are fixed in `prx-gen`,
+  `lv2-prx.ld`, the PRX crt and `<sys/prx_module.h>`:
+  - every `PT_LOAD` now carries the SPU read bit, which retail Lv-2 requires
+    (load failed with `0x80010007`);
+  - export records (`.lib.ent`: each library and the management record) are
+    28 bytes (`0x1c`), not 44. Lv-2 walks them in fixed `0x1c` steps, so a
+    module with more than one export record hung in `sys_prx_start_module`.
+    Import records stay 44 bytes. The management record is now version 0 and
+    also exports the `module_info` variable;
+  - a module is linked as a code segment (`0x00400005`) and a separate data
+    segment (`0x00600006`) instead of one writable and executable segment,
+    whose first store to the module's own `.data` or `.bss` froze the
+    process. `prx-gen` now judges each relocation by whether its two ends
+    share a segment: a `bl` through a function's `.opd` descriptor and a
+    TOC-relative access to data beside the TOC are accepted, a cross-segment
+    `REL64` is emitted for the loader, and relocations that cannot survive the
+    segments moving apart are refused.
+
+  `prx-gen check` now refuses a segment without the SPU read bit (or a
+  writable one without the SPU write bit), an export record that is not
+  `0x1c` bytes, an import record that is not `0x2c` bytes, and a writable and
+  executable segment. `prx-gen build` refuses a writable and executable
+  segment and sets the SPU bits. Modules must be relinked with this SDK.
+
+- **PRX modules with no TOC entries of their own.** With nothing in `.got`,
+  the linker dropped the section and based the TOC on `.lib.stub`, in the code
+  segment, so every TOC-relative access to `.rodata` or `.data` crossed
+  segments and `prx-gen` refused the module (a module that only imports a
+  liblv2 function was enough). `lv2-prx.ld` now always keeps `.got`, with one
+  word, in the data segment.
+- **`sys_ppu_thread_exit` on a thread with no TLS area.** The exit ran
+  librt's cleanup (thread_local and pthread key destructors), which reads TLS,
+  so a thread the kernel created without a TLS area faulted. Cobra runs a VSH
+  plugin's `module_start` and `module_stop` on such a thread. The exit now
+  checks r13 first, reading nothing from memory, and on such a thread ends
+  with the bare exit system call (41) and no cleanup; the joiner still gets
+  the exit code. Threads with a TLS area keep the cleanup as before.
+- **`sys_ppu_thread_create` and `sys_ppu_thread_exit` in a PRX module.** They
+  pulled librt's thread layer into the module, which is TLS-based, so a module
+  that started a thread failed to link. Modules now get the pair from the new
+  `liblv2prx.a`, which `ps3_add_prx` and `lv2-prx.specs` link ahead of
+  librt: no TLS and no
+  heap, so `module_start` can start a thread even on a thread with no TLS
+  area. A module has no thread_local or pthread key cleanup to run.
+
+- **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
+  toolchain files now name one project-include file, which includes the
+  selected profiler modules in order, so `PS3_PROF_WAITS`,
+  `PS3_PROF_LIVE_AUTOSTART` and `PS3_PROF_AUTO`, in every combination they
+  support, configure on CMake older than 3.29. A `CMAKE_PROJECT_INCLUDE` the project sets itself
+  still runs, first.
+- **`PS3_PROF_AUTO` link identity without the toolchain on `PATH`.** The trial
+  link that records the link's inputs ran the driver's linker command without
+  the environment the driver gives it, so the linker was looked up on `PATH`
+  and the executable's link failed unless the toolchain's `ppu/bin` was on
+  `PATH`. It now runs with the driver's own search paths.
+- **Texture format documentation.** The `gcmTexture.format` description in
+  `<rsx/gcm_sys.h>` names the defined `GCM_TEXTURE_FORMAT_DXT23`,
+  `GCM_TEXTURE_FORMAT_DXT45` and `GCM_TEXTURE_FORMAT_G8B8` in place of three
+  macros that do not exist, and describes the value as one base format plus a
+  layout flag (`SWZ`/`LIN`) and a coordinate-mode flag (`NRM`/`UNRM`).
+- **`scripts/build-cell-stub-archives.sh` under a parallel make.** It ran
+  `make clean all` as one command, which a parallel make (`MAKEFLAGS=-j`) could
+  run out of order and stop on a missing wrappers object; it runs `make clean`
+  and `make all` separately. It also finds `nidgen` under `CARGO_TARGET_DIR`
+  when that is set.
+
+### Changed
+
+- New sample `samples/sprx/module-segments` (both ABIs) and regression rows
+  `sprx-segments` / `sprx-segments-lp64`: a module that exports two libraries
+  and writes its own `.data` and `.bss` in `module_start` and `module_stop`,
+  with a loader that prints a verdict for every step.
+- New sample `samples/sprx/vsh-plugin` (both ABIs) and regression row
+  `sprx-vsh-plugin` (ILP32): a VSH plugin for webMAN MOD's
+  `/loadprx.ps3` and `/unloadprx.ps3`. `module_start` starts a worker with
+  `sys_ppu_thread_create` and `module_stop` joins it; on a thread with no
+  caller (the plugin loader's) each ends with the bare exit system call, and
+  `module_stop` first sends the final stop report. A loader runs the
+  game-process path. The pattern is documented in `docs/tools/prx-gen.md`.
+- The regression battery boots PRX modules from all three containers
+  (#20): besides the `.fake.self` / `.fake.sprx` pairs, the `sprx-segments`
+  and `sprx-vsh-plugin` rows boot a raw `.elf` that loads the unsigned
+  `.prx` and a real `.self` that loads the real-signed `.sprx`, each staged
+  alone with its loader (six new rows: both ABIs for `sprx-segments`, ILP32
+  for `sprx-vsh-plugin`). `sprx-load` and
+  `sprx-module-macros` still boot only the fake pair.
+- `samples/gcm/hello-ppu-prof-auto-verdicts` stops at configure with a message
+  naming `-DPS3_PROF_AUTO=ON` when `PS3_PROF_AUTO` is off, instead of building
+  a sample that records nothing. `scripts/build-all-samples.sh` configures it
+  with the option.
+- The release workflow builds with one exact Rust (`scripts/ci-pin-rust.sh`,
+  1.100.0) and checks it in every job that installs Rust, as it does for CMake.
+
 ## [v0.28.0] — 2026-11-21
 
 ### Added

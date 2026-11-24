@@ -98,6 +98,10 @@ def run(bash, work):
     case('split-no-match-batch', {'one': LINKS, 'two': STUB}, split=True)
     case('generated-stub-excluded', {'one': LINKS + STUB +
          'target_link_libraries(probe PRIVATE local_prx_stub)\n'})
+    # a per-ABI stub name built in a foreach: matched verbatim with its variable, as the link token is
+    case('generated-stub-with-variable', {'one': LINKS +
+         'ps3_prx_stub_library(local_prx_stub${_sfx} EXPORTS exports.yml ABI ${_abi})\n'
+         'target_link_libraries(probe PRIVATE local_prx_stub${_sfx})\n'})
     case('missing-literal', {'one': LINKS + STUB}, 1, 'ppu/lib/libbar.a',
          archives=['ppu/lib/libfoo.a', 'spu/lib/libbaz.a'])
     case('uncovered-literal', {'one': LINKS + STUB}, 1, 'MANIFEST INCOMPLETE',

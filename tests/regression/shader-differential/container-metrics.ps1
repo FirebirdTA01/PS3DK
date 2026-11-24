@@ -104,10 +104,10 @@ function Add-ContainerMetricsRow(
         source = $Source
         uniform_set = $UniformSet
         ours_instruction_count = $ours.instruction_count
-        reference_instruction_count = $ref.instruction_count
+        established_instruction_count = $ref.instruction_count
         instruction_delta = $ours.instruction_count - $ref.instruction_count
         ours_register_count = $ours.register_count
-        reference_register_count = $ref.register_count
+        established_register_count = $ref.register_count
         register_delta = $ours.register_count - $ref.register_count
         byte_identical = [bool]$ByteIdentical
         staged = [bool]$Staged
@@ -179,7 +179,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
     $index = Get-ContainerMetricBaselineIndex $BaselineRows
     $baselineByKey = $index.Rows
     $identityMismatches=0; $missingIdentities=0; $sourceMismatches=0
-    $flagMismatches=0; $includeMismatches=0; $oracleMismatches=0
+    $flagMismatches=0; $includeMismatches=0; $establishedMismatches=0
     $currentKeys=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($r in $Rows) { $null=$currentKeys.Add((Get-ContainerMetricKey $r)) }
     $missingInputs=@($AttemptedInputs | Where-Object {-not $currentKeys.Contains((Get-ContainerMetricKey $_))})
@@ -206,7 +206,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
                     if ($row.source_sha256 -cnotin @($versions.source_sha256)) { $sourceMismatches++ }
                     if ($row.compile_flags -cnotin @($versions.compile_flags)) { $flagMismatches++ }
                     if ($row.resolved_includes -cnotin @($versions.resolved_includes)) { $includeMismatches++ }
-                    if ($row.oracle_sha256 -cnotin @($versions.oracle_sha256)) { $oracleMismatches++ }
+                    if ($row.established_sha256 -cnotin @($versions.established_sha256)) { $establishedMismatches++ }
                 }
                 continue
             }
@@ -257,7 +257,7 @@ function Get-ContainerMetricsGateSummary([object[]]$Rows, [object[]]$BaselineRow
         SourceVersionMismatches = $sourceMismatches
         CompileFlagsMismatches = $flagMismatches
         IncludeMismatches = $includeMismatches
-        OracleMismatches = $oracleMismatches
+        EstablishedMismatches = $establishedMismatches
         MissingVersionedResults = $missingVersionedResults
         UnversionedRows = @((@($Rows)+@($missingInputs)) | Where-Object { $_.input_status -eq 'unversioned' } | ForEach-Object {
             [pscustomobject]@{Key=(Get-ContainerMetricKey $_);Reason=$_.input_reason}
@@ -300,7 +300,7 @@ function Write-ContainerMetricsGateReport([object[]]$Rows, [string]$BaselinePath
     $baselineState = if ($baselinePresent) { "present" } else { "absent" }
     Write-Host "SDIFF-METRICS-GATE|status=$($summary.Status)|mode=$mode|current_rows=$($summary.CurrentRows)|baseline_rows=$($summary.BaselineRows)|compared_baseline_rows=$($summary.ComparedBaselineRows)|missing_baseline_rows=$($summary.MissingBaselineRows)|baseline_regressions=$($summary.BaselineRegressions)|worst_instruction_regression=$($summary.WorstInstructionRegression)|worst_register_regression=$($summary.WorstRegisterRegression)|baseline=$baselineState"
     if($summary.VersionedBaselineIdentities -gt 0) {
-        Write-Host "SDIFF-METRICS-IDENTITY|mismatches=$($summary.IdentityMismatches)|missing=$($summary.MissingIdentityRows)|source=$($summary.SourceVersionMismatches)|flags=$($summary.CompileFlagsMismatches)|includes=$($summary.IncludeMismatches)|oracle=$($summary.OracleMismatches)|missing_results=$($summary.MissingVersionedResults.Count)"
+        Write-Host "SDIFF-METRICS-IDENTITY|mismatches=$($summary.IdentityMismatches)|missing=$($summary.MissingIdentityRows)|source=$($summary.SourceVersionMismatches)|flags=$($summary.CompileFlagsMismatches)|includes=$($summary.IncludeMismatches)|established=$($summary.EstablishedMismatches)|missing_results=$($summary.MissingVersionedResults.Count)"
         foreach($key in $summary.MissingVersionedResults) { Write-Host "SDIFF-METRICS-MISSING-VERSIONED-RESULT|key=$key" }
     }
     if(@($Rows | Where-Object { $_.input_status }).Count -gt 0 -or $AttemptedInputs.Count -gt 0) {

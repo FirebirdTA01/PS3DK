@@ -72,6 +72,8 @@
 #include <sys/lv2errno.h>
 #include <lv2/thread.h>
 
+#include "lv2_thread_tls.h"
+
 /* ------------------------------------------------------------------ *
  * Tunables
  * ------------------------------------------------------------------ */
@@ -614,11 +616,20 @@ pt_trampoline(void *arg)
 }
 
 /* The SDK's Cell-style API (sys/ppu_thread.h) routes here.  The PSL1GHT-level
- * sysThreadCreate / sysThreadExit stay raw syscall wrappers: pthread_create
- * uses them with its own trampoline, so nothing is wrapped twice. */
+ * sysThreadCreate / sysThreadExit stay plain liblv2 calls with no librt
+ * cleanup: pthread_create uses them with its own trampoline, so nothing is
+ * wrapped twice.
+ *
+ * A thread with no TLS area (one the kernel created itself, such as the
+ * thread Cobra runs a plugin's module_start on) has none of librt's
+ * per-thread state, and both the cleanup and liblv2's sys_ppu_thread_exit
+ * read TLS.  It ends with the bare exit system call instead.  The check
+ * comes first and reads only r13 (lv2_thread_tls.h). */
 void
 __lv2_thread_exit(uint64_t exit_code)
 {
+	if (!pt_thread_has_tls())
+		pt_raw_thread_exit(exit_code);
 	pt_thread_cleanup(pt_self_cookie, NULL);
 	sysThreadExit(exit_code);
 	__builtin_unreachable();

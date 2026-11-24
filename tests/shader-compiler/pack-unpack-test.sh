@@ -45,9 +45,16 @@
 # CONTROL: every accept row fails on a compiler without the family ("no
 # matching function for call to 'pack_2half(half2)'"), the refusal rows are
 # checked against a stub compiler that accepts everything, and with
-# PS3_REF_CG_COMPILER set the rows in BYTE_IDENTICAL must equal the
-# established compiler's container byte for byte.
-set -euo pipefail
+ # PS3_ESTABLISHED_CG_COMPILER set the rows in BYTE_IDENTICAL must equal the
+ # established compiler's container byte for byte.
+ # (PS3_REF_CG_COMPILER is the pre-rename identifier; it still works as a fallback.)
+ set -euo pipefail
+
+ # Deprecated-name fallback: honor PS3_REF_CG_COMPILER when the new name is unset.
+ if [[ -z "${PS3_ESTABLISHED_CG_COMPILER:-}" && -n "${PS3_REF_CG_COMPILER:-}" ]]; then
+   PS3_ESTABLISHED_CG_COMPILER="$PS3_REF_CG_COMPILER"
+   export PS3_ESTABLISHED_CG_COMPILER
+ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 here="$repo_root/tests/shader-compiler"
@@ -228,21 +235,21 @@ refuse "pack_4ubyte(float3) (reference: C1115)"               fp_pack4_float3_re
 
 # ------------------------------------------------ reference byte identity
 # The established compiler's executable is private (never named in the tree); with
-# PS3_REF_CG_COMPILER set, these rows must match it byte for byte, and the
+# PS3_ESTABLISHED_CG_COMPILER set, these rows must match it byte for byte, and the
 # remaining accept rows are reported (not asserted) so a newly identical row
 # can be promoted here.
 BYTE_IDENTICAL="fp_pack_normal_out_f"
-if [[ -n "${PS3_REF_CG_COMPILER:-}" ]]; then
-    [[ -x "$PS3_REF_CG_COMPILER" ]] || fail "PS3_REF_CG_COMPILER is not executable"
+if [[ -n "${PS3_ESTABLISHED_CG_COMPILER:-}" ]]; then
+    [[ -x "$PS3_ESTABLISHED_CG_COMPILER" ]] || fail "PS3_ESTABLISHED_CG_COMPILER is not executable"
     # The half-scalar smear is the one accept row the established compiler REFUSES
     # (C1101); measured here rather than assumed.
-    if "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/half_scalar.ref" \
+    if "$PS3_ESTABLISHED_CG_COMPILER" -profile sce_fp_rsx -o "$work/half_scalar.ref" \
             "$shaders/fp_pack_half_scalar_f.cg" >/dev/null 2>&1; then
         fail "fp_pack_half_scalar_f: the established compiler now ACCEPTS pack_2half(half scalar); re-measure the overload rule"
     fi
     pass "fp_pack_half_scalar_f refused by the reference, as recorded"
     for stem in $(ls "$shaders" | grep -E '^fp_(un)?pack.*_f\.cg$' | grep -v -e refuse -e half_scalar | sed 's/\.cg$//'); do
-        "$PS3_REF_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
+        "$PS3_ESTABLISHED_CG_COMPILER" -profile sce_fp_rsx -o "$work/$stem.ref" "$shaders/$stem.cg" >/dev/null 2>&1 \
             || fail "$stem: the established compiler refused a fixture it is recorded as accepting"
         [[ -s "$work/$stem.bin" ]] || continue
         if cmp -s "$work/$stem.bin" "$work/$stem.ref"; then verdict=identical; else verdict=differs; fi

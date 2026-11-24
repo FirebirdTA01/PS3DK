@@ -177,24 +177,26 @@ The `.sys_proc_prx_param` block (executables) or the module-info block
 
 ### 3.1 Export record layout
 
-Same 44-byte shape as the import `Stub` record in §4.1, interpreted as:
+The first 28 bytes of the import `Stub` record in §4.1, interpreted as
+below. An export record is exactly 28 bytes: retail Lv-2 walks `.lib.ent` in
+fixed `0x1c` steps, so a 44-byte export record misplaces every record after
+the first (issue #137).
 
 ```c
 typedef struct {
-    uint8_t  size;         /* 0x2c */
+    uint8_t  size;         /* 0x1c */
     uint8_t  unk0;
-    uint16_t version;      /* 1 */
+    uint16_t version;      /* 1; 0 for the management record */
     uint16_t attributes;   /* 0x0001 named library, 0x8000 management */
     uint16_t num_func;     /* written at assembly time */
-    uint16_t num_var;      /* 0 in v1 */
+    uint16_t num_var;      /* 0; 1 (module_info) for the management record */
     uint16_t num_tlsvar;   /* 0 */
     uint8_t  info_hash, info_tlshash;
     uint16_t unk1;
     uint32_t name;         /* -> C string; 0 for the management record */
     uint32_t nids;         /* -> u32[num_func + num_var] */
     uint32_t addrs;        /* -> u32[...]; functions = compact OPD addresses */
-    uint32_t vnids, vstubs, unk4, unk5;   /* 0 */
-} Ent;
+} Ent;                     /* 28 bytes */
 ```
 
 Emitters: `<sys/prx_module.h>` (`PRX_LIBRARY_BEGIN/PRX_EXPORT_FUNC/

@@ -70,7 +70,9 @@ def main():
                 accepts+=1
             else:
                 compile_one(name,row['source'],row['profile'],row['refusal']);refusals+=1
-    assert (twins,refusals,accepts)==(32,9,5),(twins,refusals,accepts)
+    # break and continue in a helper's expanded loop are no longer gaps:
+    # static-loop-early-exit-test.sh judges them by value.
+    assert (twins,refusals,accepts)==(32,5,5),(twins,refusals,accepts)
     print(f'PASS ({twins} strict twins, {accepts} hardware-loop rows by value, {refusals} named helper-loop gaps)')
 
 if __name__=='__main__':

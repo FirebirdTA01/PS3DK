@@ -171,37 +171,33 @@ cmp -s "$work/vp_scalar_ctor_broadcast_v.vpo" "$work/vp_scalar_ctor_swizzle_v.vp
     || fail "float3(p.w) in a vertex program did not compile to the bytes of the .www spelling"
 printf '  %-36s == .www\n' "vertex float3(scalar)"
 
-# Three different scalars stay three lanes, each reading its own.
+# Three different scalars keep their three lanes, each reading its own:
+# one MOV of three lanes since copies of one source share an instruction
+# (fp-lane-moves), reading .z, .y and .x in that order.
 accept fp_scalar_ctor_distinct_f
 cmp -s "$work/fp_scalar_ctor_distinct_f.fpo" "$work/fp_scalar_ctor_broadcast_f.fpo" \
     && fail "float3(t.b, t.g, t.r) compiled to the BROADCAST's bytes - three different scalars were folded into one"
 insns fp_scalar_ctor_distinct_f > "$work/distinct.insns"
-for want in 'mask=x .* s0=R[0-9]+[.]zzzz' 'mask=y .* s0=R[0-9]+[.]yyyy' 'mask=z .* s0=R[0-9]+[.]xxxx'; do
-    grep -qE "^[0-9]+ MOV dst=R0 $want\$" "$work/distinct.insns" \
-        || { cat "$work/distinct.insns" >&2; fail "float3(t.b, t.g, t.r): missing the lane MOV '$want'"; }
-done
-printf '  %-36s packed: x<-.z y<-.y z<-.x\n' "float3(a, b, c)"
+grep -qE '^[0-9]+ MOV dst=R0 mask=xyz .* s0=R[0-9]+[.]zyx[xyzw]$' "$work/distinct.insns" \
+    || { cat "$work/distinct.insns" >&2; fail "float3(t.b, t.g, t.r): no xyz MOV reading .zyx - a lane reads the wrong scalar"; }
+printf '  %-36s packed: xyz <- .zyx\n' "float3(a, b, c)"
 
 # The width BOUNDARY: a repeated NON-scalar operand is the packer's shape.
-# float4(h, h) with a float2 h must pack lane pairs - xy <- .xyxx and
-# zw <- .xxxy from the INPUT (source type 1) - and must NOT become one
-# full-mask MOV: a broadcast keyed on operand identity alone would read
-# .xyyy and put h.y into lane z (a review found exactly that mutation green
-# before this row existed).  The established compiler merges the pair into one MOV
-# reading .xyxy (swizzle 0x44); that merge is a separate packer gap
-# (repeated-vector-move-coalescing), and when it lands this row's pins become that single MOV.
+# float4(h, h) with a float2 h must pack lane pairs from the INPUT (source
+# type 1): xy <- .xy and zw <- .xy, which is one MOV reading .xyxy, as the
+# established compiler emits it (swizzle 0x44).  It must NOT read .xyyy: a
+# broadcast keyed on operand identity alone would put h.y into lane z (a
+# review found exactly that mutation green before this row existed).
 accept fp_scalar_ctor_pair2_f
 insns fp_scalar_ctor_pair2_f > "$work/pair2.insns"
-grep -qE '^[0-9]+ MOV dst=R0 mask=xy .* s0=TEX0[.]xyxx$' "$work/pair2.insns" \
-    || { cat "$work/pair2.insns" >&2; fail "float4(h, h): missing the xy MOV reading the input's .xyxx"; }
-grep -qE '^[0-9]+ MOV dst=R0 mask=zw .* s0=TEX0[.]xxxy$' "$work/pair2.insns" \
-    || { cat "$work/pair2.insns" >&2; fail "float4(h, h): missing the zw MOV reading the input's .xxxy"; }
 # MOV-scoped on purpose: the shared decoder prints EVERY instruction, so
 # an unanchored 'mask=xyzw' would be satisfied by a TEX in some future
-# version of this fixture and stop being about the broadcast at all.
-grep -qE '^[0-9]+ MOV .* mask=xyzw ' "$work/pair2.insns" \
-    && { cat "$work/pair2.insns" >&2; fail "float4(h, h) emitted a full-mask MOV - a width-2 operand was broadcast as if it were a scalar"; }
-printf '  %-36s packed: xy<-.xy zw<-.xy, no broadcast\n' "float4(h, h), h float2"
+# version of this fixture and stop being about the constructor at all.
+grep -qE '^[0-9]+ MOV dst=R0 mask=xyzw .* s0=TEX0[.]xyxy$' "$work/pair2.insns" \
+    || { cat "$work/pair2.insns" >&2; fail "float4(h, h): no xyzw MOV reading the input's .xyxy"; }
+grep -qE '^[0-9]+ MOV .* s0=TEX0[.]xyyy$' "$work/pair2.insns" \
+    && { cat "$work/pair2.insns" >&2; fail "float4(h, h) reads .xyyy - a width-2 operand was broadcast as if it were a scalar"; }
+printf '  %-36s packed: xyzw <- .xyxy, no broadcast\n' "float4(h, h), h float2"
 
 # A width mismatch still refuses by name and leaves nothing behind.
 rc="$(emit fp_scalar_ctor_width_refusal_f)"

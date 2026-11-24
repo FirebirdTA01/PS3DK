@@ -11,7 +11,7 @@
 # shipped sample (hello-ppu-cellgcm-vp-loop).
 #
 # This test fails, naming the file, whenever a tracked shader under samples/
-# or sdk/ is absent from every curated list: reference-pairs.txt,
+# or sdk/ is absent from every curated list: established-pairs.txt,
 # path-pairs.txt or path-pair-corpus.txt for a fragment program, vp-pairs.txt
 # for a vertex program.  Listed is not judged - the rig's own verdicts are the
 # judgement - but an unlisted shader can never be judged, and that is the
@@ -84,7 +84,7 @@ if ($shaders.Count -lt 10) {
     throw "only $($shaders.Count) shipped shaders enumerated; the denominator is wrong, not small"
 }
 
-$fragmentLists = @(Read-ListPaths (Join-Path $here "reference-pairs.txt")) +
+$fragmentLists = @(Read-ListPaths (Join-Path $here "established-pairs.txt")) +
                  @(Read-ListPaths (Join-Path $here "path-pairs.txt")) +
                  @(Read-ListPaths (Join-Path $here "path-pair-corpus.txt"))
 $vertexLists = @(Read-ListPaths (Join-Path $here "vp-pairs.txt"))

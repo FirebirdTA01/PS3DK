@@ -60,8 +60,11 @@ trap 'rm -rf "$work"' EXIT
 "${cc[@]}" -O2 -Wall $repro "$t/generic/bin2s.c" -o "$out/bin2s"
 
 crypto=(-lgmp -lcrypto -lz)
-"${cc[@]}" -O2 $repro "$t/geohot/make_self.c" "${crypto[@]}" -o "$out/make_self"
-"${cc[@]}" -O2 $repro -DNPDRM "$t/geohot/make_self.c" "${crypto[@]}" -o "$out/make_self_npdrm"
+# make_self / make_self_npdrm from a copy with the certified-file header data-length fix
+# (gen-make-self-source.sh); make_sprx below gets it through gen-make-sprx-source.sh.
+"$script_dir/gen-make-self-source.sh" "$t/geohot/make_self.c" "$work/make_self_fixed.c"
+"${cc[@]}" -O2 $repro -I"$t/geohot" "$work/make_self_fixed.c" "${crypto[@]}" -o "$out/make_self"
+"${cc[@]}" -O2 $repro -I"$t/geohot" -DNPDRM "$work/make_self_fixed.c" "${crypto[@]}" -o "$out/make_self_npdrm"
 "$script_dir/gen-make-sprx-source.sh" "$t/geohot/make_self.c" "$work/make_self_sprx.c"
 "${cc[@]}" -O2 $repro -I"$t/geohot" -DSPRX "$work/make_self_sprx.c" "${crypto[@]}" -o "$out/make_sprx"
 "${cc[@]}" -O2 $repro "$t/geohot/package_finalize.c" "${crypto[@]}" -o "$out/package_finalize"

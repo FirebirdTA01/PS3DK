@@ -22,19 +22,25 @@
 # so a divergence closing shows as a move here rather than as silence.
 #
 # Compilers: -WslCompiler <wsl path> (ours; dev builds live in WSL) and
-# -ReferenceCompiler <exe> or PS3_REF_CG_COMPILER - the same contract
+# -EstablishedCompiler <exe> or PS3_ESTABLISHED_CG_COMPILER - the same contract
 # as stage-differential.ps1.
 param(
     [string]$WslCompiler = "",
+    [string]$EstablishedCompiler = "",
+    # -ReferenceCompiler is a deprecated alias for -EstablishedCompiler
+    # (the established compiler's executable); accept it until callers
+    # migrate, then remove.
     [string]$ReferenceCompiler = "",
     [string]$List = ""
 )
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $List) { $List = Join-Path $here "must-reject.txt" }
-if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
-if (-not $ReferenceCompiler -or -not (Test-Path -LiteralPath $ReferenceCompiler -PathType Leaf)) {
-    throw "established compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+if (-not $EstablishedCompiler -and $ReferenceCompiler) { $EstablishedCompiler = $ReferenceCompiler }  # deprecated alias
+if (-not $EstablishedCompiler -and $env:PS3_ESTABLISHED_CG_COMPILER) { $EstablishedCompiler = $env:PS3_ESTABLISHED_CG_COMPILER }
+if (-not $EstablishedCompiler -and $env:PS3_REF_CG_COMPILER) { $EstablishedCompiler = $env:PS3_REF_CG_COMPILER }  # deprecated name
+if (-not $EstablishedCompiler -or -not (Test-Path -LiteralPath $EstablishedCompiler -PathType Leaf)) {
+    throw "established compiler not found or not a file (pass -EstablishedCompiler (or its -ReferenceCompiler alias) <exe>, or set PS3_ESTABLISHED_CG_COMPILER (PS3_REF_CG_COMPILER also works))"
 }
 if (-not $WslCompiler) { throw "pass -WslCompiler <wsl path to rsx-cg-compiler>" }
 $cases = Join-Path $here "must-reject"
@@ -83,7 +89,7 @@ function Compile-Ref([string]$src, [string]$dst) {
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $global:LASTEXITCODE = -1
-    $text = (& $ReferenceCompiler -p sce_fp_rsx -o $dst $src 2>&1 | Out-String)
+    $text = (& $EstablishedCompiler -p sce_fp_rsx -o $dst $src 2>&1 | Out-String)
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     return @{ rc = $rc; text = $text }

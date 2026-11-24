@@ -12,10 +12,17 @@ CASES = {
     'shared_prefix': ('float4 q=p*2;if(p.x>0)return q;else return p;', lambda p: [2*x for x in p] if p[0]>0 else p),
     'different_lanes': ('if(p.y>0)return p.wzyx;else return p;', lambda p: list(reversed(p)) if p[1]>0 else p),
     'early_return_control': ('if(p.x>0)return p;return p*2;', lambda p: p if p[0]>0 else [2*x for x in p]),
+    # A fragment entry's returns inside if are merged into one result
+    # (entry-early-returns); these two were refused before.
+    'three_live_returns': ('if(p.x>0)return p;else if(p.y>0)return p*2;else return p*3;',
+                           lambda p: p if p[0]>0 else [2*x for x in p] if p[1]>0 else [3*x for x in p]),
+    # One arm returns a variable that was never written.  Its value is
+    # unspecified, so that arm is not judged (None); the other arm must still
+    # return p, and the program must not read an unwritten register (the
+    # evaluator refuses that).
+    'live_undef': ('float4 q;if(p.x>0)return q;else return p;', lambda p: None if p[0]>0 else p),
 }
 DEBTS = {
-    'live_undef': 'float4 q;if(p.x>0)return q;else return p;',
-    'three_live_returns': 'if(p.x>0)return p;else if(p.y>0)return p*2;else return p*3;',
     'loop': 'while(p.x>0)p.x-=p.y;return p;',
 }
 
@@ -41,7 +48,7 @@ def main():
                     for x,y in itertools.product((-.5,0,.5),repeat=2):
                         p=[x,y,.25,.75]
                         got=evaluate(dst.read_bytes(),{'TEX0':p});want=CASES[name][1](p)
-                        assert got==want,(p,got,want)
+                        assert want is None or got==want,(p,got,want)
                         checks+=1
                 print('PASS',name)
             except (AssertionError,Unmodelled) as e:

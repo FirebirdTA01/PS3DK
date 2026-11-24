@@ -166,14 +166,27 @@ printed to stdout.
 
 | Option | Default | Effect |
 |---|---|---|
-| `-O0`, `-O1`, `-O2`, `-O3` (also `--O0` ... `--O3`) | `-O1` | Optimisation level, named to match the established compiler's levels. |
-| `-O4` / `--O4` | | `-O3` plus optimisations beyond what the established compiler applies; reserved for this compiler's own improvements. |
+| `-O0`, `-O1`, `-O2`, `-O3` (also `--O0` ... `--O3`) | `-O1` | Optimisation level, named to match the established compiler's levels. Accepted for compatibility: all four give the same output today. |
+| `-O4` / `--O4` | | Optimisations beyond what the established compiler applies. Today: a fragment program's scalar temporaries are packed into shared registers, four to a register, where that gives fewer registers and no more instructions. |
 | `--fastmath` | on | Fast-math. |
-| `--nofastmath` | | Disable fast-math. |
+| `--nofastmath` | | Disable fast-math. Accepted for compatibility: no effect today. |
 
-**Current behaviour:** the levels and fast-math switches are accepted and
-recorded, but no pass in this compiler is gated on them yet, so every level
-and both fast-math settings produce the same output today. The cleanup the
+**When to use `-O4`:** to reduce a fragment program's register pressure. The
+compiler builds the program twice, as the default level does and with its
+scalars packed into shared registers, and keeps the packed one only when it
+uses fewer registers and has no more instructions; otherwise the output is
+exactly the default program. So at `-O4` a program never has more registers or
+more instructions than at the default level. That guarantee is about the
+emitted counts, not about run-time speed, which this compiler does not
+measure. Packing every program without that choice costs instructions: a copy
+that is dropped when two values share a register survives when they sit in
+different lanes. Leave `-O4` off when you compare output against the
+established compiler: its output is deliberately different. The back end runs
+twice for each fragment program at `-O4`. Vertex programs are not affected.
+
+**Current behaviour:** `-O0` to `-O3` and the fast-math switches are accepted
+and recorded, but no pass in this compiler is gated on them yet, so they all
+produce the same output today; only `-O4` changes it. The cleanup the
 compiler always does (algebraic simplification, common-subexpression
 elimination, dead-code elimination, constant folding and constant sharing,
 if-conversion, expansion of `for` loops with constant bounds) runs at every level.
@@ -302,6 +315,15 @@ Only `for` loops compile, in one of two ways:
   bounds (including negative literals) is fully unrolled, up to 64
   iterations. Past 64 the compile fails with `static loop expansion exceeds
   64 iterations; hardware-loop lowering required`.
+  In a fragment program a large loop of this kind is kept as a hardware
+  `LOOP` with the fixed trip count instead: one whose trip count times its
+  body size (operations plus one) exceeds 150, the point where the
+  established compiler stops expanding a braced body (it expands a body that
+  is a single unbraced statement whatever its size; here that loop is kept
+  too). The loop must declare its own
+  induction variable and may open with one `if (c) break;`; a loop that
+  indexes an array by its induction variable, or that the hardware loop
+  cannot carry, is expanded as before.
 - **Run-time loop.** A `for` whose bound is a run-time value (for example a
   uniform) becomes a real loop: in a fragment program a hardware `LOOP` with
   the condition tested at each iteration and a `BRK` where it fails (at most

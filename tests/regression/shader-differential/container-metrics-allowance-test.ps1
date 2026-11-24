@@ -12,9 +12,9 @@ function Check($ok, [string]$label) {
 function Clone($value) { return ($value | ConvertTo-Json -Depth 20 | ConvertFrom-Json) }
 function Counts([int]$ours = 13, [int]$reference = 2) {
     return [pscustomobject]@{
-        ours_instruction_count = $ours; reference_instruction_count = $reference
+        ours_instruction_count = $ours; established_instruction_count = $reference
         instruction_delta = $ours - $reference
-        ours_register_count = 2; reference_register_count = 1; register_delta = 1
+        ours_register_count = 2; established_register_count = 1; register_delta = 1
     }
 }
 function Row([string]$name, [int]$ours) {
@@ -122,7 +122,7 @@ try {
     Reject 'duplicate current row' { Write-ContainerMetricsGateReport @($rows[0],$rows[0],$rows[1]) $baseline -AllowancePath $allowance 6>$null }
     Reject 'fixed row forces allowance removal' { Write-ContainerMetricsGateReport @((Row 'first' 11),$rows[1]) $baseline -AllowancePath $allowance 6>$null }
     Reject 'growth in instruction count' { Write-ContainerMetricsGateReport @((Row 'first' 14),$rows[1]) $baseline -AllowancePath $allowance 6>$null }
-    $sameDelta = Row 'first' 14; $sameDelta.reference_instruction_count=3; $sameDelta.instruction_delta=11
+    $sameDelta = Row 'first' 14; $sameDelta.established_instruction_count=3; $sameDelta.instruction_delta=11
     Reject 'compensating reference growth still rejected' { Write-ContainerMetricsGateReport @($sameDelta,$rows[1]) $baseline -AllowancePath $allowance 6>$null }
     Reject 'allowance requires baseline' { Write-ContainerMetricsGateReport $rows (Join-Path $work 'absent.csv') -AllowancePath $allowance 6>$null }
     Set-Content -LiteralPath $allowance -Value '{broken' -Encoding UTF8

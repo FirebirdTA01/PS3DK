@@ -57,7 +57,14 @@ def check(lib,include,abi,mode,mapfile=None):
         ('__ps3dk_prof_wait_config_anchor','wait_startup.o'),('ps3dk_prof_init','prof_core.o')]})
     if mode=='auto':required['__ps3dk_prof_startup_anchor']=(prof,'startup.o')
     elif '__ps3dk_prof_startup_anchor' in providers:
-        raise ValueError('automatic lifecycle selected in manual/ext link')
+        # live_autostart.o carries a weak reference to the automatic lifecycle's
+        # anchor (to skip its own teardown when one is linked); live auto-start in
+        # manual/ext links is supported and the weak ref is expected.  A real
+        # definition - a startup.o member of the automatic lifecycle - is a
+        # different symbol provider and is refused.
+        prov=providers['__ps3dk_prof_startup_anchor']
+        if re.search(r'\(startup\.o\)$',prov):
+            raise ValueError('automatic lifecycle selected in manual/ext link: anchor defined by '+prov)
     for name,(archive,member) in required.items():
         if norm(providers.get(name,''))!=norm(str(archive.resolve())+'('+member+')'):
             raise ValueError('wrong/missing provider for '+name+': '+providers.get(name,'absent'))

@@ -35,15 +35,22 @@ param(
     [switch]$Corpus,
     [string]$WslCompiler = "",
     [string]$CorpusDir = "",     # WSL path; default: repo corpus + tracked fixtures
-    # -ReferenceCompiler: also stage the ours-vs-reference pairs listed in
-    # -ReferencePairs (increment 2c).  A host-side executable, or the
-    # PS3_REF_CG_COMPILER environment variable (the same discovery
+    # -EstablishedCompiler: also stage the ours-vs-reference pairs listed in
+    # -EstablishedPairs (increment 2c).  A host-side executable, or the
+    # PS3_ESTABLISHED_CG_COMPILER environment variable (the same discovery
     # contract as the established compiler harness: an executable, never a directory,
     # and the console reports presence, never the path).  Reference
     # containers are runtime input under dev_hdd0 only; they never enter
     # the tree.  Byte-identical pairs are not staged.
+    [string]$EstablishedCompiler = "",
+    [string]$EstablishedPairs = "",  # default: <rig>/established-pairs.txt; "-" = none
+    # -ReferenceCompiler is a deprecated alias for -EstablishedCompiler
+    # (the established compiler's executable); accept it until callers
+    # migrate, then remove.
     [string]$ReferenceCompiler = "",
-    [string]$ReferencePairs = "",  # default: <rig>/reference-pairs.txt; "-" = none
+    # -ReferencePairs is a deprecated alias for -EstablishedPairs; accept
+    # it until callers migrate, then remove.
+    [string]$ReferencePairs = "",
     # -ReferenceCorpus: also stage EVERY fragment shader under the corpus
     # root (the fetched community corpus, _work/ excluded) as an
     # ours-vs-reference pair under uniform_set auto (increment 3c).  A
@@ -126,7 +133,7 @@ param(
     # same coupling in the other direction).
     #
     # With -RepoRoot, EVERYTHING THE JUDGED TREE OWNS resolves under it:
-    # every repo-relative shader in reference-pairs / path-pairs / vp-pairs,
+    # every repo-relative shader in established-pairs / path-pairs / vp-pairs,
     # the lists themselves, path-pair-corpus.txt, reference-corpus-exclude.txt,
     # container-metrics-baseline.csv and the tracked-tree corpus root.  The
     # INSTRUMENTS (sd_* controls, probes, coverage sources) and the helper
@@ -147,7 +154,7 @@ param(
 $ErrorActionPreference = "Stop"
 # Fail before loading helpers, resolving roots, or touching dev_hdd0.
 if ($LegacyLowering) { throw '-LegacyLowering has been removed; general lowering is the only implementation.' }
-if ($PathPairs -or $PathPairsList) { throw '-PathPairs / -PathPairsList have been removed; use -ReferencePairs with reference-pairs.txt.' }
+if ($PathPairs -or $PathPairsList) { throw '-PathPairs / -PathPairsList have been removed; use -EstablishedPairs with established-pairs.txt.' }
 if ($PathPairCorpus -or $PathPairCorpusDir -or $PathPairCorpusManifest) { throw '-PathPairCorpus and its options have been removed; use -ReferenceTreeCorpus / -ReferenceTreeCorpusDir / -ReferenceTreeCorpusManifest.' }
 if ($VpPathPairs) { throw '-VpPathPairs has been removed; use -VpPairs plus -VpCorpus.' }
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -604,20 +611,20 @@ if ($Corpus) {
 # exists afterwards.
 function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_fp_rsx") {
     $inputs = Get-ShaderCompileInputs $src @('-p',$Profile)
-    $oracleHash = (Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
+    $establishedHash = (Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant()
     $script:containerCompileInputs.Remove([IO.Path]::GetFullPath($dst))
     Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $global:LASTEXITCODE = -1
-    $null = & $ReferenceCompiler -p $Profile -o $dst $src 2>&1
+    $null = & $EstablishedCompiler -p $Profile -o $dst $src 2>&1
     $refRc = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     Assert-ShaderCompileInputs $inputs
-    if ((Get-FileHash -LiteralPath $ReferenceCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oracleHash) {
+    if ((Get-FileHash -LiteralPath $EstablishedCompiler -Algorithm SHA256).Hash.ToLowerInvariant() -cne $establishedHash) {
         throw 'established compiler changed during compile'
     }
-    $inputs | Add-Member NoteProperty OracleHash $oracleHash
+    $inputs | Add-Member NoteProperty EstablishedHash $establishedHash
     $script:containerCompileInputs[[IO.Path]::GetFullPath($dst)] = $inputs
     $script:lastCompileRc = $refRc
     return ($refRc -eq 0) -and (Test-Path -LiteralPath $dst) -and ((Get-Item $dst).Length -gt 0)
@@ -628,17 +635,20 @@ function Compile-Reference([string]$src, [string]$dst, [string]$Profile = "sce_f
 # established compiler fails the run.  Byte-identical pairs are counted and not
 # staged (byte-identical implies pixel-identical); a refusal on either
 # side is a finding, not a skip, so it aborts the stage.
-if (-not $ReferenceCompiler -and $env:PS3_REF_CG_COMPILER) { $ReferenceCompiler = $env:PS3_REF_CG_COMPILER }
-if ($ReferenceTreeCorpus -and -not $ReferenceCompiler) {
-    throw "-ReferenceTreeCorpus needs the established compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+if (-not $EstablishedCompiler -and $ReferenceCompiler) { $EstablishedCompiler = $ReferenceCompiler }  # deprecated alias
+if (-not $EstablishedPairs -and $ReferencePairs) { $EstablishedPairs = $ReferencePairs }  # deprecated alias
+if (-not $EstablishedCompiler -and $env:PS3_ESTABLISHED_CG_COMPILER) { $EstablishedCompiler = $env:PS3_ESTABLISHED_CG_COMPILER }
+if (-not $EstablishedCompiler -and $env:PS3_REF_CG_COMPILER) { $EstablishedCompiler = $env:PS3_REF_CG_COMPILER }  # deprecated name
+if ($ReferenceTreeCorpus -and -not $EstablishedCompiler) {
+    throw "-ReferenceTreeCorpus needs the established compiler (pass -EstablishedCompiler (or its -ReferenceCompiler alias) <exe>, or set PS3_ESTABLISHED_CG_COMPILER (PS3_REF_CG_COMPILER also works))"
 }
-if ($ReferenceCompiler) {
+if ($EstablishedCompiler) {
     # -PathType Leaf enforces the "an executable, never a directory"
     # contract at the layer that can name the fault: a bare Test-Path
     # accepts a directory, the launch then fails, and the next guard
     # blames OUR shader for a bad tool argument.
-    if (-not (Test-Path -LiteralPath $ReferenceCompiler -PathType Leaf)) {
-        throw "established compiler not found or not a file (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)"
+    if (-not (Test-Path -LiteralPath $EstablishedCompiler -PathType Leaf)) {
+        throw "established compiler not found or not a file (pass -EstablishedCompiler (or its -ReferenceCompiler alias) <exe>, or set PS3_ESTABLISHED_CG_COMPILER (PS3_REF_CG_COMPILER also works))"
     }
     Write-Host "stager: established compiler present"
     # Calibration control (increment 4b): a ramp vs a twin biased by 1/2550
@@ -802,22 +812,27 @@ if ($ReferenceCompiler) {
     )
     Write-Host "stager: output controls compiled (10 proving rows: MRT dense/sparse/skip, depth with colour, depth-only; plus 2 H0 instrument rows judging z); placed ahead of the first corpus row when the manifest is written"
 
-    # -ReferencePairs - (a dash, the manifest's own "none") stages no
+    # -EstablishedPairs - (a dash, the manifest's own "none") stages no
     # curated list: the list is tied to the DEFAULT lowering path (a
     # curated shader that refuses is a finding and aborts), while a
     # -GeneralLowering corpus sweep must be able to run without it -
     # discard-blend/fpshader, for one, refuses on the general path until
     # CF-2 lands (general-path-discard).
-    $ReferencePairs = Get-ReferencePairsPathForStage `
-        -ReferencePairs $ReferencePairs `
-        -DefaultPath (Join-Path $rig "reference-pairs.txt") `
+    $defaultPairs = Join-Path $rig "established-pairs.txt"
+    $EstablishedPairs = Get-EstablishedPairsPathForStage `
+        -EstablishedPairs $EstablishedPairs `
+        -DefaultPath $defaultPairs `
         -ReferenceTreeCorpus ([bool]$ReferenceTreeCorpus) `
         -ReferenceCorpus ([bool]$ReferenceCorpus) `
         -PathPairs $false
+    # The curated list was renamed reference-pairs.txt -> established-pairs.txt;
+    # honor the legacy name as a fallback so old checkouts still stage - for
+    # the default list only, never in place of a list named explicitly.
+    if ($EstablishedPairs -ne '-') { $EstablishedPairs = Resolve-EstablishedPairsFile $EstablishedPairs $defaultPairs }
     $pairLines = @()
-    if ($ReferencePairs -ne '-') {
-        $pairLines = @(Get-Content $ReferencePairs | Where-Object { $_ -and -not $_.StartsWith("#") })
-        if ($pairLines.Count -eq 0) { throw "reference-pairs list is empty: $ReferencePairs" }
+    if ($EstablishedPairs -ne '-') {
+        $pairLines = @(Get-Content $EstablishedPairs | Where-Object { $_ -and -not $_.StartsWith("#") })
+        if ($pairLines.Count -eq 0) { throw "established-pairs list is empty: $EstablishedPairs" }
     }
 
     $refDst = Join-Path $root "reference"
@@ -837,7 +852,7 @@ if ($ReferenceCompiler) {
         $set = if ($fields.Count -ge 2 -and $fields[1].Trim()) { $fields[1].Trim() } else { "0" }
         if (-not (Row-AppliesToPath $fields 2)) { $refSkippedPath++; continue }
         $src = Resolve-StageTreePath -RepoRoot $repoRoot -CorpusRoot $corpusRoot -Rel $rel
-        if (-not (Test-Path $src)) { throw "reference-pairs: shader not found: $rel" }
+        if (-not (Test-Path $src)) { throw "established-pairs: shader not found: $rel" }
         $name = [System.IO.Path]::GetFileNameWithoutExtension($src)
         # The SAME shader listed twice with two uniform sets (a double-duty
         # witness: set 0 for its compiled default, auto for patchability) is
@@ -861,7 +876,7 @@ if ($ReferenceCompiler) {
             $rowFlags = @($fields[3].Trim() -split ' +')
             $slug = (@($rowFlags | ForEach-Object { $_ -replace '^-+', '' }) -join '_') -replace '[^A-Za-z0-9]', '_'
             $name = "$name" + "__" + $slug + "__set" + $set
-            if ($name.Length -gt 63) { throw "reference-pairs: row name exceeds the guest's 63-char limit: $name" }
+            if ($name.Length -gt 63) { throw "established-pairs: row name exceeds the guest's 63-char limit: $name" }
         }
         if ($seenNames.ContainsKey($name)) {
             $md5 = [System.Security.Cryptography.MD5]::Create()
@@ -1061,7 +1076,7 @@ if ($ReferenceCompiler) {
 
 # ---- VP rows (increment 4, gate 5) ----
 if ($VpPairs -or $VpCorpus) {
-    if (-not $ReferenceCompiler) { throw "-VpPairs / -VpCorpus need the established compiler (pass -ReferenceCompiler <exe> or set PS3_REF_CG_COMPILER)" }
+    if (-not $EstablishedCompiler) { throw "-VpPairs / -VpCorpus need the established compiler (pass -EstablishedCompiler (or its -ReferenceCompiler alias) <exe>, or set PS3_ESTABLISHED_CG_COMPILER (PS3_REF_CG_COMPILER also works))" }
     $vpScratch = Join-Path $env:TEMP "sd-vp-stage"
     if (Test-Path $vpScratch) { Remove-Item -Recurse -Force $vpScratch }
     New-Item -ItemType Directory -Force $vpScratch | Out-Null
@@ -1345,7 +1360,7 @@ $metricsGate = Invoke-ContainerMetricsStageGate @($containerMetricRows) (Join-Pa
 $binderScratch = Join-Path $autoScratch "binder-controls"
 $binderRows = New-BinderControls $binderScratch $controls {
     param($src, $dst)
-    if ($ReferenceCompiler) {
+    if ($EstablishedCompiler) {
         if (-not (Compile-Reference $src $dst)) { throw "binder control failed to compile: $src" }
     } else {
         Compile-Shader $src $dst @("--general-lowering") -Absolute

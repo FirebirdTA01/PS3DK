@@ -48,7 +48,20 @@ typedef void (*sys_ppu_thread_entry_t)(uint64_t arg);
  * SYS_PPU_THREAD_CREATE_INTERRUPT threads are created as before.  The
  * PSL1GHT-level sysThreadCreate / sysThreadExit stay raw: code calling them
  * directly gets no exit cleanup.  Objects compiled against the earlier
- * inline wrappers keep the old behaviour until rebuilt. */
+ * inline wrappers keep the old behaviour until rebuilt.
+ *
+ * sys_ppu_thread_exit on a thread with no TLS area ends it with the bare
+ * exit system call (41) and runs no cleanup: the cleanup and liblv2's own
+ * exit both read TLS.  Such a thread is one the kernel creates itself, as
+ * Cobra does for a VSH plugin's module_start and module_stop.  The check
+ * reads only r13, so it is safe there.  The exit code still reaches
+ * sys_ppu_thread_join.
+ *
+ * In a PRX module the pair comes from liblv2prx.a (lv2-prx.specs links it
+ * ahead of librt): no TLS and no heap, so sys_ppu_thread_create works from
+ * a TLS-less module_start, and sys_ppu_thread_exit is the bare system call
+ * on such a thread and liblv2's exit on any other.  A module has no
+ * thread_local or pthread key cleanup to run. */
 extern int __lv2_ppu_thread_create(sys_ppu_thread_t *thread_id,
                                    sys_ppu_thread_entry_t entry,
                                    uint64_t arg, int prio, size_t stacksize,

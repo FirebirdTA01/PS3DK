@@ -16,12 +16,19 @@
  *
  *   2. The 4-byte prefix words at the start of .lib.ent.top /
  *      .lib.stub.top, so exports_start/imports_start = <range start> + 4
- *      lands on the first real record (same convention as lv2-sprx.S).
+ *      lands on the first real record (same convention as lv2-sprx.S), and
+ *      a 4-byte terminator word in .lib.ent.btm / .lib.stub.btm whose
+ *      address is the range end.  The five pointer fields reference labels
+ *      in these crt sections rather than linker-script symbols: a label has
+ *      a section, so prx-gen binds it to the code segment even when the
+ *      range ends exactly where the data segment begins.
  *
  *   3. Weak default module_start / module_stop that return
  *      SYS_PRX_RESIDENT (0), each with a real compact OPD descriptor, plus
  *      the nameless "management" export record (attributes 0x8000,
- *      facts §1.5/§3) carrying both under their fixed NIDs.  A module
+ *      facts §1.5/§3) carrying both under their fixed NIDs, and the
+ *      module_info variable (NID 0xD7F43016, the address of the block in 1)
+ *      that shipped modules export from the same record.  A module
  *      that defines either function strongly overrides the default.  The
  *      record NEVER references a symbol that could resolve to 0: the
  *      loader dereferences every address in a management record eagerly
@@ -48,21 +55,33 @@ __sys_prx_module_info:
 	.byte  0x00, 0x00                 /* 0x02 version[2]   (prx-gen) */
 	.space 28, 0x00                   /* 0x04 name[28]     (prx-gen) */
 	.long  .TOC.                      /* 0x20 toc                    */
-	.long  __libentstart + 4          /* 0x24 exports_start          */
-	.long  __libentend                /* 0x28 exports_end            */
-	.long  __libstubstart + 4         /* 0x2c imports_start          */
-	.long  __libstubend               /* 0x30 imports_end            */
+	.long  .Lprx_libent_top + 4       /* 0x24 exports_start          */
+	.long  .Lprx_libent_btm           /* 0x28 exports_end            */
+	.long  .Lprx_libstub_top + 4      /* 0x2c imports_start          */
+	.long  .Lprx_libstub_btm          /* 0x30 imports_end            */
 	.size  __sys_prx_module_info, . - __sys_prx_module_info
 
 	/* ------------------------------------------------------------
-	 * 2. Range prefix words.
+	 * 2. Range prefix and terminator words.
 	 * ------------------------------------------------------------ */
 	.section ".lib.ent.top","a"
 	.align 2
+.Lprx_libent_top:
+	.long 0
+
+	.section ".lib.ent.btm","a"
+	.align 2
+.Lprx_libent_btm:
 	.long 0
 
 	.section ".lib.stub.top","a"
 	.align 2
+.Lprx_libstub_top:
+	.long 0
+
+	.section ".lib.stub.btm","a"
+	.align 2
+.Lprx_libstub_btm:
 	.long 0
 
 	/* ------------------------------------------------------------
@@ -99,15 +118,21 @@ module_stop:
 	.size module_stop, . - .L.module_stop
 
 	/* ------------------------------------------------------------
-	 * 3b. Management export record (facts §1.4/§1.5/§3).
-	 *     44 bytes, size byte 0x2c, attributes 0x8000 with 0x0001 CLEAR.
-	 *     nids[] and addrs[] are parallel, functions only.
+	 * 3b. Management export record (facts §1.4/§1.5/§3, issue #137).
+	 *     28 bytes, size byte 0x1c, version 0, attributes 0x8000 with
+	 *     0x0001 CLEAR, as shipped modules write it.  Retail Lv-2 walks
+	 *     .lib.ent in fixed 0x1c steps: a 0x2c record puts every later
+	 *     record in the wrong place and sys_prx_start_module hangs.
+	 *     nids[] and addrs[] are parallel: the functions, then the
+	 *     variables (here module_info).
 	 * ------------------------------------------------------------ */
 	.section ".rodata.sceExportNID","a"
 	.align 2
 .Lprx_mgmt_nids:
 	.long 0xBC9A0086                  /* module_start */
 	.long 0xAB779874                  /* module_stop  */
+.Lprx_mgmt_nids_funcs_end:
+	.long 0xD7F43016                  /* module_info (variable) */
 .Lprx_mgmt_nids_end:
 
 	.section ".rodata.sceExportAddr","a"
@@ -115,17 +140,18 @@ module_stop:
 .Lprx_mgmt_addrs:
 	.long module_start                /* -> compact OPD entry */
 	.long module_stop
+	.long __sys_prx_module_info       /* -> the block in section 1 */
 .Lprx_mgmt_addrs_end:
 
 	.section ".lib.ent","a"
 	.align 2
 .Lprx_mgmt_record:
-	.byte  0x2c                       /* 0x00 size = 44                 */
+	.byte  0x1c                       /* 0x00 size = 28                 */
 	.byte  0x00                       /* 0x01 unk0                      */
-	.short 0x0001                     /* 0x02 version                   */
+	.short 0x0000                     /* 0x02 version                   */
 	.short 0x8000                     /* 0x04 attributes: management    */
-	.short (.Lprx_mgmt_nids_end - .Lprx_mgmt_nids) / 4   /* 0x06 num_func */
-	.short 0x0000                     /* 0x08 num_var                   */
+	.short (.Lprx_mgmt_nids_funcs_end - .Lprx_mgmt_nids) / 4  /* 0x06 num_func */
+	.short (.Lprx_mgmt_nids_end - .Lprx_mgmt_nids_funcs_end) / 4 /* 0x08 num_var */
 	.short 0x0000                     /* 0x0a num_tlsvar                */
 	.byte  0x00                       /* 0x0c info_hash                 */
 	.byte  0x00                       /* 0x0d info_tlshash              */
@@ -133,8 +159,4 @@ module_stop:
 	.long  0x00000000                 /* 0x10 name: none (nameless)     */
 	.long  .Lprx_mgmt_nids            /* 0x14 nids                      */
 	.long  .Lprx_mgmt_addrs           /* 0x18 addrs                     */
-	.long  0x00000000                 /* 0x1c vnids                     */
-	.long  0x00000000                 /* 0x20 vstubs                    */
-	.long  0x00000000                 /* 0x24 unk4                      */
-	.long  0x00000000                 /* 0x28 unk5                      */
 	.size .Lprx_mgmt_record, . - .Lprx_mgmt_record

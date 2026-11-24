@@ -55,7 +55,10 @@ for out in mkpath.elf mkpath.self mkpath.fake.self mkpath.pkg mkpath.gnpdrm.pkg;
 done
 
 # The data blob must be linked in, not just assembled.
-ppu-nm "$proj/mkpath.elf" 2>/dev/null | grep -q ' blob_bin$' \
+# Into a file first: under pipefail, `ppu-nm | grep -q` fails when grep exits at its first match and ppu-nm then
+# dies of SIGPIPE writing the rest of the table.
+ppu-nm "$proj/mkpath.elf" > "$tmp/mkpath.nm" 2>/dev/null || fail "ppu-nm failed on mkpath.elf"
+grep -q ' blob_bin$' "$tmp/mkpath.nm" \
     || fail "blob_bin symbol (from bin2o) is not in mkpath.elf"
 # The pkg must carry the CONTENTID the Makefile set.
 grep -aq 'UP0001-MKPT00001_00-0000000000000000' "$proj/mkpath.pkg" \

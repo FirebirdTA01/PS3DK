@@ -239,6 +239,8 @@ sdk_core  ppu/lib/lv2-prx-crt.o
 sdk_core  ppu/lib/lv2-prx.ld
 sdk_core  ppu/lib/lv2-prx.specs
 sdk_core  ppu/lib/lp64/lv2-prx-crt.o
+sdk_core  ppu/lib/liblv2prx.a
+sdk_core  ppu/lib/lp64/liblv2prx.a
 sdk_core  ppu/lib/librsx.a
 sdk_core  ppu/lib/lp64/librsx.a
 # librt.a's ilp32 row stays ppu_stub above (the sample-link generator derives
