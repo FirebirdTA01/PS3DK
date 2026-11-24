@@ -11,7 +11,7 @@ The SDK now has its own runtime, native cell-style headers, NID/FNID-driven stub
 - **C dialect:** GCC 16 builds C as GNU C23, and an implicit function declaration is an error.
  - **SDK export coverage:** 4338 of 4805 tracked exports (90.3%) across 99 tracked libraries are covered by the v0.28.8 install tree; 95 libraries are complete, and the remaining gaps are in `libm_stub`, `libstdc++_stub`, `libsync2_stub` and `liblv2_stub`. The full generated matrix is in [docs/coverage.md](docs/coverage.md).
 - **Network and NP coverage:** the current network-stack wave covers cellNetCtl, sys_net, SSL, HTTP/HTTPUtil, and the NP family (`sysutil_np`, NP2, trophy, TUS, clans, commerce2, SNS, and utility surfaces), adding roughly 700 exports; 13 network validation samples exercise it.
- - **Samples:** 227 CMake sample projects: toolchain 52, sysutil 41, GCM 36, LV2 20, SPURS 15, codec 14, network 13, profiling 10, SPU 6, audio 5, firmware helper 4, sprx 3, font 2, input 2, dbgfont 1, debug 1, util 1 and vision 1, plus 21 PSL1GHT sample ports. See [samples/README.md](samples/README.md).
+ - **Samples:** 228 CMake sample projects: toolchain 52, sysutil 41, GCM 37, LV2 20, SPURS 15, codec 14, network 13, profiling 10, SPU 6, audio 5, firmware helper 4, sprx 3, font 2, input 2, dbgfont 1, debug 1, util 1 and vision 1, plus 21 PSL1GHT sample ports. See [samples/README.md](samples/README.md).
 - **Install contract:** `make -C sdk install` produces the installed headers, native archives, multilib stub archives, and `$PS3DK/.ps3dk-install-manifest`; `cmake/ps3-self.cmake` refuses stale installs at configure time.
 
 ## Direction
