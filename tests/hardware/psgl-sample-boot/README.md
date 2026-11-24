@@ -5,12 +5,12 @@ ps3dk-run network loader, so a release can show that each PSGL sample starts,
 renders its loop and exits cleanly on real hardware, not only in RPCS3.
 
 This is not a CI test: it needs a console running the ps3dk-run loader
-(protocol 2) and a checkout of `spike/ps3dk-run` for the run hook.
+(protocol 2); the run hook comes from `tools/ps3dk-run` ([guide](../../../docs/tools/ps3dk-run.md)).
 
 ## Build
 
 ```
-build-samples.ps1 -Out <new dir> -HookDir <spike/ps3dk-run checkout> [-Sdk <PS3DK>] [-LibDir <dir>]
+build-samples.ps1 -Out <new dir> [-HookDir <dir with hook/ and common/>] [-Sdk <PS3DK>] [-LibDir <dir>]
 ```
 
 Each sample is configured with `-DCMAKE_PROJECT_INCLUDE=run-hook-inject.cmake`.
@@ -18,7 +18,9 @@ At the end of the sample's own `CMakeLists.txt` that file renames the
 sample's `main` to `ps3dk_sample_main` (a compile definition on the sample's
 sources only), adds `hook_main.c` as the entry point, and links the hook. The
 sample sources are not changed. `hook_main.c` prints
-`PSGL_SAMPLE_BOOT hook=<n>`, starts the hook and calls the sample. Without the
+`PSGL_SAMPLE_BOOT hook=<n>`, starts the hook and calls the sample with the
+remaining `argc`/`argv` (the hook's marker removed). `-HookDir` defaults to
+the repository's `tools/ps3dk-run`. Without the
 loader's argv marker the hook stays inert, so the same SELF boots in RPCS3.
 
 `-RsxCg` selects the rsx-cg-compiler used for shaders and shader libraries.

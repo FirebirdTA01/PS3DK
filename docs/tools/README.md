@@ -26,6 +26,7 @@ in `$PS3DEV/bin` (mirrored to `$PS3DK/bin`); in the Windows release they are
 | `make_sdata` | [make-sdata.md](make-sdata.md) | SDATA files for `cellFsSdataOpen`; `ps3_make_sdata` |
 | `cellOvisConfigAuto`, `cellOvisMkLdscript` | [ovis.md](ovis.md) | SPU overlay support |
 | `abi-verify` | [abi-verify.md](abi-verify.md) | Check PPU objects against the ABI contract |
+| `ps3dk-run`, PS3DK Loader | [ps3dk-run.md](ps3dk-run.md) | Run a SELF on a console over the network: loader PKG, pairing, file upload, the run hook and its check, watchdog |
 | `coverage-report` | [coverage-report.md](coverage-report.md) | SDK export coverage matrix ([../coverage.md](../coverage.md)) |
 | `make_self`, `fself`, `bin2s` | [toolchain.md](toolchain.md#the-ps3-self-helper-module) | SELF signing and data embedding, driven by `ps3_add_self` and `ps3_bin2s` |
 | `cgcomp` | [toolchain.md](toolchain.md#shaders) | Legacy PSL1GHT shader compiler, bundled for older Makefiles |

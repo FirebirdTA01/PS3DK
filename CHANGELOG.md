@@ -18,6 +18,12 @@ The version stamped into builds is generated from the most recent
 
 ### Added
 
+- **`ps3dk-run`: run a SELF on a console over the network.** The PS3DK
+  Loader PKG (`tools/ps3dk-run/loader`), the run hook linked into the launched
+  application, the `ps3dk-run` host tool (paired 32-byte key, authenticated
+  frames, side-file upload, a `/dev_hdd0/tmp` file service, an optional
+  watchdog) and `hook-check.py` / `hook-check.ps1`, which confirm a build
+  carries the hook. Guide: [docs/tools/ps3dk-run.md](docs/tools/ps3dk-run.md).
 - **`ps3dk-prof rsx-frame --shader-dir DIR`.** Names the programs of RSX frame
   captures from a folder of `.vpo`/`.fpo` containers by canonical hash: the
   viewer's **Shader folder…** scan, now shared by both (one level, at most 4096
@@ -129,6 +135,12 @@ The version stamped into builds is generated from the most recent
   wherever nothing later in the iteration still needs the old value.
 
 ### Fixed
+
+- **Hooked samples see their arguments.** The `main` that
+  `run-hook-inject.cmake` adds called the sample's own `main` with no
+  arguments, so on a console every hooked sample saw `argc` 0 and none of the
+  arguments given to `ps3dk-run` after `--`. It now passes `argc`/`argv` with
+  the hook's marker removed, and still calls a C++ `int main()` without them.
 
 - **`make_self`, `make_self_npdrm`, `make_sprx`: the certified-file header's data length is
   the data the file stores.** They wrote the input ELF's size there, although

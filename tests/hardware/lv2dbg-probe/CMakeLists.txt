@@ -1,7 +1,7 @@
 # lv2dbg hardware probe (debugger design study, phase 1).  See README.md.
 #
-# -DPS3DK_RUN_HOOK_DIR=<dir> links the ps3dk-run protocol-2 run hook from a
-# checkout of spike/ps3dk-run (the directory holding hook/ and common/), so the
+# -DPS3DK_RUN_HOOK_DIR=<dir> links the ps3dk-run protocol-2 run hook from <dir>
+# (holding hook/ and common/; in this repository tools/ps3dk-run), so the
 # network loader sees HELLO and reports the exit status.  A hardware build must
 # set it; without it the probe is a plain SELF for RPCS3 or an XMB launch.
 #
@@ -12,7 +12,7 @@ project(lv2dbg_probe C)
 
 include(ps3-self)
 
-set(PS3DK_RUN_HOOK_DIR "" CACHE PATH "spike/ps3dk-run checkout providing the run hook")
+set(PS3DK_RUN_HOOK_DIR "" CACHE PATH "directory with the ps3dk-run hook/ and common/ (tools/ps3dk-run)")
 option(LV2DBG_PROBE_SIM "Also build the failure-path simulations" OFF)
 
 # Compile the hook from a copy in the build tree: objects of sources outside

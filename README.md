@@ -44,6 +44,7 @@ Toolchain-version rationale is in [docs/toolchain-design.md](docs/toolchain-desi
 | Installable packages (`ps3_add_pkg`) | [docs/tools/pkg.md](docs/tools/pkg.md) |
 | PRX / SPRX modules (`prx-gen`, `ps3_add_prx`) | [docs/tools/prx-gen.md](docs/tools/prx-gen.md) |
 | Embedding SPU programs | [docs/tools/spu-elf-to-ppu-obj.md](docs/tools/spu-elf-to-ppu-obj.md) |
+| Running a SELF on a console over the network (`ps3dk-run`) | [docs/tools/ps3dk-run.md](docs/tools/ps3dk-run.md) |
 | Profiler | [docs/profiler-guide.md](docs/profiler-guide.md) |
 | Building from source | [docs/building.md](docs/building.md) |
 | Samples | [samples/README.md](samples/README.md) |

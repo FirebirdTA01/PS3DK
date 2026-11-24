@@ -65,8 +65,8 @@ Configure with the SDK toolchain file. It builds `lv2dbg-probe-ilp32` and
 
 For the network loader (`ps3dk-run`), the probe must link the protocol-2
 run hook, or the loader never hears from it. Pass
-`-DPS3DK_RUN_HOOK_DIR=<dir>`, where `<dir>` holds `hook/` and `common/` from
-the `spike/ps3dk-run` tree at the protocol the installed loader speaks.
+`-DPS3DK_RUN_HOOK_DIR=<dir>`, where `<dir>` holds `hook/` and `common/`:
+this repository's `tools/ps3dk-run` ([guide](../../../docs/tools/ps3dk-run.md)).
 Without that option the probe is a plain SELF for RPCS3 or an XMB launch.
 
 ## Failure-path simulations
