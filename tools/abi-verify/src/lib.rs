@@ -10,8 +10,8 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use object::elf::{
-    FileHeader64, EM_PPC64, PF_X, PT_LOAD, SHF_EXECINSTR, SHN_LORESERVE, SHN_UNDEF, SHT_RELA,
-    SHT_SYMTAB, STT_FUNC,
+    FileHeader64, EM_PPC64, PF_X, PT_LOAD, SHF_EXECINSTR, SHN_LORESERVE, SHN_UNDEF, SHN_XINDEX,
+    SHT_RELA, SHT_SYMTAB, STT_FUNC,
 };
 use object::read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader as _, Sym as _};
 use object::{Endianness, SectionIndex, SymbolIndex};
@@ -891,6 +891,23 @@ fn is_stdu_r1(word: u32) -> bool {
     (word >> 16) == 0xf821
 }
 
+/// The class of a relocation target defined in section `index` of a table of
+/// `section_count` sections, whose header flags are `flags` (None when the
+/// header cannot be read).  Index 0 (SHN_UNDEF) and an index at or past the
+/// table's end are Malformed: the caller has already routed undefined and
+/// reserved-index symbols elsewhere.  Counts are usize throughout, so a table
+/// of more than 65535 sections is not truncated.
+fn classify_defined_section(index: usize, section_count: usize, flags: Option<u64>) -> RelocTargetClass {
+    if index == 0 || index >= section_count {
+        return RelocTargetClass::Malformed;
+    }
+    match flags {
+        None => RelocTargetClass::Malformed,
+        Some(f) if f & (SHF_EXECINSTR as u64) != 0 => RelocTargetClass::Executable,
+        Some(_) => RelocTargetClass::Data,
+    }
+}
+
 fn collect_relocs(
     endian: Endianness,
     data: &[u8],
@@ -918,9 +935,13 @@ fn collect_relocs(
     //   UndefFunction  SHN_UNDEF STT_FUNC (strong or weak); the linker
     //                   resolves it in a REL, the linked ELF verifies
     //   Data           an object binding (SHN_UNDEF STT_OBJECT, SHN_COMMON)
-    //   Malformed      r_sym beyond the symbol table, or st_shndx beyond the
-    //                   section table
-    let shnum = sections.len() as u16;
+    //   Malformed      r_sym beyond the symbol table, a section index (direct,
+    //                   or through SHT_SYMTAB_SHNDX for SHN_XINDEX) beyond the
+    //                   section table, or an extended index that cannot be read
+    // The section count stays a usize: ELF allows more than 65535 sections
+    // (e_shnum 0, the real count in section 0's sh_size), and narrowing it
+    // would wrap 65536 to 0 and make every defined symbol Malformed.
+    let section_count = sections.len();
     let classify = |sym_idx: u32| -> RelocTargetClass {
         if sym_idx == 0 {
             return RelocTargetClass::Malformed;
@@ -936,9 +957,11 @@ fn collect_relocs(
         let st_type = sym.st_type();
         let shndx = sym.st_shndx(endian);
 
-        if shndx >= SHN_LORESERVE {
-            // SHN_COMMON / SHN_XINDEX / other reserved: never an in-place
-            // executable function entry in a relocatable.
+        if shndx >= SHN_LORESERVE && shndx != SHN_XINDEX {
+            // SHN_COMMON / SHN_ABS / other reserved: never an in-place
+            // executable function entry in a relocatable.  SHN_XINDEX is not
+            // reserved storage: the real index is in SHT_SYMTAB_SHNDX, and the
+            // symbol is resolved like any defined one below.
             return RelocTargetClass::NonFunction;
         }
         if shndx == SHN_UNDEF {
@@ -951,18 +974,18 @@ fn collect_relocs(
             // An undefined *object* (weak or strong) is not an executable entry.
             return RelocTargetClass::NonFunction;
         }
-        if (shndx as usize) >= shnum as usize {
-            return RelocTargetClass::Malformed;
-        }
-        let Some(sec) = sections.section(SectionIndex(shndx as usize)).ok() else {
-            return RelocTargetClass::Malformed;
+        // A defined symbol: object's resolver reads st_shndx, or for
+        // SHN_XINDEX the symbol's SHT_SYMTAB_SHNDX entry.  A missing or
+        // unreadable extended index is a real error: Malformed.
+        let index = match symbols.symbol_section(endian, sym, SymbolIndex(sym_idx as usize)) {
+            Ok(Some(SectionIndex(index))) => index,
+            Ok(None) | Err(_) => return RelocTargetClass::Malformed,
         };
-        let flags = sec.sh_flags.get(endian);
-        if flags & (SHF_EXECINSTR as u64) != 0 {
-            RelocTargetClass::Executable
-        } else {
-            RelocTargetClass::Data
-        }
+        let flags = sections
+            .section(SectionIndex(index))
+            .ok()
+            .map(|sec| sec.sh_flags.get(endian));
+        classify_defined_section(index, section_count, flags)
     };
 
     for rela in relas {
@@ -2158,6 +2181,159 @@ mod tests {
         assert!(!r.is_ok(), "out-of-range .opd reloc must fail: {:?}", r.failures);
         assert!(r.failures.iter().any(|f| f.contains("not on a descriptor slot")
             || f.contains("out of range") || f.contains("stray relocation")));
+    }
+
+    /// A relocatable (ET_REL) with one `.opd` descriptor whose head names a
+    /// function symbol stored with `st_shndx = SHN_XINDEX`; its real section
+    /// index is `xindex`, the symbol's entry in `.symtab_shndx`
+    /// (SHT_SYMTAB_SHNDX).  The tail names an undefined `.TOC.` with addend 0.
+    ///   [0] NULL  [1] .text (AX)  [2] .opd (WA)  [3] .rela.opd -> [2]
+    ///   [4] .symtab  [5] .strtab  [6] .symtab_shndx -> [4]  [7] .shstrtab
+    fn build_relocatable_elf_with_xindex_head(xindex: u32) -> Vec<u8> {
+        const R_PPC64_ADDR32: u64 = 1;
+        const SHT_SYMTAB_SHNDX: u32 = 18;
+
+        let text_off: u64 = 0x100;
+        let opd_off: u64 = 0x110;
+        let rela_off: u64 = 0x120;
+        let symtab_off: u64 = 0x158;
+        let strtab_off: u64 = 0x1a0;
+        let shndx_off: u64 = 0x1c0;
+        let shstrtab_off: u64 = 0x1d0;
+        let strtab: &[u8] = b"\0._xfn\0.TOC.\0";
+        let shstrtab: &[u8] = b"\0.text\0.opd\0.rela.opd\0.symtab\0.strtab\0.symtab_shndx\0.shstrtab\0";
+        // name offsets in shstrtab
+        let (n_text, n_opd, n_rela, n_symtab, n_strtab, n_shndx, n_shstrtab) = (1u32, 7, 12, 22, 30, 38, 52);
+        let sh_off: u64 = 0x300;
+        let shnum: u64 = 8;
+        let shstrndx: u16 = 7;
+
+        let mut out: Vec<u8> = Vec::new();
+        let be16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_be_bytes());
+        let be32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_be_bytes());
+        let be64 = |b: &mut Vec<u8>, v: u64| b.extend_from_slice(&v.to_be_bytes());
+
+        out.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 2, 1, 0x66, 0, 0, 0, 0, 0, 0, 0, 0]);
+        be16(&mut out, 1);        // e_type = ET_REL
+        be16(&mut out, 21);       // e_machine = EM_PPC64
+        be32(&mut out, 1);        // e_version
+        be64(&mut out, 0);        // e_entry
+        be64(&mut out, 0);        // e_phoff
+        be64(&mut out, sh_off);   // e_shoff
+        be32(&mut out, 0);        // e_flags
+        be16(&mut out, 64);       // e_ehsize
+        be16(&mut out, 56);       // e_phentsize
+        be16(&mut out, 0);        // e_phnum
+        be16(&mut out, 64);       // e_shentsize
+        be16(&mut out, shnum as u16);
+        be16(&mut out, shstrndx);
+
+        // .text: one blr
+        out.resize(text_off as usize, 0);
+        be32(&mut out, 0x4e80_0020);
+        // .opd: one 8-byte descriptor (the relocations carry its meaning)
+        out.resize(opd_off as usize, 0);
+        be64(&mut out, 0);
+        // .rela.opd: head (offset 0) -> sym 1 `._xfn`, tail (offset 4) -> sym 2 `.TOC.`
+        out.resize(rela_off as usize, 0);
+        for (off, sym) in [(0u64, 1u64), (4u64, 2u64)] {
+            be64(&mut out, off);
+            be64(&mut out, sym << 32 | R_PPC64_ADDR32);
+            be64(&mut out, 0);
+        }
+        // .symtab: null, `._xfn` (GLOBAL FUNC, SHN_XINDEX), `.TOC.` (GLOBAL NOTYPE, undefined)
+        out.resize(symtab_off as usize, 0);
+        for (name, info, shndx) in [(0u32, 0u8, 0u16), (1, 0x12, SHN_XINDEX), (7, 0x10, 0)] {
+            be32(&mut out, name);
+            out.push(info);
+            out.push(0);
+            be16(&mut out, shndx);
+            be64(&mut out, 0);
+            be64(&mut out, if name == 1 { 4 } else { 0 });
+        }
+        out.resize(strtab_off as usize, 0);
+        out.extend_from_slice(strtab);
+        // .symtab_shndx: one u32 per symbol; only `._xfn`'s entry is used
+        out.resize(shndx_off as usize, 0);
+        for v in [0u32, xindex, 0] {
+            be32(&mut out, v);
+        }
+        out.resize(shstrtab_off as usize, 0);
+        out.extend_from_slice(shstrtab);
+
+        out.resize(sh_off as usize, 0);
+        let sh = |b: &mut Vec<u8>,
+                  name: u32, ty: u32, flags: u64, off: u64, size: u64,
+                  link: u32, info: u32, align: u64, entsize: u64| {
+            be32(b, name); be32(b, ty); be64(b, flags); be64(b, 0);
+            be64(b, off);  be64(b, size); be32(b, link); be32(b, info);
+            be64(b, align); be64(b, entsize);
+        };
+        let mut b = vec![0u8; 64]; // [0] NULL
+        sh(&mut b, n_text, 1, 0x6 /*ALLOC|EXECINSTR*/, text_off, 4, 0, 0, 4, 0);
+        sh(&mut b, n_opd, 1, 0x3 /*WRITE|ALLOC*/, opd_off, 8, 0, 0, 4, 0);
+        sh(&mut b, n_rela, 4 /*RELA*/, 0x40 /*INFO_LINK*/, rela_off, 48, 4, 2, 8, 24);
+        sh(&mut b, n_symtab, 2 /*SYMTAB*/, 0, symtab_off, 72, 5, 1, 8, 24);
+        sh(&mut b, n_strtab, 3 /*STRTAB*/, 0, strtab_off, strtab.len() as u64, 0, 0, 1, 0);
+        sh(&mut b, n_shndx, SHT_SYMTAB_SHNDX, 0, shndx_off, 12, 4, 0, 4, 4);
+        sh(&mut b, n_shstrtab, 3, 0, shstrtab_off, shstrtab.len() as u64, 0, 0, 1, 0);
+        out.extend_from_slice(&b);
+        assert_eq!(out.len(), (sh_off + shnum * 64) as usize);
+        out
+    }
+
+    fn xindex_head_target(xindex: u32) -> (Option<RelocTargetClass>, CheckReport) {
+        let bytes = build_relocatable_elf_with_xindex_head(xindex);
+        let m = parse_elf_bytes(std::path::Path::new("test-xindex.o"), &bytes)
+            .expect("parse_elf_bytes must succeed on our hand-built ELF");
+        let opd = m.opd.as_ref().expect("must have .opd");
+        assert!(!opd.linked, "has a .rela on .opd -> relocatable");
+        assert_eq!(opd.descriptors.len(), 1);
+        let d = &opd.descriptors[0];
+        assert_eq!(d.head_relocs.len(), 1);
+        assert_eq!(d.head_relocs[0].symbol.as_deref(), Some("._xfn"));
+        (d.head_relocs[0].target.clone(), check_invariants(&m))
+    }
+
+    #[test]
+    fn opd_head_xindex_function_in_text_passes() {
+        // A function symbol with st_shndx = SHN_XINDEX whose SHT_SYMTAB_SHNDX
+        // entry names the executable .text is a valid head target.  The
+        // earlier `shndx >= SHN_LORESERVE` branch called it NonFunction.
+        let (target, r) = xindex_head_target(1);
+        assert_eq!(target, Some(RelocTargetClass::Executable));
+        assert!(r.is_ok(), "an SHN_XINDEX function in .text must pass: {:?}", r.failures);
+    }
+
+    #[test]
+    fn opd_head_xindex_into_data_section_fails() {
+        // The same symbol, its extended index naming .opd (not executable): Data.
+        let (target, r) = xindex_head_target(2);
+        assert_eq!(target, Some(RelocTargetClass::Data));
+        assert!(!r.is_ok(), "an SHN_XINDEX head in a data section must fail");
+    }
+
+    #[test]
+    fn opd_head_xindex_past_section_table_is_malformed() {
+        // The extended index names section 99 of 8: Malformed, not NonFunction.
+        let (target, r) = xindex_head_target(99);
+        assert_eq!(target, Some(RelocTargetClass::Malformed));
+        assert!(!r.is_ok(), "an SHN_XINDEX index past the section table must fail");
+    }
+
+    #[test]
+    fn defined_section_class_does_not_truncate_large_section_counts() {
+        // 65536 sections: narrowed to u16 the count wraps to 0 and every
+        // defined symbol becomes Malformed.  Counts stay usize.
+        let exec = Some(SHF_EXECINSTR as u64);
+        assert_eq!(classify_defined_section(1, 65536, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(65535, 65536, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(65537, 70000, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(1, 65536, Some(0)), RelocTargetClass::Data);
+        // the bound itself is still enforced
+        assert_eq!(classify_defined_section(65536, 65536, exec), RelocTargetClass::Malformed);
+        assert_eq!(classify_defined_section(0, 65536, exec), RelocTargetClass::Malformed);
+        assert_eq!(classify_defined_section(1, 65536, None), RelocTargetClass::Malformed);
     }
 
     #[test]
