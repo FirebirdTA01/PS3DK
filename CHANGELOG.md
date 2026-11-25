@@ -80,6 +80,13 @@ The version stamped into builds is generated from the most recent
   alone with its loader (six new rows: both ABIs for `sprx-segments`, ILP32
   for `sprx-vsh-plugin`). `sprx-load` and
   `sprx-module-macros` still boot only the fake pair.
+- New sample `samples/gcm/hello-ppu-gcm-dxt`: DXT1, DXT3 and DXT5 textures
+  drawn beside their uncompressed source. On frame 120 it copies the
+  framebuffer back with `cellGcmSetTransferImage` and checks every source
+  texel of all six panels (384 checks), saves the image and a receipt, and
+  prints `gcm-dxt: PASS` only when all of them match. The texture bytes come
+  from `tools/dxt-encoder`, and a host test regenerates them and requires
+  the committed header to match.
 
 ### Changed
 
@@ -255,6 +262,15 @@ The version stamped into builds is generated from the most recent
   `ring_export_window_through_the_cli` both pass the `ring` fixture)
   produced the same name, and each thread removes its file just before its
   own read — so one thread's remove could land between the other thread's
+- **`abi-verify`: `.opd` descriptors are checked as 8-byte `{entry, TOC}`
+  pairs.** It inferred a 4-byte stride from the relocations and required a
+  TLS relocation at the end of each descriptor, so it misread correct
+  objects. Each descriptor is now an entry word pointing into code and a TOC
+  word that is an `R_PPC64_ADDR32` against `.TOC.`; a 64-bit or TLS
+  relocation in `.opd`, or one that falls on no descriptor, is refused, and a
+  linked image's `.opd` is checked from its bytes. The six
+  `.sys_proc_prx_param` pointers are checked in objects and in linked images,
+  where the PPU GUID and `sys_process_enabled` pointers may be null.
   write and its CLI process opening the input, and the CLI then reported
   "no such file" and returned exit 3.  Every test in this file that
   names its CLI input with `temp_dir()` now appends a process-wide
