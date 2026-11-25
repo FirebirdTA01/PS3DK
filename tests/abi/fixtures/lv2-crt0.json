@@ -1,0 +1,341 @@
+{
+  "path": "tests/abi/fixtures/lv2-crt0.json",
+  "elf": {
+    "class": "ELF64",
+    "endian": "big",
+    "machine": "PowerPC64",
+    "os_abi": 0,
+    "abi_version": 0,
+    "elf_type": "REL",
+    "flags": 1
+  },
+  "sections": [
+    {
+      "name": "",
+      "sh_type": "NULL",
+      "size": 0,
+      "addralign": 0,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".text",
+      "sh_type": "PROGBITS",
+      "size": 64,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text",
+      "sh_type": "RELA",
+      "size": 120,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".text.__syscalls_init",
+      "sh_type": "PROGBITS",
+      "size": 924,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text.__syscalls_init",
+      "sh_type": "RELA",
+      "size": 3168,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".text.__finalization_init",
+      "sh_type": "PROGBITS",
+      "size": 64,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text.__finalization_init",
+      "sh_type": "RELA",
+      "size": 24,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".text.__lv2_narrow_ea_vector",
+      "sh_type": "PROGBITS",
+      "size": 512,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".text._initialize",
+      "sh_type": "PROGBITS",
+      "size": 240,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 6
+    },
+    {
+      "name": ".rela.text._initialize",
+      "sh_type": "RELA",
+      "size": 168,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".rodata",
+      "sh_type": "PROGBITS",
+      "size": 24,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".rela.rodata",
+      "sh_type": "RELA",
+      "size": 48,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".eh_frame",
+      "sh_type": "PROGBITS",
+      "size": 152,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 2
+    },
+    {
+      "name": ".rela.eh_frame",
+      "sh_type": "RELA",
+      "size": 96,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".opd",
+      "sh_type": "PROGBITS",
+      "size": 40,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.opd",
+      "sh_type": "RELA",
+      "size": 240,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".toc",
+      "sh_type": "PROGBITS",
+      "size": 180,
+      "addralign": 8,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.toc",
+      "sh_type": "RELA",
+      "size": 1080,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".data",
+      "sh_type": "PROGBITS",
+      "size": 0,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".ctors.65451",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.ctors.65451",
+      "sh_type": "RELA",
+      "size": 24,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".ctors.65449",
+      "sh_type": "PROGBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".rela.ctors.65449",
+      "sh_type": "RELA",
+      "size": 24,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 64
+    },
+    {
+      "name": ".bss",
+      "sh_type": "NOBITS",
+      "size": 8,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".bss.__ps3dk_heap_ready",
+      "sh_type": "NOBITS",
+      "size": 4,
+      "addralign": 4,
+      "entsize": 0,
+      "flags": 3
+    },
+    {
+      "name": ".comment",
+      "sh_type": "PROGBITS",
+      "size": 19,
+      "addralign": 1,
+      "entsize": 1,
+      "flags": 48
+    },
+    {
+      "name": ".gnu.attributes",
+      "sh_type": "0x6ffffff5",
+      "size": 16,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".symtab",
+      "sh_type": "SYMTAB",
+      "size": 1848,
+      "addralign": 8,
+      "entsize": 24,
+      "flags": 0
+    },
+    {
+      "name": ".strtab",
+      "sh_type": "STRTAB",
+      "size": 966,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    },
+    {
+      "name": ".shstrtab",
+      "sh_type": "STRTAB",
+      "size": 292,
+      "addralign": 1,
+      "entsize": 0,
+      "flags": 0
+    }
+  ],
+  "opd": {
+    "entry_size": 8,
+    "entries": 5,
+    "linked": false,
+    "descriptors": [
+      {
+        "offset": 0,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": "._start",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        },
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 8,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        },
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 16,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        },
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 24,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        },
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 32,
+        "head_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "addend": 0
+        },
+        "tail_reloc": {
+          "r_type": "R_PPC64_ADDR32",
+          "symbol": ".TOC.",
+          "addend": 0
+        },
+        "entry_ea": 0,
+        "toc_ea": 0
+      }
+    ]
+  },
+  "toc_check": {
+    "data_model": "Ilp32",
+    "stride": 4,
+    "reloc_count": 45,
+    "addr32_count": 45,
+    "addr64_count": 0,
+    "mixed_relocs": false,
+    "has_addr64_under_ilp32": false
+  }
+}

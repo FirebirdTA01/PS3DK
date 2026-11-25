@@ -68,12 +68,11 @@ offset  size  contents
 
 The offset +4 word is a `R_PPC64_ADDR32` against `.TOC.` (addend 0);
 binutils writes the module's TOC base EA into the 32-bit slot at link time.
-PS3DK never puts relocation 107 on this word. Another CellOS toolchain uses
-number 107 for the same word (its "TOC32"); upstream binutils numbers 107 as
-`R_PPC64_TLSGD`, which PS3DK objects do carry, but only as the genuine
-general-dynamic TLS call marker in code sections (beside the call to
-`__tls_get_addr`), never in `.opd`. Every descriptor in a
-given module carries the same TOC value (module-level constant, not per-function).
+PS3DK never puts relocation 107 (`R_PPC64_TLSGD` in upstream binutils) on
+this word. `R_PPC64_TLSGD` does appear in PS3DK objects, but only as the
+genuine general-dynamic TLS call marker in code sections (beside the call
+to `__tls_get_addr`), never in `.opd`. Every descriptor in a given module
+carries the same TOC value (module-level constant, not per-function).
 
 Normative rules:
 
@@ -86,9 +85,7 @@ Normative rules:
    long as the symbol resolves).
 4. Each descriptor's tail word (offset +4) is `R_PPC64_ADDR32` against
    `.TOC.` with addend 0, resolved to the module TOC base EA at link time.
-   PS3DK objects never carry relocation 107 on this word; another CellOS
-   toolchain's "TOC32" (also numbered 107) is a separate encoding for the
-   same 32-bit TOC base word.
+   PS3DK objects never carry relocation 107 on this word.
 5. No entry uses `R_PPC64_ADDR64`. Any 64-bit descriptor reloc is a conformance
    error and indicates upstream-ELFv1 leakage.
 
@@ -293,9 +290,9 @@ but the field widths stay 32 bits.
 Only a small set of PPC64 relocation types appear in conformant
 CellOS Lv-2 objects. `abi-verify` does not check every relocation
 against this set; it checks relocations only in `.opd` (head =
-`R_PPC64_ADDR32`, tail = `R_PPC64_TLSGD`) and `.toc` (data-model
-consistency: `R_PPC64_ADDR32` only under ILP32, `R_PPC64_ADDR64` only
-under LP64).
+`R_PPC64_ADDR32` against the function symbol, tail = `R_PPC64_ADDR32`
+against `.TOC.` with addend 0) and `.toc` (data-model consistency:
+`R_PPC64_ADDR32` only under ILP32, `R_PPC64_ADDR64` only under LP64).
 
 | Type                   | Use                                          |
 |------------------------|----------------------------------------------|
@@ -423,13 +420,16 @@ Every release candidate MUST:
    `abi-verify check` emit all PASS lines.  The native CellOS Lv-2 runtime is
    the default for the toolchain — there is no separate runtime selection flag
    to pass; the conformance sample is built and inspected as-is.
-2. Diff the **installed PPU `crt1.o`** manifest (a REL startfile, the same
-   class as the fixture) against `tests/abi/fixtures/crt1.json` on every
-   common field: ELF header, `.opd` entry shape, `.sys_proc_prx_param`
-   size/magic/version.  Object-specific fields — `elf_type` (REL vs EXEC),
-   `os_abi` (untagged `.o` vs 0x66), and the per-symbol / per-relocation /
-   path tables — are inherent to the object class, not to the conformance
-   contract, and are reported as information, not used to gate.
+2. Diff the **installed PPU `lv2-crt0.o`** manifest against
+   `tests/abi/fixtures/lv2-crt0.json` on the strict conformance fields
+   (ELF identity, `.opd` entry size, descriptor count, and the
+   per-descriptor reloc table), and the **installed PPU `lv2-sprx.o`**
+   manifest against `tests/abi/fixtures/lv2-sprx.json` on the strict
+   conformance fields (ELF identity, `.sys_proc_prx_param` size / magic /
+   version / abi_version, and the six `R_PPC64_ADDR32` descriptor-slot
+   offsets). The concrete function names the head relocs point at are
+   informative, not a normative invariant - only the reloc type and
+   descriptor layout are.
 3. Link and run the sample in RPCS3 with process start, exit-handler
    fire, and clean exit observed in the emulator log.
 

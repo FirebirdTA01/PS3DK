@@ -79,11 +79,9 @@ PS3DK object files reach that final value through one encoding:
   objects carry (GCC 0007 emits `.long .TOC.`; binutils writes the TOC
   base EA at link time).
 
-PS3DK never puts relocation 107 on this word. Another CellOS toolchain
-uses relocation 107 (its "TOC32") for the same 32-bit TOC base word;
-upstream binutils numbers 107 as `R_PPC64_TLSGD`. PS3DK objects do carry
-`R_PPC64_TLSGD`, but only as the general-dynamic TLS call marker in code
-sections, never in `.opd`.
+PS3DK never puts relocation 107 on this word. Upstream binutils numbers
+107 as `R_PPC64_TLSGD`. PS3DK objects do carry `R_PPC64_TLSGD`, but only
+as the general-dynamic TLS call marker in code sections, never in `.opd`.
 
 The linked binary contract is the same either way: bytes `0x04..0x07` contain
 the 32-bit TOC base EA. `R_PPC64_ADDR64` is not valid for `.opd`.
