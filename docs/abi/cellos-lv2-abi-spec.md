@@ -32,19 +32,14 @@ Upstream readelf prints the OS/ABI byte as `<unknown: 66>` - this is expected.
 Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 
 The `e_flags` field is zero for conforming CellOS Lv-2 PPU **linked**
-images (EXEC, DYN, SELF/SPRX payloads): the CellOS identity is carried
-by `EI_OSABI = 0x66`, not by any of the `EF_PPC64_ABI` low bits. It is
-strict there — a non-zero value on a linked image is a conformance
-failure — because that is the file the loader loads, and the PowerPC
-ABI-version bits (`0x1` = ELFv1 descriptors, `0x2` = ELFv2) that BFD
-otherwise leaves on the ppc64 default are exactly the "upstream-ELFv1
-leakage" the `.opd` rules in section 2 exist to forbid. Relocatable
-objects (REL inputs to `ld -r` and the final link) are exempt: they may
-carry those bits, because a single `ld -r` across objects from two
-toolchains with different defaults is rejected by BFD with
-"unknown e_flags" before any other check runs, and the link resets the
-value on the image it produces. `abi-verify` therefore reports the
-relocatable case as an advisory and fails it only on linked images.
+images (EXEC, DYN, SELF/SPRX payloads); the CellOS identity is carried
+by `EI_OSABI = 0x66`, not by `e_flags`. A non-zero value on a linked
+image is a conformance failure. Relocatable objects are exempt: a
+relocatable produced by `ld -r` from objects that contain `.opd` can
+carry the ELFv1 ABI-version value `0x1` (the SDK's `lv2-crt0.o` does),
+while the final link still writes zero. `abi-verify` reports a non-zero
+`e_flags` on a relocatable object as an advisory and fails it only on
+linked images.
 
 ### 1.1 Data-model tag
 
