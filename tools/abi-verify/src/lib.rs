@@ -19,8 +19,10 @@ use serde::{Deserialize, Serialize};
 
 /// CellOS Lv-2 OS/ABI identifier byte (unofficial; readelf prints "unknown: 66").
 pub const ELFOSABI_CELL_LV2: u8 = 0x66;
-/// Current CellOS Lv-2 e_flags value. Older toolchain notes used
-/// 0x01000000, but the synchronized ABI spec now requires zero.
+/// Required CellOS Lv-2 e_flags value on linked images (EXEC/DYN). Older
+/// toolchain notes used 0x01000000, but the synchronized ABI spec now
+/// requires zero. Relocatable objects are exempt (BFD ppc64 default),
+/// spec section 1.
 pub const CELLOS_LV2_E_FLAGS: u32 = 0x0000_0000;
 /// `.sys_proc_prx_param` magic value (BE).
 pub const SYS_PROC_PARAM_MAGIC: u32 = 0x1b43_4cec;
@@ -1072,8 +1074,19 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
             m.elf.os_abi
         ));
     }
+    // Spec section 1: strict zero is required on linked images (the ones the
+    // loader loads; the PowerPC ABI-version bits there are the ELFv1 leakage
+    // the .opd rules forbid). Relocatable objects are exempt: BFD's ppc64
+    // default leaves them and `ld -r` would refuse to merge two such objects
+    // with different defaults ("unknown e_flags"), and the final link resets
+    // the value on the image it produces. Advisory: reported, not failed.
     if m.elf.flags == CELLOS_LV2_E_FLAGS {
         passes.push(format!("e_flags = 0x{CELLOS_LV2_E_FLAGS:08x}"));
+    } else if is_relocatable {
+        passes.push(format!(
+            "e_flags = 0x{:08x} (relocatable object: non-zero is expected for BFD ppc64 defaults, advisory only, spec section 1)",
+            m.elf.flags
+        ));
     } else {
         failures.push(format!(
             "e_flags = 0x{:08x}, expected 0x{CELLOS_LV2_E_FLAGS:08x}",
@@ -1528,6 +1541,70 @@ mod tests {
             toc_check: None,
             stub_text_check: None,
         }
+    }
+
+    #[test]
+    fn e_flags_relocatable_object_zero_passes() {
+        // Spec section 1: a linked image must be 0x0. base_manifest is EXEC,
+        // so the strict path applies and 0x0 passes.
+        let m = base_manifest();
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "EXEC with e_flags=0 must pass; failures: {:?}", r.failures);
+        assert!(r
+            .passes
+            .iter()
+            .any(|p| p.starts_with("e_flags = 0x00000000")));
+    }
+
+    #[test]
+    fn e_flags_linked_image_nonzero_fails() {
+        // Spec section 1 (strict case): a linked image (EXEC) with a non-zero
+        // e_flags carries the PowerPC ABI-version bits the .opd rules forbid;
+        // this must fail, not be reported.
+        let mut m = base_manifest();
+        m.elf.flags = 0x1; // EF_PPC64_ABI bit 0 (ELFv1)
+        let r = check_invariants(&m);
+        assert!(
+            !r.is_ok(),
+            "EXEC with e_flags=0x1 must fail",
+        );
+        assert!(r
+            .failures
+            .iter()
+            .any(|f| f.contains("e_flags = 0x00000001") && f.contains("expected 0x00000000")));
+        // Confirm the advisory path was NOT taken.
+        assert!(!r
+            .passes
+            .iter()
+            .any(|p| p.contains("relocatable object")));
+    }
+
+    #[test]
+    fn e_flags_relocatable_object_nonzero_reported() {
+        // Spec section 1 (advisory case): a relocatable (REL) with a non-zero
+        // e_flags is exempt — BFD ppc64 leaves the bit on, and `ld -r` would
+        // refuse to merge two such objects with different defaults
+        // ("unknown e_flags") before any other check runs. This must report
+        // (pass), not fail.
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();
+        m.elf.flags = 0x1; // EF_PPC64_ABI bit 0 (ELFv1)
+        let r = check_invariants(&m);
+        assert!(
+            r.is_ok(),
+            "REL with e_flags=0x1 must be reported (advisory), not fail; failures: {:?}",
+            r.failures
+        );
+        assert!(r
+            .passes
+            .iter()
+            .any(|p| p.contains("e_flags = 0x00000001")
+                && p.contains("relocatable object")
+                && p.contains("advisory")));
+        assert!(!r
+            .failures
+            .iter()
+            .any(|f| f.contains("e_flags")));
     }
 
     fn toc(
