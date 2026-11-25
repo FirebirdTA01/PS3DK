@@ -72,6 +72,7 @@ def opd_contract(man: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ),
         "descriptors": [
             {
+                "offset": d.get("offset"),
                 "head_n": len(d.get("head_relocs") or []),
                 "head_types": tuple(r.get("r_type") for r in (d.get("head_relocs") or [])),
                 # head symbol is INFORMATIVe — not compared

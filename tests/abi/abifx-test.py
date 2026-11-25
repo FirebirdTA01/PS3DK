@@ -71,6 +71,13 @@ def main():
         d["opd"]["entries"] = len(d["opd"]["descriptors"])
     run_role(mut_crt0(dup), "crt0", False, "duplicate descriptor FAILS")
 
+    # a descriptor's offset changed (e.g. 0 -> 4) must FAIL (gap: offset was
+    # not part of the contract, so two objects with the same descriptors at
+    # different strides compared equal)
+    def bad_offset(d):
+        d["opd"]["descriptors"][0]["offset"] = 4
+    run_role(mut_crt0(bad_offset), "crt0", False, "changed descriptor offset FAILS")
+
     # changed tail addend -> FAIL (finding 4: addend is contract)
     def tail_add(d):
         d["opd"]["descriptors"][0]["tail_relocs"][0]["addend"] = 4
