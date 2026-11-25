@@ -106,9 +106,11 @@ unsigned `.prx`, in:
 4. `/app_home`.
 
 Each directory is tried once. Before searching, the loader prints the arguments
-it was started with: `VSHP argv argc=<n> [0]=... [1]=...`. A child started with
-`exitspawn` (the ps3dk-run loader, for example) gets no usable argv, so stage the
-plugin in the fixed directory for that launcher.
+it was started with: `VSHP argv argc=<n> [0]=... [1]=...`. Under the ps3dk-run
+loader, `argv[0]` is the SELF's path in its run directory and `argv[1..]` are the
+arguments given after `--` ([ps3dk-run.md](../../../docs/tools/ps3dk-run.md)), so a
+plugin sent with `--file` is found beside the SELF, and an absolute directory
+after `--` is searched first.
 
 A `.self` loads the real-signed `.sprx`, a `.fake.self` the `.fake.sprx`,
 and on RPCS3 a raw `.elf` boot the `.prx`.

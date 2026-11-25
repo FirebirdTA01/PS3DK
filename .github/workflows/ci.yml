@@ -465,6 +465,8 @@ jobs:
       - name: Function-path runtime host test
         run: |
           python3 tests/host/run-hook-inject-test.py
+          python3 tests/host/run-hook-inject-argv-test.py
+          python3 tests/host/ps3dk-run-crypto-test.py
           python3 samples/profiling/heterogeneous-workload/tests/test_func_verify.py
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-plain"
           python3 tests/host/ps3dk-prof-runtime/func-test.py --out "$RUNNER_TEMP/func-address" --sanitize address

@@ -1,0 +1,16 @@
+[package]
+name = "ps3dk-run"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Send a SELF to the PS3DK loader on a console, stream its output, report the outcome"
+publish = false
+
+[[bin]]
+name = "ps3dk-run"
+path = "src/main.rs"
+
+[dependencies]
+ps3dk-version.workspace = true

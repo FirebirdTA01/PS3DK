@@ -1,18 +1,19 @@
 # Links the ps3dk-run protocol-2 run hook into an unmodified sample.
 #
 # Configure a sample with
-#   -DCMAKE_PROJECT_INCLUDE=<this file> -DPS3DK_RUN_HOOK_DIR=<dir>
-# where <dir> is a checkout of spike/ps3dk-run (the directory holding hook/
-# and common/).  At the end of the sample's CMakeLists.txt, every executable
+#   -DCMAKE_PROJECT_INCLUDE=<this file> [-DPS3DK_RUN_HOOK_DIR=<dir>] [-DPS3DK_RUN_HOOK_TARGETS=<t1;t2>]
+# where <dir> holds hook/ and common/ (default: this repository's
+# tools/ps3dk-run).  At the end of the sample's CMakeLists.txt, every executable
 # target defined there gets:
 #   - its own sources compiled with main renamed to ps3dk_sample_main;
 #   - hook_main.c (or .cpp for a C++ sample) as the new main, which starts
-#     the hook and then calls the sample's main;
+#     the hook and then calls the sample's main with the remaining argv;
 #   - the hook sources, libnet and the sysmodule stubs.
 # The sample's sources are not changed.  Without the loader's marker in argv
 # the hook stays inert, so the same SELF also boots in RPCS3.
+# tools/ps3dk-run/hook-check.py (or hook-check.ps1) checks a built SELF actually carries the hook.
 if(NOT PS3DK_RUN_HOOK_DIR)
-    message(FATAL_ERROR "run-hook-inject.cmake: set PS3DK_RUN_HOOK_DIR")
+    get_filename_component(PS3DK_RUN_HOOK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../tools/ps3dk-run" ABSOLUTE)
 endif()
 if(NOT EXISTS "${PS3DK_RUN_HOOK_DIR}/hook/ps3dk_run_hook.c")
     message(FATAL_ERROR "run-hook-inject.cmake: no hook/ps3dk_run_hook.c in ${PS3DK_RUN_HOOK_DIR}")
@@ -36,17 +37,23 @@ function(_ps3dk_inject_run_hook)
         if(NOT type STREQUAL "EXECUTABLE")
             continue()
         endif()
+        # -DPS3DK_RUN_HOOK_TARGETS="a;b" limits the injection to those targets: a PRX module is an EXECUTABLE to
+        # CMake too (ps3_add_prx), and must not get the hook or a main.
+        if(PS3DK_RUN_HOOK_TARGETS AND NOT t IN_LIST PS3DK_RUN_HOOK_TARGETS)
+            continue()
+        endif()
         get_target_property(sources ${t} SOURCES)
         set(cxx 0)
         foreach(s ${sources})
-            if(s MATCHES "\\.(c|cpp|cc|cxx)$")
-                set_property(SOURCE "${s}" TARGET_DIRECTORY ${t}
-                             APPEND PROPERTY COMPILE_DEFINITIONS "main=ps3dk_sample_main")
-                if(s MATCHES "\\.(cpp|cc|cxx)$")
-                    set(cxx 1)
-                endif()
+            if(s MATCHES "\\.(cpp|cc|cxx)$")
+                set(cxx 1)
             endif()
         endforeach()
+        # The rename is a property of this target, not of its source files: a source property follows the file into
+        # every target in the directory, so an excluded target sharing main.c (an ILP32 and an LP64 build of one
+        # loader) would lose its main too.  The wrapper below #undefs main before defining its own; the hook
+        # sources never use the token.
+        target_compile_definitions(${t} PRIVATE main=ps3dk_sample_main)
         if(cxx)
             set(wrapper "${CMAKE_BINARY_DIR}/run-hook/hook_main_${t}.cpp")
         else()

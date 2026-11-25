@@ -2,7 +2,7 @@
 Builds every PSGL sample with the ps3dk-run hook linked in (run-hook-inject.cmake),
 for a hardware boot gate.  The sample sources are not changed.
 
-  build-samples.ps1 -Out <new dir> -HookDir <spike/ps3dk-run checkout> [-Sdk <PS3DK>]
+  build-samples.ps1 -Out <new dir> [-HookDir <dir with hook/ and common/, default tools/ps3dk-run>] [-Sdk <PS3DK>]
                     [-Samples a,b] [-LibDir <dir with libPSGL.a / libgcm_cmd.a>]
                     [-RsxCg <rsx-cg-compiler.exe>]
                     [-Cmake <cmake.exe>] [-Ninja <ninja.exe>]
@@ -16,7 +16,7 @@ on the first configure or build failure.  It takes no build slot itself.
 #>
 param(
     [Parameter(Mandatory)][string]$Out,
-    [Parameter(Mandatory)][string]$HookDir,
+    [string]$HookDir = '',
     [string]$Sdk = $env:PS3DK,
     [string[]]$Samples = @(),
     [string]$LibDir = '',
@@ -27,6 +27,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $inject = "$PSScriptRoot/run-hook-inject.cmake"
+if (-not $HookDir) { $HookDir = "$repo/tools/ps3dk-run" }
 if (-not $Sdk) { throw 'set -Sdk or PS3DK' }
 if (Test-Path $Out) { throw "output exists: $Out" }
 if (-not (Test-Path "$HookDir/hook/ps3dk_run_hook.c")) { throw "no run hook in $HookDir" }
