@@ -115,13 +115,13 @@ offset  size  field               value / reloc
 0x04    4     magic               0x1b434cec
 0x08    4     version             0x00000004
 0x0c    4     sdk_version         BCD SDK version (e.g. 0x00475001)
-0x10    4     lib_ent.begin       R_PPC64_ADDR32 __begin_of_section_lib_ent + 4
-0x14    4     lib_ent.end         R_PPC64_ADDR32 __end_of_section_lib_ent
-0x18    4     lib_stub.begin      R_PPC64_ADDR32 __begin_of_section_lib_stub + 4
-0x1c    4     lib_stub.end        R_PPC64_ADDR32 __end_of_section_lib_stub
+0x10    4     lib_ent.begin       R_PPC64_ADDR32 __libentstart + 4
+0x14    4     lib_ent.end         R_PPC64_ADDR32 __libentend
+0x18    4     lib_stub.begin      R_PPC64_ADDR32 __libstubstart + 4
+0x1c    4     lib_stub.end        R_PPC64_ADDR32 __libstubend
 0x20    4     abi_version         0x01010000 (REQUIRED - see rule 5)
 0x24    4     ppu_guid_addr       R_PPC64_ADDR32 __PPU_GUID
-0x28    4     sys_process_enable  R_PPC64_ADDR32 __sys_process_enable_*
+0x28    4     sys_process_enable  R_PPC64_ADDR32 __sys_process_enabled
 0x2c    4     reserved            0
 0x30    16    reserved / padded   zero
 ```
@@ -134,10 +134,15 @@ Normative rules:
 3. The `+4` addends on the `lib_ent.begin` and `lib_stub.begin` fields
    account for a 4-byte section header prefix at the start of
    `.lib.ent.top` / `.lib.stub.top`; samples MUST preserve that layout.
-4. The `__sys_process_enable_*` symbol name is compile-time mangled with
-   a publisher/company token (e.g. `__sys_process_enable_cp_43454c4c__`
-   encodes ASCII `CELL`). Our toolchain selects the token at link time
-   via a linker-script symbol; the value is not fixed by this spec.
+   The boundary symbols are `__libentstart` / `__libentend` /
+   `__libstubstart` / `__libstubend`.
+4. The `ppu_guid_addr` (`__PPU_GUID`) and `sys_process_enable`
+   (`__sys_process_enabled`) fields are weak. A shipping program defines
+   one or both in its own source to populate the slot, or leaves them
+   undefined; they then resolve to zero at link time, which the PRX
+   loader reads as "no GUID set / baseline capability set only". The
+   concrete symbol names are informative; the loader keys on the
+   relocation and slot offset, not the name.
 5. `abi_version` at offset `0x20` is the 32-bit literal `0x01010000`.
    Zero here is not a conforming process-parameter block and can stall
    the loader before the module entry point is invoked. The normative

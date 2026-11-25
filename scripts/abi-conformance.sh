@@ -232,85 +232,22 @@ diff_one() {
     fi
     cp -f "$fix" "$fix_json"
 
-    python3 - "$obj_json" "$fix_json" "$role" <<'PY'
-import json, sys
-
-obj_p, fix_p, role = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    obj = json.load(open(obj_p))
-except Exception as e:
-    print(f"  [FAIL] cannot read object manifest {obj_p}: {e}"); sys.exit(1)
-try:
-    fix = json.load(open(fix_p))
-except Exception as e:
-    print(f"  [FAIL] cannot read fixture manifest {fix_p}: {e}"); sys.exit(1)
-
-rc = 0
-def check(label, a, b):
-    global rc
-    if a == b:
-        print(f"  [ok]   {label}: {a!r}")
-    else:
-        print(f"  [FAIL] {label}: object={a!r} fixture={b!r}"); rc = 1
-
-def get(d, *path):
-    for k in path:
-        if not isinstance(d, dict) or k not in d: return None
-        d = d[k]
-    return d
-
-print(f"  [strict] ELF identity (class / endian / machine / flags):")
-for f in ("class", "endian", "machine", "flags"):
-    check(f"elf.{f}", get(obj, "elf", f), get(fix, "elf", f))
-for f in ("elf_type", "os_abi"):
-    print(f"  [info] elf.{f}  object={get(obj,'elf',f)!r} fixture={get(fix,'elf',f)!r} — type-dependent, informational only")
-
-if role == "crt0":
-    def opd(man):
-        o = get(man, "opd")
-        if o is None: return ("ABSENT", None, None)
-        sh = set()
-        for d in (get(o, "descriptors") or []):
-            h = (get(d, "head_reloc", "r_type"), get(d, "head_reloc", "symbol")) if get(d, "head_reloc") else None
-            t = (get(d, "tail_reloc", "r_type"), get(d, "tail_reloc", "symbol")) if get(d, "tail_reloc") else None
-            sh.add((h, t))
-        return ("POPULATED" if (get(o, "entries") or 0) > 0 else "EMPTY",
-                get(o, "entry_size"), sorted(sh))
-    s, f = opd(obj), opd(fix)
-    print(f"  [strict] .opd descriptor shape (entry_size + per-descriptor reloc table):")
-    if s == f:
-        print(f"  [ok]   .opd shape: {s!r}")
-    else:
-        print(f"  [FAIL] .opd: object={s!r}")
-        print(f"         fixture={f!r}")
-        print("         the installed lv2-crt0.o's .opd shape differs from the normative")
-        print("         compact-descriptor fixture — a section-7 deviation.")
-        rc = 1
-
-if role == "sprx":
-    def prx(man):
-        p = get(man, "sys_proc_prx_param")
-        if p is None: return None
-        return (
-            get(p, "size"),
-            get(p, "magic"),
-            get(p, "version"),
-            get(p, "abi_version"),
-            sorted((r["offset"], r["r_type"]) for r in (get(p, "relocs") or [])),
-        )
-    so, sf = prx(obj), prx(fix)
-    print(f"  [strict] .sys_proc_prx_param (size, magic, version, abi_version, ADDR32 slot table):")
-    if so is None and sf is None:
-        print("  [ok]   .sys_proc_prx_param: absent in both (unexpected for lv2-sprx.o)")
-        rc = 1
-    elif so == sf:
-        print(f"  [ok]   .sys_proc_prx_param block: sizes/magic/version/abi_version and addr32-slot offsets all match")
-    else:
-        print(f"  [FAIL] .sys_proc_prx_param: object={so!r} fixture={sf!r}")
-        rc = 1
-
-sys.exit(rc)
-PY
+    # Locate the shared strict comparator (tests/abi/abifx.py) relative to this
+    # script, so it works regardless of the CWD the caller used.  The old
+    # inline Python here collapsed the descriptor table into a set() and
+    # sorted() it, which crashed when a symbol was present in one manifest and
+    # None in the other, and let a duplicate descriptor slip past.  abifx.py
+    # compares descriptor-by-descriptor (count, layout, addend) and treats
+    # the concrete head/tail symbol names as informative, not contract.
+    local script_dir repo_root abifx
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    repo_root="$(cd "$script_dir/.." && pwd)"
+    abifx="$repo_root/tests/abi/abifx.py"
+    if [ ! -f "$abifx" ]; then
+        printf '  [FAIL] comparator not found: %s\n' "$abifx"
+        return 1
+    fi
+    python3 "$abifx" compare "$obj_json" "$fix_json" "$role"
     return $?
 }
 

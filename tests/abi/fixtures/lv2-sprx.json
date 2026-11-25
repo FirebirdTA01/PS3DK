@@ -142,6 +142,14 @@
         "symbol": "__sys_process_enabled",
         "addend": 0
       }
+    ],
+    "pointer_slots": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
     ]
   }
 }
