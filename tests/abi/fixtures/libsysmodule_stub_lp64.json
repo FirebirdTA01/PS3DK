@@ -1,5 +1,5 @@
 {
-  "path": "generated/libsysmodule_stub.lp64(sysmodule.o)",
+  "path": "tests/abi/fixtures/libsysmodule_stub_lp64.json",
   "elf": {
     "class": "ELF64",
     "endian": "big",
@@ -109,7 +109,7 @@
     {
       "name": ".opd",
       "sh_type": "PROGBITS",
-      "size": 64,
+      "size": 128,
       "addralign": 4,
       "entsize": 0,
       "flags": 3
@@ -117,7 +117,7 @@
     {
       "name": ".rela.opd",
       "sh_type": "RELA",
-      "size": 384,
+      "size": 768,
       "addralign": 8,
       "entsize": 24,
       "flags": 64
@@ -125,7 +125,7 @@
     {
       "name": ".symtab",
       "sh_type": "SYMTAB",
-      "size": 1176,
+      "size": 1368,
       "addralign": 8,
       "entsize": 24,
       "flags": 0
@@ -133,7 +133,7 @@
     {
       "name": ".strtab",
       "sh_type": "STRTAB",
-      "size": 843,
+      "size": 996,
       "addralign": 1,
       "entsize": 0,
       "flags": 0
@@ -148,136 +148,316 @@
     }
   ],
   "opd": {
-    "entry_size": 4,
+    "entry_size": 8,
     "entries": 16,
+    "linked": false,
+    "addralign": 4,
+    "entsize": 0,
+    "off_slot_relocs": [],
     "descriptors": [
       {
         "offset": 0,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleFetchImage",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 4,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleFetchImage",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 8,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleFinalize",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 12,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleFetchImage",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 16,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleGetImagesize",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 20,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleFinalize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 24,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleInitialize",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 28,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleFinalize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 32,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleIsLoaded",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 36,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleGetImagesize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 40,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleLoadModule",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 44,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleGetImagesize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 48,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleSetMemcontainer",
-          "addend": 0
-        }
-      },
-      {
-        "offset": 52,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleInitialize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
         "offset": 56,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": "__cellSysmoduleUnloadModule",
-          "addend": 0
-        }
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleInitialize",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       },
       {
-        "offset": 60,
-        "head_reloc": {
-          "r_type": "R_PPC64_ADDR32",
-          "symbol": ".TOC.",
-          "addend": 0
-        }
+        "offset": 64,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleIsLoaded",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 72,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleIsLoaded",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 80,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleLoadModule",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 88,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleLoadModule",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 96,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleSetMemcontainer",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 104,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleSetMemcontainer",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 112,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleUnloadModule",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
+      },
+      {
+        "offset": 120,
+        "head_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": "__cellSysmoduleUnloadModule",
+            "addend": 0
+          }
+        ],
+        "tail_relocs": [
+          {
+            "r_type": "R_PPC64_ADDR32",
+            "symbol": ".TOC.",
+            "addend": 0
+          }
+        ],
+        "entry_ea": 0,
+        "toc_ea": 0
       }
     ]
   },
