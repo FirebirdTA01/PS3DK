@@ -1,7 +1,7 @@
 # Samples
 
-Minimal programs that exercise the toolchain, PSL1GHT, and reference-the platform ABI
-ABI conformance.  One concept per sample; big examples go elsewhere.
+Minimal programs that check the toolchain, PSL1GHT, and the platform ABI.
+One concept per sample; big examples go elsewhere.
 
 Samples are grouped by subsystem.  New subsystems (audio, pad, network,
 video, spurs, …) will get their own subdirectory when the first sample
@@ -19,7 +19,17 @@ samples/
 ├── sprx/          relocatable modules (PRX/SPRX) and their loaders
 ├── util/          self-contained PPU utility libraries (hash)
 ├── spu/           SPU toolchain + PPU/SPU interop
-└── spurs/         libspurs sync primitives + Spurs task runtime
+├── spurs/         libspurs sync primitives + Spurs task runtime
+├── audio/         cellAudio mixer + cellAudioOut discovery
+├── codec/         codec decode/encode surfaces (pngenc, jpgdec, sail, …)
+├── dbgfont/       cellDbgFont on-screen text overlay
+├── debug/         debugger / GDB practice sample
+├── font/          system font (cellFont) rendering
+├── fw/            firmware (FW) framework validation samples
+├── input/         keyboard / mouse / GEM / DualShock 3 input
+├── PSL1GHT/       upstream PSL1GHT sample ports
+├── profiling/     profiler probes + benchmark drivers
+└── vision/        camera (Eye) capture + GCM presentation
 ```
 
 ## input/
@@ -35,6 +45,10 @@ verification is pending; emulator checks cover API/input/lifecycle only.
 pressure-mode restore and reconnect handling. See its
 [README](input/ds3-bench/README.md) for controls. Hardware verification is
 pending.
+
+| Sample | Validates | Status |
+|---|---|---|
+| `host-tests` | native-host unit tests for the portable `ds3-bench` logic (use the SDK `cell/pad.h` for constants / structs only; no PS3 code runs) |  |
 
 ## profiling/
 
@@ -59,6 +73,16 @@ writer finalization. ON/OFF controls and one/two enabled-SPU configurations are
 provided. Its firmware execution and decrementer behavior still require target
 validation; a successful build is not that validation.
 
+| Sample | Validates | Status |
+|---|---|---|
+| `clock-calibration` | RAW observations of the SPU decrementer and the RSX timestamp, each bracketed between two PPU timebase reads (records only; no calibration claim) |  |
+| `clock-calibration-w` | localization probe W / W0: a clock-probe variant (c4 path) on the shared probe harness |  |
+| `ext-probe` | the first on-console SPU-lane + RSX-domain probe (design p3.3 E1) |  |
+| `launch-marker` | launch-marker probe L: the smallest program on the clock probe's launch path (a single marker + timebase pair) |  |
+| `live-read-probe` | live-link hardware gate 0: can an app thread read the profiler's capture file while the target is running |  |
+| `overhead-bench` | the portable overhead-bench target driver (Plan A r2 probe design, A-1 to A-4 + D7) |  |
+| `wait-observations` | ordinary `pthread` calls with capture-lifecycle only (no manual zones / wait hooks); 32 mutex calls + a distinct mutex, handshaked |  |
+
 ## toolchain/
 
 Validate the toolchain, `libsysbase` lv2 glue, and .sys_proc_param ABI.
@@ -69,7 +93,32 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 | `hello-ppu-c++17` | PPU C++17 front- and back-end, libstdc++ link, PPU thread id | **green** |
 | `hello-ppu-abi-check` | `.sys_proc_param` 36-byte firmware-3.30+ layout; malloc/calloc/realloc through libsysbase `_sbrk_r`; printf through `_write_r` | **green** |
 | `hello-ppu-backfill` | Batch link test — anchors one symbol from each of five stub archives (subdisplay / music / music_decode / music_export / imejp) so FNID + sceResident entries land in the ELF | **green** + RPCS3 runtime-verified |
-
+| `compact-opd-probe` | proof-of-concept for 8-byte compact function descriptors (call through lwz/lwz/mtctr/bctrl inline asm) |  |
+| `gcm-config-abi` | empirical kernel-ABI probe for `cellGcmGetConfiguration` (the `CellGcmConfig` widener) |  |
+| `hello-cellcgb-parse` | `<cell/cgb.h>` / libCGB parser smoke test (parses a CGB file; the `file io failed` path is a distinct check) |  |
+| `hello-ppu-c++17-oss` | C++17 `std::ostringstream<<int` crash isolation (a minimal repro of the integer-insertion fault) |  |
+| `hello-ppu-dtoa-minimal` | newlib `dtoa` (float-to-string) minimal validation: a `printf("%g")` round-trip on a small set of floats |  |
+| `hello-ppu-lp64-syscall-probe` | LP64 ABI bisect: `cellGcm` / `rsxMemalign` probes in a minimal program, stepped with `-DSTEP=N` |  |
+| `hello-ppu-lp64-video-out-probe` | LP64 ABI bisect: `cellVideoOut` + `cellGcm` in a minimal program, stepped with `-DSTEP=N` (N = 1 to 4) |  |
+| `hello-ppu-mlp64-tagged-pointer` | packs a 16-bit type tag into the unused high 16 bits of a 64-bit pointer and recovers it via mask + shift (works under `-mlp64`, not ILP32) | builds; LP64 artefact is produced at link time but currently cannot reach `main()` at runtime (ILP32-shape CRT objects; see the sample README) |
+| `hello-ppu-mlp64-types` | probe: prints `sizeof` of every width-sensitive primitive + the state of `__LP64__` / `__ILP32__` (built twice so both ABI flavours ship) | builds; LP64 artefact is produced at link time but currently cannot reach `main()` at runtime (ILP32-shape CRT objects; see the sample README) |
+| `hello-ppu-mt19937` | C++ `std::mt19937` deterministic sequence: known 32-bit values + a 100-iteration check |  |
+| `hello-ppu-oss-int-midflight` | snapshot the `ostringstream` internal buffer before and after `oss << 1` to locate the corruption |  |
+| `hello-ppu-oss-int-nobanner` | `ostringstream<<int` variant: no `printf` banner before the ostringstream block |  |
+| `hello-ppu-oss-int-noctor` | `ostringstream<<int` variant: a global `ostringstream`, constructed far from use |  |
+| `hello-ppu-oss-int-only` | `ostringstream<<int` variant: isolate integer-only insertion |  |
+| `hello-ppu-oss-int-sigsegv` | `ostringstream<<int` variant: a SIGSEGV handler reads `oss+184` at fault time |  |
+| `hello-ppu-oss-int-stack-vs-heap` | `ostringstream<<int` variant: stack vs heap allocation of the facet |  |
+| `hello-ppu-oss-int-tracepoint` | `ostringstream<<int` variant: a runtime tracepoint to pin down the `oss+184` corruption timing |  |
+| `hello-ppu-oss-layout` | memory-layout probe of `std::ostringstream` (a `sizeof` scan of the facet / buffer internals) |  |
+| `hello-ppu-oss-manual-recipe` | replicate `_M_insert<long>` with an explicit vs implicit `ostreambuf_iterator` |  |
+| `hello-ppu-oss-put-noargs` | `ostringstream` `put` variant: the facet reached through a const pointer (no-arg `put`) |  |
+| `hello-ppu-oss-str-only` | `ostringstream` variant: isolate string-only insertion (`oss << "...") |  |
+| `hello-ppu-ostream-iter-byval` | test `ostreambuf_iterator<char>` by-value through a virtual call (the sink + dummy check) |  |
+| `hello-ppu-perf` | `<cell/perf/performance.h>` (`cellPerf*`) surface validation: `cellPerfGetVersion` / `Start` / `InsertCBEpmBookmark` / `Stop` |  |
+| `hello-ppu-struct-byval` | test by-value passing of an 8-byte aggregate through a virtual call |  |
+| `hello-ppu-struct-byval-ret` | test by-value return of an 8-byte aggregate through a virtual call |  |
+| `hello-ppu-sv-aggregate-min` | C++ `std::vector` aggregate round-trip: a vector of 16-byte structs, push / read / clear |  |
 ### PSGL (`toolchain/hello-psgl-*`, `toolchain/hello-psglu`)
 
 OpenGL ES 1.1-style rendering through `libPSGL` / `libPSGLU` on top of GCM.
@@ -211,6 +260,25 @@ the published v0.26.0 FIFO-sizing caveat.
 | `hello-ppu-dbgfont` | `cellDbgFont*` on-screen text overlay demo over a clear-loop background: multi-size / multi-colour text grid covering the whole screen, animated pulsing + drifting strings, per-frame counter | **green** (RPCS3 runtime test pending) |
 | `hello-ppu-gcm-label-reuse` | A2 label reuse probe (light): verifies memory safety when reusing vertex/texture buffers after completion labels | **green** |
 | `hello-ppu-gcm-label-reuse-heavy` | A2 label probe (heavy): index, vertex, and texture poison across early, command-label, and back-end completion modes under pipeline-saturating workload | **builds** (hardware measurement probe) |
+| `hello-ppu-cellgcm-alpha-mask` | `rsx-cg-compiler` validation: FP alpha-mask if-else shape + implicit varying-binding inference through `cellGcmCg*` / `cellGcmSetFragmentProgram` |  |
+| `hello-ppu-cellgcm-blend` | alpha-blend visual demo + `rsx-cg-compiler` emitter validation: three overlapping translucent quads |  |
+| `hello-ppu-cellgcm-chain` | `rsx-cg-compiler` FP arithmetic-chain validation with per-draw runtime uniform patching |  |
+| `hello-ppu-cellgcm-discard-blend` | `rsx-cg-compiler` validation: compound-discard + simple-discard + `VecConstruct` through the FP emitter |  |
+| `hello-ppu-cellgcm-drawenv` | `setSurface` + `setDrawEnv` repro (mirrors the `cellgcm-clear` init / flip / clear loop) |  |
+| `hello-ppu-cellgcm-global-uniforms` | rotating-cube textured sample: decodes `sdk/assets/ICON0.PNG` via `cellPngDec`, byte-shuffles to R8G8B8A8, samples it from a 3D cube |  |
+| `hello-ppu-cellgcm-laneelision` | `rsx-cg-compiler` 3-unique-values lane-elision validation test |  |
+| `hello-ppu-cellgcm-loops` | `rsx-cg-compiler` shader-feature validation (loops / control flow through the FP emitter) |  |
+| `hello-ppu-cellgcm-render-to-texture` | render-target switch: after display init, allocate an offscreen surface, clear it, wait a fresh RSX completion label, read eight pixels back through the PPU mapping |  |
+| `hello-ppu-cellgcm-sysinfo` | the GCM system-query surface, value-checked (the 28 `gcm_sys*` queries in `<rsx/gcm_sys.h>`) |  |
+| `hello-ppu-cellgcm-textured-cube` | rotating cube, SDK ICON0 texture, canonical `flip_immediate`: decodes `ICON0.PNG` via `cellPngDec`, samples it from a 3D cube (24 vertices / 36 indices) |  |
+| `hello-ppu-cellgcm-vp-loop` | basic GCM `flip_immediate` demo: `.cg` vertex + fragment shaders through `rsx-cg-compiler` |  |
+| `hello-ppu-dbgrsx` | `cellDbgRsx` validation: `cellDbgRsxInit` + the debug resource-query surface |  |
+| `hello-ppu-gcm-call-return` | GCM command segments: each frame's drawing is built into a small command segment and run via the CALL / RETURN segment APIs |  |
+| `hello-ppu-gcm-main-arena` | textured, indexed quad from vertices / 16-bit indices / a texture in a 1 MiB `cellGcmMapMainMemory` arena; the PPU rewrites the arena between 60-frame phases and reads back 128x128 windows |  |
+| `hello-ppu-gcm-nested-call` | nested-CALL probe: a ring segment CALLs an outer segment that itself CALLs an inner segment |  |
+| `hello-ppu-gcm-zcull-clip-border` | GCM command coverage: 4 screen-space vertices (NDC + UV) drawn against a zcull region + clip border |  |
+| `hello-ppu-resc` | `cellResc` surface validation: load `CELL_SYSMODULE_RESC`, exercise the render-surface-query API, print return codes |  |
+| `hello-spu-gcm-segment` | SPU-built GCM command segments: each frame an SPU job writes the frame's drawing into a main-memory segment the PPU submits |  |
 
 ## sysutil/
 
@@ -231,7 +299,37 @@ non-PSL1GHT-backed library pull one of the nidgen-built stub archives.
 | `hello-ppu-sysutil-queries` | License area, Remote Play status and volume, boot game info, HOME export path and paired Bluetooth devices through the new sysutil headers; loads and unloads each system module | **green** + RPCS3 runtime-verified |
 | `hello-ppu-l10n` | `cellSysmoduleLoadModule(CELL_SYSMODULE_L10N)` + `eucjp2sjis()` — 165-export libl10n scaling test for the nidgen-archive pipeline | **green** + RPCS3 runtime-verified (all four EUC-JP→SJIS conversions match) |
 | `hello-ppu-input-combined` | Pad + keyboard + mouse polled in one loop; hot-plug on port 0 of each surface printed as it happens; any failed init, callback, read or shutdown call ends the run in FAIL (exit 1), while absent devices, idle frames and a confirmed unplug during a read are normal (`README.md`) | builds both ABIs; RPCS3 run of this revision pending; hot-plug needs a console |
-
+| `hello-ppu-avc` | `cellSysutilAvc*` (legacy AVC voice-chat panel) surface validation: Load the panel, query show / mute / layout / volume, Unload |  |
+| `hello-ppu-avc2` | `cellSysutilAvc2` (AVC2 voice-chat panel) init-param + surface-call validation via `sysutil_avc2_stub` |  |
+| `hello-ppu-bgm` | `cellSysutil*BgmPlayback` (system-BGM) control surface: enable / disable / fade via the BGM-playback API |  |
+| `hello-ppu-cellfs` | `cellFs` file-system surface validation: open / write / stat / read / memcmp / unlink round-trip of a small payload in `/dev_hdd0/tmp` |  |
+| `hello-ppu-face` | `cellFaceDetection` surface validation: `cellFaceDetectionGetDictEa` + the face-detection call API |  |
+| `hello-ppu-font` | `cellFont` surface validation: `cellFontInitializeWithRevision` / `GetRevisionFlags` + the font API |  |
+| `hello-ppu-gamecontent` | `cellGame*` surface validation: all 17 entry points backed by `libcellGame_stub` |  |
+| `hello-ppu-imejp` | `cellImeJpUtility` surface validation: all 41 entry points in `libsysutil_imejp_stub` |  |
+| `hello-ppu-key2char` | `cellKey2Char` surface validation: all 5 entry points in `libcellKey2char_stub` |  |
+| `hello-ppu-keyboard` | `cellKb` keyboard input surface: `<cell/keyboard.h>` end-to-end (`CellKeyboardInfo` / `Key` / data polling) |  |
+| `hello-ppu-mouse` | `cellMouse` input surface: `<cell/mouse.h>` (`CellMouseInfo` / `ButtonState` polling) |  |
+| `hello-ppu-msgdialog-3d` | the stereoscopic-3D "remove glasses" warning splash via `cellMsgDialogOpen2` (3D button type) |  |
+| `hello-ppu-msgdialog-errcode` | `cellMsgDialogOpenErrorCode`: an error-code dialog that displays a formatted code + OK / Cancel |  |
+| `hello-ppu-msgdialog-progressbar` | the progress-bar dialog via `cellMsgDialogOpen2` + `cellMsgDialogProgressBarInc` / `Set` |  |
+| `hello-ppu-msgdialog-string` | a text-only dialog via `cellMsgDialogOpen2` with `TYPE_BUTTON_TYPE_NONE` |  |
+| `hello-ppu-music-decode2` | `cellMusicDecodeUtility` v2 surface validation: all 10 v2 entry points |  |
+| `hello-ppu-osk` | bring up the on-screen keyboard and drive the extended layout / key-options entry points (`oskSetLayoutMode` / `oskSetKeyLayoutOption`) |  |
+| `hello-ppu-osk-ext` | `cellOskDialogExt*` extended-OSK validation: the 17-entry ext surface |  |
+| `hello-ppu-pad` | `cellPad` API validation via the nidgen stub archive: `Pad*` (init / info / data / actuator) end-to-end |  |
+| `hello-ppu-png` | decode a PNG via `cellPngDec` and display it via RSX (the decoder in `libcellPngDec_stub`) |  |
+| `hello-ppu-rtc` | `cellRtc` validation: load the `cellRtc` SPRX, exercise the commonly used entry points (date / time / timezone) |  |
+| `hello-ppu-savedata-link` | link-only test of the full `cellSaveData` Cell-name surface (takes the address of every export to confirm they resolve) |  |
+| `hello-ppu-savedata-list` | `cellSaveDataListSave2` validation: present the savedata list dialog, offer a delete, confirm |  |
+| `hello-ppu-search` | `cellSearch` content-search validation: init / search-start / finalize |  |
+| `hello-ppu-storagedata` | drive `cellStorageDataImport` / `Export` / `ImportMove` with sentinel paths (no removable media required) |  |
+| `hello-ppu-subdisplay` | `cellSubDisplay` surface validation: every entry point in `libsysutil_subdisplay_stub` |  |
+| `hello-ppu-sync` | `libsync` + `libsync2` validation: load `cellSync` + `cellSync2`, exercise the sync / mutex / semaphore / condition surface |  |
+| `hello-ppu-sys-event` | Cell-named LV2 event-queue / event-port surface: the `sys_*` snake_case wrappers |  |
+| `hello-ppu-syscache` | mount the per-title cache area on `/dev_hdd1` (`cellSysCacheMount`), read back the assigned size, then clear |  |
+| `hello-ppu-sysconf` | open the audio-device configuration sub-dialog (`cellSysconfOpen`) and wait for its callback |  |
+| `hello-ppu-videoout-info` | the `cellVideoOut*` device surface: `GetNumberOfDevice` / `GetDeviceInfo` / `GetState` / `GetConfiguration` round-trips |  |
 ## sprx/
 
 Relocatable modules (`ps3_add_prx`) and the programs that load them; see
@@ -263,7 +361,18 @@ The `hello-event-flag-spu` sample additionally pulls in our
 | `hello-raw-spu` | A raw SPU created, loaded and run through its problem-state registers with the `<sys/raw_spu.h>` names: `sys_raw_spu_create` / `image_load`, `SPU_In_MBox`, `SPU_NPC`, `SPU_RunCntl`, `SPU_Out_MBox` and `SPU_Status` via `sys_raw_spu_mmio_*`, the local store via `LS_BASE_ADDR`; prints `HELLO_RAW_SPU OK` | **green** + RPCS3 runtime-verified |
 | `hello-ppu-lv2-memcontainer` | LV2 memory container: four sequential 512 KiB allocate / nonzero-address / readback / free cycles from a 2 MiB container must all complete, total unchanged afterwards; invalid container IDs must be refused and `sys_memory_free(0)` returns EINVAL (`README.md`) | builds both ABIs; RPCS3 run of this revision pending |
 | `hello-ppu-cellfs-async-stream` | cellFs AIO + streaming read on a scratch file it creates exclusively under a unique `/dev_hdd0/tmp` name and removes: `cellFsAioRead` with a callback (data checked), an AIO read plus `cellFsAioCancel` (outcome printed), then a `cellFsStRead` ring buffer over 32 checked 8 KiB blocks; an AIO request that does not complete in time stops the run with its resources left in place (`README.md`) | builds both ABIs; AIO and streaming need a console (RPCS3 stops on `cellFsAioInit`) |
-
+| `hello-event-port-spu` | exercise the SPU side of lv2 event ports: `sys_spu_thread_send_event` / `throw_event` / `receive_event` / `tryreceive_event` / `group_yield` |  |
+| `hello-ppu-crashdump` | `sys_crash_dump_*` validation: register a user log area, query it back, verify the crash-dump param shape |  |
+| `hello-ppu-fiber` | `libfiber` bring-up validation: the PPU fiber surface end-to-end (fiber A / B scheduling) |  |
+| `hello-ppu-lv2-mempool` | LV2 random-number, mempool and spinlock surface (`sys/random_number.h`, `sys/mempool.h`, `sys/spinlock.h`) |  |
+| `hello-ppu-lv2-mmapper` | LV2 memory allocation and the mmapper wrapper (`sys_memory_alloc` / `sys_memory_free`) |  |
+| `hello-ppu-lv2-timer` | an event loop driven by an LV2 kernel timer (`sys_timer_*`: a periodic timer posts one event per expiry) |  |
+| `hello-ppu-lv2-vm` | on-demand memory: LV2 virtual memory (`sys_vm_*`) and the mmapper; reserve 32 MB, map, touch, unmap, free |  |
+| `hello-ppu-lv2dbg` | `lv2dbg` syscall surface validation: load `CELL_SYSMODULE_LV2DBG`, exercise the low-level debug syscall surface |  |
+| `hello-ppu-sheap` | `sheap` (shared-heap) surface validation: load `CELL_SYSMODULE_SHEAP`, exercise alloc / free |  |
+| `hello-ppu-usbd` | `libusbd` bring-up validation: load `CELL_SYSMODULE_USBD`, exercise the `cellUsbd*` surface |  |
+| `hello-sprx-export` | the build produces a SPRX from `exports.yml` (a `0x1c` function record) and the PPU loader reads the export table back to verify it |  |
+| `hello-sprx-import` | import a function from a SPRX and call it (verifies ILP32 / LP64 container alignment + `ps3_add_prx` SIGN) |  |
 ## audio/
 
 cellAudio mixer + cellAudioOut configuration / discovery.
@@ -282,7 +391,7 @@ validated separately. See its README for the `libmixer` placeholder limit.
 |---|---|---|
 | `hello-ppu-audio` | cellAudio Init / PortOpen / PortStart / Stop / NotifyEventQueue / AddData chain; plays a chip-tune melody via direct ring fills against `libaudio_stub.a` | **green** + RPCS3 runtime-verified |
 | `hello-ppu-audio-out` | cellAudioOut surface in `<cell/cell_audio_out.h>`: GetNumberOfDevice / GetDeviceInfo / GetState / GetConfiguration via `libsysutil_audio_out_stub.a`, then a 1 s 440 Hz sine tone through cellAudio so both the discovery API and the mixer downstream get exercised in the same boot | **green** + RPCS3 runtime-verified (nDevice=0 is an RPCS3 HLE quirk; FNIDs resolve and tone plays) |
-
+| `hello-ppu-voice` | `cellVoice` surface validation: load `CELL_SYSMODULE_VOICE`, exercise the voice-control API, print return codes |  |
 ## util/
 
 Self-contained PPU utility libraries.
@@ -300,7 +409,11 @@ machinery.
 | Sample | Validates | Status |
 |---|---|---|
 | `hello-spu` | SPU toolchain + `spu_*`/`mfc_*` intrinsics + DMA write back to PPU | **green** |
-
+| `hello-daisy` | `libdaisy` data streams: seven local / atomic / signal-notification stream checks across PPU and SPU threads |  |
+| `hello-ovis` | run two overlaid SPU programs (SPU image + overlay) and check their reports (size / fill / read-back) |  |
+| `hello-ppu-ovis` | `cellOvis` overlay-table validation: query `cellOvisGetOverlayTableSize`, exercise the surface API |  |
+| `hello-spu-dma` | the SPU writes a complete 16-byte DMA packet asynchronously to the PPU (mfc round-trip) |  |
+| `hello-spu-simd` | SPU SIMD spin: vector math + a PPU-side check of the result |  |
 ## spurs/
 
 libspurs sync primitives + Spurs task runtime.  PPU side goes through
@@ -323,6 +436,113 @@ code at `CELL_SPURS_TASK_TOP` (LS 0x3000).
 | `hello-ppu-spurs-queue` | `cellSpursQueue*` IWL variant: init, size/depth/entry-size/direction queries, TryPop-busy return path | **green** + RPCS3 runtime-verified |
 | `hello-ppu-spurs-semaphore` | `cellSpursSemaphore*` IWL variant: init + GetTasksetAddress | **green** + RPCS3 runtime-verified |
 | `hello-spurs-task` | Full PPU + SPU round-trip.  PPU spawns an embedded SPU task via `cellSpursCreateTask` on a class-0 taskset.  SPU task receives a PPU-visible flag EA in `argTask.u64[0]`, DMAs `0xC0FFEE` via `mfc_put`, exits via `cellSpursTaskExit(0)`; PPU observes the flag, Shutdown+Join, finalize | **green** + RPCS3 runtime-verified |
+| `hello-ppu-hl-spurs` | `hl/spurs.h` (PSL1GHT high-level `spurs::Spurs` C++ wrapper) bring-up + finalize, return-code logging |  |
+| `hello-ppu-spurs-job-chain` | PPU-side job-chain bring-up: a 4-SPU Spurs2 instance + a tiny 2-entry job chain |  |
+| `hello-spu-job` | SPURS JobChain + SPU job end-to-end: drive the JobChain machinery with an SPU job and inspect the raw job bytes |  |
+| `hello-spu-spurs-umbrella` | PPU-side regression gate for the slim SPU `spurs.h` umbrella + the `lv2_event_queue.h` prototypes |  |
+| `hello-spurs-getters` | validate libspurs SPU module-runtime getters: Spurs2 + Taskset, run an SPU task, query the getters |  |
+| `hello-spurs-jq` | SPURS job-queue end-to-end: push N jobs through a `CellSpursJobQueueHandle` and collect their results |  |
+| `hello-spurs-semaphore` | `CellSpursSemaphore` P/V validation: two SPU tasks share a 128-byte semaphore block |  |
+| `hello-spurs-task2` | Taskset2 / Task2 API: Spurs2 bring-up (4 SPUs, `EXCLUSIVE_NON_CONTEXT`), class-1 taskset, three `createTask2` / `joinTask2` tasks returning 100 + number |  |
+| `spurs-status` | run every spurs-suite row and show a live status board (one line per row: state, run time, verdict + a live panel for the running row) |  |
+| `sync2-objects` | SPURS tasks, a SPURS job and PPU threads sharing `cellSync2` objects |  |
+
+## PSL1GHT/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `audiosync` | PSL1GHT port: `cellAudio` playback (`audioInit` / ring-buffer fill with a 48 kHz tone, `cellAudioAddData`) |  |
+| `audiotest` | PSL1GHT port: query the current display resolution and play one audio block (`audioInit` / `audioPortOpen` / `playOneBlock`) through `cellAudio` |  |
+| `blitting` | PSL1GHT port: `rsxSetTransferImage` blit of a source-bitmap region onto the framebuffer (with `rsxutil` render loop) |  |
+| `gemsample` | PSL1GHT port: Eye + Move bring-up via libgem (`cameraInit` / `cellGemInit`); needs a PS3 Eye and a PS Move |  |
+| `gemtest` | PSL1GHT port: libgem state machine (`cameraInit`, then `gemGetState` across the state transitions) |  |
+| `kbtest` | PSL1GHT port: keyboard via `<io/kb.h>` (`ioKbInit` / `ioKbGetInfo` / `ioKbGetConfiguration` / `ioKbCnvRawCode` / `ioKbClearBuf` / `ioKbEnd`); ends on the Pad X button, optional netcat debug output |  |
+| `padtest` | PSL1GHT port: `<io/pad.h>` + `<io/mouse.h>` input (`ioPadInit` / `ioPadGetInfo` / `ioPadGetData` / `ioPadSetActDirect` / `ioPadEnd`) |  |
+| `debugtest` | PSL1GHT port: UDP send of debug lines to a host running `nc -l -u 18194` (netcat-style debug path for firmware where `ethdebug` is unavailable) |  |
+| `echoserv` | PSL1GHT port: TCP/IP echo server (`<sys/socket.h>`; `bind` / `listen` / `accept` / `recv` / `send`) |  |
+| `httptest` | PSL1GHT port: HTTP GET / SSL via `<http/https.h>` (`cellHttpResponseGetStatusCode`) after loading `NET` + `HTTP` sysmodules |  |
+| `networktest` | PSL1GHT port: connect to a user-specified IP with both TCP and UDP and send a small message (`socket` / `connect` / `sendto` / `recvfrom`) |  |
+| `spuchain` | PSL1GHT port: a chain of 6 SPU threads (each passes its result to the next), `spu_thread` + `mfc` round-trips per hop |  |
+| `spudma` | PSL1GHT port: a PPU to SPU DMA round-trip (`mfc_put` in, `mfc_get` back, `mfc_write_tag_mask` wait-for-completion) |  |
+| `spumars` | PSL1GHT port: MARS task loop (`mars/task.h` `mars_task_main`) with barrier signalling over `spu_printf` |  |
+| `spuparallel` | PSL1GHT port: 6-SPU shared array (each SPU reads a slice via `mfc_get`, writes back via `mfc_put`; PPU verifies) |  |
+| `spurs` | PSL1GHT port: 6-SPU Spurs bring-up (`<spurs/spurs.h>` `spursAttributeInitialize` / `spursGetSpuThreadId`) over `<lv2/spu.h>` |  |
+| `sputest` | PSL1GHT port: minimal SPU image (`spu_writech(SPU_WrOutMbox, 0x1337BAAD)`) to confirm a SPU program executes |  |
+| `sputhread` | PSL1GHT port: `spu_thread` mailbox round-trip (`spu_read_signal1` in, `spu_thread_send_event` out with x*3 / x*5) |  |
+| `msgdialog` | PSL1GHT port: message dialog via `<sysutil/msg.h>` (`msgDialogOpen2` / `OpenErrorCode` / `Abort` / `Close`; pad + `rsxutil` render loop) |  |
+| `osk` | PSL1GHT port: on-screen keyboard (`oskLoadAsync` / `oskAbort` / `oskSetInitialInputDevice` / `oskSetKeyLayoutOption` / `oskSetLayoutMode` / `oskUnloadAsync`; pad + `rsxutil` render loop) |  |
+| `threadtest` | PSL1GHT port: `sysThread*` (LV2 thread surface) — `sysThreadCreate` / `sysThreadJoin` / `sysThreadYield` / `sysThreadGetStackInformation` / `sysThreadGetPriority` |  |
+
+
+## codec/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-adec` | `cellAdec` (audio-decoder) framework validation: Init / QueryAttr / Open / Close round-trip requesting an LPCM decoder |  |
+| `hello-ppu-atrac3multi` | `cellAtracMulti` (`<cell/codec/libatrac3multi.h>`) decoder validation: load + the ATRAC3-mux surface |  |
+| `hello-ppu-atrac3plus` | `cellAtrac` (ATRAC3+) validation: minimal init / query / create / delete round-trip |  |
+| `hello-ppu-celp8enc` | `cellCelp8Enc` (`<cell/codec/celpenc8.h>`) validation: QueryAttr to Open to Close |  |
+| `hello-ppu-celpenc` | `cellCelpEnc` (`<cell/codec/celpenc.h>`) validation: QueryAttr to Open to Close |  |
+| `hello-ppu-dmux` | `cellDmux` + PAMF demux chain: the PAMF message-callback dispatches `DEMUX_DONE` / `FATAL_ERR` / `PROG_END_CODE` through the SPRX |  |
+| `hello-ppu-gifdec` | `cellGifDec` (`<cell/codec/gifdec.h>`) validation: Create / Open / Close |  |
+| `hello-ppu-jpg-dec` | decode a JPEG via `cellJpgDec` and display it via RSX; the full libjpgdec lifecycle |  |
+| `hello-ppu-jpgenc` | buffer-only `cellJpgEnc` regression sample: generate a small RGB test image in memory and encode it |  |
+| `hello-ppu-pamf` | `cellPamf` container-parser validation: feed the SPRX a minimal PAMF-magic buffer; check the unsupported-version refusal |  |
+| `hello-ppu-pngenc` | `cellPngEnc` validation: QueryAttr to Open to Close |  |
+| `hello-ppu-sail` | `cellSail` validation: MemAllocator init (avoids the Player state machine) |  |
+| `hello-ppu-sail-rec` | `cellSailRec` validation: Composer init / finalize (the 4.75+ surface) |  |
+| `hello-ppu-vpost` | `cellVpost` (post-processing) validation: QueryAttr to Open to Close round-trip |  |
+
+
+## dbgfont/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-dbgfont-console` | exercise the Console API subsystem: open a custom console (lower-right, green) alongside the auto stdout console and write to both every frame via `cellDbgFontDrawGcm` |  |
+
+
+## debug/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-debug-rpcs3` | a small program to practise GDB on in RPCS3 (the target stops at `accumulate()` for `bt` / `info locals` / `print *p`) |  |
+
+
+## font/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-font-render` | draw text with the system font and show it: `cellFont` (canonical) on line 1 and the PSL1GHT `font*` wrappers on line 2 |  |
+| `hello-ppu-fontgcm` | `cellFont` GCM path: `cellFontInitGraphicsGcm` renders a text line through the GCM command buffer |  |
+
+
+## fw/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-fw-gcm-text` | GCM-backed FW text rendering: `FWGCMApplication` owns a real `FWCellGCMWindow` over cellGcm; `FWGCMDebugFontRenderer` adapts to `libdbgfont`; emits visible text every frame for 60 frames |  |
+| `hello-ppu-fw-headers` | header-only FW compatibility surface validation: macro / config / typedef shape (no runtime calls) |  |
+| `hello-ppu-fw-input` | FW input validation: the Tier 4 sample input facade over the FW app lifecycle |  |
+| `hello-ppu-fw-null-lifecycle` | Null FW lifecycle + debug-font facade: the no-op shim path through the FW app / renderer interfaces |  |
+
+
+## network/
+
+| Sample | Validates | Status |
+|---|---|---|
+| `hello-ppu-http` | `cellHttp` module-load validation: load `CELL_SYSMODULE_NET` + `CELL_SYSMODULE_HTTP`, print load / release return codes |  |
+| `hello-ppu-libnet` | `cellLibnet` module-load validation: load `CELL_SYSMODULE_NET` via the nidgen stub archive, print return codes |  |
+| `hello-ppu-netctl` | `cellNetCtl` module-load validation: load `CELL_SYSMODULE_NETCTL`, print the load return code |  |
+| `hello-ppu-np` | `cellNp` module-load validation: load `CELL_SYSMODULE_NP`, print the load return code |  |
+| `hello-ppu-np-clans` | `cellNpClans` module-load validation: load `CELL_SYSMODULE_CLANS`, print the load return code |  |
+| `hello-ppu-np-commerce2` | `cellNpCommerce2` module-load validation: load `CELL_SYSMODULE_COMMERCE2`, print the load return code |  |
+| `hello-ppu-np-sns` | `cellNpSns` module-load validation: load `CELL_SYSMODULE_SNS`, print the load return code |  |
+| `hello-ppu-np-trophy` | `cellNpTrophy` module-load validation: load `CELL_SYSMODULE_TROPHY`, print the load return code |  |
+| `hello-ppu-np-tus` | `cellNpTus` module-load validation: load `CELL_SYSMODULE_TUS`, print the load return code |  |
+| `hello-ppu-np-util` | `cellNpUtil` module-load validation: load `CELL_SYSMODULE_NP` + the `cellNpUtil` surface, print return codes |  |
+| `hello-ppu-np2` | `cellNp2` module-load validation: load `CELL_SYSMODULE_NP2` (`<cell/np/np2.h>`), print the load return code |  |
+| `hello-ppu-rudp` | `cellRudp` raw-datagram surface validation: load `CELL_SYSMODULE_RUDP`, exercise the socket-API entry points |  |
+| `hello-ppu-ssl` | `ssl` module-load validation: load `CELL_SYSMODULE_SSL`, exercise the certificate / handshake surface |  |
 
 ## Ideas for growth
 
