@@ -106,15 +106,19 @@ The important compiler-side ABI properties are:
 The linker is responsible for normal section layout, relocation resolution, and
 the final ELF identity bytes. For compact `.opd`, the relevant properties are:
 
-- `.opd` must remain 4-byte aligned in final output;
+- - `.opd` must remain 4-byte aligned in final output;
 - descriptor entry fields resolve to 32-bit code EAs;
 - descriptor TOC fields resolve to the module TOC base EA;
 - `R_PPC64_ADDR64` must not leak into `.opd` in conforming output.
 
-Some inputs may encode the TOC field with a direct `.TOC.` relocation, while
-the compiler/binutils path may use the CellOS-specific marker described in the
-ABI spec. The final linked descriptor bytes are the important contract: two
-32-bit words, `[entry_ea, toc_ea]`.
+The TOC word is always a `R_PPC64_ADDR32` relocation against the `.TOC.`
+global symbol (addend 0).  There is no alternative encoding and no
+alternative relocation type in use; `abi-verify` will fail conformance
+if the descriptor tail (offset +4) is not `R_PPC64_ADDR32` against
+`.TOC.`. `R_PPC64_TLSGD` (relocation 107) does appear in conforming
+PS3DK objects, but only as the genuine general-dynamic TLS call marker
+in code sections — never in `.opd`. The final linked descriptor bytes
+are two 32-bit words: `[entry_ea, toc_ea]`.
 
 ### Runtime start files
 

@@ -9,8 +9,11 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use object::elf::{FileHeader64, EM_PPC64, SHT_RELA, SHT_SYMTAB, STT_FUNC};
-use object::read::elf::{FileHeader, Rela, SectionHeader as _, Sym as _};
+use object::elf::{
+    FileHeader64, EM_PPC64, PF_X, PT_LOAD, SHF_EXECINSTR, SHN_LORESERVE, SHN_UNDEF, SHN_XINDEX,
+    SHT_RELA, SHT_SYMTAB, STT_FUNC,
+};
+use object::read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader as _, Sym as _};
 use object::{Endianness, SectionIndex, SymbolIndex};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +29,10 @@ pub const SYS_PROC_PARAM_MAGIC: u32 = 0x1b43_4cec;
 /// Cell OS CEX binary surveyed; zero stalls the PRX loader. See
 /// docs/abi/cellos-lv2-abi-spec.md section 3 rule 5.
 pub const SYS_PROC_PRX_PARAM_ABI_VERSION: u32 = 0x0101_0000;
+/// `.sys_proc_prx_param` loader/format version word at offset 0x8. The CellOS
+/// PRX loader accepts a fixed set of version codes; our reference startfile
+/// carries 4. See docs/abi/cellos-lv2-abi-spec.md section 3 rule 4.
+pub const SYS_PROC_PARAM_VERSION: u32 = 4;
 /// CellOS Lv-2 compact `.opd` descriptor size in bytes.
 pub const LV2_OPD_ENTRY_SIZE: u64 = 8;
 
@@ -119,21 +126,55 @@ pub struct SectionSummary {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpdSummary {
-    /// Inferred descriptor stride. Lv-2 compact = 8, standard ELFv1 = 24.
+    /// Descriptor stride. Lv-2 compact = 8; 24 would be a standard ELFv1
+    /// descriptor.
     pub entry_size: u64,
     /// Number of descriptors.
     pub entries: u64,
+    /// True if this is a linked ELF (no .rela on .opd) and the descriptors
+    /// were read by decoding the section bytes. False for a relocatable,
+    /// where each slot carries a `R_PPC64_ADDR32` relocation instead.
+    #[serde(default)]
+    pub linked: bool,
+    /// `.opd` section `sh_addralign`. Spec section 2 rule 2 requires 4.
+    #[serde(default)]
+    pub addralign: u64,
+    /// `.opd` section `sh_entsize`. Spec section 2 rule 1 requires 0.
+    #[serde(default)]
+    pub entsize: u64,
+    /// Relocations in `.opd` that do not land on a descriptor slot
+    /// (offset 8k or 8k+4 for 8-byte descriptors). Any entry here is a
+    /// conformance error — e.g. a stray R_PPC64_TLSGD at 8k+2, or a
+    /// duplicate ADDR64 at 8k+4 sitting behind the real tail reloc.
+    #[serde(default)]
+    pub off_slot_relocs: Vec<RelocAt>,
+    /// For a linked ELF: whether every descriptor's entry word falls inside a
+    /// `PF_X` (executable) program segment. `None` for a relocatable object
+    /// (bytes are unrelocated) or if there are no descriptors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_in_executable_segment: Option<bool>,
     pub descriptors: Vec<OpdEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OpdEntry {
     pub offset: u64,
-    pub head_reloc: RelocDesc,
+    /// All relocations at the head slot (offset +0). For a relocatable one
+    /// `R_PPC64_ADDR32` against the function is expected; a second, or a
+    /// different type, is a conformance error.
+    #[serde(default)]
+    pub head_relocs: Vec<RelocDesc>,
+    /// All relocations at the tail slot (offset +4). For a relocatable one
+    /// `R_PPC64_ADDR32` against `.TOC.` with addend 0 is expected.
+    #[serde(default)]
+    pub tail_relocs: Vec<RelocDesc>,
+    /// The two 32-bit words as stored in the section (unrelocated on a REL
+    /// object, resolved on a linked ELF). `entry_ea` is the function-entry EA,
+    /// `toc_ea` is the module TOC base EA.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tail_reloc: Option<RelocDesc>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub extra_relocs: Vec<RelocDesc>,
+    pub entry_ea: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toc_ea: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,6 +188,13 @@ pub struct SysProcPrxParamSummary {
     /// causes the PRX loader to stall before the entry point runs.
     pub abi_version: u32,
     pub relocs: Vec<RelocAt>,
+    /// Resolved 32-bit bytes at the six pointer slots (0x10, 0x14, 0x18,
+    /// 0x1c, 0x24, 0x28; 0x20 is abi_version, not a pointer) — read
+    /// directly from the section. On a relocatable these are the
+    /// unrelocated placeholders (typically 0); on a linked executable they
+    /// are the final descriptor / function EAs and must be non-zero.
+    #[serde(default)]
+    pub pointer_slots: [u64; 6],
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,12 +204,41 @@ pub struct RelocAt {
     pub reloc: RelocDesc,
 }
 
+/// How a `.opd` head relocation's target resolves against the symbol table.
+/// Classifies each head so the check can distinguish a legitimate function
+/// entry from a data target or a malformed index, instead of collapsing every
+/// "couldn't prove execution" case into a single `ok`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelocTargetClass {
+    /// Defined in a section with `SHF_EXECINSTR` set — a valid function, or a
+    /// (nameless) section symbol used as a code reference.
+    Executable,
+    /// An undefined (`SHN_UNDEF`) `STT_FUNC` symbol, strong or weak. Allowed
+    /// in a relocatable; the linked ELF must resolve it to executable code.
+    UndefFunction,
+    /// Defined in a non-executable (data) section.
+    Data,
+    /// A target that is not a function entry: an `STT_OBJECT` in `SHN_COMMON`
+    /// (common storage) or an undefined (`SHN_UNDEF`) object binding.
+    NonFunction,
+    /// The target index is out of range — `r_sym` beyond the symbol table, or
+    /// `st_shndx` beyond the section table. Malformed input.
+    Malformed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RelocDesc {
     pub r_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
     pub addend: i64,
+    /// The classification of the relocation's target symbol, recorded so the
+    /// head check can distinguish a real function entry from a data symbol,
+    /// a non-function binding, or a malformed out-of-range index.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<RelocTargetClass>,
 }
 
 pub fn parse_elf_file(path: &Path) -> Result<Manifest> {
@@ -203,6 +280,26 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
     let mut sys_proc_prx_index: Option<usize> = None;
     let mut rela_by_target: BTreeMap<usize, usize> = BTreeMap::new();
 
+    // For a linked ELF, descriptor entry words are resolved to final addresses
+    // and the conformance check ("every entry inside an executable segment")
+    // needs the PF_X program-segment ranges. Computed once below, used only
+    // when a linked .opd actually has descriptors to decode.
+    let mut exec_ranges = Vec::new();
+    if let Ok(progs) = header.program_headers(endian, data) {
+        for ph in progs {
+            let ptype = ph.p_type(endian);
+            let pflags = ph.p_flags(endian);
+            if ptype == PT_LOAD && (pflags & PF_X) != 0 {
+                let base: u64 = ph.p_vaddr(endian).into();
+                let memsz: u64 = ph.p_memsz(endian).into();
+                if memsz > 0 {
+                    exec_ranges.push((base, base + memsz));
+                }
+            }
+        }
+    }
+
+
     for (i, shdr) in sections.iter().enumerate() {
         let name_bytes = shdr.name(endian, strings).unwrap_or_default();
         let name = String::from_utf8_lossy(name_bytes).to_string();
@@ -232,6 +329,7 @@ pub fn parse_elf_bytes(path: &Path, data: &[u8]) -> Result<Manifest> {
             &sections,
             idx,
             &rela_by_target,
+            &exec_ranges,
         )?)
     } else {
         None
@@ -381,73 +479,131 @@ fn summarize_opd(
     sections: &object::read::elf::SectionTable<'_, FileHeader64<Endianness>>,
     opd_idx: usize,
     rela_by_target: &BTreeMap<usize, usize>,
+    exec_ranges: &[(u64, u64)],
 ) -> Result<OpdSummary> {
     let opd_shdr = sections
         .section(SectionIndex(opd_idx))
         .context("indexing .opd")?;
     let size = opd_shdr.sh_size.get(endian);
 
-    let mut per_offset: BTreeMap<u64, Vec<RelocDesc>> = BTreeMap::new();
+    // LV-2 compact descriptors are a FIXED 8-byte stride (spec section 2).
+    // We do not infer the stride from reloc offsets: the old inference
+    // mis-read a 5x8 section as 10x4, and it is what let a 107 / ADDR64 tail
+    // slip through as if it were a valid TOC word.
+    let entry_size: u64 = LV2_OPD_ENTRY_SIZE;
+    if size % entry_size != 0 {
+        return Err(anyhow!(
+            ".opd size {size} is not a multiple of the 8-byte compact descriptor stride"
+        ));
+    }
+    let entries: u64 = size / entry_size;
+    let addralign: u64 = opd_shdr.sh_addralign.get(endian);
+    let entsize: u64 = opd_shdr.sh_entsize.get(endian);
 
-    if let Some(&rela_idx) = rela_by_target.get(&opd_idx) {
+    // Relocatable (each slot carries a R_PPC64_ADDR32) or linked ELF (no .rela
+    // on .opd; the bytes are the final resolved descriptors)?
+    let opd_rela_idx = rela_by_target.get(&opd_idx).copied();
+    let mut per_offset: BTreeMap<u64, Vec<RelocDesc>> = BTreeMap::new();
+    if let Some(rela_idx) = opd_rela_idx {
         collect_relocs(endian, data, sections, rela_idx, &mut per_offset)?;
     }
+    let linked = opd_rela_idx.is_none();
 
-    let entry_size = infer_opd_entry_size(&per_offset, size);
-    let entries = if entry_size == 0 {
-        0
-    } else {
-        size / entry_size
+    // Resolved 32-bit words, present in the section bytes. On a relocatable
+    // these are the (unrelocated) placeholder words; on a linked ELF they are
+    // the real entry / TOC values.
+    let opd_bytes = opd_shdr.data(endian, data).unwrap_or_default();
+    let word32 = |off: usize| -> Option<u64> {
+        if off + 4 > opd_bytes.len() {
+            return None;
+        }
+        Some(u32::from_be_bytes([
+            opd_bytes[off],
+            opd_bytes[off + 1],
+            opd_bytes[off + 2],
+            opd_bytes[off + 3],
+        ]) as u64)
     };
 
-    let mut descriptors = Vec::new();
-    if entry_size != 0 {
-        for i in 0..entries {
-            let base = i * entry_size;
-            let mut relocs: Vec<(u64, RelocDesc)> = per_offset
-                .range(base..base + entry_size)
-                .flat_map(|(off, rs)| rs.iter().map(move |r| (*off, r.clone())))
-                .collect();
-            relocs.sort_by_key(|(o, _)| *o);
-            let head = relocs.first().map(|(_, r)| r.clone()).unwrap_or(RelocDesc {
-                r_type: "NONE".to_string(),
-                symbol: None,
-                addend: 0,
-            });
-            let tail = relocs.get(1).map(|(_, r)| r.clone());
-            let extra: Vec<RelocDesc> = relocs.iter().skip(2).map(|(_, r)| r.clone()).collect();
-            descriptors.push(OpdEntry {
-                offset: base,
-                head_reloc: head,
-                tail_reloc: tail,
-                extra_relocs: extra,
-            });
+    // Descriptor head (offset +0) carries the function reloc(s); the tail
+    // (offset +4) carries the `.TOC.` reloc(s). Anything at another offset
+    // inside the section — e.g. a stray 107 at 8k+2, or a second ADDR64 at
+    // 8k+4 hiding behind the real tail — is a conformance error.
+    let in_slot = |off: u64| -> bool {
+        // Must be inside a real descriptor. `off` is a slot candidate when
+        // it is 8k or 8k+4 for some k < entries. Checking only `off % 8`
+        // (as before) would let a reloc at offset 8 on a section that holds a
+        // single descriptor (size == 8) count as "in slot" even though it
+        // belongs to no descriptor — so every out-of-range relocation is
+        // rejected too.
+        off < size && (off % entry_size == 0 || off % entry_size == 4)
+    };
+    let mut off_slot_relocs: Vec<RelocAt> = Vec::new();
+    for (off, rs) in per_offset.iter() {
+        if !in_slot(*off) {
+            for r in rs {
+                off_slot_relocs.push(RelocAt {
+                    offset: *off,
+                    reloc: r.clone(),
+                });
+            }
         }
+    }
+    off_slot_relocs.sort_by_key(|r| r.offset);
+    let mut descriptors = Vec::new();
+    let mut entry_in_exec = if linked { Some(true) } else { None };
+    for i in 0..entries {
+        let base: u64 = i * entry_size;
+        let head_off = base;
+        let tail_off = base + 4;
+        let head_relocs = per_offset.get(&head_off).cloned().unwrap_or_default();
+        let tail_relocs = per_offset.get(&tail_off).cloned().unwrap_or_default();
+
+        // For a linked ELF the section bytes are the final resolved
+        // descriptors: entry word (+0) and TOC word (+4), each a big-endian
+        // 32-bit effective address, within one 8-byte descriptor (base = i*8).
+        // For a relocatable these are zero/unrelocated placeholders and are
+        // not used for the conformance decision (the relocs are).
+        let entry_ea = word32(base as usize);
+        let toc_ea = word32(base as usize + 4);
+
+        if linked {
+            // Every entry word must live inside an executable segment, or the
+            // descriptor points outside the code segment and the loader
+            // follows a dangling function pointer. Fail closed if the word
+            // cannot be decoded at all.
+            if entry_ea.is_none() {
+                entry_in_exec = Some(false);
+            } else {
+                let ea = entry_ea.unwrap();
+                let in_exec = exec_ranges.iter().any(|(lo, hi)| ea >= *lo && ea < *hi);
+                if !in_exec {
+                    entry_in_exec = Some(false);
+                }
+            }
+        } else {
+            let _ = (entry_ea, toc_ea);
+        }
+
+        descriptors.push(OpdEntry {
+            offset: base,
+            head_relocs,
+            tail_relocs,
+            entry_ea,
+            toc_ea,
+        });
     }
 
     Ok(OpdSummary {
         entry_size,
         entries,
+        linked,
+        addralign,
+        entsize,
+        off_slot_relocs,
+        entry_in_executable_segment: entry_in_exec,
         descriptors,
     })
-}
-
-fn infer_opd_entry_size(per_offset: &BTreeMap<u64, Vec<RelocDesc>>, section_size: u64) -> u64 {
-    let entry_offsets: Vec<u64> = per_offset
-        .iter()
-        .filter(|(_, rs)| {
-            rs.iter()
-                .any(|r| r.r_type == "R_PPC64_ADDR32" || r.r_type == "R_PPC64_ADDR64")
-        })
-        .map(|(o, _)| *o)
-        .collect();
-    if entry_offsets.len() >= 2 {
-        return entry_offsets[1] - entry_offsets[0];
-    }
-    if entry_offsets.len() == 1 {
-        return section_size;
-    }
-    0
 }
 
 fn summarize_sys_proc_prx_param(
@@ -501,6 +657,31 @@ fn summarize_sys_proc_prx_param(
         0
     };
 
+    // The six pointer slots at 0x10, 0x14, 0x18, 0x1c, 0x24, 0x28.
+    // On a relocatable these hold the unrelocated placeholders (typically 0);
+    // on a linked EXEC they hold the resolved 32-bit EAs and MUST be
+    // non-zero — a null there means the loader will take a bad jump.
+    // `be_u32` requires the section long enough; guard with a safe helper.
+    let be_u32_at = |off: usize| -> u64 {
+        if off + 4 > section_data.len() {
+            return 0;
+        }
+        u32::from_be_bytes([
+            section_data[off],
+            section_data[off + 1],
+            section_data[off + 2],
+            section_data[off + 3],
+        ]) as u64
+    };
+    let pointer_slots = [
+        be_u32_at(0x10),
+        be_u32_at(0x14),
+        be_u32_at(0x18),
+        be_u32_at(0x1c),
+        be_u32_at(0x24),
+        be_u32_at(0x28),
+    ];
+
     Ok(SysProcPrxParamSummary {
         size: be_u32(0),
         magic: be_u32(4),
@@ -508,6 +689,7 @@ fn summarize_sys_proc_prx_param(
         sdk_version: be_u32(12),
         abi_version,
         relocs: relocs_vec,
+        pointer_slots,
     })
 }
 
@@ -709,6 +891,23 @@ fn is_stdu_r1(word: u32) -> bool {
     (word >> 16) == 0xf821
 }
 
+/// The class of a relocation target defined in section `index` of a table of
+/// `section_count` sections, whose header flags are `flags` (None when the
+/// header cannot be read).  Index 0 (SHN_UNDEF) and an index at or past the
+/// table's end are Malformed: the caller has already routed undefined and
+/// reserved-index symbols elsewhere.  Counts are usize throughout, so a table
+/// of more than 65535 sections is not truncated.
+fn classify_defined_section(index: usize, section_count: usize, flags: Option<u64>) -> RelocTargetClass {
+    if index == 0 || index >= section_count {
+        return RelocTargetClass::Malformed;
+    }
+    match flags {
+        None => RelocTargetClass::Malformed,
+        Some(f) if f & (SHF_EXECINSTR as u64) != 0 => RelocTargetClass::Executable,
+        Some(_) => RelocTargetClass::Data,
+    }
+}
+
 fn collect_relocs(
     endian: Endianness,
     data: &[u8],
@@ -728,7 +927,69 @@ fn collect_relocs(
         .symbols(endian, data, SHT_SYMTAB)
         .context("reading symbol table")?;
 
+    // Classify a relocation's target symbol so a `.opd` head check can tell a
+    // real function entry from a data-binding, a non-function binding, and a
+    // malformed out-of-range index.  Every case is reported explicitly rather
+    // than folding "couldn't prove exec" into one bucket:
+    //   Executable     defined in a section with SHF_EXECINSTR set
+    //   UndefFunction  SHN_UNDEF STT_FUNC (strong or weak); the linker
+    //                   resolves it in a REL, the linked ELF verifies
+    //   Data           an object binding (SHN_UNDEF STT_OBJECT, SHN_COMMON)
+    //   Malformed      r_sym beyond the symbol table, a section index (direct,
+    //                   or through SHT_SYMTAB_SHNDX for SHN_XINDEX) beyond the
+    //                   section table, or an extended index that cannot be read
+    // The section count stays a usize: ELF allows more than 65535 sections
+    // (e_shnum 0, the real count in section 0's sh_size), and narrowing it
+    // would wrap 65536 to 0 and make every defined symbol Malformed.
+    let section_count = sections.len();
+    let classify = |sym_idx: u32| -> RelocTargetClass {
+        if sym_idx == 0 {
+            return RelocTargetClass::Malformed;
+        }
+        let Some(sym) = symbols.symbol(SymbolIndex(sym_idx as usize)).ok() else {
+            return RelocTargetClass::Malformed;
+        };
+        // Weak vs strong is not the deciding factor here — any non-function
+        // binding (a weak "may be undefined" symbol, or an `STT_OBJECT` in
+        // `SHN_COMMON` storage) is equally not an executable entry point; we
+        // fold both into NonFunction.  Defined symbols in a non-executable
+        // section are Data.
+        let st_type = sym.st_type();
+        let shndx = sym.st_shndx(endian);
+
+        if shndx >= SHN_LORESERVE && shndx != SHN_XINDEX {
+            // SHN_COMMON / SHN_ABS / other reserved: never an in-place
+            // executable function entry in a relocatable.  SHN_XINDEX is not
+            // reserved storage: the real index is in SHT_SYMTAB_SHNDX, and the
+            // symbol is resolved like any defined one below.
+            return RelocTargetClass::NonFunction;
+        }
+        if shndx == SHN_UNDEF {
+            if st_type == STT_FUNC {
+                // An undefined function, strong or weak, is still a valid way
+                // to name the entry point in a relocatable; the linked ELF is
+                // where the executable-target guarantee is verified.
+                return RelocTargetClass::UndefFunction;
+            }
+            // An undefined *object* (weak or strong) is not an executable entry.
+            return RelocTargetClass::NonFunction;
+        }
+        // A defined symbol: object's resolver reads st_shndx, or for
+        // SHN_XINDEX the symbol's SHT_SYMTAB_SHNDX entry.  A missing or
+        // unreadable extended index is a real error: Malformed.
+        let index = match symbols.symbol_section(endian, sym, SymbolIndex(sym_idx as usize)) {
+            Ok(Some(SectionIndex(index))) => index,
+            Ok(None) | Err(_) => return RelocTargetClass::Malformed,
+        };
+        let flags = sections
+            .section(SectionIndex(index))
+            .ok()
+            .map(|sec| sec.sh_flags.get(endian));
+        classify_defined_section(index, section_count, flags)
+    };
+
     for rela in relas {
+
         let r_type = rela.r_type(endian, false);
         let r_sym = rela.r_sym(endian, false);
         let r_offset = rela.r_offset(endian);
@@ -751,10 +1012,17 @@ fn collect_relocs(
             }
         };
 
+        let target = if r_sym == 0 {
+            None
+        } else {
+            Some(classify(r_sym))
+        };
+
         let desc = RelocDesc {
             r_type: reloc_type_name(r_type),
             symbol: sym_name,
             addend: r_addend,
+            target,
         };
         out.entry(r_offset).or_default().push(desc);
     }
@@ -816,31 +1084,194 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
     if let Some(opd) = &m.opd {
         if opd.entries == 0 {
             passes.push(".opd present but empty (stub-only object)".into());
-        } else if opd.entry_size == LV2_OPD_ENTRY_SIZE {
-            passes.push(format!(
-                ".opd entry size = {} bytes ({} descriptors)",
-                opd.entry_size, opd.entries
-            ));
         } else {
-            failures.push(format!(
-                ".opd entry size = {}, expected {} (Lv-2 compact)",
-                opd.entry_size, LV2_OPD_ENTRY_SIZE
-            ));
-        }
-        for (i, d) in opd.descriptors.iter().enumerate() {
-            if d.head_reloc.r_type != "R_PPC64_ADDR32" {
+            // ---- section 2 normative metadata ----
+            if opd.entry_size == LV2_OPD_ENTRY_SIZE {
+                passes.push(format!(
+                    ".opd entry size = {} bytes ({} descriptors)",
+                    opd.entry_size, opd.entries
+                ));
+            } else {
                 failures.push(format!(
-                    ".opd[{}] head reloc is {}, expected R_PPC64_ADDR32",
-                    i, d.head_reloc.r_type
+                    ".opd entry size = {}, expected {} (Lv-2 compact)",
+                    opd.entry_size, LV2_OPD_ENTRY_SIZE
                 ));
             }
-            match &d.tail_reloc {
-                Some(r) if r.r_type == "R_PPC64_TLSGD" => {}
-                Some(r) => failures.push(format!(
-                    ".opd[{}] tail reloc is {}, expected R_PPC64_TLSGD",
-                    i, r.r_type
-                )),
-                None => failures.push(format!(".opd[{}] missing TLSGD tail reloc", i)),
+            if opd.addralign == 4 {
+                passes.push(".opd sh_addralign = 4 (spec §2 rule 2)".into());
+            } else {
+                failures.push(format!(
+                    ".opd sh_addralign = {}, expected 4 (spec §2 rule 2)",
+                    opd.addralign
+                ));
+            }
+            if opd.entsize == 0 {
+                passes.push(".opd sh_entsize = 0 (spec §2 rule 1)".into());
+            } else {
+                failures.push(format!(
+                    ".opd sh_entsize = {}, expected 0 (spec §2 rule 1)",
+                    opd.entsize
+                ));
+            }
+
+            // ---- section 2: no relocation may live off a descriptor slot ----
+            if opd.off_slot_relocs.is_empty() {
+                passes.push(
+                    ".opd: no relocations outside the 8k / 8k+4 descriptor slots".into(),
+                );
+            } else {
+                for r in &opd.off_slot_relocs {
+                    failures.push(format!(
+                        ".opd: stray relocation at 0x{:x} — {} sym={:?} a={:?} — not on a descriptor slot (8k or 8k+4)",
+                        r.offset, r.reloc.r_type, r.reloc.symbol, r.reloc.addend
+                    ));
+                }
+            }
+
+            if opd.linked {
+                // Linked ELF: the descriptor bytes are final.
+                //
+                // (1) Every entry word (+0) must sit inside an executable
+                // program segment, or the loader follows a dangling function
+                // pointer. Fails closed if the word could not be decoded.
+                match opd.entry_in_executable_segment {
+                    Some(true) => passes.push(
+                        ".opd linked: every entry word is inside an executable segment".into(),
+                    ),
+                    _ => failures.push(
+                        ".opd linked: a descriptor entry word is not inside an executable segment"
+                            .into(),
+                    ),
+                }
+
+                // (2) Every descriptor tail (+4) must carry the one constant
+                // TOC value for the module. Multiple distinct values (or a
+                // stray zero) means the descriptors were not resolved against
+                // a single TOC — exactly the drift this invariant exists to
+                // catch.
+                let mut distinct_toc: Vec<u64> = opd
+                    .descriptors
+                    .iter()
+                    .filter_map(|d| d.toc_ea)
+                    .collect();
+                distinct_toc.sort_unstable();
+                distinct_toc.dedup();
+                match distinct_toc.as_slice() {
+                    [value] if *value != 0 => passes.push(format!(
+                        ".opd linked: single TOC value 0x{value:08x} across {} descriptors",
+                        opd.entries
+                    )),
+                    [value] => failures.push(format!(
+                        ".opd linked: TOC value 0x{value:08x} is null; expected the module TOC base"
+                    )),
+                    [] => failures.push(
+                        ".opd linked: no TOC words decoded in the descriptors".into(),
+                    ),
+                    [head, rest @ ..] => failures.push(format!(
+                        ".opd linked: {} distinct TOC values (0x{head:08x}, 0x{:08x}, …); expected exactly one",
+                        distinct_toc.len(),
+                        rest[0]
+                    )),
+                }
+            } else {
+                // Relocatable. Per spec section 2, each descriptor slot
+                // carries exactly one relocation: the head (8k) is
+                // R_PPC64_ADDR32 against a function symbol (a section-symbol
+                // + addend code reference is fine, so we do not gate the head
+                // addend), and the tail (8k+4) is R_PPC64_ADDR32 against
+                // `.TOC.` with addend 0 (a non-zero addend shifts the word
+                // off the module TOC base).
+                //
+                // The head target MUST resolve to executable code. Naming a
+                // The head target must be an executable function: an
+                // STT_OBJECT in SHN_COMMON (common storage), a weak undefined
+                // object (a binding), a target in a non-executable section,
+                // or a malformed (out-of-range r_sym / st_shndx) all fail.
+                // An undefined STT_FUNC (strong or weak) is still allowed in a
+                // relocatable, with the executable-target guarantee deferred to
+                // the linked ELF.
+                let mut bad_head = 0usize;
+                let mut bad_tail = 0usize;
+                let mut first_head = None;
+                let mut first_tail = None;
+                for (i, d) in opd.descriptors.iter().enumerate() {
+                    let head_desc = match d.head_relocs.len() {
+                        0 => "missing".to_string(),
+                        1 => {
+                            let r = &d.head_relocs[0];
+                            if r.r_type == "R_PPC64_ADDR32" {
+                                if r.symbol.as_deref() == Some(".TOC.") {
+                                    "ADDR32 against `.TOC.` (should be a function symbol)".into()
+                                } else {
+                                    match r.target {
+                                        Some(RelocTargetClass::Executable)
+                                        | Some(RelocTargetClass::UndefFunction) => "ok".to_string(),
+                                        _ => format!(
+                                            "head target of sym={:?} is not an executable entry (data / COMMON / undefined-object / malformed index)",
+                                            r.symbol
+                                        ),
+                                    }
+                                }
+                            } else {
+                                format!(
+                                    "{} sym={:?} a={}",
+                                    r.r_type, r.symbol, r.addend
+                                )
+                            }
+                        }
+                        n => format!("{} relocations at head slot", n),
+                    };
+                    if head_desc != "ok" {
+                        bad_head += 1;
+                        if first_head.is_none() {
+                            first_head = Some((i, head_desc));
+                        }
+                    }
+                    let tail_desc = match d.tail_relocs.len() {
+                        0 => "missing".to_string(),
+                        1 => {
+                            let r = &d.tail_relocs[0];
+                            if r.r_type == "R_PPC64_ADDR32"
+                                && r.symbol.as_deref() == Some(".TOC.")
+                                && r.addend == 0
+                            {
+                                "ok".into()
+                            } else {
+                                format!(
+                                    "{} sym={:?} a={}",
+                                    r.r_type, r.symbol, r.addend
+                                )
+                            }
+                        }
+                        n => format!("{} relocations at tail slot", n),
+                    };
+                    if tail_desc != "ok" {
+                        bad_tail += 1;
+                        if first_tail.is_none() {
+                            first_tail = Some((i, tail_desc));
+                        }
+                    }
+                }
+                match first_head {
+                    None => passes.push(format!(
+                        ".opd relocatable: {} descriptor heads are a single R_PPC64_ADDR32 against a function symbol",
+                        opd.entries
+                    )),
+                    Some((i, t)) => failures.push(format!(
+                        ".opd[{}] head slot is {t}, expected a single R_PPC64_ADDR32 against a function symbol ({} of {} bad)",
+                        i, bad_head, opd.entries
+                    )),
+                }
+                match first_tail {
+                    None => passes.push(format!(
+                        ".opd relocatable: {} descriptor tails are a single R_PPC64_ADDR32 against `.TOC.` (addend 0)",
+                        opd.entries
+                    )),
+                    Some((i, t)) => failures.push(format!(
+                        ".opd[{}] tail slot is {t}, expected a single R_PPC64_ADDR32 against `.TOC.` with addend 0 (TLSGD 107 / ADDR64 / non-zero addend are not allowed) ({} of {} bad)",
+                        i, bad_tail, opd.entries
+                    )),
+                }
             }
         }
     }
@@ -862,6 +1293,17 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                 p.size
             ));
         }
+        if p.version == SYS_PROC_PARAM_VERSION {
+            passes.push(format!(
+                ".sys_proc_prx_param version@0x08 = {}",
+                p.version
+            ));
+        } else {
+            failures.push(format!(
+                ".sys_proc_prx_param version@0x08 = {}, expected {}",
+                p.version, SYS_PROC_PARAM_VERSION
+            ));
+        }
         if p.abi_version == SYS_PROC_PRX_PARAM_ABI_VERSION {
             passes.push(format!(
                 ".sys_proc_prx_param abi_version@0x20 = 0x{:08x}",
@@ -873,8 +1315,83 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                 p.abi_version, SYS_PROC_PRX_PARAM_ABI_VERSION
             ));
         }
-    }
 
+        // The six descriptor words (libent/libstub ranges, GUID, and
+        // process-enable flag) live at fixed offsets 0x10, 0x14, 0x18,
+        // 0x1c, 0x24, 0x28.
+        //
+        // Relocatable (e_type == REL): each slot MUST carry a single
+        // R_PPC64_ADDR32 relocation. The concrete symbol name is informative,
+        // not a normative invariant — we do not gate on it.
+        //
+        // Linked (e_type == EXEC / DYN): the relocations are resolved, the
+        // loader reads the resolved 32-bit bytes directly, so each slot MUST
+        // contain a non-null word — zero there means the PRX loader takes a
+        // bad jump.
+        const EXPECTED: [(u32, &str); 6] = [
+            (0x10, "libentstart"),
+            (0x14, "libentend"),
+            (0x18, "libstubstart"),
+            (0x1c, "libstubend"),
+            (0x24, "ppu guid"),
+            (0x28, "process enable"),
+        ];
+        if is_relocatable {
+            for (off, _label) in EXPECTED {
+                let at_offset: Vec<&RelocAt> =
+                    p.relocs.iter().filter(|r| r.offset == off as u64).collect();
+                if at_offset.len() == 1 && at_offset[0].reloc.r_type == "R_PPC64_ADDR32" {
+                    passes.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} is a single R_PPC64_ADDR32 ({_label}; symbol informative)"
+                    ));
+                } else if at_offset.is_empty() {
+                    failures.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} has no relocation, expected a single R_PPC64_ADDR32 ({_label})"
+                    ));
+                } else if at_offset.len() != 1 {
+                    failures.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} has {} relocations, expected a single R_PPC64_ADDR32 ({_label})",
+                        at_offset.len(),
+                    ));
+                } else {
+                    failures.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} is {}, expected a single R_PPC64_ADDR32 ({_label})",
+                        at_offset[0].reloc.r_type
+                    ));
+                }
+            }
+        } else {
+            // pointer_slots is indexed by list position in EXPECTED
+            // ([0x10,0x14,0x18,0x1c,0x24,0x28] -> indices 0..5), NOT by byte
+            // offset — the slots skip 0x20 (abi_version, a literal value).
+            //
+            // Slots 0-3 (lib_ent / lib_stub begin/end) MUST resolve to a
+            // non-null EA in a linked executable — zero there is a bad jump.
+            // Slots 4-5 (ppu_guid at 0x24, sys_process_enable at 0x28) are
+            // WEAK-UNDEFINED by contract (spec §3 rule 4, lv2-sprx.S:39-50):
+            // a program that does not set a GUID / process-enable flag leaves
+            // them undefined, the loader resolves them to 0, and reads that
+            // as "no GUID / baseline capability only". So a zero here is the
+            // correct default and MUST be allowed.
+            for (idx, (off, _label)) in EXPECTED.iter().enumerate() {
+                let value = p.pointer_slots[idx];
+                let is_weak_default = idx >= 4;
+                if value == 0 && !is_weak_default {
+                    failures.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} resolved slot is 0x00000000 ({_label}); expected a non-null EA in a linked executable"
+                    ));
+                } else if value == 0 {
+                    passes.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} resolved slot = 0x00000000 ({_label}) — weak/undefined, zero is the correct default"
+                    ));
+                } else {
+                    passes.push(format!(
+                        ".sys_proc_prx_param 0x{off:02x} resolved slot = 0x{value:08x} ({_label})"
+                    ));
+                }
+            }
+        }
+    }
     // ---- .toc data-model checks ----
     if let Some(toc) = &m.toc_check {
         if toc.mixed_relocs {
@@ -1040,41 +1557,855 @@ mod tests {
         }
     }
 
-    #[test]
-    fn opd_stride_from_two_entries() {
-        let mut m: BTreeMap<u64, Vec<RelocDesc>> = BTreeMap::new();
-        m.insert(
-            0,
-            vec![RelocDesc {
-                r_type: "R_PPC64_ADDR32".into(),
-                symbol: Some(".foo".into()),
-                addend: 0,
-            }],
-        );
-        m.insert(
-            8,
-            vec![RelocDesc {
-                r_type: "R_PPC64_ADDR32".into(),
-                symbol: Some(".bar".into()),
-                addend: 0,
-            }],
-        );
-        assert_eq!(infer_opd_entry_size(&m, 16), 8);
+    fn addr32(sym: &str, addend: i64, target: RelocTargetClass) -> RelocDesc {
+        RelocDesc {
+            r_type: "R_PPC64_ADDR32".into(),
+            symbol: Some(sym.into()),
+            addend,
+            target: Some(target),
+        }
+    }
+
+    fn opd_summary(
+        linked: bool,
+        addralign: u64,
+        entsize: u64,
+        off_slot: Vec<RelocAt>,
+        in_exec: Option<bool>,
+        entries: Vec<OpdEntry>,
+    ) -> OpdSummary {
+        OpdSummary {
+            entry_size: LV2_OPD_ENTRY_SIZE,
+            entries: entries.len() as u64,
+            linked,
+            addralign,
+            entsize,
+            off_slot_relocs: off_slot,
+            entry_in_executable_segment: in_exec,
+            descriptors: entries,
+        }
+    }
+
+    fn opd_entry(head: &[RelocDesc], tail: &[RelocDesc], offset: u64) -> OpdEntry {
+        OpdEntry {
+            offset,
+            head_relocs: head.to_vec(),
+            tail_relocs: tail.to_vec(),
+            entry_ea: None,
+            toc_ea: None,
+        }
     }
 
     #[test]
-    fn opd_stride_single_entry_uses_section_size() {
-        let mut m: BTreeMap<u64, Vec<RelocDesc>> = BTreeMap::new();
-        m.insert(
-            0,
-            vec![RelocDesc {
-                r_type: "R_PPC64_ADDR32".into(),
-                symbol: Some(".foo".into()),
-                addend: 0,
+    fn opd_relocatable_two_relocs_per_descriptor_passes() {
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![
+                opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0),
+                opd_entry(&[addr32(".__syscalls_init", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 8),
+            ],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "relocatable lv2-crt0 shape should pass: {:?}", r.failures);
+        assert!(r.passes.iter().any(|p| p.contains("descriptor heads are a single R_PPC64_ADDR32")));
+        assert!(r.passes.iter().any(|p| p.contains("descriptor tails are a single R_PPC64_ADDR32")));
+    }
+
+    #[test]
+    fn opd_relocatable_single_descriptor_passes() {
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "single-descriptor relocatable should pass: {:?}", r.failures);
+    }
+
+    #[test]
+    fn opd_relocatable_tlsgd_tail_fails() {
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._start", 0, RelocTargetClass::Executable)],
+                tail_relocs: vec![RelocDesc {
+                    r_type: "R_PPC64_TLSGD".into(),
+                    symbol: None,
+                    addend: 0,
+                    target: None,
+                }],
+                entry_ea: None,
+                toc_ea: None,
             }],
         );
-        assert_eq!(infer_opd_entry_size(&m, 8), 8);
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "TLSGD tail must not be blessed; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("R_PPC64_TLSGD") && f.contains("tail slot")));
     }
+
+    #[test]
+    fn opd_linked_wrong_toc_fails() {
+        let opd = opd_summary(
+            true, 4, 0, vec![], Some(true),
+            vec![
+                OpdEntry {
+                    offset: 0, head_relocs: vec![], tail_relocs: vec![],
+                    entry_ea: Some(0x0001_0000), toc_ea: Some(0x10_0000_0000),
+                },
+                OpdEntry {
+                    offset: 8, head_relocs: vec![], tail_relocs: vec![],
+                    entry_ea: Some(0x0001_1000), toc_ea: Some(0x10_0000_2000),
+                },
+            ],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "two distinct TOC words must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("distinct TOC values")
+            && f.contains("expected exactly one")));
+    }
+
+    #[test]
+    fn opd_tail_addend_nonzero_fails() {
+        // A tail reloc against `.TOC.` with a non-zero addend shifts the
+        // word off the module TOC base. Spec section 2 requires addend 0.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._start", 0, RelocTargetClass::Executable)],
+                tail_relocs: vec![addr32(".TOC.", 4, RelocTargetClass::Executable)], // non-zero addend
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "tail addend 4 must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("tail slot") && f.contains("a=4")));
+    }
+
+    #[test]
+    fn opd_head_symbol_toc_fails() {
+        // A head slot must name a FUNCTION, not `.TOC.`.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)], // wrong: head must be a function
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "head against `.TOC.` must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head slot")
+            && f.contains("should be a function symbol")));
+    }
+
+    #[test]
+    fn opd_head_data_symbol_target_fails() {
+        // Finding P2 (round 2): a head ADDR32 whose target is a DATA symbol
+        // (STT_OBJECT in a non-executable section) is not a valid descriptor
+        // entry point — the loader would jump into data.
+        let opd = opd_summary(
+
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32(".__my_data_symbol", 0, RelocTargetClass::Data)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "head to a data symbol must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && f.contains("not an executable entry")));
+    }
+
+    #[test]
+    fn opd_head_nameless_section_target_fails() {
+        // Finding P2 (round 2): a nameless STT_SECTION symbol whose section
+        // is data (non-executable) is equally invalid as a descriptor entry
+        // point, even though the head's symbol name is empty.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("", 0, RelocTargetClass::Data)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "head to a nameless data section must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && f.contains("not an executable entry")));
+    }
+
+    #[test]
+    fn opd_head_common_object_target_fails() {
+        // Finding round-3 / (1): an `STT_OBJECT` in `SHN_COMMON` is a binding
+        // on common storage — not an executable entry point — and must fail
+        // the head check even though the old code saw no section and let it
+        // pass as "unresolved".
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32(".__common_data", 0, RelocTargetClass::NonFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "COMMON object head must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("not an executable entry") || f.contains("COMMON") || f.contains("non-function"))));
+    }
+
+    #[test]
+    fn opd_head_undef_weak_object_target_fails() {
+        // Finding round-3 / (1): a WEAK STT_OBJECT in SHN_UNDEF is a binding
+        // on undefined storage (weak symbols are "may not be defined"), not a
+        // function.  The old code collapsed this into "no section" and let it
+        // pass as "unresolved = ok".
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._weak_object", 0, RelocTargetClass::NonFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "weak undefined object head must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("not an executable entry") || f.contains("weak"))));
+    }
+
+    #[test]
+    fn opd_head_malformed_rsym_fails() {
+        // Finding round-3 / (2): a relocation that names `r_sym = 99` when the
+        // symbol table has 3 entries is malformed.  The old parser (before
+        // this round) returned `target_exec = None` and the head check treated
+        // that as OK; the new classifier reports it as Malformed and fails.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._rsym_99", 0, RelocTargetClass::Malformed)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "r_sym past the symbol table must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("malformed") || f.contains("out-of-range") || f.contains("not an executable entry"))));
+    }
+
+    #[test]
+    fn opd_head_malformed_shndx_fails() {
+        // Finding round-3 / (2): a symbol with `st_shndx = 30` when the
+        // section table has 6 entries is a malformed cross-reference and must
+        // fail — not collapse into `target: None` and be treated as OK.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._shndx_30", 0, RelocTargetClass::Malformed)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "st_shndx past the section table must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("malformed") || f.contains("out-of-range") || f.contains("not an executable entry"))));
+    }
+
+    #[test]
+    fn opd_head_undefined_function_target_passes() {
+        // Finding round-3 / (1): a head to an UNDEFINED STT_FUNC (strong, or
+        // weak) is still a legal way to name a function in a relocatable —
+        // the linker must resolve it to a function, and the linked ELF is
+        // where the executable-target guarantee is verified.  The old code
+        // saw "no section" and let it pass by accident; the new classifier
+        // reports it as UndefFunction so that case is explicit.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("_undef_strong_fn", 0, RelocTargetClass::UndefFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();  // undefined symbols are legal in a REL
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "undefined STT_FUNC head in a REL must pass; got {:?}", r.failures);
+
+        // ...and weak undefined function, the same.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("_undef_weak_fn", 0, RelocTargetClass::UndefFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "weak undefined STT_FUNC head in a REL must pass; got {:?}", r.failures);
+    }
+
+    #[test]
+    fn prx_exec_weak_default_slots_pass() {
+        // Finding P1 (round 2): in a linked EXEC the ppu_guid (0x24) and
+        // sys_process_enable (0x28) slots are WEAK-UNDEFINED by contract and
+        // resolve to 0 when the program does not set them — so the default
+        // linked case has those two zero. The lib boundary slots (0x10-0x1c)
+        // must still be non-null. This shape must pass.
+        // pointer_slots order = [0x10,0x14,0x18,0x1c,0x24,0x28].
+        let p = prx(
+            0x1b43_4cec, 0x40, SYS_PROC_PARAM_VERSION, SYS_PROC_PRX_PARAM_ABI_VERSION,
+            vec![], [0x2000, 0x2040, 0x3000, 0x3040, 0, 0],
+        );
+        let mut m = base_manifest(); // base_manifest is EXEC
+        m.sys_proc_prx_param = Some(p);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "weak-default 0x24/0x28 = 0 with lib slots set must pass: {:?}", r.failures);
+        assert!(r.passes.iter().any(|p| p.contains("0x24") && p.contains("weak/undefined")));
+        assert!(r.passes.iter().any(|p| p.contains("0x28") && p.contains("weak/undefined")));
+        assert!(r.passes.iter().any(|p| p.contains("0x10") && p.contains("0x00002000")));
+    }
+
+    #[test]
+    fn opd_head_section_symbol_addend_ok() {
+        // A section-symbol + addend code reference on the head is a legal way
+        // to name the function. The head addend is NOT gated.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32(".text.somefunc", 16, RelocTargetClass::Executable)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "head section-symbol + addend should pass: {:?}", r.failures);
+    }
+
+    #[test]
+    fn opd_off_slot_reloc_fails() {
+        // A relocation off every descriptor slot (e.g. a stray one at 8k+2)
+        // must fail conformance.
+        let opd = opd_summary(
+            false, 4, 0,
+            vec![RelocAt {
+                offset: 2,
+                reloc: RelocDesc {
+                    r_type: "R_PPC64_TLSGD".into(), symbol: None, addend: 0,
+                    target: None,
+                },
+            }],
+            None,
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "off-slot reloc must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("not on a descriptor slot")));
+    }
+
+    #[test]
+    fn opd_bad_entsize_and_addralign_fail() {
+        // Section 2 rules 1 and 2: sh_entsize = 0 and sh_addralign = 4.
+        let opd = opd_summary(
+            false, 8, 8, vec![], None,  // addralign 8, entsize 8 -> both wrong
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "bad entsize/addralign must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("sh_entsize") && f.contains("expected 0")));
+        assert!(r.failures.iter().any(|f| f.contains("sh_addralign") && f.contains("expected 4")));
+    }
+
+    fn build_linked_elf_with_opd(descs: &[(u32, u32)]) -> Vec<u8> {
+        // Minimal big-endian ELF64 (EXEC) with a single .opd section of
+        // 8 * descs.len() bytes holding descs descriptors. One PT_LOAD
+        // segment is executable and spans .opd, so every entry word is in an
+        // executable segment. No .rela -> summarize_opd treats as linked and
+        // decodes the section BYTES.
+        let n = descs.len();
+        let opd_size = (n * 8) as u64;
+        let eh_size: u64 = 64;
+        let ph_size: u64 = 56;
+        let ph_off = eh_size;
+        let opd_off: u64 = 0x100;
+        let shstrtab_off: u64 = 0x400;
+        let shstrtab_size: u64 = 16; // "\0.opd\0.shstrtab\0"
+        let sh_off = shstrtab_off + shstrtab_size;
+        let shnum: u64 = 3;
+        let shstrndx: u16 = 2;
+
+        let mut out: Vec<u8> = Vec::new();
+        let be16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_be_bytes());
+        let be32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_be_bytes());
+        let be64 = |b: &mut Vec<u8>, v: u64| b.extend_from_slice(&v.to_be_bytes());
+
+        // ELF header
+        out.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 2, 1, 0x66, 0, 0, 0, 0, 0, 0, 0, 0]);
+        be16(&mut out, 2);    // e_type = ET_EXEC
+        be16(&mut out, 21);   // e_machine = EM_PPC64
+        be32(&mut out, 1);    // e_version
+        be64(&mut out, 0x1000); // e_entry
+        be64(&mut out, ph_off);
+        be64(&mut out, sh_off);
+        be32(&mut out, 0);    // e_flags (must equal CELLOS_LV2_E_FLAGS = 0)
+        be16(&mut out, 64);   // e_ehsize
+        be16(&mut out, ph_size as u16);
+        be16(&mut out, 1);    // e_phnum
+        be16(&mut out, 64);   // e_shentsize
+        be16(&mut out, shnum as u16);
+        be16(&mut out, shstrndx);
+        assert_eq!(out.len(), 64, "ELF header must be 64 bytes");
+
+        // Program header: one PT_LOAD, R+X, covering the .opd section.
+        be32(&mut out, 1);     // p_type = PT_LOAD
+        be32(&mut out, 0x5);   // p_flags = PF_R | PF_X
+        be64(&mut out, opd_off);
+        be64(&mut out, 0x1000); // p_vaddr = exec base
+        be64(&mut out, 0x1000); // p_paddr
+        be64(&mut out, opd_size);
+        be64(&mut out, opd_size);
+        be64(&mut out, 0x1000); // p_align
+        assert_eq!(out.len(), (ph_off + ph_size) as usize);
+
+        // Pad to .opd, write the resolved descriptors (entry, toc, entry, toc, ...).
+        out.resize(opd_off as usize, 0);
+        for (entry, toc) in descs {
+            be32(&mut out, *entry);
+            be32(&mut out, *toc);
+        }
+        assert_eq!(out.len(), (opd_off + opd_size) as usize);
+
+        // Pad to shstrtab, write the shstrtab ("\0.opd\0.shstrtab\0").
+        out.resize(shstrtab_off as usize, 0);
+        out.extend_from_slice(b"\0.opd\0.shstrtab\0");
+        assert_eq!(out.len(), (shstrtab_off + shstrtab_size) as usize);
+
+        // Pad to sh_off and write 3 section headers (NULL, .opd, .shstrtab).
+        out.resize(sh_off as usize, 0);
+        let sh = |b: &mut Vec<u8>,
+                 name: u32, ty: u32, flags: u64, addr: u64, off: u64, size: u64,
+                 align: u64, entsize: u64| {
+            be32(b, name); be32(b, ty); be64(b, flags); be64(b, addr);
+            be64(b, off);  be64(b, size); be32(b, 0); be32(b, 0);
+            be64(b, align); be64(b, entsize);
+        };
+        // [0] NULL
+        out.extend_from_slice(&[0u8; 64]);
+        // [1] .opd (name at offset 1, len 4)
+        let mut b = Vec::new();
+        sh(&mut b, 1, 1 /*PROGBITS*/, 0x2 /*SHF_ALLOC*/, 0x1000, opd_off, opd_size, 4, 0);
+        out.extend_from_slice(&b);
+        // [2] .shstrtab (name at offset 6, len 9)
+        let mut b = Vec::new();
+        sh(&mut b, 6, 3 /*STRTAB*/, 0, 0, shstrtab_off, shstrtab_size, 1, 0);
+        out.extend_from_slice(&b);
+        assert_eq!(out.len(), (sh_off + shnum * 64) as usize);
+        out
+    }
+
+    fn build_relocatable_elf_with_opd_and_stray_reloc() -> Vec<u8> {
+        // A relocatable (ET_REL) with an .opd of exactly ONE descriptor (8
+        // bytes) and a .rela.opd carrying three relocations: at 0 and 4
+        // (the head/tail slots of the single descriptor) and a stray one at
+        // 8.  Offset 8 satisfies `8 % 8 == 0` so it looked "in slot" to the
+        // old check, but it belongs to no descriptor (entries == 1, size ==
+        // 8) — the old code silently dropped it from every descriptor AND
+        // from off_slot_relocs. Finding P1 (round 2): it must be surfaced as
+        // an out-of-range relocation.
+        const R_PPC64_ADDR32: u64 = 38;
+        const R_PPC64_TLSGD: u64 = 107;
+
+        let opd_off: u64 = 0x100;
+        let rela_off: u64 = 0x110;
+        let symtab_off: u64 = 0x160;
+        let strtab_off: u64 = 0x180;
+        let shstrtab_off: u64 = 0x200;
+        let shstrtab_size: u64 = 42;3;
+        let sh_off: u64 = 0x300;
+        let shnum: u64 = 6;
+        let shstrndx: u16 = 5;
+
+        let mut out: Vec<u8> = Vec::new();
+        let be16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_be_bytes());
+        let be32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_be_bytes());
+        let be64 = |b: &mut Vec<u8>, v: u64| b.extend_from_slice(&v.to_be_bytes());
+
+        // ELF header: ET_REL (1), EM_PPC64, big-endian, CellOS OSABI 0x66,
+        // e_flags 0, 0 program headers.
+        out.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 2, 1, 0x66, 0, 0, 0, 0, 0, 0, 0, 0]);
+        be16(&mut out, 1);        // e_type = ET_REL
+        be16(&mut out, 21);       // e_machine = EM_PPC64
+        be32(&mut out, 1);        // e_version
+        be64(&mut out, 0);        // e_entry
+        be64(&mut out, 0);        // e_phoff
+        be64(&mut out, sh_off);   // e_shoff
+        be32(&mut out, 0);        // e_flags
+        be16(&mut out, 64);       // e_ehsize
+        be16(&mut out, 56);       // e_phentsize
+        be16(&mut out, 0);        // e_phnum
+        be16(&mut out, 64);       // e_shentsize
+        be16(&mut out, shnum as u16);
+        be16(&mut out, shstrndx);
+        assert_eq!(out.len(), 64);
+
+        // Pad to .opd and write ONE descriptor (the two words are irrelevant
+        // on a relocatable; the relocations are what matter).
+        out.resize(opd_off as usize, 0);
+        be64(&mut out, 0); // 8-byte .opd, 1 descriptor
+        assert_eq!(out.len(), (opd_off + 8) as usize);
+
+        // Pad to .rela.opd and write three 24-byte RELA entries at 0, 4, 8.
+        out.resize(rela_off as usize, 0);
+        assert_eq!(out.len(), rela_off as usize);
+        for (off, ty) in [(0u64, R_PPC64_ADDR32), (4u64, R_PPC64_ADDR32), (8u64, R_PPC64_TLSGD)] {
+            be64(&mut out, off);              // r_offset
+            be64(&mut out, 0u64 << 32 | ty);  // r_info = sym 0 | type
+            be64(&mut out, 0);                // r_addend
+        }
+        assert_eq!(out.len(), (rela_off + 72) as usize);
+
+        // Pad to .symtab (one null symbol) and write it.
+        out.resize(symtab_off as usize, 0);
+        be32(&mut out, 0); // st_name
+        out.push(0);       // st_info
+        out.push(0);       // st_other
+        be64(&mut out, 0); // st_value
+        be64(&mut out, 0); // st_size
+        be16(&mut out, 0); // st_shndx
+        assert_eq!(out.len(), (symtab_off + 24) as usize);
+
+        // Pad to .strtab (empty).
+        out.resize(strtab_off as usize, 0);
+
+        // Pad to .shstrtab and write the section names.
+        out.resize(shstrtab_off as usize, 0);
+        out.extend_from_slice(b"\0.opd\0.rela.opd\0.symtab\0.strtab\0.shstrtab\0");
+        assert_eq!(out.len(), (shstrtab_off + shstrtab_size) as usize);
+
+        // Pad to sh_off and write 6 section headers.
+        out.resize(sh_off as usize, 0);
+        let sh = |b: &mut Vec<u8>,
+                  name: u32, ty: u32, flags: u64, addr: u64, off: u64, size: u64,
+                  link: u32, info: u32, align: u64, entsize: u64| {
+            be32(b, name); be32(b, ty); be64(b, flags); be64(b, addr);
+            be64(b, off);  be64(b, size); be32(b, link); be32(b, info);
+            be64(b, align); be64(b, entsize);
+        };
+        // [0] NULL
+        out.extend_from_slice(&[0u8; 64]);
+        // [1] .opd
+        let mut b = Vec::new(); sh(&mut b, 1, 1, 0x2 /*SHF_ALLOC*/, 0, opd_off, 8, 0, 0, 4, 0); out.extend_from_slice(&b);
+        // [2] .rela.opd -> target .opd (index 1)
+        let mut b = Vec::new(); sh(&mut b, 6, 4 /*RELA*/, 0x4 /*INFO*/, 0, rela_off, 72, 0, 1, 8, 24); out.extend_from_slice(&b);
+        // [3] .symtab -> strtab (index 4)
+        let mut b = Vec::new(); sh(&mut b, 16, 2 /*SYMTAB*/, 0, 0, symtab_off, 24, 4, 1, 8, 24); out.extend_from_slice(&b);
+        // [4] .strtab
+        let mut b = Vec::new(); sh(&mut b, 24, 3 /*STRTAB*/, 0, 0, strtab_off, 0, 0, 0, 1, 0); out.extend_from_slice(&b);
+        // [5] .shstrtab
+        let mut b = Vec::new(); sh(&mut b, 32, 3, 0, 0, shstrtab_off, shstrtab_size, 0, 0, 1, 0); out.extend_from_slice(&b);
+        assert_eq!(out.len(), (sh_off + shnum * 64) as usize);
+        out
+    }
+
+    #[test]
+    fn opd_stray_reloc_beyond_last_descriptor_fails() {
+        // Finding P1 (round 2): a relocation at offset 8 on a section that
+        // holds a single descriptor (size 8) satisfies `off % 8 == 0`, so the
+        // old `in_slot` check counted it as "in slot". It belongs to no
+        // descriptor and vanished. The bound-check must surface it as an
+        // out-of-range relocation and fail conformance.
+        let bytes = build_relocatable_elf_with_opd_and_stray_reloc();
+        let m = parse_elf_bytes(std::path::Path::new("test-rel.elf"), &bytes)
+            .expect("parse_elf_bytes must succeed on our hand-built ELF");
+        let opd = m.opd.as_ref().expect("must have .opd");
+        assert_eq!(opd.entries, 1, "one 8-byte descriptor");
+        assert!(!opd.linked, "has a .rela on .opd -> relocatable");
+        assert_eq!(opd.descriptors.len(), 1);
+        // The stray TLSGD at offset 8 must be captured, not dropped.
+        assert!(
+            opd.off_slot_relocs.iter().any(|r| r.offset == 8),
+            "stray reloc at offset 8 (past the single descriptor) must be an out-of-range reloc, got {}",
+            format!("{:?}", opd.off_slot_relocs),
+        );
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "out-of-range .opd reloc must fail: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("not on a descriptor slot")
+            || f.contains("out of range") || f.contains("stray relocation")));
+    }
+
+    /// A relocatable (ET_REL) with one `.opd` descriptor whose head names a
+    /// function symbol stored with `st_shndx = SHN_XINDEX`; its real section
+    /// index is `xindex`, the symbol's entry in `.symtab_shndx`
+    /// (SHT_SYMTAB_SHNDX).  The tail names an undefined `.TOC.` with addend 0.
+    ///   [0] NULL  [1] .text (AX)  [2] .opd (WA)  [3] .rela.opd -> [2]
+    ///   [4] .symtab  [5] .strtab  [6] .symtab_shndx -> [4]  [7] .shstrtab
+    fn build_relocatable_elf_with_xindex_head(xindex: u32) -> Vec<u8> {
+        const R_PPC64_ADDR32: u64 = 1;
+        const SHT_SYMTAB_SHNDX: u32 = 18;
+
+        let text_off: u64 = 0x100;
+        let opd_off: u64 = 0x110;
+        let rela_off: u64 = 0x120;
+        let symtab_off: u64 = 0x158;
+        let strtab_off: u64 = 0x1a0;
+        let shndx_off: u64 = 0x1c0;
+        let shstrtab_off: u64 = 0x1d0;
+        let strtab: &[u8] = b"\0._xfn\0.TOC.\0";
+        let shstrtab: &[u8] = b"\0.text\0.opd\0.rela.opd\0.symtab\0.strtab\0.symtab_shndx\0.shstrtab\0";
+        // name offsets in shstrtab
+        let (n_text, n_opd, n_rela, n_symtab, n_strtab, n_shndx, n_shstrtab) = (1u32, 7, 12, 22, 30, 38, 52);
+        let sh_off: u64 = 0x300;
+        let shnum: u64 = 8;
+        let shstrndx: u16 = 7;
+
+        let mut out: Vec<u8> = Vec::new();
+        let be16 = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_be_bytes());
+        let be32 = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_be_bytes());
+        let be64 = |b: &mut Vec<u8>, v: u64| b.extend_from_slice(&v.to_be_bytes());
+
+        out.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 2, 1, 0x66, 0, 0, 0, 0, 0, 0, 0, 0]);
+        be16(&mut out, 1);        // e_type = ET_REL
+        be16(&mut out, 21);       // e_machine = EM_PPC64
+        be32(&mut out, 1);        // e_version
+        be64(&mut out, 0);        // e_entry
+        be64(&mut out, 0);        // e_phoff
+        be64(&mut out, sh_off);   // e_shoff
+        be32(&mut out, 0);        // e_flags
+        be16(&mut out, 64);       // e_ehsize
+        be16(&mut out, 56);       // e_phentsize
+        be16(&mut out, 0);        // e_phnum
+        be16(&mut out, 64);       // e_shentsize
+        be16(&mut out, shnum as u16);
+        be16(&mut out, shstrndx);
+
+        // .text: one blr
+        out.resize(text_off as usize, 0);
+        be32(&mut out, 0x4e80_0020);
+        // .opd: one 8-byte descriptor (the relocations carry its meaning)
+        out.resize(opd_off as usize, 0);
+        be64(&mut out, 0);
+        // .rela.opd: head (offset 0) -> sym 1 `._xfn`, tail (offset 4) -> sym 2 `.TOC.`
+        out.resize(rela_off as usize, 0);
+        for (off, sym) in [(0u64, 1u64), (4u64, 2u64)] {
+            be64(&mut out, off);
+            be64(&mut out, sym << 32 | R_PPC64_ADDR32);
+            be64(&mut out, 0);
+        }
+        // .symtab: null, `._xfn` (GLOBAL FUNC, SHN_XINDEX), `.TOC.` (GLOBAL NOTYPE, undefined)
+        out.resize(symtab_off as usize, 0);
+        for (name, info, shndx) in [(0u32, 0u8, 0u16), (1, 0x12, SHN_XINDEX), (7, 0x10, 0)] {
+            be32(&mut out, name);
+            out.push(info);
+            out.push(0);
+            be16(&mut out, shndx);
+            be64(&mut out, 0);
+            be64(&mut out, if name == 1 { 4 } else { 0 });
+        }
+        out.resize(strtab_off as usize, 0);
+        out.extend_from_slice(strtab);
+        // .symtab_shndx: one u32 per symbol; only `._xfn`'s entry is used
+        out.resize(shndx_off as usize, 0);
+        for v in [0u32, xindex, 0] {
+            be32(&mut out, v);
+        }
+        out.resize(shstrtab_off as usize, 0);
+        out.extend_from_slice(shstrtab);
+
+        out.resize(sh_off as usize, 0);
+        let sh = |b: &mut Vec<u8>,
+                  name: u32, ty: u32, flags: u64, off: u64, size: u64,
+                  link: u32, info: u32, align: u64, entsize: u64| {
+            be32(b, name); be32(b, ty); be64(b, flags); be64(b, 0);
+            be64(b, off);  be64(b, size); be32(b, link); be32(b, info);
+            be64(b, align); be64(b, entsize);
+        };
+        let mut b = vec![0u8; 64]; // [0] NULL
+        sh(&mut b, n_text, 1, 0x6 /*ALLOC|EXECINSTR*/, text_off, 4, 0, 0, 4, 0);
+        sh(&mut b, n_opd, 1, 0x3 /*WRITE|ALLOC*/, opd_off, 8, 0, 0, 4, 0);
+        sh(&mut b, n_rela, 4 /*RELA*/, 0x40 /*INFO_LINK*/, rela_off, 48, 4, 2, 8, 24);
+        sh(&mut b, n_symtab, 2 /*SYMTAB*/, 0, symtab_off, 72, 5, 1, 8, 24);
+        sh(&mut b, n_strtab, 3 /*STRTAB*/, 0, strtab_off, strtab.len() as u64, 0, 0, 1, 0);
+        sh(&mut b, n_shndx, SHT_SYMTAB_SHNDX, 0, shndx_off, 12, 4, 0, 4, 4);
+        sh(&mut b, n_shstrtab, 3, 0, shstrtab_off, shstrtab.len() as u64, 0, 0, 1, 0);
+        out.extend_from_slice(&b);
+        assert_eq!(out.len(), (sh_off + shnum * 64) as usize);
+        out
+    }
+
+    fn xindex_head_target(xindex: u32) -> (Option<RelocTargetClass>, CheckReport) {
+        let bytes = build_relocatable_elf_with_xindex_head(xindex);
+        let m = parse_elf_bytes(std::path::Path::new("test-xindex.o"), &bytes)
+            .expect("parse_elf_bytes must succeed on our hand-built ELF");
+        let opd = m.opd.as_ref().expect("must have .opd");
+        assert!(!opd.linked, "has a .rela on .opd -> relocatable");
+        assert_eq!(opd.descriptors.len(), 1);
+        let d = &opd.descriptors[0];
+        assert_eq!(d.head_relocs.len(), 1);
+        assert_eq!(d.head_relocs[0].symbol.as_deref(), Some("._xfn"));
+        (d.head_relocs[0].target.clone(), check_invariants(&m))
+    }
+
+    #[test]
+    fn opd_head_xindex_function_in_text_passes() {
+        // A function symbol with st_shndx = SHN_XINDEX whose SHT_SYMTAB_SHNDX
+        // entry names the executable .text is a valid head target.  The
+        // earlier `shndx >= SHN_LORESERVE` branch called it NonFunction.
+        let (target, r) = xindex_head_target(1);
+        assert_eq!(target, Some(RelocTargetClass::Executable));
+        assert!(r.is_ok(), "an SHN_XINDEX function in .text must pass: {:?}", r.failures);
+    }
+
+    #[test]
+    fn opd_head_xindex_into_data_section_fails() {
+        // The same symbol, its extended index naming .opd (not executable): Data.
+        let (target, r) = xindex_head_target(2);
+        assert_eq!(target, Some(RelocTargetClass::Data));
+        assert!(!r.is_ok(), "an SHN_XINDEX head in a data section must fail");
+    }
+
+    #[test]
+    fn opd_head_xindex_past_section_table_is_malformed() {
+        // The extended index names section 99 of 8: Malformed, not NonFunction.
+        let (target, r) = xindex_head_target(99);
+        assert_eq!(target, Some(RelocTargetClass::Malformed));
+        assert!(!r.is_ok(), "an SHN_XINDEX index past the section table must fail");
+    }
+
+    #[test]
+    fn defined_section_class_does_not_truncate_large_section_counts() {
+        // 65536 sections: narrowed to u16 the count wraps to 0 and every
+        // defined symbol becomes Malformed.  Counts stay usize.
+        let exec = Some(SHF_EXECINSTR as u64);
+        assert_eq!(classify_defined_section(1, 65536, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(65535, 65536, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(65537, 70000, exec), RelocTargetClass::Executable);
+        assert_eq!(classify_defined_section(1, 65536, Some(0)), RelocTargetClass::Data);
+        // the bound itself is still enforced
+        assert_eq!(classify_defined_section(65536, 65536, exec), RelocTargetClass::Malformed);
+        assert_eq!(classify_defined_section(0, 65536, exec), RelocTargetClass::Malformed);
+        assert_eq!(classify_defined_section(1, 65536, None), RelocTargetClass::Malformed);
+    }
+
+    #[test]
+    fn opd_linked_elf_bytes_two_descriptors() {
+        // Finding P1-1: linked descriptors MUST be decoded at base/base+4
+        // (stride 8). With the old bug (entry_ea = word32(i*4)), descs[1]
+        // was read from offset 4 (i.e. descs[0]'s TOC word), so
+        // entry_in_exec was false and the object failed. The fixed decoder
+        // reads the correct words and passes.
+        let descs = [(0x1000u32, 0x3000u32), (0x1008u32, 0x3000u32)];
+        let bytes = build_linked_elf_with_opd(&descs);
+        let m = parse_elf_bytes(std::path::Path::new("test-linked.elf"), &bytes)
+            .expect("parse_elf_bytes must succeed on our hand-built ELF");
+        let opd = m.opd.as_ref().expect("must have .opd");
+        assert_eq!(opd.entries, 2);
+        assert!(opd.linked, "no .rela on .opd -> linked");
+        assert_eq!(opd.descriptors[0].entry_ea, Some(0x1000));
+        assert_eq!(opd.descriptors[0].toc_ea,  Some(0x3000));
+        assert_eq!(opd.descriptors[1].entry_ea, Some(0x1008));
+        assert_eq!(opd.descriptors[1].toc_ea,  Some(0x3000));
+        assert_eq!(opd.entry_in_executable_segment, Some(true));
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "linked 2-descriptor .opd must pass: {:?}", r.failures);
+        assert!(r.passes.iter().any(|p| p.contains("single TOC value")
+            && p.contains("0x00003000")));
+    }
+
+    fn prx(
+        magic: u32, size: u32, version: u32, abi_version: u32,
+        relocs: Vec<RelocAt>, pointer_slots: [u64; 6],
+    ) -> SysProcPrxParamSummary {
+        SysProcPrxParamSummary {
+            magic, size, version, sdk_version: 0xff, abi_version,
+            relocs, pointer_slots,
+        }
+    }
+
+    #[test]
+    fn prx_relocatable_six_addr32_passes() {
+        // Relocatable: each of the six slots is a single R_PPC64_ADDR32.
+        let mut p = prx(
+            0x1b43_4cec, 0x40, SYS_PROC_PARAM_VERSION, SYS_PROC_PRX_PARAM_ABI_VERSION,
+            vec![], [0; 6],
+        );
+        for off in [0x10u64, 0x14, 0x18, 0x1c, 0x24, 0x28] {
+            p.relocs.push(RelocAt { offset: off, reloc: addr32("__x", 0, RelocTargetClass::Executable) });
+        }
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();
+        m.sys_proc_prx_param = Some(p);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "relocatable six ADDR32 slots must pass: {:?}", r.failures);
+        assert!(r.passes.iter().any(|p| p.contains("0x10")
+            && p.contains("single R_PPC64_ADDR32")));
+    }
+
+    #[test]
+    fn prx_exec_null_slot_fails() {
+        // Linked EXEC: resolved bytes must be non-null in all six slots.
+        // A zero in any of the six slots means the PRX loader takes a bad jump.
+        let p = prx(
+            0x1b43_4cec, 0x40, SYS_PROC_PARAM_VERSION, SYS_PROC_PRX_PARAM_ABI_VERSION,
+            vec![], [0x1000, 0x1004, 0x1008, 0, 0x1010, 0x1014],
+        );
+        let mut m = base_manifest(); // base_manifest is EXEC
+        m.sys_proc_prx_param = Some(p);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "null resolved slot must fail; failures: {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("0x1c")
+            && f.contains("resolved slot is 0x00000000")));
+    }
+
 
     #[test]
     fn toc_check_ilp32_stride_4() {

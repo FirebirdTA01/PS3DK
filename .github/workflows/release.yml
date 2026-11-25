@@ -931,29 +931,41 @@ jobs:
       # native PPU cross toolchain ($PS3DEV/ppu) and our SDK ($PS3DK) are both
       # installed, so:
       #   7.1  build samples/toolchain/hello-ppu-abi-check (zero warnings) and
-      #        require `abi-verify check` to all-PASS on the linked ELF;
-      #   7.2  diff our installed PPU crt1.o (a REL startfile, same class as
-      #        the fixture) against tests/abi/fixtures/crt1.json on the common
-      #        conformance fields — ELF identity, .opd compact descriptor
-      #        shape (STRICT) and .sys_proc_prx_param.
-      # The linked sample's own .opd may legitimately be EMPTY (final
-      # executable vs startfile), so it is not part of 7.2; the compact-
-      # descriptor contract is where it actually lives, in a REL crt1.o.
+      #        require `abi-verify check` to all-PASS on the linked ELF.
+      #        This is the byte-level check of a final executable: .opd
+      #        entries in resolved form (entry words inside an executable
+      #        segment, a single constant TOC word across all descriptors),
+      #        plus .sys_proc_prx_param size/magic/version/abi_version and
+      #        the six R_PPC64_ADDR32 descriptor slots.
+      #   7.2  diff the manifest of the INSTALLED PPU lv2-crt0.o (the REL
+      #        startfile that carries .opd) against
+      #        tests/abi/fixtures/lv2-crt0.json, AND the manifest of the
+      #        INSTALLED lv2-sprx.o (the REL startfile that carries
+      #        .sys_proc_prx_param) against tests/abi/fixtures/lv2-sprx.json,
+      #        on every strict conformance field — ELF identity, the full
+      #        .opd descriptor shape (entry size, count, and per-descriptor
+      #        head/tail reloc type + symbol) in lv2-crt0.o, and the
+      #        .sys_proc_prx_param block (size, magic, version, abi_version,
+      #        and the six R_PPC64_ADDR32 slots at the fixed offsets) in
+      #        lv2-sprx.o.  The concrete function names head relocs point at
+      #        are informative, not a normative invariant — only the
+      #        reloc type and descriptor layout are.
       #
-      # REPORT-ONLY WHILE THE OPEN .opd FINDING IS SETTLED: the installed
-      # crt1.o's .opd shape (.opd-compact-descriptor-migration question) is
-      # the section-7 deviation the spec's own clause calls for a documented
-      # fixture update or a toolchain/abi-verify change for.  Until that is
-      # settled, --report-only surfaces the named finding and exits 0 so the
-      # release does not block on its own documented open question.  Drop the
-      # --report-only flag (one line) to flip the same checks blocking the
-      # moment that question is resolved.
-      - name: "Stage 0 — ABI conformance (spec section 7; report-only until the open .opd finding is settled)"
+      # REPORT-ONLY PENDING THE e_flags FINDING: the reference
+      # lv2-crt0.o reference startfile has e_flags = 0x1, and
+      # CELLOS_LV2_E_FLAGS is 0 in this tree; that is a separate open
+      # question (the "e_flags is an open cell64lv2 ABI finding" noted on
+      # the original card) and not a .opd drift.  --report-only surfaces it
+      # with a named finding and exits 0 so the release does not block on it.
+      # Drop the --report-only flag (one line) once the e_flags question is
+      # resolved.
+      - name: "Stage 0 — ABI conformance (spec section 7; report-only while the e_flags finding is open)"
         run: |
           source scripts/env.sh
           bash scripts/abi-conformance.sh \
                --ps3dev "$PS3DEV" --sdk "$PS3DK" \
-               --fixture "$PS3_TOOLCHAIN_ROOT/tests/abi/fixtures/crt1.json" \
+               --fixture-crt0 "$PS3_TOOLCHAIN_ROOT/tests/abi/fixtures/lv2-crt0.json" \
+               --fixture-sprx "$PS3_TOOLCHAIN_ROOT/tests/abi/fixtures/lv2-sprx.json" \
                --report-only
 
       - name: Stage 1 — cross-build PPU toolchain (mingw-w64)

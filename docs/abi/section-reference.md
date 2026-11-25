@@ -79,11 +79,9 @@ PS3DK object files reach that final value through one encoding:
   objects carry (GCC 0007 emits `.long .TOC.`; binutils writes the TOC
   base EA at link time).
 
-PS3DK never puts relocation 107 on this word. Another CellOS toolchain
-uses relocation 107 (its "TOC32") for the same 32-bit TOC base word;
-upstream binutils numbers 107 as `R_PPC64_TLSGD`. PS3DK objects do carry
-`R_PPC64_TLSGD`, but only as the general-dynamic TLS call marker in code
-sections, never in `.opd`.
+PS3DK never puts relocation 107 on this word. Upstream binutils numbers
+107 as `R_PPC64_TLSGD`. PS3DK objects do carry `R_PPC64_TLSGD`, but only
+as the general-dynamic TLS call marker in code sections, never in `.opd`.
 
 The linked binary contract is the same either way: bytes `0x04..0x07` contain
 the 32-bit TOC base EA. `R_PPC64_ADDR64` is not valid for `.opd`.
@@ -120,13 +118,13 @@ offset  size  field                        value / relocation
 0x04    4     magic                        0x1b434cec
 0x08    4     version                      0x00000004
 0x0c    4     sdk_version                  BCD SDK version, e.g. 0x00475001
-0x10    4     lib_ent.begin                __begin_of_section_lib_ent + 4
-0x14    4     lib_ent.end                  __end_of_section_lib_ent
-0x18    4     lib_stub.begin               __begin_of_section_lib_stub + 4
-0x1c    4     lib_stub.end                 __end_of_section_lib_stub
+0x10    4     lib_ent.begin                __libentstart + 4
+0x14    4     lib_ent.end                  __libentend
+0x18    4     lib_stub.begin               __libstubstart + 4
+0x1c    4     lib_stub.end                 __libstubend
 0x20    4     abi_version                  0x01010000
 0x24    4     ppu_guid_addr                __PPU_GUID
-0x28    4     sys_process_enable_addr      __sys_process_enable_*
+0x28    4     sys_process_enable_addr      __sys_process_enabled
 0x2c    4     reserved                     0
 0x30   16     reserved / padding           0
 ```
@@ -173,7 +171,7 @@ carrying `module_start` / `module_stop`.
 
 The `.sys_proc_prx_param` block (executables) or the module-info block
 (`.rodata.sceModuleInfo`, PRX) points to the range using
-`__begin_of_section_lib_ent + 4` and `__end_of_section_lib_ent`.
+`__libentstart + 4` and `__libentend`.
 
 ### 3.1 Export record layout
 
