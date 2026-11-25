@@ -62,6 +62,24 @@ The version stamped into builds is generated from the most recent
   and pressure values and fires 200 ms pulses on each rumble motor, with port
   selection, pressure-mode restore, length-checked records and reconnect
   handling. Its pad lifecycle has native host tests.
+- New sample `samples/sprx/module-segments` (both ABIs) and regression rows
+  `sprx-segments` / `sprx-segments-lp64`: a module that exports two libraries
+  and writes its own `.data` and `.bss` in `module_start` and `module_stop`,
+  with a loader that prints a verdict for every step.
+- New sample `samples/sprx/vsh-plugin` (both ABIs) and regression row
+  `sprx-vsh-plugin` (ILP32): a VSH plugin for webMAN MOD's
+  `/loadprx.ps3` and `/unloadprx.ps3`. `module_start` starts a worker with
+  `sys_ppu_thread_create` and `module_stop` joins it; on a thread with no
+  caller (the plugin loader's) each ends with the bare exit system call, and
+  `module_stop` first sends the final stop report. A loader runs the
+  game-process path. The pattern is documented in `docs/tools/prx-gen.md`.
+- The regression battery boots PRX modules from all three containers
+  (#20): besides the `.fake.self` / `.fake.sprx` pairs, the `sprx-segments`
+  and `sprx-vsh-plugin` rows boot a raw `.elf` that loads the unsigned
+  `.prx` and a real `.self` that loads the real-signed `.sprx`, each staged
+  alone with its loader (six new rows: both ABIs for `sprx-segments`, ILP32
+  for `sprx-vsh-plugin`). `sprx-load` and
+  `sprx-module-macros` still boot only the fake pair.
 
 ### Changed
 
@@ -140,6 +158,51 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
+- **PRX/SPRX modules now load and run on retail consoles (#137).** Three
+  layout problems the emulator accepted are fixed in `prx-gen`,
+  `lv2-prx.ld`, the PRX crt and `<sys/prx_module.h>`:
+  - every `PT_LOAD` now carries the SPU read bit, which retail Lv-2 requires
+    (load failed with `0x80010007`);
+  - export records (`.lib.ent`: each library and the management record) are
+    28 bytes (`0x1c`), not 44. Lv-2 walks them in fixed `0x1c` steps, so a
+    module with more than one export record hung in `sys_prx_start_module`.
+    Import records stay 44 bytes. The management record is now version 0 and
+    also exports the `module_info` variable;
+  - a module is linked as a code segment (`0x00400005`) and a separate data
+    segment (`0x00600006`) instead of one writable and executable segment,
+    whose first store to the module's own `.data` or `.bss` froze the
+    process. `prx-gen` now judges each relocation by whether its two ends
+    share a segment: a `bl` through a function's `.opd` descriptor and a
+    TOC-relative access to data beside the TOC are accepted, a cross-segment
+    `REL64` is emitted for the loader, and relocations that cannot survive the
+    segments moving apart are refused.
+
+  `prx-gen check` now refuses a segment without the SPU read bit (or a
+  writable one without the SPU write bit), an export record that is not
+  `0x1c` bytes, an import record that is not `0x2c` bytes, and a writable and
+  executable segment. `prx-gen build` refuses a writable and executable
+  segment and sets the SPU bits. Modules must be relinked with this SDK.
+
+- **PRX modules with no TOC entries of their own.** With nothing in `.got`,
+  the linker dropped the section and based the TOC on `.lib.stub`, in the code
+  segment, so every TOC-relative access to `.rodata` or `.data` crossed
+  segments and `prx-gen` refused the module (a module that only imports a
+  liblv2 function was enough). `lv2-prx.ld` now always keeps `.got`, with one
+  word, in the data segment.
+- **`sys_ppu_thread_exit` on a thread with no TLS area.** The exit ran
+  librt's cleanup (thread_local and pthread key destructors), which reads TLS,
+  so a thread the kernel created without a TLS area faulted. Cobra runs a VSH
+  plugin's `module_start` and `module_stop` on such a thread. The exit now
+  checks r13 first, reading nothing from memory, and on such a thread ends
+  with the bare exit system call (41) and no cleanup; the joiner still gets
+  the exit code. Threads with a TLS area keep the cleanup as before.
+- **`sys_ppu_thread_create` and `sys_ppu_thread_exit` in a PRX module.** They
+  pulled librt's thread layer into the module, which is TLS-based, so a module
+  that started a thread failed to link. Modules now get the pair from the new
+  `liblv2prx.a`, which `ps3_add_prx` and `lv2-prx.specs` link ahead of
+  librt: no TLS and no
+  heap, so `module_start` can start a thread even on a thread with no TLS
+  area. A module has no thread_local or pthread key cleanup to run.
 - **Hooked samples see their arguments.** The `main` that
   `run-hook-inject.cmake` adds called the sample's own `main` with no
   arguments, so on a console every hooked sample saw `argc` 0 and none of the
@@ -203,52 +266,6 @@ The version stamped into builds is generated from the most recent
 
 ### Fixed
 
-- **PRX/SPRX modules now load and run on retail consoles (#137).** Three
-  layout problems the emulator accepted are fixed in `prx-gen`,
-  `lv2-prx.ld`, the PRX crt and `<sys/prx_module.h>`:
-  - every `PT_LOAD` now carries the SPU read bit, which retail Lv-2 requires
-    (load failed with `0x80010007`);
-  - export records (`.lib.ent`: each library and the management record) are
-    28 bytes (`0x1c`), not 44. Lv-2 walks them in fixed `0x1c` steps, so a
-    module with more than one export record hung in `sys_prx_start_module`.
-    Import records stay 44 bytes. The management record is now version 0 and
-    also exports the `module_info` variable;
-  - a module is linked as a code segment (`0x00400005`) and a separate data
-    segment (`0x00600006`) instead of one writable and executable segment,
-    whose first store to the module's own `.data` or `.bss` froze the
-    process. `prx-gen` now judges each relocation by whether its two ends
-    share a segment: a `bl` through a function's `.opd` descriptor and a
-    TOC-relative access to data beside the TOC are accepted, a cross-segment
-    `REL64` is emitted for the loader, and relocations that cannot survive the
-    segments moving apart are refused.
-
-  `prx-gen check` now refuses a segment without the SPU read bit (or a
-  writable one without the SPU write bit), an export record that is not
-  `0x1c` bytes, an import record that is not `0x2c` bytes, and a writable and
-  executable segment. `prx-gen build` refuses a writable and executable
-  segment and sets the SPU bits. Modules must be relinked with this SDK.
-
-- **PRX modules with no TOC entries of their own.** With nothing in `.got`,
-  the linker dropped the section and based the TOC on `.lib.stub`, in the code
-  segment, so every TOC-relative access to `.rodata` or `.data` crossed
-  segments and `prx-gen` refused the module (a module that only imports a
-  liblv2 function was enough). `lv2-prx.ld` now always keeps `.got`, with one
-  word, in the data segment.
-- **`sys_ppu_thread_exit` on a thread with no TLS area.** The exit ran
-  librt's cleanup (thread_local and pthread key destructors), which reads TLS,
-  so a thread the kernel created without a TLS area faulted. Cobra runs a VSH
-  plugin's `module_start` and `module_stop` on such a thread. The exit now
-  checks r13 first, reading nothing from memory, and on such a thread ends
-  with the bare exit system call (41) and no cleanup; the joiner still gets
-  the exit code. Threads with a TLS area keep the cleanup as before.
-- **`sys_ppu_thread_create` and `sys_ppu_thread_exit` in a PRX module.** They
-  pulled librt's thread layer into the module, which is TLS-based, so a module
-  that started a thread failed to link. Modules now get the pair from the new
-  `liblv2prx.a`, which `ps3_add_prx` and `lv2-prx.specs` link ahead of
-  librt: no TLS and no
-  heap, so `module_start` can start a thread even on a thread with no TLS
-  area. A module has no thread_local or pthread key cleanup to run.
-
 - **`PS3_PROF_LIVE_AUTOSTART` with `PS3_PROF_AUTO` on CMake 3.28.** The PPU
   toolchain files now name one project-include file, which includes the
   selected profiler modules in order, so `PS3_PROF_WAITS`,
@@ -273,24 +290,6 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
-- New sample `samples/sprx/module-segments` (both ABIs) and regression rows
-  `sprx-segments` / `sprx-segments-lp64`: a module that exports two libraries
-  and writes its own `.data` and `.bss` in `module_start` and `module_stop`,
-  with a loader that prints a verdict for every step.
-- New sample `samples/sprx/vsh-plugin` (both ABIs) and regression row
-  `sprx-vsh-plugin` (ILP32): a VSH plugin for webMAN MOD's
-  `/loadprx.ps3` and `/unloadprx.ps3`. `module_start` starts a worker with
-  `sys_ppu_thread_create` and `module_stop` joins it; on a thread with no
-  caller (the plugin loader's) each ends with the bare exit system call, and
-  `module_stop` first sends the final stop report. A loader runs the
-  game-process path. The pattern is documented in `docs/tools/prx-gen.md`.
-- The regression battery boots PRX modules from all three containers
-  (#20): besides the `.fake.self` / `.fake.sprx` pairs, the `sprx-segments`
-  and `sprx-vsh-plugin` rows boot a raw `.elf` that loads the unsigned
-  `.prx` and a real `.self` that loads the real-signed `.sprx`, each staged
-  alone with its loader (six new rows: both ABIs for `sprx-segments`, ILP32
-  for `sprx-vsh-plugin`). `sprx-load` and
-  `sprx-module-macros` still boot only the fake pair.
 - `samples/gcm/hello-ppu-prof-auto-verdicts` stops at configure with a message
   naming `-DPS3_PROF_AUTO=ON` when `PS3_PROF_AUTO` is off, instead of building
   a sample that records nothing. `scripts/build-all-samples.sh` configures it
