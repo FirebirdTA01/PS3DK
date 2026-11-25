@@ -342,6 +342,16 @@ power-cycled (and, on PS3HEN, HEN is re-enabled).
   cycle was needed. Instrumented reruns were clean, and the cause is not
   known. Expect it to be rare but possible, and do not leave a console
   running unattended on the assumption that every run comes back.
+- **Intermittent hang in a module reload (open).** On 2026-11-24 the
+  `samples/sprx/vsh-plugin` loader hung in 1 of 3 runs on the same build. It
+  was in its second `sys_prx_load_module` of the plugin, in the game process,
+  after the first load, start, stop and unload had all passed.
+  - The watchdog's TIMEOUT arrived, but no loader came back.
+  - The screen stayed black and FTP stopped answering; a power cycle was needed.
+  - The two clean runs loaded the plugin from the run directory and from
+    `/dev_hdd0/tmp` respectively, so the location alone is not the cause.
+
+  The cause is not known. A watchdog does not get you out of this one.
 - **GPU wedges** need a power cycle (see [Watchdog and rescue](#watchdog-and-rescue)).
 - **No confidentiality.** Use it on a LAN you trust.
 - **Output before `main` is not captured.** The hook starts in `main`, so
