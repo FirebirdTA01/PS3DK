@@ -9,7 +9,10 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use object::elf::{FileHeader64, EM_PPC64, PF_X, PT_LOAD, SHT_RELA, SHT_SYMTAB, SHF_EXECINSTR, STT_FUNC};
+use object::elf::{
+    FileHeader64, EM_PPC64, PF_X, PT_LOAD, SHF_EXECINSTR, SHN_LORESERVE, SHN_UNDEF, SHT_RELA,
+    SHT_SYMTAB, STT_FUNC,
+};
 use object::read::elf::{FileHeader, ProgramHeader, Rela, SectionHeader as _, Sym as _};
 use object::{Endianness, SectionIndex, SymbolIndex};
 use serde::{Deserialize, Serialize};
@@ -201,19 +204,41 @@ pub struct RelocAt {
     pub reloc: RelocDesc,
 }
 
+/// How a `.opd` head relocation's target resolves against the symbol table.
+/// Classifies each head so the check can distinguish a legitimate function
+/// entry from a data target or a malformed index, instead of collapsing every
+/// "couldn't prove execution" case into a single `ok`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelocTargetClass {
+    /// Defined in a section with `SHF_EXECINSTR` set — a valid function, or a
+    /// (nameless) section symbol used as a code reference.
+    Executable,
+    /// An undefined (`SHN_UNDEF`) `STT_FUNC` symbol, strong or weak. Allowed
+    /// in a relocatable; the linked ELF must resolve it to executable code.
+    UndefFunction,
+    /// Defined in a non-executable (data) section.
+    Data,
+    /// A target that is not a function entry: an `STT_OBJECT` in `SHN_COMMON`
+    /// (common storage) or an undefined (`SHN_UNDEF`) object binding.
+    NonFunction,
+    /// The target index is out of range — `r_sym` beyond the symbol table, or
+    /// `st_shndx` beyond the section table. Malformed input.
+    Malformed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RelocDesc {
     pub r_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
     pub addend: i64,
-    /// Whether the target symbol's section has SHF_EXECINSTR set.
-    /// `None` when the target has no section (e.g. SHN_COMMON like `.TOC.`,
-    /// or SHN_UNDEF). A head slot whose target is `Some(false)` is a
-    /// data symbol and must not be a descriptor entry point.
+    /// The classification of the relocation's target symbol, recorded so the
+    /// head check can distinguish a real function entry from a data symbol,
+    /// a non-function binding, or a malformed out-of-range index.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_exec: Option<bool>,
+    pub target: Option<RelocTargetClass>,
 }
 
 pub fn parse_elf_file(path: &Path) -> Result<Manifest> {
@@ -885,28 +910,63 @@ fn collect_relocs(
         .symbols(endian, data, SHT_SYMTAB)
         .context("reading symbol table")?;
 
-    // Resolve the target symbol's SHF_EXECINSTR flag:
-    //   Some(true)  symbol is in a section with SHF_EXECINSTR set (code)
-    //   Some(false) symbol is in a non-executable section (data)
-    //   None        no section (SHN_COMMON / SHN_UNDEF) or lookup failed
-    let sym_exec = |sym_idx: u32| -> Option<bool> {
+    // Classify a relocation's target symbol so a `.opd` head check can tell a
+    // real function entry from a data-binding, a non-function binding, and a
+    // malformed out-of-range index.  Every case is reported explicitly rather
+    // than folding "couldn't prove exec" into one bucket:
+    //   Executable     defined in a section with SHF_EXECINSTR set
+    //   UndefFunction  SHN_UNDEF STT_FUNC (strong or weak); the linker
+    //                   resolves it in a REL, the linked ELF verifies
+    //   Data           an object binding (SHN_UNDEF STT_OBJECT, SHN_COMMON)
+    //   Malformed      r_sym beyond the symbol table, or st_shndx beyond the
+    //                   section table
+    let shnum = sections.len() as u16;
+    let classify = |sym_idx: u32| -> RelocTargetClass {
         if sym_idx == 0 {
-            return Some(false);
+            return RelocTargetClass::Malformed;
         }
-        let Ok(sym) = symbols.symbol(SymbolIndex(sym_idx as usize)) else {
-            return None;
+        let Some(sym) = symbols.symbol(SymbolIndex(sym_idx as usize)).ok() else {
+            return RelocTargetClass::Malformed;
         };
-        let Ok(Some(sec_idx)) = symbols.symbol_section(endian, sym, SymbolIndex(sym_idx as usize)) else {
-            return None;
-        };
-        let Ok(sec) = sections.section(sec_idx) else {
-            return None;
+        // Weak vs strong is not the deciding factor here — any non-function
+        // binding (a weak "may be undefined" symbol, or an `STT_OBJECT` in
+        // `SHN_COMMON` storage) is equally not an executable entry point; we
+        // fold both into NonFunction.  Defined symbols in a non-executable
+        // section are Data.
+        let st_type = sym.st_type();
+        let shndx = sym.st_shndx(endian);
+
+        if shndx >= SHN_LORESERVE {
+            // SHN_COMMON / SHN_XINDEX / other reserved: never an in-place
+            // executable function entry in a relocatable.
+            return RelocTargetClass::NonFunction;
+        }
+        if shndx == SHN_UNDEF {
+            if st_type == STT_FUNC {
+                // An undefined function, strong or weak, is still a valid way
+                // to name the entry point in a relocatable; the linked ELF is
+                // where the executable-target guarantee is verified.
+                return RelocTargetClass::UndefFunction;
+            }
+            // An undefined *object* (weak or strong) is not an executable entry.
+            return RelocTargetClass::NonFunction;
+        }
+        if (shndx as usize) >= shnum as usize {
+            return RelocTargetClass::Malformed;
+        }
+        let Some(sec) = sections.section(SectionIndex(shndx as usize)).ok() else {
+            return RelocTargetClass::Malformed;
         };
         let flags = sec.sh_flags.get(endian);
-        Some(flags & (SHF_EXECINSTR as u64) != 0)
+        if flags & (SHF_EXECINSTR as u64) != 0 {
+            RelocTargetClass::Executable
+        } else {
+            RelocTargetClass::Data
+        }
     };
 
     for rela in relas {
+
         let r_type = rela.r_type(endian, false);
         let r_sym = rela.r_sym(endian, false);
         let r_offset = rela.r_offset(endian);
@@ -929,18 +989,17 @@ fn collect_relocs(
             }
         };
 
-        let target_exec = if r_sym == 0 {
-            // No symbol — the relocation is absolute; treat as not-executable
-            Some(false)
+        let target = if r_sym == 0 {
+            None
         } else {
-            sym_exec(r_sym)
+            Some(classify(r_sym))
         };
 
         let desc = RelocDesc {
             r_type: reloc_type_name(r_type),
             symbol: sym_name,
             addend: r_addend,
-            target_exec,
+            target,
         };
         out.entry(r_offset).or_default().push(desc);
     }
@@ -1101,11 +1160,13 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                 // off the module TOC base).
                 //
                 // The head target MUST resolve to executable code. Naming a
-                // data symbol (STT_OBJECT in a non-executable section) or a
-                // nameless section symbol of a data section would emit a
-                // descriptor entry point that the loader jumps into data. An
-                // executable section-symbol + addend (e.g. `.text.foo`) is a
-                // legal way to name the function and is still allowed.
+                // The head target must be an executable function: an
+                // STT_OBJECT in SHN_COMMON (common storage), a weak undefined
+                // object (a binding), a target in a non-executable section,
+                // or a malformed (out-of-range r_sym / st_shndx) all fail.
+                // An undefined STT_FUNC (strong or weak) is still allowed in a
+                // relocatable, with the executable-target guarantee deferred to
+                // the linked ELF.
                 let mut bad_head = 0usize;
                 let mut bad_tail = 0usize;
                 let mut first_head = None;
@@ -1118,20 +1179,15 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                             if r.r_type == "R_PPC64_ADDR32" {
                                 if r.symbol.as_deref() == Some(".TOC.") {
                                     "ADDR32 against `.TOC.` (should be a function symbol)".into()
-                                } else if r.target_exec == Some(false) {
-                                    format!(
-                                        "target of sym={:?} is not executable code (data section)",
-                                        r.symbol
-                                    )
                                 } else {
-                                    // target_exec is Some(true) (executable
-                                    // code — STT_FUNC or an executable-section
-                                    // symbol) or None (no section, e.g. a
-                                    // weak/COMMON name the linker resolves to
-                                    // a function). Both are acceptable; the
-                                    // executable-target guarantee on a named
-                                    // data symbol is what we reject above.
-                                    "ok".into()
+                                    match r.target {
+                                        Some(RelocTargetClass::Executable)
+                                        | Some(RelocTargetClass::UndefFunction) => "ok".to_string(),
+                                        _ => format!(
+                                            "head target of sym={:?} is not an executable entry (data / COMMON / undefined-object / malformed index)",
+                                            r.symbol
+                                        ),
+                                    }
                                 }
                             } else {
                                 format!(
@@ -1478,23 +1534,12 @@ mod tests {
         }
     }
 
-    fn addr32(sym: &str, addend: i64) -> RelocDesc {
+    fn addr32(sym: &str, addend: i64, target: RelocTargetClass) -> RelocDesc {
         RelocDesc {
             r_type: "R_PPC64_ADDR32".into(),
             symbol: Some(sym.into()),
             addend,
-            target_exec: Some(true),
-        }
-    }
-
-    /// A `.opd` head ADDR32 whose target is a DATA symbol (non-executable
-    /// section) — `target_exec` is `Some(false)`.
-    fn addr32_data(sym: &str, addend: i64) -> RelocDesc {
-        RelocDesc {
-            r_type: "R_PPC64_ADDR32".into(),
-            symbol: Some(sym.into()),
-            addend,
-            target_exec: Some(false),
+            target: Some(target),
         }
     }
 
@@ -1533,8 +1578,8 @@ mod tests {
         let opd = opd_summary(
             false, 4, 0, vec![], None,
             vec![
-                opd_entry(&[addr32("._start", 0)], &[addr32(".TOC.", 0)], 0),
-                opd_entry(&[addr32(".__syscalls_init", 0)], &[addr32(".TOC.", 0)], 8),
+                opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0),
+                opd_entry(&[addr32(".__syscalls_init", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 8),
             ],
         );
         let mut m = base_manifest();
@@ -1549,7 +1594,7 @@ mod tests {
     fn opd_relocatable_single_descriptor_passes() {
         let opd = opd_summary(
             false, 4, 0, vec![], None,
-            vec![opd_entry(&[addr32("._start", 0)], &[addr32(".TOC.", 0)], 0)],
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
         );
         let mut m = base_manifest();
         m.opd = Some(opd);
@@ -1563,12 +1608,12 @@ mod tests {
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32("._start", 0)],
+                head_relocs: vec![addr32("._start", 0, RelocTargetClass::Executable)],
                 tail_relocs: vec![RelocDesc {
                     r_type: "R_PPC64_TLSGD".into(),
                     symbol: None,
                     addend: 0,
-                    target_exec: None,
+                    target: None,
                 }],
                 entry_ea: None,
                 toc_ea: None,
@@ -1612,8 +1657,8 @@ mod tests {
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32("._start", 0)],
-                tail_relocs: vec![addr32(".TOC.", 4)], // non-zero addend
+                head_relocs: vec![addr32("._start", 0, RelocTargetClass::Executable)],
+                tail_relocs: vec![addr32(".TOC.", 4, RelocTargetClass::Executable)], // non-zero addend
                 entry_ea: None, toc_ea: None,
             }],
         );
@@ -1631,8 +1676,8 @@ mod tests {
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32(".TOC.", 0)], // wrong: head must be a function
-                tail_relocs: vec![addr32(".TOC.", 0)],
+                head_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)], // wrong: head must be a function
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
                 entry_ea: None, toc_ea: None,
             }],
         );
@@ -1648,14 +1693,14 @@ mod tests {
     fn opd_head_data_symbol_target_fails() {
         // Finding P2 (round 2): a head ADDR32 whose target is a DATA symbol
         // (STT_OBJECT in a non-executable section) is not a valid descriptor
-        // entry point — the loader would jump into data. The old check keyed
-        // only on "not named .TOC." and let this through.
+        // entry point — the loader would jump into data.
         let opd = opd_summary(
+
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32_data(".__my_data_symbol", 0)],
-                tail_relocs: vec![addr32(".TOC.", 0)],
+                head_relocs: vec![addr32(".__my_data_symbol", 0, RelocTargetClass::Data)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
                 entry_ea: None, toc_ea: None,
             }],
         );
@@ -1663,8 +1708,8 @@ mod tests {
         m.opd = Some(opd);
         let r = check_invariants(&m);
         assert!(!r.is_ok(), "head to a data symbol must fail; failures: {:?}", r.failures);
-        assert!(r.failures.iter().any(|f| f.contains("head slot")
-            && f.contains("not executable code")));
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && f.contains("not an executable entry")));
     }
 
     #[test]
@@ -1676,8 +1721,8 @@ mod tests {
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32_data("", 0)],
-                tail_relocs: vec![addr32(".TOC.", 0)],
+                head_relocs: vec![addr32("", 0, RelocTargetClass::Data)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
                 entry_ea: None, toc_ea: None,
             }],
         );
@@ -1685,8 +1730,139 @@ mod tests {
         m.opd = Some(opd);
         let r = check_invariants(&m);
         assert!(!r.is_ok(), "head to a nameless data section must fail; failures: {:?}", r.failures);
-        assert!(r.failures.iter().any(|f| f.contains("head slot")
-            && f.contains("not executable code")));
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && f.contains("not an executable entry")));
+    }
+
+    #[test]
+    fn opd_head_common_object_target_fails() {
+        // Finding round-3 / (1): an `STT_OBJECT` in `SHN_COMMON` is a binding
+        // on common storage — not an executable entry point — and must fail
+        // the head check even though the old code saw no section and let it
+        // pass as "unresolved".
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32(".__common_data", 0, RelocTargetClass::NonFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "COMMON object head must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("not an executable entry") || f.contains("COMMON") || f.contains("non-function"))));
+    }
+
+    #[test]
+    fn opd_head_undef_weak_object_target_fails() {
+        // Finding round-3 / (1): a WEAK STT_OBJECT in SHN_UNDEF is a binding
+        // on undefined storage (weak symbols are "may not be defined"), not a
+        // function.  The old code collapsed this into "no section" and let it
+        // pass as "unresolved = ok".
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._weak_object", 0, RelocTargetClass::NonFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "weak undefined object head must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("not an executable entry") || f.contains("weak"))));
+    }
+
+    #[test]
+    fn opd_head_malformed_rsym_fails() {
+        // Finding round-3 / (2): a relocation that names `r_sym = 99` when the
+        // symbol table has 3 entries is malformed.  The old parser (before
+        // this round) returned `target_exec = None` and the head check treated
+        // that as OK; the new classifier reports it as Malformed and fails.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._rsym_99", 0, RelocTargetClass::Malformed)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "r_sym past the symbol table must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("malformed") || f.contains("out-of-range") || f.contains("not an executable entry"))));
+    }
+
+    #[test]
+    fn opd_head_malformed_shndx_fails() {
+        // Finding round-3 / (2): a symbol with `st_shndx = 30` when the
+        // section table has 6 entries is a malformed cross-reference and must
+        // fail — not collapse into `target: None` and be treated as OK.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("._shndx_30", 0, RelocTargetClass::Malformed)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(!r.is_ok(), "st_shndx past the section table must fail; got {:?}", r.failures);
+        assert!(r.failures.iter().any(|f| f.contains("head target")
+            && (f.contains("malformed") || f.contains("out-of-range") || f.contains("not an executable entry"))));
+    }
+
+    #[test]
+    fn opd_head_undefined_function_target_passes() {
+        // Finding round-3 / (1): a head to an UNDEFINED STT_FUNC (strong, or
+        // weak) is still a legal way to name a function in a relocatable —
+        // the linker must resolve it to a function, and the linked ELF is
+        // where the executable-target guarantee is verified.  The old code
+        // saw "no section" and let it pass by accident; the new classifier
+        // reports it as UndefFunction so that case is explicit.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("_undef_strong_fn", 0, RelocTargetClass::UndefFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();  // undefined symbols are legal in a REL
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "undefined STT_FUNC head in a REL must pass; got {:?}", r.failures);
+
+        // ...and weak undefined function, the same.
+        let opd = opd_summary(
+            false, 4, 0, vec![], None,
+            vec![OpdEntry {
+                offset: 0,
+                head_relocs: vec![addr32("_undef_weak_fn", 0, RelocTargetClass::UndefFunction)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
+                entry_ea: None, toc_ea: None,
+            }],
+        );
+        let mut m = base_manifest();
+        m.elf.elf_type = "REL".into();
+        m.opd = Some(opd);
+        let r = check_invariants(&m);
+        assert!(r.is_ok(), "weak undefined STT_FUNC head in a REL must pass; got {:?}", r.failures);
     }
 
     #[test]
@@ -1718,8 +1894,8 @@ mod tests {
             false, 4, 0, vec![], None,
             vec![OpdEntry {
                 offset: 0,
-                head_relocs: vec![addr32(".text.somefunc", 16)],
-                tail_relocs: vec![addr32(".TOC.", 0)],
+                head_relocs: vec![addr32(".text.somefunc", 16, RelocTargetClass::Executable)],
+                tail_relocs: vec![addr32(".TOC.", 0, RelocTargetClass::Executable)],
                 entry_ea: None, toc_ea: None,
             }],
         );
@@ -1739,11 +1915,11 @@ mod tests {
                 offset: 2,
                 reloc: RelocDesc {
                     r_type: "R_PPC64_TLSGD".into(), symbol: None, addend: 0,
-                    target_exec: None,
+                    target: None,
                 },
             }],
             None,
-            vec![opd_entry(&[addr32("._start", 0)], &[addr32(".TOC.", 0)], 0)],
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
         );
         let mut m = base_manifest();
         m.opd = Some(opd);
@@ -1757,7 +1933,7 @@ mod tests {
         // Section 2 rules 1 and 2: sh_entsize = 0 and sh_addralign = 4.
         let opd = opd_summary(
             false, 8, 8, vec![], None,  // addralign 8, entsize 8 -> both wrong
-            vec![opd_entry(&[addr32("._start", 0)], &[addr32(".TOC.", 0)], 0)],
+            vec![opd_entry(&[addr32("._start", 0, RelocTargetClass::Executable)], &[addr32(".TOC.", 0, RelocTargetClass::Executable)], 0)],
         );
         let mut m = base_manifest();
         m.opd = Some(opd);
@@ -2027,7 +2203,7 @@ mod tests {
             vec![], [0; 6],
         );
         for off in [0x10u64, 0x14, 0x18, 0x1c, 0x24, 0x28] {
-            p.relocs.push(RelocAt { offset: off, reloc: addr32("__x", 0) });
+            p.relocs.push(RelocAt { offset: off, reloc: addr32("__x", 0, RelocTargetClass::Executable) });
         }
         let mut m = base_manifest();
         m.elf.elf_type = "REL".into();
