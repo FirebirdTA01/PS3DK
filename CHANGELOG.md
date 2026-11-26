@@ -16,6 +16,8 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.29.0] — 2026-11-26
+
 ### Added
 
 - **`ps3dk-run`: run a SELF on a console over the network.** The PS3DK
@@ -271,6 +273,8 @@ The version stamped into builds is generated from the most recent
   linked image's `.opd` is checked from its bytes. The six
   `.sys_proc_prx_param` pointers are checked in objects and in linked images,
   where the PPU GUID and `sys_process_enabled` pointers may be null.
+  A non-zero `e_flags` is now an advisory on a relocatable object and
+  still a failure on a linked image.
   write and its CLI process opening the input, and the CLI then reported
   "no such file" and returned exit 3.  Every test in this file that
   names its CLI input with `temp_dir()` now appends a process-wide
