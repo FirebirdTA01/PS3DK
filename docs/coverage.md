@@ -9,7 +9,7 @@ Platform ABI symbols vs our install tree.  Primary diff is by exact symbol name,
 - Libraries tracked: **99**
 - platform ABI exports total: **4805**
 - Covered by our install tree: **4338** (90.3%) — 4338 by exact name, 0 via alias
-- Our install tree exports: **29952** (all archives, deduplicated)
+- Our install tree exports: **29962** (all archives, deduplicated)
 - Alias map entries loaded: **629**
 - Impl status (per YAML annotations): unknown 4798 · stub 7 · impl 0 · verified 0
 
