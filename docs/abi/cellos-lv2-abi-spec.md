@@ -26,13 +26,20 @@ binaries, SELF/SPRX payloads prior to post-processing) MUST satisfy:
 | `EI_OSABI`       | `0x66` (CellOS Lv-2)                |
 | `EI_ABIVERSION`  | `0`                                 |
 | `e_machine`      | `EM_PPC64` (21)                     |
-| `e_flags`        | `0x00000000`                        |
+| `e_flags`        | `0x00000000` (linked images)        |
 
 Upstream readelf prints the OS/ABI byte as `<unknown: 66>` - this is expected.
 Our fork of binutils (when added) SHOULD render it as `CellOS Lv-2`.
 
-The `e_flags` field is zero for conforming CellOS Lv-2 PPU user-mode
-outputs. The CellOS identity is carried by `EI_OSABI = 0x66`.
+The `e_flags` field is zero for conforming CellOS Lv-2 PPU **linked**
+images (EXEC, DYN, SELF/SPRX payloads); the CellOS identity is carried
+by `EI_OSABI = 0x66`, not by `e_flags`. A non-zero value on a linked
+image is a conformance failure. Relocatable objects are exempt: a
+relocatable produced by `ld -r` from objects that contain `.opd` can
+carry the ELFv1 ABI-version value `0x1` (the SDK's `lv2-crt0.o` does),
+while the final link still writes zero. `abi-verify` reports a non-zero
+`e_flags` on a relocatable object as an advisory and fails it only on
+linked images.
 
 ### 1.1 Data-model tag
 
