@@ -228,7 +228,7 @@ for abi_flag in "" "-mlp64"; do
             # attribute there runs only in code built with -fexceptions).
             eh_flag=""
             [[ "$(basename "$src")" == pthread.c ]] && eh_flag="-fexceptions"
-            "$CC" -c $abi_flag -mcpu=cell $eh_flag \
+            "$CC" -c $abi_flag -mcpu=cell -O2 $eh_flag \
                 -Werror=implicit-function-declaration \
                 -Werror=incompatible-pointer-types \
                 -Werror=int-conversion \

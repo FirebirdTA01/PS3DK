@@ -80,7 +80,7 @@ def main():
         objects = []
         for src in sources:
             obj = dest / (src.stem + '.o')
-            flags = [*af, '-mcpu=cell']
+            flags = [*af, '-mcpu=cell', '-O2']
             if src.name == 'pthread.c':
                 flags += ['-fexceptions', '-DPS3DK_PROF_WAIT_OBSERVE=1']
             flags += ['-Werror=implicit-function-declaration', '-Werror=incompatible-pointer-types',

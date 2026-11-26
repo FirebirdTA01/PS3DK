@@ -16,6 +16,12 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+### Changed
+
+- **`librt` is built with `-O2`.** The pthread layer, the system-call
+  wrappers and the errno mapping in `librt.a` (and the opt-in
+  `librt_profwait.a`) were compiled without optimisation.
+
 ## [v0.29.0] — 2026-11-26
 
 ### Added
