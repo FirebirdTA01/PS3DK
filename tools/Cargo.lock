@@ -1519,15 +1519,15 @@ dependencies = [
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.4.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
-
-[[package]]
-name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "litemap"
@@ -2246,17 +2246,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "ps3dk-ui"
-version = "0.0.0"
-dependencies = [
- "egui",
-]
-
-[[package]]
 name = "ps3dk-run"
 version = "0.0.0"
 dependencies = [
  "ps3dk-version",
+]
+
+[[package]]
+name = "ps3dk-ui"
+version = "0.0.0"
+dependencies = [
+ "egui",
 ]
 
 [[package]]
