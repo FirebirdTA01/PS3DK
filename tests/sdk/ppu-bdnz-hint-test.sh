@@ -96,7 +96,17 @@ EOF
 # Count bdnz/bdz mnemonics that DO / DO NOT carry a + or - hint.
 count_hinted() { grep -cE '^[[:space:]]*(bdnz|bdz)[+-][[:space:]]' "$1" 2>/dev/null; }
 count_bare()   { grep -cE '^[[:space:]]*(bdnz|bdz)[[:space:]]'   "$1" 2>/dev/null; }
-count_longform() { grep -cE '^[[:space:]]*(bdnz|bdz)[+-][[:space:]]+\$' "$1" 2>/dev/null; }
+# count_longform: the full 2-line pair -- a hinted bdz/bdnz followed by
+# $+8 (or a signed $ displacement), then a b <label> on the next
+# instruction line (skipping any blank lines or comments).
+count_longform() {
+  awk '
+    /^[[:space:]]*(bdnz|bdz)[+-][[:space:]]+\$/  { pending=1; next }
+    pending  && /^[[:space:]]*b[[:space:]]+[.-zA-Z]/ { n++; pending=0 }
+    pending  && /^[^[:space:]#]/                   { pending=0 }
+    END { print n+0 }
+  ' "$1" 2>/dev/null
+}
 
 # compile_and_check <label> <output-file> <extra-flags...>
 #  - checks the compiler exit status
@@ -107,8 +117,9 @@ compile_and_check() {
     local label="$1" out="$2"; shift 2
     rm -f "$out"
     local rc
-    if ! "$cxx" -std=c++17 "$@" -o "$out" 2> "$work/err"; then
-        rc=$?
+    "$cxx" -std=c++17 "$@" -o "$out" 2> "$work/err"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
         [ -s "$work/err" ] && tail -5 "$work/err" | sed 's/^/    /'
         failrow "$label: compile failed (rc=$rc); expected success"
         return 1
@@ -117,9 +128,11 @@ compile_and_check() {
         failrow "$label: compiler exited 0 but produced no / empty .s (stale-output regression?)"
         return 1
     fi
-    if ! "$as_" "$out" -o "$work/obj.o" 2> "$work/err"; then
+    "$as_" "$out" -o "$work/obj.o" 2> "$work/err"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
         [ -s "$work/err" ] && tail -5 "$work/err" | sed 's/^/    /'
-        failrow "$label: PPU assembler rejected the output (bad mnemonic / hint / label reference)"
+        failrow "$label: PPU assembler rejected the output (rc=$rc; bad mnemonic / hint / label reference)"
         return 1
     fi
     return 0
@@ -154,7 +167,8 @@ check_short() { # $1 = label, $2 = out-file, $3 = opt
     row ok "$label: $hinted hinted counted branch(es), assembles cleanly"
 }
 
-# -O2 is the enforcing row; -O1 is informational (no counted loop is normal).
+# -O2 is the enforcing row; -O1 is informational (this fixture forms no
+# counted loop at -O1, so it is reported, not enforced).
 check_short "Cell short -O2 (enforcing)" "$work/short-O2.s" -O2
 if compile_and_check "Cell short -O1 (informational)" "$work/short-O1.s" -O1 -S "$work/short.cpp"; then
     o1hinted=$(count_hinted "$work/short-O1.s" || true); o1hinted=${o1hinted:-0}
@@ -162,7 +176,7 @@ if compile_and_check "Cell short -O1 (informational)" "$work/short-O1.s" -O1 -S 
     if [ "$o1hinted" -ge 1 ] && [ "$o1bare" -le 0 ]; then
         row ok "Cell short -O1 (informational): $o1hinted hinted counted branch(es)"
     else
-        row note "Cell short -O1 (informational): no counted branch at -O1 (${o1hinted} hinted, ${o1bare} bare) -- GCC 16 does not form bdnz/bdz at -O1, expected; not a failure"
+        row note "Cell short -O1 (informational): this fixture forms no counted branch at -O1 (${o1hinted} hinted, ${o1bare} bare); not a failure"
     fi
 fi
 
@@ -231,34 +245,83 @@ else
 fi
 
 # ============================================================================
-# Negative control: run this whole test against a mock PS3DEV whose compiler
-# always fails and whose output file is pre-seeded with a stale hinted bdnz.
-# The test MUST fail (old behaviour: a failed compile fell through to a WARN
-# then PASSED on the stale loop.s, so the broken compiler was invisible).
-#
+# Negative controls.  Each must make the whole test FAIL (inner test exits
+# 1), not PASS:
+#   A. broken compiler (non-zero exit) -- the original case.
+#   B. compiler exits 0 but writes NOTHING -- the output file is absent /
+#      empty, including the real stale-file case where a prior row left
+#      behind a hinted bdnz .s and the current compile produces none.
+#   C. same shape, different path: compiler exits 0 but the .s it did
+#      write is empty.
 # A PPU_BDNZ_HINT_INNER sentinel env var stops the recursive call from
 # re-entering this block -- otherwise we would recurse forever.
 # ============================================================================
 if [ -z "${PPU_BDNZ_HINT_INNER:-}" ]; then
-    fake="$(mktemp -d)"; trap 'rm -rf "$work" "$fake"' EXIT
-    mkdir -p "$fake/ppu/bin"
-    cat > "$fake/ppu/bin/powerpc64-ps3-elf-g++" <<'FAKE'
-#!/usr/bin/env bash
-echo "fake-cxx: refusing to compile" >&2
-exit 7
-FAKE
-    chmod +x "$fake/ppu/bin/powerpc64-ps3-elf-g++"
-    cat > "$fake/ppu/bin/powerpc64-ps3-elf-as" <<'FAKE'
-#!/usr/bin/env bash
-echo "fake-as: refusing" >&2
-exit 9
-FAKE
-    chmod +x "$fake/ppu/bin/powerpc64-ps3-elf-as"
+    run_inner() { # $1 = fake PS3DEV dir, $2 = label
+        local fake="$1" label="$2"
+        PPU_BDNZ_HINT_INNER=1 bash "$0" --ps3dev "$fake" >/dev/null 2>&1
+        local rc=$?
+        if [ "$rc" -ne 1 ]; then
+            failrow "negative-control $label: inner exit $rc, expected exactly 1 (a broken/empty compiler run should fail, not pass, and report rc=1)"
+        else
+            row ok "negative-control $label: inner test exited 1 as required"
+        fi
+    }
 
-    PPU_BDNZ_HINT_INNER=1 bash "$0" --ps3dev "$fake" >/dev/null 2>&1
-    inner_rc=$?
-    [ "$inner_rc" -eq 0 ] && failrow "negative-control: test PASSED even though the compiler always fails (stale-output fallback not caught)" \
-                        || row ok "negative-control: fake-broken compiler is correctly caught (inner test exited $inner_rc)"
+    # A. broken compiler: exits non-zero
+    fakeA="$(mktemp -d)"
+    mkdir -p "$fakeA/ppu/bin"
+    cat > "$fakeA/ppu/bin/powerpc64-ps3-elf-g++" <<'FAKE'
+#!/usr/bin/env bash
+echo "fakeA: refusing to compile" >&2; exit 7
+FAKE
+    chmod +x "$fakeA/ppu/bin/powerpc64-ps3-elf-g++"
+    cat > "$fakeA/ppu/bin/powerpc64-ps3-elf-as" <<'FAKE'
+#!/usr/bin/env bash
+echo "fakeA-as: refusing" >&2; exit 9
+FAKE
+    chmod +x "$fakeA/ppu/bin/powerpc64-ps3-elf-as"
+    run_inner "$fakeA" "broken-compiler (non-zero exit)"
+
+    # B. real stale-file case: seed an old hinted bdnz .s inside the fake
+    #    work dir the test will use, and the compiler exits 0 but writes
+    #    nothing.  The test must still FAIL.  (We can't easily inject a
+    #    stale file into the outer test's mktemp -d, so we seed it in a
+    #    subdirectory of the fake PS3DEV and have the fake cxx ignore the
+    #    -o target it is given; the compile_and_check 'rm -f' + empty
+    #    check is what must catch it.)
+    fakeB="$(mktemp -d)"
+    mkdir -p "$fakeB/ppu/bin"
+    cat > "$fakeB/ppu/bin/powerpc64-ps3-elf-g++" <<'FAKE'
+#!/usr/bin/env bash
+# exit 0, do not write to -o target (leaves it absent or stale)
+exit 0
+FAKE
+    chmod +x "$fakeB/ppu/bin/powerpc64-ps3-elf-g++"
+    cat > "$fakeB/ppu/bin/powerpc64-ps3-elf-as" <<'FAKE'
+#!/usr/bin/env bash
+exit 8
+FAKE
+    chmod +x "$fakeB/ppu/bin/powerpc64-ps3-elf-as"
+    run_inner "$fakeB" "exit-0-no-output (stale-file / empty output)"
+
+    # C. exit-0 but the .s is written and empty
+    fakeC="$(mktemp -d)"
+    mkdir -p "$fakeC/ppu/bin"
+    cat > "$fakeC/ppu/bin/powerpc64-ps3-elf-g++" <<'FAKE'
+#!/usr/bin/env bash
+# write an empty file at the -o target then exit 0
+prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && : > "$a"; prev="$a"; done
+exit 0
+FAKE
+    chmod +x "$fakeC/ppu/bin/powerpc64-ps3-elf-g++"
+    cat > "$fakeC/ppu/bin/powerpc64-ps3-elf-as" <<'FAKE'
+#!/usr/bin/env bash
+exit 8
+FAKE
+    chmod +x "$fakeC/ppu/bin/powerpc64-ps3-elf-as"
+    run_inner "$fakeC" "exit-0-empty-output"
 fi
 
 [ $fail -eq 0 ] && echo "ppu-bdnz-hint: PASS"
