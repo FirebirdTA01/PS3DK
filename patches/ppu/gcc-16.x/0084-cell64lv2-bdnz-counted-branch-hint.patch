@@ -1,0 +1,96 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: hint the bdnz/bdz counted branch
+
+The PPU counts loops with bdnz/bdz.  Those instructions take a
+"likely-taken" / "likely-not-taken" hint (bdnz-/bdnz+; bdz-/bdz+) that
+the PPU honours without costing an extra issue.  GCC already has the
+probability (REG_BR_PROB) it would apply to a b<b<...> branch; the
+bdnz/bdz never got it, so a hot and a nearly-cold counted loop emit
+the same un-hinted bdnz.
+
+Add rs6000_bdnz_hint (insn, need_long), which returns the sign of the
+REG_BR_PROB note ("+" if the note says the branch is likely taken,
+"-" otherwise; the long form, which contains the negated counted
+branch, gets the inverted hint) and returns "" on any target that is
+not Cell.  The <bd>_<mode> insn now asks the helper for the hint and
+appends it: the short form is <bd><hint> %l0, and for the long form
+(<bd_neg> $+8; b %l0) the hint is inverted (need_long=true).
+
+Non-Cell powerpc* builds: the helper returns "" immediately, so the
+emitted bdnz/bdz is byte-for-byte unchanged.
+
+--- a/gcc/config/rs6000/rs6000.cc
++++ b/gcc/config/rs6000/rs6000.cc
+@@ -16219,6 +16219,38 @@
+   return string;
+ }
+ 
++/* Return the "+"/"-" hint suffix for a bdnz/bdz at INSN.  The PPU counts
++   loops with bdnz/bdz (and their bdnz+/bdz- variants), so a likely-taken
++   versus likely-not-taken hint is meaningful and, unlike a b<b<...>, no
++   extra issue is needed: the hint is a field of the instruction.  On any
++   other PowerPC the bdnz/bdz is the plain form and a hinted variant is
++   not used, so we return "" there and leave the emitted insn unchanged.
++
++   The sign of the REG_BR_PROB note chooses the hint: prob > 0 is a
++   likely-taken branch (bdnz+, the loop keeps running); prob <= 0 is a
++   likely-not-taken branch (bdnz-, the loop is about to end).  For the
++   long form the counted branch is the negated one, so the hint is
++   inverted (need_long).  We deliberately keep no "reliable / not
++   profile-guessed" gate: the gate that disables conditional-branch
++   hints on Cell would disable this one too, which is the opposite of
++   what this patch is for.  */
++
++const char *
++rs6000_bdnz_hint (rtx_insn *insn, bool need_long)
++{
++  static const char *empty = "";
++  if (rs6000_cpu != PROCESSOR_CELL)
++    return empty;
++  rtx note = find_reg_note (insn, REG_BR_PROB, NULL_RTX);
++  if (note == NULL_RTX)
++    return empty;
++  int prob = profile_probability::from_reg_br_prob_note (XINT (note, 0))
++	       .to_reg_br_prob_base () - REG_BR_PROB_BASE / 2;
++  if ((prob > 0) ^ need_long)
++    return "+";
++  return "-";
++}
++
+ /* Emit vector compare for operands OP0 and OP1 using code RCODE.
+    DMODE is expected destination mode.  */
+ 
+--- a/gcc/config/rs6000/rs6000-protos.h
++++ b/gcc/config/rs6000/rs6000-protos.h
+@@ -121,6 +121,7 @@
+ extern void rs6000_emit_sCOND (machine_mode, rtx[]);
+ extern void rs6000_emit_cbranch (machine_mode, rtx[]);
+ extern char * output_cbranch (rtx, const char *, int, rtx_insn *);
++extern const char *rs6000_bdnz_hint (rtx_insn *, bool);
+ extern const char * output_probe_stack_range (rtx, rtx, rtx);
+ extern void rs6000_emit_dot_insn (rtx dst, rtx src, int dot, rtx ccreg);
+ extern bool rs6000_emit_set_const (rtx, rtx);
+--- a/gcc/config/rs6000/rs6000.md
++++ b/gcc/config/rs6000/rs6000.md
+@@ -13751,10 +13751,18 @@
+ {
+   if (which_alternative != 0)
+     return "#";
+-  else if (get_attr_length (insn) == 4)
+-    return "<bd> %l0";
++  if (get_attr_length (insn) == 4)
++    {
++      static char buf[64];
++      sprintf (buf, "<bd>%s %l0", rs6000_bdnz_hint (insn, false));
++      return buf;
++    }
+   else
+-    return "<bd_neg> $+8\;b %l0";
++    {
++      static char buf[64];
++      sprintf (buf, "<bd_neg>%s $+8\\;b %l0", rs6000_bdnz_hint (insn, true));
++      return buf;
++    }
+ }
+   [(set_attr "type" "branch")
+    (set_attr_alternative "length"

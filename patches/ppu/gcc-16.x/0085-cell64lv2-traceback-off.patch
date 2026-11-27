@@ -1,0 +1,43 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: do not emit AIX traceback tables by default
+
+The AIX traceback table (tbtab, .long 0 + .byte 0,<lang>,... at the end
+of each function's .text) is emitted by rs6000-logue.cc:5290 when:
+    (DEFAULT_ABI == ABI_AIX || DEFAULT_ABI == ABI_ELFv2)
+     && ! flag_inhibit_size_directive
+     && rs6000_traceback != traceback_none
+     && !cfun->is_thunk
+
+For the PS3 target the default ABI is AIX (set by the linux64 override),
+and on Cell LV2 userspace the kernel never reads the AIX tbtab; the
+backtrace walk is driven by .debug_frame / the CFA, not by the tbtab.
+The table is 8+ bytes of dead weight per function.
+
+rs6000.opt initialises rs6000_traceback to traceback_default (the
+"unspecified by the user" sentinel); -mtraceback=full|part|no override it.
+The override runs after option processing, so a plain assignment would
+wipe out a user-specified -mtraceback. Gate the default on the sentinel:
+set traceback_none only when rs6000_traceback is still traceback_default,
+preserving an explicit -mtraceback.
+
+Behaviour:
+  default            no tbtab
+  -mtraceback=full   tbtab
+  -mtraceback=part   tbtab
+  -mtraceback=no     no tbtab
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -119,7 +119,11 @@
+ /* Reuse the linux64-style override_options, identical to linux64.h.  */
+ #undef	SUBSUBTARGET_OVERRIDE_OPTIONS
+ #define	SUBSUBTARGET_OVERRIDE_OPTIONS				\
+-  do rs6000_linux64_override_options (); while (0)
++  do { \
++       rs6000_linux64_override_options (); \
++       if (rs6000_traceback == traceback_default) \
++	 rs6000_traceback = traceback_none; \
++     } while (0)
+ 
+ /* -----------------------------------------------------------------------
+    Assembler / linker specs — LV2 (PS3) variants.
