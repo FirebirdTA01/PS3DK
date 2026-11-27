@@ -141,59 +141,100 @@ for model in "" -mlp64; do
 done
 
 # Rejecting self-test: prove the red-control FAIL branch is reachable
-# and that the script exits nonzero when it fires.  Build a stub
-# compiler that fails only the -S red.cpp invocation (the row we
-# want to reach the FAIL branch on) and succeeds the predefine row
-# and the green row so those do not `continue` past the red row.
-# The only assertion is on the red-control outcome:
-#   - the script's exit code is nonzero;
-#   - the last "red control" line is a FAIL naming the compile
-#     failure -- NOT the "note ... skipped" soft-skip line that was
-#     there before the FAIL branch was added.
-# A red control that cannot reject is the same as no red control.
-# Guarded by PPU_AN_NO_SELFTEST so the nested invocation does not
-# itself run the self-test (no infinite recursion).
-if [ -z "${PPU_AN_NO_SELFTEST:-}" ]; then
-    stub="$(mktemp -d)"
-    trap 'rm -rf "$work" "$stub"' EXIT
-    mkdir -p "$stub/ppu/bin"
-    cat > "$stub/ppu/bin/powerpc64-ps3-elf-g++" <<'SH'
+# AND that it is what sets the nonzero exit.  A control that cannot
+# reject is the same as no control, so the same assertion is run
+# against two scripts:
+#
+#   validate <out> <rc>: PASS iff, with green+predefine clean, the only
+#   failures are the 6 red-control rows, they are the hard FAIL line
+#   (not a skip), and the exit is EXACTLY 1 (red is the sole failure).
+#   A plain "nonzero" check would miss a red branch that prints FAIL but
+#   forgets to set status=1 (which then exits 0); the exact-1 check does
+#   not.
+#
+#  (A) real script, red forced to fail -> validate must PASS.
+#  (B) a copy with ONLY the red branch's status=1 removed -> the red
+#      rows print FAIL but status is never set, so with green+predefine
+#      clean it exits 0 and validate must REJECT it.
+#
+# The stub honours -o for every row (predefine and green) exactly as the
+# real test reads it, and fails only red.cpp.  Guarded by
+# PPU_AN_NO_SELFTEST so the nested invocation does not run this block
+# itself (no infinite recursion).
+make_stub() {
+    local d=$1
+    mkdir -p "$d/ppu/bin"
+    cat > "$d/ppu/bin/powerpc64-ps3-elf-g++" <<'SH'
 #!/bin/sh
-# POSIX sh.  Fail only the -S invocation whose source is red.cpp.
-# Succeed the predefine (-dM) row and the green -S row.
-# Order of checks: red.cpp (fail), -dM (emit predefine), -o (green).
+# Fail only the red.cpp compile; honour -o for every other row.
 for a in "$@"; do
-    case "$a" in
-        *red.cpp) echo "stub-red: not supported" >&2; exit 1 ;;
-    esac
-done
-for a in "$@"; do
-    [ "$a" = "-dM" ] && { echo '#define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 16'; exit 0; }
+    case "$a" in *red.cpp) echo "stub-red: not supported" >&2; exit 1 ;; esac
 done
 out=""; prev=""
 for a in "$@"; do
     if [ "$prev" = "-o" ]; then out="$a"; fi
     prev="$a"
 done
+for a in "$@"; do
+    [ "$a" = "-dM" ] && { echo '#define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 16' > "$out"; exit 0; }
+done
 [ -n "$out" ] && { echo 'call _Znwm' > "$out"; }
 exit 0
 SH
-    chmod +x "$stub/ppu/bin/powerpc64-ps3-elf-g++"
-    echo "ppu-aligned-new-threshold: self-test: forcing a red-control regression"
+    chmod +x "$d/ppu/bin/powerpc64-ps3-elf-g++"
+}
+
+# validate <out> <rc>: 0 if green+predefine clean, only the 6 red rows
+# fail with the hard FAIL line, and exit is exactly 1; 1 otherwise.
+validate() {
+    local out=$1 rc=$2 red_fail red_skip predef_fail green_fail
+    red_fail=$(printf '%s\n' "$out"  | grep -cE 'FAIL .*red control \(red\.cpp did not compile\)')
+    red_skip=$(printf '%s\n'   "$out" | grep -cE 'note .*red control')
+    predef_fail=$(printf '%s\n' "$out"| grep -cE 'FAIL .*predefine')
+    green_fail=$(printf '%s\n'  "$out"| grep -cE 'FAIL .*green')
+    [ "$rc" -eq 1 ] \
+        && [ "$red_fail" -eq 6 ] && [ "$red_skip" -eq 0 ] \
+        && [ "$predef_fail" -eq 0 ] && [ "$green_fail" -eq 0 ]
+}
+
+if [ -z "${PPU_AN_NO_SELFTEST:-}" ]; then
+    selftest_status=0
+    stub="$(mktemp -d)"
+    trap 'rm -rf "$work" "$stub"' EXIT
+    make_stub "$stub"
+
+    # (A) real script: red forced to fail -> validate must PASS.
+    echo "ppu-aligned-new-threshold: self-test: forcing the red rows to fail (green + predefine succeed)"
     out=$(PPU_AN_NO_SELFTEST=1 bash "${BASH_SOURCE[0]}" --ps3dev "$stub" 2>&1); rc=$?
-red_line=$(printf '%s\n' "$out" | grep -E 'red control' | tail -n 1)
-    if [ $rc -ne 0 ] \
-       && printf '%s\n' "$red_line" | grep -qE 'FAIL .*red control \(red\.cpp did not compile\)'; then
-        echo "ppu-aligned-new-threshold: ok   self-test: red-control FAIL branch fires and exits nonzero (rc=$rc)"
-    elif [ -n "$red_line" ] && printf '%s\n' "$red_line" | grep -q 'note .*red control'; then
-        echo "ppu-aligned-new-threshold: FAIL self-test: red-control was a SOFT SKIP (the FAIL branch is unreachable)"
-        printf '%s\n' "$red_line" | sed 's/^/    /'
-        status=1
+    if validate "$out" "$rc"; then
+        echo "ppu-aligned-new-threshold: ok   self-test A: only the red rows failed (predefine+green clean), exit=1"
     else
-        echo "ppu-aligned-new-threshold: FAIL self-test: no red-control line in the self-test run (rc=$rc)"
-        printf '%s\n' "$out" | tail -n 6 | sed 's/^/    /'
-        status=1
+        echo "ppu-aligned-new-threshold: FAIL self-test A: rc=$rc (expected exactly 1, red-only, no skips)"
+        printf '%s\n' "$out" | grep -E 'FAIL|ok ' | sed 's/^/    /'
+        selftest_status=1
     fi
+
+    # (B) a copy with ONLY the red branch's status=1 removed -> validate
+    #     must REJECT it (red rows print FAIL but status is never set, so
+    #     with green+predefine clean the run exits 0).
+    echo "ppu-aligned-new-threshold: self-test: the status=1-less red branch must be rejected"
+    mutated="$work/broken.sh"
+    cp "${BASH_SOURCE[0]}" "$mutated"
+    awk '
+        /FAIL \[?.*red control \(red\.cpp did not compile\)/ { red=1 }
+        red && /^[[:space:]]*status=1[[:space:]]*$/ { red=0; next }
+        { print }
+    ' "$mutated" > "$mutated.t" && mv "$mutated.t" "$mutated"
+    chmod +x "$mutated"
+    bout=$(PPU_AN_NO_SELFTEST=1 bash "$mutated" --ps3dev "$stub" 2>&1); brc=$?
+    if ! validate "$bout" "$brc"; then
+        echo "ppu-aligned-new-threshold: ok   self-test B: status=1-less red branch rejected (run exited $brc, not the expected 1)"
+    else
+        echo "ppu-aligned-new-threshold: FAIL self-test B: the status=1-less red branch was NOT rejected (it looked correct)"
+        selftest_status=1
+    fi
+
+    [ $selftest_status -eq 0 ] || status=1
 fi
 
 [ $status -eq 0 ] && echo "ppu-aligned-new-threshold: PASS"
