@@ -12,7 +12,7 @@ Validates that:
 5. .ps3dk.module_identity section contains the exact PMI\\1 record and
    module_start / module_stop symbols are bound to the custom handlers.
 6. ps3_prx_stub_library defaults to the correct ABI matching the toolchain
-   (LP64: std/bctr caller-restore stub; ILP32: stw/lwz wrapping trampoline),
+   (both ABIs now emit the std/bctr caller-restore tail-call stub),
    and respects explicit ABI overrides.
 """
 
@@ -170,22 +170,13 @@ def verify_stub_archive(objdump: Path, archive_path: Path, expected_abi: str):
     has_bctr = any(line.strip().endswith("bctr") for line in disasm.splitlines())
     has_blr = any(line.strip().endswith("blr") for line in disasm.splitlines())
 
-    if expected_abi == "lp64":
-        # LP64: nidgen std/bctr caller-restore stub
+    if expected_abi in ("lp64", "ilp32"):
+        # Both ABIs: nidgen std/bctr caller-restore tail-call stub
         if not (has_std and has_bctr and not has_bctrl and not has_stw and not has_lwz and not has_blr):
             return False, (
-                f"Expected LP64 stub (std/bctr) in {archive_path}:\n"
+                f"Expected {expected_abi.upper()} stub (std/bctr) in {archive_path}:\n"
                 f"  has_std={has_std}, has_bctr={has_bctr}, has_bctrl={has_bctrl}, "
                 f"has_stw={has_stw}, has_lwz={has_lwz}, has_blr={has_blr}\n"
-                f"Disassembly excerpt:\n{disasm[:1000]}"
-            )
-    elif expected_abi == "ilp32":
-        # ILP32: nidgen stw/lwz wrapping trampoline
-        if not (has_stw and has_lwz and has_bctrl and has_blr and not has_std and not has_bctr):
-            return False, (
-                f"Expected ILP32 stub (stw/lwz/bctrl/blr) in {archive_path}:\n"
-                f"  has_stw={has_stw}, has_lwz={has_lwz}, has_bctrl={has_bctrl}, has_blr={has_blr}, "
-                f"has_std={has_std}, has_bctr={has_bctr}\n"
                 f"Disassembly excerpt:\n{disasm[:1000]}"
             )
     else:

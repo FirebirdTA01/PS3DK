@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# sprxlinker gives every call to an LP64 import stub its TOC restore, with or
-# without --lp64, and never touches a call to an ILP32 stub.
+# sprxlinker gives every call to a tail-call import stub its TOC restore, with
+# or without --lp64, and never touches a call to an older ILP32 wrapping stub.
+# (Current stub archives emit the tail-call form for ILP32 too; the "LP64
+# stub" fixture below is that shared form, the "ILP32 stub" fixture is the
+# older wrapping form.)
 #
 # An LP64 import stub saves r2 and tail-calls the export (std r2,40(r1) ...
 # bctr), so the caller must reload its TOC: the nop after the bl has to become
 # ld r2,40(r1).  That rewrite used to run only under --lp64, which Make's
 # ppu_rules never passes; an LP64 ELF packed without it returned from its
 # first import with the firmware's TOC in r2 and faulted on the next
-# TOC-relative access.  An ILP32 stub calls the export (bctrl) and restores r2
+# TOC-relative access.  An older ILP32 wrapping stub calls the export (bctrl) and restores r2
 # itself, so its callers must be left alone; --lp64 on an ILP32 ELF used to
 # rewrite them to an 8-byte load of a 4-byte save slot.
 #
@@ -38,7 +41,7 @@ NOP, LD_R2, BLR = 0x60000000, 0xe8410028, 0x4e800020
 # LP64 stub: save r2, load the export's descriptor, tail-call it.
 LP64_STUB = [0xf8410028, 0x3d800002, 0x818c0100, 0x800c0000,
              0x804c0004, 0x7c0903a6, 0x4e800420]
-# ILP32 stub: call the export and restore r2 before returning.
+# Older ILP32 wrapping stub: call the export and restore r2 before returning.
 ILP32_STUB = [0x7c0802a6, 0x90010018, 0x90410028, 0x3d800002, 0x818c0104,
               0x800c0000, 0x804c0004, 0x7c0903a6, 0x4e800421, 0x80410028,
               0x80010018, 0x7c0803a6, 0x4e800020]

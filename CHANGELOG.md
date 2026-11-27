@@ -22,6 +22,14 @@ The version stamped into builds is generated from the most recent
   wrappers and the errno mapping in `librt.a` (and the opt-in
   `librt_profwait.a`) were compiled without optimisation.
 
+- **Shorter SPRX import calls in ILP32.** Import stubs in the default ILP32
+  ABI now use the same tail-call form as LP64: the stub saves the caller's
+  TOC, loads the export's entry and TOC from its descriptor and branches
+  without linking, and `sprx-linker` turns the caller's post-call `nop` into
+  the TOC restore. Each import call saves the stub's link-register save and
+  restore and a second call/return pair. Executables must be relinked
+  against the regenerated stub archives.
+
 ## [v0.29.0] — 2026-11-26
 
 ### Added

@@ -340,11 +340,14 @@ local anchor other than the baseline.
 
 ---
 
-## SPRX stub trampolines: frame-less wrapping shape, not bctr tail-call
+## SPRX stub trampolines: frame-less, no SP shift
 
-**Status:** fixed 2026-04-27 in `tools/nidgen/src/stubgen.rs`. Documented
-here because the divergence from the platform ABI stub shape is
-load-bearing and easy to regress.
+**Status:** fixed 2026-04-27 in `tools/nidgen/src/stubgen.rs` with a
+frame-less wrapping shape.  Superseded: `sprxlinker` now rewrites the
+post-`bl` `nop` to `ld r2,40(r1)` for every call to a tail-call stub, so
+both ILP32 and LP64 stubs use the frame-less `bctr` tail-call form (see
+"Current shape" below).  The history below is kept because the
+frame-less rule is load-bearing and easy to regress.
 
 **Symptom.** With a `bctr` tail-call leaf trampoline (the system
 SDK's stub shape, byte-identical to `libspurs_stub.a`), every SPRX call
@@ -373,7 +376,7 @@ accesses caller-passed stack args at `NEW_r1 + frame + 112`, expecting
 that to equal the original `caller_sp + 112`.  Our extra frame shifts
 that by `N` so the SPRX reads garbage from the wrong offsets.
 
-**Working shape — frame-less wrapping.**
+**Former working shape — frame-less wrapping.**
 ```asm
 mflr   0
 std    0, 24(1)        ; save caller LR in caller-frame scratch slot
@@ -390,31 +393,38 @@ mtlr   0
 blr
 ```
 
+**Current shape — frame-less tail call (ILP32 and LP64).**
+```asm
+std    2, 40(1)        ; save caller TOC in standard slot
+lis    12, slot@ha
+lwz    12, slot@l(12)
+lwz    0, 0(12)        ; SPRX entry EA
+lwz    2, 4(12)        ; SPRX TOC
+mtctr  0
+bctr                   ; tail-call SPRX; it returns straight to the caller
+```
+
+`sprxlinker` finds every `bl` to a stub of this shape and rewrites the
+`nop` after it to `ld r2,40(r1)`, which supplies the caller-side TOC
+restore the wrapping shape used to do itself.  It refuses a call to such
+a stub that is followed by anything other than a `nop` (or an existing
+`ld r2,40(r1)`).
+
 Key invariants — break any of them and one class of caller starts
 crashing again:
 
-- **No `stdu`.**  SP unchanged across `bctrl` so the SPRX finds caller-
-  passed stack args at `caller_sp+112+`.
-- **`bctrl`, not `bctr`.**  We need to re-enter the trampoline post-call
-  to restore `r2` and LR ourselves; we can't depend on caller TOC restore.
-- **LR save at `sp+24`, NOT `sp+16`.**  The SPRX's prologue writes its
-  own LR to caller's `sp+16` (per ELFv1) and would clobber ours; `sp+24`
-  is reserved scratch the SPRX never touches.
-- **`r2` save at `sp+40`.**  Standard ELFv1 TOC save area, untouched by
-  SPRX.
+- **No `stwu`/`stdu`.**  SP unchanged across the dispatch so the SPRX
+  finds caller-passed stack args at `caller_sp+112+`.
+- **`r2` save at `sp+40` with `std`.**  Standard ELFv1 TOC save
+  doubleword, untouched by the SPRX, in both data models.
+- **The post-`bl` `nop` must reach `sprxlinker`.**  Without the rewrite,
+  `r2` holds the SPRX TOC after return.
 
 **How to validate after touching the stub generator.** Rebuild a sample
 that exercises a >8-arg SPRX function and run it on RPCS3.
 `samples/spurs/hello-ppu-spurs-job-chain` is the canonical regression
 test — its `cellSpursJobChainAttributeInitialize` call has 14 args and
-won't return success unless both invariants above hold.
-
-**Future work.** If we ever bring up a Canadian-cross host toolchain
-(MinGW-hosted PPU compiler) or migrate to ELFv2, this assumption needs
-revisiting.  The "PPU GCC linker rewrites the trailing `nop` after
-cross-module `bl`" path was load-bearing for the system stub shape
-and is currently false in our setup; if we ever fix it we can switch to
-the smaller `bctr` tail-call form.
+won't return success unless the invariants above hold.
 
 ---
 

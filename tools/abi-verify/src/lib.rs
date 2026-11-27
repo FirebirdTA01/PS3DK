@@ -1466,10 +1466,17 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
         } else {
             passes.push("no stwu in .sceStub.text (frame-less trampoline invariant)".into());
         }
-        let expected_shape = m.toc_check.as_ref().map(|toc| match toc.data_model {
-            TocDataModel::Ilp32 => StubTrampolineShape::Ilp32Wrapping,
-            TocDataModel::Lp64 => StubTrampolineShape::Lp64TailCall,
-        });
+        // Current stub archives emit the bctr tail-call shape for both data
+        // models.  ILP32 still accepts the wrapping bctrl shape, which ELFs
+        // linked against older stub archives carry and which stays correct.
+        let allowed_shapes: Option<&[StubTrampolineShape]> =
+            m.toc_check.as_ref().map(|toc| match toc.data_model {
+                TocDataModel::Ilp32 => &[
+                    StubTrampolineShape::Lp64TailCall,
+                    StubTrampolineShape::Ilp32Wrapping,
+                ][..],
+                TocDataModel::Lp64 => &[StubTrampolineShape::Lp64TailCall][..],
+            });
         if stub.trampolines.is_empty() {
             failures.push(".sceStub.text present but no trampoline symbols/shapes decoded".into());
         }
@@ -1485,22 +1492,22 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                 }
                 continue;
             }
-            if let Some(expected) = expected_shape {
-                if tramp.shape != expected {
+            if let Some(allowed) = allowed_shapes {
+                if !allowed.contains(&tramp.shape) {
                     failures.push(format!(
-                        ".sceStub.text {name} at +0x{:x} shape {:?}, expected {:?}",
-                        tramp.offset, tramp.shape, expected
+                        ".sceStub.text {name} at +0x{:x} shape {:?}, expected one of {:?}",
+                        tramp.offset, tramp.shape, allowed
                     ));
                     continue;
                 }
             }
             match tramp.shape {
                 StubTrampolineShape::Ilp32Wrapping => passes.push(format!(
-                    ".sceStub.text {name} at +0x{:x}: ILP32 wrapping bctrl shape",
+                    ".sceStub.text {name} at +0x{:x}: ILP32 wrapping bctrl shape (older stub archive)",
                     tramp.offset
                 )),
                 StubTrampolineShape::Lp64TailCall => passes.push(format!(
-                    ".sceStub.text {name} at +0x{:x}: LP64 bctr tail-call shape",
+                    ".sceStub.text {name} at +0x{:x}: bctr tail-call shape",
                     tramp.offset
                 )),
                 StubTrampolineShape::Unknown => {}
@@ -2573,6 +2580,43 @@ mod tests {
             .iter()
             .any(|p| p.contains("no stwu in .sceStub.text")));
         assert!(r.is_ok());
+    }
+
+    fn stub_shape_failures(model: TocDataModel, shape: StubTrampolineShape) -> Vec<String> {
+        let mut m = base_manifest();
+        m.toc_check = Some(match model {
+            TocDataModel::Ilp32 => toc(TocDataModel::Ilp32, 4, 2, 0),
+            TocDataModel::Lp64 => toc(TocDataModel::Lp64, 8, 0, 2),
+        });
+        m.stub_text_check = Some(StubTextCheckData {
+            has_stwu: false,
+            stwu_offsets: vec![],
+            trampolines: vec![trampoline(shape)],
+        });
+        check_invariants(&m)
+            .failures
+            .into_iter()
+            .filter(|f| f.contains(".sceStub.text"))
+            .collect()
+    }
+
+    #[test]
+    fn ilp32_accepts_tail_call_and_older_wrapping_stubs() {
+        let tail = stub_shape_failures(TocDataModel::Ilp32, StubTrampolineShape::Lp64TailCall);
+        assert!(tail.is_empty(), "ILP32 tail-call stub rejected: {tail:?}");
+        let wrap = stub_shape_failures(TocDataModel::Ilp32, StubTrampolineShape::Ilp32Wrapping);
+        assert!(wrap.is_empty(), "ILP32 wrapping stub rejected: {wrap:?}");
+    }
+
+    #[test]
+    fn lp64_rejects_wrapping_stub() {
+        let wrap = stub_shape_failures(TocDataModel::Lp64, StubTrampolineShape::Ilp32Wrapping);
+        assert!(
+            wrap.iter().any(|f| f.contains("expected one of")),
+            "LP64 wrapping stub accepted: {wrap:?}"
+        );
+        let tail = stub_shape_failures(TocDataModel::Lp64, StubTrampolineShape::Lp64TailCall);
+        assert!(tail.is_empty(), "LP64 tail-call stub rejected: {tail:?}");
     }
 
     #[test]

@@ -125,10 +125,11 @@ static bool section_contains(const Elf64_Shdr *shdr, uint64_t addr)
 }
 
 /* Does the import stub at `addr` leave the TOC restore to its caller?
-   An LP64 stub saves r2 and tail-calls the export (std r2,40(r1) ...
-   bctr), so r2 holds the export's TOC when control returns to the
-   caller.  An ILP32 stub calls the export itself (bctrl) and restores r2
-   before it returns. */
+   Import stubs in both ABIs save r2 and tail-call the export
+   (std r2,40(r1) ... bctr), so r2 holds the export's TOC when control
+   returns to the caller.  A stub that calls the export itself (bctrl)
+   and restores r2 before it returns, as ILP32 stubs from older stub
+   archives do, is left alone. */
 static bool stub_is_tail_call(const Elf_Data *data, const Elf64_Shdr *shdr, uint64_t addr)
 {
 	const unsigned char *buf = (const unsigned char *)data->d_buf;
@@ -150,8 +151,8 @@ static bool stub_is_tail_call(const Elf_Data *data, const Elf64_Shdr *shdr, uint
 
 /* Give every call to a tail-call import stub its TOC restore: the nop
    GCC leaves after the bl becomes ld r2,40(r1).  Which calls need it is
-   read from the stubs, so an LP64 ELF is fixed whether or not --lp64 was
-   passed, and an ILP32 ELF is never touched. */
+   read from the stubs, so the fix does not depend on --lp64: ILP32
+   stubs are tail calls too and are rewritten the same way as LP64 ones. */
 static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 {
 	Elf_Scn *text = getSection(elf, ".text");

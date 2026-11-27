@@ -54,9 +54,10 @@ fself     build/app.elf app.fake.self
 ## What it does
 
 1. **TOC restores for tail-call import stubs.** For every `bl` in `.text`
-   that targets a `.sceStub.text` trampoline of the tail-call kind (an LP64
-   import stub), the `nop` the compiler left after the call becomes
-   `ld r2,40(r1)`. ILP32 programs are never touched.
+   that targets a `.sceStub.text` trampoline of the tail-call kind (the
+   import stub shape for both ILP32 and LP64), the `nop` the compiler left
+   after the call becomes `ld r2,40(r1)`. Calls to the older ILP32 wrapping
+   stubs, which restore r2 themselves, are left alone.
 2. **Checks the process parameter section.** `.sys_proc_prx_param` must
    carry the magic `0x1b434cec` at offset 4. Both the 40-byte legacy layout
    and the 64-byte layout are accepted.
