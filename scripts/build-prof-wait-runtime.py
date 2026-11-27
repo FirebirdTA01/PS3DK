@@ -80,7 +80,7 @@ def main():
         objects = []
         for src in sources:
             obj = dest / (src.stem + '.o')
-            flags = [*af, '-mcpu=cell']
+            flags = [*af, '-mcpu=cell', '-O2']
             if src.name == 'pthread.c':
                 flags += ['-fexceptions', '-DPS3DK_PROF_WAIT_OBSERVE=1']
             flags += ['-Werror=implicit-function-declaration', '-Werror=incompatible-pointer-types',
@@ -103,7 +103,7 @@ def main():
             if not re.search(r'\bWEAK\s+DEFAULT\s+UND\s+' + hook + r'\s*$', symbols, re.M):
                 raise ValueError(abi + ': missing weak adapter hook ' + hook)
         manifest['abis'][abi] = dict(sha256=sha(archive), members=[o.name for o in objects],
-                                     pthread_tls_symbol_bytes=4, optimization='default (O0)',
+                                     pthread_tls_symbol_bytes=4, optimization='-O2',
                                      observation_define='PS3DK_PROF_WAIT_OBSERVE=1 on pthread.c only')
         print(abi + ': ' + str(len(objects)) + ' members', flush=True)
     if input_pins(root,sdk)!=before or sha(cc)!=compiler_pin:
