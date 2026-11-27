@@ -84,7 +84,11 @@ pub struct StubTrampolineCheck {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StubTrampolineShape {
+    /// Legacy ILP32 stub from older stub archives: mflr ... bctrl ... blr.
     Ilp32Wrapping,
+    /// ILP32 frame-less tail call: stw r2,40(r1) ... bctr.
+    Ilp32TailCall,
+    /// LP64 frame-less tail call: std r2,40(r1) ... bctr.
     Lp64TailCall,
     Unknown,
 }
@@ -782,7 +786,7 @@ fn summarize_stub_text(
             if shape != StubTrampolineShape::Unknown {
                 let size = match shape {
                     StubTrampolineShape::Ilp32Wrapping => 13 * 4,
-                    StubTrampolineShape::Lp64TailCall => 7 * 4,
+                    StubTrampolineShape::Ilp32TailCall | StubTrampolineShape::Lp64TailCall => 7 * 4,
                     StubTrampolineShape::Unknown => 0,
                 };
                 trampolines.push(StubTrampolineCheck {
@@ -801,17 +805,22 @@ fn summarize_stub_text(
 
 fn classify_trampoline_words(words: &[u32]) -> (StubTrampolineShape, Vec<String>) {
     let ilp32 = match_ilp32_trampoline(words);
-    let lp64 = match_lp64_trampoline(words);
-    match (ilp32.is_empty(), lp64.is_empty()) {
-        (true, _) => (StubTrampolineShape::Ilp32Wrapping, Vec::new()),
-        (false, true) => (StubTrampolineShape::Lp64TailCall, Vec::new()),
-        (false, false) => {
-            let mut failures = Vec::new();
-            failures.extend(ilp32.into_iter().map(|f| format!("ILP32: {f}")));
-            failures.extend(lp64.into_iter().map(|f| format!("LP64: {f}")));
-            (StubTrampolineShape::Unknown, failures)
-        }
+    if ilp32.is_empty() {
+        return (StubTrampolineShape::Ilp32Wrapping, Vec::new());
     }
+    let ilp32_tail = match_ilp32_tail_call_trampoline(words);
+    if ilp32_tail.is_empty() {
+        return (StubTrampolineShape::Ilp32TailCall, Vec::new());
+    }
+    let lp64 = match_lp64_trampoline(words);
+    if lp64.is_empty() {
+        return (StubTrampolineShape::Lp64TailCall, Vec::new());
+    }
+    let mut failures = Vec::new();
+    failures.extend(ilp32.into_iter().map(|f| format!("ILP32 wrapping: {f}")));
+    failures.extend(ilp32_tail.into_iter().map(|f| format!("ILP32 tail call: {f}")));
+    failures.extend(lp64.into_iter().map(|f| format!("LP64: {f}")));
+    (StubTrampolineShape::Unknown, failures)
 }
 
 fn match_ilp32_trampoline(words: &[u32]) -> Vec<String> {
@@ -833,9 +842,20 @@ fn match_ilp32_trampoline(words: &[u32]) -> Vec<String> {
     match_expected_words(words, &expected)
 }
 
+fn match_ilp32_tail_call_trampoline(words: &[u32]) -> Vec<String> {
+    match_tail_call_trampoline(words, (0xffff_ffff, 0x9041_0028, "stw r2,40(r1)"))
+}
+
 fn match_lp64_trampoline(words: &[u32]) -> Vec<String> {
+    match_tail_call_trampoline(words, (0xffff_ffff, 0xf841_0028, "std r2,40(r1)"))
+}
+
+/// Frame-less tail-call stub: TOC save (4-byte `stw` in ILP32, 8-byte
+/// `std` in LP64, matching the ABI's TOC-save slot at 40(r1)), descriptor
+/// load, `bctr`.
+fn match_tail_call_trampoline(words: &[u32], toc_save: (u32, u32, &str)) -> Vec<String> {
     let expected = [
-        (0xffff_ffff, 0xf841_0028, "std r2,40(r1)"),
+        toc_save,
         (0xffff_0000, 0x3d80_0000, "lis r12,stub@ha"),
         (0xffff_0000, 0x818c_0000, "lwz r12,stub@l(r12)"),
         (0xffff_ffff, 0x800c_0000, "lwz r0,0(r12)"),
@@ -1466,10 +1486,19 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
         } else {
             passes.push("no stwu in .sceStub.text (frame-less trampoline invariant)".into());
         }
-        let expected_shape = m.toc_check.as_ref().map(|toc| match toc.data_model {
-            TocDataModel::Ilp32 => StubTrampolineShape::Ilp32Wrapping,
-            TocDataModel::Lp64 => StubTrampolineShape::Lp64TailCall,
-        });
+        // Current stub archives emit the bctr tail-call shape for both data
+        // models, with the TOC save width of the ABI's slot at 40(r1): stw
+        // for ILP32, std for LP64.  ILP32 still accepts the legacy wrapping
+        // bctrl shape, which ELFs linked against older stub archives carry
+        // and which stays correct; it is reported as legacy, not failed.
+        let allowed_shapes: Option<&[StubTrampolineShape]> =
+            m.toc_check.as_ref().map(|toc| match toc.data_model {
+                TocDataModel::Ilp32 => &[
+                    StubTrampolineShape::Ilp32TailCall,
+                    StubTrampolineShape::Ilp32Wrapping,
+                ][..],
+                TocDataModel::Lp64 => &[StubTrampolineShape::Lp64TailCall][..],
+            });
         if stub.trampolines.is_empty() {
             failures.push(".sceStub.text present but no trampoline symbols/shapes decoded".into());
         }
@@ -1485,22 +1514,26 @@ pub fn check_invariants(m: &Manifest) -> CheckReport {
                 }
                 continue;
             }
-            if let Some(expected) = expected_shape {
-                if tramp.shape != expected {
+            if let Some(allowed) = allowed_shapes {
+                if !allowed.contains(&tramp.shape) {
                     failures.push(format!(
-                        ".sceStub.text {name} at +0x{:x} shape {:?}, expected {:?}",
-                        tramp.offset, tramp.shape, expected
+                        ".sceStub.text {name} at +0x{:x} shape {:?}, expected one of {:?}",
+                        tramp.offset, tramp.shape, allowed
                     ));
                     continue;
                 }
             }
             match tramp.shape {
                 StubTrampolineShape::Ilp32Wrapping => passes.push(format!(
-                    ".sceStub.text {name} at +0x{:x}: ILP32 wrapping bctrl shape",
+                    ".sceStub.text {name} at +0x{:x}: legacy ILP32 wrapping bctrl shape (older stub archive)",
+                    tramp.offset
+                )),
+                StubTrampolineShape::Ilp32TailCall => passes.push(format!(
+                    ".sceStub.text {name} at +0x{:x}: ILP32 stw/bctr tail-call shape",
                     tramp.offset
                 )),
                 StubTrampolineShape::Lp64TailCall => passes.push(format!(
-                    ".sceStub.text {name} at +0x{:x}: LP64 bctr tail-call shape",
+                    ".sceStub.text {name} at +0x{:x}: LP64 std/bctr tail-call shape",
                     tramp.offset
                 )),
                 StubTrampolineShape::Unknown => {}
@@ -2575,6 +2608,53 @@ mod tests {
         assert!(r.is_ok());
     }
 
+    fn stub_shape_failures(model: TocDataModel, shape: StubTrampolineShape) -> Vec<String> {
+        let mut m = base_manifest();
+        m.toc_check = Some(match model {
+            TocDataModel::Ilp32 => toc(TocDataModel::Ilp32, 4, 2, 0),
+            TocDataModel::Lp64 => toc(TocDataModel::Lp64, 8, 0, 2),
+        });
+        m.stub_text_check = Some(StubTextCheckData {
+            has_stwu: false,
+            stwu_offsets: vec![],
+            trampolines: vec![trampoline(shape)],
+        });
+        check_invariants(&m)
+            .failures
+            .into_iter()
+            .filter(|f| f.contains(".sceStub.text"))
+            .collect()
+    }
+
+    #[test]
+    fn ilp32_accepts_tail_call_and_older_wrapping_stubs() {
+        let tail = stub_shape_failures(TocDataModel::Ilp32, StubTrampolineShape::Ilp32TailCall);
+        assert!(tail.is_empty(), "ILP32 tail-call stub rejected: {tail:?}");
+        let wide = stub_shape_failures(TocDataModel::Ilp32, StubTrampolineShape::Lp64TailCall);
+        assert!(
+            wide.iter().any(|f| f.contains("expected one of")),
+            "ILP32 accepted an 8-byte std TOC save: {wide:?}"
+        );
+        let wrap = stub_shape_failures(TocDataModel::Ilp32, StubTrampolineShape::Ilp32Wrapping);
+        assert!(wrap.is_empty(), "ILP32 wrapping stub rejected: {wrap:?}");
+    }
+
+    #[test]
+    fn lp64_rejects_wrapping_and_stw_stubs() {
+        let wrap = stub_shape_failures(TocDataModel::Lp64, StubTrampolineShape::Ilp32Wrapping);
+        assert!(
+            wrap.iter().any(|f| f.contains("expected one of")),
+            "LP64 wrapping stub accepted: {wrap:?}"
+        );
+        let narrow = stub_shape_failures(TocDataModel::Lp64, StubTrampolineShape::Ilp32TailCall);
+        assert!(
+            narrow.iter().any(|f| f.contains("expected one of")),
+            "LP64 accepted a 4-byte stw TOC save: {narrow:?}"
+        );
+        let tail = stub_shape_failures(TocDataModel::Lp64, StubTrampolineShape::Lp64TailCall);
+        assert!(tail.is_empty(), "LP64 tail-call stub rejected: {tail:?}");
+    }
+
     #[test]
     fn stub_text_has_stwu_fails() {
         let mut m = base_manifest();
@@ -2628,6 +2708,23 @@ mod tests {
         assert_eq!(
             classify_trampoline_words(&words).0,
             StubTrampolineShape::Lp64TailCall
+        );
+    }
+
+    #[test]
+    fn ilp32_tail_call_trampoline_words_match() {
+        let words = [
+            0x9041_0028,
+            0x3d80_1234,
+            0x818c_5678,
+            0x800c_0000,
+            0x804c_0004,
+            0x7c09_03a6,
+            0x4e80_0420,
+        ];
+        assert_eq!(
+            classify_trampoline_words(&words).0,
+            StubTrampolineShape::Ilp32TailCall
         );
     }
 

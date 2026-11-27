@@ -328,40 +328,34 @@ are dispatched through per-export trampolines emitted into
 `sprx/common/exports.S` macro for legacy archives that have not been
 folded into the nidgen flow yet).
 
-The trampoline shape is data-model aware. ILP32 uses a frame-less
-wrapping `bctrl` form so SPRX exports with more than eight arguments
-see the caller's original stack-argument area. LP64 uses a bare
-`bctr` tail-call form that defers TOC restoration to the call-site
-nop slot, which `sprxlinker` rewrites to `ld r2,40(r1)`.  sprxlinker
-picks the calls from the stub shape (a stub that starts with
-`std r2,40(r1)` and ends in `bctr`), so `--lp64` is not needed; it is
-still accepted and changes nothing.  A call to such a stub followed by
-anything other than a nop or `ld r2,40(r1)` is refused.
+Both data models use a frame-less trampoline, so SPRX exports with
+more than eight arguments see the caller's original stack-argument
+area: a bare `bctr` tail-call form that defers TOC restoration to the
+call-site nop slot.  The TOC save and restore width follows the data
+model's TOC-save slot at `40(r1)`: ILP32 saves a 4-byte word
+(`stw r2,40(r1)`) and `sprxlinker` rewrites the nop to
+`lwz r2,40(r1)`; LP64 saves the doubleword (`std r2,40(r1)`) and the
+nop becomes `ld r2,40(r1)`.  The ILP32 width is not optional: the
+compiler's ILP32 indirect-call sequence saves and reloads r2 there as a
+4-byte word, and sprxlinker only rewrites direct `bl` calls, so a call
+that reaches an import through a function pointer relies on the stub
+writing the same word.  An 8-byte `std` would put the zero high word
+at `40(r1)` and such a caller would reload r2 = 0.
 
-Normative trampoline body (per export, ILP32 hybrid):
+ILP32 used a wrapping `bctrl` form until it moved to the tail-call
+form; ELFs linked against those older stub archives still run and are
+left alone by sprxlinker.  sprxlinker picks the calls from the stub
+shape (a stub that starts with `stw r2,40(r1)` or `std r2,40(r1)` and
+ends in `bctr`), so `--lp64` is not needed; it is still accepted and
+changes nothing.  A call to such a stub followed by anything other than
+a nop or the matching-width restore is refused, including a restore of
+the other width.
 
-```asm
-__<name>:
-    mflr   r0
-    stw    r0, 24(r1)          ; LR -> caller's callee-TOC scratch slot
-    stw    r2, 40(r1)          ; TOC -> caller's reserved scratch slot
-    lis    r12, <name>_stub@ha
-    lwz    r12, <name>_stub@l(r12)
-    lwz    r0, 0(r12)          ; SPRX entry EA (compact OPD slot 0)
-    lwz    r2, 4(r12)          ; SPRX TOC (compact OPD slot 4)
-    mtctr  r0
-    bctrl                       ; call SPRX
-    lwz    r2, 40(r1)           ; restore caller TOC
-    lwz    r0, 24(r1)           ; restore caller LR
-    mtlr   r0
-    blr
-```
-
-Normative trampoline body (per export, LP64):
+Normative trampoline body (per export; ILP32 uses `stw`, LP64 `std`):
 
 ```asm
 __<name>:
-    std    r2, 40(r1)           ; caller TOC, restored at call site
+    stw    r2, 40(r1)           ; ILP32 (LP64: std r2, 40(r1)); restored at call site
     lis    r12, <name>_stub@ha
     lwz    r12, <name>_stub@l(r12) ; 32-bit compact descriptor EA
     lwz    r0, 0(r12)           ; SPRX entry EA (compact OPD slot 0)
@@ -376,15 +370,14 @@ Normative rules:
    `stdu` before dispatch shifts the caller's parameter-save area.
    SPRX exports with more than eight arguments read arg9+ from that
    area; moving `r1` makes the callee read trampoline-frame garbage.
-2. **ILP32 caller LR save** is `stw r0,24(r1)`, not `sp+16`.
-   `sp+16` is the ELFv1 callee LR-save slot and is clobbered by the
-   SPRX callee prologue.  `sp+24` is safe for the wrapping trampoline
-   because the callee saves its incoming TOC in its own frame.
-3. **ILP32 caller TOC save** is `stw r2,40(r1)` and must be restored
-   after `bctrl`.
-4. **LP64 tail-call form** saves caller TOC with `std r2,40(r1)` and
-   uses `bctr`, not `bctrl`.  The caller-side post-call restore is
-   emitted by the LP64 link path as `ld r2,40(r1)`.
+2. **No LR save in the trampoline.**  The SPRX returns straight to
+   the caller through the LR the caller's `bl` set.
+3. **Caller TOC save width follows the data model.**  ILP32 saves
+   `stw r2,40(r1)`, the same 4-byte word the ILP32 indirect-call
+   sequence saves and reloads; LP64 saves `std r2,40(r1)`.
+4. **Tail-call form** uses `bctr`, not `bctrl`.  The caller-side
+   post-call restore is the call-site nop, rewritten by sprxlinker to
+   `lwz r2,40(r1)` (ILP32) or `ld r2,40(r1)` (LP64).
 5. **Compact OPD descriptor read** at `lwz r0, 0(r12); lwz r2,
    4(r12)` — the `.data.sceFStub` slot was written by the loader
    with the resolved 8-byte compact OPD address.

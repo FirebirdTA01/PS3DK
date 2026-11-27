@@ -199,57 +199,42 @@ pub fn render_library(lib: &Library, abi: AbiMode) -> String {
         //     CELL_SPURS_JOB_ERROR_INVAL / ERROR_ALIGN under a framed
         //     trampoline).
         //
-        //     ILP32 keeps the historical wrapping form: save LR and r2
-        //     in the caller linkage area, bctrl into the SPRX, restore,
-        //     and return.  This path is empirically validated and must
-        //     stay byte-shape compatible with the existing hybrid ABI.
-        //
-        //     LP64 uses the PPC64 ELFv1/Cell OS tail-call form:
+        //     Both ABIs use the PPC64 ELFv1/Cell OS tail-call form:
         //     save caller r2 at sp+40, load the 32-bit EA of the SPRX
         //     compact descriptor from the ABI-independent 4-byte fstub
         //     slot, and bctr into the resolved entry.  There is no
-        //     trampoline LR save because LP64 caller-frame header slots
-        //     are ABI reserved (sp+16 LR, sp+24 compiler, sp+32 link
-        //     editor, sp+40 TOC).  sprxlinker post-links these call sites:
+        //     trampoline LR save: the SPRX returns straight to the caller.
+        //     ILP32 now uses the tail-call form (it used to wrap the call
+        //     with mflr/bctrl/restore/blr).
+        //
+        //     The TOC save width follows the ABI's TOC-save slot at sp+40:
+        //     ILP32 saves a 4-byte word with `stw` (the compiler's own
+        //     indirect-call TOC save is `stw 2,40(1)` / `lwz 2,40(1)`, so
+        //     an 8-byte `std` would leave the zero high word at sp+40 and
+        //     a caller that reached the import through a function pointer
+        //     would reload r2 = 0); LP64 saves the doubleword with `std`.
+        //
+        //     sprx-linker post-links the direct call sites for both ABIs:
         //     it finds them from the stub shape (a stub that saves r2 to
-        //     sp+40 and tail-calls) and rewrites the post-bl nop to
-        //     `ld r2,40(r1)`, matching the system caller-side TOC restore
-        //     contract.  Its `--lp64` flag is a no-op kept for legacy
-        //     build rules.
+        //     sp+40 and tail-calls) and rewrites the post-bl nop to the
+        //     matching restore, `lwz r2,40(r1)` after a `stw` stub and
+        //     `ld r2,40(r1)` after a `std` stub.  Its `--lp64` flag is a
+        //     no-op kept for legacy build rules.
         writeln!(out, "\t.section \".sceStub.text\",\"ax\"").ok();
         writeln!(out, "\t.align 2").ok();
         writeln!(out, "\t.globl {}", tramp_sym).ok();
         writeln!(out, "\t.type {}, @function", tramp_sym).ok();
         writeln!(out, "{}:", tramp_sym).ok();
         match abi {
-            AbiMode::Ilp32 => {
-                writeln!(out, "\tmflr   0").ok();
-                writeln!(out, "\tstw    0,24(1)").ok(); // LR  -> caller's callee-TOC slot
-                writeln!(out, "\tstw    2,40(1)").ok(); // TOC -> caller's reserved scratch
-                writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
-                writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok();
-            }
-            AbiMode::Lp64 => {
-                writeln!(out, "\tstd    2,40(1)").ok(); // TOC -> caller TOC-save slot (8B)
-                writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
-                writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok(); // 32-bit compact descriptor EA
-            }
-        }
+            AbiMode::Ilp32 => writeln!(out, "\tstw    2,40(1)").ok(), // TOC -> caller TOC-save word (4B)
+            AbiMode::Lp64 => writeln!(out, "\tstd    2,40(1)").ok(), // TOC -> caller TOC-save slot (8B)
+        };
+        writeln!(out, "\tlis    12,{}@ha", stub_sym).ok();
+        writeln!(out, "\tlwz    12,{}@l(12)", stub_sym).ok(); // 32-bit compact descriptor EA
         writeln!(out, "\tlwz    0,0(12)").ok(); // SPRX entry
         writeln!(out, "\tlwz    2,4(12)").ok(); // SPRX TOC
         writeln!(out, "\tmtctr  0").ok();
-        match abi {
-            AbiMode::Ilp32 => {
-                writeln!(out, "\tbctrl").ok(); // call SPRX
-                writeln!(out, "\tlwz    2,40(1)").ok(); // restore caller TOC
-                writeln!(out, "\tlwz    0,24(1)").ok(); // restore caller LR
-                writeln!(out, "\tmtlr   0").ok();
-                writeln!(out, "\tblr").ok();
-            }
-            AbiMode::Lp64 => {
-                writeln!(out, "\tbctr").ok(); // tail-call SPRX; caller restores r2
-            }
-        }
+        writeln!(out, "\tbctr").ok(); // tail-call SPRX; caller restores r2
         writeln!(out, "\t.size {}, .-{}", tramp_sym, tramp_sym).ok();
 
         // 5d. OPD function descriptor for the externally callable symbol.
@@ -549,31 +534,39 @@ exports:
         // The prx_header struct body.
         assert!(s.contains("0x2c000001"), "missing prx_header magic word");
         assert!(s.contains(".2byte 2"), "export count should be 2");
-        // Trampoline body is the frame-less form: save caller LR @
-        // caller_sp+24 (callee-TOC scratch slot, untouched by the SPRX
-        // because SPRX writes its own caller-TOC at SPRX_sp+24 inside
-        // its new frame), save caller TOC @ caller_sp+40 (reserved
-        // scratch slot above the linkage block).  Crucially, NO stwu —
-        // the SPRX accesses caller stack-spilled args at sp+48+ from the
-        // trampoline's r1, so any SP shift moves them out from under
-        // it (broke libspurs's >8-arg exports).  See comment block in
+        // Trampoline body is the frame-less tail-call form: save caller
+        // TOC @ caller_sp+40 with a 4-byte stw (the ILP32 TOC-save word
+        // the compiler's indirect calls also use), load the descriptor,
+        // and bctr; sprx-linker rewrites the caller's post-bl nop to
+        // `lwz r2,40(r1)`.  Crucially, NO stwu/stdu — the SPRX
+        // accesses caller stack-spilled args at sp+48+ from the
+        // trampoline's r1, so any SP shift moves them out from under it
+        // (broke libspurs's >8-arg exports).  See comment block in
         // render_library above for the full ABI rationale.
-        assert!(s.contains("bctrl"), "trampoline missing bctrl");
         assert!(
-            !s.contains("stwu"),
+            s.contains("__cellPadInit:\n\tstw    2,40(1)\n"),
+            "ILP32 trampoline must start by saving caller TOC with stw at caller_sp+40"
+        );
+        assert!(
+            !s.contains("\tstd "),
+            "ILP32 trampoline must not use an 8-byte std (indirect callers reload a 4-byte word)"
+        );
+        assert!(s.contains("bctr"), "ILP32 trampoline must tail-call with bctr");
+        assert!(
+            !s.contains("bctrl"),
+            "ILP32 trampoline must not use wrapping bctrl"
+        );
+        assert!(
+            !s.contains("mflr"),
+            "ILP32 tail-call trampoline must not save LR"
+        );
+        assert!(
+            !s.contains("stwu") && !s.contains("stdu"),
             "trampoline must NOT allocate a frame; >8-arg SPRX exports break under any SP shift"
         );
         assert!(
-            s.contains("stw    0,24(1)") || s.contains("stw 0,24(1)"),
-            "trampoline must save caller LR at caller_sp+24 (callee-TOC scratch slot)"
-        );
-        assert!(
-            s.contains("stw    2,40(1)") || s.contains("stw 2,40(1)"),
-            "trampoline must save caller TOC at caller_sp+40 (reserved scratch slot)"
-        );
-        assert!(
-            !s.contains("std    0,") && !s.contains("std 0,"),
-            "ILP32 trampoline must not use 8-byte std for LR save"
+            !s.contains("lwz    2,40(1)") && !s.contains("ld     2,40(1)"),
+            "ILP32 trampoline must leave caller TOC restore to the call site"
         );
         assert!(
             s.contains("cellPadInit_stub@ha"),
@@ -594,8 +587,12 @@ exports:
             "LP64 tail-call trampoline must not save LR"
         );
         assert!(
-            s.contains("std    2,40(1)") || s.contains("std 2,40(1)"),
-            "LP64 trampoline must save caller TOC at caller_sp+40"
+            s.contains("__cellPadInit:\n\tstd    2,40(1)\n"),
+            "LP64 trampoline must start by saving caller TOC with std at caller_sp+40"
+        );
+        assert!(
+            !s.contains("stw    2,40(1)"),
+            "LP64 trampoline must not use the 4-byte ILP32 TOC save"
         );
         assert!(
             s.contains(".size cellPadInit_stub, 4"),

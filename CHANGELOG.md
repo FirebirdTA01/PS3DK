@@ -48,6 +48,17 @@ The version stamped into builds is generated from the most recent
   malloc-alignment probe (2322 results, 0 misaligned, 0 null) passed
   in both ILP32 and LP64.
 
+- **Shorter SPRX import calls in ILP32.** Import stubs in the default ILP32
+  ABI now use the same tail-call form as LP64: the stub saves the caller's
+  TOC, loads the export's entry and TOC from its descriptor and branches
+  without linking, and `sprx-linker` turns the caller's post-call `nop` into
+  the TOC restore. The save and restore keep each ABI's width: ILP32 stubs
+  save a 4-byte word with `stw` and callers restore it with `lwz`, the same
+  word an ILP32 call through a function pointer saves and reloads; LP64
+  stubs keep `std` and `ld`. Each import call saves the stub's
+  link-register save and restore and a second call/return pair. Executables
+  must be relinked against the regenerated stub archives.
+
 ## [v0.29.0] — 2026-11-26
 
 ### Added

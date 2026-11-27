@@ -78,6 +78,8 @@ static const unsigned char PRX_MAGIC[4] = { 0x1b, 0x43, 0x4c, 0xec };
 static const uint32_t PPC_NOP = 0x60000000;
 static const uint32_t PPC_LD_R2_40_R1 = 0xe8410028;
 static const uint32_t PPC_STD_R2_40_R1 = 0xf8410028;
+static const uint32_t PPC_LWZ_R2_40_R1 = 0x80410028;
+static const uint32_t PPC_STW_R2_40_R1 = 0x90410028;
 static const uint32_t PPC_BCTR = 0x4e800420;
 static const uint32_t PPC_BCTRL = 0x4e800421;
 
@@ -124,34 +126,56 @@ static bool section_contains(const Elf64_Shdr *shdr, uint64_t addr)
 	return addr >= shdr->sh_addr && addr < shdr->sh_addr + shdr->sh_size;
 }
 
+/* Which kind of import stub a call targets. */
+typedef enum {
+	STUB_SELF_RESTORING,	/* not a tail call: restores r2 itself (or unknown) */
+	STUB_TAIL_CALL_STW,	/* ILP32: stw r2,40(r1) ... bctr */
+	STUB_TAIL_CALL_STD,	/* LP64:  std r2,40(r1) ... bctr */
+} StubKind;
+
 /* Does the import stub at `addr` leave the TOC restore to its caller?
-   An LP64 stub saves r2 and tail-calls the export (std r2,40(r1) ...
-   bctr), so r2 holds the export's TOC when control returns to the
-   caller.  An ILP32 stub calls the export itself (bctrl) and restores r2
-   before it returns. */
-static bool stub_is_tail_call(const Elf_Data *data, const Elf64_Shdr *shdr, uint64_t addr)
+   Import stubs in both ABIs save r2 and tail-call the export, so r2 holds
+   the export's TOC when control returns to the caller.  The save width
+   follows the ABI's TOC-save slot at 40(r1): ILP32 stubs save a 4-byte
+   word (stw r2,40(r1) ... bctr), matching the compiler's own ILP32
+   indirect-call save and restore, and LP64 stubs save the doubleword
+   (std r2,40(r1) ... bctr).  A stub that calls the export itself (bctrl)
+   and restores r2 before it returns, as ILP32 stubs from older stub
+   archives do (they start with mflr), is left alone. */
+static StubKind stub_kind(const Elf_Data *data, const Elf64_Shdr *shdr, uint64_t addr)
 {
 	const unsigned char *buf = (const unsigned char *)data->d_buf;
 	size_t first = (size_t)(addr - shdr->sh_addr) / sizeof(uint32_t);
 	size_t count = data->d_size / sizeof(uint32_t);
+	StubKind kind = STUB_SELF_RESTORING;
 	for(size_t i = first; i < count && i < first + 16; i++) {
 		uint32_t insn;
 		memcpy(&insn, buf + i * sizeof(uint32_t), sizeof(insn));
 		insn = BE32(insn);
-		if(i == first && insn != PPC_STD_R2_40_R1)
-			return false;
+		if(i == first) {
+			if(insn == PPC_STD_R2_40_R1)
+				kind = STUB_TAIL_CALL_STD;
+			else if(insn == PPC_STW_R2_40_R1)
+				kind = STUB_TAIL_CALL_STW;
+			else
+				return STUB_SELF_RESTORING;
+		}
 		if(insn == PPC_BCTRL)
-			return false;
+			return STUB_SELF_RESTORING;
 		if(insn == PPC_BCTR)
-			return true;
+			return kind;
 	}
-	return false;
+	return STUB_SELF_RESTORING;
 }
 
 /* Give every call to a tail-call import stub its TOC restore: the nop
-   GCC leaves after the bl becomes ld r2,40(r1).  Which calls need it is
-   read from the stubs, so an LP64 ELF is fixed whether or not --lp64 was
-   passed, and an ILP32 ELF is never touched. */
+   GCC leaves after the bl becomes the restore that matches the stub's
+   save, lwz r2,40(r1) after an stw stub (ILP32) and ld r2,40(r1) after
+   an std stub (LP64).  Which calls need it, and which width, is read
+   from the stubs, so the fix does not depend on --lp64.  Only direct
+   calls (bl) are rewritten; an indirect call through a function pointer
+   restores r2 with the compiler's own sequence, which is why the stub's
+   save width must match the ABI's. */
 static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 {
 	Elf_Scn *text = getSection(elf, ".text");
@@ -180,8 +204,11 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 			continue;
 		if(!section_contains(sce_stub_shdr, target))
 			continue;
-		if(!stub_is_tail_call(sce_stub_data, sce_stub_shdr, target))
+		StubKind kind = stub_kind(sce_stub_data, sce_stub_shdr, target);
+		if(kind == STUB_SELF_RESTORING)
 			continue;
+		uint32_t restore = kind == STUB_TAIL_CALL_STW ? PPC_LWZ_R2_40_R1 : PPC_LD_R2_40_R1;
+		uint32_t wrong_restore = kind == STUB_TAIL_CALL_STW ? PPC_LD_R2_40_R1 : PPC_LWZ_R2_40_R1;
 
 		if(i + 1 == count) {
 			fprintf(stderr,
@@ -194,8 +221,19 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 		uint32_t next;
 		memcpy(&next, buf + (i + 1) * sizeof(uint32_t), sizeof(next));
 		next = BE32(next);
-		if(next == PPC_LD_R2_40_R1)
+		if(next == restore)
 			continue;
+		if(next == wrong_restore) {
+			/* A restore of the other width reads the wrong bytes of the
+			   save slot (or half of it). */
+			fprintf(stderr,
+			    "sprx-linker: the import call at 0x%llx is followed by "
+			    "0x%08x, a TOC restore whose width does not match the "
+			    "stub's %s save.\n",
+			    (unsigned long long)(textshdr->sh_addr + i * sizeof(uint32_t)),
+			    next, kind == STUB_TAIL_CALL_STW ? "4-byte stw" : "8-byte std");
+			return -1;
+		}
 		if(next != PPC_NOP) {
 			/* No slot for the restore: r2 would stay the export's TOC. */
 			fprintf(stderr,
@@ -206,12 +244,12 @@ static int rewrite_lp64_sce_stub_toc_restores(int fd, Elf *elf)
 			return -1;
 		}
 
-		uint32_t replacement = BE32(PPC_LD_R2_40_R1);
+		uint32_t replacement = BE32(restore);
 		off_t off = (off_t)(textshdr->sh_offset + (i + 1) * sizeof(uint32_t));
 		if(lseek(fd, off, SEEK_SET) < 0
 		   || write(fd, &replacement, sizeof(replacement)) != (ssize_t)sizeof(replacement)) {
 			fprintf(stderr,
-			    "sprx-linker: write LP64 TOC restore failed at %s:%d\n",
+			    "sprx-linker: write TOC restore failed at %s:%d\n",
 			    __FILE__, __LINE__);
 			return -1;
 		}

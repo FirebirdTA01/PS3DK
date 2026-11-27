@@ -22,10 +22,10 @@ big-endian ELF64/PPC64 environment with:
 - explicit 32-bit EA typedef (`lv2_ea32_t`) for kernel-facing struct
   fields that the Lv-2 syscall layer treats as 32-bit EAs regardless
   of whether the user binary is ILP32 or LP64;
-- data-model-aware SPRX import trampolines: ILP32 uses a frame-less
-  wrapping `bctrl` shape so >8-arg exports see the original caller
-  stack, while LP64 uses a bare `bctr` tail-call shape with caller-side
-  TOC restore (see ABI spec §5.1);
+- frame-less SPRX import trampolines: ILP32 and LP64 both use a bare
+  `bctr` tail-call shape with caller-side TOC restore, so >8-arg
+  exports see the original caller stack; the TOC save is `stw`/`lwz`
+  in ILP32 and `std`/`ld` in LP64 (see ABI spec §5.1);
 - NID/FNID-driven import metadata and stub archives, with PSL1GHT-style
   aliases folded into the canonical Cell OS nidgen output.
 
