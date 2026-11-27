@@ -139,7 +139,14 @@ SECTIONS
 	.sys_proc_param     : { KEEP (*(.sys_proc_param)) } : hdr_text : hdr_param
 	.sys_proc_prx_param : { KEEP (*(.sys_proc_prx_param)) } : hdr_text : hdr_prx
 
+	/* The first data segment (constructors, the import stub slots, .opd, .got)
+	 * starts on a 64 KB boundary with bit 16 set, i.e. an odd multiple of 64 KB.
+	 * Measured on the console: with the base an even multiple of 64 KB, every
+	 * SPRX import call through the stub slots was about 30% slower (base
+	 * 0x120000 against 0x130000, identical code), so the cost depended on the
+	 * text size by accident.  The skipped 64 KB is address space only. */
 	. = ALIGN(64K);
+	. = . + ((. & 0x10000) ? 0 : 0x10000);
 	
 	.ppu_data           : { *(.ppu_data .ppu_data.*) } : hdr_data
 	.sdata2             : { *(.sdata2 .sdata2.* .gnu.linkonce.s2.*) }

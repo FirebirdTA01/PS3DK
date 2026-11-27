@@ -22,6 +22,17 @@ The version stamped into builds is generated from the most recent
   wrappers and the errno mapping in `librt.a` (and the opt-in
   `librt_profwait.a`) were compiled without optimisation.
 
+- **Faster SPRX import calls: the first data segment of an executable now
+  starts on an odd multiple of 64 KB.** `lv2.ld` places the segment that holds
+  the constructors, the import stub slots, `.opd` and `.got` at the next 64 KB
+  boundary with bit 16 set. Before, its base followed the text size, and when
+  it landed on an even multiple of 64 KB every import call was about 30%
+  slower on the console. In `ppu-codegen-workload`, with identical code and
+  only the base changed (0x120000 to 0x130000), the import phase went from
+  74.2 to 95.6 fps and the C++ allocation phase from 72.8 to 77.8 fps. Every
+  other phase was within 0.3%. The gap costs at most 64 KB of address space
+  and nothing in the file. Executables must be relinked to get it.
+
 ## [v0.29.0] — 2026-11-26
 
 ### Added
