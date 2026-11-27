@@ -25,13 +25,15 @@ The version stamped into builds is generated from the most recent
 - **Faster SPRX import calls: the first data segment of an executable now
   starts on an odd multiple of 64 KB.** `lv2.ld` places the segment that holds
   the constructors, the import stub slots, `.opd` and `.got` at the next 64 KB
-  boundary with bit 16 set. Before, its base followed the text size, and when
-  it landed on an even multiple of 64 KB every import call was about 30%
-  slower on the console. In `ppu-codegen-workload`, with identical code and
-  only the base changed (0x120000 to 0x130000), the import phase went from
-  74.2 to 95.6 fps and the C++ allocation phase from 72.8 to 77.8 fps. Every
-  other phase was within 0.3%. The gap costs at most 64 KB of address space
-  and nothing in the file. Executables must be relinked to get it.
+  boundary with bit 16 set. Before, its base followed the text size. In the
+  import-call workload measured on the console (`ppu-codegen-workload`, with
+  identical code and only the base changed from 0x120000 to 0x130000), the
+  import phase went from 74.2 to 95.6 fps and the C++ allocation phase from
+  72.8 to 77.8 fps; the other four phases were within 0.3%. The gap costs at
+  most 64 KB of address space and nothing in the file. This holds while no
+  input section at the start of that segment needs more than 64 KB
+  alignment: a larger alignment is kept, and the base is then an even
+  multiple of 64 KB. Executables must be relinked to get it.
 
 ## [v0.29.0] — 2026-11-26
 
