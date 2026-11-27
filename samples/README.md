@@ -116,6 +116,7 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 | `hello-ppu-oss-str-only` | `ostringstream` variant: isolate string-only insertion (`oss << "...") |  |
 | `hello-ppu-ostream-iter-byval` | test `ostreambuf_iterator<char>` by-value through a virtual call (the sink + dummy check) |  |
 | `hello-ppu-perf` | `<cell/perf/performance.h>` (`cellPerf*`) surface validation: `cellPerfGetVersion` / `Start` / `InsertCBEpmBookmark` / `Stop` |  |
+| `ppu-speed-probe` | timebase speed probe for comparing two builds on hardware: library kernels (pixman, libpng, zlib, printf/strtod, libstdc++ containers, C++ exceptions) and code-generation microkernels (sign-extending loads, flag tests, stored comparisons, short counted loops, vector lane tests, SPRX import calls); prints min/median ticks and a checksum per kernel |  |
 | `hello-ppu-struct-byval` | test by-value passing of an 8-byte aggregate through a virtual call |  |
 | `hello-ppu-struct-byval-ret` | test by-value return of an 8-byte aggregate through a virtual call |  |
 | `hello-ppu-sv-aggregate-min` | C++ `std::vector` aggregate round-trip: a vector of 16-byte structs, push / read / clear |  |
