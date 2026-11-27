@@ -25,8 +25,10 @@
 #       __STDCPP_DEFAULT_NEW_ALIGNMENT__ == 16;
 #   (2) asm row: a struct V with alignas(16) members -- the exact shape
 #       of an AltiVec/vmx vector-holder -- `new V()` at -O/-O2/-O3
-#       references plain operator new (_Znwm) and NOT the aligned form
-#       (the mangled symbol carries St13align_val_t);
+#       references plain operator new and NOT the aligned form.  The
+#       mangled size_t is model-dependent: j in ILP32 (sizeof(long)==4,
+#       sizeof(size_t)==4), m in LP64; the aligned form appends
+#       St11align_val_t as the second parameter.
 #   (3) control (red if 0083 regresses the dispatch): the same struct
 #       but a second field at alignas(32) -- EXCEEDING the target
 #       biggest -- still takes the aligned form; without this control a
@@ -63,7 +65,7 @@ CXX
 #   alignof(V) == 32 > 16 (threshold).  This MUST still take the aligned
 #   operator new; without this the green row could be satisfied by
 #   setting the threshold to any value >=16 (including 32 or 64), which
-#   is wrong.  The aligned form's mangled name carries St13align_val_t
+#   is wrong.  The aligned form's mangled name carries St11align_val_t
 #   (std::align_val_t is the second parameter).
 cat > "$work/red.cpp" <<'CXX'
 struct V { alignas(16) double x; alignas(16) double y; alignas(32) double h; };
@@ -93,18 +95,19 @@ for model in "" -mlp64; do
         if ! out=$("$cxx" $model $opt -std=c++17 -S "$work/green.cpp" -o "$work/g.s" 2>&1); then
             echo "ppu-aligned-new-threshold: FAIL $tag: green compile"; printf '%s\n' "$out" | head -4; status=1; continue
         fi
-        # _Znwm is the mangled name for the plain operator new (size_t);
-        # the aligned form carries St11align_val_t (or similar) in its
-        # mangled name.  We grep for the substring align_val_t anywhere
-        # on the line, which works regardless of the exact length prefix
-        # the mangler uses for the type name.
-        plain=$(grep -cE '\b_Znwm\b' "$work/g.s" 2>/dev/null); plain=${plain:-0}
-        aligned_in_green=$(grep -cE '_Znwm.*align_val_t' "$work/g.s" 2>/dev/null); aligned_in_green=${aligned_in_green:-0}
+        # size_t in the mangled operator new is model-dependent:
+        # ILP32  sizeof(size_t)==4  ->  "j" (unsigned int)   _Znwj ...
+        # LP64   sizeof(size_t)==8  ->  "m" (long, 64-bit)   _Znwm ...
+        # The aligned form appends the second parameter's type name
+        # St11align_val_t, so both _ZnwjSt11align_val_t and
+        # _ZnwmSt11align_val_t exist depending on the model.
+        plain=$(grep -cE '\b_Znw[jm]\b' "$work/g.s" 2>/dev/null); plain=${plain:-0}
+        aligned_in_green=$(grep -cE '_Znw[jm]St11align_val_t' "$work/g.s" 2>/dev/null); aligned_in_green=${aligned_in_green:-0}
         if [ "$plain" -ge 1 ] && [ "$aligned_in_green" -eq 0 ]; then
             echo "ppu-aligned-new-threshold: ok   $tag green plain (plain=$plain aligned=$aligned_in_green)"
         else
             echo "ppu-aligned-new-threshold: FAIL $tag green (plain=$plain aligned=$aligned_in_green)"
-            grep -nE '_Znwm' "$work/g.s" | head -4 || true
+            grep -nE '_Znw' "$work/g.s" | head -4 || true
             status=1
         fi
 
@@ -112,7 +115,7 @@ for model in "" -mlp64; do
         rm -f "$work/h.s"
         aligned_in_red=0
         if out=$("$cxx" $model $opt -std=c++17 -S "$work/red.cpp" -o "$work/h.s" 2>&1); then
-            aligned_in_red=$(grep -cE '_ZnwmSt13align_val_t' "$work/h.s" 2>/dev/null); aligned_in_red=${aligned_in_red:-0}
+            aligned_in_red=$(grep -cE '_Znw[jm]St11align_val_t' "$work/h.s" 2>/dev/null); aligned_in_red=${aligned_in_red:-0}
             if [ "$aligned_in_red" -ge 1 ]; then
                 echo "ppu-aligned-new-threshold: ok   $tag red control alignas(32) -> aligned new (aligned=$aligned_in_red)"
             else
