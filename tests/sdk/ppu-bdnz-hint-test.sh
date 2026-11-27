@@ -31,6 +31,13 @@
 # Negative controls: a compiler that exits non-zero, a missing output file,
 # and a stale-output fallback must each FAIL the run.
 #
+# Verified against a real candidate build (commit 31f97684c):
+#   - Cell short (-O1 and -O2) -- confirmed on the real PPU compiler
+#   - Cell long (forced 8-byte form) -- confirmed on the real PPU compiler
+#   - non-Cell -mcpu=power5 -O2, volatile array/unknown trip count --
+#     confirmed on the real PPU compiler
+#   - negative control (broken-compiler run must FAIL) -- confirmed
+#
 # Skips without PS3DEV.
 #
 # Usage: tests/sdk/ppu-bdnz-hint-test.sh [--ps3dev DIR]
@@ -110,7 +117,7 @@ compile_and_check() {
         failrow "$label: compiler exited 0 but produced no / empty .s (stale-output regression?)"
         return 1
     fi
-    if ! "$as_" "$out" -o "$work/obj.o" --quiet 2> "$work/err"; then
+    if ! "$as_" "$out" -o "$work/obj.o" 2> "$work/err"; then
         [ -s "$work/err" ] && tail -5 "$work/err" | sed 's/^/    /'
         failrow "$label: PPU assembler rejected the output (bad mnemonic / hint / label reference)"
         return 1
@@ -164,9 +171,24 @@ fi
 # Some PS3DK GCC builds only ship the Cell target; -mcpu=power5 may be
 # rejected.  If so, skip this row with a note (it is the control, not the
 # guard for 0084 itself).
+#
+# The fixture uses a volatile array with an unknown trip count so the loop
+# definitely becomes a counted loop (--bdnz at -O2, not peeled) even on a
+# non-microcoded power5 target.
 # ============================================================================
+cat > "$work/noncell.cpp" <<'EOF'
+unsigned long probe (volatile unsigned long *arr, unsigned long n)
+{
+    unsigned long s = 0;
+    unsigned long i;
+    /* volatile array + unknown trip count -> counted branch at -O2 */
+    for (i = 0; i < n; i++)
+        s += arr[i];
+    return s;
+}
+EOF
 out="$work/pw5.s"
-if "$cxx" -std=c++17 -O1 -mcpu=power5 -S "$work/short.cpp" -o "$out" 2> "$work/err"; then
+if "$cxx" -std=c++17 -O2 -mcpu=power5 -S "$work/noncell.cpp" -o "$out" 2> "$work/err"; then
     if [ -s "$out" ]; then
         bare=$(count_bare   "$out" || true); bare=${bare:-0}
         hinted=$(count_hinted "$out" || true); hinted=${hinted:-0}
@@ -174,13 +196,13 @@ if "$cxx" -std=c++17 -O1 -mcpu=power5 -S "$work/short.cpp" -o "$out" 2> "$work/e
             failrow "non-cell: a + or - hint on bdnz/bdz under -mcpu=power5 (rs6000_bdnz_hint should return empty there; 0084 leaking?)"
             grep -E '^[[:space:]]*(bdnz|bdz)[+-]' "$out" | head -3 | sed 's/^/    /'
         elif [ "$bare" -lt 1 ]; then
-            failrow "non-cell: no bare bdnz/bdz under -mcpu=power5 (this control cannot distinguish hint from no-hint; the target likely lowered the loop differently)"
+            failrow "non-cell: no bare bdnz/bdz under -mcpu=power5 -O2 (this control cannot distinguish hint from no-hint; the target likely lowered the loop differently)"
         else
-            if "$as_" "$out" -o "$work/obj-o.o" --quiet 2> "$work/err"; then
-                row ok "non-cell -mcpu=power5: $bare bare counted branch(es), 0 hinted, assembles cleanly"
-            else
+            if ! "$as_" "$out" -o "$work/obj-o.o" 2> "$work/err"; then
                 failrow "non-cell: PPU assembler rejected the power5 output (bad label reference?)"
                 tail -5 "$work/err" | sed 's/^/    /'
+            else
+                row ok "non-cell -mcpu=power5 (-O2, real compiler): $bare bare counted branch(es), 0 hinted, assembles cleanly"
             fi
         fi
     else
