@@ -116,6 +116,7 @@ These are the "does the compiler work" tier — don't touch RSX / sysutil.
 | `hello-ppu-oss-str-only` | `ostringstream` variant: isolate string-only insertion (`oss << "...") |  |
 | `hello-ppu-ostream-iter-byval` | test `ostreambuf_iterator<char>` by-value through a virtual call (the sink + dummy check) |  |
 | `hello-ppu-perf` | `<cell/perf/performance.h>` (`cellPerf*`) surface validation: `cellPerfGetVersion` / `Start` / `InsertCBEpmBookmark` / `Stop` |  |
+| `ppu-codegen-workload` | artificial frame-based workload for comparing two builds by frame rate: six phases (text parsing, predicate sort, short counted loops, vector lane tests, SPRX import calls, C++ vector-aligned objects), each about 10-13 ms of fixed PPU work per frame on the console, flipped without waiting for vertical blank so the frame rate follows the work; prints fps, frame-time percentiles, PPU work time and a checksum per phase; `-DPS3_PROF_AUTO=ON` captures the whole run |  |
 | `ppu-speed-probe` | timebase speed probe for comparing two builds on hardware: library kernels (pixman, libpng, zlib, printf/strtod, libstdc++ containers, C++ exceptions) and code-generation microkernels (sign-extending loads, flag tests, stored comparisons, short counted loops, vector lane tests, SPRX import calls); prints min/median ticks and a checksum per kernel |  |
 | `hello-ppu-struct-byval` | test by-value passing of an 8-byte aggregate through a virtual call |  |
 | `hello-ppu-struct-byval-ret` | test by-value return of an 8-byte aggregate through a virtual call |  |
