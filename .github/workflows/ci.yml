@@ -1134,6 +1134,8 @@ jobs:
         run: bash tests/sdk/ppu-fp-displacement-codegen-test.sh
       - name: A loop vectorised with factor 1 keeps no single realignment mask (patch 0082)
         run: bash tests/sdk/ppu-vect-realign-codegen-test.sh
+      - name: The aligned-new threshold is the target biggest and 16-aligned types use plain new (patch 0083)
+        run: bash tests/sdk/ppu-aligned-new-threshold-test.sh
 
       # Skips without PS3DEV; binding a vertex program and the standalone
       # cellGcmCgUploadInternalConsts helper both upload the literal pool.

@@ -58,3 +58,4 @@
 0080-ext-dce-clear-pointer-fact.patch
 0081-libstdcxx-ps3-entropy-backend.patch
 0082-vect-no-optimized-realign-ungrouped-vf-below-nunits.patch
+0083-cell64lv2-aligned-new-threshold-16.patch

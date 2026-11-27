@@ -22,6 +22,21 @@ The version stamped into builds is generated from the most recent
   wrappers and the errno mapping in `librt.a` (and the opt-in
   `librt_profwait.a`) were compiled without optimisation.
 
+### Changed (PPU aligned-new dispatch)
+
+- PPU target (cell64lv2): `MALLOC_ABI_ALIGNMENT` is now 128 bits
+  (was 64) — the C++ `__STDCPP_DEFAULT_NEW_ALIGNMENT__` predefine
+  and the aligned-new dispatch threshold both now match the
+  target's largest type, a 16-byte VMX quadword. The PS3 allocator
+  already returns blocks aligned to it (`vec_mallocr.c` MINSIZE=16,
+  `_mallocr.c` MALLOC_ALIGN=16 per newlib patch 0015,
+  `BIGGEST_ALIGNMENT` is 128 bits), so the previous 8-byte threshold
+  was understating the guarantee and made every `new` of a type
+  holding a vector call the aligned operator new — now they use
+  plain `operator new` in both ILP32 and LP64. Behaviour change
+  for code that overloaded the aligned operator new and relied on
+  16-byte-aligned types reaching it.
+
 ## [v0.29.0] — 2026-11-26
 
 ### Added
