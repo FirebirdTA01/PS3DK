@@ -9,16 +9,23 @@
 #     aligned_new_threshold = malloc_alignment() / BITS_PER_UNIT
 #   = MAX(max_align_t_align(), MALLOC_ABI_ALIGNMENT) / BITS_PER_UNIT
 # and rs6000.h fixes MALLOC_ABI_ALIGNMENT at 64 bits, so the threshold
-# came out 8.  The PS3 allocator, however, really does return 16-byte
-# aligned blocks -- newlib's vec_mallocr.c sets MINSIZE to 16, and _mallocr.c's
-# MALLOC_ALIGN is 16 (via newlib patch 0015) -- and the target's
-# BIGGEST_ALIGNMENT is 128 bits (16 bytes).  So before 0083 every `new`
-# of a type holding a vector (or any 16-byte-aligned field) called the
-# aligned operator new, even though the block malloc hands out was
-# already 16-byte aligned.  0083 raises MALLOC_ABI_ALIGNMENT to 128
-# bits in the target header, so the threshold becomes 16 and types with
-# alignof <= 16 use plain operator new; only types with alignof > 16
-# (exceeding the target biggest) still take the aligned form.
+# came out 8.  The ordinary _mallocr on this target returns 16-byte-
+# aligned blocks (newlib patch 0015 sets MALLOC_ALIGNMENT to 16, and
+# the size/split math -- chunk2mem is aligned at heap acquisition and
+# sizes/splits are rounded, realloc included -- preserves that
+# alignment), so before 0083 every `new` of a type holding a vector
+# or any 16-byte-aligned field called the aligned operator new even
+# though the ordinary allocator already served a 16-byte-aligned
+# block.  0083 raises MALLOC_ABI_ALIGNMENT to 128 bits in the target
+# header, so the threshold becomes 16 and types with alignof <= 16
+# use plain operator new; only types with alignof > 16 (exceeding the
+# target biggest) still take the aligned form.
+#
+# Note: vec_malloc is a separate API (calls _memalign_r(...,16,...)).
+# vec_mallocr's MINSIZE is sizeof(struct malloc_chunk) (32 under LP64),
+# not a fixed 16.  Neither is the guarantee.  A custom malloc
+# replacement must also return 16-byte-aligned blocks, because the
+# compiler now assumes it for malloc/calloc/realloc/strdup/strndup.
 #
 # The rows:
 #   (1) predefine row: powerpc64-ps3-elf-g++ (both data models) reports
@@ -123,14 +130,71 @@ for model in "" -mlp64; do
                 status=1
             fi
         else
-            # Red control may legitimately fail to compile in some
-            # configurations (e.g. the placement-new overload isn't
-            # linked in the single-thread build); treat a compile
-            # failure as a soft skip but say so.
-            echo "ppu-aligned-new-threshold: note $tag red control skipped (compile refused)"
+            # A compile failure is never a soft skip: the red control is
+            # what keeps the threshold from drifting past the target
+            # biggest, so the check has to be able to fail.
+            echo "ppu-aligned-new-threshold: FAIL $tag red control (red.cpp did not compile)"
+            printf '%s\n' "$out" | head -4 | sed 's/^/    /'
+            status=1
         fi
     done
 done
+
+# Rejecting self-test: prove the red-control FAIL branch is reachable
+# and that the script exits nonzero when it fires.  Build a stub
+# compiler that fails only the -S red.cpp invocation (the row we
+# want to reach the FAIL branch on) and succeeds the predefine row
+# and the green row so those do not `continue` past the red row.
+# The only assertion is on the red-control outcome:
+#   - the script's exit code is nonzero;
+#   - the last "red control" line is a FAIL naming the compile
+#     failure -- NOT the "note ... skipped" soft-skip line that was
+#     there before the FAIL branch was added.
+# A red control that cannot reject is the same as no red control.
+# Guarded by PPU_AN_NO_SELFTEST so the nested invocation does not
+# itself run the self-test (no infinite recursion).
+if [ -z "${PPU_AN_NO_SELFTEST:-}" ]; then
+    stub="$(mktemp -d)"
+    trap 'rm -rf "$work" "$stub"' EXIT
+    mkdir -p "$stub/ppu/bin"
+    cat > "$stub/ppu/bin/powerpc64-ps3-elf-g++" <<'SH'
+#!/bin/sh
+# POSIX sh.  Fail only the -S invocation whose source is red.cpp.
+# Succeed the predefine (-dM) row and the green -S row.
+# Order of checks: red.cpp (fail), -dM (emit predefine), -o (green).
+for a in "$@"; do
+    case "$a" in
+        *red.cpp) echo "stub-red: not supported" >&2; exit 1 ;;
+    esac
+done
+for a in "$@"; do
+    [ "$a" = "-dM" ] && { echo '#define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 16'; exit 0; }
+done
+out=""; prev=""
+for a in "$@"; do
+    if [ "$prev" = "-o" ]; then out="$a"; fi
+    prev="$a"
+done
+[ -n "$out" ] && { echo 'call _Znwm' > "$out"; }
+exit 0
+SH
+    chmod +x "$stub/ppu/bin/powerpc64-ps3-elf-g++"
+    echo "ppu-aligned-new-threshold: self-test: forcing a red-control regression"
+    out=$(PPU_AN_NO_SELFTEST=1 bash "${BASH_SOURCE[0]}" --ps3dev "$stub" 2>&1); rc=$?
+red_line=$(printf '%s\n' "$out" | grep -E 'red control' | tail -n 1)
+    if [ $rc -ne 0 ] \
+       && printf '%s\n' "$red_line" | grep -qE 'FAIL .*red control \(red\.cpp did not compile\)'; then
+        echo "ppu-aligned-new-threshold: ok   self-test: red-control FAIL branch fires and exits nonzero (rc=$rc)"
+    elif [ -n "$red_line" ] && printf '%s\n' "$red_line" | grep -q 'note .*red control'; then
+        echo "ppu-aligned-new-threshold: FAIL self-test: red-control was a SOFT SKIP (the FAIL branch is unreachable)"
+        printf '%s\n' "$red_line" | sed 's/^/    /'
+        status=1
+    else
+        echo "ppu-aligned-new-threshold: FAIL self-test: no red-control line in the self-test run (rc=$rc)"
+        printf '%s\n' "$out" | tail -n 6 | sed 's/^/    /'
+        status=1
+    fi
+fi
 
 [ $status -eq 0 ] && echo "ppu-aligned-new-threshold: PASS"
 exit $status
