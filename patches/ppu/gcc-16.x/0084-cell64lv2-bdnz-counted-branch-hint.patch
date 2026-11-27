@@ -81,14 +81,14 @@ emitted bdnz/bdz is byte-for-byte unchanged.
 +  if (get_attr_length (insn) == 4)
 +    {
 +      static char buf[64];
-+      sprintf (buf, "<bd>%s %l0", rs6000_bdnz_hint (insn, false));
++      sprintf (buf, "<bd>%s %%l0", rs6000_bdnz_hint (insn, false));
 +      return buf;
 +    }
    else
 -    return "<bd_neg> $+8\;b %l0";
 +    {
 +      static char buf[64];
-+      sprintf (buf, "<bd_neg>%s $+8\\;b %l0", rs6000_bdnz_hint (insn, true));
++      sprintf (buf, "<bd_neg>%s $+8\\;b %%l0", rs6000_bdnz_hint (insn, true));
 +      return buf;
 +    }
  }

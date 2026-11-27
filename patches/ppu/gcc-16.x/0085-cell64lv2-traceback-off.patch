@@ -8,10 +8,11 @@ of each function's .text) is emitted by rs6000-logue.cc:5290 when:
      && rs6000_traceback != traceback_none
      && !cfun->is_thunk
 
-For the PS3 target the default ABI is AIX (set by the linux64 override),
-and on Cell LV2 userspace the kernel never reads the AIX tbtab; the
-backtrace walk is driven by .debug_frame / the CFA, not by the tbtab.
-The table is 8+ bytes of dead weight per function.
+For the PS3 target the default ABI is AIX (set by the linux64 override).
+Nothing in this toolchain tree reads the AIX tbtab at runtime, and the
+backtracer we ship (GDB) walks .debug_frame / the CFA rather than the
+tbtab.  The table is therefore 8+ bytes of weight per function for our
+current consumers.
 
 rs6000.opt initialises rs6000_traceback to traceback_default (the
 "unspecified by the user" sentinel); -mtraceback=full|part|no override it.
