@@ -57,7 +57,7 @@ install_tool() {
 build_rust_workspace() {
     say "building Rust workspace (release)"
     bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
-    cargo build --release --workspace --manifest-path "$TOOLS_DIR/Cargo.toml"
+    cargo build --locked --release --workspace --manifest-path "$TOOLS_DIR/Cargo.toml"
 
     local out="$TOOLS_DIR/target/release"
     local bin

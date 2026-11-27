@@ -68,7 +68,7 @@ install_with_legacy() {
 NIDGEN_BIN="$(nidgen_bin "$PS3_TOOLCHAIN_ROOT")"  # honours CARGO_TARGET_DIR, as cargo does
 say "building nidgen (release)"
 bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
-cargo build --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
+cargo build --locked --release --manifest-path "$PS3_TOOLCHAIN_ROOT/tools/nidgen/Cargo.toml"
 [[ -x "$NIDGEN_BIN" ]] || die "release nidgen missing after cargo build: $NIDGEN_BIN"
 
 # Stub-archive YAMLs.  One entry per zero-PSL1GHT-coverage library.

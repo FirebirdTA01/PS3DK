@@ -150,7 +150,7 @@ jobs:
 
       - name: Build Rust workspace (release)
         working-directory: tools
-        run: cargo build --release --workspace
+        run: cargo build --locked --release --workspace
 
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
@@ -986,6 +986,19 @@ jobs:
         with:
           name: host-tools-windows-x86_64
           path: artifacts/host-tools-windows
+
+      - name: Refuse a dirty release version
+        # A tag or candidate build must name its assets exactly: a build
+        # step that rewrote a tracked file (as a stale tools/Cargo.lock did
+        # for v0.29.0) makes version.sh append +dirty.
+        if: github.event_name == 'push' || inputs.candidate_tag != ''
+        run: |
+          version="$(./scripts/version.sh --format=plain)"
+          if [[ "$version" == *+dirty* ]]; then
+            echo "::error::version.sh says $version: a build step changed tracked files"
+            git status --short | head -20
+            exit 1
+          fi
 
       - name: Stage 2 — package Windows release zip
         run: |

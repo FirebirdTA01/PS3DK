@@ -477,7 +477,7 @@ build_rust_tools() {
 
     bash "$PS3_TOOLCHAIN_ROOT/scripts/check-rust-version.sh"
     (cd "$PS3_TOOLCHAIN_ROOT/tools" && \
-        cargo build --release --workspace --target x86_64-pc-windows-gnu)
+        cargo build --locked --release --workspace --target x86_64-pc-windows-gnu)
 
     local rust_out="$PS3_TOOLCHAIN_ROOT/tools/target/x86_64-pc-windows-gnu/release"
     # Stage whatever the workspace actually produced, rather than a hardcoded
