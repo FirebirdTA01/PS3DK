@@ -1,0 +1,59 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: raise the aligned-new threshold to the target biggest alignment (16 bytes)
+
+The ordinary _mallocr on this target already returns 16-byte-aligned
+blocks: newlib patch 0015 sets _mallocr's MALLOC_ALIGNMENT to 16, and
+the size/split math carries that alignment -- chunk2mem is aligned
+when the heap is acquired, and allocated-and-split sizes are rounded,
+realloc included.  (vec_malloc is a separate API, _memalign_r(...,16,
+...), and vec_mallocr's MINSIZE is sizeof(struct malloc_chunk), 32
+under LP64, not a fixed 16; neither is the guarantee.)
+rs6000.h nonetheless hardcodes MALLOC_ABI_ALIGNMENT to 64, a
+conservative word-sized default shared across the PowerPC family.  That
+value feeds both the C++ aligned-new threshold, which the compiler
+derives as
+
+    aligned_new_threshold = malloc_alignment() / BITS_PER_UNIT
+      = MAX(max_align_t_align(), MALLOC_ABI_ALIGNMENT) / BITS_PER_UNIT,
+
+and the compiler's model of what malloc returns; with the threshold at
+8 bytes every 'new' of a type with a 16-byte-aligned member -- anything
+holding a vector, or a 16-byte-aligned field -- called the aligned
+operator new, even though the ordinary allocator already served a
+16-byte-aligned block.
+
+Raise the promise in the target header (last in the tm_file chain, so
+this define overrides the 64 in rs6000.h and the BITS_PER_WORD default
+in defaults.h).  128 is the target's BIGGEST_ALIGNMENT expressed in
+bits, and it is the exact value the aligned-new dispatch and the
+__STDCPP_DEFAULT_NEW_ALIGNMENT__ predefine use in both data models.
+
+A custom malloc replacement must also return 16-byte-aligned blocks:
+the compiler now assumes 16-byte alignment for malloc, calloc, realloc,
+strdup and strndup.
+
+Behaviour change for code that overloaded the aligned operator new and
+relied on 16-byte-aligned types reaching it: every such type now
+resolves to plain operator new.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -562,3 +562,18 @@
+ /* IEEE 128-bit emulator type handling.  */
+ #undef	TARGET_FLOAT128_ENABLE_TYPE
+ #define TARGET_FLOAT128_ENABLE_TYPE 1
++
++/* The ordinary _mallocr already returns 16-byte-aligned blocks
++   (newlib patch 0015 sets _mallocr's MALLOC_ALIGNMENT to 16, and the
++   size/split math carries that alignment; realloc included).
++   rs6000.h nonetheless fixes MALLOC_ABI_ALIGNMENT at 64 bits, which
++   sets both the C++ aligned-new threshold
++   ( MAX(max_align_t_align(), MALLOC_ABI_ALIGNMENT) / 8 ) and the
++   compiler's model of malloc's guarantee; at 8 every 'new' of a type
++   with a 16-byte-aligned member called the aligned operator new.
++   Raise the promise to the target's biggest alignment (128 bits) so
++   plain operator new serves those types.  A custom malloc replacement
++   must also return 16-byte-aligned blocks, because the compiler now
++   assumes it for malloc/calloc/realloc/strdup/strndup.  */
++#undef MALLOC_ABI_ALIGNMENT
++#define MALLOC_ABI_ALIGNMENT 128

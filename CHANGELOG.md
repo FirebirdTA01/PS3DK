@@ -21,6 +21,32 @@ The version stamped into builds is generated from the most recent
 - **`librt` is built with `-O2`.** The pthread layer, the system-call
   wrappers and the errno mapping in `librt.a` (and the opt-in
   `librt_profwait.a`) were compiled without optimisation.
+- PPU target (cell64lv2): `MALLOC_ABI_ALIGNMENT` is now 128 bits
+  (was 64) — the C++ `__STDCPP_DEFAULT_NEW_ALIGNMENT__` predefine
+  and the aligned-new dispatch threshold both now match the
+  target's largest type, a 16-byte VMX quadword. The ordinary
+  `_mallocr` on this target already returns 16-byte-aligned blocks
+  (newlib patch 0015 sets its `MALLOC_ALIGNMENT` to 16, and the
+  size/split math carries that alignment — `chunk2mem` is aligned at
+  heap acquisition and sizes/splits are rounded, `realloc` included);
+  `vec_malloc` is a separate API (`_memalign_r(...,16,...)`) and
+  `vec_mallocr`'s `MINSIZE` is `sizeof(struct malloc_chunk)` (32 under
+  LP64), neither of which is the guarantee. `BIGGEST_ALIGNMENT` is
+  128 bits, so the previous 8-byte threshold was understating the
+  promise and made every `new` of a type holding a vector (or any
+  16-byte-aligned field) call the aligned `operator new` — now they
+  use plain `operator new` in both ILP32 and LP64. Behaviour change
+  for code that overloaded the aligned operator new and relied on
+  16-byte-aligned types reaching it. Note that this is also a broader
+  allocator ABI promise: the compiler now assumes 16-byte alignment
+  for `malloc`, `calloc`, `realloc`, `strdup` and `strndup`, so a
+  custom `malloc` replacement must return 16-byte-aligned blocks.
+  On the console, `ppu-codegen-workload`'s cxx-objects phase measured
+  +0.99% fps against the v0.29.0 baseline, but the import stubs and
+  other phases varied by up to ±2.4%; the A/B should be read as mixed
+  measured evidence, not an isolated speedup. The console
+  malloc-alignment probe (2322 results, 0 misaligned, 0 null) passed
+  in both ILP32 and LP64.
 
 ## [v0.29.0] — 2026-11-26
 
