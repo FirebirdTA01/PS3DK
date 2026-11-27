@@ -181,7 +181,9 @@ uint32_t k_micro_lanes(uint32_t (*rng)())
 uint32_t k_micro_imports(uint32_t (*rng)())
 {
 	(void)rng;
-	static sys_lwmutex_t mtx;
+	// Own cache line: the timing must not depend on what else the linker
+	// places next to the mutex (its line holds the lock reservation).
+	alignas(128) static sys_lwmutex_t mtx;
 	static bool made = false;
 	if (!made) {
 		sys_lwmutex_attribute_t attr;
