@@ -730,8 +730,9 @@ jobs:
       - name: Build sprx-linker
         run: make -C tools/sprx-linker
 
-      # Calls to tail-call import stubs (ILP32 and LP64) get their TOC
-      # restore with or without --lp64; calls to older ILP32 wrapping stubs
+      # Calls to tail-call import stubs get their TOC restore at the
+      # stub's width (lwz after an ILP32 stw stub, ld after an LP64 std
+      # stub) with or without --lp64; calls to older ILP32 wrapping stubs
       # are never touched.
       - name: Test sprxlinker TOC restores
         run: bash tests/sdk/sprxlinker-toc-restore-test.sh

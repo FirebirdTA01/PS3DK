@@ -265,12 +265,12 @@ function NID, then writes the resolved function descriptor EA into the matching
 The trampoline then loads that descriptor EA and jumps through the same compact
 two-word descriptor contract used by normal C function-pointer calls.
 
-A compact-descriptor import trampoline (current `tools/nidgen` shape for
-both ILP32 and LP64) does:
+A compact-descriptor import trampoline (current `tools/nidgen` shape;
+ILP32 shown, LP64 uses `std` for the save) does:
 
 ```asm
 __<name>:
-    std    r2, 40(r1)               ; caller TOC, restored at the call site
+    stw    r2, 40(r1)               ; caller TOC word, restored at the call site
     lis    r12, <name>_stub@ha
     lwz    r12, <name>_stub@l(r12)  ; resolved descriptor EA from .data.sceFStub
     lwz    r0, 0(r12)               ; entry EA (compact OPD slot 0)
@@ -279,10 +279,11 @@ __<name>:
     bctr                             ; tail-call into SPRX
 ```
 
-The TOC save is an 8-byte `std` in both data models: the PPU runs with
-64-bit registers and `sp+40` is the caller's TOC-save doubleword.
-`sprxlinker` rewrites the `nop` after each `bl` to the stub into
-`ld r2,40(r1)`. The trampoline must not allocate a frame because SPRX
+The TOC save width follows the data model's TOC-save slot at `sp+40`:
+ILP32 saves a 4-byte word with `stw`, the same word the ILP32
+indirect-call sequence saves and reloads, and LP64 saves the doubleword
+with `std`. `sprxlinker` rewrites the `nop` after each `bl` to the stub
+into the matching restore, `lwz r2,40(r1)` or `ld r2,40(r1)`. The trampoline must not allocate a frame because SPRX
 exports with more than eight arguments read their stack-spilled arguments
 from the incoming caller frame. See `docs/abi/cellos-lv2-abi-spec.md §5.1`
 for the full contract.

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # sprxlinker gives every call to a tail-call import stub its TOC restore, with
 # or without --lp64, and never touches a call to an older ILP32 wrapping stub.
-# (Current stub archives emit the tail-call form for ILP32 too; the "LP64
-# stub" fixture below is that shared form, the "ILP32 stub" fixture is the
-# older wrapping form.)
+# The restore matches the stub's save width: an ILP32 tail-call stub saves the
+# 4-byte word (stw r2,40(r1)) and its callers get lwz r2,40(r1); an LP64 stub
+# saves the doubleword (std r2,40(r1)) and its callers get ld r2,40(r1).  The
+# "ILP32 stub" fixture below is the older wrapping form; "STW stub" is the
+# current ILP32 tail-call form.
 #
 # An LP64 import stub saves r2 and tail-calls the export (std r2,40(r1) ...
 # bctr), so the caller must reload its TOC: the nop after the bl has to become
@@ -22,6 +24,12 @@
 #   noslot an LP64 call followed by an instruction that is not a nop, or in
 #          the last word of .text (an ILP32 call there is left alone): exit 1,
 #          the call's address named.
+#   stw    calls to the STW stub get lwz, an LP64 call in the same file gets
+#          ld, a call already restored with lwz is untouched; a second run
+#          changes nothing.
+#   stwwide / stdnarrow  a restore of the wrong width already in the slot
+#          (ld after an STW stub, lwz after an LP64 stub): exit 1.
+#   stwnoslot  an STW-stub call followed by a non-nop: exit 1.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -45,14 +53,19 @@ LP64_STUB = [0xf8410028, 0x3d800002, 0x818c0100, 0x800c0000,
 ILP32_STUB = [0x7c0802a6, 0x90010018, 0x90410028, 0x3d800002, 0x818c0104,
               0x800c0000, 0x804c0004, 0x7c0903a6, 0x4e800421, 0x80410028,
               0x80010018, 0x7c0803a6, 0x4e800020]
+# ILP32 tail-call stub: save the 4-byte r2 word, load the descriptor, tail-call.
+STW_STUB = [0x90410028, 0x3d800002, 0x818c0108, 0x800c0000,
+            0x804c0004, 0x7c0903a6, 0x4e800420]
+LWZ_R2 = 0x80410028
 LP64_AT = STUBS
 ILP32_AT = STUBS + 4 * len(LP64_STUB)
+STW_AT = ILP32_AT + 4 * len(ILP32_STUB)
 
 def bl(pc, target):
     return 0x48000001 | ((target - pc) & 0x03fffffc)
 
 def write_elf(path, text):
-    stubs = LP64_STUB + ILP32_STUB
+    stubs = LP64_STUB + ILP32_STUB + STW_STUB
     tb = b"".join(struct.pack(">I", w) for w in text)
     sb = b"".join(struct.pack(">I", w) for w in stubs)
     # .sys_proc_prx_param: size 0x40 and the magic, as the link writes it.
@@ -92,6 +105,14 @@ write_elf(work + "/noslot.elf", text_of([(LP64_AT, NOP), (LP64_AT, 0x60210000)])
 # The call is the last word of .text: no slot after it at all.
 write_elf(work + "/lastlp64.elf", [BLR, bl(TEXT + 4, LP64_AT)])
 write_elf(work + "/lastilp32.elf", [BLR, bl(TEXT + 4, ILP32_AT)])
+# stw: ILP32 tail-call calls get lwz r2,40(r1); the LP64 call still gets ld;
+# a call already restored with lwz is untouched.
+write_elf(work + "/stw.elf", text_of([(STW_AT, NOP), (LP64_AT, NOP), (STW_AT, LWZ_R2)]))
+write_elf(work + "/stw.want", text_of([(STW_AT, LWZ_R2), (LP64_AT, LD_R2), (STW_AT, LWZ_R2)]))
+# Mismatched restore widths and a non-nop slot after an stw stub: refused.
+write_elf(work + "/stwwide.elf", text_of([(STW_AT, NOP), (STW_AT, LD_R2)]))
+write_elf(work + "/stdnarrow.elf", text_of([(LP64_AT, NOP), (LP64_AT, LWZ_R2)]))
+write_elf(work + "/stwnoslot.elf", text_of([(STW_AT, NOP), (STW_AT, 0x60210000)]))
 EOF
 
 run() {  # <fixture> <out> [flag]; prints the exit status
@@ -142,5 +163,34 @@ rc="$(run lastilp32 lastilp32.out)"
 [[ "$rc" -eq 0 ]] || fail "lastilp32: exit $rc ($(head -1 "$work/lastilp32.out.log"))"
 cmp -s "$work/lastilp32.out" "$work/lastilp32.elf" || fail "lastilp32: an ILP32 call in the last word was changed"
 printf '  ok: an ILP32 call in the last word is byte-identical\n'
+
+# ---- stw: ILP32 tail-call stubs get the 4-byte restore ---------------------
+for flag in "" "--lp64"; do
+    rc="$(run stw "stw${flag}.out" "$flag")"
+    [[ "$rc" -eq 0 ]] || fail "stw ${flag:-(no flag)}: exit $rc ($(head -1 "$work/stw${flag}.out.log"))"
+    cmp -s "$work/stw${flag}.out" "$work/stw.want" \
+        || fail "stw ${flag:-(no flag)}: stw-stub calls must get lwz r2,40(r1), std-stub calls ld r2,40(r1) ($(cmp "$work/stw${flag}.out" "$work/stw.want" | head -1))"
+    printf '  ok: stw %s: stw-stub calls restored with lwz, std-stub call with ld\n' "${flag:-(no flag)}"
+done
+cp "$work/stw.out" "$work/stw.again"
+"$sprxlinker" "$work/stw.again" > "$work/stwagain.log" 2>&1 || fail "stw second run: exit $? ($(head -1 "$work/stwagain.log"))"
+cmp -s "$work/stw.again" "$work/stw.want" || fail "stw: a second run changed the file"
+printf '  ok: stw: a second run changes nothing\n'
+
+# ---- mismatched restore widths and a non-nop slot: refused -----------------
+for case in stwwide stdnarrow; do
+    rc="$(run "$case" "$case.out")"
+    [[ "$rc" -eq 1 ]] || fail "$case: expected exit 1, got $rc"
+    grep -qF 'import call at 0x10008' "$work/$case.out.log" \
+        || fail "$case: expected the call at 0x10008 named, got $(head -1 "$work/$case.out.log")"
+    grep -qF 'does not match' "$work/$case.out.log" \
+        || fail "$case: expected a width-mismatch message, got $(head -1 "$work/$case.out.log")"
+    printf '  ok: %s refused, call at 0x10008 named\n' "$case"
+done
+rc="$(run stwnoslot stwnoslot.out)"
+[[ "$rc" -eq 1 ]] || fail "stwnoslot: expected exit 1, got $rc"
+grep -qF 'import call at 0x10008 is followed by 0x60210000, not a nop' "$work/stwnoslot.out.log" \
+    || fail "stwnoslot: expected the call at 0x10008 named, got $(head -1 "$work/stwnoslot.out.log")"
+printf '  ok: stwnoslot refused, call at 0x10008 named\n'
 
 echo "sprxlinker-toc-restore: PASS"

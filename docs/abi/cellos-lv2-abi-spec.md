@@ -328,23 +328,34 @@ are dispatched through per-export trampolines emitted into
 `sprx/common/exports.S` macro for legacy archives that have not been
 folded into the nidgen flow yet).
 
-Both data models use the same frame-less trampoline, so SPRX exports
-with more than eight arguments see the caller's original
-stack-argument area: a bare `bctr` tail-call form that defers TOC
-restoration to the call-site nop slot, which `sprxlinker` rewrites to
-`ld r2,40(r1)`.  ILP32 used a wrapping `bctrl` form until it moved to
-the tail-call form; ELFs linked against those older stub archives
-still run and are left alone by sprxlinker.  sprxlinker
-picks the calls from the stub shape (a stub that starts with
-`std r2,40(r1)` and ends in `bctr`), so `--lp64` is not needed; it is
-still accepted and changes nothing.  A call to such a stub followed by
-anything other than a nop or `ld r2,40(r1)` is refused.
+Both data models use a frame-less trampoline, so SPRX exports with
+more than eight arguments see the caller's original stack-argument
+area: a bare `bctr` tail-call form that defers TOC restoration to the
+call-site nop slot.  The TOC save and restore width follows the data
+model's TOC-save slot at `40(r1)`: ILP32 saves a 4-byte word
+(`stw r2,40(r1)`) and `sprxlinker` rewrites the nop to
+`lwz r2,40(r1)`; LP64 saves the doubleword (`std r2,40(r1)`) and the
+nop becomes `ld r2,40(r1)`.  The ILP32 width is not optional: the
+compiler's ILP32 indirect-call sequence saves and reloads r2 there as a
+4-byte word, and sprxlinker only rewrites direct `bl` calls, so a call
+that reaches an import through a function pointer relies on the stub
+writing the same word.  An 8-byte `std` would put the zero high word
+at `40(r1)` and such a caller would reload r2 = 0.
 
-Normative trampoline body (per export, ILP32 and LP64):
+ILP32 used a wrapping `bctrl` form until it moved to the tail-call
+form; ELFs linked against those older stub archives still run and are
+left alone by sprxlinker.  sprxlinker picks the calls from the stub
+shape (a stub that starts with `stw r2,40(r1)` or `std r2,40(r1)` and
+ends in `bctr`), so `--lp64` is not needed; it is still accepted and
+changes nothing.  A call to such a stub followed by anything other than
+a nop or the matching-width restore is refused, including a restore of
+the other width.
+
+Normative trampoline body (per export; ILP32 uses `stw`, LP64 `std`):
 
 ```asm
 __<name>:
-    std    r2, 40(r1)           ; caller TOC, restored at call site
+    stw    r2, 40(r1)           ; ILP32 (LP64: std r2, 40(r1)); restored at call site
     lis    r12, <name>_stub@ha
     lwz    r12, <name>_stub@l(r12) ; 32-bit compact descriptor EA
     lwz    r0, 0(r12)           ; SPRX entry EA (compact OPD slot 0)
@@ -361,12 +372,12 @@ Normative rules:
    area; moving `r1` makes the callee read trampoline-frame garbage.
 2. **No LR save in the trampoline.**  The SPRX returns straight to
    the caller through the LR the caller's `bl` set.
-3. **Caller TOC save is `std r2,40(r1)` in both data models.**  The
-   PPU runs with 64-bit registers and `sp+40` is the 8-byte TOC-save
-   doubleword of the caller's frame header.
+3. **Caller TOC save width follows the data model.**  ILP32 saves
+   `stw r2,40(r1)`, the same 4-byte word the ILP32 indirect-call
+   sequence saves and reloads; LP64 saves `std r2,40(r1)`.
 4. **Tail-call form** uses `bctr`, not `bctrl`.  The caller-side
    post-call restore is the call-site nop, rewritten by sprxlinker to
-   `ld r2,40(r1)` for both data models.
+   `lwz r2,40(r1)` (ILP32) or `ld r2,40(r1)` (LP64).
 5. **Compact OPD descriptor read** at `lwz r0, 0(r12); lwz r2,
    4(r12)` — the `.data.sceFStub` slot was written by the loader
    with the resolved 8-byte compact OPD address.

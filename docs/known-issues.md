@@ -344,7 +344,7 @@ local anchor other than the baseline.
 
 **Status:** fixed 2026-04-27 in `tools/nidgen/src/stubgen.rs` with a
 frame-less wrapping shape.  Superseded: `sprxlinker` now rewrites the
-post-`bl` `nop` to `ld r2,40(r1)` for every call to a tail-call stub, so
+post-`bl` `nop` to the TOC restore for every call to a tail-call stub, so
 both ILP32 and LP64 stubs use the frame-less `bctr` tail-call form (see
 "Current shape" below).  The history below is kept because the
 frame-less rule is load-bearing and easy to regress.
@@ -393,9 +393,9 @@ mtlr   0
 blr
 ```
 
-**Current shape — frame-less tail call (ILP32 and LP64).**
+**Current shape — frame-less tail call (ILP32 shown; LP64 saves with `std`).**
 ```asm
-std    2, 40(1)        ; save caller TOC in standard slot
+stw    2, 40(1)        ; save caller TOC word in standard slot
 lis    12, slot@ha
 lwz    12, slot@l(12)
 lwz    0, 0(12)        ; SPRX entry EA
@@ -405,18 +405,23 @@ bctr                   ; tail-call SPRX; it returns straight to the caller
 ```
 
 `sprxlinker` finds every `bl` to a stub of this shape and rewrites the
-`nop` after it to `ld r2,40(r1)`, which supplies the caller-side TOC
-restore the wrapping shape used to do itself.  It refuses a call to such
-a stub that is followed by anything other than a `nop` (or an existing
-`ld r2,40(r1)`).
+`nop` after it to the matching restore (`lwz r2,40(r1)` after a `stw`
+stub, `ld r2,40(r1)` after a `std` stub), which supplies the caller-side
+TOC restore the wrapping shape used to do itself.  It refuses a call to
+such a stub that is followed by anything other than a `nop` or an
+existing restore of the matching width.
 
 Key invariants — break any of them and one class of caller starts
 crashing again:
 
 - **No `stwu`/`stdu`.**  SP unchanged across the dispatch so the SPRX
   finds caller-passed stack args at `caller_sp+112+`.
-- **`r2` save at `sp+40` with `std`.**  Standard ELFv1 TOC save
-  doubleword, untouched by the SPRX, in both data models.
+- **`r2` save at `sp+40` at the data model's width.**  ILP32 must use
+  `stw`: the ILP32 indirect-call sequence saves and reloads r2 there as
+  a 4-byte word and `sprxlinker` cannot rewrite indirect calls, so an
+  8-byte `std` would leave the zero high word at `sp+40` and a caller
+  that reached the import through a function pointer would reload
+  r2 = 0.  LP64 uses `std`.
 - **The post-`bl` `nop` must reach `sprxlinker`.**  Without the rewrite,
   `r2` holds the SPRX TOC after return.
 

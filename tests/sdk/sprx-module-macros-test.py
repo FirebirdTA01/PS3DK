@@ -12,8 +12,8 @@ Validates that:
 5. .ps3dk.module_identity section contains the exact PMI\\1 record and
    module_start / module_stop symbols are bound to the custom handlers.
 6. ps3_prx_stub_library defaults to the correct ABI matching the toolchain
-   (both ABIs now emit the std/bctr caller-restore tail-call stub),
-   and respects explicit ABI overrides.
+   (ILP32: stw/bctr tail-call stub; LP64: std/bctr tail-call stub, each
+   rejected under the other ABI), and respects explicit ABI overrides.
 """
 
 import argparse
@@ -170,19 +170,43 @@ def verify_stub_archive(objdump: Path, archive_path: Path, expected_abi: str):
     has_bctr = any(line.strip().endswith("bctr") for line in disasm.splitlines())
     has_blr = any(line.strip().endswith("blr") for line in disasm.splitlines())
 
-    if expected_abi in ("lp64", "ilp32"):
-        # Both ABIs: nidgen std/bctr caller-restore tail-call stub
-        if not (has_std and has_bctr and not has_bctrl and not has_stw and not has_lwz and not has_blr):
-            return False, (
-                f"Expected {expected_abi.upper()} stub (std/bctr) in {archive_path}:\n"
-                f"  has_std={has_std}, has_bctr={has_bctr}, has_bctrl={has_bctrl}, "
-                f"has_stw={has_stw}, has_lwz={has_lwz}, has_blr={has_blr}\n"
-                f"Disassembly excerpt:\n{disasm[:1000]}"
-            )
+    if expected_abi == "lp64":
+        # LP64: nidgen std/bctr caller-restore tail-call stub
+        ok = has_std and has_bctr and not has_bctrl and not has_stw and not has_lwz and not has_blr
+        shape = "std/bctr"
+    elif expected_abi == "ilp32":
+        # ILP32: nidgen stw/bctr caller-restore tail-call stub (4-byte TOC
+        # save word, matching the ILP32 indirect-call save at 40(r1))
+        ok = has_stw and has_bctr and not has_bctrl and not has_std and not has_lwz and not has_blr
+        shape = "stw/bctr"
     else:
         return False, f"Unknown expected ABI: {expected_abi}"
+    if not ok:
+        return False, (
+            f"Expected {expected_abi.upper()} stub ({shape}) in {archive_path}:\n"
+            f"  has_std={has_std}, has_stw={has_stw}, has_bctr={has_bctr}, "
+            f"has_bctrl={has_bctrl}, has_lwz={has_lwz}, has_blr={has_blr}\n"
+            f"Disassembly excerpt:\n{disasm[:1000]}"
+        )
     return True, disasm
 
+
+def verify_stub_archive_abi(objdump: Path, archive_path: Path, expected_abi: str):
+    """Accept the expected ABI's stub shape and reject the other ABI's.
+
+    The negative control makes a swapped or ignored ABI selection fail even
+    if the positive check were ever loosened."""
+    ok, detail = verify_stub_archive(objdump, archive_path, expected_abi)
+    if not ok:
+        return False, detail
+    wrong_abi = "ilp32" if expected_abi == "lp64" else "lp64"
+    wrong_ok, _ = verify_stub_archive(objdump, archive_path, wrong_abi)
+    if wrong_ok:
+        return False, (
+            f"Negative control failed: {archive_path} also matches the "
+            f"{wrong_abi.upper()} stub shape"
+        )
+    return True, detail
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -314,7 +338,7 @@ def main():
                 print(f"FAIL: {stub_lib} not found")
                 return 1
 
-            ok, disasm_or_err = verify_stub_archive(objdump, stub_lib, abi)
+            ok, disasm_or_err = verify_stub_archive_abi(objdump, stub_lib, abi)
             if not ok:
                 print(f"FAIL: stub archive ABI check ({abi}) failed:\n{disasm_or_err}")
                 return 1
@@ -358,7 +382,7 @@ ps3_prx_stub_library(stub_override_ilp32
             return 1
 
         lp64_ov_archive = bdir_ov_ilp32 / "stub_override_lp64" / "libsample_module_export_stub.a"
-        ok, err = verify_stub_archive(objdump, lp64_ov_archive, "lp64")
+        ok, err = verify_stub_archive_abi(objdump, lp64_ov_archive, "lp64")
         if not ok:
             print(f"FAIL: explicit ABI lp64 override under ILP32 toolchain failed:\n{err}")
             return 1
@@ -384,7 +408,7 @@ ps3_prx_stub_library(stub_override_ilp32
             return 1
 
         ilp32_ov_archive = bdir_ov_lp64 / "stub_override_ilp32" / "libsample_module_export_stub.a"
-        ok, err = verify_stub_archive(objdump, ilp32_ov_archive, "ilp32")
+        ok, err = verify_stub_archive_abi(objdump, ilp32_ov_archive, "ilp32")
         if not ok:
             print(f"FAIL: explicit ABI ilp32 override under LP64 toolchain failed:\n{err}")
             return 1

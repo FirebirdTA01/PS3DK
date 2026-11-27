@@ -70,12 +70,16 @@ fn screenshot_yaml_renders_complete_cell_sdk_stub() {
         assert!(asm.contains(nid), "missing nid value {nid} for {name}");
     }
 
-    // Trampoline body must be the frame-less tail-call form: save the
-    // caller TOC with std at sp+40 and bctr (sprx-linker restores r2 at
-    // the call site), with no LR save and no stwu/stdu of SP.
+    // Trampoline body must be the frame-less ILP32 tail-call form: save
+    // the caller TOC word with stw at sp+40 and bctr (sprx-linker restores
+    // r2 with lwz at the call site), with no LR save and no stwu/stdu of SP.
     assert!(
-        asm.contains("__cellScreenShotEnable:\n\tstd    2,40(1)\n"),
-        "trampoline must start by saving caller TOC at sp+40"
+        asm.contains("__cellScreenShotEnable:\n\tstw    2,40(1)\n"),
+        "trampoline must start by saving caller TOC word at sp+40"
+    );
+    assert!(
+        !asm.contains("\tstd "),
+        "ILP32 trampoline must not use an 8-byte std"
     );
     assert!(asm.contains("bctr"), "trampoline must tail-call with bctr");
     assert!(
