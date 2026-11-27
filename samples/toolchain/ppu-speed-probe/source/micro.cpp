@@ -32,6 +32,10 @@ v4si g_vec[N / 4];
 // call path rather than on the kernel.
 bool g_filled = false;
 
+// Both outcomes of each lane test must occur in the inputs (checked by
+// k_micro_lanes), or the kernel would time a branch that never goes one way.
+uint32_t g_l2_hit = 0, g_l2_miss = 0, g_l0_hit = 0, g_l0_miss = 0;
+
 void fill(uint32_t (*rng)())
 {
 	if (g_filled)
@@ -45,12 +49,25 @@ void fill(uint32_t (*rng)())
 		g_u32b[i] = rng();
 		g_trip[i] = (uint8_t)(1 + (r >> 30)); // 1..4
 	}
+	// Lane values 0..15 from the generator's high bits (its low bits have a
+	// short period, which left some lane values unreachable).
 	for (int i = 0; i < N / 4; i++) {
-		v4si v = { g_w32[4 * i] & 15, g_w32[4 * i + 1] & 15, g_w32[4 * i + 2] & 15,
-		           g_w32[4 * i + 3] & 15 };
+		int32_t l0 = (int32_t)(rng() >> 16) & 15, l1 = (int32_t)(rng() >> 16) & 15;
+		int32_t l2 = (int32_t)(rng() >> 16) & 15, l3 = (int32_t)(rng() >> 16) & 15;
+		v4si v = { l0, l1, l2, l3 };
 		g_vec[i] = v;
+		g_l2_hit += l2 == 7;
+		g_l2_miss += l2 != 7;
+		g_l0_hit += l0 >= 11;
+		g_l0_miss += l0 < 11;
 	}
 }
+
+// A compiler barrier before each timed call: the kernels only read memory,
+// so without it the compiler may treat a call as pure and run it once for
+// all repetitions.  The barrier says memory may have changed, which keeps
+// every repetition a real call without changing the kernel's own code.
+inline void reload_barrier() { __asm__ __volatile__("" ::: "memory"); }
 
 uint32_t mix(uint32_t h, uint32_t v) { return (h ^ v) * 16777619u; }
 
@@ -132,8 +149,10 @@ uint32_t k_micro_sext(uint32_t (*rng)())
 {
 	fill(rng);
 	uint32_t h = 2166136261u;
-	for (int r = 0; r < 16; r++)
+	for (int r = 0; r < 16; r++) {
+		reload_barrier();
 		h = mix(h, (uint32_t)sext_sum(g_h16, g_w32, N));
+	}
 	return h;
 }
 
@@ -141,8 +160,10 @@ uint32_t k_micro_flags(uint32_t (*rng)())
 {
 	fill(rng);
 	uint32_t h = 2166136261u;
-	for (int r = 0; r < 16; r++)
+	for (int r = 0; r < 16; r++) {
+		reload_barrier();
 		h = mix(h, flag_tests(g_u32a, N));
+	}
 	return h;
 }
 
@@ -162,17 +183,23 @@ uint32_t k_micro_shortloops(uint32_t (*rng)())
 {
 	fill(rng);
 	uint32_t h = 2166136261u;
-	for (int r = 0; r < 16; r++)
+	for (int r = 0; r < 16; r++) {
+		reload_barrier();
 		h = mix(h, short_loops(g_trip, g_u32a, N));
+	}
 	return h;
 }
 
 uint32_t k_micro_lanes(uint32_t (*rng)())
 {
 	fill(rng);
+	if (!g_l2_hit || !g_l2_miss || !g_l0_hit || !g_l0_miss)
+		return 0; /* a zero sum flags inputs that miss an outcome */
 	uint32_t h = 2166136261u;
-	for (int r = 0; r < 64; r++)
+	for (int r = 0; r < 64; r++) {
+		reload_barrier();
 		h = mix(h, lane_tests(g_vec, N / 4));
+	}
 	return h;
 }
 
