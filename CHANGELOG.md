@@ -21,9 +21,6 @@ The version stamped into builds is generated from the most recent
 - **`librt` is built with `-O2`.** The pthread layer, the system-call
   wrappers and the errno mapping in `librt.a` (and the opt-in
   `librt_profwait.a`) were compiled without optimisation.
-
-### Changed (PPU aligned-new dispatch)
-
 - PPU target (cell64lv2): `MALLOC_ABI_ALIGNMENT` is now 128 bits
   (was 64) — the C++ `__STDCPP_DEFAULT_NEW_ALIGNMENT__` predefine
   and the aligned-new dispatch threshold both now match the
