@@ -1,0 +1,45 @@
+From: PS3 Custom Toolchain
+Subject: [PATCH] cell64lv2: raise the branch cost to 8
+
+rs6000.h:1000 sets BRANCH_COST to 3: "roughly the average cost of an
+unscheduled conditional branch", tuned for an out-of-order POWER core.
+The Cell PPU is in-order with a long pipeline: a mispredicted branch
+costs more than on the cores that default was set for, while the
+branch-free substitutes the middle end can generate (if-conversion,
+conditional moves, count/sel/shift idioms) are no harder to issue here
+than a taken branch.  With BRANCH_COST at 3 the if-converter
+(ifcvt.cc), jump-eliminator (dojump.cc), expression matcher (expmed.cc)
+and optabs (optabs.cc) see only a thin edge and keep the taken branch
+when a branch-free idiom was available, so code that stores comparison
+results, takes a min/max, or does branchy integer arithmetic was
+compiled with the branch instead of the arithmetic/SEL/CTLZ form.
+
+Raise BRANCH_COST to 8 in the target header.  cell64lv2.h is last in
+the tm_file chain for powerpc64-ps3-elf, and defaults.h guards with
+ifndef, so this override wins over rs6000.h's 3 and the 1-bit fallback.
+LOGICAL_OP_NON_SHORT_CIRCUIT is left at its existing default
+(0): it is a separate override for an orthogonal short-circuiting cost
+issue and is not the right knob here.
+
+Behaviour: slightly more code in branchy integer code; possibly a few
+more registers live across a converted branch; small .text increase.
+
+--- a/gcc/config/rs6000/cell64lv2.h
++++ b/gcc/config/rs6000/cell64lv2.h
+@@ -577,3 +577,16 @@
+    assumes it for malloc/calloc/realloc/strdup/strndup.  */
+ #undef MALLOC_ABI_ALIGNMENT
+ #define MALLOC_ABI_ALIGNMENT 128
++
++/* The Cell PPU is in-order with a long pipeline: a mispredicted
++   conditional branch costs more than the average-PowerPC value
++   rs6000.h sets (3, "roughly the average cost of an unscheduled
++   conditional branch") was tuned for, while the branch-free
++   substitutes the middle end can generate (if-conversion,
++   conditional moves, count/sel/shift idioms) are no harder to issue
++   here than a taken branch.  With BRANCH_COST at 3 the if-converter,
++   jump-eliminator and expression matcher keep the taken branch; raise
++   the promise to 8 so the branch-free form wins when it is available.
++   */
++#undef BRANCH_COST
++#define BRANCH_COST(speed_p, predictable_p) 8
