@@ -26,8 +26,17 @@ int32_t g_out[N];
 typedef int32_t v4si __attribute__((vector_size(16)));
 v4si g_vec[N / 4];
 
+// The inputs are generated once, outside the timed runs: each run resets the
+// generator, so the data would be identical anyway, and generating it inside
+// the timed region made every microkernel's time depend on the generator's
+// call path rather than on the kernel.
+bool g_filled = false;
+
 void fill(uint32_t (*rng)())
 {
+	if (g_filled)
+		return;
+	g_filled = true;
 	for (int i = 0; i < N; i++) {
 		uint32_t r = rng();
 		g_h16[i] = (int16_t)r;
