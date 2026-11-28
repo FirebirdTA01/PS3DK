@@ -14,13 +14,18 @@ an intended change in the changelog.  A whole-file sha256 is not enough: two
 archives with identical members used to differ in their headers, and a
 library can change behaviour through a header it did not own.
 
-For each ABI (`ppu/lib` and `ppu/lib/lp64`), `libps3dkprof.a` has exactly
-`prof_core.o`, `prof_drain.o` and `pal_lv2.o`. `libps3prof.a` has those three
-plus `prof_arcs_writer.o` and `startup.o`. The manual archive omits the
-automatic lifecycle and arc serializer deliberately. Include these members
-in the diff and hash record; `scripts/check-release-tree.sh` rejects missing,
-extra or duplicate members. Update these expectations when compiler adapters
-are added, alongside their build and acceptance tests.
+For each ABI (`ppu/lib` and `ppu/lib/lp64`), the four profiler archives
+`libps3dkprof.a`, `libps3prof.a`, `libps3dkprof_ext.a` and
+`libps3dkprof_ext_live.a` must hold exactly the members listed in
+`scripts/check-release-tree.sh`, which rejects missing, extra or duplicate
+members. That script is the only copy of the lists; this page does not
+repeat them. In outline: the manual archive (`libps3dkprof.a`) holds the core,
+drain, version, platform, rolling-capture and live-link members but not the
+automatic lifecycle or the arc serializer, which only `libps3prof.a` adds; the
+extension archive adds the SPU/RSX runtime and its generated identity member;
+the live archive holds the live-link members alone. Include these members in
+the diff and hash record, and update the script's lists when compiler adapters
+or profiler members are added, alongside their build and acceptance tests.
 
 The shared required-artifact manifest also requires both archives for both
 ABIs and `ppu/include/ps3dk/prof.h`. Windows packaging copies the installed
