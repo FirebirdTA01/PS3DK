@@ -59,3 +59,5 @@
 0081-libstdcxx-ps3-entropy-backend.patch
 0082-vect-no-optimized-realign-ungrouped-vf-below-nunits.patch
 0083-cell64lv2-aligned-new-threshold-16.patch
+0084-cell64lv2-bdnz-counted-branch-hint.patch
+0085-cell64lv2-traceback-off.patch
