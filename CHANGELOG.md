@@ -16,7 +16,7 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
-## [v0.30.0] — 2026-11-27
+## [v0.30.0] — 2026-11-28
 
 ### Added
 
@@ -29,14 +29,13 @@ The version stamped into builds is generated from the most recent
 
 ### Changed
 
-- **Counted loops carry static branch hints on Cell.** The PPU compiler now
-  emits `bdnz+`/`bdz-` style hints on the counter branches of counted
-  loops, including the inverted hint on the long form used when the loop
-  body is out of short-branch range. Other `-mcpu` targets are unchanged.
 - **Traceback tables are off by default on the PPU target.** Nothing in
   this toolchain reads them and GDB uses `.debug_frame`, so the default is
   now `-mtraceback=no`, which drops the table after every function.
   `-mtraceback=full` and `-mtraceback=part` still emit them.
+- **Smaller Windows SDK.** The PPU and SPU compiler executables in the
+  Windows package are shipped without their debug sections, and the host
+  builds map the source checkout out of the paths they record.
 
 - **`librt` is built with `-O2`.** The pthread layer, the system-call
   wrappers and the errno mapping in `librt.a` (and the opt-in
