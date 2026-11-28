@@ -138,11 +138,12 @@ if [[ -n "$HOST_TRIPLE" ]]; then
         "CXX_FOR_BUILD=${_ccache}g++"
         # -Wl,--no-insert-timestamp zeroes the PE TimeDateStamp so the .exe/.dll
         # we ship are byte-identical run to run.  -ffile-prefix-map strips the CI
-        # build tree out of the host binaries' DWARF (__FILE__ / debug info);
-        # -g -O2 are kept because setting the flags otherwise replaces the
-        # build's defaults.  This reaches the SPU host (mingw) toolchain links.
-        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
-        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        # build tree and the repo checkout out of the host binaries' DWARF
+        # (__FILE__ / debug info); -g -O2 are kept because setting the flags
+        # otherwise replaces the build's defaults.  This reaches the SPU host
+        # (mingw) toolchain links.
+        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
+        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
         "LDFLAGS=-static -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp"
     )
     unset _ccache

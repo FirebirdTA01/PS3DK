@@ -192,14 +192,14 @@ if [[ -n "$HOST_TRIPLE" ]]; then
         "CXX_FOR_BUILD=${_ccache}g++"
         # -Wl,--no-insert-timestamp zeroes the PE TimeDateStamp so the .exe/.dll
         # we ship are byte-identical run to run.  -ffile-prefix-map strips the CI
-        # build tree out of the host binaries' DWARF (__FILE__ / debug info);
-        # -g -O2 are kept because setting the flags otherwise replaces the
-        # build's default flags.  CXX carries no -std here: only -std=gnu++11
-        # (the libcody guard) must stay out of this shared array, since binutils
-        # and GDB build their C++ without it.  This reaches the binutils, GCC
-        # and GDB host links alike.
-        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
-        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+        # build tree and the repo checkout out of the host binaries' DWARF
+        # (__FILE__ / debug info); -g -O2 are kept because setting the flags
+        # otherwise replaces the build's default flags.  CXX carries no -std
+        # here: only -std=gnu++11 (the libcody guard) must stay out of this
+        # shared array, since binutils and GDB build their C++ without it.
+        # This reaches the binutils, GCC and GDB host links alike.
+        "CFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
+        "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
         "LDFLAGS=-static -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp"
     )
     unset _ccache
@@ -495,11 +495,12 @@ build_gcc_newlib() {
             CC_FOR_BUILD=gcc
             CXX_FOR_BUILD=g++
         )
-        # The prefix map without a -std (as in the native build).  Appended
-        # LAST on the env line so it wins over CROSS_LDFLAGS_ARGS' CXXFLAGS,
-        # without touching their order.
+        # The prefix maps without a -std (as in the native build).  Appended
+        # LAST on the env line so they win over CROSS_LDFLAGS_ARGS' CXXFLAGS,
+        # without touching their order.  Both the build tree and the repo
+        # checkout are mapped out so neither lands in the host .exe's DWARF.
         gcc_host_cxx=(
-            "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build"
+            "CXXFLAGS=-g -O2 -ffile-prefix-map=$PS3_BUILD_ROOT=/ps3dk-build -ffile-prefix-map=$PS3_TOOLCHAIN_ROOT=."
         )
     else
         conf_args+=(--with-system-zlib)
