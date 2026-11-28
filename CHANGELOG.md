@@ -16,7 +16,27 @@ The version stamped into builds is generated from the most recent
 <!-- New entries go here while work is in progress; promote them to a
      dated, version-tagged section at release time. -->
 
+## [v0.30.0] — 2026-11-27
+
+### Added
+
+- **`samples/toolchain/ppu-speed-probe` and
+  `samples/toolchain/ppu-codegen-workload`.** Two PPU samples for comparing
+  builds on the console: a probe that times single kernels (integer, branch,
+  memory, import-call and C++ patterns) and a six-phase workload that prints
+  per-phase frame rates, for A/B runs of compiler, runtime and linker
+  changes.
+
 ### Changed
+
+- **Counted loops carry static branch hints on Cell.** The PPU compiler now
+  emits `bdnz+`/`bdz-` style hints on the counter branches of counted
+  loops, including the inverted hint on the long form used when the loop
+  body is out of short-branch range. Other `-mcpu` targets are unchanged.
+- **Traceback tables are off by default on the PPU target.** Nothing in
+  this toolchain reads them and GDB uses `.debug_frame`, so the default is
+  now `-mtraceback=no`, which drops the table after every function.
+  `-mtraceback=full` and `-mtraceback=part` still emit them.
 
 - **`librt` is built with `-O2`.** The pthread layer, the system-call
   wrappers and the errno mapping in `librt.a` (and the opt-in
