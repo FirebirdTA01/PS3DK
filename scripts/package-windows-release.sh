@@ -337,6 +337,45 @@ stage_tool_aliases() {
 stage_tool_aliases
 
 # ---------------------------------------------------------------------------
+# Strip debug sections out of every shipped Windows .exe.
+# ---------------------------------------------------------------------------
+# The PPU/SPU GCC frontends ship their host .exe with full debug info: on an
+# installed v0.29.0, ppu's cc1.exe is 552 MB, of which only ~31 MB is code /
+# read-only data and the remaining ~520 MB is .debug_* / .dwo sections.  The
+# same holds for cc1plus, lto1 and lto-dump under both PPU and SPU, and for
+# the gcc / g++ drivers.  Those debug sections are what makes the release zip
+# multi-gigabyte, and they carry the host build path (__FILE__ / DWARF) that
+# leakscan row B reports: the -ffile-prefix-map in the build maps the build
+# ROOT, but the repo check-out ($PS3_TOOLCHAIN_ROOT) was not mapped for the
+# toolchain .exe, so a raw path string survived in the DWARF.
+#
+# This is a PE file, so it must be stripped with the x86_64-w64-mingw32 strip
+# (the same cross strip the host-tools job uses) — the powerpc64-ps3-elf /
+# spu-elf strips cannot read it.  --strip-debug removes the debugging sections
+# and keeps the symbol table, which is the safe choice for the drivers.  We
+# refuse to ship a release with an unstripped (leaking) .exe: strip is fatal
+# on failure rather than best-effort.  Target code is untouched — this only
+# matches *.exe, never the .a / .o / .elf target libraries or the LV2 crt
+# files, which are PPU/SPU PowerPC ELFs a mingw strip would reject.
+strip_toolchain_exes() {
+    local strip_bin="x86_64-w64-mingw32-strip"
+    command -v "$strip_bin" >/dev/null 2>&1 \
+        || die "$strip_bin not on PATH — cannot strip the shipped .exe (install mingw-w64 in the packaging job)"
+
+    say "Stripping debug sections from the shipped Windows .exe"
+    local exe n=0
+    while IFS= read -r -d '' exe; do
+        [[ -n "$exe" ]] || continue
+        if ! "$strip_bin" --strip-debug "$exe"; then
+            die "strip failed on ${exe#"$STAGE_DIR"/} — refusing to ship an unstripped (potentially leaking) executable"
+        fi
+        n=$((n + 1))
+    done < <(find "$STAGE_DIR" -type f -name '*.exe' -print0)
+    say "Stripped $n .exe file(s) (debug sections removed)"
+}
+strip_toolchain_exes
+
+# ---------------------------------------------------------------------------
 # Symlink materialization (Windows releases must contain ZERO symlink entries)
 # ---------------------------------------------------------------------------
 # sdk/Makefile and scripts/build-cell-stub-archives.sh install several stub
