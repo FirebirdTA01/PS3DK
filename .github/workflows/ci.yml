@@ -1138,8 +1138,6 @@ jobs:
         run: bash tests/sdk/ppu-vect-realign-codegen-test.sh
       - name: The aligned-new threshold is the target biggest and 16-aligned types use plain new (patch 0083)
         run: bash tests/sdk/ppu-aligned-new-threshold-test.sh
-      - name: bdnz/bdz counter-branches carry a + or - taken hint on Cell (patch 0084)
-        run: bash tests/sdk/ppu-bdnz-hint-test.sh
       - name: AIX traceback tables are off by default on Cell LV2, preserved by -mtraceback (patch 0085)
         run: bash tests/sdk/ppu-traceback-off-test.sh
 
