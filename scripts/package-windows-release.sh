@@ -366,7 +366,10 @@ strip_toolchain_exes() {
     local exe n=0
     while IFS= read -r -d '' exe; do
         [[ -n "$exe" ]] || continue
-        if ! "$strip_bin" --strip-debug "$exe"; then
+        # strip rewrites the PE header and stamps SOURCE_DATE_EPOCH (or the
+        # current time) into its TimeDateStamp; 0 keeps the link-time zero that
+        # --no-insert-timestamp gave the file, so releases stay byte-identical.
+        if ! SOURCE_DATE_EPOCH=0 "$strip_bin" --strip-debug "$exe"; then
             die "strip failed on ${exe#"$STAGE_DIR"/} — refusing to ship an unstripped (potentially leaking) executable"
         fi
         n=$((n + 1))
