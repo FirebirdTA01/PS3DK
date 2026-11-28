@@ -389,11 +389,11 @@ jobs:
 
       - name: cargo build
         working-directory: tools
-        run: cargo build --workspace --all-targets
+        run: cargo build --locked --workspace --all-targets
 
       - name: cargo test
         working-directory: tools
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       # The binary arc writer (sdk/libps3dkprof core) on the host, plain and ASan+UBSan, checked by its oracle
       # and by the reader built above (check-arcs, arcs-json).
@@ -2419,7 +2419,7 @@ jobs:
 
       - name: cargo build (windows)
         working-directory: tools
-        run: cargo build --workspace --all-targets
+        run: cargo build --locked --workspace --all-targets
 
       - name: Build sprx-linker (static)
         run: |
